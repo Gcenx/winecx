@@ -152,14 +152,14 @@ void CDECL WLDAP32_ldap_perror( WLDAP32_LDAP *ld, const PCHAR msg )
 ULONG CDECL WLDAP32_ldap_result2error( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *res, ULONG free )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     int error;
 
     TRACE( "(%p, %p, 0x%08x)\n", ld, res, free );
 
     if (!ld || !res) return ~0u;
 
-    ret = ldap_parse_result( ld->ld, res, &error, NULL, NULL, NULL, NULL, free );
+    ret = pldap_parse_result( ld->ld, res, &error, NULL, NULL, NULL, NULL, free );
 
     if (ret == LDAP_SUCCESS)
         ret = error;

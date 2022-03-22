@@ -72,9 +72,7 @@ static ULONG STDMETHODCALLTYPE d3d11_query_AddRef(ID3D11Query *iface)
     if (refcount == 1)
     {
         ID3D11Device2_AddRef(query->device);
-        wined3d_mutex_lock();
         wined3d_query_incref(query->wined3d_query);
-        wined3d_mutex_unlock();
     }
 
     return refcount;
@@ -90,11 +88,7 @@ static ULONG STDMETHODCALLTYPE d3d11_query_Release(ID3D11Query *iface)
     if (!refcount)
     {
         ID3D11Device2 *device = query->device;
-
-        wined3d_mutex_lock();
         wined3d_query_decref(query->wined3d_query);
-        wined3d_mutex_unlock();
-
         ID3D11Device2_Release(device);
     }
 
@@ -295,10 +289,8 @@ static void STDMETHODCALLTYPE d3d10_query_Begin(ID3D10Query *iface)
 
     TRACE("iface %p.\n", iface);
 
-    wined3d_mutex_lock();
     if (FAILED(hr = wined3d_query_issue(query->wined3d_query, WINED3DISSUE_BEGIN)))
         ERR("Failed to issue query, hr %#x.\n", hr);
-    wined3d_mutex_unlock();
 }
 
 static void STDMETHODCALLTYPE d3d10_query_End(ID3D10Query *iface)
@@ -308,10 +300,8 @@ static void STDMETHODCALLTYPE d3d10_query_End(ID3D10Query *iface)
 
     TRACE("iface %p.\n", iface);
 
-    wined3d_mutex_lock();
     if (FAILED(hr = wined3d_query_issue(query->wined3d_query, WINED3DISSUE_END)))
         ERR("Failed to issue query, hr %#x.\n", hr);
-    wined3d_mutex_unlock();
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_query_GetData(ID3D10Query *iface, void *data, UINT data_size, UINT flags)

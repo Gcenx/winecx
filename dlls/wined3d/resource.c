@@ -388,12 +388,16 @@ GLbitfield wined3d_resource_gl_storage_flags(const struct wined3d_resource *reso
     return flags;
 }
 
-GLbitfield wined3d_resource_gl_map_flags(DWORD d3d_flags)
+GLbitfield wined3d_resource_gl_map_flags(const struct wined3d_bo_gl *bo, DWORD d3d_flags)
 {
     GLbitfield ret = 0;
 
     if (d3d_flags & WINED3D_MAP_WRITE)
-        ret |= GL_MAP_WRITE_BIT | GL_MAP_FLUSH_EXPLICIT_BIT;
+    {
+        ret |= GL_MAP_WRITE_BIT;
+        if (!bo->b.coherent)
+            ret |= GL_MAP_FLUSH_EXPLICIT_BIT;
+    }
     if (d3d_flags & WINED3D_MAP_READ)
         ret |= GL_MAP_READ_BIT;
     else
@@ -585,4 +589,30 @@ VkPipelineStageFlags vk_pipeline_stage_mask_from_bind_flags(uint32_t bind_flags)
         flags |= VK_PIPELINE_STAGE_TRANSFORM_FEEDBACK_BIT_EXT;
 
     return flags;
+}
+
+void *resource_offset_map_pointer(struct wined3d_resource *resource, unsigned int sub_resource_idx,
+        uint8_t * WIN32PTR base_memory, const struct wined3d_box *box)
+{
+    const struct wined3d_format *format = resource->format;
+    unsigned int row_pitch, slice_pitch;
+
+    wined3d_resource_get_sub_resource_map_pitch(resource, sub_resource_idx, &row_pitch, &slice_pitch);
+
+    if ((resource->format_flags & (WINED3DFMT_FLAG_BLOCKS | WINED3DFMT_FLAG_BROKEN_PITCH)) == WINED3DFMT_FLAG_BLOCKS)
+    {
+        /* Compressed textures are block based, so calculate the offset of
+         * the block that contains the top-left pixel of the mapped box. */
+        return base_memory
+                + (box->front * slice_pitch)
+                + ((box->top / format->block_height) * row_pitch)
+                + ((box->left / format->block_width) * format->block_byte_count);
+    }
+    else
+    {
+        return base_memory
+                + (box->front * slice_pitch)
+                + (box->top * row_pitch)
+                + (box->left * format->byte_count);
+    }
 }

@@ -461,18 +461,18 @@ struct d3d_depthstencil_state *unsafe_impl_from_ID3D10DepthStencilState(
 /* ID3D11RasterizerState, ID3D10RasterizerState */
 struct d3d_rasterizer_state
 {
-    ID3D11RasterizerState ID3D11RasterizerState_iface;
+    ID3D11RasterizerState1 ID3D11RasterizerState1_iface;
     ID3D10RasterizerState ID3D10RasterizerState_iface;
     LONG refcount;
 
     struct wined3d_private_store private_store;
     struct wined3d_rasterizer_state *wined3d_state;
-    D3D11_RASTERIZER_DESC desc;
+    D3D11_RASTERIZER_DESC1 desc;
     struct wine_rb_entry entry;
     ID3D11Device2 *device;
 };
 
-HRESULT d3d_rasterizer_state_create(struct d3d_device *device, const D3D11_RASTERIZER_DESC *desc,
+HRESULT d3d_rasterizer_state_create(struct d3d_device *device, const D3D11_RASTERIZER_DESC1 *desc,
         struct d3d_rasterizer_state **state) DECLSPEC_HIDDEN;
 struct d3d_rasterizer_state *unsafe_impl_from_ID3D11RasterizerState(ID3D11RasterizerState *iface) DECLSPEC_HIDDEN;
 struct d3d_rasterizer_state *unsafe_impl_from_ID3D10RasterizerState(ID3D10RasterizerState *iface) DECLSPEC_HIDDEN;
@@ -545,6 +545,7 @@ struct d3d11_device_context
 {
     ID3D11DeviceContext1 ID3D11DeviceContext1_iface;
     ID3D11Multithread ID3D11Multithread_iface;
+    ID3DUserDefinedAnnotation ID3DUserDefinedAnnotation_iface;
     LONG refcount;
 
     D3D11_DEVICE_CONTEXT_TYPE type;

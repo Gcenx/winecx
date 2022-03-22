@@ -18,12 +18,98 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <assert.h>
 #include "wine/heap.h"
 #include "wine/unicode.h"
 
 extern HINSTANCE hwldap32 DECLSPEC_HIDDEN;
 
 ULONG map_error( int ) DECLSPEC_HIDDEN;
+
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
+extern BerElement * (*pber_alloc_t)( int ) DECLSPEC_HIDDEN;
+extern void (*pber_bvfree)( struct berval * ) DECLSPEC_HIDDEN;
+extern ber_tag_t (*pber_first_element)( BerElement *, ber_len_t *, char ** ) DECLSPEC_HIDDEN;
+extern int (*pber_flatten)( BerElement *, struct berval ** ) DECLSPEC_HIDDEN;
+extern void (*pber_free)( BerElement *, int ) DECLSPEC_HIDDEN;
+extern BerElement * (*pber_init)( struct berval * ) DECLSPEC_HIDDEN;
+extern ber_tag_t (*pber_next_element)( BerElement *, ber_len_t *, LDAP_CONST char * ) DECLSPEC_HIDDEN;
+extern ber_tag_t (*pber_peek_tag)( BerElement *, ber_len_t * ) DECLSPEC_HIDDEN;
+extern ber_tag_t (*pber_skip_tag)( BerElement *, ber_len_t * ) DECLSPEC_HIDDEN;
+extern int (*pber_printf)( BerElement *, LDAP_CONST char *, ... ) DECLSPEC_HIDDEN;
+extern ber_tag_t (*pber_scanf)( BerElement *, LDAP_CONST char *, ... ) DECLSPEC_HIDDEN;
+
+extern int (*pldap_abandon_ext)( LDAP *, int , LDAPControl **, LDAPControl ** ) DECLSPEC_HIDDEN;
+extern int (*pldap_add_ext)( LDAP *, LDAP_CONST char *, LDAPMod **, LDAPControl **, LDAPControl **,
+                             int * ) DECLSPEC_HIDDEN;
+extern int (*pldap_add_ext_s)( LDAP *, LDAP_CONST char *, LDAPMod **, LDAPControl **, LDAPControl ** ) DECLSPEC_HIDDEN;
+extern int (*pldap_compare_ext)( LDAP *, LDAP_CONST char *, LDAP_CONST char *, struct berval *, LDAPControl **,
+                                 LDAPControl **, int * ) DECLSPEC_HIDDEN;
+extern int (*pldap_compare_ext_s)( LDAP *, LDAP_CONST char *, LDAP_CONST char *, struct berval *, LDAPControl **,
+                                   LDAPControl ** ) DECLSPEC_HIDDEN;
+extern void (*pldap_control_free)( LDAPControl * ) DECLSPEC_HIDDEN;
+extern void (*pldap_controls_free)( LDAPControl ** ) DECLSPEC_HIDDEN;
+extern int (*pldap_count_entries)( LDAP *, LDAPMessage * ) DECLSPEC_HIDDEN;
+extern int (*pldap_count_references)( LDAP *, LDAPMessage * ) DECLSPEC_HIDDEN;
+extern int (*pldap_count_values_len)( struct berval ** ) DECLSPEC_HIDDEN;
+extern int (*pldap_create_sort_control)( LDAP *, LDAPSortKey **, int, LDAPControl ** ) DECLSPEC_HIDDEN;
+extern int (*pldap_create_vlv_control)( LDAP *, LDAPVLVInfo *, LDAPControl ** ) DECLSPEC_HIDDEN;
+extern int (*pldap_delete_ext)( LDAP *, LDAP_CONST char *, LDAPControl **, LDAPControl **, int * ) DECLSPEC_HIDDEN;
+extern int (*pldap_delete_ext_s)( LDAP *, LDAP_CONST char *, LDAPControl **, LDAPControl ** ) DECLSPEC_HIDDEN;
+extern char * (*pldap_dn2ufn)( LDAP_CONST char * ) DECLSPEC_HIDDEN;
+extern char ** (*pldap_explode_dn)( LDAP_CONST char *, int ) DECLSPEC_HIDDEN;
+extern int (*pldap_extended_operation)( LDAP *, LDAP_CONST char *, struct berval *, LDAPControl **, LDAPControl **,
+                                        int * ) DECLSPEC_HIDDEN;
+extern int (*pldap_extended_operation_s)( LDAP *, LDAP_CONST char *, struct berval *, LDAPControl **, LDAPControl **,
+                                          char **, struct berval ** ) DECLSPEC_HIDDEN;
+extern char * (*pldap_first_attribute)( LDAP *, LDAPMessage *, BerElement ** ) DECLSPEC_HIDDEN;
+extern LDAPMessage * (*pldap_first_entry)( LDAP *, LDAPMessage * ) DECLSPEC_HIDDEN;
+extern LDAPMessage * (*pldap_first_reference)( LDAP *, LDAPMessage * ) DECLSPEC_HIDDEN;
+extern char * (*pldap_get_dn)( LDAP *, LDAPMessage * ) DECLSPEC_HIDDEN;
+extern int (*pldap_get_option)( LDAP *, int, void * ) DECLSPEC_HIDDEN;
+extern struct berval ** (*pldap_get_values_len)( LDAP *, LDAPMessage *, LDAP_CONST char * ) DECLSPEC_HIDDEN;
+extern int (*pldap_initialize)( LDAP **, LDAP_CONST char * ) DECLSPEC_HIDDEN;
+extern void (*pldap_memfree)( void * ) DECLSPEC_HIDDEN;
+extern void (*pldap_memvfree)( void ** ) DECLSPEC_HIDDEN;
+extern int (*pldap_modify_ext)( LDAP *, LDAP_CONST char *, LDAPMod **, LDAPControl **, LDAPControl **,
+                                int * ) DECLSPEC_HIDDEN;
+extern int (*pldap_modify_ext_s)( LDAP *, LDAP_CONST char *, LDAPMod **, LDAPControl **,
+                                  LDAPControl ** ) DECLSPEC_HIDDEN;
+extern int (*pldap_msgfree)( LDAPMessage * ) DECLSPEC_HIDDEN;
+extern char * (*pldap_next_attribute)( LDAP *, LDAPMessage *, BerElement * ) DECLSPEC_HIDDEN;
+extern LDAPMessage * (*pldap_next_entry)( LDAP *, LDAPMessage * ) DECLSPEC_HIDDEN;
+extern LDAPMessage * (*pldap_next_reference)( LDAP *, LDAPMessage * ) DECLSPEC_HIDDEN;
+extern int (*pldap_parse_extended_result)( LDAP *, LDAPMessage *, char **, struct berval **, int ) DECLSPEC_HIDDEN;
+extern int (*pldap_parse_reference)( LDAP *, LDAPMessage *, char ***, LDAPControl ***, int ) DECLSPEC_HIDDEN;
+extern int (*pldap_parse_result)( LDAP *, LDAPMessage *, int *, char **, char **, char ***, LDAPControl ***,
+                                  int ) DECLSPEC_HIDDEN;
+extern int (*pldap_parse_sort_control)( LDAP *, LDAPControl **, unsigned long *, char ** ) DECLSPEC_HIDDEN;
+extern int (*pldap_parse_sortresponse_control)( LDAP *, LDAPControl *, ber_int_t *, char ** ) DECLSPEC_HIDDEN;
+extern int (*pldap_parse_vlv_control)( LDAP *, LDAPControl **, unsigned long *, unsigned long *, struct berval **, int * ) DECLSPEC_HIDDEN;
+extern int (*pldap_parse_vlvresponse_control)( LDAP *, LDAPControl *, ber_int_t *, ber_int_t *, struct berval **,
+                                               int * ) DECLSPEC_HIDDEN;
+extern int (*pldap_rename)( LDAP *, LDAP_CONST char *, LDAP_CONST char *, LDAP_CONST char *, int, LDAPControl **,
+                            LDAPControl **, int * ) DECLSPEC_HIDDEN;
+extern int (*pldap_rename_s)( LDAP *, LDAP_CONST char *, LDAP_CONST char *, LDAP_CONST char *, int, LDAPControl **,
+                              LDAPControl ** ) DECLSPEC_HIDDEN;
+extern int (*pldap_result)( LDAP *, int, int, struct timeval *, LDAPMessage ** ) DECLSPEC_HIDDEN;
+extern int (*pldap_sasl_bind)( LDAP *, LDAP_CONST char *, LDAP_CONST char *, struct berval *, LDAPControl **,
+                               LDAPControl **, int * ) DECLSPEC_HIDDEN;
+extern int (*pldap_sasl_bind_s)( LDAP *, LDAP_CONST char *, LDAP_CONST char *, struct berval *, LDAPControl **,
+                                 LDAPControl **, struct berval ** ) DECLSPEC_HIDDEN;
+typedef int (LDAP_SASL_INTERACT_PROC)( LDAP *, unsigned, void *, void * );
+extern int (*pldap_sasl_interactive_bind_s)( LDAP *, LDAP_CONST char *, LDAP_CONST char *, LDAPControl **, LDAPControl **,
+                                             unsigned, LDAP_SASL_INTERACT_PROC *, void * ) DECLSPEC_HIDDEN;
+extern int (*pldap_search_ext)( LDAP *, LDAP_CONST char *, int, LDAP_CONST char *, char **, int, LDAPControl **,
+                                LDAPControl **, struct timeval *, int, int * ) DECLSPEC_HIDDEN;
+extern int (*pldap_search_ext_s)( LDAP *, LDAP_CONST char *, int, LDAP_CONST char *, char **, int, LDAPControl **,
+                                  LDAPControl **, struct timeval *, int, LDAPMessage ** ) DECLSPEC_HIDDEN;
+extern int (*pldap_set_option)( LDAP *, int, LDAP_CONST void * ) DECLSPEC_HIDDEN;
+extern int (*pldap_start_tls_s)( LDAP *, LDAPControl **, LDAPControl ** ) DECLSPEC_HIDDEN;
+extern int (*pldap_unbind_ext)( LDAP *, LDAPControl **, LDAPControl ** ) DECLSPEC_HIDDEN;
+extern int (*pldap_unbind_ext_s)( LDAP *, LDAPControl **, LDAPControl ** ) DECLSPEC_HIDDEN;
+extern void (*pldap_value_free_len)( struct berval ** ) DECLSPEC_HIDDEN;
+#endif
 
 /* A set of helper functions to convert LDAP data structures
  * to and from ansi (A), wide character (W) and utf8 (U) encodings.
@@ -292,12 +378,35 @@ static inline void strarrayfreeU( char **strarray )
     }
 }
 
-#ifdef HAVE_LDAP
+static inline struct WLDAP32_berval *bervalWtoW( struct WLDAP32_berval *bv )
+{
+    struct WLDAP32_berval *berval;
+    DWORD size = sizeof(*berval) + bv->bv_len;
 
-static inline struct berval *bvdup( struct berval *bv )
+    if ((berval = heap_alloc( size )))
+    {
+        char *val = (char *)(berval + 1);
+
+        berval->bv_len = bv->bv_len;
+        berval->bv_val = val;
+        memcpy( val, bv->bv_val, bv->bv_len );
+    }
+    return berval;
+}
+
+static inline void bvarrayfreeW( struct WLDAP32_berval **bv )
+{
+    struct WLDAP32_berval **p = bv;
+    while (*p) heap_free( *p++ );
+    heap_free( bv );
+}
+
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
+
+static inline struct berval *bervalWtoU( struct WLDAP32_berval *bv )
 {
     struct berval *berval;
-    DWORD size = sizeof(struct berval) + bv->bv_len;
+    DWORD size = sizeof(*berval) + bv->bv_len;
 
     if ((berval = heap_alloc( size )))
     {
@@ -308,6 +417,148 @@ static inline struct berval *bvdup( struct berval *bv )
         memcpy( val, bv->bv_val, bv->bv_len );
     }
     return berval;
+}
+
+static inline struct WLDAP32_berval *bervalUtoW( struct berval *bv )
+{
+    struct WLDAP32_berval *berval;
+    DWORD size = sizeof(*berval) + bv->bv_len;
+
+    assert( bv->bv_len <= ~0u );
+
+    if ((berval = heap_alloc( size )))
+    {
+        char *val = (char *)(berval + 1);
+
+        berval->bv_len = bv->bv_len;
+        berval->bv_val = val;
+        memcpy( val, bv->bv_val, bv->bv_len );
+    }
+    return berval;
+}
+
+static inline DWORD bvarraylenU( struct berval **bv )
+{
+    struct berval **p = bv;
+    while (*p) p++;
+    return p - bv;
+}
+
+static inline DWORD bvarraylenW( struct WLDAP32_berval **bv )
+{
+    struct WLDAP32_berval **p = bv;
+    while (*p) p++;
+    return p - bv;
+}
+
+static inline struct WLDAP32_berval **bvarrayWtoW( struct WLDAP32_berval **bv )
+{
+    struct WLDAP32_berval **berval = NULL;
+    DWORD size;
+
+    if (bv)
+    {
+        size = sizeof(*berval) * (bvarraylenW( bv ) + 1);
+        if ((berval = heap_alloc( size )))
+        {
+            struct WLDAP32_berval **p = bv;
+            struct WLDAP32_berval **q = berval;
+
+            while (*p) *q++ = bervalWtoW( *p++ );
+            *q = NULL;
+        }
+    }
+    return berval;
+}
+
+static inline struct berval **bvarrayWtoU( struct WLDAP32_berval **bv )
+{
+    struct berval **berval = NULL;
+    DWORD size;
+
+    if (bv)
+    {
+        size = sizeof(*berval) * (bvarraylenW( bv ) + 1);
+        if ((berval = heap_alloc( size )))
+        {
+            struct WLDAP32_berval **p = bv;
+            struct berval **q = berval;
+
+            while (*p) *q++ = bervalWtoU( *p++ );
+            *q = NULL;
+        }
+    }
+    return berval;
+}
+
+static inline struct WLDAP32_berval **bvarrayUtoW( struct berval **bv )
+{
+    struct WLDAP32_berval **berval = NULL;
+    DWORD size;
+
+    if (bv)
+    {
+        size = sizeof(*berval) * (bvarraylenU( bv ) + 1);
+        if ((berval = heap_alloc( size )))
+        {
+            struct berval **p = bv;
+            struct WLDAP32_berval **q = berval;
+
+            while (*p) *q++ = bervalUtoW( *p++ );
+            *q = NULL;
+        }
+    }
+    return berval;
+}
+
+static inline void bvarrayfreeU( struct berval **bv )
+{
+    struct berval **p = bv;
+    while (*p) heap_free( *p++ );
+    heap_free( bv );
+}
+
+static inline LDAPModW *modAtoW( LDAPModA *mod )
+{
+    LDAPModW *modW;
+
+    if ((modW = heap_alloc( sizeof(LDAPModW) )))
+    {
+        modW->mod_op = mod->mod_op;
+        modW->mod_type = strAtoW( mod->mod_type );
+
+        if (mod->mod_op & LDAP_MOD_BVALUES)
+            modW->mod_vals.modv_bvals = bvarrayWtoW( mod->mod_vals.modv_bvals );
+        else
+            modW->mod_vals.modv_strvals = strarrayAtoW( mod->mod_vals.modv_strvals );
+    }
+    return modW;
+}
+
+static inline LDAPMod *modWtoU( LDAPModW *mod )
+{
+    LDAPMod *modU;
+
+    if ((modU = heap_alloc( sizeof(LDAPMod) )))
+    {
+        modU->mod_op = mod->mod_op;
+        modU->mod_type = strWtoU( mod->mod_type );
+
+        if (mod->mod_op & LDAP_MOD_BVALUES)
+            modU->mod_vals.modv_bvals = bvarrayWtoU( mod->mod_vals.modv_bvals );
+        else
+            modU->mod_vals.modv_strvals = strarrayWtoU( mod->mod_vals.modv_strvals );
+    }
+    return modU;
+}
+
+static inline void modfreeW( LDAPModW *mod )
+{
+    if (mod->mod_op & LDAP_MOD_BVALUES)
+        bvarrayfreeW( mod->mod_vals.modv_bvals );
+    else
+        strarrayfreeW( mod->mod_vals.modv_strvals );
+    heap_free( mod );
 }
 
 static inline struct WLDAP32_berval *bvconvert_h2w( struct berval *bv )
@@ -332,91 +583,14 @@ static inline struct WLDAP32_berval *bvconvert_h2w( struct berval *bv )
 static inline ULONG bvconvert_and_free( ULONG ret, struct berval *bv, struct WLDAP32_berval **ptr )
 {
     *ptr = bvconvert_h2w( bv );
-    ber_bvfree( bv );
+    pber_bvfree( bv );
     return (bv && !*ptr) ? WLDAP32_LDAP_NO_MEMORY : ret;
-}
-
-static inline DWORD bvarraylen( struct berval **bv )
-{
-    struct berval **p = bv;
-    while (*p) p++;
-    return p - bv;
-}
-
-static inline struct berval **bvarraydup( struct berval **bv )
-{
-    struct berval **berval = NULL;
-    DWORD size;
-
-    if (bv)
-    {
-        size = sizeof(struct berval *) * (bvarraylen( bv ) + 1);
-        if ((berval = heap_alloc( size )))
-        {
-            struct berval **p = bv;
-            struct berval **q = berval;
-
-            while (*p) *q++ = bvdup( *p++ );
-            *q = NULL;
-        }
-    }
-    return berval;
-}
-
-static inline void bvarrayfree( struct berval **bv )
-{
-    struct berval **p = bv;
-    while (*p) heap_free( *p++ );
-    heap_free( bv );
-}
-
-static inline LDAPModW *modAtoW( LDAPModA *mod )
-{
-    LDAPModW *modW;
-
-    if ((modW = heap_alloc( sizeof(LDAPModW) )))
-    {
-        modW->mod_op = mod->mod_op;
-        modW->mod_type = strAtoW( mod->mod_type );
-
-        if (mod->mod_op & LDAP_MOD_BVALUES)
-            modW->mod_vals.modv_bvals = bvarraydup( mod->mod_vals.modv_bvals );
-        else
-            modW->mod_vals.modv_strvals = strarrayAtoW( mod->mod_vals.modv_strvals );
-    }
-    return modW;
-}
-
-static inline LDAPMod *modWtoU( LDAPModW *mod )
-{
-    LDAPMod *modU;
-
-    if ((modU = heap_alloc( sizeof(LDAPMod) )))
-    {
-        modU->mod_op = mod->mod_op;
-        modU->mod_type = strWtoU( mod->mod_type );
-
-        if (mod->mod_op & LDAP_MOD_BVALUES)
-            modU->mod_vals.modv_bvals = bvarraydup( mod->mod_vals.modv_bvals );
-        else
-            modU->mod_vals.modv_strvals = strarrayWtoU( mod->mod_vals.modv_strvals );
-    }
-    return modU;
-}
-
-static inline void modfreeW( LDAPModW *mod )
-{
-    if (mod->mod_op & LDAP_MOD_BVALUES)
-        bvarrayfree( mod->mod_vals.modv_bvals );
-    else
-        strarrayfreeW( mod->mod_vals.modv_strvals );
-    heap_free( mod );
 }
 
 static inline void modfreeU( LDAPMod *mod )
 {
     if (mod->mod_op & LDAP_MOD_BVALUES)
-        bvarrayfree( ADDRSPACECAST(void *, mod->mod_vals.modv_bvals) );
+        bvarrayfreeU( ADDRSPACECAST(void *, mod->mod_vals.modv_bvals) );
     else
         strarrayfreeU( ADDRSPACECAST(void *, mod->mod_vals.modv_strvals) );
     heap_free( mod );

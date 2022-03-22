@@ -22,8 +22,6 @@
  * native headers.
  */
 
-/* 32on64 FIXME: All changes to wldap discarded. There were many, and my impression is they
- * got partially upstreamed in a different way */
 typedef enum {
     WLDAP32_LDAP_SUCCESS                 =   0x00,
     WLDAP32_LDAP_UNWILLING_TO_PERFORM    =   0x35,
@@ -105,9 +103,15 @@ typedef struct berelement
 
 #define WLDAP32_LDAP_AUTH_NEGOTIATE             0x486
 
+typedef struct WLDAP32_berval
+{
+    ULONG bv_len;
+    PCHAR bv_val;
+} LDAP_BERVAL, *PLDAP_BERVAL, BERVAL, *PBERVAL, WLDAP32_BerValue;
+
 typedef struct wldap32
 {
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     LDAP *ld;
 #endif
     struct
@@ -141,7 +145,7 @@ typedef struct ldapmodA {
     PCHAR mod_type;
     union {
         PCHAR *modv_strvals;
-        struct berval **modv_bvals;
+        struct WLDAP32_berval **modv_bvals;
     } mod_vals;
 } LDAPModA, *PLDAPModA;
 
@@ -150,7 +154,7 @@ typedef struct ldapmodW {
     PWCHAR mod_type;
     union {
         PWCHAR *modv_strvals;
-        struct berval **modv_bvals;
+        struct WLDAP32_berval **modv_bvals;
     } mod_vals;
 } LDAPModW, *PLDAPModW;
 
@@ -189,12 +193,6 @@ typedef struct ldap_version_info
     ULONG lv_major;
     ULONG lv_minor;
 } LDAP_VERSION_INFO, *PLDAP_VERSION_INFO;
-
-typedef struct WLDAP32_berval
-{
-    ULONG bv_len;
-    PCHAR bv_val;
-} LDAP_BERVAL, *PLDAP_BERVAL, BERVAL, *PBERVAL, WLDAP32_BerValue;
 
 #define LDAP_PAGED_RESULT_OID_STRING "1.2.840.113556.1.4.319"
 #define LDAP_SERVER_RESP_SORT_OID "1.2.840.113556.1.4.474"
@@ -244,7 +242,7 @@ typedef struct ldapsearch
     LDAPControlW **clientctrls;
     struct l_timeval timeout;
     ULONG sizelimit;
-    struct berval *cookie;
+    struct WLDAP32_berval *cookie;
 } LDAPSearch, *PLDAPSearch;
 
 typedef struct ldapsortkeyA

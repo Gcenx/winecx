@@ -3936,8 +3936,10 @@ static void test_create_rendertarget_view(void)
 
     if (!enable_debug_layer)
     {
+        rtview = (void *)0xdeadbeef;
         hr = ID3D11Device_CreateRenderTargetView(device, NULL, &rtv_desc, &rtview);
         ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+        ok(!rtview, "Unexpected pointer %p.\n", rtview);
     }
 
     expected_refcount = get_refcount(device) + 1;
@@ -4054,8 +4056,10 @@ static void test_create_rendertarget_view(void)
         }
 
         get_rtv_desc(&rtv_desc, &invalid_desc_tests[i].rtv_desc);
+        rtview = (void *)0xdeadbeef;
         hr = ID3D11Device_CreateRenderTargetView(device, texture, &rtv_desc, &rtview);
         ok(hr == E_INVALIDARG, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(!rtview, "Unexpected pointer %p.\n", rtview);
 
         ID3D11Resource_Release(texture);
     }
@@ -5389,6 +5393,7 @@ static void test_create_rasterizer_state(void)
     D3D10_RASTERIZER_DESC d3d10_desc;
     D3D11_RASTERIZER_DESC desc;
     ID3D11Device *device, *tmp;
+    ID3D11Device1 *device1;
     HRESULT hr;
 
     if (!(device = create_device(NULL)))
@@ -5450,6 +5455,31 @@ static void test_create_rasterizer_state(void)
 
         refcount = ID3D10RasterizerState_Release(d3d10_rast_state);
         ok(refcount == 2, "Got unexpected refcount %u.\n", refcount);
+    }
+
+    if (ID3D11Device_QueryInterface(device, &IID_ID3D11Device1, (void **)&device1) == S_OK)
+    {
+        ID3D11RasterizerState1 *state_ex1;
+        D3D11_RASTERIZER_DESC1 desc1;
+
+        hr = ID3D11RasterizerState_QueryInterface(rast_state1, &IID_ID3D11RasterizerState1, (void **)&state_ex1);
+        ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+        memset(&desc1, 0xcc, sizeof(desc1));
+        ID3D11RasterizerState1_GetDesc1(state_ex1, &desc1);
+        ok(!memcmp(&desc1, &desc, sizeof(desc)), "D3D11 desc didn't match.\n");
+        ok(!desc1.ForcedSampleCount, "Got forced sample count %u.\n", desc1.ForcedSampleCount);
+
+        ID3D11RasterizerState1_Release(state_ex1);
+
+        memcpy(&desc1, &desc, sizeof(desc));
+        desc1.ForcedSampleCount = 0;
+        hr = ID3D11Device1_CreateRasterizerState1(device1, &desc1, &state_ex1);
+        ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+        ID3D11RasterizerState1_Release(state_ex1);
+
+        ID3D11Device1_Release(device1);
     }
 
     refcount = ID3D11RasterizerState_Release(rast_state2);
@@ -11594,6 +11624,30 @@ static void test_clear_state(void)
     ok(tmp_ds_state == ds_state, "Got unexpected depth stencil state %p, expected %p.\n", tmp_ds_state, ds_state);
     ID3D11DepthStencilState_Release(tmp_ds_state);
     ok(stencil_ref == 3, "Got unexpected stencil ref %u.\n", stencil_ref);
+    /* For OMGetDepthStencilState() both arguments are optional. */
+    ID3D11DeviceContext_OMGetDepthStencilState(context, NULL, NULL);
+    stencil_ref = 0;
+    ID3D11DeviceContext_OMGetDepthStencilState(context, NULL, &stencil_ref);
+    ok(stencil_ref == 3, "Got unexpected stencil ref %u.\n", stencil_ref);
+    tmp_ds_state = NULL;
+    ID3D11DeviceContext_OMGetDepthStencilState(context, &tmp_ds_state, NULL);
+    ok(tmp_ds_state == ds_state, "Got unexpected depth stencil state %p, expected %p.\n", tmp_ds_state, ds_state);
+    ID3D11DepthStencilState_Release(tmp_ds_state);
+    /* OMGetBlendState() arguments are optional */
+    ID3D11DeviceContext_OMGetBlendState(context, NULL, NULL, NULL);
+    ID3D11DeviceContext_OMGetBlendState(context, &tmp_blend_state, NULL, NULL);
+    ok(tmp_blend_state == blend_state, "Got unexpected blend state %p, expected %p.\n", tmp_blend_state, blend_state);
+    ID3D11BlendState_Release(tmp_blend_state);
+    sample_mask = 0;
+    ID3D11DeviceContext_OMGetBlendState(context, NULL, NULL, &sample_mask);
+    ok(sample_mask == 0xff00ff00, "Got unexpected sample mask %#x.\n", sample_mask);
+    memset(blend_factor, 0, sizeof(blend_factor));
+    ID3D11DeviceContext_OMGetBlendState(context, NULL, blend_factor, NULL);
+    ok(blend_factor[0] == 0.1f && blend_factor[1] == 0.2f
+            && blend_factor[2] == 0.3f && blend_factor[3] == 0.4f,
+            "Got unexpected blend factor {%.8e, %.8e, %.8e, %.8e}.\n",
+            blend_factor[0], blend_factor[1], blend_factor[2], blend_factor[3]);
+
     ID3D11DeviceContext_OMGetRenderTargets(context, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, tmp_rtv, &tmp_dsv);
     for (i = 0; i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT - 1; ++i)
     {
@@ -15014,10 +15068,8 @@ static void test_clear_buffer_unordered_access_view(void)
     buffer_desc.Usage = D3D11_USAGE_DEFAULT;
     buffer_desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
     buffer_desc.CPUAccessFlags = 0;
-    buffer_desc.MiscFlags = 0;
-    buffer_desc.StructureByteStride = 0;
     buffer_desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-    buffer_desc.StructureByteStride = 4;
+    buffer_desc.StructureByteStride = 8;
     hr = ID3D11Device_CreateBuffer(device, &buffer_desc, NULL, &buffer);
     ok(hr == S_OK, "Failed to create a buffer, hr %#x.\n", hr);
 
@@ -15043,9 +15095,10 @@ static void test_clear_buffer_unordered_access_view(void)
 
         ID3D11DeviceContext_ClearUnorderedAccessViewUint(context, uav2, &fe_uvec4.x);
         get_buffer_readback(buffer, &rb);
-        SetRect(&rect, 0, 0, U(uav_desc).Buffer.NumElements, 1);
+        SetRect(&rect, 0, 0, U(uav_desc).Buffer.NumElements * buffer_desc.StructureByteStride / sizeof(uvec4.x), 1);
         check_readback_data_color(&rb, &rect, fe_uvec4.x, 0);
-        SetRect(&rect, U(uav_desc).Buffer.NumElements, 0, buffer_desc.ByteWidth / sizeof(uvec4.x), 1);
+        rect.left = rect.right;
+        rect.right = buffer_desc.ByteWidth / sizeof(uvec4.x);
         check_readback_data_color(&rb, &rect, uvec4.x, 0);
         release_resource_readback(&rb);
     }
@@ -18963,8 +19016,9 @@ static void check_format_support(const unsigned int *format_support, D3D_FEATURE
 
         if (formats[i].fl_required <= feature_level)
         {
-            todo_wine ok(supported, "Format %#x - %s not supported, feature_level %#x, format support %#x.\n",
-                    format, feature_name, feature_level, format_support[format]);
+            todo_wine_if (feature_flag == D3D11_FORMAT_SUPPORT_DISPLAY)
+                ok(supported, "Format %#x - %s not supported, feature_level %#x, format support %#x.\n",
+                        format, feature_name, feature_level, format_support[format]);
             continue;
         }
 
@@ -18976,8 +19030,9 @@ static void check_format_support(const unsigned int *format_support, D3D_FEATURE
             continue;
         }
 
-        ok(!supported, "Format %#x - %s supported, feature level %#x, format support %#x.\n",
-                format, feature_name, feature_level, format_support[format]);
+        todo_wine_if (feature_flag != D3D11_FORMAT_SUPPORT_DISPLAY)
+            ok(!supported, "Format %#x - %s supported, feature level %#x, format support %#x.\n",
+                    format, feature_name, feature_level, format_support[format]);
     }
 }
 
@@ -26557,7 +26612,6 @@ static void test_fractional_viewports(void)
                 ok(compare_float(v->x, expected.x, 0) && compare_float(v->y, expected.y, 0),
                         "Got fragcoord {%.8e, %.8e}, expected {%.8e, %.8e} at (%u, %u), offset %.8e.\n",
                         v->x, v->y, expected.x, expected.y, x, y, viewport_offsets[i]);
-                todo_wine
                 ok(compare_float(v->z, expected.z, 2) && compare_float(v->w, expected.w, 2),
                         "Got texcoord {%.8e, %.8e}, expected {%.8e, %.8e} at (%u, %u), offset %.8e.\n",
                         v->z, v->w, expected.z, expected.w, x, y, viewport_offsets[i]);
@@ -27013,8 +27067,9 @@ static void test_format_compatibility(void)
             colour = get_readback_color(&rb, x, y, 0);
             expected = test_data[i].success && x >= texel_dwords && y
                     ? bitmap_data[j - (4 + texel_dwords)] : initial_data[j];
-            ok(colour == expected, "Test %u: Got unexpected colour 0x%08x at (%u, %u), expected 0x%08x.\n",
-                    i, colour, x, y, expected);
+            todo_wine_if(test_data[i].src_format == DXGI_FORMAT_R9G9B9E5_SHAREDEXP && expected)
+                ok(colour == expected, "Test %u: Got unexpected colour 0x%08x at (%u, %u), expected 0x%08x.\n",
+                        i, colour, x, y, expected);
         }
         release_resource_readback(&rb);
 
@@ -27027,8 +27082,9 @@ static void test_format_compatibility(void)
             y = j / 4;
             colour = get_readback_color(&rb, x, y, 0);
             expected = test_data[i].success ? bitmap_data[j] : initial_data[j];
-            ok(colour == expected, "Test %u: Got unexpected colour 0x%08x at (%u, %u), expected 0x%08x.\n",
-                    i, colour, x, y, expected);
+            todo_wine_if(test_data[i].src_format == DXGI_FORMAT_R9G9B9E5_SHAREDEXP && expected)
+                ok(colour == expected, "Test %u: Got unexpected colour 0x%08x at (%u, %u), expected 0x%08x.\n",
+                        i, colour, x, y, expected);
         }
         release_resource_readback(&rb);
 

@@ -66,11 +66,9 @@ static ULONG WINAPI d3d8_surface_AddRef(IDirect3DSurface8 *iface)
     {
         if (surface->parent_device)
             IDirect3DDevice8_AddRef(surface->parent_device);
-        wined3d_mutex_lock();
         if (surface->wined3d_rtv)
             wined3d_rendertarget_view_incref(surface->wined3d_rtv);
         wined3d_texture_incref(surface->wined3d_texture);
-        wined3d_mutex_unlock();
     }
 
     return refcount;
@@ -102,11 +100,9 @@ static ULONG WINAPI d3d8_surface_Release(IDirect3DSurface8 *iface)
     {
         IDirect3DDevice8 *parent_device = surface->parent_device;
 
-        wined3d_mutex_lock();
         if (surface->wined3d_rtv)
             wined3d_rendertarget_view_decref(surface->wined3d_rtv);
         wined3d_texture_decref(surface->wined3d_texture);
-        wined3d_mutex_unlock();
 
         if (parent_device)
             IDirect3DDevice8_Release(parent_device);
@@ -269,9 +265,7 @@ static HRESULT WINAPI d3d8_surface_UnlockRect(IDirect3DSurface8 *iface)
 
     TRACE("iface %p.\n", iface);
 
-    wined3d_mutex_lock();
     hr = wined3d_resource_unmap(wined3d_texture_get_resource(surface->wined3d_texture), surface->sub_resource_idx);
-    wined3d_mutex_unlock();
 
     if (hr == WINEDDERR_NOTLOCKED)
     {

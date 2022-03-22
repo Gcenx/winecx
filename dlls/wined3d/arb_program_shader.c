@@ -499,27 +499,26 @@ static void shader_arb_load_np2fixup_constants(const struct arb_ps_np2fixup_info
         const struct wined3d_gl_info *gl_info, const struct wined3d_state *state)
 {
     GLfloat np2fixup_constants[4 * WINED3D_MAX_FRAGMENT_SAMPLERS];
-    WORD active = fixup->super.active;
-    UINT i;
+    uint32_t active = fixup->super.active;
+    const struct wined3d_texture *tex;
+    unsigned char idx;
+    GLfloat *tex_dim;
+    unsigned int i;
 
     if (!active)
         return;
 
-    for (i = 0; active; active >>= 1, ++i)
+    while (active)
     {
-        const struct wined3d_texture *tex = state->textures[i];
-        unsigned char idx = fixup->super.idx[i];
-        GLfloat *tex_dim = &np2fixup_constants[(idx >> 1) * 4];
-
-        if (!(active & 1))
-            continue;
-
-        if (!tex)
+        i = wined3d_bit_scan(&active);
+        if (!(tex = state->textures[i]))
         {
             ERR("Nonexistent texture is flagged for NP2 texcoord fixup.\n");
             continue;
         }
 
+        idx = fixup->super.idx[i];
+        tex_dim = &np2fixup_constants[(idx >> 1) * 4];
         if (idx % 2)
         {
             tex_dim[2] = tex->pow2_matrix[0];
@@ -3970,16 +3969,16 @@ static int compare_sig(const struct wined3d_shader_signature *sig1, const struct
 
         if ((ret = strcmp(e1->semantic_name, e2->semantic_name)))
             return ret;
-        if (e1->semantic_idx != e2->semantic_idx)
-            return e1->semantic_idx < e2->semantic_idx ? -1 : 1;
-        if (e1->sysval_semantic != e2->sysval_semantic)
-            return e1->sysval_semantic < e2->sysval_semantic ? -1 : 1;
-        if (e1->component_type != e2->component_type)
-            return e1->component_type < e2->component_type ? -1 : 1;
-        if (e1->register_idx != e2->register_idx)
-            return e1->register_idx < e2->register_idx ? -1 : 1;
-        if (e1->mask != e2->mask)
-            return e1->mask < e2->mask ? -1 : 1;
+        if ((ret = wined3d_uint32_compare(e1->semantic_idx, e2->semantic_idx)))
+            return ret;
+        if ((ret = wined3d_uint32_compare(e1->sysval_semantic, e2->sysval_semantic)))
+            return ret;
+        if ((ret = wined3d_uint32_compare(e1->component_type, e2->component_type)))
+            return ret;
+        if ((ret = wined3d_uint32_compare(e1->register_idx, e2->register_idx)))
+            return ret;
+        if ((ret = wined3d_uint32_compare(e1->mask, e2->mask)))
+            return ret;
     }
     return 0;
 }

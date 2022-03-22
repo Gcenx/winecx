@@ -4385,7 +4385,15 @@ static void test_contextmenu(IContextMenu *menu, BOOL background)
             ok(hr == S_OK || hr == E_NOTIMPL || hr == E_INVALIDARG,
                     "Got unexpected hr %#x for ID %d, string %s.\n", hr, mii.wID, debugstr_a(mii.dwTypeData));
             if (hr == S_OK)
+            {
                 trace("Got ID %d, verb %s, string %s.\n", mii.wID, debugstr_a(buf), debugstr_a(mii.dwTypeData));
+                if (!strcmp(buf, "copy"))
+                    ok(mii.wID == 64 - 0x7000 + FCIDM_SHVIEW_COPY, "wrong menu wID %d\n", mii.wID);
+                else if (!strcmp(buf, "paste"))
+                    ok(mii.wID == 64 - 0x7000 + FCIDM_SHVIEW_INSERT, "wrong menu wID %d\n", mii.wID);
+                else if (!strcmp(buf, "properties"))
+                    ok(mii.wID == 64 - 0x7000 + FCIDM_SHVIEW_PROPERTIES, "wrong menu wID %d\n", mii.wID);
+            }
             else
                 trace("Got ID %d, hr %#x, string %s.\n", mii.wID, hr, debugstr_a(mii.dwTypeData));
         }
@@ -4461,6 +4469,69 @@ static void test_GetUIObject(void)
 
     IShellFolder_Release(psf_desktop);
     Cleanup();
+}
+
+static void test_CreateViewObject_contextmenu(void)
+{
+    IShellFolder *desktop;
+    IShellFolder *folder;
+    IContextMenu *cmenu;
+    WCHAR path[MAX_PATH];
+    LPITEMIDLIST pidl;
+    HRESULT hr;
+    DWORD ret;
+    int i;
+
+    static const CLSID *folders[] =
+    {
+        &CLSID_MyComputer,
+        &CLSID_MyDocuments,
+        &CLSID_ControlPanel,
+        &CLSID_NetworkPlaces,
+        &CLSID_Printers,
+        &CLSID_RecycleBin
+    };
+
+    for (i = 0; i < ARRAY_SIZE(folders); i++)
+    {
+        hr = CoCreateInstance(folders[i], NULL, CLSCTX_INPROC_SERVER, &IID_IShellFolder, (void**)&folder);
+        if (hr != S_OK)
+        {
+            win_skip("Failed to create folder %s, hr %#x.\n", wine_dbgstr_guid(folders[i]), hr);
+            continue;
+        }
+
+        hr = IShellFolder_CreateViewObject(folder, NULL, &IID_IContextMenu, (void**)&cmenu);
+        if (IsEqualIID(folders[i], &CLSID_MyDocuments))
+            ok(hr == S_OK, "got 0x%08x\n", hr);
+        else if (IsEqualIID(folders[i], &CLSID_MyComputer))
+            ok(hr == S_OK || broken(hr == E_NOINTERFACE /* win10 */), "got 0x%08x\n", hr);
+        else
+            ok(hr == E_NOINTERFACE || broken(FAILED(hr)), "got 0x%08x for %s\n", hr, wine_dbgstr_guid(folders[i]));
+        if (SUCCEEDED(hr))
+            IContextMenu_Release(cmenu);
+        IShellFolder_Release(folder);
+    }
+
+    hr = SHGetDesktopFolder(&desktop);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = IShellFolder_CreateViewObject(desktop, NULL, &IID_IContextMenu, (void**)&cmenu);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    if (SUCCEEDED(hr))
+        IContextMenu_Release(cmenu);
+    ret = GetCurrentDirectoryW(MAX_PATH, path);
+    ok(ret, "got %d\n", GetLastError());
+    hr = IShellFolder_ParseDisplayName(desktop, NULL, NULL, path, NULL, &pidl, 0);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = IShellFolder_BindToObject(desktop, pidl, NULL, &IID_IShellFolder, (void**)&folder);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = IShellFolder_CreateViewObject(folder, NULL, &IID_IContextMenu, (void**)&cmenu);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    if (SUCCEEDED(hr))
+        IContextMenu_Release(cmenu);
+    IShellFolder_Release(folder);
+    ILFree(pidl);
+    IShellFolder_Release(desktop);
 }
 
 #define verify_pidl(i,p) r_verify_pidl(__LINE__, i, p)
@@ -5305,6 +5376,7 @@ START_TEST(shlfolder)
     test_ShellItemArrayEnumItems();
     test_desktop_IPersist();
     test_GetUIObject();
+    test_CreateViewObject_contextmenu();
     test_SHSimpleIDListFromPath();
     test_ParseDisplayNamePBC();
     test_SHGetNameFromIDList();

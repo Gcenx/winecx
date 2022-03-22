@@ -36,7 +36,7 @@
 #include "wldap32.h"
 #include "wine/debug.h"
 
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
 /* Should eventually be determined by the algorithm documented on MSDN. */
 static const WCHAR defaulthost[] = { 'l','o','c','a','l','h','o','s','t',0 };
 
@@ -204,7 +204,7 @@ static char *urlify_hostnames( const char *scheme, char *hostnames, ULONG port )
 
 WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
 
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
 static WLDAP32_LDAP *create_context( const char *url )
 {
     WLDAP32_LDAP *ld;
@@ -212,12 +212,12 @@ static WLDAP32_LDAP *create_context( const char *url )
 
     ld = heap_alloc_zero( sizeof( *ld ));
     if (!ld) return NULL;
-    if (ldap_initialize( &ld->ld, url ) != LDAP_SUCCESS)
+    if (pldap_initialize( &ld->ld, url ) != LDAP_SUCCESS)
     {
         heap_free( ld );
         return NULL;
     }
-    ldap_set_option( ld->ld, LDAP_OPT_PROTOCOL_VERSION, &version );
+    pldap_set_option( ld->ld, LDAP_OPT_PROTOCOL_VERSION, &version );
     return ld;
 }
 #endif
@@ -229,7 +229,7 @@ static WLDAP32_LDAP *create_context( const char *url )
  */
 WLDAP32_LDAP * CDECL cldap_openA( PCHAR hostname, ULONG portnumber )
 {
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WLDAP32_LDAP *ld = NULL;
     WCHAR *hostnameW = NULL;
 
@@ -274,7 +274,7 @@ exit:
  */
 WLDAP32_LDAP * CDECL cldap_openW( PWCHAR hostname, ULONG portnumber )
 {
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WLDAP32_LDAP *ld = NULL;
     char *hostnameU = NULL, *url = NULL;
 
@@ -337,7 +337,7 @@ ULONG CDECL ldap_connect( WLDAP32_LDAP *ld, struct l_timeval *timeout )
  */
 WLDAP32_LDAP *  CDECL ldap_initA( const PCHAR hostname, ULONG portnumber )
 {
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WLDAP32_LDAP *ld = NULL;
     WCHAR *hostnameW = NULL;
 
@@ -383,7 +383,7 @@ exit:
  */
 WLDAP32_LDAP * CDECL ldap_initW( const PWCHAR hostname, ULONG portnumber )
 {
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WLDAP32_LDAP *ld = NULL;
     char *hostnameU = NULL, *url = NULL;
 
@@ -420,7 +420,7 @@ exit:
  */
 WLDAP32_LDAP * CDECL ldap_openA( PCHAR hostname, ULONG portnumber )
 {
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WLDAP32_LDAP *ld = NULL;
     WCHAR *hostnameW = NULL;
 
@@ -465,7 +465,7 @@ exit:
  */
 WLDAP32_LDAP * CDECL ldap_openW( PWCHAR hostname, ULONG portnumber )
 {
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WLDAP32_LDAP *ld = NULL;
     char *hostnameU = NULL, *url = NULL;
 
@@ -502,7 +502,7 @@ exit:
  */
 WLDAP32_LDAP * CDECL ldap_sslinitA( PCHAR hostname, ULONG portnumber, int secure )
 {
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WLDAP32_LDAP *ld;
     WCHAR *hostnameW = NULL;
 
@@ -548,7 +548,7 @@ WLDAP32_LDAP * CDECL ldap_sslinitA( PCHAR hostname, ULONG portnumber, int secure
  */
 WLDAP32_LDAP * CDECL ldap_sslinitW( PWCHAR hostname, ULONG portnumber, int secure )
 {
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WLDAP32_LDAP *ld = NULL;
     char *hostnameU = NULL, *url = NULL;
 
@@ -569,7 +569,7 @@ WLDAP32_LDAP * CDECL ldap_sslinitW( PWCHAR hostname, ULONG portnumber, int secur
         url = urlify_hostnames( "ldap://", hostnameU, portnumber );
 
     if (!url) goto exit;
-    ldap_initialize( &ld->ld, url );
+    pldap_initialize( &ld->ld, url );
 
 exit:
     strfreeU( hostnameU );
@@ -590,7 +590,7 @@ ULONG CDECL ldap_start_tls_sA( WLDAP32_LDAP *ld, PULONG retval, WLDAP32_LDAPMess
     PLDAPControlA *serverctrls, PLDAPControlA *clientctrls )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     LDAPControlW **serverctrlsW = NULL, **clientctrlsW = NULL;
 
     ret = WLDAP32_LDAP_NO_MEMORY;
@@ -641,7 +641,7 @@ ULONG CDECL ldap_start_tls_sW( WLDAP32_LDAP *ld, PULONG retval, WLDAP32_LDAPMess
     PLDAPControlW *serverctrls, PLDAPControlW *clientctrls )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
 
     ret = WLDAP32_LDAP_NO_MEMORY;
@@ -659,7 +659,7 @@ ULONG CDECL ldap_start_tls_sW( WLDAP32_LDAP *ld, PULONG retval, WLDAP32_LDAPMess
         if (!clientctrlsU) goto exit;
     }
 
-    ret = map_error( ldap_start_tls_s( ld->ld, serverctrlsU, clientctrlsU ));
+    ret = map_error( pldap_start_tls_s( ld->ld, serverctrlsU, clientctrlsU ));
 
 exit:
     controlarrayfreeU( serverctrlsU );

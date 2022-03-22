@@ -60,6 +60,16 @@ enum {
 #endif
 
 
+@interface NSWindow (PrivatePreventsActivation)
+
+/* Needed to ensure proper behavior after adding or removing
+ * NSWindowStyleMaskNonactivatingPanel.
+ * Available since at least macOS 10.6. */
+- (void)_setPreventsActivation:(BOOL)flag;
+
+@end
+
+
 static NSUInteger style_mask_for_features(const struct macdrv_window_features* wf)
 {
     NSUInteger style_mask;
@@ -73,6 +83,8 @@ static NSUInteger style_mask_for_features(const struct macdrv_window_features* w
         if (wf->utility) style_mask |= NSWindowStyleMaskUtilityWindow;
     }
     else style_mask = NSWindowStyleMaskBorderless;
+
+    if (wf->prevents_app_activation) style_mask |= NSWindowStyleMaskNonactivatingPanel;
 
     return style_mask;
 }
@@ -367,7 +379,8 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 @interface WineWindow ()
 
 @property (readwrite, nonatomic) BOOL disabled;
-@property (readwrite, nonatomic) BOOL noActivate;
+@property (readwrite, nonatomic) BOOL noForeground;
+@property (readwrite, nonatomic) BOOL preventsAppActivation;
 @property (readwrite, nonatomic) BOOL floating;
 @property (readwrite, nonatomic) BOOL drawnSinceShown;
 @property (readwrite, getter=isFakingClose, nonatomic) BOOL fakingClose;
@@ -392,9 +405,6 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 @property (nonatomic) BOOL commandDone;
 
 @property (readonly, copy, nonatomic) NSArray* childWineWindows;
-
-/* CX HACK 16565 */
-@property (nonatomic) BOOL preventAppActivation;
 
     - (void) updateForGLSubviews;
 
@@ -448,23 +458,6 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     {
         return NSFocusRingTypeNone;
     }
-
-    /* CX HACK 16565 */
-    /* These two methods work together to prevent the app from being activated
-     * when a window is clicked. */
-    - (BOOL)shouldDelayWindowOrderingForEvent:(NSEvent *)event
-    {
-        return ((WineWindow *)self.window).preventAppActivation;
-    }
-
-    - (void)mouseDown:(NSEvent *)event
-    {
-        if (((WineWindow *)self.window).preventAppActivation)
-            [NSApp preventWindowOrdering];
-
-        [super mouseDown:event];
-    }
-    /* END HACK */
 
 @end
 
@@ -970,16 +963,13 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 
     static WineWindow* causing_becomeKeyWindow;
 
-    @synthesize disabled, noActivate, floating, fullscreen, fakingClose, latentParentWindow, hwnd, queue;
+    @synthesize disabled, noForeground, preventsAppActivation, floating, fullscreen, fakingClose, latentParentWindow, hwnd, queue;
     @synthesize drawnSinceShown;
     @synthesize surface, surface_mutex;
     @synthesize shape, shapeData, shapeChangedSinceLastDraw;
     @synthesize colorKeyed, colorKeyRed, colorKeyGreen, colorKeyBlue;
     @synthesize usePerPixelAlpha;
     @synthesize imeData, commandDone;
-
-    /* CX HACK 16565 */
-    @synthesize preventAppActivation;
 
     + (WineWindow*) createWindowWithFeatures:(const struct macdrv_window_features*)wf
                                  windowFrame:(NSRect)window_frame
@@ -1161,9 +1151,12 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     - (void) setWindowFeatures:(const struct macdrv_window_features*)wf
     {
         static const NSUInteger usedStyles = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable |
-                                             NSWindowStyleMaskResizable | NSWindowStyleMaskUtilityWindow | NSWindowStyleMaskBorderless;
+                                             NSWindowStyleMaskResizable | NSWindowStyleMaskUtilityWindow | NSWindowStyleMaskBorderless |
+                                             NSWindowStyleMaskNonactivatingPanel;
         NSUInteger currentStyle = [self styleMask];
         NSUInteger newStyle = style_mask_for_features(wf) | (currentStyle & ~usedStyles);
+
+        self.preventsAppActivation = wf->prevents_app_activation;
 
         if (newStyle != currentStyle)
         {
@@ -1180,6 +1173,17 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
                 [self setStyleMask:newStyle ^ NSWindowStyleMaskClosable];
             }
             [self setStyleMask:newStyle];
+
+            BOOL isNonActivating = (currentStyle & NSWindowStyleMaskNonactivatingPanel) != 0;
+            BOOL shouldBeNonActivating = (newStyle & NSWindowStyleMaskNonactivatingPanel) != 0;
+            if (isNonActivating != shouldBeNonActivating) {
+                // Changing NSWindowStyleMaskNonactivatingPanel with -setStyleMask is also
+                // buggy. If it's added, clicking the title bar will still activate the
+                // app. If it's removed, nothing changes at all.
+                // This private method ensures the correct behavior.
+                if ([self respondsToSelector:@selector(_setPreventsActivation:)])
+                    [self _setPreventsActivation:shouldBeNonActivating];
+            }
 
             // -setStyleMask: resets the firstResponder to the window.  Set it
             // back to the content view.
@@ -1267,16 +1271,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         NSWindowCollectionBehavior behavior;
 
         self.disabled = state->disabled;
-
-        if (self.noActivate != state->no_activate)
-        {
-            self.noActivate = state->no_activate;
-
-            /* CX HACK 16565 */
-            /* Don't allow no_activate windows from the Steam helper to activate the app when clicked. */
-            NSString *bundleName = [[NSBundle mainBundle] objectForInfoDictionaryKey:(NSString*)kCFBundleNameKey];
-            self.preventAppActivation = self.noActivate && [bundleName isEqualToString:@"steamwebhelper"];
-        }
+        self.noForeground = state->no_foreground;
 
         if (self.floating != state->floating)
         {
@@ -1706,7 +1701,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
             WineWindow* parent;
             WineWindow* child;
 
-            [controller transformProcessToForeground];
+            [controller transformProcessToForeground:!self.preventsAppActivation];
             if ([NSApp isHidden])
                 [NSApp unhide:nil];
             wasVisible = [self isVisible];
@@ -2075,7 +2070,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     {
         if (activate)
         {
-            [[WineApplicationController sharedController] transformProcessToForeground];
+            [[WineApplicationController sharedController] transformProcessToForeground:YES];
             [NSApp activateIgnoringOtherApps:YES];
         }
 
@@ -2381,7 +2376,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     {
         if (quicken_signin_hack) return YES; /* CrossOver Hack #15388 */
         if (causing_becomeKeyWindow == self) return YES;
-        if (self.disabled || self.noActivate) return NO;
+        if (self.disabled || self.noForeground) return NO;
         if ([self isKeyWindow]) return YES;
 
         // If a window's collectionBehavior says it participates in cycling,
@@ -2449,7 +2444,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         BOOL ret = [super validateMenuItem:menuItem];
 
         if ([menuItem action] == @selector(makeKeyAndOrderFront:))
-            ret = [self isKeyWindow] || (!self.disabled && !self.noActivate);
+            ret = [self isKeyWindow] || (!self.disabled && !self.noForeground);
         else if ([menuItem action] == @selector(undo:)) // CrossOver Hack 10912: Mac Edit menu
             ret = TRUE;
         if ([menuItem action] == @selector(toggleFullScreen:) && (self.disabled || maximized))
@@ -2466,7 +2461,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         [self orderBelow:nil orAbove:nil activate:NO];
         [[self ancestorWineWindow] postBroughtForwardEvent];
 
-        if (![self isKeyWindow] && !self.disabled && !self.noActivate)
+        if (![self isKeyWindow] && !self.disabled && !self.noForeground)
             [[WineApplicationController sharedController] windowGotFocus:self];
     }
 
@@ -2942,7 +2937,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         if (![self parentWindow])
             [self postBroughtForwardEvent];
 
-        if (!self.disabled && !self.noActivate)
+        if (!self.disabled && !self.noForeground)
         {
             causing_becomeKeyWindow = self;
             [self makeKeyWindow];
@@ -2999,9 +2994,16 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 
     - (void)windowDidMiniaturize:(NSNotification *)notification
     {
+        macdrv_event* event;
+
         if (fullscreen && [self isOnActiveSpace])
             [[WineApplicationController sharedController] updateFullscreenWindows];
+
         [self checkWineDisplayLink];
+
+        event = macdrv_create_event(WINDOW_DID_MINIMIZE, self);
+        [queue postEvent:event];
+        macdrv_release_event(event);
     }
 
     - (void)windowDidMove:(NSNotification *)notification

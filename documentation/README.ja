@@ -77,7 +77,7 @@ Mac OS X情報:
 
 基本的な要件:
   X11開発includeファイルをインストールする必要があります。
-  （Debianではxlib6g-devでRed HatではXFree86-develと呼ばれます。[訳注: 最近の
+  （Debianではxorg-devでRed HatではlibX11-develと呼ばれます。[訳注: 最近の
     ディストリビューションでは別のパッケージで置き換えられています]）
 
   もちろん"make"も必要です（大概はGNU make）。
@@ -163,7 +163,7 @@ Wiki:	Wine Wikiはhttps://wiki.winehq.orgにあります
         バグ報告を投稿する前に問題が既知や修正済みかどうかを調べるために
 	bugzillaデータベースを検索してください。
 
-IRC:	irc.freenode.net上のチャンネル#WineHQでオンラインヘルプを利用できます。
+IRC:	irc.libera.chat上のチャンネル#WineHQでオンラインヘルプを利用できます。
 
 Git:	現在のWine開発ツリーはGitを通して入手できます。
 	詳細についてはhttps://www.winehq.org/gitに行ってください。

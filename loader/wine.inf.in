@@ -30,7 +30,7 @@ signature="$CHICAGO$"
 RegisterDlls=RegisterDllsSection
 WineFakeDlls=FakeDllsWin32,FakeDlls
 UpdateInis=SystemIni
-CopyFiles=ColorFiles,InfFiles,NlsFiles,SortFiles
+CopyFiles=ColorFiles,EtcFiles,InfFiles,NlsFiles,SortFiles
 AddReg=\
     Classes,\
     ContentIndex,\
@@ -54,7 +54,7 @@ AddReg=\
 RegisterDlls=RegisterDllsSection
 WineFakeDlls=FakeDllsWin32,FakeDlls
 UpdateInis=SystemIni
-CopyFiles=ColorFiles,InfFiles,NlsFiles,SortFiles
+CopyFiles=ColorFiles,EtcFiles,InfFiles,NlsFiles,SortFiles
 AddReg=\
     Classes,\
     ContentIndex,\
@@ -80,7 +80,7 @@ RegisterDlls=RegisterDllsSection
 WineFakeDlls=FakeDllsWin64,FakeDlls
 WinePreInstall=Wow64
 UpdateInis=SystemIni
-CopyFiles=ColorFiles,InfFiles,NlsFiles,SortFiles
+CopyFiles=ColorFiles,EtcFiles,InfFiles,NlsFiles,SortFiles
 AddReg=\
     Classes,\
     ContentIndex,\
@@ -107,7 +107,7 @@ RegisterDlls=RegisterDllsSection
 WineFakeDlls=FakeDllsWin64,FakeDlls
 WinePreInstall=Wow64
 UpdateInis=SystemIni
-CopyFiles=ColorFiles,InfFiles,NlsFiles,SortFiles
+CopyFiles=ColorFiles,EtcFiles,InfFiles,NlsFiles,SortFiles
 AddReg=\
     Classes,\
     ContentIndex,\
@@ -3921,7 +3921,7 @@ ErrorControl=1
 ;(cw)HKLM,%CurrentVersion%\RunServices,"winemenubuilder",2,"%11%\winemenubuilder.exe -a -r"
 HKLM,"System\CurrentControlSet\Services\Eventlog\Application",,16
 HKLM,"System\CurrentControlSet\Services\Eventlog\System","Sources",0x10000,""
-HKLM,"System\CurrentControlSet\Services\Tcpip\Parameters","DataBasePath",2,"%11%\drivers"
+HKLM,"System\CurrentControlSet\Services\Tcpip\Parameters","DataBasePath",,"%12%\etc"
 HKLM,"System\CurrentControlSet\Services\VxD\MSTCP",,16
 HKLM,"System\CurrentControlSet\Services\Winsock\Parameters",,16
 HKLM,"System\CurrentControlSet\Services\Winsock2\Parameters\Protocol_Catalog9\Catalog_Entries",,16
@@ -4043,6 +4043,12 @@ HKLM,Software\Wine\LicenseInformation,"Shell-PremiumInBoxGames-Chess-EnableGame"
 [ColorFiles]
 srgb color space profile.icm,"@mscms.dll,-1"
 
+[EtcFiles]
+hosts,"@%11%\ws2_32.dll,-1"
+networks,"@%11%\ws2_32.dll,-2"
+protocol,"@%11%\ws2_32.dll,-3"
+services,"@%11%\ws2_32.dll,-4"
+
 [InfFiles]
 winebus.inf,"@winebus.sys,-1"
 winehid.inf,"@winehid.sys,-1"
@@ -4080,6 +4086,7 @@ c_1361.nls
 c_20127.nls
 c_20866.nls
 c_20932.nls
+c_20949.nls
 c_21866.nls
 c_28591.nls
 c_28592.nls
@@ -4095,6 +4102,7 @@ c_28605.nls
 c_437.nls
 c_500.nls
 c_708.nls
+c_720.nls
 c_737.nls
 c_775.nls
 c_850.nls
@@ -4131,6 +4139,7 @@ SortFiles = nls
 
 [DestinationDirs]
 ColorFiles = 23
+EtcFiles  = 12,etc
 InfFiles  = 17
 NlsFiles  = 11
 SortFiles = 10,globalization\sorting

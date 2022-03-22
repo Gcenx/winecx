@@ -2871,8 +2871,11 @@ static void test_effect_local_shader(void)
     D3D10_EFFECT_DESC effect_desc;
     ID3D10EffectShaderVariable *null_shader, *null_anon_vs, *null_anon_ps, *null_anon_gs,
         *p3_anon_vs, *p3_anon_ps, *p3_anon_gs, *p6_vs, *p6_ps, *p6_gs, *gs, *ps, *vs;
+    ID3D10PixelShader *ps_d3d, *ps_d3d_2;
     D3D10_EFFECT_SHADER_DESC shaderdesc;
     D3D10_SIGNATURE_PARAMETER_DESC sign;
+    D3D10_STATE_BLOCK_MASK mask;
+    D3D10_PASS_DESC pass_desc;
     ID3D10Device *device;
     ULONG refcount;
 
@@ -2966,12 +2969,38 @@ if (0)
     hr = p->lpVtbl->GetGeometryShaderDesc(p, NULL);
     ok(hr == E_INVALIDARG, "GetGeometryShaderDesc got %x, expected %x\n", hr, E_INVALIDARG);
 
+    v = effect->lpVtbl->GetVariableByName(effect, "p");
+    ps = v->lpVtbl->AsShader(v);
+
+    hr = ps->lpVtbl->GetPixelShader(ps, 0, &ps_d3d);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
     /* get the null_shader_variable */
     v = effect->lpVtbl->GetVariableByIndex(effect, 10000);
     null_shader = v->lpVtbl->AsShader(v);
 
     /* pass 0 */
     p = t->lpVtbl->GetPassByIndex(t, 0);
+
+    /* Pass without Set*Shader() instructions */
+    hr = D3D10StateBlockMaskDisableAll(&mask);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = p->lpVtbl->ComputeStateBlockMask(p, &mask);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ret = D3D10StateBlockMaskGetSetting(&mask, D3D10_DST_VS, 0);
+    ok(!ret, "Unexpected mask.\n");
+    ret = D3D10StateBlockMaskGetSetting(&mask, D3D10_DST_PS, 0);
+    ok(!ret, "Unexpected mask.\n");
+    ret = D3D10StateBlockMaskGetSetting(&mask, D3D10_DST_GS, 0);
+    ok(!ret, "Unexpected mask.\n");
+
+    ID3D10Device_PSSetShader(device, ps_d3d);
+    hr = p->lpVtbl->Apply(p, 0);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ID3D10Device_PSGetShader(device, &ps_d3d_2);
+    ok(ps_d3d_2 == ps_d3d, "Unexpected shader object.\n");
+    ID3D10PixelShader_Release(ps_d3d_2);
+
     hr = p->lpVtbl->GetVertexShaderDesc(p, &pdesc);
     ok(hr == S_OK, "GetVertexShaderDesc got %x, expected %x\n", hr, S_OK);
     ok(pdesc.pShaderVariable == null_shader, "Got %p, expected %p\n", pdesc.pShaderVariable, null_shader);
@@ -2998,6 +3027,12 @@ if (0)
 
     /* pass 1 */
     p = t->lpVtbl->GetPassByIndex(t, 1);
+
+    ID3D10Device_PSSetShader(device, ps_d3d);
+    hr = p->lpVtbl->Apply(p, 0);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ID3D10Device_PSGetShader(device, &ps_d3d_2);
+    ok(!ps_d3d_2, "Unexpected shader object.\n");
 
     /* pass 1 vertexshader */
     hr = p->lpVtbl->GetVertexShaderDesc(p, &pdesc);
@@ -3106,6 +3141,18 @@ if (0)
     ok(typedesc.PackedSize == 0x0, "PackedSize is %#x, expected 0x0\n", typedesc.PackedSize);
     ok(typedesc.UnpackedSize == 0x0, "UnpackedSize is %#x, expected 0x0\n", typedesc.UnpackedSize);
     ok(typedesc.Stride == 0x0, "Stride is %#x, expected 0x0\n", typedesc.Stride);
+
+    /* Pass is using Set*Shader(NULL) */
+    hr = D3D10StateBlockMaskDisableAll(&mask);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = p->lpVtbl->ComputeStateBlockMask(p, &mask);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ret = D3D10StateBlockMaskGetSetting(&mask, D3D10_DST_VS, 0);
+    ok(ret, "Unexpected mask.\n");
+    ret = D3D10StateBlockMaskGetSetting(&mask, D3D10_DST_PS, 0);
+    ok(ret, "Unexpected mask.\n");
+    ret = D3D10StateBlockMaskGetSetting(&mask, D3D10_DST_GS, 0);
+    ok(ret, "Unexpected mask.\n");
 
     /* pass 2 */
     p = t->lpVtbl->GetPassByIndex(t, 2);
@@ -3527,6 +3574,12 @@ if (0)
     ok(typedesc.UnpackedSize == 0x0, "UnpackedSize is %#x, expected 0x0\n", typedesc.UnpackedSize);
     ok(typedesc.Stride == 0x0, "Stride is %#x, expected 0x0\n", typedesc.Stride);
 
+    /* Get input signature from vertex shader set from array element. */
+    hr = p->lpVtbl->GetDesc(p, &pass_desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!!pass_desc.pIAInputSignature, "Expected input signature.\n");
+    ok(pass_desc.IAInputSignatureSize == 88, "Unexpected input signature size.\n");
+
     /* pass 6 pixelshader */
     hr = p->lpVtbl->GetPixelShaderDesc(p, &pdesc);
     ok(hr == S_OK, "GetPixelShaderDesc got %x, expected %x\n", hr, S_OK);
@@ -3789,6 +3842,8 @@ if (0)
     ok(!strcmp(sign.SemanticName, "POSITION"), "Unexpected semantic %s.\n", sign.SemanticName);
 
     effect->lpVtbl->Release(effect);
+
+    ID3D10PixelShader_Release(ps_d3d);
 
     refcount = ID3D10Device_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
@@ -4164,6 +4219,7 @@ static void test_effect_state_groups(void)
     UINT sample_mask, stencil_ref;
     ID3D10EffectBlendVariable *b;
     D3D10_BLEND_DESC blend_desc;
+    D3D10_STATE_BLOCK_MASK mask;
     D3D10_PASS_DESC pass_desc;
     ID3D10EffectVariable *v;
     ID3D10EffectPass *pass;
@@ -4172,6 +4228,7 @@ static void test_effect_state_groups(void)
     ID3D10Device *device;
     ULONG refcount;
     HRESULT hr;
+    BOOL ret;
 
     if (!(device = create_device()))
     {
@@ -4232,6 +4289,22 @@ static void test_effect_state_groups(void)
             blend_desc.RenderTargetWriteMask[0]);
     ok(blend_desc.RenderTargetWriteMask[7] == 0x7, "Got unexpected RenderTargetWriteMask[7] %#x.\n",
             blend_desc.RenderTargetWriteMask[7]);
+    hr = b->lpVtbl->GetBlendState(b, 0, &blend_state);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ID3D10BlendState_GetDesc(blend_state, &blend_desc);
+    ok(blend_desc.SrcBlend == D3D10_BLEND_ONE, "Got unexpected SrcBlend %#x.\n", blend_desc.SrcBlend);
+    ID3D10BlendState_Release(blend_state);
+    b->lpVtbl->GetBackingStore(b, 1, &blend_desc);
+    ok(blend_desc.SrcBlend == D3D10_BLEND_SRC_COLOR, "Got unexpected SrcBlend %#x.\n", blend_desc.SrcBlend);
+    hr = b->lpVtbl->GetBlendState(b, 1, &blend_state);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ID3D10BlendState_GetDesc(blend_state, &blend_desc);
+    /* We can't check the SrcBlend value from the ID3D10BlendState object
+     * descriptor because BlendEnable[0] is effectively false, which forces
+     * normalization of all the other descriptor values. We can at least
+     * confirm that we got blend_state2 by checking BlendEnable[0] itself. */
+    ok(!blend_desc.BlendEnable[0], "Got unexpected BlendEnable[0] %#x.\n", blend_desc.BlendEnable[0]);
+    ID3D10BlendState_Release(blend_state);
 
     v = effect->lpVtbl->GetVariableByName(effect, "ds_state");
     d = v->lpVtbl->AsDepthStencil(v);
@@ -4259,6 +4332,18 @@ static void test_effect_state_groups(void)
             ds_desc.BackFace.StencilPassOp);
     ok(ds_desc.BackFace.StencilFunc == D3D10_COMPARISON_GREATER_EQUAL, "Got unexpected BackFaceStencilFunc %#x.\n",
             ds_desc.BackFace.StencilFunc);
+    hr = d->lpVtbl->GetDepthStencilState(d, 0, &ds_state);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ID3D10DepthStencilState_GetDesc(ds_state, &ds_desc);
+    ok(ds_desc.DepthEnable, "Got unexpected DepthEnable %#x.\n", ds_desc.DepthEnable);
+    ID3D10DepthStencilState_Release(ds_state);
+    d->lpVtbl->GetBackingStore(d, 1, &ds_desc);
+    ok(!ds_desc.DepthEnable, "Got unexpected DepthEnable %#x.\n", ds_desc.DepthEnable);
+    hr = d->lpVtbl->GetDepthStencilState(d, 1, &ds_state);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ID3D10DepthStencilState_GetDesc(ds_state, &ds_desc);
+    ok(!ds_desc.DepthEnable, "Got unexpected DepthEnable %#x.\n", ds_desc.DepthEnable);
+    ID3D10DepthStencilState_Release(ds_state);
 
     v = effect->lpVtbl->GetVariableByName(effect, "rast_state");
     r = v->lpVtbl->AsRasterizer(v);
@@ -4276,6 +4361,19 @@ static void test_effect_state_groups(void)
     ok(rast_desc.MultisampleEnable, "Got unexpected MultisampleEnable %#x.\n", rast_desc.MultisampleEnable);
     ok(rast_desc.AntialiasedLineEnable, "Got unexpected AntialiasedLineEnable %#x.\n",
             rast_desc.AntialiasedLineEnable);
+    hr = r->lpVtbl->GetRasterizerState(r, 0, &rast_state);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ID3D10RasterizerState_GetDesc(rast_state, &rast_desc);
+    ok(rast_desc.CullMode == D3D10_CULL_FRONT, "Got unexpected CullMode %#x.\n", rast_desc.CullMode);
+    ID3D10RasterizerState_Release(rast_state);
+
+    r->lpVtbl->GetBackingStore(r, 1, &rast_desc);
+    ok(rast_desc.CullMode == D3D10_CULL_BACK, "Got unexpected CullMode %#x.\n", rast_desc.CullMode);
+    hr = r->lpVtbl->GetRasterizerState(r, 1, &rast_state);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ID3D10RasterizerState_GetDesc(rast_state, &rast_desc);
+    ok(rast_desc.CullMode == D3D10_CULL_BACK, "Got unexpected CullMode %#x.\n", rast_desc.CullMode);
+    ID3D10RasterizerState_Release(rast_state);
 
     technique = effect->lpVtbl->GetTechniqueByName(effect, "tech0");
     ok(!!technique, "Failed to get technique.\n");
@@ -4292,6 +4390,18 @@ static void test_effect_state_groups(void)
     ok(pass_desc.BlendFactor[1] == 0.6f, "Got unexpected BlendFactor[1] %.8e.\n", pass_desc.BlendFactor[1]);
     ok(pass_desc.BlendFactor[2] == 0.7f, "Got unexpected BlendFactor[2] %.8e.\n", pass_desc.BlendFactor[2]);
     ok(pass_desc.BlendFactor[3] == 0.8f, "Got unexpected BlendFactor[3] %.8e.\n", pass_desc.BlendFactor[3]);
+
+    hr = D3D10StateBlockMaskDisableAll(&mask);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = pass->lpVtbl->ComputeStateBlockMask(pass, &mask);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ret = D3D10StateBlockMaskGetSetting(&mask, D3D10_DST_RS_RASTERIZER_STATE, 0);
+    ok(ret, "Unexpected mask.\n");
+    ret = D3D10StateBlockMaskGetSetting(&mask, D3D10_DST_OM_DEPTH_STENCIL_STATE, 0);
+    ok(ret, "Unexpected mask.\n");
+    ret = D3D10StateBlockMaskGetSetting(&mask, D3D10_DST_OM_BLEND_STATE, 0);
+    ok(ret, "Unexpected mask.\n");
+
     hr = pass->lpVtbl->Apply(pass, 0);
     ok(SUCCEEDED(hr), "Failed to apply pass, hr %#x.\n", hr);
 
@@ -4563,43 +4673,32 @@ cbuffer cb
     float f0, f_a[2];
     int i0, i_a[2];
     bool b0, b_a[2];
+    uint i1, i1_a[2];
 };
 #endif
 static DWORD fx_test_scalar_variable[] =
 {
-    0x43425844, 0xe4da4aa6, 0x1380ddc5, 0x445edad5,
-    0x08581666, 0x00000001, 0x0000020b, 0x00000001,
-    0x00000024, 0x30315846, 0x000001df, 0xfeff1001,
-    0x00000001, 0x00000006, 0x00000000, 0x00000000,
-    0x00000000, 0x00000000, 0x00000000, 0x000000d3,
-    0x00000000, 0x00000000, 0x00000000, 0x00000000,
-    0x00000000, 0x00000000, 0x00000000, 0x00000000,
-    0x00000000, 0x00000000, 0x00000000, 0x66006263,
-    0x74616f6c, 0x00000700, 0x00000100, 0x00000000,
-    0x00000400, 0x00001000, 0x00000400, 0x00090900,
-    0x00306600, 0x00000007, 0x00000001, 0x00000002,
-    0x00000014, 0x00000010, 0x00000008, 0x00000909,
-    0x00615f66, 0x00746e69, 0x0000004c, 0x00000001,
-    0x00000000, 0x00000004, 0x00000010, 0x00000004,
-    0x00000911, 0x4c003069, 0x01000000, 0x02000000,
-    0x14000000, 0x10000000, 0x08000000, 0x11000000,
-    0x69000009, 0x6200615f, 0x006c6f6f, 0x0000008f,
-    0x00000001, 0x00000000, 0x00000004, 0x00000010,
-    0x00000004, 0x00000921, 0x8f003062, 0x01000000,
-    0x02000000, 0x14000000, 0x10000000, 0x08000000,
-    0x21000000, 0x62000009, 0x0400615f, 0x70000000,
-    0x00000000, 0x06000000, 0xff000000, 0x00ffffff,
-    0x29000000, 0x0d000000, 0x00000000, 0x00000000,
-    0x00000000, 0x00000000, 0x00000000, 0x48000000,
-    0x2c000000, 0x00000000, 0x10000000, 0x00000000,
-    0x00000000, 0x00000000, 0x6c000000, 0x50000000,
-    0x00000000, 0x24000000, 0x00000000, 0x00000000,
-    0x00000000, 0x8b000000, 0x6f000000, 0x00000000,
-    0x30000000, 0x00000000, 0x00000000, 0x00000000,
-    0xb0000000, 0x94000000, 0x00000000, 0x44000000,
-    0x00000000, 0x00000000, 0x00000000, 0xcf000000,
-    0xb3000000, 0x00000000, 0x50000000, 0x00000000,
-    0x00000000, 0x00000000, 0x00000000,
+    0x43425844, 0x7d97f44c, 0x1da4b110, 0xb710407e, 0x26750c1c, 0x00000001, 0x00000288, 0x00000001,
+    0x00000024, 0x30315846, 0x0000025c, 0xfeff1001, 0x00000001, 0x00000008, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000118, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x66006263,
+    0x74616f6c, 0x00000700, 0x00000100, 0x00000000, 0x00000400, 0x00001000, 0x00000400, 0x00090900,
+    0x00306600, 0x00000007, 0x00000001, 0x00000002, 0x00000014, 0x00000010, 0x00000008, 0x00000909,
+    0x00615f66, 0x00746e69, 0x0000004c, 0x00000001, 0x00000000, 0x00000004, 0x00000010, 0x00000004,
+    0x00000911, 0x4c003069, 0x01000000, 0x02000000, 0x14000000, 0x10000000, 0x08000000, 0x11000000,
+    0x69000009, 0x6200615f, 0x006c6f6f, 0x0000008f, 0x00000001, 0x00000000, 0x00000004, 0x00000010,
+    0x00000004, 0x00000921, 0x8f003062, 0x01000000, 0x02000000, 0x14000000, 0x10000000, 0x08000000,
+    0x21000000, 0x62000009, 0x7500615f, 0x00746e69, 0x000000d3, 0x00000001, 0x00000000, 0x00000004,
+    0x00000010, 0x00000004, 0x00000919, 0xd3003169, 0x01000000, 0x02000000, 0x14000000, 0x10000000,
+    0x08000000, 0x19000000, 0x69000009, 0x00615f31, 0x00000004, 0x00000090, 0x00000000, 0x00000008,
+    0xffffffff, 0x00000000, 0x00000029, 0x0000000d, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000048, 0x0000002c, 0x00000000, 0x00000010, 0x00000000, 0x00000000, 0x00000000,
+    0x0000006c, 0x00000050, 0x00000000, 0x00000024, 0x00000000, 0x00000000, 0x00000000, 0x0000008b,
+    0x0000006f, 0x00000000, 0x00000030, 0x00000000, 0x00000000, 0x00000000, 0x000000b0, 0x00000094,
+    0x00000000, 0x00000044, 0x00000000, 0x00000000, 0x00000000, 0x000000cf, 0x000000b3, 0x00000000,
+    0x00000050, 0x00000000, 0x00000000, 0x00000000, 0x000000f4, 0x000000d8, 0x00000000, 0x00000064,
+    0x00000000, 0x00000000, 0x00000000, 0x00000113, 0x000000f7, 0x00000000, 0x00000070, 0x00000000,
+    0x00000000, 0x00000000,
 };
 
 static void test_scalar_methods(ID3D10EffectScalarVariable *var, D3D10_SHADER_VARIABLE_TYPE type,
@@ -4865,9 +4964,11 @@ static void test_effect_scalar_variable(void)
     {
         {"f0", D3D10_SVT_FLOAT},
         {"i0", D3D10_SVT_INT},
+        {"i1", D3D10_SVT_UINT},
         {"b0", D3D10_SVT_BOOL},
         {"f_a", D3D10_SVT_FLOAT, TRUE},
         {"i_a", D3D10_SVT_INT, TRUE},
+        {"i1_a", D3D10_SVT_UINT, TRUE},
         {"b_a", D3D10_SVT_BOOL, TRUE},
     };
     D3D10_EFFECT_TYPE_DESC type_desc;
@@ -4897,7 +4998,7 @@ static void test_effect_scalar_variable(void)
             effect_desc.ConstantBuffers);
     ok(effect_desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
             effect_desc.SharedConstantBuffers);
-    ok(effect_desc.GlobalVariables == 6, "Unexpected global variables count %u.\n",
+    ok(effect_desc.GlobalVariables == 8, "Unexpected global variables count %u.\n",
             effect_desc.GlobalVariables);
     ok(effect_desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
             effect_desc.SharedGlobalVariables);
@@ -5766,6 +5867,59 @@ static DWORD fx_test_resource_variable[] =
     0x00070000, 0x02120000, 0x00070000, 0x00000000, 0x00070000, 0x057a0000, 0x00000000,
 };
 
+#if 0
+Texture2D t_a[2];
+
+SamplerState s[2] : register(s1);
+
+float4 PS( float4 pos : SV_POSITION ) : SV_Target
+{
+    return t_a[1].Sample(s[1], float2(0, 0));
+}
+
+PixelShader ps[1] = { CompileShader(ps_4_0, PS()) };
+
+technique10 rsrc_test
+{
+    pass p0
+    {
+        SetPixelShader(ps[0]);
+    }
+}
+#endif
+static DWORD fx_test_resource_variable2[] =
+{
+    0x43425844, 0xecd43fcd, 0x0654927c, 0x71931f03, 0xf166cc09, 0x00000001, 0x0000039d, 0x00000001,
+    0x00000024, 0x30315846, 0x00000371, 0xfeff1001, 0x00000000, 0x00000000, 0x00000003, 0x00000000,
+    0x00000000, 0x00000000, 0x00000001, 0x000002b5, 0x00000000, 0x00000002, 0x00000000, 0x00000000,
+    0x00000000, 0x00000002, 0x00000000, 0x00000000, 0x00000001, 0x00000000, 0x00000000, 0x74786554,
+    0x32657275, 0x00040044, 0x00020000, 0x00020000, 0x00000000, 0x00000000, 0x00000000, 0x000c0000,
+    0x5f740000, 0x61530061, 0x656c706d, 0x61745372, 0x2e006574, 0x02000000, 0x02000000, 0x00000000,
+    0x00000000, 0x00000000, 0x15000000, 0x73000000, 0x78695000, 0x68536c65, 0x72656461, 0x00005900,
+    0x00000200, 0x00000100, 0x00000000, 0x00000000, 0x00000000, 0x00000500, 0x00737000, 0x00000218,
+    0x43425844, 0x9e83b242, 0xfc183c88, 0x2920b8b8, 0x877a749f, 0x00000001, 0x00000218, 0x00000005,
+    0x00000034, 0x000000c8, 0x000000fc, 0x00000130, 0x0000019c, 0x46454452, 0x0000008c, 0x00000000,
+    0x00000000, 0x00000002, 0x0000001c, 0xffff0400, 0x00000100, 0x00000062, 0x0000005c, 0x00000003,
+    0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000002, 0x00000001, 0x0000005e, 0x00000002,
+    0x00000005, 0x00000004, 0xffffffff, 0x00000000, 0x00000002, 0x0000000c, 0x5f740073, 0x694d0061,
+    0x736f7263, 0x2074666f, 0x20295228, 0x4c534c48, 0x61685320, 0x20726564, 0x706d6f43, 0x72656c69,
+    0x2e303120, 0xabab0031, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000,
+    0x00000001, 0x00000003, 0x00000000, 0x0000000f, 0x505f5653, 0x5449534f, 0x004e4f49, 0x4e47534f,
+    0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003, 0x00000000,
+    0x0000000f, 0x545f5653, 0x65677261, 0xabab0074, 0x52444853, 0x00000064, 0x00000040, 0x00000019,
+    0x0300005a, 0x00106000, 0x00000002, 0x04001858, 0x00107000, 0x00000001, 0x00005555, 0x03000065,
+    0x001020f2, 0x00000000, 0x0c000045, 0x001020f2, 0x00000000, 0x00004002, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00107e46, 0x00000001, 0x00106000, 0x00000002, 0x0100003e, 0x54415453,
+    0x00000074, 0x00000002, 0x00000000, 0x00000000, 0x00000001, 0x00000000, 0x00000000, 0x00000000,
+    0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000001,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x63727372, 0x7365745f,
+    0x30700074, 0x00008100, 0x00000000, 0x00002a00, 0x00000e00, 0x00000000, 0xffffff00, 0x000000ff,
+    0x00005700, 0x00003b00, 0x00000000, 0xffffff00, 0x000000ff, 0x00000000, 0x00000000, 0x00008100,
+    0x00006500, 0x00000000, 0xffffff00, 0x000084ff, 0x00000000, 0x0002a000, 0x00000100, 0x00000000,
+    0x0002aa00, 0x00000100, 0x00000000, 0x00000700, 0x00000000, 0x00000300, 0x0002ad00, 0x00000000,
+};
+
 static void create_effect_texture_resource(ID3D10Device *device, ID3D10ShaderResourceView **srv,
         ID3D10Texture2D **tex)
 {
@@ -5809,10 +5963,13 @@ static ID3D10EffectShaderResourceVariable *get_effect_shader_resource_variable_(
 
 static void test_effect_resource_variable(void)
 {
+    ID3D10SamplerState *samplers[D3D10_COMMONSHADER_SAMPLER_SLOT_COUNT];
     ID3D10ShaderResourceView *srv0, *srv_a[2], *srv_tmp[2];
     ID3D10EffectShaderResourceVariable *t0, *t_a, *t_a_0;
     ID3D10EffectTechnique *technique;
     ID3D10Texture2D *tex0, *tex_a[2];
+    ID3D10EffectSamplerVariable *s;
+    ID3D10SamplerState *sampler[2];
     D3D10_EFFECT_DESC effect_desc;
     D3D10_PASS_DESC pass_desc;
     ID3D10EffectVariable *var;
@@ -5935,6 +6092,45 @@ static void test_effect_resource_variable(void)
 
     effect->lpVtbl->Release(effect);
 
+    hr = create_effect(fx_test_resource_variable2, 0, device, NULL, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    technique = effect->lpVtbl->GetTechniqueByName(effect, "rsrc_test");
+    ok(!!technique, "Got unexpected technique %p.\n", technique);
+    pass = technique->lpVtbl->GetPassByName(technique, "p0");
+    ok(!!pass, "Got unexpected pass %p.\n", pass);
+
+    var = effect->lpVtbl->GetVariableByName(effect, "s");
+    ok(var->lpVtbl->IsValid(var), "Expected valid variable.\n");
+
+    s = var->lpVtbl->AsSampler(var);
+    ok(s->lpVtbl->IsValid(s), "Expected valid sample variable.\n");
+
+    hr = s->lpVtbl->GetSampler(s, 0, &sampler[0]);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = s->lpVtbl->GetSampler(s, 1, &sampler[1]);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = pass->lpVtbl->Apply(pass, 0);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    ID3D10Device_PSGetSamplers(device, 0, ARRAY_SIZE(samplers), samplers);
+    for (i = 0; i < ARRAY_SIZE(samplers); ++i)
+    {
+        if (i == 1 || i == 2)
+        {
+            ok(samplers[i] == sampler[i - 1], "Unexpected sampler at %u.\n", i);
+        }
+        else
+            ok(!samplers[i], "Unexpected sampler at %u.\n", i);
+        if (samplers[i])
+            ID3D10SamplerState_Release(samplers[i]);
+    }
+    for (i = 0; i < ARRAY_SIZE(sampler); ++i)
+        ID3D10SamplerState_Release(sampler[i]);
+
+    effect->lpVtbl->Release(effect);
+
     refcount = ID3D10Device_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
 }
@@ -5952,6 +6148,7 @@ static void test_effect_optimize(void)
     ID3D10Device *device;
     ULONG refcount;
     HRESULT hr;
+    BOOL ret;
 
     if (!(device = create_device()))
     {
@@ -5985,8 +6182,14 @@ static void test_effect_optimize(void)
     ok(!!shaderdesc.NumInputSignatureEntries, "Unexpected input signature count.\n");
     ok(!!shaderdesc.NumOutputSignatureEntries, "Unexpected output signature count.\n");
 
+    ret = effect->lpVtbl->IsOptimized(effect);
+    ok(!ret, "Unexpected return value.\n");
+
     hr = effect->lpVtbl->Optimize(effect);
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    ret = effect->lpVtbl->IsOptimized(effect);
+    ok(ret, "Unexpected return value.\n");
 
     hr = gs->lpVtbl->GetShaderDesc(gs, 0, &shaderdesc);
     ok(hr == S_OK, "Failed to get shader description, hr %#x.\n", hr);
@@ -6014,6 +6217,10 @@ static void test_effect_optimize(void)
 
     tech = effect->lpVtbl->GetTechniqueByName(effect, "Render");
     ok(!tech->lpVtbl->IsValid(tech), "Unexpected valid technique.\n");
+
+    /* Already optimized */
+    hr = effect->lpVtbl->Optimize(effect);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     effect->lpVtbl->Release(effect);
 

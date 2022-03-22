@@ -197,6 +197,7 @@ static const struct column col_networkadapter[] =
     { L"AdapterTypeID",       CIM_UINT16 },
     { L"Description",         CIM_STRING|COL_FLAG_DYNAMIC },
     { L"DeviceId",            CIM_STRING|COL_FLAG_DYNAMIC|COL_FLAG_KEY },
+    { L"GUID",                CIM_STRING|COL_FLAG_DYNAMIC },
     { L"Index",               CIM_UINT32 },
     { L"InterfaceIndex",      CIM_UINT32 },
     { L"MACAddress",          CIM_STRING|COL_FLAG_DYNAMIC },
@@ -205,6 +206,7 @@ static const struct column col_networkadapter[] =
     { L"NetConnectionStatus", CIM_UINT16 },
     { L"PhysicalAdapter",     CIM_BOOLEAN },
     { L"PNPDeviceID",         CIM_STRING },
+    { L"ServiceName",         CIM_STRING|COL_FLAG_DYNAMIC },
     { L"Speed",               CIM_UINT64 },
 };
 static const struct column col_networkadapterconfig[] =
@@ -244,6 +246,7 @@ static const struct column col_operatingsystem[] =
     { L"OSProductSuite",          CIM_UINT32 },
     { L"OSType",                  CIM_UINT16 },
     { L"Primary",                 CIM_BOOLEAN },
+    { L"ProductType",             CIM_UINT32 },
     { L"SerialNumber",            CIM_STRING|COL_FLAG_DYNAMIC },
     { L"ServicePackMajorVersion", CIM_UINT16 },
     { L"ServicePackMinorVersion", CIM_UINT16 },
@@ -405,6 +408,20 @@ static const struct column col_systemsecurity[] =
 {
     { L"GetSD", CIM_FLAG_ARRAY|COL_FLAG_METHOD },
     { L"SetSD", CIM_FLAG_ARRAY|COL_FLAG_METHOD },
+};
+static const struct column col_sysrestore[] =
+{
+    { L"CreationTime",         CIM_STRING },
+    { L"Description",          CIM_STRING },
+    { L"EventType",            CIM_UINT32 },
+    { L"RestorePointType",     CIM_UINT32 },
+    { L"SequenceNumber",       CIM_UINT32 },
+    /* methods */
+    { L"CreateRestorePoint",   CIM_FLAG_ARRAY|COL_FLAG_METHOD },
+    { L"Disable",              CIM_FLAG_ARRAY|COL_FLAG_METHOD },
+    { L"Enable",               CIM_FLAG_ARRAY|COL_FLAG_METHOD },
+    { L"GetLastRestoreStatus", CIM_FLAG_ARRAY|COL_FLAG_METHOD },
+    { L"Restore",              CIM_FLAG_ARRAY|COL_FLAG_METHOD },
 };
 static const struct column col_videocontroller[] =
 {
@@ -595,6 +612,7 @@ struct record_networkadapter
     UINT16       adaptertypeid;
     const WCHAR *description;
     const WCHAR *device_id;
+    const WCHAR *guid;
     UINT32       index;
     UINT32       interface_index;
     const WCHAR *mac_address;
@@ -603,6 +621,7 @@ struct record_networkadapter
     UINT16       netconnection_status;
     int          physicaladapter;
     const WCHAR *pnpdevice_id;
+    const WCHAR *servicename;
     UINT64       speed;
 };
 struct record_networkadapterconfig
@@ -642,6 +661,7 @@ struct record_operatingsystem
     UINT32       osproductsuite;
     UINT16       ostype;
     int          primary;
+    UINT32       producttype;
     const WCHAR *serialnumber;
     UINT16       servicepackmajor;
     UINT16       servicepackminor;
@@ -789,6 +809,19 @@ struct record_stdregprov
     class_method *enumvalues;
     class_method *getstringvalue;
 };
+struct record_sysrestore
+{
+    const WCHAR  *creation_time;
+    const WCHAR  *description;
+    UINT32        event_type;
+    UINT32        restore_point_type;
+    UINT32        sequence_number;
+    class_method *create_restore_point;
+    class_method *disable_restore;
+    class_method *enable_restore;
+    class_method *get_last_restore_status;
+    class_method *restore;
+};
 struct record_systemsecurity
 {
     class_method *getsd;
@@ -877,6 +910,10 @@ static const struct record_param data_param[] =
     { L"StdRegProv", L"GetStringValue", 1, L"sValueName", CIM_STRING },
     { L"StdRegProv", L"GetStringValue", -1, L"ReturnValue", CIM_UINT32 },
     { L"StdRegProv", L"GetStringValue", -1, L"sValue", CIM_STRING },
+    { L"SystemRestore", L"Disable", 1, L"Drive", CIM_STRING },
+    { L"SystemRestore", L"Disable", -1, L"ReturnValue", CIM_UINT32 },
+    { L"SystemRestore", L"Enable", 1, L"Drive", CIM_STRING },
+    { L"SystemRestore", L"Enable", -1, L"ReturnValue", CIM_UINT32 },
     { L"Win32_Process", L"GetOwner", -1, L"ReturnValue", CIM_UINT32 },
     { L"Win32_Process", L"GetOwner", -1, L"User", CIM_STRING },
     { L"Win32_Process", L"GetOwner", -1, L"Domain", CIM_STRING },
@@ -907,6 +944,12 @@ static const struct record_stdregprov data_stdregprov[] =
 {
     { reg_create_key, reg_enum_key, reg_enum_values, reg_get_stringvalue }
 };
+
+static const struct record_sysrestore data_sysrestore[] =
+{
+    { NULL, NULL, 0, 0, 0, create_restore_point, disable_restore, enable_restore, get_last_restore_status, restore }
+};
+
 static UINT16 systemenclosure_chassistypes[] =
 {
     1,
@@ -2630,6 +2673,24 @@ static const WCHAR *get_adaptertype( DWORD type, int *id, int *physical )
     }
 }
 
+#define GUID_SIZE 39
+static WCHAR *guid_to_str( const GUID *ptr )
+{
+    WCHAR *ret;
+    if (!(ret = heap_alloc( GUID_SIZE * sizeof(WCHAR) ))) return NULL;
+    swprintf( ret, GUID_SIZE, L"{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+              ptr->Data1, ptr->Data2, ptr->Data3, ptr->Data4[0], ptr->Data4[1], ptr->Data4[2],
+              ptr->Data4[3], ptr->Data4[4], ptr->Data4[5], ptr->Data4[6], ptr->Data4[7] );
+    return ret;
+}
+
+static WCHAR *get_networkadapter_guid( const IF_LUID *luid )
+{
+    GUID guid;
+    if (ConvertInterfaceLuidToGuid( luid, &guid )) return NULL;
+    return guid_to_str( &guid );
+}
+
 static enum fill_status fill_networkadapter( struct table *table, const struct expr *cond )
 {
     WCHAR device_id[11];
@@ -2668,6 +2729,7 @@ static enum fill_status fill_networkadapter( struct table *table, const struct e
         rec->adaptertypeid        = adaptertypeid;
         rec->description          = heap_strdupW( aa->Description );
         rec->device_id            = heap_strdupW( device_id );
+        rec->guid                 = get_networkadapter_guid( &aa->Luid );
         rec->index                = aa->u.s.IfIndex;
         rec->interface_index      = aa->u.s.IfIndex;
         rec->mac_address          = get_mac_address( aa->PhysicalAddress, aa->PhysicalAddressLength );
@@ -2676,6 +2738,7 @@ static enum fill_status fill_networkadapter( struct table *table, const struct e
         rec->netconnection_status = get_connection_status( aa->OperStatus );
         rec->physicaladapter      = physical;
         rec->pnpdevice_id         = L"PCI\\VEN_8086&DEV_100E&SUBSYS_001E8086&REV_02\\3&267A616A&1&18";
+        rec->servicename          = heap_strdupW( aa->FriendlyName );
         rec->speed                = 1000000;
         if (!match_row( table, row, cond, &status ))
         {
@@ -2856,13 +2919,9 @@ static struct array *get_ipsubnet( IP_ADAPTER_UNICAST_ADDRESS_LH *list )
 static WCHAR *get_settingid( UINT32 index )
 {
     GUID guid;
-    WCHAR *ret, *str;
     memset( &guid, 0, sizeof(guid) );
     guid.Data1 = index;
-    UuidToStringW( &guid, &str );
-    ret = heap_strdupW( str );
-    RpcStringFreeW( &str );
-    return ret;
+    return guid_to_str( &guid );
 }
 
 static enum fill_status fill_networkadapterconfig( struct table *table, const struct expr *cond )
@@ -3395,8 +3454,8 @@ static WCHAR *get_oscaption( OSVERSIONINFOEXW *ver )
     if (!(ret = heap_alloc( len * sizeof(WCHAR) + sizeof(win2003W) ))) return NULL;
     memcpy( ret, windowsW, sizeof(windowsW) );
     if (ver->dwMajorVersion == 10 && ver->dwMinorVersion == 0) memcpy( ret + len, win10W, sizeof(win10W) );
-    else if (ver->dwMajorVersion == 6 && ver->dwMinorVersion == 3) memcpy( ret + len, win8W, sizeof(win8W) );
-    else if (ver->dwMajorVersion == 6 && ver->dwMinorVersion == 2) memcpy( ret + len, win81W, sizeof(win81W) );
+    else if (ver->dwMajorVersion == 6 && ver->dwMinorVersion == 3) memcpy( ret + len, win81W, sizeof(win81W) );
+    else if (ver->dwMajorVersion == 6 && ver->dwMinorVersion == 2) memcpy( ret + len, win8W, sizeof(win8W) );
     else if (ver->dwMajorVersion == 6 && ver->dwMinorVersion == 1)
     {
         if (ver->wProductType == VER_NT_WORKSTATION) memcpy( ret + len, win7W, sizeof(win7W) );
@@ -3473,13 +3532,13 @@ static enum fill_status fill_operatingsystem( struct table *table, const struct 
 {
     struct record_operatingsystem *rec;
     enum fill_status status = FILL_STATUS_UNFILTERED;
-    OSVERSIONINFOEXW ver;
+    RTL_OSVERSIONINFOEXW ver;
     UINT row = 0;
 
     if (!resize_table( table, 1, sizeof(*rec) )) return FILL_STATUS_FAILED;
 
     ver.dwOSVersionInfoSize = sizeof(ver);
-    GetVersionExW( (OSVERSIONINFOW *)&ver );
+    RtlGetVersion( &ver );
 
     rec = (struct record_operatingsystem *)table->data;
     rec->buildnumber            = get_osbuildnumber( &ver );
@@ -3502,6 +3561,7 @@ static enum fill_status fill_operatingsystem( struct table *table, const struct 
     rec->osproductsuite         = 2461140; /* Windows XP Professional  */
     rec->ostype                 = 18;      /* WINNT */
     rec->primary                = -1;
+    rec->producttype            = 1;
     rec->serialnumber           = get_osserialnumber();
     rec->servicepackmajor       = ver.wServicePackMajor;
     rec->servicepackminor       = ver.wServicePackMinor;
@@ -3997,6 +4057,7 @@ static struct table builtin_classes[] =
     { L"CIM_LogicalDisk", C(col_logicaldisk), 0, 0, NULL, fill_logicaldisk },
     { L"CIM_Processor", C(col_processor), 0, 0, NULL, fill_processor },
     { L"StdRegProv", C(col_stdregprov), D(data_stdregprov) },
+    { L"SystemRestore", C(col_sysrestore), D(data_sysrestore) },
     { L"Win32_BIOS", C(col_bios), 0, 0, NULL, fill_bios },
     { L"Win32_BaseBoard", C(col_baseboard), 0, 0, NULL, fill_baseboard },
     { L"Win32_CDROMDrive", C(col_cdromdrive), 0, 0, NULL, fill_cdromdrive },

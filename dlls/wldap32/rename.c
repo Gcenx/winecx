@@ -34,7 +34,7 @@
 #include "wldap32.h"
 #include "wine/debug.h"
 
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
 WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
 #endif
 
@@ -48,7 +48,7 @@ ULONG CDECL ldap_rename_extA( WLDAP32_LDAP *ld, PCHAR dn, PCHAR newrdn,
     PLDAPControlA *clientctrls, ULONG *message )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WCHAR *dnW = NULL, *newrdnW = NULL, *newparentW = NULL;
     LDAPControlW **serverctrlsW = NULL, **clientctrlsW = NULL;
 
@@ -124,7 +124,7 @@ ULONG CDECL ldap_rename_extW( WLDAP32_LDAP *ld, PWCHAR dn, PWCHAR newrdn,
     PLDAPControlW *clientctrls, ULONG *message )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     char *dnU = NULL, *newrdnU = NULL, *newparentU = NULL;
     LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
 
@@ -157,8 +157,8 @@ ULONG CDECL ldap_rename_extW( WLDAP32_LDAP *ld, PWCHAR dn, PWCHAR newrdn,
         if (!clientctrlsU) goto exit;
     }
 
-    ret = map_error( ldap_rename( ld->ld, dn ? dnU : "", newrdn ? newrdnU : "", newparentU,
-                                  delete, serverctrlsU, clientctrlsU, (int *)message ));
+    ret = map_error( pldap_rename( ld->ld, dn ? dnU : "", newrdn ? newrdnU : "", newparentU,
+                                   delete, serverctrlsU, clientctrlsU, (int *)message ));
 
 exit:
     strfreeU( dnU );
@@ -181,7 +181,7 @@ ULONG CDECL ldap_rename_ext_sA( WLDAP32_LDAP *ld, PCHAR dn, PCHAR newrdn,
     PLDAPControlA *clientctrls )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WCHAR *dnW = NULL, *newrdnW = NULL, *newparentW = NULL;
     LDAPControlW **serverctrlsW = NULL, **clientctrlsW = NULL;
 
@@ -250,7 +250,7 @@ ULONG CDECL ldap_rename_ext_sW( WLDAP32_LDAP *ld, PWCHAR dn, PWCHAR newrdn,
     PLDAPControlW *clientctrls )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     char *dnU = NULL, *newrdnU = NULL, *newparentU = NULL;
     LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
 
@@ -283,8 +283,8 @@ ULONG CDECL ldap_rename_ext_sW( WLDAP32_LDAP *ld, PWCHAR dn, PWCHAR newrdn,
         if (!clientctrlsU) goto exit;
     }
 
-    ret = map_error( ldap_rename_s( ld->ld, dn ? dnU : "", newrdn ? newrdnU : "", newparentU,
-                                    delete, serverctrlsU, clientctrlsU ));
+    ret = map_error( pldap_rename_s( ld->ld, dn ? dnU : "", newrdn ? newrdnU : "", newparentU,
+                                     delete, serverctrlsU, clientctrlsU ));
 
 exit:
     strfreeU( dnU );

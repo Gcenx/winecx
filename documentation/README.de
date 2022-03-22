@@ -80,7 +80,7 @@ Unterstützte Dateisysteme:
 
 Grundsätzliche Voraussetzungen:
   Sie müssen die Entwicklungsdateien für X11 installiert haben
-  (Debian nennt diese xlib6g-dev, Red Hat XFree86-devel).
+  (Debian nennt diese xorg-dev, Red Hat libX11-devel).
 
   Selbstverständlich benötigen Sie auch "make" (höchstwahrscheinlich GNU make).
 
@@ -170,7 +170,7 @@ Fehler:	Melden Sie Fehler bitte an Wine-Bugzilla unter https://bugs.winehq.org
     bereits bekannt ist oder sogar behoben wurde, bevor Sie eine Fehlermeldung
     verfassen.
 
-IRC:    Online-Hilfe ist im IRC-Kanal #WineHQ unter irc.freenode.net verfügbar.
+IRC:    Online-Hilfe ist im IRC-Kanal #WineHQ unter irc.libera.chat verfügbar.
 
 Git:    Der aktuelle Wine-Entwicklungsstand ist über Git verfügbar.
         Besuchen Sie https://www.winehq.org/git für weitere Informationen.

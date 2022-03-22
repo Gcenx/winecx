@@ -183,6 +183,7 @@ extern int right_option_is_alt DECLSPEC_HIDDEN;
 extern int left_command_is_ctrl DECLSPEC_HIDDEN;
 extern int right_command_is_ctrl DECLSPEC_HIDDEN;
 extern int allow_immovable_windows DECLSPEC_HIDDEN;
+extern int use_confinement_cursor_clipping DECLSPEC_HIDDEN;
 extern int cursor_clipping_locks_windows DECLSPEC_HIDDEN;
 extern int use_precise_scrolling DECLSPEC_HIDDEN;
 extern int gl_surface_mode DECLSPEC_HIDDEN;
@@ -362,6 +363,7 @@ enum {
     STATUS_ITEM_MOUSE_MOVE,
     WINDOW_BROUGHT_FORWARD,
     WINDOW_CLOSE_REQUESTED,
+    WINDOW_DID_MINIMIZE,
     WINDOW_DID_UNMINIMIZE,
     WINDOW_DRAG_BEGIN,
     WINDOW_DRAG_END,
@@ -565,11 +567,12 @@ struct macdrv_window_features {
     unsigned int    maximize_button:1;
     unsigned int    utility:1;
     unsigned int    shadow:1;
+    unsigned int    prevents_app_activation:1;
 };
 
 struct macdrv_window_state {
     unsigned int    disabled:1;
-    unsigned int    no_activate:1;
+    unsigned int    no_foreground:1;
     unsigned int    floating:1;
     unsigned int    excluded_by_expose:1;
     unsigned int    excluded_by_cycle:1;
@@ -625,6 +628,7 @@ extern void macdrv_set_view_backing_size(macdrv_view v, const int backing_size[2
 extern uint32_t macdrv_window_background_color(void) DECLSPEC_HIDDEN;
 extern void macdrv_send_text_input_event(int pressed, unsigned int flags, int repeat, int keyc,
                                          void* WIN32PTR data, int* done) DECLSPEC_HIDDEN;
+extern int macdrv_is_any_wine_window_visible(void) DECLSPEC_HIDDEN;
 
 
 /* keyboard */

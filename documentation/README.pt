@@ -73,7 +73,7 @@ possa escrever.
 
 Requisitos básicos:
 Tu precisas de ter instalados os fucheiros de include do X11 development
-(chamados xlib6g-dev em Debian e Xfree86-devel no RedHat).
+(chamados xorg-dev em Debian e libX11-devel no RedHat).
 
 Requisitos para as ferramentas de construção:
 Em sistemas x86 o gcc >= 2.7.2 é requerido.
@@ -194,7 +194,7 @@ FAQ:	A Wine FAQ está localizada em https://www.winehq.org/FAQ
 Usenet:	Tu podes discutor tópicos relacionados de Wine e obter ajuda em
 	comp.emulators.ms-windows.wine.
 
-IRC:	Ajuda online está disponivel em #WineHQ on irc.freenode.net.
+IRC:	Ajuda online está disponivel em #WineHQ on irc.libera.chat.
 
 
 Git:	O currente desenvolvimento do Wine está disponivel por Git.

@@ -195,6 +195,14 @@ static void set_tty_cursor( struct console *console, unsigned int x, unsigned in
     else if (!x && y == console->tty_cursor_y) strcpy( buf, "\r" );
     else if (y == console->tty_cursor_y)
     {
+        if (console->is_unix && console->tty_cursor_x >= console->active->width)
+        {
+            /* Unix will usually have the cursor at width-1 in this case. instead of depending
+             * on the exact behaviour, move the cursor to the first column and move forward
+             * from threre. */
+            tty_write( console, "\r", 1 );
+            console->tty_cursor_x = 0;
+        }
         if (x + 1 == console->tty_cursor_x) strcpy( buf, "\b" );
         else if (x > console->tty_cursor_x) sprintf( buf, "\x1b[%uC", x - console->tty_cursor_x );
         else sprintf( buf, "\x1b[%uD", console->tty_cursor_x - x );
@@ -1735,6 +1743,18 @@ static NTSTATUS get_output_info( struct screen_buffer *screen_buffer, size_t *ou
     return STATUS_SUCCESS;
 }
 
+void notify_screen_buffer_size( struct screen_buffer *screen_buffer )
+{
+    if (is_active( screen_buffer ) && screen_buffer->console->mode & ENABLE_WINDOW_INPUT)
+    {
+        INPUT_RECORD ir;
+        ir.EventType = WINDOW_BUFFER_SIZE_EVENT;
+        ir.Event.WindowBufferSizeEvent.dwSize.X = screen_buffer->width;
+        ir.Event.WindowBufferSizeEvent.dwSize.Y = screen_buffer->height;
+        write_console_input( screen_buffer->console, &ir, 1, TRUE );
+    }
+}
+
 NTSTATUS change_screen_buffer_size( struct screen_buffer *screen_buffer, int new_width, int new_height )
 {
     int i, old_width, old_height, copy_width, copy_height;
@@ -1839,14 +1859,7 @@ static NTSTATUS set_output_info( struct screen_buffer *screen_buffer,
         if (screen_buffer->cursor_x >= info->width)  screen_buffer->cursor_x = info->width - 1;
         if (screen_buffer->cursor_y >= info->height) screen_buffer->cursor_y = info->height - 1;
 
-        if (is_active( screen_buffer ) && screen_buffer->console->mode & ENABLE_WINDOW_INPUT)
-        {
-            INPUT_RECORD ir;
-            ir.EventType = WINDOW_BUFFER_SIZE_EVENT;
-            ir.Event.WindowBufferSizeEvent.dwSize.X = info->width;
-            ir.Event.WindowBufferSizeEvent.dwSize.Y = info->height;
-            write_console_input( screen_buffer->console, &ir, 1, TRUE );
-        }
+        notify_screen_buffer_size( screen_buffer );
     }
     if (params->mask & SET_CONSOLE_OUTPUT_INFO_ATTR)
     {

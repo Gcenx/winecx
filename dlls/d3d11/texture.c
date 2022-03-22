@@ -76,9 +76,7 @@ static ULONG STDMETHODCALLTYPE d3d11_texture1d_AddRef(ID3D11Texture1D *iface)
     if (refcount == 1)
     {
         ID3D11Device2_AddRef(texture->device);
-        wined3d_mutex_lock();
         wined3d_texture_incref(texture->wined3d_texture);
-        wined3d_mutex_unlock();
     }
 
     return refcount;
@@ -94,10 +92,7 @@ static ULONG STDMETHODCALLTYPE d3d11_texture1d_Release(ID3D11Texture1D *iface)
     if (!refcount)
     {
         ID3D11Device2 *device = texture->device;
-
-        wined3d_mutex_lock();
         wined3d_texture_decref(texture->wined3d_texture);
-        wined3d_mutex_unlock();
         /* Release the device last, it may cause the wined3d device to be
          * destroyed. */
         ID3D11Device2_Release(device);
@@ -354,13 +349,11 @@ static HRESULT STDMETHODCALLTYPE d3d10_texture1d_Map(ID3D10Texture1D *iface, UIN
     if (map_flags)
         FIXME("Ignoring map_flags %#x.\n", map_flags);
 
-    wined3d_mutex_lock();
     if (SUCCEEDED(hr = wined3d_resource_map(wined3d_texture_get_resource(texture->wined3d_texture), sub_resource_idx,
             &wined3d_map_desc, NULL, wined3d_map_flags_from_d3d10_map_type(map_type))))
     {
         *data = wined3d_map_desc.data;
     }
-    wined3d_mutex_unlock();
 
     return hr;
 }
@@ -371,9 +364,7 @@ static void STDMETHODCALLTYPE d3d10_texture1d_Unmap(ID3D10Texture1D *iface, UINT
 
     TRACE("iface %p, sub_resource_idx %u.\n", iface, sub_resource_idx);
 
-    wined3d_mutex_lock();
     wined3d_resource_unmap(wined3d_texture_get_resource(texture->wined3d_texture), sub_resource_idx);
-    wined3d_mutex_unlock();
 }
 
 static void STDMETHODCALLTYPE d3d10_texture1d_GetDesc(ID3D10Texture1D *iface, D3D10_TEXTURE1D_DESC *desc)
@@ -564,9 +555,7 @@ static ULONG STDMETHODCALLTYPE d3d11_texture2d_AddRef(ID3D11Texture2D *iface)
     if (refcount == 1)
     {
         ID3D11Device2_AddRef(texture->device);
-        wined3d_mutex_lock();
         wined3d_texture_incref(texture->wined3d_texture);
-        wined3d_mutex_unlock();
     }
 
     return refcount;
@@ -582,10 +571,7 @@ static ULONG STDMETHODCALLTYPE d3d11_texture2d_Release(ID3D11Texture2D *iface)
     if (!refcount)
     {
         ID3D11Device2 *device = texture->device;
-
-        wined3d_mutex_lock();
         wined3d_texture_decref(texture->wined3d_texture);
-        wined3d_mutex_unlock();
         /* Release the device last, it may cause the wined3d device to be
          * destroyed. */
         ID3D11Device2_Release(device);
@@ -856,14 +842,12 @@ static HRESULT STDMETHODCALLTYPE d3d10_texture2d_Map(ID3D10Texture2D *iface, UIN
     if (map_flags)
         FIXME("Ignoring map_flags %#x.\n", map_flags);
 
-    wined3d_mutex_lock();
     if (SUCCEEDED(hr = wined3d_resource_map(wined3d_texture_get_resource(texture->wined3d_texture), sub_resource_idx,
             &wined3d_map_desc, NULL, wined3d_map_flags_from_d3d10_map_type(map_type))))
     {
         mapped_texture->pData = wined3d_map_desc.data;
         mapped_texture->RowPitch = wined3d_map_desc.row_pitch;
     }
-    wined3d_mutex_unlock();
 
     return hr;
 }
@@ -874,9 +858,7 @@ static void STDMETHODCALLTYPE d3d10_texture2d_Unmap(ID3D10Texture2D *iface, UINT
 
     TRACE("iface %p, sub_resource_idx %u.\n", iface, sub_resource_idx);
 
-    wined3d_mutex_lock();
     wined3d_resource_unmap(wined3d_texture_get_resource(texture->wined3d_texture), sub_resource_idx);
-    wined3d_mutex_unlock();
 }
 
 static void STDMETHODCALLTYPE d3d10_texture2d_GetDesc(ID3D10Texture2D *iface, D3D10_TEXTURE2D_DESC *desc)
@@ -1119,9 +1101,7 @@ static ULONG STDMETHODCALLTYPE d3d11_texture3d_AddRef(ID3D11Texture3D *iface)
     if (refcount == 1)
     {
         ID3D11Device2_AddRef(texture->device);
-        wined3d_mutex_lock();
         wined3d_texture_incref(texture->wined3d_texture);
-        wined3d_mutex_unlock();
     }
 
     return refcount;
@@ -1146,9 +1126,7 @@ static ULONG STDMETHODCALLTYPE d3d11_texture3d_Release(ID3D11Texture3D *iface)
     {
         ID3D11Device2 *device = texture->device;
 
-        wined3d_mutex_lock();
         wined3d_texture_decref(texture->wined3d_texture);
-        wined3d_mutex_unlock();
         /* Release the device last, it may cause the wined3d device to be
          * destroyed. */
         ID3D11Device2_Release(device);
@@ -1353,7 +1331,6 @@ static HRESULT STDMETHODCALLTYPE d3d10_texture3d_Map(ID3D10Texture3D *iface, UIN
     if (map_flags)
         FIXME("Ignoring map_flags %#x.\n", map_flags);
 
-    wined3d_mutex_lock();
     if (SUCCEEDED(hr = wined3d_resource_map(wined3d_texture_get_resource(texture->wined3d_texture), sub_resource_idx,
             &wined3d_map_desc, NULL, wined3d_map_flags_from_d3d10_map_type(map_type))))
     {
@@ -1361,7 +1338,6 @@ static HRESULT STDMETHODCALLTYPE d3d10_texture3d_Map(ID3D10Texture3D *iface, UIN
         mapped_texture->RowPitch = wined3d_map_desc.row_pitch;
         mapped_texture->DepthPitch = wined3d_map_desc.slice_pitch;
     }
-    wined3d_mutex_unlock();
 
     return hr;
 }
@@ -1372,9 +1348,7 @@ static void STDMETHODCALLTYPE d3d10_texture3d_Unmap(ID3D10Texture3D *iface, UINT
 
     TRACE("iface %p, sub_resource_idx %u.\n", iface, sub_resource_idx);
 
-    wined3d_mutex_lock();
     wined3d_resource_unmap(wined3d_texture_get_resource(texture->wined3d_texture), sub_resource_idx);
-    wined3d_mutex_unlock();
 }
 
 static void STDMETHODCALLTYPE d3d10_texture3d_GetDesc(ID3D10Texture3D *iface, D3D10_TEXTURE3D_DESC *desc)

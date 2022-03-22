@@ -1,5 +1,6 @@
 /*
  * Copyright 2017 Alex Henrie
+ * Copyright 2021 Vijay Kiran Kamuju
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -29,7 +30,9 @@ typedef struct
     IDHTMLEdit IDHTMLEdit_iface;
     IOleObject IOleObject_iface;
     IPersistStreamInit IPersistStreamInit_iface;
+    IOleControl IOleControl_iface;
     IOleClientSite *client_site;
+    SIZEL extent;
     LONG ref;
 } DHTMLEditImpl;
 
@@ -46,6 +49,11 @@ static inline DHTMLEditImpl *impl_from_IOleObject(IOleObject *iface)
 static inline DHTMLEditImpl *impl_from_IPersistStreamInit(IPersistStreamInit *iface)
 {
     return CONTAINING_RECORD(iface, DHTMLEditImpl, IPersistStreamInit_iface);
+}
+
+static inline DHTMLEditImpl *impl_from_IOleControl(IOleControl *iface)
+{
+    return CONTAINING_RECORD(iface, DHTMLEditImpl, IOleControl_iface);
 }
 
 static ULONG dhtml_edit_addref(DHTMLEditImpl *This)
@@ -79,6 +87,12 @@ static HRESULT dhtml_edit_qi(DHTMLEditImpl *This, REFIID iid, void **out)
     {
         dhtml_edit_addref(This);
         *out = &This->IPersistStreamInit_iface;
+        return S_OK;
+    }
+    else if(IsEqualGUID(iid, &IID_IOleControl))
+    {
+        dhtml_edit_addref(This);
+        *out = &This->IOleControl_iface;
         return S_OK;
     }
 
@@ -177,7 +191,7 @@ static HRESULT WINAPI DHTMLEdit_NewDocument(IDHTMLEdit *iface)
 {
     DHTMLEditImpl *This = impl_from_IDHTMLEdit(iface);
     FIXME("(%p)->() stub\n", This);
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 static HRESULT WINAPI DHTMLEdit_LoadURL(IDHTMLEdit *iface, BSTR url)
@@ -700,15 +714,25 @@ static HRESULT WINAPI OleObject_GetUserType(IOleObject *iface, DWORD type_type, 
 static HRESULT WINAPI OleObject_SetExtent(IOleObject *iface, DWORD aspect, SIZEL *size_limit)
 {
     DHTMLEditImpl *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%u, %p) stub\n", This, aspect, size_limit);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%u, %p)\n", This, aspect, size_limit);
+
+    if(aspect != DVASPECT_CONTENT)
+        return DV_E_DVASPECT;
+
+    This->extent = *size_limit;
+    return S_OK;
 }
 
 static HRESULT WINAPI OleObject_GetExtent(IOleObject *iface, DWORD aspect, SIZEL *size_limit)
 {
     DHTMLEditImpl *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%u, %p) stub\n", This, aspect, size_limit);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%u, %p)\n", This, aspect, size_limit);
+
+    if(aspect != DVASPECT_CONTENT)
+        return E_FAIL;
+
+    *size_limit = This->extent;
+    return S_OK;
 }
 
 static HRESULT WINAPI OleObject_Advise(IOleObject *iface, IAdviseSink *sink, DWORD *conn)
@@ -737,9 +761,9 @@ static HRESULT WINAPI OleObject_EnumAdvise(IOleObject *iface, IEnumSTATDATA **ad
 static HRESULT WINAPI OleObject_GetMiscStatus(IOleObject *iface, DWORD aspect, DWORD *status)
 {
     DHTMLEditImpl *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%u, %p) stub\n", This, aspect, status);
-    *status = 0;
-    return E_NOTIMPL;
+    TRACE("(%p)->(%u, %p)\n", This, aspect, status);
+
+    return OleRegGetMiscStatus(&CLSID_DHTMLEdit, aspect, status);
 }
 
 static HRESULT WINAPI OleObject_SetColorScheme(IOleObject *iface, LOGPALETTE *palette)
@@ -846,9 +870,64 @@ static const IPersistStreamInitVtbl PersistStreamInitVtbl = {
     PersistStreamInit_InitNew
 };
 
+static HRESULT WINAPI OleControl_QueryInterface(IOleControl *iface, REFIID iid, void **out)
+{
+    return dhtml_edit_qi(impl_from_IOleControl(iface), iid, out);
+}
+
+static ULONG WINAPI OleControl_AddRef(IOleControl *iface)
+{
+    return dhtml_edit_addref(impl_from_IOleControl(iface));
+}
+
+static ULONG WINAPI OleControl_Release(IOleControl *iface)
+{
+    return dhtml_edit_release(impl_from_IOleControl(iface));
+}
+
+static HRESULT WINAPI OleControl_GetControlInfo(IOleControl *iface, CONTROLINFO *pCI)
+{
+    DHTMLEditImpl *This = impl_from_IOleControl(iface);
+    FIXME("(%p)->(%p)\n", This, pCI);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI OleControl_OnMnemonic(IOleControl *iface, MSG *msg)
+{
+    DHTMLEditImpl *This = impl_from_IOleControl(iface);
+    FIXME("(%p)->(%p)\n", This, msg);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI OleControl_OnAmbientPropertyChange(IOleControl *iface, DISPID dispID)
+{
+    DHTMLEditImpl *This = impl_from_IOleControl(iface);
+    FIXME("(%p)->(%d)\n", This, dispID);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI OleControl_FreezeEvents(IOleControl *iface, BOOL freeze)
+{
+    DHTMLEditImpl *This = impl_from_IOleControl(iface);
+    FIXME("(%p)->(%x)\n", This, freeze);
+    return E_NOTIMPL;
+}
+
+static const IOleControlVtbl OleControlVtbl = {
+    OleControl_QueryInterface,
+    OleControl_AddRef,
+    OleControl_Release,
+    OleControl_GetControlInfo,
+    OleControl_OnMnemonic,
+    OleControl_OnAmbientPropertyChange,
+    OleControl_FreezeEvents
+};
+
 HRESULT dhtml_edit_create(REFIID iid, void **out)
 {
     DHTMLEditImpl *This;
+    DWORD dpi_x, dpi_y;
+    HDC hdc;
     HRESULT ret;
 
     TRACE("(%s, %p)\n", debugstr_guid(iid), out);
@@ -860,8 +939,17 @@ HRESULT dhtml_edit_create(REFIID iid, void **out)
     This->IDHTMLEdit_iface.lpVtbl = &DHTMLEditVtbl;
     This->IOleObject_iface.lpVtbl = &OleObjectVtbl;
     This->IPersistStreamInit_iface.lpVtbl = &PersistStreamInitVtbl;
+    This->IOleControl_iface.lpVtbl = &OleControlVtbl;
     This->client_site = NULL;
     This->ref = 1;
+
+    hdc = GetDC(0);
+    dpi_x = GetDeviceCaps(hdc, LOGPIXELSX);
+    dpi_y = GetDeviceCaps(hdc, LOGPIXELSY);
+    ReleaseDC(0, hdc);
+
+    This->extent.cx = MulDiv(192, 2540, dpi_x);
+    This->extent.cy = MulDiv(192, 2540, dpi_y);
 
     ret = IDHTMLEdit_QueryInterface(&This->IDHTMLEdit_iface, iid, out);
     IDHTMLEdit_Release(&This->IDHTMLEdit_iface);

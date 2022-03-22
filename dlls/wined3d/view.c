@@ -245,16 +245,21 @@ static void create_texture_view(struct wined3d_gl_view *view, GLenum view_target
 }
 
 static void create_buffer_texture(struct wined3d_gl_view *view, struct wined3d_context_gl *context_gl,
-        struct wined3d_buffer_gl *buffer_gl, const struct wined3d_format_gl *view_format_gl,
+        struct wined3d_buffer *buffer, const struct wined3d_format_gl *view_format_gl,
         unsigned int offset, unsigned int size)
 {
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
+    const struct wined3d_bo_gl *bo_gl;
 
     if (!gl_info->supported[ARB_TEXTURE_BUFFER_OBJECT])
     {
         FIXME("OpenGL implementation does not support buffer textures.\n");
         return;
     }
+
+    wined3d_buffer_load_location(buffer, &context_gl->c, WINED3D_LOCATION_BUFFER);
+    bo_gl = wined3d_bo_gl(buffer->buffer_object);
+    offset += bo_gl->b.buffer_offset;
 
     if ((offset & (gl_info->limits.texture_buffer_offset_alignment - 1)))
     {
@@ -263,8 +268,6 @@ static void create_buffer_texture(struct wined3d_gl_view *view, struct wined3d_c
         return;
     }
 
-    wined3d_buffer_load_location(&buffer_gl->b, &context_gl->c, WINED3D_LOCATION_BUFFER);
-
     view->target = GL_TEXTURE_BUFFER;
     if (!view->name)
         gl_info->gl_ops.gl.p_glGenTextures(1, &view->name);
@@ -272,13 +275,13 @@ static void create_buffer_texture(struct wined3d_gl_view *view, struct wined3d_c
     wined3d_context_gl_bind_texture(context_gl, GL_TEXTURE_BUFFER, view->name);
     if (gl_info->supported[ARB_TEXTURE_BUFFER_RANGE])
     {
-        GL_EXTCALL(glTexBufferRange(GL_TEXTURE_BUFFER, view_format_gl->internal, buffer_gl->bo.id, offset, size));
+        GL_EXTCALL(glTexBufferRange(GL_TEXTURE_BUFFER, view_format_gl->internal, bo_gl->id, offset, size));
     }
     else
     {
-        if (offset || size != buffer_gl->b.resource.size)
+        if (offset || size != buffer->resource.size)
             FIXME("OpenGL implementation does not support ARB_texture_buffer_range.\n");
-        GL_EXTCALL(glTexBuffer(GL_TEXTURE_BUFFER, view_format_gl->internal, buffer_gl->bo.id));
+        GL_EXTCALL(glTexBuffer(GL_TEXTURE_BUFFER, view_format_gl->internal, bo_gl->id));
     }
     checkGLcall("Create buffer texture");
 
@@ -309,8 +312,7 @@ static void create_buffer_view(struct wined3d_gl_view *view, struct wined3d_cont
     unsigned int offset, size;
 
     get_buffer_view_range(buffer, desc, view_format, &offset, &size);
-    create_buffer_texture(view, wined3d_context_gl(context),
-            wined3d_buffer_gl(buffer), wined3d_format_gl(view_format), offset, size);
+    create_buffer_texture(view, wined3d_context_gl(context), buffer, wined3d_format_gl(view_format), offset, size);
 }
 
 static void wined3d_view_invalidate_location(struct wined3d_resource *resource,
@@ -376,7 +378,11 @@ ULONG CDECL wined3d_rendertarget_view_decref(struct wined3d_rendertarget_view *v
     TRACE("%p decreasing refcount to %u.\n", view, refcount);
 
     if (!refcount)
+    {
+        wined3d_mutex_lock();
         view->resource->device->adapter->adapter_ops->adapter_destroy_rendertarget_view(view);
+        wined3d_mutex_unlock();
+    }
 
     return refcount;
 }
@@ -668,17 +674,19 @@ static VkBufferView wined3d_view_vk_create_vk_buffer_view(struct wined3d_context
     struct wined3d_device_vk *device_vk;
     VkBufferView vk_buffer_view;
     unsigned int offset, size;
+    struct wined3d_bo_vk *bo;
     VkResult vr;
 
     get_buffer_view_range(&buffer_vk->b, desc, &view_format_vk->f, &offset, &size);
     wined3d_buffer_prepare_location(&buffer_vk->b, &context_vk->c, WINED3D_LOCATION_BUFFER);
+    bo = wined3d_bo_vk(buffer_vk->b.buffer_object);
 
     create_info.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
     create_info.pNext = NULL;
     create_info.flags = 0;
-    create_info.buffer = buffer_vk->bo.vk_buffer;
+    create_info.buffer = bo->vk_buffer;
     create_info.format = view_format_vk->vk_format;
-    create_info.offset = buffer_vk->bo.buffer_offset + offset;
+    create_info.offset = bo->b.buffer_offset + offset;
     create_info.range = size;
 
     device_vk = wined3d_device_vk(buffer_vk->b.resource.device);
@@ -923,7 +931,11 @@ ULONG CDECL wined3d_shader_resource_view_decref(struct wined3d_shader_resource_v
     TRACE("%p decreasing refcount to %u.\n", view, refcount);
 
     if (!refcount)
+    {
+        wined3d_mutex_lock();
         view->resource->device->adapter->adapter_ops->adapter_destroy_shader_resource_view(view);
+        wined3d_mutex_unlock();
+    }
 
     return refcount;
 }
@@ -966,7 +978,7 @@ static void wined3d_shader_resource_view_gl_cs_init(void *object)
         context = context_acquire(resource->device, NULL, 0);
         create_buffer_view(&view_gl->gl_view, context, desc, buffer, view_format);
         view_gl->bo_user.valid = true;
-        list_add_head(&wined3d_buffer_gl(buffer)->bo.users, &view_gl->bo_user.entry);
+        list_add_head(&buffer->buffer_object->users, &view_gl->bo_user.entry);
         context_release(context);
     }
     else
@@ -1074,6 +1086,7 @@ static void wined3d_shader_resource_view_vk_cs_init(void *object)
     VkBufferView vk_buffer_view;
     uint32_t default_flags = 0;
     VkImageView vk_image_view;
+    struct wined3d_bo_vk *bo;
 
     TRACE("srv_vk %p.\n", srv_vk);
 
@@ -1091,12 +1104,13 @@ static void wined3d_shader_resource_view_vk_cs_init(void *object)
 
         if (!vk_buffer_view)
             return;
+        bo = wined3d_bo_vk(buffer_vk->b.buffer_object);
 
         TRACE("Created buffer view 0x%s.\n", wine_dbgstr_longlong(vk_buffer_view));
 
         srv_vk->view_vk.u.vk_buffer_view = vk_buffer_view;
         srv_vk->view_vk.bo_user.valid = true;
-        list_add_head(&buffer_vk->bo.users, &srv_vk->view_vk.bo_user.entry);
+        list_add_head(&bo->b.users, &srv_vk->view_vk.bo_user.entry);
 
         return;
     }
@@ -1441,7 +1455,11 @@ ULONG CDECL wined3d_unordered_access_view_decref(struct wined3d_unordered_access
     TRACE("%p decreasing refcount to %u.\n", view, refcount);
 
     if (!refcount)
+    {
+        wined3d_mutex_lock();
         view->resource->device->adapter->adapter_ops->adapter_destroy_unordered_access_view(view);
+        wined3d_mutex_unlock();
+    }
 
     return refcount;
 }
@@ -1464,8 +1482,9 @@ void wined3d_unordered_access_view_gl_clear(struct wined3d_unordered_access_view
 {
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     const struct wined3d_format_gl *format_gl;
-    struct wined3d_buffer_gl *buffer_gl;
     struct wined3d_resource *resource;
+    struct wined3d_buffer *buffer;
+    struct wined3d_bo_gl *bo_gl;
     unsigned int offset, size;
 
     resource = view_gl->v.resource;
@@ -1486,10 +1505,19 @@ void wined3d_unordered_access_view_gl_clear(struct wined3d_unordered_access_view
 
         format_gl = wined3d_format_gl(resource->format);
         texture_gl = wined3d_texture_gl(texture_from_resource(resource));
-        layer_count = view_gl->v.desc.u.texture.layer_count;
         level_count = view_gl->v.desc.u.texture.level_count;
-        base_layer = view_gl->v.desc.u.texture.layer_idx;
         base_level = view_gl->v.desc.u.texture.level_idx;
+
+        if (resource->type == WINED3D_RTYPE_TEXTURE_3D)
+        {
+            layer_count = 1;
+            base_layer = 0;
+        }
+        else
+        {
+            layer_count = view_gl->v.desc.u.texture.layer_count;
+            base_layer = view_gl->v.desc.u.texture.layer_idx;
+        }
 
         if (format_gl->f.byte_count <= 4 && !fp)
         {
@@ -1571,15 +1599,16 @@ void wined3d_unordered_access_view_gl_clear(struct wined3d_unordered_access_view
         return;
     }
 
-    buffer_gl = wined3d_buffer_gl(buffer_from_resource(resource));
-    wined3d_buffer_load_location(&buffer_gl->b, &context_gl->c, WINED3D_LOCATION_BUFFER);
+    buffer = buffer_from_resource(resource);
+    wined3d_buffer_load_location(buffer, &context_gl->c, WINED3D_LOCATION_BUFFER);
     wined3d_unordered_access_view_invalidate_location(&view_gl->v, ~WINED3D_LOCATION_BUFFER);
 
-    get_buffer_view_range(&buffer_gl->b, &view_gl->v.desc, &format_gl->f, &offset, &size);
-    wined3d_context_gl_bind_bo(context_gl, buffer_gl->bo.binding, buffer_gl->bo.id);
-    GL_EXTCALL(glClearBufferSubData(buffer_gl->bo.binding, format_gl->internal,
-            offset, size, format_gl->format, format_gl->type, clear_value));
-    wined3d_context_gl_reference_bo(context_gl, &buffer_gl->bo);
+    bo_gl = wined3d_bo_gl(buffer->buffer_object);
+    get_buffer_view_range(buffer, &view_gl->v.desc, &format_gl->f, &offset, &size);
+    wined3d_context_gl_bind_bo(context_gl, bo_gl->binding, bo_gl->id);
+    GL_EXTCALL(glClearBufferSubData(bo_gl->binding, format_gl->internal,
+            bo_gl->b.buffer_offset + offset, size, format_gl->format, format_gl->type, clear_value));
+    wined3d_context_gl_reference_bo(context_gl, bo_gl);
     checkGLcall("clear unordered access view");
 }
 
@@ -1646,12 +1675,12 @@ static void wined3d_unordered_access_view_gl_cs_init(void *object)
         context_gl = wined3d_context_gl(context_acquire(resource->device, NULL, 0));
         create_buffer_view(&view_gl->gl_view, &context_gl->c, desc, buffer, view_gl->v.format);
         view_gl->bo_user.valid = true;
-        list_add_head(&wined3d_buffer_gl(buffer)->bo.users, &view_gl->bo_user.entry);
+        list_add_head(&buffer->buffer_object->users, &view_gl->bo_user.entry);
         if (desc->flags & (WINED3D_VIEW_BUFFER_COUNTER | WINED3D_VIEW_BUFFER_APPEND))
         {
             struct wined3d_bo_gl *bo = &view_gl->counter_bo;
 
-            view_gl->v.counter_bo = (uintptr_t)bo;
+            view_gl->v.counter_bo = &bo->b;
             wined3d_context_gl_create_bo(context_gl, sizeof(uint32_t), GL_ATOMIC_COUNTER_BUFFER,
                     GL_STATIC_DRAW, true, GL_MAP_READ_BIT | GL_MAP_WRITE_BIT | GL_CLIENT_STORAGE_BIT, bo);
             wined3d_unordered_access_view_set_counter(&view_gl->v, 0);
@@ -1957,11 +1986,16 @@ void wined3d_unordered_access_view_vk_clear(struct wined3d_unordered_access_view
 
     if (resource->type == WINED3D_RTYPE_BUFFER)
     {
+        struct wined3d_buffer *buffer = buffer_from_resource(resource);
+
         uav_location = WINED3D_LOCATION_BUFFER;
         layout = state->buffer_layout;
         vk_writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 
-        constants.extent.width  = view_desc->u.buffer.count;
+        if (buffer->structure_byte_stride)
+            constants.extent.width = view_desc->u.buffer.count * buffer->structure_byte_stride / 4;
+        else
+            constants.extent.width = view_desc->u.buffer.count;
         constants.extent.height = 1;
     }
     else
@@ -2009,7 +2043,7 @@ void wined3d_unordered_access_view_vk_clear(struct wined3d_unordered_access_view
 
     if (format_id == WINED3DFMT_UNKNOWN)
     {
-        ERR("Unsupported format %s.", debug_d3dformat(view_format->id));
+        ERR("Unsupported format %s.\n", debug_d3dformat(view_format->id));
         return;
     }
 
@@ -2018,12 +2052,16 @@ void wined3d_unordered_access_view_vk_clear(struct wined3d_unordered_access_view
 
     if (resource->type == WINED3D_RTYPE_BUFFER)
     {
-        struct wined3d_buffer_vk *buffer_vk = wined3d_buffer_vk(buffer_from_resource(resource));
+        struct wined3d_buffer *buffer;
+        struct wined3d_bo_vk *bo_vk;
         unsigned int size, offset;
-        get_buffer_view_range(&buffer_vk->b, view_desc, view_format, &offset, &size);
-        uav_buffer_info.buffer = buffer_vk->bo.vk_buffer;
+
+        buffer = buffer_from_resource(resource);
+        bo_vk = wined3d_bo_vk(buffer->buffer_object);
+        get_buffer_view_range(buffer, view_desc, view_format, &offset, &size);
+        uav_buffer_info.buffer = bo_vk->vk_buffer;
         uav_buffer_info.range = size;
-        uav_buffer_info.offset = buffer_vk->bo.buffer_offset + offset;
+        uav_buffer_info.offset = bo_vk->b.buffer_offset + offset;
     }
     else
     {
@@ -2069,16 +2107,16 @@ void wined3d_unordered_access_view_vk_clear(struct wined3d_unordered_access_view
         goto out;
     }
 
-    cb_source_address.buffer_object = 0;
+    cb_source_address.buffer_object = NULL;
     cb_source_address.addr = (BYTE *)&constants;
-    cb_destination_address.buffer_object = (UINT_PTR)&constants_bo;
+    cb_destination_address.buffer_object = &constants_bo.b;
     cb_destination_address.addr = 0;
 
     adapter_vk_copy_bo_address(&context_vk->c, &cb_destination_address, &cb_source_address, sizeof(constants));
 
     buffer_info.buffer = constants_bo.vk_buffer;
     buffer_info.range = constants_bo.size;
-    buffer_info.offset = constants_bo.buffer_offset;
+    buffer_info.offset = constants_bo.b.buffer_offset;
 
     vk_info = context_vk->vk_info;
 
@@ -2186,11 +2224,13 @@ static void wined3d_unordered_access_view_vk_cs_init(void *object)
 
         if ((vk_buffer_view = wined3d_view_vk_create_vk_buffer_view(context_vk, desc, buffer_vk, format_vk)))
         {
+            struct wined3d_bo_vk *bo = wined3d_bo_vk(buffer_vk->b.buffer_object);
+
             TRACE("Created buffer view 0x%s.\n", wine_dbgstr_longlong(vk_buffer_view));
 
             uav_vk->view_vk.u.vk_buffer_view = vk_buffer_view;
             uav_vk->view_vk.bo_user.valid = true;
-            list_add_head(&buffer_vk->bo.users, &view_vk->bo_user.entry);
+            list_add_head(&bo->b.users, &view_vk->bo_user.entry);
         }
 
         if (desc->flags & (WINED3D_VIEW_BUFFER_COUNTER | WINED3D_VIEW_BUFFER_APPEND))
@@ -2208,7 +2248,7 @@ static void wined3d_unordered_access_view_vk_cs_init(void *object)
 
             wined3d_context_vk_end_current_render_pass(context_vk);
             VK_CALL(vkCmdFillBuffer(wined3d_context_vk_get_command_buffer(context_vk),
-                    uav_vk->counter_bo.vk_buffer, uav_vk->counter_bo.buffer_offset, sizeof(uint32_t), 0));
+                    uav_vk->counter_bo.vk_buffer, uav_vk->counter_bo.b.buffer_offset, sizeof(uint32_t), 0));
             wined3d_context_vk_reference_bo(context_vk, &uav_vk->counter_bo);
 
             create_info.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
@@ -2216,7 +2256,7 @@ static void wined3d_unordered_access_view_vk_cs_init(void *object)
             create_info.flags = 0;
             create_info.buffer = uav_vk->counter_bo.vk_buffer;
             create_info.format = VK_FORMAT_R32_UINT;
-            create_info.offset = uav_vk->counter_bo.buffer_offset;
+            create_info.offset = uav_vk->counter_bo.b.buffer_offset;
             create_info.range = sizeof(uint32_t);
             if ((vr = VK_CALL(vkCreateBufferView(device_vk->vk_device,
                     &create_info, NULL, &uav_vk->vk_counter_view))) < 0)
@@ -2228,10 +2268,10 @@ static void wined3d_unordered_access_view_vk_cs_init(void *object)
                 TRACE("Created counter buffer view 0x%s.\n", wine_dbgstr_longlong(uav_vk->vk_counter_view));
 
                 uav_vk->vk_counter_buffer_info.buffer = uav_vk->counter_bo.vk_buffer;
-                uav_vk->vk_counter_buffer_info.offset = uav_vk->counter_bo.buffer_offset;
+                uav_vk->vk_counter_buffer_info.offset = uav_vk->counter_bo.b.buffer_offset;
                 uav_vk->vk_counter_buffer_info.range = sizeof(uint32_t);
 
-                uav_vk->v.counter_bo = (uintptr_t)&uav_vk->counter_bo;
+                uav_vk->v.counter_bo = &uav_vk->counter_bo.b;
             }
         }
 

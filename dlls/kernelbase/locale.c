@@ -108,6 +108,7 @@ static const struct { UINT cp; const WCHAR *name; } codepage_names[] =
     { 437,   L"OEM United States" },
     { 500,   L"IBM EBCDIC International" },
     { 708,   L"Arabic ASMO" },
+    { 720,   L"Arabic (Transparent ASMO)" },
     { 737,   L"OEM Greek 437G" },
     { 775,   L"OEM Baltic" },
     { 850,   L"OEM Multilingual Latin 1" },
@@ -161,6 +162,7 @@ static const struct { UINT cp; const WCHAR *name; } codepage_names[] =
     { 20127, L"US-ASCII (7bit)" },
     { 20866, L"Russian KOI8" },
     { 20932, L"EUC-JP" },
+    { 20949, L"Korean Wansung" },
     { 21866, L"Ukrainian KOI8" },
     { 28591, L"ISO 8859-1 Latin 1" },
     { 28592, L"ISO 8859-2 Latin 2 (East European)" },
@@ -3081,6 +3083,13 @@ INT WINAPI DECLSPEC_HOTPATCH CompareStringA( LCID lcid, DWORD flags, const char 
         SetLastError( ERROR_INVALID_PARAMETER );
         return 0;
     }
+
+    if (flags & SORT_DIGITSASNUMBERS)
+    {
+        SetLastError( ERROR_INVALID_FLAGS );
+        return 0;
+    }
+
     if (len1 < 0) len1 = strlen(str1);
     if (len2 < 0) len2 = strlen(str2);
 

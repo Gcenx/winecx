@@ -66,7 +66,7 @@ Mac OS X:
 
 Базовые требования:
   У вас должны быть установлены заголовочные файлы X11
-  (xlib6g-dev в Debian и XFree86-devel в Red Hat).
+  (xorg-dev в Debian и libX11-devel в Red Hat).
 
   Разумеется, вам необходим «make» (лучше всего использовать GNU make).
 
@@ -148,7 +148,7 @@ Wiki:	 Wine Wiki расположен на https://wiki.winehq.org
 	 Прежде чем отправлять сообщение об ошибке проверьте, может эта ошибка
 	 уже известна или исправлена в последней версии Wine.
 
-IRC:	 Онлайн помощь доступна на канале #WineHQ на irc.freenode.net.
+IRC:	 Онлайн помощь доступна на канале #WineHQ на irc.libera.chat.
 
 Git:	 Текущие разработки Wine доступны через Git.
 	 Смотрите https://www.winehq.org/site/git для дополнительной информации.

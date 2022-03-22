@@ -53,12 +53,12 @@ WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
 ULONG CDECL WLDAP32_ldap_abandon( WLDAP32_LDAP *ld, ULONG msgid )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
 
     TRACE( "(%p, 0x%08x)\n", ld, msgid );
 
     if (!ld) return ~0u;
-    ret = map_error( ldap_abandon_ext( ld->ld, msgid, NULL, NULL ));
+    ret = map_error( pldap_abandon_ext( ld->ld, msgid, NULL, NULL ));
 
 #endif
     return ret;
@@ -156,12 +156,12 @@ WLDAP32_LDAP * CDECL ldap_conn_from_msg( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *
 ULONG CDECL WLDAP32_ldap_count_entries( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *res )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
 
     TRACE( "(%p, %p)\n", ld, res );
 
     if (!ld) return ~0u;
-    ret = ldap_count_entries( ld->ld, res );
+    ret = pldap_count_entries( ld->ld, res );
 
 #endif
     return ret;
@@ -183,12 +183,12 @@ ULONG CDECL WLDAP32_ldap_count_entries( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *r
 ULONG CDECL WLDAP32_ldap_count_references( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *res )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP_COUNT_REFERENCES
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
 
     TRACE( "(%p, %p)\n", ld, res );
 
     if (!ld) return 0;
-    ret = ldap_count_references( ld->ld, res );
+    ret = pldap_count_references( ld->ld, res );
 
 #endif
     return ret;
@@ -291,7 +291,7 @@ PCHAR CDECL ldap_first_attributeA( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *entry,
     WLDAP32_BerElement** ptr )
 {
     PCHAR ret = NULL;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WCHAR *retW;
 
     TRACE( "(%p, %p, %p)\n", ld, entry, ptr );
@@ -333,10 +333,10 @@ PWCHAR CDECL ldap_first_attributeW( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *entry
     TRACE( "(%p, %p, %p)\n", ld, entry, ptr );
 
     if (!ld || !entry) return NULL;
-    retU = ldap_first_attribute( ld->ld, entry, ptr );
+    retU = pldap_first_attribute( ld->ld, entry, ptr );
 
     ret = strUtoW( retU );
-    ldap_memfree( retU );
+    pldap_memfree( retU );
 
 #endif
     return ret;
@@ -365,7 +365,7 @@ WLDAP32_LDAPMessage * CDECL WLDAP32_ldap_first_entry( WLDAP32_LDAP *ld, WLDAP32_
     TRACE( "(%p, %p)\n", ld, res );
 
     if (!ld || !res) return NULL;
-    return ldap_first_entry( ld->ld, res );
+    return pldap_first_entry( ld->ld, res );
 
 #else
     return NULL;
@@ -392,7 +392,7 @@ WLDAP32_LDAPMessage * CDECL WLDAP32_ldap_first_reference( WLDAP32_LDAP *ld, WLDA
     TRACE( "(%p, %p)\n", ld, res );
 
     if (!ld) return NULL;
-    return ldap_first_reference( ld->ld, res );
+    return pldap_first_reference( ld->ld, res );
 
 #else
     return NULL;
@@ -435,10 +435,10 @@ void CDECL ldap_memfreeW( PWCHAR block )
 ULONG CDECL WLDAP32_ldap_msgfree( WLDAP32_LDAPMessage *res )
 {
     ULONG ret = WLDAP32_LDAP_SUCCESS;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
 
     TRACE( "(%p)\n", res );
-    ldap_msgfree( res );
+    pldap_msgfree( res );
 
 #endif
     return ret;
@@ -453,7 +453,7 @@ PCHAR CDECL ldap_next_attributeA( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *entry,
     WLDAP32_BerElement *ptr )
 {
     PCHAR ret = NULL;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WCHAR *retW;
 
     TRACE( "(%p, %p, %p)\n", ld, entry, ptr );
@@ -496,10 +496,10 @@ PWCHAR CDECL ldap_next_attributeW( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *entry,
     TRACE( "(%p, %p, %p)\n", ld, entry, ptr );
 
     if (!ld || !entry || !ptr) return NULL;
-    retU = ldap_next_attribute( ld->ld, entry, ptr );
+    retU = pldap_next_attribute( ld->ld, entry, ptr );
 
     ret = strUtoW( retU );
-    ldap_memfree( retU );
+    pldap_memfree( retU );
 
 #endif
     return ret;
@@ -528,7 +528,7 @@ WLDAP32_LDAPMessage * CDECL WLDAP32_ldap_next_entry( WLDAP32_LDAP *ld, WLDAP32_L
     TRACE( "(%p, %p)\n", ld, entry );
 
     if (!ld || !entry) return NULL;
-    return ldap_next_entry( ld->ld, entry );
+    return pldap_next_entry( ld->ld, entry );
 
 #else
     return NULL;
@@ -558,7 +558,7 @@ WLDAP32_LDAPMessage * CDECL WLDAP32_ldap_next_reference( WLDAP32_LDAP *ld, WLDAP
     TRACE( "(%p, %p)\n", ld, entry );
 
     if (!ld || !entry) return NULL;
-    return ldap_next_reference( ld->ld, entry );
+    return pldap_next_reference( ld->ld, entry );
 
 #else
     return NULL;
@@ -610,7 +610,7 @@ ULONG CDECL WLDAP32_ldap_result( WLDAP32_LDAP *ld, ULONG msgid, ULONG all,
     TRACE( "(%p, 0x%08x, 0x%08x, %p, %p)\n", ld, msgid, all, timeout, res );
 
     if (!ld || !res || msgid == ~0u) return ~0u;
-    ret = ldap_result( ld->ld, msgid, all, (struct timeval *)timeout, res );
+    ret = pldap_result( ld->ld, msgid, all, (struct timeval *)timeout, res );
 
 #endif
     return ret;

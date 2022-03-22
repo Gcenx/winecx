@@ -160,6 +160,7 @@ static const struct wined3d_extension_map gl_extension_map[] =
     {"GL_ARB_vertex_buffer_object",         ARB_VERTEX_BUFFER_OBJECT      },
     {"GL_ARB_vertex_program",               ARB_VERTEX_PROGRAM            },
     {"GL_ARB_vertex_shader",                ARB_VERTEX_SHADER             },
+    {"GL_ARB_vertex_type_10f_11f_11f_rev",  ARB_VERTEX_TYPE_10F_11F_11F_REV},
     {"GL_ARB_vertex_type_2_10_10_10_rev",   ARB_VERTEX_TYPE_2_10_10_10_REV},
     {"GL_ARB_viewport_array",               ARB_VIEWPORT_ARRAY            },
     {"GL_ARB_texture_barrier",              ARB_TEXTURE_BARRIER           },
@@ -1228,6 +1229,7 @@ static void quirk_broken_arb_fog(struct wined3d_gl_info *gl_info)
 
 static void quirk_broken_viewport_subpixel_bits(struct wined3d_gl_info *gl_info)
 {
+    gl_info->limits.viewport_subpixel_bits = 0;
     if (gl_info->supported[ARB_CLIP_CONTROL])
     {
         TRACE("Disabling ARB_clip_control.\n");
@@ -3722,6 +3724,7 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter,
         {ARB_CLEAR_TEXTURE,                MAKEDWORD_VERSION(4, 4)},
         {ARB_QUERY_BUFFER_OBJECT,          MAKEDWORD_VERSION(4, 4)},
         {ARB_TEXTURE_MIRROR_CLAMP_TO_EDGE, MAKEDWORD_VERSION(4, 4)},
+        {ARB_VERTEX_TYPE_10F_11F_11F_REV,  MAKEDWORD_VERSION(4, 4)},
 
         {ARB_CLIP_CONTROL,                 MAKEDWORD_VERSION(4, 5)},
         {ARB_CULL_DISTANCE,                MAKEDWORD_VERSION(4, 5)},
@@ -4001,6 +4004,7 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter,
             TRACE("Disabling ARB_clip_control because viewport subpixel bits < 8.\n");
             gl_info->supported[ARB_CLIP_CONTROL] = FALSE;
         }
+        gl_info->limits.viewport_subpixel_bits = subpixel_bits;
     }
     if (gl_info->supported[ARB_CLIP_CONTROL] && !gl_info->supported[ARB_VIEWPORT_ARRAY])
     {
@@ -4917,7 +4921,7 @@ static HRESULT adapter_gl_init_3d(struct wined3d_device *device)
 {
     TRACE("device %p.\n", device);
 
-    wined3d_cs_init_object(device->cs, wined3d_device_create_primary_opengl_context_cs, device);
+    wined3d_cs_init_object(device->cs, wined3d_device_gl_create_primary_opengl_context_cs, wined3d_device_gl(device));
     wined3d_cs_finish(device->cs, WINED3D_CS_QUEUE_DEFAULT);
     if (!wined3d_swapchain_gl(device->swapchains[0])->context_count)
         return E_FAIL;
@@ -4929,7 +4933,8 @@ static void adapter_gl_uninit_3d(struct wined3d_device *device)
 {
     TRACE("device %p.\n", device);
 
-    wined3d_cs_destroy_object(device->cs, wined3d_device_delete_opengl_contexts_cs, device);
+    wined3d_device_destroy_default_samplers(device);
+    wined3d_cs_destroy_object(device->cs, wined3d_device_gl_delete_opengl_contexts_cs, wined3d_device_gl(device));
     wined3d_cs_finish(device->cs, WINED3D_CS_QUEUE_DEFAULT);
 }
 
@@ -4949,6 +4954,23 @@ static void adapter_gl_copy_bo_address(struct wined3d_context *context,
         const struct wined3d_bo_address *dst, const struct wined3d_bo_address *src, size_t size)
 {
     wined3d_context_gl_copy_bo_address(wined3d_context_gl(context), dst, src, size);
+}
+
+static void adapter_gl_flush_bo_address(struct wined3d_context *context,
+        const struct wined3d_const_bo_address *data, size_t size)
+{
+    wined3d_context_gl_flush_bo_address(wined3d_context_gl(context), data, size);
+}
+
+static bool adapter_gl_alloc_bo(struct wined3d_device *device, struct wined3d_resource *resource,
+        unsigned int sub_resource_idx, struct wined3d_bo_address *addr)
+{
+    return false;
+}
+
+static void adapter_gl_destroy_bo(struct wined3d_context *context, struct wined3d_bo *bo)
+{
+    wined3d_context_gl_destroy_bo(wined3d_context_gl(context), wined3d_bo_gl(bo));
 }
 
 static HRESULT adapter_gl_create_swapchain(struct wined3d_device *device,
@@ -5403,6 +5425,9 @@ static const struct wined3d_adapter_ops wined3d_adapter_gl_ops =
     .adapter_map_bo_address = adapter_gl_map_bo_address,
     .adapter_unmap_bo_address = adapter_gl_unmap_bo_address,
     .adapter_copy_bo_address = adapter_gl_copy_bo_address,
+    .adapter_flush_bo_address = adapter_gl_flush_bo_address,
+    .adapter_alloc_bo = adapter_gl_alloc_bo,
+    .adapter_destroy_bo = adapter_gl_destroy_bo,
     .adapter_create_swapchain = adapter_gl_create_swapchain,
     .adapter_destroy_swapchain = adapter_gl_destroy_swapchain,
     .adapter_create_buffer = adapter_gl_create_buffer,
@@ -5487,14 +5512,63 @@ static void wined3d_adapter_gl_init_d3d_info(struct wined3d_adapter_gl *adapter_
     d3d_info->full_ffp_varyings = !!(shader_caps.wined3d_caps & WINED3D_SHADER_CAP_FULL_FFP_VARYINGS);
     d3d_info->scaled_resolve = !!gl_info->supported[EXT_FRAMEBUFFER_MULTISAMPLE_BLIT_SCALED];
     d3d_info->pbo = !!gl_info->supported[ARB_PIXEL_BUFFER_OBJECT];
+    d3d_info->subpixel_viewport = gl_info->limits.viewport_subpixel_bits >= 8;
     d3d_info->emulated_clipplanes = !!(gl_info->quirks & WINED3D_CX_QUIRK_GLSL_CLIP_BROKEN);
     d3d_info->multithread_safe = !(gl_info->quirks & WINED3D_CX_QUIRK_BROKEN_MULTITHREAD_GL);
     d3d_info->feature_level = feature_level_from_caps(gl_info, &shader_caps, &fragment_caps);
+    d3d_info->filling_convention_offset = gl_info->filling_convention_offset;
 
     if (gl_info->supported[ARB_TEXTURE_MULTISAMPLE])
         d3d_info->multisample_draw_location = WINED3D_LOCATION_TEXTURE_RGB;
     else
         d3d_info->multisample_draw_location = WINED3D_LOCATION_RB_MULTISAMPLE;
+}
+
+static float wined3d_adapter_find_fill_offset(struct wined3d_caps_gl_ctx *ctx)
+{
+    static const float test_array[] =
+    {
+        0.0f,
+        -1.0f / 1024.0f,
+        -1.0f / 512.0f,
+        -1.0f / 256.0f,
+        -1.0f / 128.0f,
+        -1.0f / 64.0f
+    };
+    unsigned int upper = ARRAY_SIZE(test_array), lower = 0, test;
+    float value;
+
+    if (wined3d_settings.offscreen_rendering_mode != ORM_FBO)
+        goto end;
+
+    while (upper != lower)
+    {
+        test = (upper + lower) / 2;
+        value = test_array[test];
+        TRACE("Good %u lower %u, test %u.\n", upper, lower, test);
+        if (wined3d_caps_gl_ctx_test_filling_convention(ctx, value))
+            upper = test;
+        else
+            lower = test + 1;
+    }
+
+    if (upper < ARRAY_SIZE(test_array))
+    {
+        value = test_array[upper];
+        if (value)
+            WARN("Using a filling convention fixup offset of -1/%f.\n", -1.0f / value);
+        else
+            TRACE("No need for a filling convention offset.\n");
+
+        return value;
+    }
+
+    FIXME("Did not find a way to get the filling convention we want.\n");
+
+end:
+    /* This value was used unconditionally before the dynamic test function was
+     * introduced. */
+    return -1.0f / 64.0f;
 }
 
 static BOOL wined3d_adapter_gl_init(struct wined3d_adapter_gl *adapter_gl,
@@ -5581,6 +5655,8 @@ static BOOL wined3d_adapter_gl_init(struct wined3d_adapter_gl *adapter_gl,
         wined3d_caps_gl_ctx_destroy(&caps_gl_ctx);
         return FALSE;
     }
+
+    gl_info->filling_convention_offset = wined3d_adapter_find_fill_offset(&caps_gl_ctx);
 
     wined3d_adapter_gl_init_d3d_info(adapter_gl, wined3d_creation_flags);
 

@@ -34,7 +34,7 @@
 #include "wldap32.h"
 #include "wine/debug.h"
 
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
 WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
 #endif
 
@@ -46,7 +46,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
 ULONG CDECL ldap_deleteA( WLDAP32_LDAP *ld, PCHAR dn )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WCHAR *dnW = NULL;
 
     TRACE( "(%p, %s)\n", ld, debugstr_a(dn) );
@@ -86,7 +86,7 @@ ULONG CDECL ldap_deleteA( WLDAP32_LDAP *ld, PCHAR dn )
 ULONG CDECL ldap_deleteW( WLDAP32_LDAP *ld, PWCHAR dn )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     char *dnU = NULL;
     int msg;
 
@@ -99,7 +99,7 @@ ULONG CDECL ldap_deleteW( WLDAP32_LDAP *ld, PWCHAR dn )
         if (!dnU) return WLDAP32_LDAP_NO_MEMORY;
     }
 
-    ret = ldap_delete_ext( ld->ld, dn ? dnU : "", NULL, NULL, &msg );
+    ret = pldap_delete_ext( ld->ld, dn ? dnU : "", NULL, NULL, &msg );
 
     if (ret == LDAP_SUCCESS)
         ret = msg;
@@ -121,7 +121,7 @@ ULONG CDECL ldap_delete_extA( WLDAP32_LDAP *ld, PCHAR dn, PLDAPControlA *serverc
     PLDAPControlA *clientctrls, ULONG *message )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WCHAR *dnW = NULL;
     LDAPControlW **serverctrlsW = NULL, **clientctrlsW = NULL;
 
@@ -181,7 +181,7 @@ ULONG CDECL ldap_delete_extW( WLDAP32_LDAP *ld, PWCHAR dn, PLDAPControlW *server
     PLDAPControlW *clientctrls, ULONG *message )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     char *dnU = NULL;
     LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
     int dummy;
@@ -206,8 +206,8 @@ ULONG CDECL ldap_delete_extW( WLDAP32_LDAP *ld, PWCHAR dn, PLDAPControlW *server
         if (!clientctrlsU) goto exit;
     }
 
-    ret = map_error( ldap_delete_ext( ld->ld, dn ? dnU : "", serverctrlsU, clientctrlsU,
-                                      message ? (int *)message : &dummy ));
+    ret = map_error( pldap_delete_ext( ld->ld, dn ? dnU : "", serverctrlsU, clientctrlsU,
+                                       message ? (int *)message : &dummy ));
 
 exit:
     strfreeU( dnU );
@@ -227,7 +227,7 @@ ULONG CDECL ldap_delete_ext_sA( WLDAP32_LDAP *ld, PCHAR dn, PLDAPControlA *serve
     PLDAPControlA *clientctrls )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WCHAR *dnW = NULL;
     LDAPControlW **serverctrlsW = NULL, **clientctrlsW = NULL;
 
@@ -283,7 +283,7 @@ ULONG CDECL ldap_delete_ext_sW( WLDAP32_LDAP *ld, PWCHAR dn, PLDAPControlW *serv
     PLDAPControlW *clientctrls )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     char *dnU = NULL;
     LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
 
@@ -305,7 +305,7 @@ ULONG CDECL ldap_delete_ext_sW( WLDAP32_LDAP *ld, PWCHAR dn, PLDAPControlW *serv
         if (!clientctrlsU) goto exit;
     }
 
-    ret = map_error( ldap_delete_ext_s( ld->ld, dn ? dnU : "", serverctrlsU, clientctrlsU ));
+    ret = map_error( pldap_delete_ext_s( ld->ld, dn ? dnU : "", serverctrlsU, clientctrlsU ));
 
 exit:
     strfreeU( dnU );
@@ -324,7 +324,7 @@ exit:
 ULONG CDECL ldap_delete_sA( WLDAP32_LDAP *ld, PCHAR dn )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WCHAR *dnW = NULL;
 
     TRACE( "(%p, %s)\n", ld, debugstr_a(dn) );
@@ -359,7 +359,7 @@ ULONG CDECL ldap_delete_sA( WLDAP32_LDAP *ld, PCHAR dn )
 ULONG CDECL ldap_delete_sW( WLDAP32_LDAP *ld, PWCHAR dn )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     char *dnU = NULL;
 
     TRACE( "(%p, %s)\n", ld, debugstr_w(dn) );
@@ -371,7 +371,7 @@ ULONG CDECL ldap_delete_sW( WLDAP32_LDAP *ld, PWCHAR dn )
         if (!dnU) return WLDAP32_LDAP_NO_MEMORY;
     }
 
-    ret = map_error( ldap_delete_ext_s( ld->ld, dn ? dnU : "", NULL, NULL ));
+    ret = map_error( pldap_delete_ext_s( ld->ld, dn ? dnU : "", NULL, NULL ));
     strfreeU( dnU );
 
 #endif

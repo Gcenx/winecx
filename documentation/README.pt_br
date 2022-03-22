@@ -68,7 +68,7 @@ Sistemas de arquivo suportados:
 
 Requisitos básicos:
   Você necessita ter instalados os arquivos de inclusão para desenvolvimento
-  do X11 (chamados de xlib6g-dev no Debian e XFree86-devel no RedHat).
+  do X11 (chamados de xorg-dev no Debian e libX11-devel no RedHat).
 
   Obviamente você também irá precisar do "make" (comumente o GNU make).
 
@@ -160,7 +160,7 @@ Bugs:	Relate erros ao Bugzilla do Wine em https://bugs.winehq.org
 	se seu problema já foi encontrado ou resolvido antes de enviar
 	um relatório do erro.
 
-IRC:	A ajuda online está disponível em #WineHQ em irc.freenode.net.
+IRC:	A ajuda online está disponível em #WineHQ em irc.libera.chat.
 
 Git:	A árvore de desenvolvimento atual do Wine está disponível por Git.
 	Visite https://www.winehq.org/git para mais informação.

@@ -69,7 +69,7 @@ Desteklenen dosya sistemleri:
 
 Temel gereksinimler:
   X11 geliştirme dosyalarının kurulu olması gereklidir.
-  (Debian'da xlib6g-dev, Red Hat'da XFree86-devel adlı paketler).
+  (Debian'da xorg-dev, Red Hat'da libX11-devel adlı paketler).
 
   "make" komutuna kesinlikle ihtiyacınız vardır. (çoğunlukla GNU make)
 
@@ -153,7 +153,7 @@ Hatalar:
 	hatanın önceden girilip girilmediğini öğrenmek için Bugzilla'da
 	arama yapınız.
 
-IRC:	irc.freenode.net sunucusundan #WineHQ kanalı ile çevrimiçi yardım
+IRC:	irc.libera.chat sunucusundan #WineHQ kanalı ile çevrimiçi yardım
 	alabilirsiniz.
 
 Git:	Geçerli Wine geliştirme ağacına Git üzerinden erişim sağlanabilir.

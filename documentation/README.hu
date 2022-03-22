@@ -73,7 +73,7 @@ Támogatott fájlrendszerek:
 
 Alap követelmények:
   Önnek fel kell telepítenie az X11 fejlesztõi fájlokat
-  (xlib6g-dev néven van a Debianban és XFree86-devel néven a Red Hat-ben).
+  (xorg-dev néven van a Debianban és libX11-devel néven a Red Hat-ben).
 
 Fordítási eszköz követelmények:
   x86 rendszereken gcc >= 2.7.2 szükséges.
@@ -190,7 +190,7 @@ Hibák:	Wine hibabejelentés a Bugzilla-n keresztül itt: https://bugs.winehq.or
 	már megtalálható-e az adatbázisban.  Küldhet hibabejelentéseket a
 	comp.emulators.ms-windows.wine címre is.
 
-IRC:	Azonnali segítség elérhetõ a #WineHQ csatornán a irc.freenode.net-en.
+IRC:	Azonnali segítség elérhetõ a #WineHQ csatornán a irc.libera.chat-en.
 
 Git:	A jelenlegi Wine fejlesztõi fa elérhetõ Git-en keresztül.
 	Látogasson el ide a további információhoz: https://www.winehq.org/git

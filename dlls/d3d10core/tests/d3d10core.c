@@ -2937,8 +2937,10 @@ static void test_create_rendertarget_view(void)
 
     if (!enable_debug_layer)
     {
+        rtview = (void *)0xdeadbeef;
         hr = ID3D10Device_CreateRenderTargetView(device, NULL, &rtv_desc, &rtview);
         ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+        ok(!rtview, "Unexpected pointer %p.\n", rtview);
     }
 
     expected_refcount = get_refcount(device) + 1;
@@ -3055,8 +3057,10 @@ static void test_create_rendertarget_view(void)
         }
 
         get_rtv_desc(&rtv_desc, &invalid_desc_tests[i].rtv_desc);
+        rtview = (void *)0xdeadbeef;
         hr = ID3D10Device_CreateRenderTargetView(device, texture, &rtv_desc, &rtview);
         ok(hr == E_INVALIDARG, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(!rtview, "Unexpected pointer %p.\n", rtview);
 
         ID3D10Resource_Release(texture);
     }
@@ -5514,6 +5518,20 @@ float4 main(float4 color : COLOR) : SV_TARGET
     blend_factor[2] = 0.3f;
     blend_factor[3] = 0.4f;
     ID3D10Device_OMSetBlendState(device, blend_state, blend_factor, D3D10_DEFAULT_SAMPLE_MASK);
+    /* OMGetBlendState() arguments are optional */
+    ID3D10Device_OMGetBlendState(device, NULL, NULL, NULL);
+    ID3D10Device_OMGetBlendState(device, &tmp_blend_state, NULL, NULL);
+    ID3D10BlendState_Release(tmp_blend_state);
+    sample_mask = 0;
+    ID3D10Device_OMGetBlendState(device, NULL, NULL, &sample_mask);
+    ok(sample_mask == D3D10_DEFAULT_SAMPLE_MASK, "Unexpected sample mask %#x.\n", sample_mask);
+    memset(tmp_blend_factor, 0, sizeof(tmp_blend_factor));
+    ID3D10Device_OMGetBlendState(device, NULL, tmp_blend_factor, NULL);
+    ok(tmp_blend_factor[0] == 0.1f && tmp_blend_factor[1] == 0.2f
+            && tmp_blend_factor[2] == 0.3f && tmp_blend_factor[3] == 0.4f,
+            "Got unexpected blend factor {%.8e, %.8e, %.8e, %.8e}.\n",
+            tmp_blend_factor[0], tmp_blend_factor[1], tmp_blend_factor[2], tmp_blend_factor[3]);
+
     ID3D10Device_OMGetBlendState(device, &tmp_blend_state, tmp_blend_factor, &sample_mask);
     ok(tmp_blend_factor[0] == 0.1f && tmp_blend_factor[1] == 0.2f
             && tmp_blend_factor[2] == 0.3f && tmp_blend_factor[3] == 0.4f,
@@ -5677,6 +5695,17 @@ float4 main(float4 color : COLOR) : SV_TARGET
     ok(tmp_ds_state == ds_state, "Got unexpected depth stencil state %p, expected %p.\n", tmp_ds_state, ds_state);
     ID3D10DepthStencilState_Release(tmp_ds_state);
     ok(stencil_ref == 3, "Got unexpected stencil ref %u.\n", stencil_ref);
+    /* For OMGetDepthStencilState() both arguments are optional. */
+    ID3D10Device_OMGetDepthStencilState(device, NULL, NULL);
+    stencil_ref = 0;
+    ID3D10Device_OMGetDepthStencilState(device, NULL, &stencil_ref);
+    ok(stencil_ref == 3, "Got unexpected stencil ref %u.\n", stencil_ref);
+    tmp_ds_state = NULL;
+    ID3D10Device_OMGetDepthStencilState(device, &tmp_ds_state, NULL);
+    ok(stencil_ref == 3, "Got unexpected stencil ref %u.\n", stencil_ref);
+    ok(tmp_ds_state == ds_state, "Got unexpected depth stencil state %p, expected %p.\n", tmp_ds_state, ds_state);
+    ID3D10DepthStencilState_Release(tmp_ds_state);
+
     ID3D10Device_OMGetRenderTargets(device, D3D10_SIMULTANEOUS_RENDER_TARGET_COUNT, tmp_rtv, &tmp_dsv);
     for (i = 0; i < D3D10_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
     {
@@ -13460,7 +13489,7 @@ static void check_format_support(const unsigned int *format_support,
             continue;
         }
 
-        todo_wine
+        todo_wine_if (feature_flag == D3D11_FORMAT_SUPPORT_DISPLAY)
         ok(supported, "Format %#x - %s supported, format support %#x.\n",
                 format, feature_name, format_support[format]);
     }

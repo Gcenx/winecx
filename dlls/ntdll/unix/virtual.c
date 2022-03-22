@@ -2938,6 +2938,18 @@ NTSTATUS virtual_handle_fault( void * HOSTPTR addr, DWORD err, void *stack )
     page = ROUND_ADDR( TRUNCCAST( void *, addr ), page_mask );
     mutex_lock( &virtual_mutex );  /* no need for signal masking inside signal handler */
     vprot = get_page_vprot( page );
+
+    /* CX HACK 20012: Work around Apple Silicon misreporting certain write faults as reads. */
+#ifdef __APPLE__
+    if (err == EXCEPTION_READ_FAULT &&
+        (vprot & VPROT_WRITEWATCH) &&
+        (get_unix_prot( vprot ) & PROT_READ))
+    {
+        FIXME("HACK: read fault @ %p is in a readable WRITEWATCH page; treating as a write\n", addr);
+        err = EXCEPTION_WRITE_FAULT;
+    }
+#endif
+
     if (!is_inside_signal_stack( stack ) && (vprot & VPROT_GUARD))
     {
         if (page < (char *)NtCurrentTeb()->DeallocationStack ||

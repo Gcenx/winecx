@@ -1269,8 +1269,10 @@ static HRESULT WINAPI IDirectInput8WImpl_EnumDevicesBySemantics(
         if (lpCallback(&didevis[i], lpdid, callbackFlags, --remain, pvRef) == DIENUM_STOP)
         {
             HeapFree(GetProcessHeap(), 0, didevis);
+            IDirectInputDevice_Release(lpdid);
             return DI_OK;
         }
+        IDirectInputDevice_Release(lpdid);
     }
 
     HeapFree(GetProcessHeap(), 0, didevis);
@@ -1288,7 +1290,11 @@ static HRESULT WINAPI IDirectInput8WImpl_EnumDevicesBySemantics(
             IDirectInputDevice_GetDeviceInfo(lpdid, &didevi);
 
             if (lpCallback(&didevi, lpdid, callbackFlags, --remain, pvRef) == DIENUM_STOP)
+            {
+                IDirectInputDevice_Release(lpdid);
                 return DI_OK;
+            }
+            IDirectInputDevice_Release(lpdid);
         }
     }
 
@@ -1862,6 +1868,7 @@ static BOOL check_hook_thread(void)
 {
     static HANDLE hook_thread;
     HMODULE module;
+    HANDLE wait_handle = NULL;
 
     EnterCriticalSection(&dinput_hook_crit);
 
@@ -1885,11 +1892,17 @@ static BOOL check_hook_thread(void)
 
         hook_thread_id = 0;
         PostThreadMessageW(tid, WM_USER+0x10, 0, 0);
-        CloseHandle(hook_thread);
+        wait_handle = hook_thread;
         hook_thread = NULL;
     }
 
     LeaveCriticalSection(&dinput_hook_crit);
+
+    if (wait_handle)
+    {
+        WaitForSingleObject(wait_handle, INFINITE);
+        CloseHandle(wait_handle);
+    }
     return hook_thread_id != 0;
 }
 

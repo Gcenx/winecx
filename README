@@ -75,7 +75,7 @@ Supported file systems:
 
 Basic requirements:
   You need to have the X11 development include files installed
-  (called xlib6g-dev in Debian and XFree86-devel in Red Hat).
+  (called xorg-dev in Debian and libX11-devel in Red Hat).
 
   Of course you also need "make" (most likely GNU make).
 
@@ -159,7 +159,7 @@ Bugs:	Report bugs to Wine Bugzilla at https://bugs.winehq.org
 	Please search the bugzilla database to check whether your
 	problem is already known or fixed before posting a bug report.
 
-IRC:	Online help is available at channel #WineHQ on irc.freenode.net.
+IRC:	Online help is available at channel #WineHQ on irc.libera.chat.
 
 Git:	The current Wine development tree is available through Git.
 	Go to https://www.winehq.org/git for more information.

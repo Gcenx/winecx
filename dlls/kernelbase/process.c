@@ -671,6 +671,30 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     }
     /* end CROSSOVER HACK */
 
+    /* CROSSOVER HACK: bug 20084
+     * Insert --udpforce in command line of steam.exe */
+    {
+        static const WCHAR steamexeW[] = {'s','t','e','a','m','.','e','x','e',0};
+        static const WCHAR udpforceW[] = {' ','-','u','d','p','f','o','r','c','e',0};
+
+        if (wcsstr(name, steamexeW))
+        {
+            WCHAR *new_command_line = RtlAllocateHeap(GetProcessHeap(), 0,
+                (lstrlenW(tidy_cmdline) + lstrlenW(udpforceW) + 1) * sizeof(WCHAR));
+
+            if (new_command_line)
+            {
+                wcscpy(new_command_line, tidy_cmdline);
+                lstrcatW(new_command_line, udpforceW);
+
+                TRACE("CrossOver hack changing command line to %s\n", debugstr_w(new_command_line));
+                if (tidy_cmdline != cmd_line) RtlFreeHeap( GetProcessHeap(), 0, tidy_cmdline );
+                tidy_cmdline = new_command_line;
+            }
+        }
+    }
+    /* end CROSSOVER HACK */
+
     /* Warn if unsupported features are used */
 
     if (flags & (IDLE_PRIORITY_CLASS | HIGH_PRIORITY_CLASS | REALTIME_PRIORITY_CLASS |

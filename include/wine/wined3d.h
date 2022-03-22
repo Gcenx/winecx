@@ -2108,6 +2108,7 @@ struct wined3d_shader_signature_element
     enum wined3d_component_type component_type;
     unsigned int register_idx;
     DWORD mask;
+    unsigned int min_precision;
 };
 
 struct wined3d_shader_signature
@@ -2545,6 +2546,10 @@ HRESULT __cdecl wined3d_device_context_set_stream_sources(struct wined3d_device_
 void __cdecl wined3d_device_context_set_unordered_access_views(struct wined3d_device_context *context,
         enum wined3d_pipeline pipeline, unsigned int start_idx, unsigned int count,
         struct wined3d_unordered_access_view *const *uavs, const unsigned int *initial_counts);
+void __cdecl wined3d_device_context_set_render_targets_and_unordered_access_views(struct wined3d_device_context *context,
+        unsigned int rtv_count, struct wined3d_rendertarget_view *const *render_target_views,
+        struct wined3d_rendertarget_view *depth_stencil_view, UINT uav_count,
+        struct wined3d_unordered_access_view *const *unordered_access_views, const unsigned int *initial_counts);
 void __cdecl wined3d_device_context_set_vertex_declaration(struct wined3d_device_context *context,
         struct wined3d_vertex_declaration *declaration);
 void __cdecl wined3d_device_context_set_viewports(struct wined3d_device_context *context, unsigned int viewport_count,

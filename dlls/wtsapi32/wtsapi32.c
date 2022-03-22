@@ -15,11 +15,15 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include <stdarg.h>
 #include <stdlib.h>
 #include "windef.h"
 #include "winbase.h"
+#include "winternl.h"
 #include "winnls.h"
+#include "lmcons.h"
 #include "wtsapi32.h"
 #include "wine/debug.h"
 #include "wine/heap.h"
@@ -75,11 +79,127 @@ BOOL WINAPI WTSEnableChildSessions(BOOL enable)
 /************************************************************
  *                WTSEnumerateProcessesExW  (WTSAPI32.@)
  */
-BOOL WINAPI WTSEnumerateProcessesExW(HANDLE server, DWORD *level, DWORD session_id, WCHAR **info, DWORD *count)
+BOOL WINAPI WTSEnumerateProcessesExW(HANDLE server, DWORD *level, DWORD session_id,
+        WCHAR **ret_info, DWORD *ret_count)
 {
-    FIXME("Stub %p %p %d %p %p\n", server, level, session_id, info, count);
-    if (count) *count = 0;
-    return FALSE;
+    SYSTEM_PROCESS_INFORMATION *nt_info, *nt_process;
+    WTS_PROCESS_INFOW *info;
+    ULONG nt_size = 4096;
+    DWORD count, size;
+    NTSTATUS status;
+    char *p;
+
+    TRACE("server %p, level %u, session_id %#x, ret_info %p, ret_count %p\n",
+            server, *level, session_id, ret_info, ret_count);
+
+    if (!ret_info || !ret_count)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (session_id != WTS_ANY_SESSION)
+        FIXME("ignoring session id %#x\n", session_id);
+
+    if (*level)
+    {
+        FIXME("unhandled level %u\n", *level);
+        SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+        return FALSE;
+    }
+
+    if (!(nt_info = malloc(nt_size)))
+    {
+        SetLastError(ERROR_OUTOFMEMORY);
+        return FALSE;
+    }
+
+    while ((status = NtQuerySystemInformation(SystemProcessInformation, nt_info,
+            nt_size, NULL)) == STATUS_INFO_LENGTH_MISMATCH)
+    {
+        SYSTEM_PROCESS_INFORMATION *new_info;
+
+        nt_size *= 2;
+        if (!(new_info = realloc(nt_info, nt_size)))
+        {
+            free(nt_info);
+            SetLastError(ERROR_OUTOFMEMORY);
+            return FALSE;
+        }
+        nt_info = new_info;
+    }
+    if (status)
+    {
+        free(nt_info);
+        SetLastError(RtlNtStatusToDosError(status));
+        return FALSE;
+    }
+
+    size = 0;
+    count = 0;
+    nt_process = nt_info;
+    for (;;)
+    {
+        size += sizeof(WTS_PROCESS_INFOW) + nt_process->ProcessName.Length + sizeof(WCHAR);
+        size += offsetof(SID, SubAuthority[SID_MAX_SUB_AUTHORITIES]);
+        ++count;
+
+        if (!nt_process->NextEntryOffset)
+            break;
+        nt_process = (SYSTEM_PROCESS_INFORMATION *)((char *)nt_process + nt_process->NextEntryOffset);
+    }
+
+    if (!(info = heap_alloc(size)))
+    {
+        free(nt_info);
+        SetLastError(ERROR_OUTOFMEMORY);
+        return FALSE;
+    }
+    p = (char *)(info + count);
+
+    count = 0;
+    nt_process = nt_info;
+    for (;;)
+    {
+        HANDLE process, token;
+
+        info[count].SessionId = nt_process->SessionId;
+        info[count].ProcessId = (DWORD_PTR)nt_process->UniqueProcessId;
+
+        info[count].pProcessName = (WCHAR *)p;
+        memcpy(p, nt_process->ProcessName.Buffer, nt_process->ProcessName.Length);
+        info[count].pProcessName[nt_process->ProcessName.Length / sizeof(WCHAR)] = 0;
+        p += nt_process->ProcessName.Length + sizeof(WCHAR);
+
+        info[count].pUserSid = NULL;
+        if ((process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, info[count].ProcessId)))
+        {
+            if (OpenProcessToken(process, TOKEN_QUERY, &token))
+            {
+                char buffer[sizeof(TOKEN_USER) + offsetof(SID, SubAuthority[SID_MAX_SUB_AUTHORITIES])];
+                TOKEN_USER *user = (TOKEN_USER *)buffer;
+                DWORD size;
+
+                GetTokenInformation(token, TokenUser, buffer, sizeof(buffer), &size);
+                info[count].pUserSid = p;
+                size = GetLengthSid(user->User.Sid);
+                memcpy(p, user->User.Sid, size);
+                p += size;
+                CloseHandle(token);
+            }
+            CloseHandle(process);
+        }
+
+        ++count;
+        if (!nt_process->NextEntryOffset)
+            break;
+        nt_process = (SYSTEM_PROCESS_INFORMATION *)((char *)nt_process + nt_process->NextEntryOffset);
+    }
+
+    *ret_info = (WCHAR *)info;
+    *ret_count = count;
+    SetLastError(0);
+    return TRUE;
 }
 
 /************************************************************
@@ -112,22 +232,20 @@ BOOL WINAPI WTSEnumerateProcessesA(HANDLE hServer, DWORD Reserved, DWORD Version
 /************************************************************
  *                WTSEnumerateProcessesW  (WTSAPI32.@)
  */
-BOOL WINAPI WTSEnumerateProcessesW(HANDLE hServer, DWORD Reserved, DWORD Version,
-    PWTS_PROCESS_INFOW* ppProcessInfo, DWORD* pCount)
+BOOL WINAPI WTSEnumerateProcessesW(HANDLE server, DWORD reserved, DWORD version,
+        WTS_PROCESS_INFOW **info, DWORD *count)
 {
-    FIXME("Stub %p 0x%08x 0x%08x %p %p\n", hServer, Reserved, Version,
-          ppProcessInfo, pCount);
+    DWORD level = 0;
 
-    if (!ppProcessInfo || !pCount || Reserved != 0 || Version != 1)
+    TRACE("server %p, reserved %#x, version %u, info %p, count %p\n", server, reserved, version, info, count);
+
+    if (reserved || version != 1)
     {
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
 
-    *pCount = 0;
-    *ppProcessInfo = NULL;
-
-    return TRUE;
+    return WTSEnumerateProcessesExW(server, &level, WTS_ANY_SESSION, (WCHAR **)info, count);
 }
 
 /************************************************************
@@ -330,41 +448,46 @@ BOOL WINAPI WTSQuerySessionInformationA(HANDLE server, DWORD session_id, WTS_INF
 /************************************************************
  *                WTSQuerySessionInformationW  (WTSAPI32.@)
  */
-BOOL WINAPI WTSQuerySessionInformationW(
-    HANDLE hServer,
-    DWORD SessionId,
-    WTS_INFO_CLASS WTSInfoClass,
-    LPWSTR* Buffer,
-    DWORD* BytesReturned)
+BOOL WINAPI WTSQuerySessionInformationW(HANDLE server, DWORD session_id, WTS_INFO_CLASS class, WCHAR **buffer, DWORD *count)
 {
-    /* FIXME: Forward request to winsta.dll::WinStationQueryInformationW */
-    FIXME("Stub %p 0x%08x %d %p %p\n", hServer, SessionId, WTSInfoClass,
-        Buffer, BytesReturned);
+    TRACE("%p 0x%08x %d %p %p\n", server, session_id, class, buffer, count);
 
-    if (!Buffer || !BytesReturned)
+    if (!buffer || !count)
     {
         SetLastError(ERROR_INVALID_USER_BUFFER);
         return FALSE;
     }
 
-    if (WTSInfoClass == WTSUserName)
+    if (class == WTSUserName)
     {
+        DWORD size = UNLEN + 1;
         WCHAR *username;
-        DWORD count = 0;
 
-        GetUserNameW(NULL, &count);
-        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) return FALSE;
-        if (!(username = heap_alloc(count * sizeof(WCHAR)))) return FALSE;
-        GetUserNameW(username, &count);
-        *Buffer = username;
-        *BytesReturned = count * sizeof(WCHAR);
+        if (!(username = heap_alloc(size * sizeof(WCHAR)))) return FALSE;
+        GetUserNameW(username, &size);
+        *buffer = username;
+        *count = size * sizeof(WCHAR);
         return TRUE;
     }
-    else
+
+    if (class ==  WTSDomainName)
     {
-        *Buffer = NULL;
-        *BytesReturned = 0;
+        DWORD size = MAX_COMPUTERNAME_LENGTH + 1;
+        WCHAR *computername;
+
+        if (!(computername = heap_alloc(size * sizeof(WCHAR)))) return FALSE;
+        GetComputerNameW(computername, &size);
+        *buffer = computername;
+        /* GetComputerNameW() return size doesn't include terminator */
+        size++;
+        *count = size * sizeof(WCHAR);
+        return TRUE;
     }
+
+    FIXME("Unimplemented class %d\n", class);
+
+    *buffer = NULL;
+    *count = 0;
     return FALSE;
 }
 

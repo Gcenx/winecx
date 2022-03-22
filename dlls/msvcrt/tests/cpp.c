@@ -44,12 +44,8 @@ typedef struct __type_info
 #endif
 
 /* Function pointers. We need to use these to call these funcs as __thiscall */
-static HMODULE hMsvcrt;
-
-static void* (__cdecl *poperator_new)(unsigned int);
+static void* (__cdecl *poperator_new)(size_t);
 static void  (__cdecl *poperator_delete)(void*);
-static void* (__cdecl *pmalloc)(unsigned int);
-static void  (__cdecl *pfree)(void*);
 
 /* exception */
 static void (__thiscall *pexception_ctor)(exception*,LPCSTR*);
@@ -157,23 +153,12 @@ static void init_thiscall_thunk(void)
 #endif /* __i386__ */
 
 /* Some exports are only available in later versions */
-#define SETNOFAIL(x,y) x = (void*)GetProcAddress(hMsvcrt,y)
+#define SETNOFAIL(x,y) x = (void*)GetProcAddress(hmsvcrt,y)
 #define SET(x,y) do { SETNOFAIL(x,y); ok(x != NULL, "Export '%s' not found\n", y); } while(0)
 
 static BOOL InitFunctionPtrs(void)
 {
-    hMsvcrt = GetModuleHandleA("msvcrt.dll");
-    if (!hMsvcrt)
-        hMsvcrt = GetModuleHandleA("msvcrtd.dll");
-    ok(hMsvcrt != 0, "GetModuleHandleA failed\n");
-    if (!hMsvcrt)
-    {
-        win_skip("Could not load msvcrt.dll\n");
-        return FALSE;
-    }
-
-    SET(pmalloc, "malloc");
-    SET(pfree, "free");
+    HMODULE hmsvcrt = GetModuleHandleA("msvcrt.dll");
 
     SET(pexception_vtable, "??_7exception@@6B@");
     SET(pbad_typeid_vtable, "??_7bad_typeid@@6B@");
@@ -338,9 +323,9 @@ static BOOL InitFunctionPtrs(void)
     }
 
     if (!poperator_new)
-        poperator_new = pmalloc;
+        poperator_new = malloc;
     if (!poperator_delete)
-        poperator_delete = pfree;
+        poperator_delete = free;
 
     init_thiscall_thunk();
     return TRUE;
@@ -818,14 +803,14 @@ static void test_type_info(void)
   char* name;
   int res;
 
-  if (!pmalloc || !pfree || !ptype_info_dtor || !ptype_info_raw_name ||
+  if (!ptype_info_dtor || !ptype_info_raw_name ||
       !ptype_info_name || !ptype_info_before ||
       !ptype_info_opequals_equals || !ptype_info_opnot_equals)
     return;
 
   /* Test calling the dtors */
   call_func1(ptype_info_dtor, &t1); /* No effect, since name is NULL */
-  t1.name = pmalloc(64);
+  t1.name = malloc(64);
   strcpy(t1.name, "foo");
   call_func1(ptype_info_dtor, &t1); /* Frees t1.name using 'free' */
 
@@ -1099,24 +1084,30 @@ static void test_demangle_datatype(void)
 {
     char * name;
     struct _demangle demangle[]={
-/*	{ "BlaBla"," ?? ::Bla", FALSE}, */
-	{ "ABVVec4@ref2@dice@@","class dice::ref2::Vec4 const &",TRUE},
-	{ "?AV?$CDB_GEN_BIG_ENUM_FLAG@W4CDB_WYSIWYG_BITS_ENUM@@$0H@@@", "class CDB_GEN_BIG_ENUM_FLAG<enum CDB_WYSIWYG_BITS_ENUM,7>", TRUE},
-	{ "?AV?$CDB_GEN_BIG_ENUM_FLAG@W4CDB_WYSIWYG_BITS_ENUM@@$0HO@@@", "class CDB_GEN_BIG_ENUM_FLAG<enum CDB_WYSIWYG_BITS_ENUM,126>",TRUE},
-	{ "?AV?$CDB_GEN_BIG_ENUM_FLAG@W4CDB_WYSIWYG_BITS_ENUM@@$0HOA@@@", "class CDB_GEN_BIG_ENUM_FLAG<enum CDB_WYSIWYG_BITS_ENUM,2016>",TRUE},
-	{ "?AV?$CDB_GEN_BIG_ENUM_FLAG@W4CDB_WYSIWYG_BITS_ENUM@@$0HOAA@@@", "class CDB_GEN_BIG_ENUM_FLAG<enum CDB_WYSIWYG_BITS_ENUM,32256>",TRUE},
-	{ "?AV?$CDB_GEN_BIG_ENUM_FLAG@W4CDB_WYSIWYG_BITS_ENUM@@$01@@@", "?AV?$CDB_GEN_BIG_ENUM_FLAG@W4CDB_WYSIWYG_BITS_ENUM@@$01@@@", FALSE},
-/*	{ "?AV?$CDB_GEN_BIG_ENUM_FLAG@W4CDB_WYSIWYG_BITS_ENUM@@$011@@@", "?AV?$CDB_GEN_BIG_ENUM_FLAG@W4CDB_WYSIWYG_BITS_ENUM@@$011@@@",FALSE}, */
+        { "BlaBla"," ?? ::Bla", FALSE},
+        { "ABVVec4@ref2@dice@@", "class dice::ref2::Vec4 const &", TRUE},
+        { "?AV?$CDB_GEN_BIG_ENUM_FLAG@W4CDB_WYSIWYG_BITS_ENUM@@$0H@@@",
+            "class CDB_GEN_BIG_ENUM_FLAG<enum CDB_WYSIWYG_BITS_ENUM,7>", TRUE},
+        { "?AV?$CDB_GEN_BIG_ENUM_FLAG@W4CDB_WYSIWYG_BITS_ENUM@@$0HO@@@",
+            "class CDB_GEN_BIG_ENUM_FLAG<enum CDB_WYSIWYG_BITS_ENUM,126>",TRUE},
+        { "?AV?$CDB_GEN_BIG_ENUM_FLAG@W4CDB_WYSIWYG_BITS_ENUM@@$0HOA@@@",
+            "class CDB_GEN_BIG_ENUM_FLAG<enum CDB_WYSIWYG_BITS_ENUM,2016>",TRUE},
+        { "?AV?$CDB_GEN_BIG_ENUM_FLAG@W4CDB_WYSIWYG_BITS_ENUM@@$0HOAA@@@",
+            "class CDB_GEN_BIG_ENUM_FLAG<enum CDB_WYSIWYG_BITS_ENUM,32256>",TRUE},
+        { "?AV?$CDB_GEN_BIG_ENUM_FLAG@W4CDB_WYSIWYG_BITS_ENUM@@$01@@@",
+            "?AV?$CDB_GEN_BIG_ENUM_FLAG@W4CDB_WYSIWYG_BITS_ENUM@@$01@@@", FALSE},
+        { "P8test@@AACXZ", "signed char (__cdecl test::*)(void)", TRUE},
+        { "P8test@@BACXZ", "signed char (__cdecl test::*)(void)const ", TRUE},
     };
     int i, num_test = ARRAY_SIZE(demangle);
 
     for (i = 0; i < num_test; i++)
     {
-	name = p__unDName(0, demangle[i].mangled, 0, pmalloc, pfree, 0x2800);
+        name = p__unDName(0, demangle[i].mangled, 0, malloc, free, 0x2800);
         todo_wine_if (!demangle[i].test_in_wine)
             ok(name != NULL && !strcmp(name,demangle[i].result), "Got name \"%s\" for %d\n", name, i);
         if(name)
-            pfree(name);
+            free(name);
     }
 }
 
@@ -1331,7 +1322,7 @@ static void test_demangle(void)
 
     for (i = 0; i < num_test; i++)
     {
-	name = p__unDName(0, test[i].in, 0, pmalloc, pfree, test[i].flags);
+	name = p__unDName(0, test[i].in, 0, malloc, free, test[i].flags);
         ok(name != NULL, "%u: unDName failed\n", i);
         if (!name) continue;
         ok( !strcmp_space(test[i].out, name) ||
@@ -1340,7 +1331,7 @@ static void test_demangle(void)
         ok( !strcmp_space(test[i].out, name) ||
             broken(test[i].broken && !strcmp_space(test[i].broken, name)),
            "%u: Expected \"%s\"\n", i, test[i].out );
-        pfree(name);
+        free(name);
     }
 }
 

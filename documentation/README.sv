@@ -70,8 +70,8 @@ Stödda filsystem:
   program. Det rekommenderas att använda ett riktigt Unix-filsystem.
 
 Grundläggande krav:
-  Utvecklingsfilerna för X11 måste vara installerade (de kallas xlib6g-dev i
-  Debian och XFree86-devel i Red Hat).
+  Utvecklingsfilerna för X11 måste vara installerade (de kallas xorg-dev i
+  Debian och libX11-devel i Red Hat).
 
   Du måste givetvis också ha "make" (mest troligt "GNU make").
 
@@ -153,7 +153,7 @@ Fel:       Rapportera fel till Wines Bugzilla på https://bugs.winehq.org
            rapporterat innan du sänder en felrapport.
 
 IRC:       Hjälp finns tillgänglig online på kanalen #WineHQ på
-           irc.freenode.net.
+           irc.libera.chat.
 
 Git:       Wines nuvarande utvecklingsversion finns tillgänglig genom Git.
            Gå till https://www.winehq.org/git för mer information.

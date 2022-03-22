@@ -36,7 +36,7 @@
 #include "wldap32.h"
 #include "wine/debug.h"
 
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
 WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
 #endif
 
@@ -48,7 +48,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
 PCHAR CDECL ldap_dn2ufnA( PCHAR dn )
 {
     PCHAR ret = NULL;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WCHAR *dnW, *retW;
 
     TRACE( "(%s)\n", debugstr_a(dn) );
@@ -84,11 +84,7 @@ PCHAR CDECL ldap_dn2ufnA( PCHAR dn )
 PWCHAR CDECL ldap_dn2ufnW( PWCHAR dn )
 {
     PWCHAR ret = NULL;
-#ifdef HAVE_LDAP
-#ifdef __i386_on_x86_64__
-    /* 32on64 FIXME: Bounce retU to 32 bit address space if necessary. */
-    assert(0);
-#else
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     char *dnU, *retU;
 
     TRACE( "(%s)\n", debugstr_w(dn) );
@@ -96,13 +92,12 @@ PWCHAR CDECL ldap_dn2ufnW( PWCHAR dn )
     dnU = strWtoU( dn );
     if (!dnU) return NULL;
 
-    retU = ldap_dn2ufn( dnU );
+    retU = pldap_dn2ufn( dnU );
     ret = strUtoW( retU );
 
     strfreeU( dnU );
-    ldap_memfree( retU );
+    pldap_memfree( retU );
 
-#endif
 #endif
     return ret;
 }
@@ -115,7 +110,7 @@ PWCHAR CDECL ldap_dn2ufnW( PWCHAR dn )
 PCHAR * CDECL ldap_explode_dnA( PCHAR dn, ULONG notypes )
 {
     PCHAR *ret = NULL;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     WCHAR *dnW, **retW;
 
     TRACE( "(%s, 0x%08x)\n", debugstr_a(dn), notypes );
@@ -153,11 +148,7 @@ PCHAR * CDECL ldap_explode_dnA( PCHAR dn, ULONG notypes )
 PWCHAR * CDECL ldap_explode_dnW( PWCHAR dn, ULONG notypes )
 {
     PWCHAR *ret = NULL;
-#ifdef HAVE_LDAP
-#ifdef __i386_on_x86_64__
-    /* 32on64 FIXME: Bounce retU to 32 bit address space if necessary. */
-    assert(0);
-#else
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     char *dnU, **retU;
 
     TRACE( "(%s, 0x%08x)\n", debugstr_w(dn), notypes );
@@ -165,13 +156,12 @@ PWCHAR * CDECL ldap_explode_dnW( PWCHAR dn, ULONG notypes )
     dnU = strWtoU( dn );
     if (!dnU) return NULL;
 
-    retU = ldap_explode_dn( dnU, notypes );
+    retU = pldap_explode_dn( dnU, notypes );
     ret = strarrayUtoW( retU );
 
     strfreeU( dnU );
-    ldap_memvfree( (void **)retU );
+    pldap_memvfree( (void **)retU );
 
-#endif
 #endif
     return ret;
 }
@@ -184,7 +174,7 @@ PWCHAR * CDECL ldap_explode_dnW( PWCHAR dn, ULONG notypes )
 PCHAR CDECL ldap_get_dnA( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *entry )
 {
     PCHAR ret = NULL;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     PWCHAR retW;
 
     TRACE( "(%p, %p)\n", ld, entry );
@@ -219,23 +209,18 @@ PCHAR CDECL ldap_get_dnA( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *entry )
 PWCHAR CDECL ldap_get_dnW( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *entry )
 {
     PWCHAR ret = NULL;
-#ifdef HAVE_LDAP
-#ifdef __i386_on_x86_64__
-    /* 32on64 FIXME: Bounce retU to 32 bit address space if necessary. */
-    assert(0);
-#else
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     char *retU;
 
     TRACE( "(%p, %p)\n", ld, entry );
 
     if (!ld || !entry) return NULL;
 
-    retU = ldap_get_dn( ld->ld, entry );
+    retU = pldap_get_dn( ld->ld, entry );
 
     ret = strUtoW( retU );
-    ldap_memfree( retU );
+    pldap_memfree( retU );
 
-#endif
 #endif
     return ret;
 }
@@ -248,7 +233,7 @@ PWCHAR CDECL ldap_get_dnW( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *entry )
 ULONG CDECL ldap_ufn2dnA( PCHAR ufn, PCHAR *dn )
 {
     ULONG ret = WLDAP32_LDAP_SUCCESS;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     PWCHAR ufnW = NULL, dnW = NULL;
 
     TRACE( "(%s, %p)\n", debugstr_a(ufn), dn );
@@ -295,7 +280,7 @@ ULONG CDECL ldap_ufn2dnA( PCHAR ufn, PCHAR *dn )
 ULONG CDECL ldap_ufn2dnW( PWCHAR ufn, PWCHAR *dn )
 {
     ULONG ret = WLDAP32_LDAP_SUCCESS;
-#ifdef HAVE_LDAP
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
     char *ufnU = NULL;
 
     TRACE( "(%s, %p)\n", debugstr_w(ufn), dn );
