@@ -29,7 +29,6 @@
 #include "natupnp.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "hnetcfg_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(hnetcfg);
@@ -62,7 +61,7 @@ static ULONG WINAPI fw_app_Release(
     {
         TRACE("destroying %p\n", fw_app);
         SysFreeString( fw_app->filename );
-        HeapFree( GetProcessHeap(), 0, fw_app );
+        free( fw_app );
     }
     return refs;
 }
@@ -115,7 +114,9 @@ static REFIID tid_id[] =
     &IID_INetFwPolicy,
     &IID_INetFwPolicy2,
     &IID_INetFwProfile,
-    &IID_IUPnPNAT
+    &IID_IUPnPNAT,
+    &IID_IStaticPortMappingCollection,
+    &IID_IStaticPortMapping,
 };
 
 HRESULT get_typeinfo( enum type_id tid, ITypeInfo **ret )
@@ -129,7 +130,7 @@ HRESULT get_typeinfo( enum type_id tid, ITypeInfo **ret )
         hr = LoadRegTypeLib( &LIBID_NetFwPublicTypeLib, 1, 0, LOCALE_SYSTEM_DEFAULT, &lib );
         if (FAILED(hr))
         {
-            ERR("LoadRegTypeLib failed: %08x\n", hr);
+            ERR("LoadRegTypeLib failed: %08lx\n", hr);
             return hr;
         }
         if (InterlockedCompareExchangePointer( (void **)&typelib, lib, NULL ))
@@ -142,7 +143,7 @@ HRESULT get_typeinfo( enum type_id tid, ITypeInfo **ret )
         hr = ITypeLib_GetTypeInfoOfGuid( typelib, tid_id[tid], &info );
         if (FAILED(hr))
         {
-            ERR("GetTypeInfoOfGuid(%s) failed: %08x\n", debugstr_guid(tid_id[tid]), hr);
+            ERR("GetTypeInfoOfGuid(%s) failed: %08lx\n", debugstr_guid(tid_id[tid]), hr);
             return hr;
         }
         if (InterlockedCompareExchangePointer( (void **)(typeinfo + tid), info, NULL ))
@@ -173,7 +174,7 @@ static HRESULT WINAPI fw_app_GetTypeInfo(
 {
     fw_app *This = impl_from_INetFwAuthorizedApplication( iface );
 
-    TRACE("%p %u %u %p\n", This, iTInfo, lcid, ppTInfo);
+    TRACE("%p %u %lu %p\n", This, iTInfo, lcid, ppTInfo);
     return get_typeinfo( INetFwAuthorizedApplication_tid, ppTInfo );
 }
 
@@ -189,7 +190,7 @@ static HRESULT WINAPI fw_app_GetIDsOfNames(
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("%p %s %p %u %u %p\n", This, debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
+    TRACE("%p %s %p %u %lu %p\n", This, debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
 
     hr = get_typeinfo( INetFwAuthorizedApplication_tid, &typeinfo );
     if (SUCCEEDED(hr))
@@ -215,7 +216,7 @@ static HRESULT WINAPI fw_app_Invoke(
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("%p %d %s %d %d %p %p %p %p\n", This, dispIdMember, debugstr_guid(riid),
+    TRACE("%p %ld %s %ld %d %p %p %p %p\n", This, dispIdMember, debugstr_guid(riid),
           lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo( INetFwAuthorizedApplication_tid, &typeinfo );
@@ -269,7 +270,7 @@ static HRESULT WINAPI fw_app_put_ProcessImageFileName(
     fw_app *This = impl_from_INetFwAuthorizedApplication( iface );
     UNIVERSAL_NAME_INFOW *info;
     DWORD sz, longsz;
-    WCHAR *path;
+    WCHAR *path, *new_path;
     DWORD res;
 
     FIXME("%p, %s\n", This, debugstr_w(image));
@@ -281,7 +282,7 @@ static HRESULT WINAPI fw_app_put_ProcessImageFileName(
     res = WNetGetUniversalNameW(image, UNIVERSAL_NAME_INFO_LEVEL, NULL, &sz);
     if (res == WN_MORE_DATA)
     {
-        if (!(path = heap_alloc(sz)))
+        if (!(path = malloc(sz)))
             return E_OUTOFMEMORY;
 
         info = (UNIVERSAL_NAME_INFOW *)&path;
@@ -291,29 +292,30 @@ static HRESULT WINAPI fw_app_put_ProcessImageFileName(
             SysFreeString(This->filename);
             This->filename = SysAllocString(info->lpUniversalName);
         }
-        heap_free(path);
+        free(path);
         return HRESULT_FROM_WIN32(res);
     }
 
     sz = GetFullPathNameW(image, 0, NULL, NULL);
-    if (!(path = heap_alloc(++sz * sizeof(WCHAR))))
+    if (!(path = malloc(++sz * sizeof(WCHAR))))
         return E_OUTOFMEMORY;
     GetFullPathNameW(image, sz, path, NULL);
 
     longsz = GetLongPathNameW(path, path, sz);
     if (longsz > sz)
     {
-        if (!(path = heap_realloc(path, longsz * sizeof(WCHAR))))
+        if (!(new_path = realloc(path, longsz * sizeof(WCHAR))))
         {
-            heap_free(path);
+            free(path);
             return E_OUTOFMEMORY;
         }
+        path = new_path;
         GetLongPathNameW(path, path, longsz);
     }
 
     SysFreeString( This->filename );
     This->filename = SysAllocString(path);
-    heap_free(path);
+    free(path);
     return This->filename ? S_OK : E_OUTOFMEMORY;
 }
 
@@ -432,7 +434,7 @@ HRESULT NetFwAuthorizedApplication_create( IUnknown *pUnkOuter, LPVOID *ppObj )
 
     TRACE("(%p,%p)\n", pUnkOuter, ppObj);
 
-    fa = HeapAlloc( GetProcessHeap(), 0, sizeof(*fa) );
+    fa = malloc( sizeof(*fa) );
     if (!fa) return E_OUTOFMEMORY;
 
     fa->INetFwAuthorizedApplication_iface.lpVtbl = &fw_app_vtbl;
@@ -470,7 +472,7 @@ static ULONG WINAPI fw_apps_Release(
     if (!refs)
     {
         TRACE("destroying %p\n", fw_apps);
-        HeapFree( GetProcessHeap(), 0, fw_apps );
+        free( fw_apps );
     }
     return refs;
 }
@@ -517,7 +519,7 @@ static HRESULT WINAPI fw_apps_GetTypeInfo(
 {
     fw_apps *This = impl_from_INetFwAuthorizedApplications( iface );
 
-    TRACE("%p %u %u %p\n", This, iTInfo, lcid, ppTInfo);
+    TRACE("%p %u %lu %p\n", This, iTInfo, lcid, ppTInfo);
     return get_typeinfo( INetFwAuthorizedApplications_tid, ppTInfo );
 }
 
@@ -533,7 +535,7 @@ static HRESULT WINAPI fw_apps_GetIDsOfNames(
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("%p %s %p %u %u %p\n", This, debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
+    TRACE("%p %s %p %u %lu %p\n", This, debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
 
     hr = get_typeinfo( INetFwAuthorizedApplications_tid, &typeinfo );
     if (SUCCEEDED(hr))
@@ -559,7 +561,7 @@ static HRESULT WINAPI fw_apps_Invoke(
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("%p %d %s %d %d %p %p %p %p\n", This, dispIdMember, debugstr_guid(riid),
+    TRACE("%p %ld %s %ld %d %p %p %p %p\n", This, dispIdMember, debugstr_guid(riid),
           lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo( INetFwAuthorizedApplications_tid, &typeinfo );
@@ -645,7 +647,7 @@ HRESULT NetFwAuthorizedApplications_create( IUnknown *pUnkOuter, LPVOID *ppObj )
 
     TRACE("(%p,%p)\n", pUnkOuter, ppObj);
 
-    fa = HeapAlloc( GetProcessHeap(), 0, sizeof(*fa) );
+    fa = malloc( sizeof(*fa) );
     if (!fa) return E_OUTOFMEMORY;
 
     fa->INetFwAuthorizedApplications_iface.lpVtbl = &fw_apps_vtbl;

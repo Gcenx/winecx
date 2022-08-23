@@ -373,7 +373,7 @@ static ULONG WINAPI ISynchronize_fnAddRef(ISynchronize *iface)
 {
     MREImpl *This = impl_from_ISynchronize(iface);
     LONG ref = InterlockedIncrement(&This->ref);
-    TRACE("%p - ref %d\n", This, ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
 
     return ref;
 }
@@ -382,7 +382,7 @@ static ULONG WINAPI ISynchronize_fnRelease(ISynchronize *iface)
 {
     MREImpl *This = impl_from_ISynchronize(iface);
     LONG ref = InterlockedDecrement(&This->ref);
-    TRACE("%p - ref %d\n", This, ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
 
     if(!ref)
     {
@@ -396,8 +396,8 @@ static ULONG WINAPI ISynchronize_fnRelease(ISynchronize *iface)
 static HRESULT WINAPI ISynchronize_fnWait(ISynchronize *iface, DWORD dwFlags, DWORD dwMilliseconds)
 {
     MREImpl *This = impl_from_ISynchronize(iface);
-    UINT index;
-    TRACE("%p (%08x, %08x)\n", This, dwFlags, dwMilliseconds);
+    DWORD index;
+    TRACE("%p, %#lx, %#lx.\n", iface, dwFlags, dwMilliseconds);
     return CoWaitForMultipleHandles(dwFlags, dwMilliseconds, 1, &This->event, &index);
 }
 
@@ -924,108 +924,12 @@ HRESULT Handler_DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
     return CLASS_E_CLASSNOTAVAILABLE;
 }
 
-typedef struct {
-    IGlobalOptions IGlobalOptions_iface;
-    LONG ref;
-} GlobalOptions;
-
-static inline GlobalOptions *impl_from_IGlobalOptions(IGlobalOptions *iface)
-{
-    return CONTAINING_RECORD(iface, GlobalOptions, IGlobalOptions_iface);
-}
-
-static HRESULT WINAPI GlobalOptions_QueryInterface(IGlobalOptions *iface, REFIID riid, void **ppv)
-{
-    GlobalOptions *This = impl_from_IGlobalOptions(iface);
-
-    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
-
-    if (IsEqualGUID(&IID_IGlobalOptions, riid) || IsEqualGUID(&IID_IUnknown, riid))
-    {
-        *ppv = iface;
-    }
-    else
-    {
-        *ppv = NULL;
-        return E_NOINTERFACE;
-    }
-
-    IUnknown_AddRef((IUnknown*)*ppv);
-    return S_OK;
-}
-
-static ULONG WINAPI GlobalOptions_AddRef(IGlobalOptions *iface)
-{
-    GlobalOptions *This = impl_from_IGlobalOptions(iface);
-    LONG ref = InterlockedIncrement(&This->ref);
-
-    TRACE("(%p) ref=%d\n", This, ref);
-
-    return ref;
-}
-
-static ULONG WINAPI GlobalOptions_Release(IGlobalOptions *iface)
-{
-    GlobalOptions *This = impl_from_IGlobalOptions(iface);
-    LONG ref = InterlockedDecrement(&This->ref);
-
-    TRACE("(%p) ref=%d\n", This, ref);
-
-    if (!ref)
-        heap_free(This);
-
-    return ref;
-}
-
-static HRESULT WINAPI GlobalOptions_Set(IGlobalOptions *iface, GLOBALOPT_PROPERTIES property, ULONG_PTR value)
-{
-    GlobalOptions *This = impl_from_IGlobalOptions(iface);
-    FIXME("(%p)->(%u %lx)\n", This, property, value);
-    return S_OK;
-}
-
-static HRESULT WINAPI GlobalOptions_Query(IGlobalOptions *iface, GLOBALOPT_PROPERTIES property, ULONG_PTR *value)
-{
-    GlobalOptions *This = impl_from_IGlobalOptions(iface);
-    FIXME("(%p)->(%u %p)\n", This, property, value);
-    return E_NOTIMPL;
-}
-
-static const IGlobalOptionsVtbl GlobalOptionsVtbl = {
-    GlobalOptions_QueryInterface,
-    GlobalOptions_AddRef,
-    GlobalOptions_Release,
-    GlobalOptions_Set,
-    GlobalOptions_Query
-};
-
-HRESULT WINAPI GlobalOptions_CreateInstance(IClassFactory *iface, IUnknown *outer, REFIID riid, void **ppv)
-{
-    GlobalOptions *global_options;
-    HRESULT hres;
-
-    TRACE("(%p %s %p)\n", outer, debugstr_guid(riid), ppv);
-
-    if (outer)
-        return E_INVALIDARG;
-
-    global_options = heap_alloc(sizeof(*global_options));
-    if (!global_options)
-        return E_OUTOFMEMORY;
-    global_options->IGlobalOptions_iface.lpVtbl = &GlobalOptionsVtbl;
-    global_options->ref = 1;
-
-    hres = IGlobalOptions_QueryInterface(&global_options->IGlobalOptions_iface, riid, ppv);
-    IGlobalOptions_Release(&global_options->IGlobalOptions_iface);
-    return hres;
-}
-
 /***********************************************************************
  *		DllMain (OLE32.@)
  */
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID reserved)
 {
-    TRACE("%p 0x%x %p\n", hinstDLL, fdwReason, reserved);
+    TRACE("%p, %#lx, %p.\n", hinstDLL, fdwReason, reserved);
 
     switch(fdwReason) {
     case DLL_PROCESS_ATTACH:
@@ -1033,6 +937,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID reserved)
 	break;
 
     case DLL_PROCESS_DETACH:
+        clipbrd_destroy();
         if (reserved) break;
         release_std_git();
         break;

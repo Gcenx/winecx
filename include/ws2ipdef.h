@@ -85,6 +85,7 @@ typedef struct _INTERFACE_INFO
 #define IP_UNBLOCK_SOURCE               18
 #define IP_PKTINFO                      19
 #define IP_HOPLIMIT                     21
+#define IP_RECVTTL                      21
 #define IP_RECEIVE_BROADCAST            22
 #define IP_RECVIF                       24
 #define IP_RECVDSTADDR                  25
@@ -93,7 +94,21 @@ typedef struct _INTERFACE_INFO
 #define IP_DEL_IFLIST                   30
 #define IP_UNICAST_IF                   31
 #define IP_RTHDR                        32
+#define IP_GET_IFLIST                   33
 #define IP_RECVRTHDR                    38
+#define IP_TCLASS                       39
+#define IP_RECVTCLASS                   40
+#define IP_RECVTOS                      40
+#define IP_ORIGINAL_ARRIVAL_IF          47
+#define IP_ECN                          50
+#define IP_PKTINFO_EX                   51
+#define IP_WFP_REDIRECT_RECORDS         60
+#define IP_WFP_REDIRECT_CONTEXT         70
+#define IP_MTU_DISCOVER                 71
+#define IP_MTU                          73
+#define IP_NRT_INTERFACE                74
+#define IP_RECVERR                      75
+#define IP_USER_MTU                     76
 #else
 #define WS_IP_OPTIONS                   1
 #define WS_IP_HDRINCL                   2
@@ -111,6 +126,7 @@ typedef struct _INTERFACE_INFO
 #define WS_IP_UNBLOCK_SOURCE            18
 #define WS_IP_PKTINFO                   19
 #define WS_IP_HOPLIMIT                  21
+#define WS_IP_RECVTTL                   21
 #define WS_IP_RECEIVE_BROADCAST         22
 #define WS_IP_RECVIF                    24
 #define WS_IP_RECVDSTADDR               25
@@ -119,7 +135,21 @@ typedef struct _INTERFACE_INFO
 #define WS_IP_DEL_IFLIST                30
 #define WS_IP_UNICAST_IF                31
 #define WS_IP_RTHDR                     32
+#define WS_IP_GET_IFLIST                33
 #define WS_IP_RECVRTHDR                 38
+#define WS_IP_TCLASS                    39
+#define WS_IP_RECVTCLASS                40
+#define WS_IP_RECVTOS                   40
+#define WS_IP_ORIGINAL_ARRIVAL_IF       47
+#define WS_IP_ECN                       50
+#define WS_IP_PKTINFO_EX                51
+#define WS_IP_WFP_REDIRECT_RECORDS      60
+#define WS_IP_WFP_REDIRECT_CONTEXT      70
+#define WS_IP_MTU_DISCOVER              71
+#define WS_IP_MTU                       73
+#define WS_IP_NRT_INTERFACE             74
+#define WS_IP_RECVERR                   75
+#define WS_IP_USER_MTU                  76
 #endif /* USE_WS_PREFIX */
 
 typedef struct WS(sockaddr_in6)
@@ -179,8 +209,14 @@ typedef struct WS(in_pktinfo) {
     UINT    ipi_ifindex;
 } IN_PKTINFO, *PIN_PKTINFO;
 
+typedef struct WS(in6_pktinfo) {
+    IN6_ADDR ipi6_addr;
+    ULONG    ipi6_ifindex;
+} IN6_PKTINFO, *PIN6_PKTINFO;
+
 #ifndef USE_WS_PREFIX
 #define IPV6_OPTIONS                    1
+#define IPV6_HOPOPTS                    1
 #define IPV6_HDRINCL                    2
 #define IPV6_UNICAST_HOPS               4
 #define IPV6_MULTICAST_IF               9
@@ -203,9 +239,22 @@ typedef struct WS(in_pktinfo) {
 #define IPV6_DEL_IFLIST                 30
 #define IPV6_UNICAST_IF                 31
 #define IPV6_RTHDR                      32
+#define IPV6_GET_IFLIST                 33
 #define IPV6_RECVRTHDR                  38
+#define IPV6_TCLASS                     39
+#define IPV6_RECVTCLASS                 40
+#define IPV6_ECN                        50
+#define IPV6_PKTINFO_EX                 51
+#define IPV6_WFP_REDIRECT_RECORDS       60
+#define IPV6_WFP_REDIRECT_CONTEXT       70
+#define IPV6_MTU_DISCOVER               71
+#define IPV6_MTU                        72
+#define IPV6_NRT_INTERFACE              74
+#define IPV6_RECVERR                    75
+#define IPV6_USER_MTU                   76
 #else
 #define WS_IPV6_OPTIONS                 1
+#define WS_IPV6_HOPOPTS                 1
 #define WS_IPV6_HDRINCL                 2
 #define WS_IPV6_UNICAST_HOPS            4
 #define WS_IPV6_MULTICAST_IF            9
@@ -227,7 +276,19 @@ typedef struct WS(in_pktinfo) {
 #define WS_IPV6_DEL_IFLIST              30
 #define WS_IPV6_UNICAST_IF              31
 #define WS_IPV6_RTHDR                   32
+#define WS_IPV6_GET_IFLIST              33
 #define WS_IPV6_RECVRTHDR               38
+#define WS_IPV6_TCLASS                  39
+#define WS_IPV6_RECVTCLASS              40
+#define WS_IPV6_ECN                     50
+#define WS_IPV6_PKTINFO_EX              51
+#define WS_IPV6_WFP_REDIRECT_RECORDS    60
+#define WS_IPV6_WFP_REDIRECT_CONTEXT    70
+#define WS_IPV6_MTU_DISCOVER            71
+#define WS_IPV6_MTU                     72
+#define WS_IPV6_NRT_INTERFACE           74
+#define WS_IPV6_RECVERR                 75
+#define WS_IPV6_USER_MTU                76
 #endif /* USE_WS_PREFIX */
 
 #ifndef USE_WS_PREFIX
@@ -269,6 +330,11 @@ typedef struct WS(in_pktinfo) {
 #define WS_TCP_CONGESTION_ALGORITHM     12
 #define WS_TCP_DELAY_FIN_ACK            13
 #endif /* USE_WS_PREFIX */
+
+#define PROTECTION_LEVEL_UNRESTRICTED   10
+#define PROTECTION_LEVEL_EDGERESTRICTED 20
+#define PROTECTION_LEVEL_RESTRICTED     30
+#define PROTECTION_LEVEL_DEFAULT        ((UINT)-1)
 
 #ifndef USE_WS_PREFIX
 #define INET_ADDRSTRLEN         22
@@ -323,6 +389,16 @@ static inline BOOLEAN WS(IN6_IS_ADDR_UNSPECIFIED) ( const IN6_ADDR *a )
             (a->s6_words[5] == 0) &&
             (a->s6_words[6] == 0) &&
             (a->s6_words[7] == 0));
+}
+
+static inline BOOLEAN WS(IN6_IS_ADDR_LINKLOCAL) ( const IN6_ADDR *a )
+{
+    return ((a->s6_bytes[0] == 0xfe) && ((a->s6_bytes[1] & 0xc0) == 0x80));
+}
+
+static inline BOOLEAN WS(IN6_IS_ADDR_SITELOCAL) ( const IN6_ADDR *a )
+{
+    return ((a->s6_bytes[0] == 0xfe) && ((a->s6_bytes[1] & 0xc0) == 0xc0));
 }
 
 #ifdef __cplusplus

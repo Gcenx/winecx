@@ -18,6 +18,7 @@
 
 #include "wine/winheader_enter.h"
 
+NTSTATUS WINAPI LsaEnumerateAccounts(LSA_HANDLE,PLSA_ENUMERATION_HANDLE,PVOID*,ULONG,PULONG);
 NTSTATUS WINAPI LsaLookupPrivilegeDisplayName(LSA_HANDLE policy, LSA_UNICODE_STRING *name,
     LSA_UNICODE_STRING **display_name, SHORT *language);
 NTSTATUS WINAPI LsaLookupPrivilegeName(LSA_HANDLE policy, LUID *value, LSA_UNICODE_STRING **name);

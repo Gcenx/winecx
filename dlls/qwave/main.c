@@ -26,21 +26,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(qwave);
 
-BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD reason, LPVOID lpv)
-{
-    TRACE("(%p, %d, %p)\n", hInstDLL, reason, lpv);
-
-    switch (reason)
-    {
-    case DLL_WINE_PREATTACH:
-        return FALSE;    /* prefer native version */
-    case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls(hInstDLL);
-        break;
-    }
-    return TRUE;
-}
-
 BOOL WINAPI QOSCreateHandle(PQOS_VERSION version, PHANDLE handle)
 {
     FIXME("%p %p stub!\n", version, handle);
@@ -54,7 +39,7 @@ BOOL WINAPI QOSCreateHandle(PQOS_VERSION version, PHANDLE handle)
 BOOL WINAPI QOSAddSocketToFlow(HANDLE handle, SOCKET socket, PSOCKADDR addr,
                                QOS_TRAFFIC_TYPE traffictype, DWORD flags, PQOS_FLOWID flowid)
 {
-    FIXME("%p, %lx, %p, %d, 0x%08x, %p stub!\n", handle, socket, addr, traffictype, flags, flowid);
+    FIXME("%p, %Ix, %p, %d, 0x%08lx, %p stub!\n", handle, socket, addr, traffictype, flags, flowid);
     SetLastError(ERROR_NOT_SUPPORTED);
     return FALSE;
 }

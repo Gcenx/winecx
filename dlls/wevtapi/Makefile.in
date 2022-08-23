@@ -1,6 +1,7 @@
 MODULE    = wevtapi.dll
+IMPORTLIB = wevtapi
 
-EXTRADLLFLAGS = -mno-cygwin
+EXTRADLLFLAGS = -Wb,--prefer-native
 
 C_SRCS = \
 	main.c

@@ -141,7 +141,7 @@ static BOOL fetch_thread_info(struct dump_context* dc, int thd_idx,
 
     if ((hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, tid)) == NULL)
     {
-        FIXME("Couldn't open thread %u (%u)\n", tid, GetLastError());
+        FIXME("Couldn't open thread %lu (%lu)\n", tid, GetLastError());
         return FALSE;
     }
     
@@ -326,7 +326,6 @@ static void fetch_module_versioninfo(LPCWSTR filename, VS_FIXEDFILEINFO* ffi)
 {
     DWORD       handle;
     DWORD       sz;
-    static const WCHAR backslashW[] = {'\\', '\0'};
 
     memset(ffi, 0, sizeof(*ffi));
     if ((sz = GetFileVersionInfoSizeW(filename, &handle)))
@@ -337,7 +336,7 @@ static void fetch_module_versioninfo(LPCWSTR filename, VS_FIXEDFILEINFO* ffi)
             VS_FIXEDFILEINFO*   ptr;
             UINT    len;
 
-            if (VerQueryValueW(info, backslashW, (void*)&ptr, &len))
+            if (VerQueryValueW(info, L"\\", (void*)&ptr, &len))
                 memcpy(ffi, ptr, min(len, sizeof(*ffi)));
         }
         HeapFree(GetProcessHeap(), 0, info);

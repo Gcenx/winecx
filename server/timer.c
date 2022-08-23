@@ -19,7 +19,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -38,6 +37,20 @@
 #include "request.h"
 #include "esync.h"
 
+static const WCHAR timer_name[] = {'T','i','m','e','r'};
+
+struct type_descr timer_type =
+{
+    { timer_name, sizeof(timer_name) },   /* name */
+    TIMER_ALL_ACCESS,                     /* valid_access */
+    {                                     /* mapping */
+        STANDARD_RIGHTS_READ | TIMER_QUERY_STATE,
+        STANDARD_RIGHTS_WRITE | TIMER_MODIFY_STATE,
+        STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE,
+        TIMER_ALL_ACCESS
+    },
+};
+
 struct timer
 {
     struct object        obj;       /* object header */
@@ -53,18 +66,16 @@ struct timer
 };
 
 static void timer_dump( struct object *obj, int verbose );
-static struct object_type *timer_get_type( struct object *obj );
 static int timer_signaled( struct object *obj, struct wait_queue_entry *entry );
 static struct esync_fd *timer_get_esync_fd( struct object *obj, enum esync_type *type );
 static void timer_satisfied( struct object *obj, struct wait_queue_entry *entry );
-static unsigned int timer_map_access( struct object *obj, unsigned int access );
 static void timer_destroy( struct object *obj );
 
 static const struct object_ops timer_ops =
 {
     sizeof(struct timer),      /* size */
+    &timer_type,               /* type */
     timer_dump,                /* dump */
-    timer_get_type,            /* get_type */
     add_queue,                 /* add_queue */
     remove_queue,              /* remove_queue */
     timer_signaled,            /* signaled */
@@ -72,7 +83,7 @@ static const struct object_ops timer_ops =
     timer_satisfied,           /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
-    timer_map_access,          /* map_access */
+    default_map_access,        /* map_access */
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
     default_get_full_name,     /* get_full_name */
@@ -122,15 +133,13 @@ static void timer_callback( void *private )
     {
         apc_call_t data;
 
+        assert (timer->callback);
         memset( &data, 0, sizeof(data) );
-        if (timer->callback)
-        {
-            data.type            = APC_TIMER;
-            data.user.timer.func = timer->callback;
-            data.user.timer.time = timer->when;
-            data.user.timer.arg  = timer->arg;
-        }
-        else data.type = APC_NONE;  /* wake up only */
+        data.type         = APC_USER;
+        data.user.func    = timer->callback;
+        data.user.args[0] = timer->arg;
+        data.user.args[1] = (unsigned int)timer->when;
+        data.user.args[2] = timer->when >> 32;
 
         if (!thread_queue_apc( NULL, timer->thread, &timer->obj, &data ))
         {
@@ -164,7 +173,7 @@ static int cancel_timer( struct timer *timer )
     }
     if (timer->thread)
     {
-        thread_cancel_apc( timer->thread, &timer->obj, APC_TIMER );
+        thread_cancel_apc( timer->thread, &timer->obj, APC_USER );
         release_object( timer->thread );
         timer->thread = NULL;
     }
@@ -203,13 +212,6 @@ static void timer_dump( struct object *obj, int verbose )
              timer->manual, get_timeout_str(timeout), timer->period );
 }
 
-static struct object_type *timer_get_type( struct object *obj )
-{
-    static const WCHAR name[] = {'T','i','m','e','r'};
-    static const struct unicode_str str = { name, sizeof(name) };
-    return get_object_type( &str );
-}
-
 static int timer_signaled( struct object *obj, struct wait_queue_entry *entry )
 {
     struct timer *timer = (struct timer *)obj;
@@ -229,15 +231,6 @@ static void timer_satisfied( struct object *obj, struct wait_queue_entry *entry 
     struct timer *timer = (struct timer *)obj;
     assert( obj->ops == &timer_ops );
     if (!timer->manual) timer->signaled = 0;
-}
-
-static unsigned int timer_map_access( struct object *obj, unsigned int access )
-{
-    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ | SYNCHRONIZE | TIMER_QUERY_STATE;
-    if (access & GENERIC_WRITE)   access |= STANDARD_RIGHTS_WRITE | TIMER_MODIFY_STATE;
-    if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE;
-    if (access & GENERIC_ALL)     access |= TIMER_ALL_ACCESS;
-    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
 static void timer_destroy( struct object *obj )

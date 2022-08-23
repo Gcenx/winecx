@@ -17,35 +17,24 @@
  *
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #define COBJMACROS
-#define VK_NO_PROTOTYPES
 #define VKD3D_NO_VULKAN_H
 #define VKD3D_NO_WIN32_TYPES
-#ifndef USE_WIN32_VULKAN
-#define WINE_VK_HOST
-#endif
 
-#include "wine/debug.h"
-#include "wine/heap.h"
-#include "wine/vulkan.h"
-#include "wine/vulkan_driver.h"
-
+#include "windef.h"
 #include "dxgi1_6.h"
 #include "d3d12.h"
+#include "wine/vulkan.h"
 
 #include <vkd3d.h>
 
 #include "initguid.h"
 #include "wine/wined3d.h"
 #include "wine/winedxgi.h"
+#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d12);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
-
-#ifdef USE_WIN32_VULKAN
 
 static HMODULE vulkan_module;
 
@@ -67,25 +56,6 @@ static PFN_vkGetInstanceProcAddr load_vulkan(void)
 
     return NULL;
 }
-
-#else
-
-static PFN_vkGetInstanceProcAddr load_vulkan(void)
-{
-    const struct vulkan_funcs *vk_funcs;
-    HDC hdc;
-
-    hdc = GetDC(0);
-    vk_funcs = __wine_get_vulkan_driver(hdc, WINE_VULKAN_DRIVER_VERSION);
-    ReleaseDC(0, hdc);
-
-    if (vk_funcs)
-        return (PFN_vkGetInstanceProcAddr)vk_funcs->p_vkGetInstanceProcAddr;
-
-    return NULL;
-}
-
-#endif  /* USE_WIN32_VULKAN */
 
 HRESULT WINAPI D3D12GetDebugInterface(REFIID iid, void **debug)
 {
@@ -109,52 +79,6 @@ static HRESULT d3d12_signal_event(HANDLE event)
     return SetEvent(event) ? S_OK : E_FAIL;
 }
 
-struct d3d12_thread_data
-{
-    PFN_vkd3d_thread main_pfn;
-    void *data;
-};
-
-static DWORD WINAPI d3d12_thread_main(void *data)
-{
-    struct d3d12_thread_data *thread_data = data;
-
-    thread_data->main_pfn(thread_data->data);
-    heap_free(thread_data);
-    return 0;
-}
-
-static void *d3d12_create_thread(PFN_vkd3d_thread main_pfn, void *data)
-{
-    struct d3d12_thread_data *thread_data;
-    HANDLE thread;
-
-    if (!(thread_data = heap_alloc(sizeof(*thread_data))))
-    {
-        ERR("Failed to allocate thread data.\n");
-        return NULL;
-    }
-
-    thread_data->main_pfn = main_pfn;
-    thread_data->data = data;
-
-    if (!(thread = CreateThread(NULL, 0, d3d12_thread_main, thread_data, 0, NULL)))
-        heap_free(thread_data);
-
-    return thread;
-}
-
-static HRESULT d3d12_join_thread(void *handle)
-{
-    HANDLE thread = handle;
-    DWORD ret;
-
-    if ((ret = WaitForSingleObject(thread, INFINITE)) != WAIT_OBJECT_0)
-        ERR("Failed to wait for thread, ret %#x.\n", ret);
-    CloseHandle(thread);
-    return ret == WAIT_OBJECT_0 ? S_OK : E_FAIL;
-}
-
 static HRESULT d3d12_get_adapter(IWineDXGIAdapter **wine_adapter, IUnknown *adapter)
 {
     IDXGIAdapter *dxgi_adapter = NULL;
@@ -165,13 +89,13 @@ static HRESULT d3d12_get_adapter(IWineDXGIAdapter **wine_adapter, IUnknown *adap
     {
         if (FAILED(hr = CreateDXGIFactory2(0, &IID_IDXGIFactory4, (void **)&factory)))
         {
-            WARN("Failed to create DXGI factory, hr %#x.\n", hr);
+            WARN("Failed to create DXGI factory, hr %#lx.\n", hr);
             goto done;
         }
 
         if (FAILED(hr = IDXGIFactory4_EnumAdapters(factory, 0, &dxgi_adapter)))
         {
-            WARN("Failed to enumerate primary adapter, hr %#x.\n", hr);
+            WARN("Failed to enumerate primary adapter, hr %#lx.\n", hr);
             goto done;
         }
 
@@ -179,7 +103,7 @@ static HRESULT d3d12_get_adapter(IWineDXGIAdapter **wine_adapter, IUnknown *adap
     }
 
     if (FAILED(hr = IUnknown_QueryInterface(adapter, &IID_IWineDXGIAdapter, (void **)wine_adapter)))
-        WARN("Invalid adapter %p, hr %#x.\n", adapter, hr);
+        WARN("Invalid adapter %p, hr %#lx.\n", adapter, hr);
 
 done:
     if (dxgi_adapter)
@@ -205,7 +129,7 @@ static BOOL check_vk_instance_extension(VkInstance vk_instance,
     if (pfn_vkEnumerateInstanceExtensionProperties(NULL, &count, NULL) < 0)
         return FALSE;
 
-    if (!(properties = heap_calloc(count, sizeof(*properties))))
+    if (!(properties = calloc(count, sizeof(*properties))))
         return FALSE;
 
     if (pfn_vkEnumerateInstanceExtensionProperties(NULL, &count, properties) >= 0)
@@ -220,7 +144,7 @@ static BOOL check_vk_instance_extension(VkInstance vk_instance,
         }
     }
 
-    heap_free(properties);
+    free(properties);
     return ret;
 }
 
@@ -259,7 +183,7 @@ static VkPhysicalDevice d3d12_get_vk_physical_device(struct vkd3d_instance *inst
         return VK_NULL_HANDLE;
     }
 
-    if (!(vk_physical_devices = heap_calloc(count, sizeof(*vk_physical_devices))))
+    if (!(vk_physical_devices = calloc(count, sizeof(*vk_physical_devices))))
         return VK_NULL_HANDLE;
 
     if ((vr = pfn_vkEnumeratePhysicalDevices(vk_instance, &count, vk_physical_devices)) < 0)
@@ -310,7 +234,7 @@ static VkPhysicalDevice d3d12_get_vk_physical_device(struct vkd3d_instance *inst
         FIXME("Could not find Vulkan physical device for DXGI adapter.\n");
 
 done:
-    heap_free(vk_physical_devices);
+    free(vk_physical_devices);
     return vk_physical_device;
 }
 
@@ -360,7 +284,7 @@ HRESULT WINAPI D3D12CreateDevice(IUnknown *adapter, D3D_FEATURE_LEVEL minimum_fe
 
     if (FAILED(hr = IWineDXGIAdapter_get_adapter_info(wine_adapter, &adapter_info)))
     {
-        WARN("Failed to get adapter info, hr %#x.\n", hr);
+        WARN("Failed to get adapter info, hr %#lx.\n", hr);
         goto done;
     }
 
@@ -372,8 +296,8 @@ HRESULT WINAPI D3D12CreateDevice(IUnknown *adapter, D3D_FEATURE_LEVEL minimum_fe
     instance_create_info.type = VKD3D_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     instance_create_info.next = &optional_extensions_info;
     instance_create_info.pfn_signal_event = d3d12_signal_event;
-    instance_create_info.pfn_create_thread = d3d12_create_thread;
-    instance_create_info.pfn_join_thread = d3d12_join_thread;
+    instance_create_info.pfn_create_thread = NULL;
+    instance_create_info.pfn_join_thread = NULL;
     instance_create_info.wchar_size = sizeof(WCHAR);
     instance_create_info.pfn_vkGetInstanceProcAddr = pfn_vkGetInstanceProcAddr;
     instance_create_info.instance_extensions = instance_extensions;
@@ -381,7 +305,7 @@ HRESULT WINAPI D3D12CreateDevice(IUnknown *adapter, D3D_FEATURE_LEVEL minimum_fe
 
     if (FAILED(hr = vkd3d_create_instance(&instance_create_info, &instance)))
     {
-        WARN("Failed to create vkd3d instance, hr %#x.\n", hr);
+        WARN("Failed to create vkd3d instance, hr %#lx.\n", hr);
         goto done;
     }
 
@@ -408,7 +332,7 @@ done:
 HRESULT WINAPI D3D12CreateRootSignatureDeserializer(const void *data, SIZE_T data_size,
         REFIID iid, void **deserializer)
 {
-    TRACE("data %p, data_size %lu, iid %s, deserializer %p.\n",
+    TRACE("data %p, data_size %Iu, iid %s, deserializer %p.\n",
             data, data_size, debugstr_guid(iid), deserializer);
 
     return vkd3d_create_root_signature_deserializer(data, data_size, iid, deserializer);
@@ -417,7 +341,7 @@ HRESULT WINAPI D3D12CreateRootSignatureDeserializer(const void *data, SIZE_T dat
 HRESULT WINAPI D3D12CreateVersionedRootSignatureDeserializer(const void *data, SIZE_T data_size,
         REFIID iid, void **deserializer)
 {
-    TRACE("data %p, data_size %lu, iid %s, deserializer %p.\n",
+    TRACE("data %p, data_size %Iu, iid %s, deserializer %p.\n",
             data, data_size, debugstr_guid(iid), deserializer);
 
     return vkd3d_create_versioned_root_signature_deserializer(data, data_size, iid, deserializer);

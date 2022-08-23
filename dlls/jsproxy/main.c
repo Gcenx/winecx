@@ -33,8 +33,6 @@
 #include "wine/debug.h"
 #include "wine/heap.h"
 
-static HINSTANCE instance;
-
 WINE_DEFAULT_DEBUG_CHANNEL(jsproxy);
 
 static CRITICAL_SECTION cs_jsproxy;
@@ -45,24 +43,6 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
       0, 0, { (DWORD_PTR)(__FILE__ ": cs_jsproxy") }
 };
 static CRITICAL_SECTION cs_jsproxy = { &critsect_debug, -1, 0, 0, 0, 0 };
-
-/******************************************************************
- *      DllMain (jsproxy.@)
- */
-BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
-{
-    switch (reason)
-    {
-    case DLL_PROCESS_ATTACH:
-        instance = hinst;
-        DisableThreadLibraryCalls( hinst );
-        break;
-
-    case DLL_PROCESS_DETACH:
-        break;
-    }
-    return TRUE;
-}
 
 static inline WCHAR *strdupAW( const char *src, int len )
 {
@@ -101,7 +81,7 @@ static struct pac_script *global_script = &pac_script;
  */
 BOOL WINAPI InternetDeInitializeAutoProxyDll( LPSTR mime, DWORD reserved )
 {
-    TRACE( "%s, %u\n", debugstr_a(mime), reserved );
+    TRACE( "%s, %lu\n", debugstr_a(mime), reserved );
 
     EnterCriticalSection( &cs_jsproxy );
 
@@ -147,7 +127,7 @@ BOOL WINAPI JSPROXY_InternetInitializeAutoProxyDll( DWORD version, LPSTR tmpfile
 {
     BOOL ret = FALSE;
 
-    TRACE( "%u, %s, %s, %p, %p\n", version, debugstr_a(tmpfile), debugstr_a(mime), callbacks, buffer );
+    TRACE( "%lu, %s, %s, %p, %p\n", version, debugstr_a(tmpfile), debugstr_a(mime), callbacks, buffer );
 
     if (callbacks) FIXME( "callbacks not supported\n" );
 
@@ -558,7 +538,7 @@ static BOOL run_script( const WCHAR *script, const WCHAR *url, const WCHAR *host
     VariantClear( &args[1] );
     if (hr != S_OK)
     {
-        WARN("script failed 0x%08x\n", hr);
+        WARN("script failed 0x%08lx\n", hr);
         goto done;
     }
     if ((*result_str = strdupWA( V_BSTR( &retval ) )))
@@ -588,7 +568,7 @@ BOOL WINAPI InternetGetProxyInfo( LPCSTR url, DWORD len_url, LPCSTR hostname, DW
     WCHAR *urlW = NULL, *hostnameW = NULL;
     BOOL ret = FALSE;
 
-    TRACE( "%s, %u, %s, %u, %p, %p\n", debugstr_a(url), len_url, hostname, len_hostname, proxy, len_proxy );
+    TRACE( "%s, %lu, %s, %lu, %p, %p\n", debugstr_a(url), len_url, hostname, len_hostname, proxy, len_proxy );
 
     EnterCriticalSection( &cs_jsproxy );
 

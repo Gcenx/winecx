@@ -812,7 +812,7 @@ static HANDLE import_nsfilenames_to_hdrop(CFDataRef data)
     char *buffer = NULL;
     WCHAR **paths = NULL;
     DROPFILES* dropfiles;
-    UniChar* p;
+    UniChar* WIN32PTR p;
 
     TRACE("data %s\n", debugstr_cf(data));
 
@@ -1611,7 +1611,7 @@ static WINE_CLIPFORMAT** get_formats_for_pasteboard_types(CFArrayRef types, UINT
         if (!format->synthesized)
         {
             TRACE("for type %s got format %p/%s\n", debugstr_cf(type), format, debugstr_format(format->format_id));
-            CFSetAddValue(seen_formats, (void*)format->format_id);
+            CFSetAddValue(seen_formats, ULongToPtr(format->format_id));
             formats[pos++] = format;
         }
         else if (format->natural_format &&
@@ -1620,7 +1620,7 @@ static WINE_CLIPFORMAT** get_formats_for_pasteboard_types(CFArrayRef types, UINT
             TRACE("for type %s deferring synthesized formats because type %s is also present\n",
                   debugstr_cf(type), debugstr_cf(format->natural_format->type));
         }
-        else if (CFSetContainsValue(seen_formats, (void*)format->format_id))
+        else if (CFSetContainsValue(seen_formats, ULongToPtr(format->format_id)))
         {
             TRACE("for type %s got duplicate synthesized format %p/%s; skipping\n", debugstr_cf(type), format,
                   debugstr_format(format->format_id));
@@ -1628,7 +1628,7 @@ static WINE_CLIPFORMAT** get_formats_for_pasteboard_types(CFArrayRef types, UINT
         else
         {
             TRACE("for type %s got synthesized format %p/%s\n", debugstr_cf(type), format, debugstr_format(format->format_id));
-            CFSetAddValue(seen_formats, (void*)format->format_id);
+            CFSetAddValue(seen_formats, ULongToPtr(format->format_id));
             formats[pos++] = format;
         }
     }
@@ -1643,10 +1643,10 @@ static WINE_CLIPFORMAT** get_formats_for_pasteboard_types(CFArrayRef types, UINT
         if (!format->synthesized) continue;
 
         /* Don't duplicate a real value with a synthesized value. */
-        if (CFSetContainsValue(seen_formats, (void*)format->format_id)) continue;
+        if (CFSetContainsValue(seen_formats, ULongToPtr(format->format_id))) continue;
 
         TRACE("for type %s got synthesized format %p/%s\n", debugstr_cf(type), format, debugstr_format(format->format_id));
-        CFSetAddValue(seen_formats, (void*)format->format_id);
+        CFSetAddValue(seen_formats, ULongToPtr(format->format_id));
         formats[pos++] = format;
     }
 
@@ -2150,7 +2150,7 @@ done:
 /**************************************************************************
  *              macdrv_UpdateClipboard
  */
-void CDECL macdrv_UpdateClipboard(void)
+void macdrv_UpdateClipboard(void)
 {
     static ULONG last_update;
     ULONG now, end;

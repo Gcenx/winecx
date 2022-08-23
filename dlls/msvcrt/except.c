@@ -31,7 +31,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
-#include "wine/exception.h"
 #include "msvcrt.h"
 #include "excpt.h"
 #include "wincon.h"
@@ -273,7 +272,7 @@ int CDECL raise(int sig)
  */
 int CDECL _XcptFilter(NTSTATUS ex, PEXCEPTION_POINTERS ptr)
 {
-    TRACE("(%08x,%p)\n", ex, ptr);
+    TRACE("(%08lx,%p)\n", ex, ptr);
     /* I assume ptr->ExceptionRecord->ExceptionCode is the same as ex */
     return msvcrt_exception_filter(ptr);
 }
@@ -474,7 +473,7 @@ void CDECL __CxxUnregisterExceptionObject(cxx_frame_info *frame_info, BOOL in_us
 
 struct __std_exception_data {
     char *what;
-    bool dofree;
+    char dofree;
 };
 
 #if _MSVCR_VER>=140

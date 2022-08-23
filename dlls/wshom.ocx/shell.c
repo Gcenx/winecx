@@ -24,7 +24,8 @@
 #include "dispex.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
+
+extern HRESULT WINAPI DoOpenPipeStream(HANDLE pipe, IOMode mode, ITextStream **stream);
 
 WINE_DEFAULT_DEBUG_CHANNEL(wshom);
 
@@ -49,7 +50,7 @@ typedef struct
     LONG ref;
 
     IShellLinkW *link;
-    BSTR path_link;
+    WCHAR *path_link;
 } WshShortcut;
 
 typedef struct
@@ -65,6 +66,9 @@ typedef struct
     IWshExec IWshExec_iface;
     LONG ref;
     PROCESS_INFORMATION info;
+    ITextStream *stdin_stream;
+    ITextStream *stdout_stream;
+    ITextStream *stderr_stream;
 } WshExecImpl;
 
 static inline WshCollection *impl_from_IWshCollection( IWshCollection *iface )
@@ -117,20 +121,28 @@ static ULONG WINAPI WshExec_AddRef(IWshExec *iface)
 {
     WshExecImpl *This = impl_from_IWshExec(iface);
     LONG ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p) ref = %d\n", This, ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
     return ref;
 }
 
 static ULONG WINAPI WshExec_Release(IWshExec *iface)
 {
-    WshExecImpl *This = impl_from_IWshExec(iface);
-    LONG ref = InterlockedDecrement(&This->ref);
-    TRACE("(%p) ref = %d\n", This, ref);
+    WshExecImpl *exec = impl_from_IWshExec(iface);
+    LONG ref = InterlockedDecrement(&exec->ref);
 
-    if (!ref) {
-        CloseHandle(This->info.hThread);
-        CloseHandle(This->info.hProcess);
-        heap_free(This);
+    TRACE("%p, refcount %ld.\n", iface, ref);
+
+    if (!ref)
+    {
+        CloseHandle(exec->info.hThread);
+        CloseHandle(exec->info.hProcess);
+        if (exec->stdin_stream)
+            ITextStream_Release(exec->stdin_stream);
+        if (exec->stdout_stream)
+            ITextStream_Release(exec->stdout_stream);
+        if (exec->stderr_stream)
+            ITextStream_Release(exec->stderr_stream);
+        free(exec);
     }
 
     return ref;
@@ -146,19 +158,18 @@ static HRESULT WINAPI WshExec_GetTypeInfoCount(IWshExec *iface, UINT *pctinfo)
 
 static HRESULT WINAPI WshExec_GetTypeInfo(IWshExec *iface, UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
-    WshExecImpl *This = impl_from_IWshExec(iface);
-    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+    TRACE("%p, %u, %lx, %p.\n", iface, iTInfo, lcid, ppTInfo);
+
     return get_typeinfo(IWshExec_tid, ppTInfo);
 }
 
 static HRESULT WINAPI WshExec_GetIDsOfNames(IWshExec *iface, REFIID riid, LPOLESTR *rgszNames,
         UINT cNames, LCID lcid, DISPID *rgDispId)
 {
-    WshExecImpl *This = impl_from_IWshExec(iface);
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
+    TRACE("%p, %s, %p, %u, %lx, %p.\n", iface, debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
 
     hr = get_typeinfo(IWshExec_tid, &typeinfo);
     if(SUCCEEDED(hr))
@@ -173,18 +184,16 @@ static HRESULT WINAPI WshExec_GetIDsOfNames(IWshExec *iface, REFIID riid, LPOLES
 static HRESULT WINAPI WshExec_Invoke(IWshExec *iface, DISPID dispIdMember, REFIID riid, LCID lcid,
         WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
-    WshExecImpl *This = impl_from_IWshExec(iface);
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+    TRACE("%p, %ld, %s, %lx, %d, %p, %p, %p, %p.\n", iface, dispIdMember, debugstr_guid(riid),
           lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo(IWshExec_tid, &typeinfo);
     if(SUCCEEDED(hr))
     {
-        hr = ITypeInfo_Invoke(typeinfo, &This->IWshExec_iface, dispIdMember, wFlags,
-                pDispParams, pVarResult, pExcepInfo, puArgErr);
+        hr = ITypeInfo_Invoke(typeinfo, iface, dispIdMember, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
         ITypeInfo_Release(typeinfo);
     }
 
@@ -221,29 +230,38 @@ static HRESULT WINAPI WshExec_get_Status(IWshExec *iface, WshExecStatus *status)
 
 static HRESULT WINAPI WshExec_get_StdIn(IWshExec *iface, ITextStream **stream)
 {
-    WshExecImpl *This = impl_from_IWshExec(iface);
+    WshExecImpl *exec = impl_from_IWshExec(iface);
 
-    FIXME("(%p)->(%p): stub\n", This, stream);
+    TRACE("%p, %p.\n", iface, stream);
 
-    return E_NOTIMPL;
+    *stream = exec->stdin_stream;
+    ITextStream_AddRef(*stream);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI WshExec_get_StdOut(IWshExec *iface, ITextStream **stream)
 {
-    WshExecImpl *This = impl_from_IWshExec(iface);
+    WshExecImpl *exec = impl_from_IWshExec(iface);
 
-    FIXME("(%p)->(%p): stub\n", This, stream);
+    TRACE("%p, %p.\n", iface, stream);
 
-    return E_NOTIMPL;
+    *stream = exec->stdout_stream;
+    ITextStream_AddRef(*stream);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI WshExec_get_StdErr(IWshExec *iface, ITextStream **stream)
 {
-    WshExecImpl *This = impl_from_IWshExec(iface);
+    WshExecImpl *exec = impl_from_IWshExec(iface);
 
-    FIXME("(%p)->(%p): stub\n", This, stream);
+    TRACE("%p, %p.\n", iface, stream);
 
-    return E_NOTIMPL;
+    *stream = exec->stderr_stream;
+    ITextStream_AddRef(*stream);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI WshExec_get_ProcessID(IWshExec *iface, DWORD *pid)
@@ -318,28 +336,108 @@ static const IWshExecVtbl WshExecVtbl = {
     WshExec_Terminate
 };
 
+static HRESULT create_pipe(HANDLE *hread, HANDLE *hwrite)
+{
+    SECURITY_ATTRIBUTES sa;
+
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = NULL;
+
+    *hread = *hwrite = NULL;
+    if (!CreatePipe(hread, hwrite, &sa, 0))
+        return HRESULT_FROM_WIN32(GetLastError());
+    return S_OK;
+}
+
+static void close_pipe(HANDLE *hread, HANDLE *hwrite)
+{
+    CloseHandle(*hread);
+    CloseHandle(*hwrite);
+    *hread = *hwrite = NULL;
+}
+
 static HRESULT WshExec_create(BSTR command, IWshExec **ret)
 {
+    HANDLE stdout_read, stdout_write;
+    HANDLE stderr_read, stderr_write;
+    HANDLE stdin_read, stdin_write;
     STARTUPINFOW si = {0};
-    WshExecImpl *This;
+    WshExecImpl *object;
+    HRESULT hr;
 
     *ret = NULL;
 
-    This = heap_alloc(sizeof(*This));
-    if (!This)
+    if (!(object = calloc(1, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    This->IWshExec_iface.lpVtbl = &WshExecVtbl;
-    This->ref = 1;
+    object->IWshExec_iface.lpVtbl = &WshExecVtbl;
+    object->ref = 1;
+    init_classinfo(&CLSID_WshExec, (IUnknown *)&object->IWshExec_iface, &object->classinfo);
 
-    if (!CreateProcessW(NULL, command, NULL, NULL, FALSE, 0, NULL, NULL, &si, &This->info)) {
-        heap_free(This);
-        return HRESULT_FROM_WIN32(GetLastError());
+    if (FAILED(hr = create_pipe(&stdin_read, &stdin_write)))
+    {
+        WARN("Failed to create stdin pipe.\n");
+        goto failed;
     }
 
-    init_classinfo(&CLSID_WshExec, (IUnknown *)&This->IWshExec_iface, &This->classinfo);
-    *ret = &This->IWshExec_iface;
-    return S_OK;
+    if (FAILED(hr = create_pipe(&stdout_read, &stdout_write)))
+    {
+        close_pipe(&stdin_read, &stdin_write);
+        WARN("Failed to create stdout pipe.\n");
+        goto failed;
+    }
+
+    if (FAILED(hr = create_pipe(&stderr_read, &stderr_write)))
+    {
+        close_pipe(&stdin_read, &stdin_write);
+        close_pipe(&stdout_read, &stdout_write);
+        WARN("Failed to create stderr pipe.\n");
+        goto failed;
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0);
+        SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0);
+        SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0);
+    }
+
+    if (SUCCEEDED(hr))
+        hr = DoOpenPipeStream(stdin_write, ForWriting, &object->stdin_stream);
+    if (SUCCEEDED(hr))
+        hr = DoOpenPipeStream(stdout_read, ForReading, &object->stdout_stream);
+    if (SUCCEEDED(hr))
+        hr = DoOpenPipeStream(stderr_read, ForReading, &object->stderr_stream);
+
+    si.cb = sizeof(si);
+    si.hStdError = stderr_write;
+    si.hStdOutput = stdout_write;
+    si.hStdInput = stdin_read;
+    si.dwFlags = STARTF_USESTDHANDLES;
+
+    if (SUCCEEDED(hr))
+    {
+        if (!CreateProcessW(NULL, command, NULL, NULL, FALSE, 0, NULL, NULL, &si, &object->info))
+            hr = HRESULT_FROM_WIN32(GetLastError());
+    }
+
+    CloseHandle(stderr_write);
+    CloseHandle(stdout_write);
+    CloseHandle(stdin_read);
+
+    if (SUCCEEDED(hr))
+    {
+        *ret = &object->IWshExec_iface;
+
+        return S_OK;
+    }
+
+failed:
+
+    IWshExec_Release(&object->IWshExec_iface);
+
+    return hr;
 }
 
 static HRESULT WINAPI WshEnvironment_QueryInterface(IWshEnvironment *iface, REFIID riid, void **obj)
@@ -372,7 +470,7 @@ static ULONG WINAPI WshEnvironment_AddRef(IWshEnvironment *iface)
 {
     WshEnvironment *This = impl_from_IWshEnvironment(iface);
     LONG ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p) ref = %d\n", This, ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
     return ref;
 }
 
@@ -380,10 +478,10 @@ static ULONG WINAPI WshEnvironment_Release(IWshEnvironment *iface)
 {
     WshEnvironment *This = impl_from_IWshEnvironment(iface);
     LONG ref = InterlockedDecrement(&This->ref);
-    TRACE("(%p) ref = %d\n", This, ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
 
     if (!ref)
-        heap_free(This);
+        free(This);
 
     return ref;
 }
@@ -398,19 +496,18 @@ static HRESULT WINAPI WshEnvironment_GetTypeInfoCount(IWshEnvironment *iface, UI
 
 static HRESULT WINAPI WshEnvironment_GetTypeInfo(IWshEnvironment *iface, UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
-    WshEnvironment *This = impl_from_IWshEnvironment(iface);
-    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+    TRACE("%p, %u, %lx, %p.\n", iface, iTInfo, lcid, ppTInfo);
+
     return get_typeinfo(IWshEnvironment_tid, ppTInfo);
 }
 
 static HRESULT WINAPI WshEnvironment_GetIDsOfNames(IWshEnvironment *iface, REFIID riid, LPOLESTR *rgszNames,
         UINT cNames, LCID lcid, DISPID *rgDispId)
 {
-    WshEnvironment *This = impl_from_IWshEnvironment(iface);
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
+    TRACE("%p, %s, %p, %u, %lx, %p.\n", iface, debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
 
     hr = get_typeinfo(IWshEnvironment_tid, &typeinfo);
     if(SUCCEEDED(hr))
@@ -425,18 +522,16 @@ static HRESULT WINAPI WshEnvironment_GetIDsOfNames(IWshEnvironment *iface, REFII
 static HRESULT WINAPI WshEnvironment_Invoke(IWshEnvironment *iface, DISPID dispIdMember, REFIID riid, LCID lcid,
         WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
-    WshEnvironment *This = impl_from_IWshEnvironment(iface);
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+    TRACE("%p, %ld, %s, %lx, %d, %p, %p, %p, %p.\n", iface, dispIdMember, debugstr_guid(riid),
           lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo(IWshEnvironment_tid, &typeinfo);
     if(SUCCEEDED(hr))
     {
-        hr = ITypeInfo_Invoke(typeinfo, &This->IWshEnvironment_iface, dispIdMember, wFlags,
-                pDispParams, pVarResult, pExcepInfo, puArgErr);
+        hr = ITypeInfo_Invoke(typeinfo, iface, dispIdMember, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
         ITypeInfo_Release(typeinfo);
     }
 
@@ -519,16 +614,16 @@ static const IWshEnvironmentVtbl WshEnvironmentVtbl = {
 
 static HRESULT WshEnvironment_Create(IWshEnvironment **env)
 {
-    WshEnvironment *This;
+    WshEnvironment *object;
 
-    This = heap_alloc(sizeof(*This));
-    if (!This) return E_OUTOFMEMORY;
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
 
-    This->IWshEnvironment_iface.lpVtbl = &WshEnvironmentVtbl;
-    This->ref = 1;
+    object->IWshEnvironment_iface.lpVtbl = &WshEnvironmentVtbl;
+    object->ref = 1;
 
-    init_classinfo(&IID_IWshEnvironment, (IUnknown *)&This->IWshEnvironment_iface, &This->classinfo);
-    *env = &This->IWshEnvironment_iface;
+    init_classinfo(&IID_IWshEnvironment, (IUnknown *)&object->IWshEnvironment_iface, &object->classinfo);
+    *env = &object->IWshEnvironment_iface;
 
     return S_OK;
 }
@@ -561,20 +656,22 @@ static HRESULT WINAPI WshCollection_QueryInterface(IWshCollection *iface, REFIID
 
 static ULONG WINAPI WshCollection_AddRef(IWshCollection *iface)
 {
-    WshCollection *This = impl_from_IWshCollection(iface);
-    LONG ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p) ref = %d\n", This, ref);
+    WshCollection *collection = impl_from_IWshCollection(iface);
+    LONG ref = InterlockedIncrement(&collection->ref);
+
+    TRACE("%p, refcount %ld.\n", iface, ref);
+
     return ref;
 }
 
 static ULONG WINAPI WshCollection_Release(IWshCollection *iface)
 {
-    WshCollection *This = impl_from_IWshCollection(iface);
-    LONG ref = InterlockedDecrement(&This->ref);
-    TRACE("(%p) ref = %d\n", This, ref);
+    WshCollection *collection = impl_from_IWshCollection(iface);
+    LONG ref = InterlockedDecrement(&collection->ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
 
     if (!ref)
-        heap_free(This);
+        free(collection);
 
     return ref;
 }
@@ -589,19 +686,18 @@ static HRESULT WINAPI WshCollection_GetTypeInfoCount(IWshCollection *iface, UINT
 
 static HRESULT WINAPI WshCollection_GetTypeInfo(IWshCollection *iface, UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
-    WshCollection *This = impl_from_IWshCollection(iface);
-    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+    TRACE("%p, %u, %lx, %p.\n", iface, iTInfo, lcid, ppTInfo);
+
     return get_typeinfo(IWshCollection_tid, ppTInfo);
 }
 
 static HRESULT WINAPI WshCollection_GetIDsOfNames(IWshCollection *iface, REFIID riid, LPOLESTR *rgszNames,
         UINT cNames, LCID lcid, DISPID *rgDispId)
 {
-    WshCollection *This = impl_from_IWshCollection(iface);
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
+    TRACE("%p, %s, %p, %u, %lx, %p.\n", iface, debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
 
     hr = get_typeinfo(IWshCollection_tid, &typeinfo);
     if(SUCCEEDED(hr))
@@ -616,18 +712,16 @@ static HRESULT WINAPI WshCollection_GetIDsOfNames(IWshCollection *iface, REFIID 
 static HRESULT WINAPI WshCollection_Invoke(IWshCollection *iface, DISPID dispIdMember, REFIID riid, LCID lcid,
         WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
-    WshCollection *This = impl_from_IWshCollection(iface);
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+    TRACE("%p, %ld, %s, %lx, %d, %p, %p, %p, %p.\n", iface, dispIdMember, debugstr_guid(riid),
           lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo(IWshCollection_tid, &typeinfo);
     if(SUCCEEDED(hr))
     {
-        hr = ITypeInfo_Invoke(typeinfo, &This->IWshCollection_iface, dispIdMember, wFlags,
-                pDispParams, pVarResult, pExcepInfo, puArgErr);
+        hr = ITypeInfo_Invoke(typeinfo, iface, dispIdMember, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
         ITypeInfo_Release(typeinfo);
     }
 
@@ -718,16 +812,16 @@ static const IWshCollectionVtbl WshCollectionVtbl = {
 
 static HRESULT WshCollection_Create(IWshCollection **collection)
 {
-    WshCollection *This;
+    WshCollection *object;
 
-    This = heap_alloc(sizeof(*This));
-    if (!This) return E_OUTOFMEMORY;
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
 
-    This->IWshCollection_iface.lpVtbl = &WshCollectionVtbl;
-    This->ref = 1;
+    object->IWshCollection_iface.lpVtbl = &WshCollectionVtbl;
+    object->ref = 1;
 
-    init_classinfo(&IID_IWshCollection, (IUnknown *)&This->IWshCollection_iface, &This->classinfo);
-    *collection = &This->IWshCollection_iface;
+    init_classinfo(&IID_IWshCollection, (IUnknown *)&object->IWshCollection_iface, &object->classinfo);
+    *collection = &object->IWshCollection_iface;
 
     return S_OK;
 }
@@ -763,7 +857,7 @@ static ULONG WINAPI WshShortcut_AddRef(IWshShortcut *iface)
 {
     WshShortcut *This = impl_from_IWshShortcut(iface);
     LONG ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p) ref = %d\n", This, ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
     return ref;
 }
 
@@ -771,13 +865,13 @@ static ULONG WINAPI WshShortcut_Release(IWshShortcut *iface)
 {
     WshShortcut *This = impl_from_IWshShortcut(iface);
     LONG ref = InterlockedDecrement(&This->ref);
-    TRACE("(%p) ref = %d\n", This, ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
 
     if (!ref)
     {
-        SysFreeString(This->path_link);
         IShellLinkW_Release(This->link);
-        heap_free(This);
+        free(This->path_link);
+        free(This);
     }
 
     return ref;
@@ -793,19 +887,18 @@ static HRESULT WINAPI WshShortcut_GetTypeInfoCount(IWshShortcut *iface, UINT *pc
 
 static HRESULT WINAPI WshShortcut_GetTypeInfo(IWshShortcut *iface, UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
-    WshShortcut *This = impl_from_IWshShortcut(iface);
-    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+    TRACE("%p, %u, %lx, %p.\n", iface, iTInfo, lcid, ppTInfo);
+
     return get_typeinfo(IWshShortcut_tid, ppTInfo);
 }
 
 static HRESULT WINAPI WshShortcut_GetIDsOfNames(IWshShortcut *iface, REFIID riid, LPOLESTR *rgszNames,
         UINT cNames, LCID lcid, DISPID *rgDispId)
 {
-    WshShortcut *This = impl_from_IWshShortcut(iface);
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
+    TRACE("%p, %s, %p, %u, %lx, %p.\n", iface, debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
 
     hr = get_typeinfo(IWshShortcut_tid, &typeinfo);
     if(SUCCEEDED(hr))
@@ -820,18 +913,16 @@ static HRESULT WINAPI WshShortcut_GetIDsOfNames(IWshShortcut *iface, REFIID riid
 static HRESULT WINAPI WshShortcut_Invoke(IWshShortcut *iface, DISPID dispIdMember, REFIID riid, LCID lcid,
         WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
-    WshShortcut *This = impl_from_IWshShortcut(iface);
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+    TRACE("%p, %ld, %s, %lx, %d, %p, %p, %p, %p.\n", iface, dispIdMember, debugstr_guid(riid),
           lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo(IWshShortcut_tid, &typeinfo);
     if(SUCCEEDED(hr))
     {
-        hr = ITypeInfo_Invoke(typeinfo, &This->IWshShortcut_iface, dispIdMember, wFlags,
-                pDispParams, pVarResult, pExcepInfo, puArgErr);
+        hr = ITypeInfo_Invoke(typeinfo, iface, dispIdMember, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
         ITypeInfo_Release(typeinfo);
     }
 
@@ -1070,35 +1161,34 @@ static const IWshShortcutVtbl WshShortcutVtbl = {
 
 static HRESULT WshShortcut_Create(const WCHAR *path, IDispatch **shortcut)
 {
-    WshShortcut *This;
+    WshShortcut *object;
     HRESULT hr;
 
     *shortcut = NULL;
 
-    This = heap_alloc(sizeof(*This));
-    if (!This) return E_OUTOFMEMORY;
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
 
-    This->IWshShortcut_iface.lpVtbl = &WshShortcutVtbl;
-    This->ref = 1;
+    object->IWshShortcut_iface.lpVtbl = &WshShortcutVtbl;
+    object->ref = 1;
 
-    hr = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER,
-            &IID_IShellLinkW, (void**)&This->link);
+    hr = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW, (void **)&object->link);
     if (FAILED(hr))
     {
-        heap_free(This);
+        free(object);
         return hr;
     }
 
-    This->path_link = SysAllocString(path);
-    if (!This->path_link)
+    object->path_link = wcsdup(path);
+    if (!object->path_link)
     {
-        IShellLinkW_Release(This->link);
-        heap_free(This);
+        IShellLinkW_Release(object->link);
+        free(object);
         return E_OUTOFMEMORY;
     }
 
-    init_classinfo(&IID_IWshShortcut, (IUnknown *)&This->IWshShortcut_iface, &This->classinfo);
-    *shortcut = (IDispatch*)&This->IWshShortcut_iface;
+    init_classinfo(&IID_IWshShortcut, (IUnknown *)&object->IWshShortcut_iface, &object->classinfo);
+    *shortcut = (IDispatch *)&object->IWshShortcut_iface;
 
     return S_OK;
 }
@@ -1156,7 +1246,8 @@ static HRESULT WINAPI WshShell3_GetTypeInfoCount(IWshShell3 *iface, UINT *pctinf
 
 static HRESULT WINAPI WshShell3_GetTypeInfo(IWshShell3 *iface, UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
-    TRACE("(%u %u %p)\n", iTInfo, lcid, ppTInfo);
+    TRACE("%u, %lx, %p.\n", iTInfo, lcid, ppTInfo);
+
     return get_typeinfo(IWshShell3_tid, ppTInfo);
 }
 
@@ -1166,7 +1257,7 @@ static HRESULT WINAPI WshShell3_GetIDsOfNames(IWshShell3 *iface, REFIID riid, LP
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%s %p %u %u %p)\n", debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
+    TRACE("%s, %p, %u, %lx, %p.\n", debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
 
     hr = get_typeinfo(IWshShell3_tid, &typeinfo);
     if(SUCCEEDED(hr))
@@ -1184,7 +1275,7 @@ static HRESULT WINAPI WshShell3_Invoke(IWshShell3 *iface, DISPID dispIdMember, R
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%d %s %d %d %p %p %p %p)\n", dispIdMember, debugstr_guid(riid),
+    TRACE("%ld, %s, %lx, %d, %p, %p, %p, %p.\n", dispIdMember, debugstr_guid(riid),
           lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo(IWshShell3_tid, &typeinfo);
@@ -1220,7 +1311,7 @@ static WCHAR *split_command( BSTR cmd, WCHAR **params )
     WCHAR *ret, *ptr;
     BOOL in_quotes = FALSE;
 
-    if (!(ret = heap_alloc((lstrlenW(cmd) + 1) * sizeof(WCHAR)))) return NULL;
+    if (!(ret = malloc((lstrlenW(cmd) + 1) * sizeof(WCHAR)))) return NULL;
     lstrcpyW( ret, cmd );
 
     *params = NULL;
@@ -1256,7 +1347,7 @@ static HRESULT WINAPI WshShell3_Run(IWshShell3 *iface, BSTR cmd, VARIANT *style,
     hr = VariantChangeType(&s, style, 0, VT_I4);
     if (FAILED(hr))
     {
-        ERR("failed to convert style argument, 0x%08x\n", hr);
+        ERR("failed to convert style argument, %#lx\n", hr);
         return hr;
     }
 
@@ -1283,10 +1374,10 @@ static HRESULT WINAPI WshShell3_Run(IWshShell3 *iface, BSTR cmd, VARIANT *style,
     info.nShow = V_I4(&s);
 
     ret = ShellExecuteExW(&info);
-    heap_free( file );
+    free(file);
     if (!ret)
     {
-        TRACE("ShellExecute failed, %d\n", GetLastError());
+        TRACE("ShellExecute failed, %ld\n", GetLastError());
         return HRESULT_FROM_WIN32(GetLastError());
     }
     else
@@ -1454,7 +1545,7 @@ static HRESULT split_reg_path(const WCHAR *path, WCHAR **subkey, WCHAR **value)
             unsigned int len = *value - *subkey - 1;
             WCHAR *ret;
 
-            ret = heap_alloc((len + 1)*sizeof(WCHAR));
+            ret = malloc((len + 1)*sizeof(WCHAR));
             if (!ret)
                 return E_OUTOFMEMORY;
 
@@ -1494,7 +1585,7 @@ static HRESULT WINAPI WshShell3_RegRead(IWshShell3 *iface, BSTR name, VARIANT *v
     if (ret == ERROR_SUCCESS) {
         void *data;
 
-        data = heap_alloc(datalen);
+        data = malloc(datalen);
         if (!data) {
             hr = E_OUTOFMEMORY;
             goto fail;
@@ -1502,7 +1593,7 @@ static HRESULT WINAPI WshShell3_RegRead(IWshShell3 *iface, BSTR name, VARIANT *v
 
         ret = RegGetValueW(root, subkey, val, RRF_RT_ANY, &type, data, &datalen);
         if (ret) {
-            heap_free(data);
+            free(data);
             hr = HRESULT_FROM_WIN32(ret);
             goto fail;
         }
@@ -1588,11 +1679,11 @@ static HRESULT WINAPI WshShell3_RegRead(IWshShell3 *iface, BSTR name, VARIANT *v
             break;
         }
         default:
-            FIXME("value type %d not supported\n", type);
+            FIXME("value type %ld not supported\n", type);
             hr = E_FAIL;
         };
 
-        heap_free(data);
+        free(data);
         if (FAILED(hr))
             VariantInit(value);
     }
@@ -1601,7 +1692,7 @@ static HRESULT WINAPI WshShell3_RegRead(IWshShell3 *iface, BSTR name, VARIANT *v
 
 fail:
     if (val)
-        heap_free(subkey);
+        free(subkey);
     return hr;
 }
 
@@ -1664,12 +1755,12 @@ static HRESULT WINAPI WshShell3_RegWrite(IWshShell3 *iface, BSTR name, VARIANT *
         data_len = sizeof(DWORD);
         break;
     default:
-        FIXME("unexpected regtype %d\n", regtype);
+        FIXME("unexpected regtype %ld\n", regtype);
         return E_FAIL;
     };
 
     if (FAILED(hr)) {
-        FIXME("failed to convert value, regtype %d, 0x%08x\n", regtype, hr);
+        FIXME("failed to convert value, regtype %ld, %#lx.\n", regtype, hr);
         return hr;
     }
 
@@ -1684,7 +1775,7 @@ static HRESULT WINAPI WshShell3_RegWrite(IWshShell3 *iface, BSTR name, VARIANT *
 fail:
     VariantClear(&v);
     if (val)
-        heap_free(subkey);
+        free(subkey);
     return hr;
 }
 

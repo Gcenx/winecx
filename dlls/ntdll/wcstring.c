@@ -241,12 +241,24 @@ int __cdecl wcsncmp( LPCWSTR str1, LPCWSTR str2, size_t n )
 /*********************************************************************
  *           wcsncpy    (NTDLL.@)
  */
+#undef wcsncpy
 LPWSTR __cdecl wcsncpy( LPWSTR s1, LPCWSTR s2, size_t n )
 {
     WCHAR *ret = s1;
     for ( ; n; n--) if (!(*s1++ = *s2++)) break;
     for ( ; n; n--) *s1++ = 0;
     return ret;
+}
+
+
+/*********************************************************************
+ *           wcsnlen    (NTDLL.@)
+ */
+size_t __cdecl wcsnlen( const WCHAR *str, size_t len )
+{
+    const WCHAR *s = str;
+    for (s = str; len && *s; s++, len--) ;
+    return s - str;
 }
 
 

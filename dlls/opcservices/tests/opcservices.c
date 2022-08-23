@@ -25,7 +25,6 @@
 #include "msopc.h"
 #include "urlmon.h"
 
-#include "wine/heap.h"
 #include "wine/test.h"
 
 static IOpcFactory *create_factory(void)
@@ -62,7 +61,7 @@ static void test_package(void)
     factory = create_factory();
 
     hr = IOpcFactory_CreatePackage(factory, &package);
-    ok(SUCCEEDED(hr) || broken(hr == E_NOTIMPL) /* Vista */, "Failed to create a package, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr) || broken(hr == E_NOTIMPL) /* Vista */, "Failed to create a package, hr %#lx.\n", hr);
     if (FAILED(hr))
     {
         IOpcFactory_Release(factory);
@@ -70,118 +69,118 @@ static void test_package(void)
     }
 
     hr = IOpcPackage_GetPartSet(package, &partset);
-    ok(SUCCEEDED(hr), "Failed to create a part set, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create a part set, hr %#lx.\n", hr);
 
     hr = IOpcPackage_GetPartSet(package, &partset2);
-    ok(SUCCEEDED(hr), "Failed to create a part set, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create a part set, hr %#lx.\n", hr);
     ok(partset == partset2, "Expected same part set instance.\n");
     IOpcPartSet_Release(partset2);
 
     /* CreatePart */
     hr = IOpcFactory_CreatePartUri(factory, uriW, &part_uri);
-    ok(SUCCEEDED(hr), "Failed to create part uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create part uri, hr %#lx.\n", hr);
 
     hr = IOpcFactory_CreatePartUri(factory, uriW, &part_uri2);
-    ok(SUCCEEDED(hr), "Failed to create part uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create part uri, hr %#lx.\n", hr);
 
     part = (void *)0xdeadbeef;
     hr = IOpcPartSet_CreatePart(partset, NULL, typeW, OPC_COMPRESSION_NONE, &part);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     ok(part == NULL, "Unexpected pointer %p.\n", part);
 
     hr = IOpcPartSet_CreatePart(partset, part_uri, typeW, OPC_COMPRESSION_NONE, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     hr = IOpcPartSet_CreatePart(partset, part_uri, typeW, 0xdeadbeef, &part);
-    ok(SUCCEEDED(hr), "Failed to create a part, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create a part, hr %#lx.\n", hr);
     hr = IOpcPart_GetCompressionOptions(part, &options);
-    ok(SUCCEEDED(hr), "Failed to get compression options, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get compression options, hr %#lx.\n", hr);
     ok(options == 0xdeadbeef, "Unexpected compression options %#x.\n", options);
 
     part2 = (void *)0xdeadbeef;
     hr = IOpcPartSet_CreatePart(partset, part_uri, typeW, OPC_COMPRESSION_NONE, &part2);
-    ok(hr == OPC_E_DUPLICATE_PART, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_DUPLICATE_PART, "Unexpected hr %#lx.\n", hr);
     ok(part2 == NULL, "Unexpected instance %p.\n", part2);
 
     part2 = (void *)0xdeadbeef;
     hr = IOpcPartSet_CreatePart(partset, part_uri2, typeW, OPC_COMPRESSION_NONE, &part2);
-    ok(hr == OPC_E_DUPLICATE_PART, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_DUPLICATE_PART, "Unexpected hr %#lx.\n", hr);
     ok(part2 == NULL, "Unexpected instance %p.\n", part2);
     IOpcPartUri_Release(part_uri2);
 
     hr = IOpcPartSet_GetPart(partset, NULL, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     part2 = (void *)0xdeadbeef;
     hr = IOpcPartSet_GetPart(partset, NULL, &part2);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     ok(part2 == NULL, "Unexpected pointer %p.\n", part2);
 
     hr = IOpcPartSet_GetPart(partset, part_uri, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     hr = IOpcPartSet_GetPart(partset, part_uri, &part2);
-    ok(SUCCEEDED(hr), "Failed to get part, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get part, hr %#lx.\n", hr);
     IOpcPart_Release(part2);
 
     hr = IOpcFactory_CreatePartUri(factory, targetW, &part_uri2);
-    ok(SUCCEEDED(hr), "Failed to create part uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create part uri, hr %#lx.\n", hr);
 
     hr = IOpcPartSet_GetPart(partset, part_uri2, &part2);
-    ok(hr == OPC_E_NO_SUCH_PART, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_NO_SUCH_PART, "Unexpected hr %#lx.\n", hr);
     IOpcPartUri_Release(part_uri2);
 
     hr = IOpcPart_GetContentStream(part, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     hr = IOpcPart_GetContentStream(part, &stream);
-    ok(SUCCEEDED(hr), "Failed to get content stream, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get content stream, hr %#lx.\n", hr);
 
     hr = IStream_Write(stream, "abc", 3, NULL);
-    ok(hr == S_OK, "Failed to write content, hr %#x.\n", hr);
+    ok(hr == S_OK, "Failed to write content, hr %#lx.\n", hr);
 
     move.QuadPart = 0;
     hr = IStream_Seek(stream, move, STREAM_SEEK_CUR, &pos);
-    ok(SUCCEEDED(hr), "Seek failed, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Seek failed, hr %#lx.\n", hr);
     ok(pos.QuadPart == 3, "Unexpected position.\n");
 
     hr = IOpcPart_GetContentStream(part, &stream2);
-    ok(SUCCEEDED(hr), "Failed to get content stream, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get content stream, hr %#lx.\n", hr);
     ok(stream != stream2, "Unexpected instance.\n");
 
     move.QuadPart = 0;
     hr = IStream_Seek(stream2, move, STREAM_SEEK_CUR, &pos);
-    ok(SUCCEEDED(hr), "Seek failed, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Seek failed, hr %#lx.\n", hr);
     ok(pos.QuadPart == 0, "Unexpected position.\n");
 
     memset(buff, 0, sizeof(buff));
     hr = IStream_Read(stream2, buff, sizeof(buff), NULL);
-    ok(hr == S_OK, "Failed to read content, hr %#x.\n", hr);
+    ok(hr == S_OK, "Failed to read content, hr %#lx.\n", hr);
     ok(!memcmp(buff, "abc", 3), "Unexpected content.\n");
 
     move.QuadPart = 0;
     hr = IStream_Seek(stream2, move, STREAM_SEEK_CUR, &pos);
-    ok(SUCCEEDED(hr), "Seek failed, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Seek failed, hr %#lx.\n", hr);
     ok(pos.QuadPart == 3, "Unexpected position.\n");
 
     IStream_Release(stream);
     IStream_Release(stream2);
 
     hr = IOpcPart_GetRelationshipSet(part, &relset);
-    ok(SUCCEEDED(hr), "Failed to get relationship set, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get relationship set, hr %#lx.\n", hr);
 
     hr = IOpcPart_GetRelationshipSet(part, &relset2);
-    ok(SUCCEEDED(hr), "Failed to get relationship set, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get relationship set, hr %#lx.\n", hr);
     ok(relset == relset2, "Expected same part set instance.\n");
 
     hr = CreateUri(targetW, Uri_CREATE_ALLOW_RELATIVE, 0, &target_uri);
-    ok(SUCCEEDED(hr), "Failed to create target uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create target uri, hr %#lx.\n", hr);
 
     hr = IOpcRelationshipSet_CreateRelationship(relset, NULL, typeW, target_uri, OPC_URI_TARGET_MODE_INTERNAL, &rel);
-    ok(SUCCEEDED(hr), "Failed to create relationship, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create relationship, hr %#lx.\n", hr);
 
     hr = IOpcRelationship_GetSourceUri(rel, &uri);
-    ok(SUCCEEDED(hr), "Failed to get source uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get source uri, hr %#lx.\n", hr);
     ok(uri == (IOpcUri *)part_uri, "Unexpected source uri.\n");
 
     IOpcUri_Release(uri);
@@ -194,15 +193,15 @@ static void test_package(void)
 
     ret = 123;
     hr = IOpcPartSet_PartExists(partset, NULL, &ret);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     ok(ret == 123, "Unexpected return value.\n");
 
     hr = IOpcPartSet_PartExists(partset, part_uri, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     ret = FALSE;
     hr = IOpcPartSet_PartExists(partset, part_uri, &ret);
-    ok(SUCCEEDED(hr), "Unexpected hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Unexpected hr %#lx.\n", hr);
     ok(ret, "Expected part to exist.\n");
 
     IOpcPartUri_Release(part_uri);
@@ -210,10 +209,10 @@ static void test_package(void)
 
     /* Relationships */
     hr = IOpcPackage_GetRelationshipSet(package, &relset);
-    ok(SUCCEEDED(hr), "Failed to get relationship set, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get relationship set, hr %#lx.\n", hr);
 
     hr = IOpcPackage_GetRelationshipSet(package, &relset2);
-    ok(SUCCEEDED(hr), "Failed to get relationship set, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get relationship set, hr %#lx.\n", hr);
     ok(relset == relset2, "Expected same part set instance.\n");
     IOpcRelationshipSet_Release(relset);
     IOpcRelationshipSet_Release(relset2);
@@ -223,11 +222,11 @@ static void test_package(void)
 
     /* Root uri */
     hr = IOpcFactory_CreatePackageRootUri(factory, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     hr = IOpcFactory_CreatePackageRootUri(factory, &uri);
-    ok(SUCCEEDED(hr), "Failed to create root uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create root uri, hr %#lx.\n", hr);
     hr = IOpcUri_GetRawUri(uri, &str);
-    ok(SUCCEEDED(hr), "Failed to get raw uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get raw uri, hr %#lx.\n", hr);
     ok(!lstrcmpW(str, rootW), "Unexpected uri %s.\n", wine_dbgstr_w(str));
     SysFreeString(str);
     IOpcUri_Release(uri);
@@ -242,15 +241,15 @@ static void test_stream_stat_(unsigned int line, IStream *stream, ULONG size)
     HRESULT hr;
 
     hr = IStream_Stat(stream, NULL, 0);
-    ok_(__FILE__, line)(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok_(__FILE__, line)(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     memset(&statstg, 0xff, sizeof(statstg));
     hr = IStream_Stat(stream, &statstg, 0);
-    ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to get stat info, hr %#x.\n", hr);
+    ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to get stat info, hr %#lx.\n", hr);
 
     ok_(__FILE__, line)(statstg.pwcsName == NULL, "Unexpected name %s.\n", wine_dbgstr_w(statstg.pwcsName));
     ok_(__FILE__, line)(statstg.type == STGTY_STREAM, "Unexpected type.\n");
-    ok_(__FILE__, line)(statstg.cbSize.QuadPart == size, "Unexpected size %u, expected %u.\n",
+    ok_(__FILE__, line)(statstg.cbSize.QuadPart == size, "Unexpected size %lu, expected %lu.\n",
             statstg.cbSize.LowPart, size);
     ok_(__FILE__, line)(statstg.grfMode == STGM_READ, "Unexpected mode.\n");
     ok_(__FILE__, line)(statstg.grfLocksSupported == 0, "Unexpected lock mode.\n");
@@ -271,7 +270,7 @@ static void test_file_stream(void)
     factory = create_factory();
 
     hr = IOpcFactory_CreateStreamOnFile(factory, NULL, OPC_STREAM_IO_READ, NULL, 0, &stream);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     GetTempPathW(ARRAY_SIZE(temppathW), temppathW);
     lstrcpyW(pathW, temppathW);
@@ -279,52 +278,52 @@ static void test_file_stream(void)
     DeleteFileW(pathW);
 
     hr = IOpcFactory_CreateStreamOnFile(factory, pathW, OPC_STREAM_IO_READ, NULL, 0, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     /* File does not exist */
     hr = IOpcFactory_CreateStreamOnFile(factory, pathW, OPC_STREAM_IO_READ, NULL, 0, &stream);
-    ok(FAILED(hr), "Unexpected hr %#x.\n", hr);
+    ok(FAILED(hr), "Unexpected hr %#lx.\n", hr);
 
     hr = IOpcFactory_CreateStreamOnFile(factory, pathW, OPC_STREAM_IO_WRITE, NULL, 0, &stream);
-    ok(SUCCEEDED(hr), "Failed to create a write stream, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create a write stream, hr %#lx.\n", hr);
 
     test_stream_stat(stream, 0);
 
     size = lstrlenW(pathW) * sizeof(WCHAR);
     hr = IStream_Write(stream, pathW, size, NULL);
-    ok(hr == S_OK, "Stream write failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Stream write failed, hr %#lx.\n", hr);
 
     test_stream_stat(stream, size);
     IStream_Release(stream);
 
     /* Invalid I/O mode */
     hr = IOpcFactory_CreateStreamOnFile(factory, pathW, 10, NULL, 0, &stream);
-    ok(hr == E_INVALIDARG, "Failed to create a write stream, hr %#x.\n", hr);
+    ok(hr == E_INVALIDARG, "Failed to create a write stream, hr %#lx.\n", hr);
 
     /* Write to read-only stream. */
     hr = IOpcFactory_CreateStreamOnFile(factory, pathW, OPC_STREAM_IO_READ, NULL, 0, &stream);
-    ok(SUCCEEDED(hr), "Failed to create a read stream, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create a read stream, hr %#lx.\n", hr);
 
     test_stream_stat(stream, size);
     hr = IStream_Write(stream, pathW, size, NULL);
-    ok(hr == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED), "Stream write failed, hr %#x.\n", hr);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED), "Stream write failed, hr %#lx.\n", hr);
     IStream_Release(stream);
 
     /* Read from write-only stream. */
     hr = IOpcFactory_CreateStreamOnFile(factory, pathW, OPC_STREAM_IO_WRITE, NULL, 0, &stream);
-    ok(SUCCEEDED(hr), "Failed to create a read stream, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create a read stream, hr %#lx.\n", hr);
 
     test_stream_stat(stream, 0);
     hr = IStream_Write(stream, pathW, size, NULL);
-    ok(hr == S_OK, "Stream write failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Stream write failed, hr %#lx.\n", hr);
     test_stream_stat(stream, size);
 
     move.QuadPart = 0;
     hr = IStream_Seek(stream, move, STREAM_SEEK_SET, NULL);
-    ok(SUCCEEDED(hr), "Seek failed, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Seek failed, hr %#lx.\n", hr);
 
     hr = IStream_Read(stream, buff, sizeof(buff), NULL);
-    ok(hr == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED), "Stream read failed, hr %#x.\n", hr);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED), "Stream read failed, hr %#lx.\n", hr);
 
     IStream_Release(stream);
 
@@ -342,10 +341,10 @@ static void test_relationship(void)
     IOpcRelationship *rel, *rel2, *rel3;
     IOpcUri *source_uri, *source_uri2;
     IOpcRelationshipSet *rels;
+    OPC_URI_TARGET_MODE mode;
     IOpcFactory *factory;
     IOpcPackage *package;
     IUnknown *unk;
-    DWORD mode;
     HRESULT hr;
     WCHAR *id;
     BOOL ret;
@@ -354,7 +353,7 @@ static void test_relationship(void)
     factory = create_factory();
 
     hr = IOpcFactory_CreatePackage(factory, &package);
-    ok(SUCCEEDED(hr) || broken(hr == E_NOTIMPL) /* Vista */, "Failed to create a package, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr) || broken(hr == E_NOTIMPL) /* Vista */, "Failed to create a package, hr %#lx.\n", hr);
     if (FAILED(hr))
     {
         IOpcFactory_Release(factory);
@@ -362,122 +361,122 @@ static void test_relationship(void)
     }
 
     hr = CreateUri(targetW, Uri_CREATE_ALLOW_RELATIVE, 0, &target_uri);
-    ok(SUCCEEDED(hr), "Failed to create target uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create target uri, hr %#lx.\n", hr);
 
     hr = CreateUri(absoluteW, 0, 0, &target_uri2);
-    ok(SUCCEEDED(hr), "Failed to create target uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create target uri, hr %#lx.\n", hr);
 
     hr = IOpcPackage_GetRelationshipSet(package, &rels);
-    ok(SUCCEEDED(hr), "Failed to get part set, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get part set, hr %#lx.\n", hr);
 
     rel = (void *)0xdeadbeef;
     hr = IOpcRelationshipSet_CreateRelationship(rels, NULL, NULL, NULL, OPC_URI_TARGET_MODE_INTERNAL, &rel);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     ok(rel == NULL, "Unexpected instance %p.\n", rel);
 
     rel = (void *)0xdeadbeef;
     hr = IOpcRelationshipSet_CreateRelationship(rels, NULL, typeW, NULL, OPC_URI_TARGET_MODE_INTERNAL, &rel);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     ok(rel == NULL, "Unexpected instance %p.\n", rel);
 
     hr = IOpcRelationshipSet_CreateRelationship(rels, NULL, NULL, target_uri, OPC_URI_TARGET_MODE_INTERNAL, &rel);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     /* Absolute target uri with internal mode */
     rel = (void *)0xdeadbeef;
     hr = IOpcRelationshipSet_CreateRelationship(rels, NULL, typeW, target_uri2, OPC_URI_TARGET_MODE_INTERNAL, &rel);
-    ok(hr == OPC_E_INVALID_RELATIONSHIP_TARGET, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_INVALID_RELATIONSHIP_TARGET, "Unexpected hr %#lx.\n", hr);
     ok(rel == NULL, "Unexpected instance %p.\n", rel);
 
     hr = IOpcRelationshipSet_CreateRelationship(rels, NULL, typeW, target_uri, OPC_URI_TARGET_MODE_INTERNAL, &rel);
-    ok(SUCCEEDED(hr), "Failed to create relationship, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create relationship, hr %#lx.\n", hr);
 
     /* Autogenerated relationship id */
     hr = IOpcRelationship_GetId(rel, &id);
-    ok(SUCCEEDED(hr), "Failed to get id, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get id, hr %#lx.\n", hr);
     ok(lstrlenW(id) == 9 && *id == 'R', "Unexpected relationship id %s.\n", wine_dbgstr_w(id));
 
     hr = IOpcRelationshipSet_CreateRelationship(rels, id, typeW, target_uri, OPC_URI_TARGET_MODE_INTERNAL, &rel2);
-    ok(hr == OPC_E_DUPLICATE_RELATIONSHIP, "Failed to create relationship, hr %#x.\n", hr);
+    ok(hr == OPC_E_DUPLICATE_RELATIONSHIP, "Failed to create relationship, hr %#lx.\n", hr);
 
     hr = IOpcRelationshipSet_CreateRelationship(rels, id, typeW, target_uri2, OPC_URI_TARGET_MODE_INTERNAL, &rel2);
-    ok(hr == OPC_E_DUPLICATE_RELATIONSHIP, "Failed to create relationship, hr %#x.\n", hr);
+    ok(hr == OPC_E_DUPLICATE_RELATIONSHIP, "Failed to create relationship, hr %#lx.\n", hr);
 
     hr = IOpcRelationshipSet_CreateRelationship(rels, NULL, typeW, target_uri, OPC_URI_TARGET_MODE_INTERNAL, &rel2);
-    ok(SUCCEEDED(hr), "Failed to create relationship, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create relationship, hr %#lx.\n", hr);
 
     ret = 123;
     hr = IOpcRelationshipSet_RelationshipExists(rels, NULL, &ret);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     ok(ret == 123, "Unexpected result %d.\n", ret);
 
     hr = IOpcRelationshipSet_RelationshipExists(rels, id, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     ret = FALSE;
     hr = IOpcRelationshipSet_RelationshipExists(rels, id, &ret);
-    ok(SUCCEEDED(hr), "Failed to get relationship, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get relationship, hr %#lx.\n", hr);
     ok(ret, "Unexpected result %d.\n", ret);
 
     hr = IOpcRelationshipSet_GetRelationship(rels, id, &rel3);
-    ok(SUCCEEDED(hr), "Failed to get relationship, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get relationship, hr %#lx.\n", hr);
     IOpcRelationship_Release(rel3);
 
     hr = IOpcRelationshipSet_GetRelationship(rels, id, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     rel3 = (void *)0xdeadbeef;
     hr = IOpcRelationshipSet_GetRelationship(rels, NULL, &rel3);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     ok(rel3 == NULL, "Expected null pointer.\n");
 
     *id = 'r';
     rel3 = (void *)0xdeadbeef;
     hr = IOpcRelationshipSet_GetRelationship(rels, id, &rel3);
-    ok(hr == OPC_E_NO_SUCH_RELATIONSHIP, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_NO_SUCH_RELATIONSHIP, "Unexpected hr %#lx.\n", hr);
     ok(rel3 == NULL, "Expected null pointer.\n");
 
     ret = TRUE;
     hr = IOpcRelationshipSet_RelationshipExists(rels, id, &ret);
-    ok(SUCCEEDED(hr), "Unexpected hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Unexpected hr %#lx.\n", hr);
     ok(!ret, "Unexpected result %d.\n", ret);
 
     CoTaskMemFree(id);
 
     hr = IOpcRelationship_GetTargetUri(rel, &uri);
-    ok(SUCCEEDED(hr), "Failed to get target uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get target uri, hr %#lx.\n", hr);
     ok(uri == target_uri, "Unexpected uri.\n");
     IUri_Release(uri);
 
     hr = IOpcRelationship_GetTargetMode(rel, &mode);
-    ok(SUCCEEDED(hr), "Failed to get target mode, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get target mode, hr %#lx.\n", hr);
     ok(mode == OPC_URI_TARGET_MODE_INTERNAL, "Unexpected mode %d.\n", mode);
 
     /* Source uri */
     hr = IOpcFactory_CreatePackageRootUri(factory, &source_uri);
-    ok(SUCCEEDED(hr), "Failed to create root uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create root uri, hr %#lx.\n", hr);
 
     hr = IOpcFactory_CreatePackageRootUri(factory, &source_uri2);
-    ok(SUCCEEDED(hr), "Failed to create root uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create root uri, hr %#lx.\n", hr);
     ok(source_uri != source_uri2, "Unexpected uri instance.\n");
 
     IOpcUri_Release(source_uri);
     IOpcUri_Release(source_uri2);
 
     hr = IOpcRelationship_GetSourceUri(rel, &source_uri);
-    ok(SUCCEEDED(hr), "Failed to get source uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get source uri, hr %#lx.\n", hr);
 
     hr = IOpcUri_QueryInterface(source_uri, &IID_IOpcPartUri, (void **)&unk);
-    ok(hr == E_NOINTERFACE, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_NOINTERFACE, "Unexpected hr %#lx.\n", hr);
 
     str = NULL;
     hr = IOpcUri_GetRawUri(source_uri, &str);
-    ok(SUCCEEDED(hr), "Failed to get raw uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get raw uri, hr %#lx.\n", hr);
     ok(!lstrcmpW(rootW, str), "Unexpected uri %s.\n", wine_dbgstr_w(str));
     SysFreeString(str);
 
     hr = IOpcRelationship_GetSourceUri(rel2, &source_uri2);
-    ok(SUCCEEDED(hr), "Failed to get source uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get source uri, hr %#lx.\n", hr);
     ok(source_uri2 == source_uri, "Unexpected source uri.\n");
 
     IOpcUri_Release(source_uri2);
@@ -494,80 +493,66 @@ static void test_relationship(void)
     IOpcFactory_Release(factory);
 }
 
-static WCHAR *strdupAtoW(const char *str)
-{
-    WCHAR *ret = NULL;
-    DWORD len;
-
-    if (!str) return ret;
-    len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
-    ret = heap_alloc(len * sizeof(WCHAR));
-    if (ret)
-        MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
-    return ret;
-}
-
 static void test_rel_part_uri(void)
 {
     static const struct
     {
-        const char *uri;
-        const char *rel_uri;
+        const WCHAR *uri;
+        const WCHAR *rel_uri;
         HRESULT hr;
     } rel_part_uri_tests[] =
     {
-        { "/uri", "/_rels/uri.rels" },
-        { "/path/uri", "/path/_rels/uri.rels" },
-        { "path/uri", "/path/_rels/uri.rels" },
-        { "../path/uri", "/path/_rels/uri.rels" },
-        { "../../path/uri", "/path/_rels/uri.rels" },
-        { "/uri.ext", "/_rels/uri.ext.rels" },
-        { "/", "/_rels/.rels" },
-        { "uri", "/_rels/uri.rels" },
-        { "/path/../uri", "/_rels/uri.rels" },
-        { "/path/path/../../uri", "/_rels/uri.rels" },
-        { "/_rels/uri.ext.rels", "", OPC_E_NONCONFORMING_URI },
+        { L"/uri", L"/_rels/uri.rels" },
+        { L"/path/uri", L"/path/_rels/uri.rels" },
+        { L"path/uri", L"/path/_rels/uri.rels" },
+        { L"../path/uri", L"/path/_rels/uri.rels" },
+        { L"../../path/uri", L"/path/_rels/uri.rels" },
+        { L"/uri.ext", L"/_rels/uri.ext.rels" },
+        { L"/", L"/_rels/.rels" },
+        { L"uri", L"/_rels/uri.rels" },
+        { L"/path/../uri", L"/_rels/uri.rels" },
+        { L"/path/path/../../uri", L"/_rels/uri.rels" },
+        { L"/_rels/uri.ext.rels", L"", OPC_E_NONCONFORMING_URI },
     };
     static const struct
     {
-        const char *uri;
+        const WCHAR *uri;
         BOOL ret;
     } is_rel_part_tests[] =
     {
-        { "/uri", FALSE },
-        { "uri", FALSE },
-        { "/_rels/uri", FALSE },
-        { "/_rels/uri/uri", FALSE },
-        { "/_rels/uri/uri.rels", FALSE },
-        { "/uri/uri.rels", FALSE },
-        { "/uri/_rels/uri.rels", TRUE },
-        { "/_rels/.rels", TRUE },
+        { L"/uri", FALSE },
+        { L"uri", FALSE },
+        { L"/_rels/uri", FALSE },
+        { L"/_rels/uri/uri", FALSE },
+        { L"/_rels/uri/uri.rels", FALSE },
+        { L"/uri/uri.rels", FALSE },
+        { L"/uri/_rels/uri.rels", TRUE },
+        { L"/_rels/.rels", TRUE },
     };
     static const WCHAR testuriW[] = {'/','u','r','i',0};
     IOpcPartUri *part_uri;
     IOpcFactory *factory;
     IOpcUri *source_uri;
     unsigned int i;
-    WCHAR *uriW;
     HRESULT hr;
 
     factory = create_factory();
 
     hr = IOpcFactory_CreatePartUri(factory, testuriW, &part_uri);
-    ok(SUCCEEDED(hr), "Failed to create part uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create part uri, hr %#lx.\n", hr);
 
     hr = IOpcPartUri_GetRelationshipsPartUri(part_uri, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     hr = IOpcPartUri_IsRelationshipsPartUri(part_uri, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     hr = IOpcPartUri_GetSourceUri(part_uri, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     source_uri = (void *)0xdeadbeef;
     hr = IOpcPartUri_GetSourceUri(part_uri, &source_uri);
-    ok(hr == OPC_E_RELATIONSHIP_URI_REQUIRED, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_RELATIONSHIP_URI_REQUIRED, "Unexpected hr %#lx.\n", hr);
     ok(source_uri == NULL, "Expected null uri.\n");
 
     IOpcPartUri_Release(part_uri);
@@ -577,19 +562,15 @@ static void test_rel_part_uri(void)
         BOOL is_root = FALSE;
         IOpcPartUri *rel_uri;
         IOpcUri *part_uri;
-        WCHAR *rel_uriW;
 
-        uriW = strdupAtoW(rel_part_uri_tests[i].uri);
-        rel_uriW = strdupAtoW(rel_part_uri_tests[i].rel_uri);
-
-        if (!strcmp(rel_part_uri_tests[i].uri, "/"))
+        if (!wcscmp(rel_part_uri_tests[i].uri, L"/"))
         {
             hr = IOpcFactory_CreatePackageRootUri(factory, &part_uri);
             is_root = TRUE;
         }
         else
-            hr = IOpcFactory_CreatePartUri(factory, uriW, (IOpcPartUri **)&part_uri);
-        ok(SUCCEEDED(hr), "Failed to create part uri, hr %#x.\n", hr);
+            hr = IOpcFactory_CreatePartUri(factory, rel_part_uri_tests[i].uri, (IOpcPartUri **)&part_uri);
+        ok(SUCCEEDED(hr), "Failed to create part uri, hr %#lx.\n", hr);
 
         rel_uri = (void *)0xdeadbeef;
         hr = IOpcUri_GetRelationshipsPartUri(part_uri, &rel_uri);
@@ -602,26 +583,26 @@ static void test_rel_part_uri(void)
             BSTR str;
 
             hr = IOpcPartUri_GetSourceUri(rel_uri, &source_uri);
-            ok(SUCCEEDED(hr), "Failed to get source uri, hr %#x.\n", hr);
+            ok(SUCCEEDED(hr), "Failed to get source uri, hr %#lx.\n", hr);
             hr = IOpcPartUri_GetSourceUri(rel_uri, &source_uri2);
-            ok(SUCCEEDED(hr), "Failed to get source uri, hr %#x.\n", hr);
+            ok(SUCCEEDED(hr), "Failed to get source uri, hr %#lx.\n", hr);
             ok(source_uri != source_uri2, "Unexpected instance.\n");
 
             hr = IOpcUri_IsEqual(source_uri, NULL, NULL);
-            ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+            ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
             ret = 123;
             hr = IOpcUri_IsEqual(source_uri, NULL, &ret);
-            ok(is_root ? hr == E_POINTER : hr == S_OK, "Unexpected hr %#x.\n", hr);
+            ok(is_root ? hr == E_POINTER : hr == S_OK, "Unexpected hr %#lx.\n", hr);
             ok(is_root ? ret == 123 : !ret, "Unexpected result.\n");
 
             ret = FALSE;
             hr = IOpcUri_IsEqual(source_uri, (IUri *)source_uri2, &ret);
-            ok(SUCCEEDED(hr), "IsEqual failed, hr %#x.\n", hr);
+            ok(SUCCEEDED(hr), "IsEqual failed, hr %#lx.\n", hr);
             ok(ret, "Expected equal uris.\n");
 
             hr = IOpcUri_QueryInterface(source_uri, &IID_IOpcPartUri, (void **)&unk);
-            ok(hr == (is_root ? E_NOINTERFACE : S_OK), "Unexpected hr %#x, %s.\n", hr, rel_part_uri_tests[i].uri);
+            ok(hr == (is_root ? E_NOINTERFACE : S_OK), "Unexpected hr %#lx, %s.\n", hr, wine_dbgstr_w(rel_part_uri_tests[i].uri));
             if (unk)
                 IUnknown_Release(unk);
 
@@ -629,27 +610,24 @@ static void test_rel_part_uri(void)
             IOpcUri_Release(source_uri);
 
             hr = IOpcUri_GetRelationshipsPartUri(part_uri, &rel_uri2);
-            ok(SUCCEEDED(hr), "Failed to get rels part uri, hr %#x.\n", hr);
+            ok(SUCCEEDED(hr), "Failed to get rels part uri, hr %#lx.\n", hr);
             ok(rel_uri2 != rel_uri, "Unexpected instance.\n");
             IOpcPartUri_Release(rel_uri2);
 
             hr = IOpcPartUri_GetRawUri(rel_uri, &str);
-            ok(SUCCEEDED(hr), "Failed to get rel uri, hr %#x.\n", hr);
-        todo_wine_if(i == 3 || i == 4 || i == 8 || i == 9)
-            ok(!lstrcmpW(str, rel_uriW), "%u: unexpected rel uri %s, expected %s.\n", i, wine_dbgstr_w(str),
-                    wine_dbgstr_w(rel_uriW));
+            ok(SUCCEEDED(hr), "Failed to get rel uri, hr %#lx.\n", hr);
+            todo_wine_if(i == 3 || i == 4 || i == 8 || i == 9)
+            ok(!lstrcmpW(str, rel_part_uri_tests[i].rel_uri), "%u: unexpected rel uri %s, expected %s.\n",
+                    i, wine_dbgstr_w(str), wine_dbgstr_w(rel_part_uri_tests[i].rel_uri));
             SysFreeString(str);
 
             IOpcPartUri_Release(rel_uri);
         }
         else
         {
-            ok(hr == rel_part_uri_tests[i].hr, "%u: unexpected hr %#x.\n", i, hr);
+            ok(hr == rel_part_uri_tests[i].hr, "%u: unexpected hr %#lx.\n", i, hr);
             ok(rel_uri == NULL, "%u: unexpected out pointer.\n", i);
         }
-
-        heap_free(uriW);
-        heap_free(rel_uriW);
 
         IOpcUri_Release(part_uri);
     }
@@ -659,17 +637,13 @@ static void test_rel_part_uri(void)
         IOpcPartUri *part_uri;
         BOOL ret;
 
-        uriW = strdupAtoW(is_rel_part_tests[i].uri);
-
-        hr = IOpcFactory_CreatePartUri(factory, uriW, &part_uri);
-        ok(SUCCEEDED(hr), "Failed to create part uri, hr %#x.\n", hr);
+        hr = IOpcFactory_CreatePartUri(factory, is_rel_part_tests[i].uri, &part_uri);
+        ok(SUCCEEDED(hr), "Failed to create part uri, hr %#lx.\n", hr);
 
         ret = 123;
         hr = IOpcPartUri_IsRelationshipsPartUri(part_uri, &ret);
-        ok(SUCCEEDED(hr), "Unexpected hr %#x.\n", hr);
+        ok(SUCCEEDED(hr), "Unexpected hr %#lx.\n", hr);
         ok(ret == is_rel_part_tests[i].ret, "%u: unexpected result %d.\n", i, ret);
-
-        heap_free(uriW);
 
         IOpcPartUri_Release(part_uri);
     }
@@ -693,7 +667,7 @@ static void test_part_enumerator(void)
     factory = create_factory();
 
     hr = IOpcFactory_CreatePackage(factory, &package);
-    ok(SUCCEEDED(hr) || broken(hr == E_NOTIMPL) /* Vista */, "Failed to create a package, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr) || broken(hr == E_NOTIMPL) /* Vista */, "Failed to create a package, hr %#lx.\n", hr);
     if (FAILED(hr))
     {
         IOpcFactory_Release(factory);
@@ -701,131 +675,131 @@ static void test_part_enumerator(void)
     }
 
     hr = IOpcPackage_GetPartSet(package, &parts);
-    ok(SUCCEEDED(hr), "Failed to get part set, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get part set, hr %#lx.\n", hr);
 
     hr = IOpcPartSet_GetEnumerator(parts, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     hr = IOpcPartSet_GetEnumerator(parts, &partenum);
-    ok(SUCCEEDED(hr), "Failed to get enumerator, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get enumerator, hr %#lx.\n", hr);
 
     hr = IOpcPartSet_GetEnumerator(parts, &partenum2);
-    ok(SUCCEEDED(hr), "Failed to get enumerator, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get enumerator, hr %#lx.\n", hr);
     ok(partenum != partenum2, "Unexpected instance.\n");
     IOpcPartEnumerator_Release(partenum2);
 
     hr = IOpcPartEnumerator_GetCurrent(partenum, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     hr = IOpcPartEnumerator_GetCurrent(partenum, &part);
-    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#lx.\n", hr);
 
     hr = IOpcPartEnumerator_MoveNext(partenum, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     ret = TRUE;
     hr = IOpcPartEnumerator_MoveNext(partenum, &ret);
-    ok(hr == S_OK, "Failed to move, hr %#x.\n", hr);
+    ok(hr == S_OK, "Failed to move, hr %#lx.\n", hr);
     ok(!ret, "Unexpected result %d.\n", ret);
 
     ret = TRUE;
     hr = IOpcPartEnumerator_MovePrevious(partenum, &ret);
-    ok(hr == S_OK, "Failed to move, hr %#x.\n", hr);
+    ok(hr == S_OK, "Failed to move, hr %#lx.\n", hr);
     ok(!ret, "Unexpected result %d.\n", ret);
 
     hr = IOpcFactory_CreatePartUri(factory, uriW, &part_uri);
-    ok(SUCCEEDED(hr), "Failed to create part uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create part uri, hr %#lx.\n", hr);
 
     hr = IOpcPartSet_CreatePart(parts, part_uri, typeW, OPC_COMPRESSION_NONE, &part);
-    ok(SUCCEEDED(hr), "Failed to create a part, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create a part, hr %#lx.\n", hr);
     IOpcPartUri_Release(part_uri);
 
     part2 = (void *)0xdeadbeef;
     hr = IOpcPartEnumerator_GetCurrent(partenum, &part2);
-    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#lx.\n", hr);
     ok(part2 == NULL, "Unexpected instance.\n");
 
     hr = IOpcPartEnumerator_MoveNext(partenum, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     ret = 123;
     hr = IOpcPartEnumerator_MoveNext(partenum, &ret);
-    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#lx.\n", hr);
     ok(ret == 123, "Unexpected result %d.\n", ret);
 
     hr = IOpcPartEnumerator_MovePrevious(partenum, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     ret = 123;
     hr = IOpcPartEnumerator_MovePrevious(partenum, &ret);
-    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#lx.\n", hr);
     ok(ret == 123, "Unexpected result %d.\n", ret);
 
     hr = IOpcPartEnumerator_Clone(partenum, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     partenum2 = (void *)0xdeadbeef;
     hr = IOpcPartEnumerator_Clone(partenum, &partenum2);
-    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#lx.\n", hr);
     ok(partenum2 == NULL, "Unexpected instance.\n");
 
     IOpcPartEnumerator_Release(partenum);
 
     hr = IOpcPartSet_GetEnumerator(parts, &partenum);
-    ok(SUCCEEDED(hr), "Failed to get enumerator, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get enumerator, hr %#lx.\n", hr);
 
     part2 = (void *)0xdeadbeef;
     hr = IOpcPartEnumerator_GetCurrent(partenum, &part2);
-    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#lx.\n", hr);
     ok(part2 == NULL, "Unexpected instance.\n");
 
     hr = IOpcPartEnumerator_MoveNext(partenum, &ret);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(ret, "Unexpected result %d.\n", ret);
 
     hr = IOpcPartEnumerator_GetCurrent(partenum, &part2);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(part2 == part, "Unexpected instance.\n");
     IOpcPart_Release(part2);
 
     hr = IOpcPartEnumerator_MoveNext(partenum, &ret);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(!ret, "Unexpected result %d.\n", ret);
 
     part2 = (void *)0xdeadbeef;
     hr = IOpcPartEnumerator_GetCurrent(partenum, &part2);
-    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#lx.\n", hr);
     ok(part2 == NULL, "Unexpected instance.\n");
 
     hr = IOpcPartEnumerator_MovePrevious(partenum, &ret);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(ret, "Unexpected result %d.\n", ret);
 
     hr = IOpcPartEnumerator_GetCurrent(partenum, &part2);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(part2 == part, "Unexpected instance.\n");
     IOpcPart_Release(part2);
 
     hr = IOpcPartEnumerator_MovePrevious(partenum, &ret);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(!ret, "Unexpected result %d.\n", ret);
 
     hr = IOpcPartEnumerator_GetCurrent(partenum, &part2);
-    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#lx.\n", hr);
 
     hr = IOpcPartEnumerator_Clone(partenum, &partenum2);
-    ok(SUCCEEDED(hr), "Clone failed, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Clone failed, hr %#lx.\n", hr);
 
     hr = IOpcPartEnumerator_MoveNext(partenum2, &ret);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(ret, "Unexpected result %d.\n", ret);
 
     hr = IOpcPartEnumerator_GetCurrent(partenum2, &part2);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     IOpcPart_Release(part2);
 
     hr = IOpcPartEnumerator_GetCurrent(partenum, &part2);
-    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#lx.\n", hr);
 
     IOpcPartEnumerator_Release(partenum2);
 
@@ -855,7 +829,7 @@ static void test_rels_enumerator(void)
     factory = create_factory();
 
     hr = IOpcFactory_CreatePackage(factory, &package);
-    ok(SUCCEEDED(hr) || broken(hr == E_NOTIMPL) /* Vista */, "Failed to create a package, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr) || broken(hr == E_NOTIMPL) /* Vista */, "Failed to create a package, hr %#lx.\n", hr);
     if (FAILED(hr))
     {
         IOpcFactory_Release(factory);
@@ -863,132 +837,132 @@ static void test_rels_enumerator(void)
     }
 
     hr = IOpcPackage_GetRelationshipSet(package, &rels);
-    ok(SUCCEEDED(hr), "Failed to get part set, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get part set, hr %#lx.\n", hr);
 
     hr = IOpcRelationshipSet_GetEnumerator(rels, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     hr = IOpcRelationshipSet_GetEnumerator(rels, &relsenum);
-    ok(SUCCEEDED(hr), "Failed to get enumerator, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get enumerator, hr %#lx.\n", hr);
 
     hr = IOpcRelationshipSet_GetEnumerator(rels, &relsenum2);
-    ok(SUCCEEDED(hr), "Failed to get enumerator, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get enumerator, hr %#lx.\n", hr);
     ok(relsenum != relsenum2, "Unexpected instance.\n");
     IOpcRelationshipEnumerator_Release(relsenum2);
 
     hr = IOpcRelationshipEnumerator_GetCurrent(relsenum, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     hr = IOpcRelationshipEnumerator_GetCurrent(relsenum, &rel);
-    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#lx.\n", hr);
 
     hr = IOpcRelationshipEnumerator_MoveNext(relsenum, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     ret = TRUE;
     hr = IOpcRelationshipEnumerator_MoveNext(relsenum, &ret);
-    ok(hr == S_OK, "Failed to move, hr %#x.\n", hr);
+    ok(hr == S_OK, "Failed to move, hr %#lx.\n", hr);
     ok(!ret, "Unexpected result %d.\n", ret);
 
     ret = TRUE;
     hr = IOpcRelationshipEnumerator_MovePrevious(relsenum, &ret);
-    ok(hr == S_OK, "Failed to move, hr %#x.\n", hr);
+    ok(hr == S_OK, "Failed to move, hr %#lx.\n", hr);
     ok(!ret, "Unexpected result %d.\n", ret);
 
     hr = CreateUri(targetW, Uri_CREATE_ALLOW_RELATIVE, 0, &target_uri);
-    ok(SUCCEEDED(hr), "Failed to create target uri, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create target uri, hr %#lx.\n", hr);
 
     hr = IOpcRelationshipSet_CreateRelationship(rels, NULL, typeW, target_uri, OPC_URI_TARGET_MODE_INTERNAL, &rel);
-    ok(SUCCEEDED(hr), "Failed to create relationship, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create relationship, hr %#lx.\n", hr);
 
     IUri_Release(target_uri);
 
     rel2 = (void *)0xdeadbeef;
     hr = IOpcRelationshipEnumerator_GetCurrent(relsenum, &rel2);
-    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#lx.\n", hr);
     ok(rel2 == NULL, "Unexpected instance.\n");
 
     hr = IOpcRelationshipEnumerator_MoveNext(relsenum, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     ret = 123;
     hr = IOpcRelationshipEnumerator_MoveNext(relsenum, &ret);
-    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#lx.\n", hr);
     ok(ret == 123, "Unexpected result %d.\n", ret);
 
     hr = IOpcRelationshipEnumerator_MovePrevious(relsenum, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     ret = 123;
     hr = IOpcRelationshipEnumerator_MovePrevious(relsenum, &ret);
-    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#lx.\n", hr);
     ok(ret == 123, "Unexpected result %d.\n", ret);
 
     hr = IOpcRelationshipEnumerator_Clone(relsenum, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     relsenum2 = (void *)0xdeadbeef;
     hr = IOpcRelationshipEnumerator_Clone(relsenum, &relsenum2);
-    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_COLLECTION_CHANGED, "Unexpected hr %#lx.\n", hr);
     ok(relsenum2 == NULL, "Unexpected instance.\n");
 
     IOpcRelationshipEnumerator_Release(relsenum);
 
     hr = IOpcRelationshipSet_GetEnumerator(rels, &relsenum);
-    ok(SUCCEEDED(hr), "Failed to get enumerator, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to get enumerator, hr %#lx.\n", hr);
 
     rel2 = (void *)0xdeadbeef;
     hr = IOpcRelationshipEnumerator_GetCurrent(relsenum, &rel2);
-    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#lx.\n", hr);
     ok(rel2 == NULL, "Unexpected instance.\n");
 
     hr = IOpcRelationshipEnumerator_MoveNext(relsenum, &ret);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(ret, "Unexpected result %d.\n", ret);
 
     hr = IOpcRelationshipEnumerator_GetCurrent(relsenum, &rel2);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(rel2 == rel, "Unexpected instance.\n");
     IOpcRelationship_Release(rel2);
 
     hr = IOpcRelationshipEnumerator_MoveNext(relsenum, &ret);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(!ret, "Unexpected result %d.\n", ret);
 
     rel2 = (void *)0xdeadbeef;
     hr = IOpcRelationshipEnumerator_GetCurrent(relsenum, &rel2);
-    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#lx.\n", hr);
     ok(rel2 == NULL, "Unexpected instance.\n");
 
     hr = IOpcRelationshipEnumerator_MovePrevious(relsenum, &ret);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(ret, "Unexpected result %d.\n", ret);
 
     hr = IOpcRelationshipEnumerator_GetCurrent(relsenum, &rel2);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(rel2 == rel, "Unexpected instance.\n");
     IOpcRelationship_Release(rel2);
 
     hr = IOpcRelationshipEnumerator_MovePrevious(relsenum, &ret);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(!ret, "Unexpected result %d.\n", ret);
 
     hr = IOpcRelationshipEnumerator_GetCurrent(relsenum, &rel2);
-    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#lx.\n", hr);
 
     hr = IOpcRelationshipEnumerator_Clone(relsenum, &relsenum2);
-    ok(SUCCEEDED(hr), "Clone failed, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Clone failed, hr %#lx.\n", hr);
 
     hr = IOpcRelationshipEnumerator_MoveNext(relsenum2, &ret);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(ret, "Unexpected result %d.\n", ret);
 
     hr = IOpcRelationshipEnumerator_GetCurrent(relsenum2, &rel2);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     IOpcRelationship_Release(rel2);
 
     hr = IOpcRelationshipEnumerator_GetCurrent(relsenum, &rel2);
-    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#x.\n", hr);
+    ok(hr == OPC_E_ENUM_INVALID_POSITION, "Unexpected hr %#lx.\n", hr);
 
     IOpcRelationshipEnumerator_Release(relsenum2);
 
@@ -1006,22 +980,22 @@ static void test_relative_uri(void)
 {
     static const struct
     {
-        const char *part;
-        const char *combined;
-        const char *relative;
-        const char *relative_broken;
+        const WCHAR *part;
+        const WCHAR *combined;
+        const WCHAR *relative;
+        const WCHAR *relative_broken;
     }
     relative_uri_tests[] =
     {
-        { "/", "/path/path2", "path/path2", "/path/path2" },
-        { "/", "/path", "path", "/path" },
-        { "/path/path2", "/path/path2/path3", "path2/path3" },
-        { "/path/path2", "/path3", "../path3" },
-        { "/path", "/path", "" },
-        { "/path", "../path", "" },
-        { "/path2", "/path", "path" },
-        { "../path", "/path", "" },
-        { "../../path", "/path", "" },
+        { L"/", L"/path/path2", L"path/path2", L"/path/path2" },
+        { L"/", L"/path", L"path", L"/path" },
+        { L"/path/path2", L"/path/path2/path3", L"path2/path3" },
+        { L"/path/path2", L"/path3", L"../path3" },
+        { L"/path", L"/path", L"" },
+        { L"/path", L"../path", L"" },
+        { L"/path2", L"/path", L"path" },
+        { L"../path", L"/path", L"" },
+        { L"../../path", L"/path", L"" },
     };
     IOpcFactory *factory;
     unsigned int i;
@@ -1030,7 +1004,7 @@ static void test_relative_uri(void)
 
     for (i = 0; i < ARRAY_SIZE(relative_uri_tests); ++i)
     {
-        WCHAR *uriW, *combinedW, *relativeW, *relative_broken_W;
+        const WCHAR *relative_broken;
         IOpcPartUri *combined_uri;
         IUri *relative_uri;
         IOpcUri *part_uri;
@@ -1038,32 +1012,29 @@ static void test_relative_uri(void)
         HRESULT hr;
         BSTR str;
 
-        uriW = strdupAtoW(relative_uri_tests[i].part);
-        combinedW = strdupAtoW(relative_uri_tests[i].combined);
-        relativeW = strdupAtoW(relative_uri_tests[i].relative);
-        relative_broken_W = strdupAtoW(relative_uri_tests[i].relative_broken);
+        relative_broken = relative_uri_tests[i].relative_broken;
 
-        if (!strcmp(relative_uri_tests[i].part, "/"))
+        if (!wcscmp(relative_uri_tests[i].part, L"/"))
             hr = IOpcFactory_CreatePackageRootUri(factory, &part_uri);
         else
-            hr = IOpcFactory_CreatePartUri(factory, uriW, (IOpcPartUri **)&part_uri);
-        ok(SUCCEEDED(hr), "%u: failed to create part uri, hr %#x.\n", i, hr);
+            hr = IOpcFactory_CreatePartUri(factory, relative_uri_tests[i].part, (IOpcPartUri **)&part_uri);
+        ok(SUCCEEDED(hr), "%u: failed to create part uri, hr %#lx.\n", i, hr);
 
-        hr = IOpcFactory_CreatePartUri(factory, combinedW, &combined_uri);
-        ok(SUCCEEDED(hr), "%u: failed to create part uri, hr %#x.\n", i, hr);
+        hr = IOpcFactory_CreatePartUri(factory, relative_uri_tests[i].combined, &combined_uri);
+        ok(SUCCEEDED(hr), "%u: failed to create part uri, hr %#lx.\n", i, hr);
 
         hr = IOpcUri_GetRelativeUri(part_uri, combined_uri, &relative_uri);
     todo_wine
-        ok(SUCCEEDED(hr), "%u: failed t oget relative uri, hr %#x.\n", i, hr);
+        ok(SUCCEEDED(hr), "%u: failed t oget relative uri, hr %#lx.\n", i, hr);
 
     if (SUCCEEDED(hr))
     {
         hr = IUri_QueryInterface(relative_uri, &IID_IOpcUri, (void **)&unk);
-        ok(hr == E_NOINTERFACE, "%u: unexpected hr %#x.\n", i, hr);
+        ok(hr == E_NOINTERFACE, "%u: unexpected hr %#lx.\n", i, hr);
 
         hr = IUri_GetRawUri(relative_uri, &str);
-        ok(SUCCEEDED(hr), "%u: failed to get raw uri, hr %#x.\n", i, hr);
-        ok(!lstrcmpW(str, relativeW) || broken(relative_broken_W && !lstrcmpW(str, relative_broken_W)),
+        ok(SUCCEEDED(hr), "%u: failed to get raw uri, hr %#lx.\n", i, hr);
+        ok(!lstrcmpW(str, relative_uri_tests[i].relative) || broken(relative_broken && !lstrcmpW(str, relative_broken)),
                 "%u: unexpected relative uri %s.\n", i, wine_dbgstr_w(str));
         SysFreeString(str);
 
@@ -1071,11 +1042,6 @@ static void test_relative_uri(void)
     }
         IOpcUri_Release(part_uri);
         IOpcPartUri_Release(combined_uri);
-
-        heap_free(uriW);
-        heap_free(combinedW);
-        heap_free(relativeW);
-        heap_free(relative_broken_W);
     }
 
     IOpcFactory_Release(factory);
@@ -1085,16 +1051,16 @@ static void test_combine_uri(void)
 {
     static const struct
     {
-        const char *uri;
-        const char *relative;
-        const char *combined;
+        const WCHAR *uri;
+        const WCHAR *relative;
+        const WCHAR *combined;
     }
     combine_tests[] =
     {
-        { "/", "path", "/path" },
-        { "/path1", "path2", "/path2" },
-        { "/path1", "../path2", "/path2" },
-        { "/path1/../path2", "path3", "/path3" },
+        { L"/", L"path", L"/path" },
+        { L"/path1", L"path2", L"/path2" },
+        { L"/path1", L"../path2", L"/path2" },
+        { L"/path1/../path2", L"path3", L"/path3" },
     };
     IOpcFactory *factory;
     unsigned int i;
@@ -1103,48 +1069,39 @@ static void test_combine_uri(void)
 
     for (i = 0; i < ARRAY_SIZE(combine_tests); ++i)
     {
-        WCHAR *uriW, *relativeW, *combinedW;
         IOpcPartUri *combined_uri;
         IUri *relative_uri;
         IOpcUri *uri;
         HRESULT hr;
         BSTR str;
 
-        uriW = strdupAtoW(combine_tests[i].uri);
-        relativeW = strdupAtoW(combine_tests[i].relative);
-        combinedW = strdupAtoW(combine_tests[i].combined);
-
-        if (!strcmp(combine_tests[i].uri, "/"))
+        if (!wcscmp(combine_tests[i].uri, L"/"))
             hr = IOpcFactory_CreatePackageRootUri(factory, &uri);
         else
-            hr = IOpcFactory_CreatePartUri(factory, uriW, (IOpcPartUri **)&uri);
-        ok(SUCCEEDED(hr), "%u: failed to create uri, hr %#x.\n", i, hr);
+            hr = IOpcFactory_CreatePartUri(factory, combine_tests[i].uri, (IOpcPartUri **)&uri);
+        ok(SUCCEEDED(hr), "%u: failed to create uri, hr %#lx.\n", i, hr);
 
-        hr = CreateUri(relativeW, Uri_CREATE_ALLOW_RELATIVE, 0, &relative_uri);
-        ok(SUCCEEDED(hr), "%u: failed to create relative uri, hr %#x.\n", i, hr);
+        hr = CreateUri(combine_tests[i].relative, Uri_CREATE_ALLOW_RELATIVE, 0, &relative_uri);
+        ok(SUCCEEDED(hr), "%u: failed to create relative uri, hr %#lx.\n", i, hr);
 
         combined_uri = (void *)0xdeadbeef;
         hr = IOpcUri_CombinePartUri(uri, NULL, &combined_uri);
-        ok(hr == E_POINTER, "%u: failed to combine uris, hr %#x.\n", i, hr);
+        ok(hr == E_POINTER, "%u: failed to combine uris, hr %#lx.\n", i, hr);
         ok(!combined_uri, "Unexpected instance.\n");
 
         hr = IOpcUri_CombinePartUri(uri, relative_uri, NULL);
-        ok(hr == E_POINTER, "%u: failed to combine uris, hr %#x.\n", i, hr);
+        ok(hr == E_POINTER, "%u: failed to combine uris, hr %#lx.\n", i, hr);
 
         hr = IOpcUri_CombinePartUri(uri, relative_uri, &combined_uri);
-        ok(SUCCEEDED(hr), "%u: failed to combine uris, hr %#x.\n", i, hr);
+        ok(SUCCEEDED(hr), "%u: failed to combine uris, hr %#lx.\n", i, hr);
 
         hr = IOpcPartUri_GetRawUri(combined_uri, &str);
-        ok(SUCCEEDED(hr), "%u: failed to get raw uri, hr %#x.\n", i, hr);
-    todo_wine_if(i == 2 || i == 3)
-        ok(!lstrcmpW(str, combinedW), "%u: unexpected uri %s.\n", i, wine_dbgstr_w(str));
+        ok(SUCCEEDED(hr), "%u: failed to get raw uri, hr %#lx.\n", i, hr);
+        todo_wine_if(i == 2 || i == 3)
+        ok(!lstrcmpW(str, combine_tests[i].combined), "%u: unexpected uri %s.\n", i, wine_dbgstr_w(str));
         SysFreeString(str);
 
         IOpcPartUri_Release(combined_uri);
-
-        heap_free(uriW);
-        heap_free(relativeW);
-        heap_free(combinedW);
 
         IOpcUri_Release(uri);
         IUri_Release(relative_uri);
@@ -1157,16 +1114,16 @@ static void test_create_part_uri(void)
 {
     static const struct
     {
-        const char *input;
-        const char *raw_uri;
+        const WCHAR *input;
+        const WCHAR *raw_uri;
     }
     create_part_uri_tests[] =
     {
-        { "path", "/path" },
-        { "../path", "/path" },
-        { "../../path", "/path" },
-        { "/path", "/path" },
-        { "/path1/path2/path3/../path4", "/path1/path2/path4" },
+        { L"path", L"/path" },
+        { L"../path", L"/path" },
+        { L"../../path", L"/path" },
+        { L"/path", L"/path" },
+        { L"/path1/path2/path3/../path4", L"/path1/path2/path4" },
     };
     IOpcFactory *factory;
     unsigned int i;
@@ -1176,38 +1133,32 @@ static void test_create_part_uri(void)
 
     for (i = 0; i < ARRAY_SIZE(create_part_uri_tests); ++i)
     {
+        const WCHAR *raw_uri = create_part_uri_tests[i].raw_uri;
         IOpcPartUri *part_uri;
-        WCHAR *inputW, *rawW;
         IUri *uri;
         BSTR str;
         BOOL ret;
 
-        inputW = strdupAtoW(create_part_uri_tests[i].input);
-        rawW = strdupAtoW(create_part_uri_tests[i].raw_uri);
-
-        hr = IOpcFactory_CreatePartUri(factory, inputW, &part_uri);
-        ok(SUCCEEDED(hr), "%u: failed to create part uri, hr %#x.\n", i, hr);
+        hr = IOpcFactory_CreatePartUri(factory, create_part_uri_tests[i].input, &part_uri);
+        ok(SUCCEEDED(hr), "%u: failed to create part uri, hr %#lx.\n", i, hr);
 
         hr = IOpcPartUri_GetRawUri(part_uri, &str);
-        ok(SUCCEEDED(hr), "Failed to get raw uri, hr %#x.\n", hr);
-    todo_wine_if(i == 1 || i == 2 || i == 4)
-        ok(!lstrcmpW(str, rawW), "%u: unexpected raw uri %s.\n", i, wine_dbgstr_w(str));
+        ok(SUCCEEDED(hr), "Failed to get raw uri, hr %#lx.\n", hr);
+        todo_wine_if(i == 1 || i == 2 || i == 4)
+        ok(!lstrcmpW(str, raw_uri), "%u: unexpected raw uri %s.\n", i, wine_dbgstr_w(str));
         SysFreeString(str);
 
-        hr = CreateUri(rawW, Uri_CREATE_ALLOW_RELATIVE, 0, &uri);
-        ok(SUCCEEDED(hr), "Failed to create uri, hr %#x.\n", hr);
+        hr = CreateUri(raw_uri, Uri_CREATE_ALLOW_RELATIVE, 0, &uri);
+        ok(SUCCEEDED(hr), "Failed to create uri, hr %#lx.\n", hr);
 
         ret = FALSE;
         hr = IOpcPartUri_IsEqual(part_uri, uri, &ret);
-        ok(SUCCEEDED(hr), "IsEqual failed, hr %#x.\n", hr);
-    todo_wine_if(i == 1 || i == 2 || i == 4)
+        ok(SUCCEEDED(hr), "IsEqual failed, hr %#lx.\n", hr);
+        todo_wine_if(i == 1 || i == 2 || i == 4)
         ok(!!ret, "%u: unexpected result %d.\n", i, ret);
 
         IOpcPartUri_Release(part_uri);
         IUri_Release(uri);
-
-        heap_free(inputW);
-        heap_free(rawW);
     }
 
     IOpcFactory_Release(factory);
@@ -1266,7 +1217,7 @@ static void test_write_package(void)
     factory = create_factory();
 
     hr = IOpcFactory_CreatePackage(factory, &package);
-    ok(SUCCEEDED(hr) || broken(hr == E_NOTIMPL) /* Vista */, "Failed to create a package, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr) || broken(hr == E_NOTIMPL) /* Vista */, "Failed to create a package, hr %#lx.\n", hr);
     if (FAILED(hr))
     {
         IOpcFactory_Release(factory);
@@ -1274,16 +1225,16 @@ static void test_write_package(void)
     }
 
     hr = IOpcFactory_WritePackageToStream(factory, NULL, OPC_WRITE_FORCE_ZIP32, NULL);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
-    ok(SUCCEEDED(hr), "Failed to create a stream, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create a stream, hr %#lx.\n", hr);
 
     hr = IOpcFactory_WritePackageToStream(factory, NULL, OPC_WRITE_FORCE_ZIP32, stream);
-    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     hr = IOpcFactory_WritePackageToStream(factory, &custom_package, OPC_WRITE_FORCE_ZIP32, stream);
-    ok(hr == 0x80000001, "Unexpected hr %#x.\n", hr);
+    ok(hr == 0x80000001, "Unexpected hr %#lx.\n", hr);
 
     IStream_Release(stream);
 
@@ -1297,7 +1248,7 @@ START_TEST(opcservices)
     HRESULT hr;
 
     hr = CoInitialize(NULL);
-    ok(SUCCEEDED(hr), "Failed to initialize COM, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to initialize COM, hr %#lx.\n", hr);
 
     if (!(factory = create_factory())) {
         win_skip("Failed to create IOpcFactory factory.\n");

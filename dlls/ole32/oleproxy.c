@@ -137,6 +137,17 @@ static const IClassFactoryVtbl PointerMonikerCFVtbl =
 
 static IClassFactory PointerMonikerCF = { &PointerMonikerCFVtbl };
 
+static const IClassFactoryVtbl ObjrefMonikerCFVtbl =
+{
+    ClassFactory_QueryInterface,
+    ClassFactory_AddRef,
+    ClassFactory_Release,
+    ObjrefMoniker_CreateInstance,
+    ClassFactory_LockServer
+};
+
+static IClassFactory ObjrefMonikerCF = { &ObjrefMonikerCFVtbl };
+
 static const IClassFactoryVtbl ComCatCFVtbl =
 {
     ClassFactory_QueryInterface,
@@ -147,17 +158,6 @@ static const IClassFactoryVtbl ComCatCFVtbl =
 };
 
 static IClassFactory ComCatCF = { &ComCatCFVtbl };
-
-static const IClassFactoryVtbl GlobalOptionsCFVtbl =
-{
-    ClassFactory_QueryInterface,
-    ClassFactory_AddRef,
-    ClassFactory_Release,
-    GlobalOptions_CreateInstance,
-    ClassFactory_LockServer
-};
-
-IClassFactory GlobalOptionsCF = { &GlobalOptionsCFVtbl };
 
 static const IClassFactoryVtbl GlobalInterfaceTableCFVtbl =
 {
@@ -209,6 +209,8 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID iid,LPVOID *ppv)
         return IClassFactory_QueryInterface(&CompositeMonikerCF, iid, ppv);
     if (IsEqualCLSID(rclsid, &CLSID_ClassMoniker))
         return IClassFactory_QueryInterface(&ClassMonikerCF, iid, ppv);
+    if (IsEqualCLSID(rclsid, &CLSID_ObjrefMoniker))
+        return IClassFactory_QueryInterface(&ObjrefMonikerCF, iid, ppv);
     if (IsEqualCLSID(rclsid, &CLSID_PointerMoniker))
         return IClassFactory_QueryInterface(&PointerMonikerCF, iid, ppv);
     if (IsEqualGUID(rclsid, &CLSID_StdComponentCategoriesMgr))
@@ -230,8 +232,6 @@ HRESULT WINAPI Ole32DllGetClassObject(REFCLSID rclsid, REFIID riid, void **obj)
         return IClassFactory_QueryInterface(&GlobalInterfaceTableCF, riid, obj);
     else if (IsEqualCLSID(rclsid, &CLSID_ManualResetEvent))
         return IClassFactory_QueryInterface(&ManualResetEventCF, riid, obj);
-    else if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions))
-        return IClassFactory_QueryInterface(&GlobalOptionsCF, riid, obj);
     else if (IsEqualCLSID(rclsid, &CLSID_InProcFreeMarshaler))
         return FTMarshalCF_Create(riid, obj);
     else

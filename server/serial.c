@@ -21,7 +21,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <fcntl.h>
@@ -31,19 +30,13 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/ioctl.h>
 #include <time.h>
+#include <termios.h>
 #include <unistd.h>
+#include <poll.h>
 #ifdef HAVE_UTIME_H
 #include <utime.h>
-#endif
-#ifdef HAVE_TERMIOS_H
-#include <termios.h>
-#endif
-#ifdef HAVE_SYS_IOCTL_H
-#include <sys/ioctl.h>
-#endif
-#ifdef HAVE_POLL_H
-#include <poll.h>
 #endif
 
 #include "ntstatus.h"
@@ -63,7 +56,7 @@ static struct fd *serial_get_fd( struct object *obj );
 static void serial_destroy(struct object *obj);
 
 static enum server_fd_type serial_get_fd_type( struct fd *fd );
-static int serial_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
+static void serial_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
 static void serial_queue_async( struct fd *fd, struct async *async, int type, int count );
 static void serial_reselect_async( struct fd *fd, struct async_queue *queue );
 
@@ -87,8 +80,8 @@ struct serial
 static const struct object_ops serial_ops =
 {
     sizeof(struct serial),        /* size */
+    &file_type,                   /* type */
     serial_dump,                  /* dump */
-    no_get_type,                  /* get_type */
     add_queue,                    /* add_queue */
     remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
@@ -96,7 +89,7 @@ static const struct object_ops serial_ops =
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
     serial_get_fd,                /* get_fd */
-    default_fd_map_access,        /* map_access */
+    default_map_access,           /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     no_get_full_name,             /* get_full_name */
@@ -105,7 +98,7 @@ static const struct object_ops serial_ops =
     NULL,                         /* unlink_name */
     no_open_file,                 /* open_file */
     no_kernel_obj_list,           /* get_kernel_obj_list */
-    fd_close_handle,              /* close_handle */
+    no_close_handle,              /* close_handle */
     serial_destroy                /* destroy */
 };
 
@@ -120,6 +113,7 @@ static const struct fd_ops serial_fd_ops =
     default_fd_get_file_info,     /* get_file_info */
     no_fd_get_volume_info,        /* get_volume_info */
     serial_ioctl,                 /* ioctl */
+    default_fd_cancel_async,      /* cancel_async */
     serial_queue_async,           /* queue_async */
     serial_reselect_async         /* reselect_async */
 };
@@ -180,7 +174,7 @@ static enum server_fd_type serial_get_fd_type( struct fd *fd )
     return FD_TYPE_SERIAL;
 }
 
-static int serial_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
+static void serial_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
 {
     struct serial *serial = get_fd_user( fd );
 
@@ -190,43 +184,42 @@ static int serial_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
         if (get_reply_max_size() < sizeof(serial->timeouts))
         {
             set_error( STATUS_BUFFER_TOO_SMALL );
-            return 0;
+            return;
         }
         set_reply_data( &serial->timeouts, sizeof(serial->timeouts ));
-        return 1;
+        return;
 
     case IOCTL_SERIAL_SET_TIMEOUTS:
         if (get_req_data_size() < sizeof(serial->timeouts))
         {
             set_error( STATUS_BUFFER_TOO_SMALL );
-            return 0;
+            return;
         }
         memcpy( &serial->timeouts, get_req_data(), sizeof(serial->timeouts) );
-        return 1;
+        return;
 
     case IOCTL_SERIAL_GET_WAIT_MASK:
         if (get_reply_max_size() < sizeof(serial->eventmask))
         {
             set_error( STATUS_BUFFER_TOO_SMALL );
-            return 0;
+            return;
         }
         set_reply_data( &serial->eventmask, sizeof(serial->eventmask) );
-        return 1;
+        return;
 
     case IOCTL_SERIAL_SET_WAIT_MASK:
         if (get_req_data_size() < sizeof(serial->eventmask))
         {
             set_error( STATUS_BUFFER_TOO_SMALL );
-            return 0;
+            return;
         }
         serial->eventmask = *(unsigned int *)get_req_data();
         serial->generation++;
         fd_async_wake_up( serial->fd, ASYNC_TYPE_WAIT, STATUS_SUCCESS );
-        return 1;
+        return;
 
     default:
         set_error( STATUS_NOT_SUPPORTED );
-        return 0;
     }
 }
 

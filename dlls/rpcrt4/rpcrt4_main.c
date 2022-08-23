@@ -543,7 +543,7 @@ RPC_STATUS WINAPI UuidToStringA(UUID *Uuid, RPC_CSTR* StringUuid)
 
   if (!Uuid) Uuid = &uuid_nil;
 
-  sprintf( (char*)*StringUuid, "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+  sprintf( (char*)*StringUuid, "%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
                  Uuid->Data1, Uuid->Data2, Uuid->Data3,
                  Uuid->Data4[0], Uuid->Data4[1], Uuid->Data4[2],
                  Uuid->Data4[3], Uuid->Data4[4], Uuid->Data4[5],
@@ -566,7 +566,7 @@ RPC_STATUS WINAPI UuidToStringW(UUID *Uuid, RPC_WSTR* StringUuid)
 
   if (!Uuid) Uuid = &uuid_nil;
 
-  sprintf(buf, "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+  sprintf(buf, "%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
                Uuid->Data1, Uuid->Data2, Uuid->Data3,
                Uuid->Data4[0], Uuid->Data4[1], Uuid->Data4[2],
                Uuid->Data4[3], Uuid->Data4[4], Uuid->Data4[5],
@@ -670,16 +670,6 @@ RPC_STATUS WINAPI UuidFromStringW(RPC_WSTR s, UUID *uuid)
     return RPC_S_OK;
 }
 
-/***********************************************************************
- *              DllRegisterServer (RPCRT4.@)
- */
-
-HRESULT WINAPI DllRegisterServer( void )
-{
-    FIXME( "(): stub\n" );
-    return S_OK;
-}
-
 #define MAX_RPC_ERROR_TEXT 256
 
 /******************************************************************************
@@ -762,7 +752,7 @@ void WINAPI I_RpcFree(void *Object)
  */
 LONG WINAPI I_RpcMapWin32Status(RPC_STATUS status)
 {
-    TRACE("(%d)\n", status);
+    TRACE("(%ld)\n", status);
     switch (status)
     {
     case ERROR_ACCESS_DENIED: return STATUS_ACCESS_DENIED;
@@ -881,7 +871,7 @@ LONG WINAPI I_RpcMapWin32Status(RPC_STATUS status)
  */
 int WINAPI RpcExceptionFilter(ULONG ExceptionCode)
 {
-    TRACE("0x%x\n", ExceptionCode);
+    TRACE("0x%lx\n", ExceptionCode);
     switch (ExceptionCode)
     {
     case STATUS_DATATYPE_MISALIGNMENT:
@@ -930,7 +920,7 @@ RPC_STATUS RPC_ENTRY RpcErrorSaveErrorInfo(RPC_ERROR_ENUM_HANDLE *EnumHandle, vo
  */
 RPC_STATUS RPC_ENTRY RpcErrorLoadErrorInfo(void *ErrorBlob, SIZE_T BlobSize, RPC_ERROR_ENUM_HANDLE *EnumHandle)
 {
-    FIXME("(%p %lu %p): stub\n", ErrorBlob, BlobSize, EnumHandle);
+    FIXME("(%p %Iu %p): stub\n", ErrorBlob, BlobSize, EnumHandle);
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
@@ -948,7 +938,7 @@ RPC_STATUS RPC_ENTRY RpcErrorGetNextRecord(RPC_ERROR_ENUM_HANDLE *EnumHandle, BO
  */
 RPC_STATUS RPC_ENTRY RpcMgmtSetCancelTimeout(LONG Timeout)
 {
-    FIXME("(%d): stub\n", Timeout);
+    FIXME("(%ld): stub\n", Timeout);
     return RPC_S_OK;
 }
 
@@ -1087,7 +1077,7 @@ RPC_STATUS RPC_ENTRY RpcCancelThreadEx(void* ThreadHandle, LONG Timeout)
 {
     DWORD target_tid;
 
-    FIXME("(%p, %d)\n", ThreadHandle, Timeout);
+    FIXME("(%p, %ld)\n", ThreadHandle, Timeout);
 
     target_tid = GetThreadId(ThreadHandle);
     if (!target_tid)
@@ -1095,7 +1085,7 @@ RPC_STATUS RPC_ENTRY RpcCancelThreadEx(void* ThreadHandle, LONG Timeout)
 
     if (Timeout)
     {
-        FIXME("(%p, %d)\n", ThreadHandle, Timeout);
+        FIXME("(%p, %ld)\n", ThreadHandle, Timeout);
         return RPC_S_OK;
     }
     else

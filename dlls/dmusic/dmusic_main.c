@@ -39,7 +39,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dmusic);
 
-static HINSTANCE instance;
 LONG DMUSIC_refCount = 0;
 
 typedef struct {
@@ -124,21 +123,6 @@ static IClassFactoryImpl Collection_CF = {{&classfactory_vtbl},
                                           DMUSIC_CreateDirectMusicCollectionImpl};
 
 /******************************************************************
- *		DllMain
- *
- *
- */
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
-	if (fdwReason == DLL_PROCESS_ATTACH) {
-            instance = hinstDLL;
-            DisableThreadLibraryCalls(hinstDLL);
-	}
-
-	return TRUE;
-}
-
-
-/******************************************************************
  *		DllCanUnloadNow (DMUSIC.@)
  *
  *
@@ -169,22 +153,6 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 	
     WARN("(%s, %s, %p): no interface found.\n", debugstr_dmguid(rclsid), debugstr_dmguid(riid), ppv);
     return CLASS_E_CLASSNOTAVAILABLE;
-}
-
-/***********************************************************************
- *		DllRegisterServer (DMUSIC.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( instance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (DMUSIC.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( instance );
 }
 
 /******************************************************************
@@ -254,12 +222,12 @@ static const char* debugstr_DMUS_PORTPARAMS_FLAGS(DWORD flagmask)
 void dump_DMUS_PORTPARAMS(LPDMUS_PORTPARAMS params)
 {
     TRACE("DMUS_PORTPARAMS (%p):\n", params);
-    TRACE(" - dwSize = %d\n", params->dwSize);
+    TRACE(" - dwSize = %ld\n", params->dwSize);
     TRACE(" - dwValidParams = %s\n", debugstr_DMUS_PORTPARAMS_FLAGS(params->dwValidParams));
-    if (params->dwValidParams & DMUS_PORTPARAMS_VOICES)        TRACE(" - dwVoices = %u\n", params->dwVoices);
-    if (params->dwValidParams & DMUS_PORTPARAMS_CHANNELGROUPS) TRACE(" - dwChannelGroup = %u\n", params->dwChannelGroups);
-    if (params->dwValidParams & DMUS_PORTPARAMS_AUDIOCHANNELS) TRACE(" - dwAudioChannels = %u\n", params->dwAudioChannels);
-    if (params->dwValidParams & DMUS_PORTPARAMS_SAMPLERATE)    TRACE(" - dwSampleRate = %u\n", params->dwSampleRate);
-    if (params->dwValidParams & DMUS_PORTPARAMS_EFFECTS)       TRACE(" - dwEffectFlags = %x\n", params->dwEffectFlags);
+    if (params->dwValidParams & DMUS_PORTPARAMS_VOICES)        TRACE(" - dwVoices = %lu\n", params->dwVoices);
+    if (params->dwValidParams & DMUS_PORTPARAMS_CHANNELGROUPS) TRACE(" - dwChannelGroup = %lu\n", params->dwChannelGroups);
+    if (params->dwValidParams & DMUS_PORTPARAMS_AUDIOCHANNELS) TRACE(" - dwAudioChannels = %lu\n", params->dwAudioChannels);
+    if (params->dwValidParams & DMUS_PORTPARAMS_SAMPLERATE)    TRACE(" - dwSampleRate = %lu\n", params->dwSampleRate);
+    if (params->dwValidParams & DMUS_PORTPARAMS_EFFECTS)       TRACE(" - dwEffectFlags = %lx\n", params->dwEffectFlags);
     if (params->dwValidParams & DMUS_PORTPARAMS_SHARE)         TRACE(" - fShare = %u\n", params->fShare);
 }

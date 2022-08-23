@@ -20,7 +20,7 @@
 @ stdcall MFAllocateWorkQueue(ptr)
 @ stdcall MFAllocateWorkQueueEx(long ptr) rtworkq.RtwqAllocateWorkQueue
 @ stub MFAppendCollection
-@ stub MFAverageTimePerFrameToFrameRate
+@ stdcall MFAverageTimePerFrameToFrameRate(int64 ptr ptr)
 @ stdcall MFBeginCreateFile(long long long wstr ptr ptr ptr)
 @ stub MFBeginGetHostByName
 @ stdcall MFBeginRegisterWorkQueueWithMMCSS(long wstr long ptr ptr)
@@ -43,9 +43,10 @@
 @ stdcall MFCreateAlignedMemoryBuffer(long long ptr)
 @ stdcall MFCreateAsyncResult(ptr ptr ptr ptr) rtworkq.RtwqCreateAsyncResult
 @ stdcall MFCreateAttributes(ptr long)
-@ stub MFCreateAudioMediaType
+@ stdcall MFCreateAudioMediaType(ptr ptr)
 @ stdcall MFCreateCollection(ptr)
 @ stdcall MFCreateDXGIDeviceManager(ptr ptr)
+@ stdcall MFCreateDXGISurfaceBuffer(ptr ptr long long ptr)
 @ stdcall MFCreateDXSurfaceBuffer(ptr ptr long ptr)
 @ stdcall MFCreateEventQueue(ptr)
 @ stdcall MFCreateFile(long long long wstr ptr)
@@ -70,7 +71,7 @@
 @ stdcall MFCreateStreamDescriptor(long long ptr ptr)
 @ stdcall MFCreateSystemTimeSource(ptr)
 @ stub MFCreateSystemUnderlyingClock
-@ stub MFCreateTempFile
+@ stdcall MFCreateTempFile(long long long ptr)
 @ stdcall MFCreateTrackedSample(ptr)
 @ stdcall MFCreateTransformActivate(ptr)
 @ stub MFCreateURLFromPath
@@ -81,6 +82,7 @@
 @ stdcall MFCreateVideoMediaTypeFromSubtype(ptr ptr)
 @ stub MFCreateVideoMediaTypeFromVideoInfoHeader2
 @ stub MFCreateVideoMediaTypeFromVideoInfoHeader
+@ stdcall MFCreateVideoSampleAllocatorEx(ptr ptr)
 @ stdcall MFCreateWaveFormatExFromMFMediaType(ptr ptr ptr long)
 @ stub MFDeserializeAttributesFromStream
 @ stub MFDeserializeEvent
@@ -125,12 +127,15 @@
 @ stub MFInitMediaTypeFromVideoInfoHeader
 @ stdcall MFInitMediaTypeFromWaveFormatEx(ptr ptr long)
 @ stub MFInitVideoFormat
-@ stub MFInitVideoFormat_RGB
+@ stdcall MFInitVideoFormat_RGB(ptr long long long)
 @ stdcall MFInvokeCallback(ptr)
 @ stub MFJoinIoPort
 @ stdcall MFJoinWorkQueue(long long ptr) rtworkq.RtwqJoinWorkQueue
+@ stdcall MFLockDXGIDeviceManager(ptr ptr)
 @ stdcall MFLockPlatform() rtworkq.RtwqLockPlatform
+@ stdcall MFLockSharedWorkQueue(wstr long ptr ptr) rtworkq.RtwqLockSharedWorkQueue
 @ stdcall MFLockWorkQueue(long) rtworkq.RtwqLockWorkQueue
+@ stdcall MFMapDX9FormatToDXGIFormat(long)
 @ stdcall MFMapDXGIFormatToDX9Format(long)
 @ stdcall MFPutWaitingWorkItem(long long ptr ptr) rtworkq.RtwqPutWaitingWorkItem
 @ stdcall MFPutWorkItem(long ptr ptr)
@@ -155,9 +160,9 @@
 @ stdcall MFTEnum(int128 long ptr ptr ptr ptr ptr)
 @ stdcall MFTEnum2(int128 long ptr ptr ptr ptr ptr)
 @ stdcall MFTEnumEx(int128 long ptr ptr ptr ptr)
-@ stub MFTGetInfo
+@ stdcall MFTGetInfo(int128 ptr ptr ptr ptr ptr ptr)
 @ stdcall MFTRegister(int128 int128 wstr long long ptr long ptr ptr)
-@ stdcall MFTRegisterLocal(ptr ptr wstr long long  ptr long ptr)
+@ stdcall MFTRegisterLocal(ptr ptr wstr long long ptr long ptr)
 @ stdcall MFTRegisterLocalByCLSID(ptr ptr wstr long long ptr long ptr)
 @ stdcall MFTUnregister(int128)
 @ stdcall MFTUnregisterLocal(ptr)
@@ -167,11 +172,12 @@
 @ stub MFTraceFuncEnter
 @ stub MFUnblockThread
 @ stdcall MFUnjoinWorkQueue(long long) rtworkq.RtwqUnjoinWorkQueue
+@ stdcall MFUnlockDXGIDeviceManager()
 @ stdcall MFUnlockPlatform() rtworkq.RtwqUnlockPlatform
 @ stdcall MFUnlockWorkQueue(long) rtworkq.RtwqUnlockWorkQueue
 @ stdcall MFUnwrapMediaType(ptr ptr)
 @ stub MFValidateMediaTypeSize
 @ stdcall MFWrapMediaType(ptr ptr ptr ptr)
-@ stub MFllMulDiv
+@ stdcall -ret64 MFllMulDiv(int64 int64 int64 int64)
 @ stub PropVariantFromStream
 @ stub PropVariantToStream

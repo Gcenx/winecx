@@ -26,30 +26,15 @@
 
 #include "wine/debug.h"
 #include "wine/heap.h"
-
-#include "mssign32_private.h"
+#include "wine/mssign.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mssign);
-
-BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID lpv )
-{
-    switch(reason)
-    {
-    case DLL_WINE_PREATTACH:
-        return FALSE;  /* prefer native version */
-    case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls( hinst );
-        break;
-    }
-    return TRUE;
-}
-
 
 HRESULT WINAPI PvkGetCryptProv(HWND hwnd, LPCWSTR pwszCaption, LPCWSTR pwszCapiProvider,
                     DWORD dwProviderType, LPCWSTR pwszPvkFile, LPCWSTR pwszKeyContainerName,
                     DWORD *pdwKeySpec, LPWSTR *ppwszTmpContainer, HCRYPTPROV *phCryptProv)
 {
-    FIXME("%p %s %s %d %s %s %p %p %p stub\n", hwnd, debugstr_w(pwszCaption), debugstr_w(pwszCapiProvider),
+    FIXME("%p %s %s %ld %s %s %p %p %p stub\n", hwnd, debugstr_w(pwszCaption), debugstr_w(pwszCapiProvider),
                     dwProviderType, debugstr_w(pwszPvkFile), debugstr_w(pwszKeyContainerName),
                     pdwKeySpec, ppwszTmpContainer, phCryptProv);
 
@@ -60,7 +45,7 @@ BOOL WINAPI PvkPrivateKeyAcquireContextFromMemory(LPCWSTR pwszProvName, DWORD dw
                     BYTE *pbData, DWORD cbData, HWND hwndOwner, LPCWSTR pwszKeyName,
                     DWORD *pdwKeySpec, HCRYPTPROV *phCryptProv, LPWSTR *ppwszTmpContainer)
 {
-    FIXME("%s %d %p %d %p %s %p %p %p stub\n", debugstr_w(pwszProvName), dwProvType,
+    FIXME("%s %ld %p %ld %p %s %p %p %p stub\n", debugstr_w(pwszProvName), dwProvType,
                     pbData, cbData, hwndOwner, debugstr_w(pwszKeyName), pdwKeySpec,
                     phCryptProv, ppwszTmpContainer);
 
@@ -70,7 +55,7 @@ BOOL WINAPI PvkPrivateKeyAcquireContextFromMemory(LPCWSTR pwszProvName, DWORD dw
 void WINAPI PvkFreeCryptProv(HCRYPTPROV hProv, LPCWSTR pwszCapiProvider, DWORD dwProviderType,
                     LPWSTR pwszTmpContainer)
 {
-    FIXME("%08lx %s %d %s stub\n", hProv, debugstr_w(pwszCapiProvider), dwProviderType,
+    FIXME("%08Ix %s %ld %s stub\n", hProv, debugstr_w(pwszCapiProvider), dwProviderType,
                     debugstr_w(pwszTmpContainer));
 }
 
@@ -86,7 +71,7 @@ HRESULT WINAPI SignerSignEx(DWORD flags, SIGNER_SUBJECT_INFO *subject_info, SIGN
                             const WCHAR *http_time_stamp, CRYPT_ATTRIBUTES *request, void *sip_data,
                             SIGNER_CONTEXT **signer_context)
 {
-    FIXME("%x %p %p %p %p %s %p %p %p stub\n", flags, subject_info, signer_cert, signature_info, provider_info,
+    FIXME("%lx %p %p %p %p %s %p %p %p stub\n", flags, subject_info, signer_cert, signature_info, provider_info,
                     wine_dbgstr_w(http_time_stamp), request, sip_data, signer_cert);
     return E_NOTIMPL;
 }

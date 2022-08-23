@@ -20,8 +20,6 @@
 
 #include <stdarg.h>
 
-#define NONAMELESSUNION
-
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -36,7 +34,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(hid);
 
 static NTSTATUS WINAPI internal_ioctl(DEVICE_OBJECT *device, IRP *irp)
 {
-    NTSTATUS status = irp->IoStatus.u.Status;
+    NTSTATUS status = irp->IoStatus.Status;
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation(irp);
     ULONG code = irpsp->Parameters.DeviceIoControl.IoControlCode;
 
@@ -61,11 +59,19 @@ static NTSTATUS WINAPI internal_ioctl(DEVICE_OBJECT *device, IRP *irp)
         return IoCallDriver(((HID_DEVICE_EXTENSION *)device->DeviceExtension)->NextDeviceObject, irp);
 
     default:
-        FIXME("Unsupported ioctl %x (device=%x access=%x func=%x method=%x)\n",
+        FIXME("Unsupported ioctl %#lx (device=%lx access=%lx func=%lx method=%lx)\n",
               code, code >> 16, (code >> 14) & 3, (code >> 2) & 0xfff, code & 3);
         IoCompleteRequest(irp, IO_NO_INCREMENT);
         return status;
     }
+}
+
+static NTSTATUS WINAPI driver_pnp(DEVICE_OBJECT *device, IRP *irp)
+{
+    HID_DEVICE_EXTENSION *ext = device->DeviceExtension;
+
+    IoSkipCurrentIrpStackLocation(irp);
+    return IoCallDriver(ext->NextDeviceObject, irp);
 }
 
 static NTSTATUS WINAPI add_device(DRIVER_OBJECT *driver, DEVICE_OBJECT *device)
@@ -81,6 +87,7 @@ NTSTATUS WINAPI DriverEntry(DRIVER_OBJECT *driver, UNICODE_STRING *path)
     TRACE("(%p, %s)\n", driver, debugstr_w(path->Buffer));
 
     driver->MajorFunction[IRP_MJ_INTERNAL_DEVICE_CONTROL] = internal_ioctl;
+    driver->MajorFunction[IRP_MJ_PNP] = driver_pnp;
     driver->DriverExtension->AddDevice = add_device;
 
     memset(&registration, 0, sizeof(registration));

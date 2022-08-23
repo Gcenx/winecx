@@ -24,7 +24,6 @@
 
 #include <windef.h>
 #include <wine/windef16.h>
-#include <wine/winheader_enter.h>
 
 #include <pshpack1.h>
 
@@ -285,6 +284,5 @@ WORD WINAPI WNetErrorText16(WORD,LPSTR,WORD);
 #define WN16_NO_ERROR                     0x0050
 
 
-#include <wine/winheader_exit.h>
 
 #endif /* __WINE_WINNET16_H */

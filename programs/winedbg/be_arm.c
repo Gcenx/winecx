@@ -1722,23 +1722,23 @@ static void be_arm_print_segment_info(HANDLE hThread, const dbg_ctx_t *ctx)
 
 static struct dbg_internal_var be_arm_ctx[] =
 {
-    {CV_ARM_R0 +  0,    "r0",           (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R0),     dbg_itype_unsigned_int},
-    {CV_ARM_R0 +  1,    "r1",           (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R1),     dbg_itype_unsigned_int},
-    {CV_ARM_R0 +  2,    "r2",           (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R2),     dbg_itype_unsigned_int},
-    {CV_ARM_R0 +  3,    "r3",           (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R3),     dbg_itype_unsigned_int},
-    {CV_ARM_R0 +  4,    "r4",           (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R4),     dbg_itype_unsigned_int},
-    {CV_ARM_R0 +  5,    "r5",           (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R5),     dbg_itype_unsigned_int},
-    {CV_ARM_R0 +  6,    "r6",           (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R6),     dbg_itype_unsigned_int},
-    {CV_ARM_R0 +  7,    "r7",           (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R7),     dbg_itype_unsigned_int},
-    {CV_ARM_R0 +  8,    "r8",           (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R8),     dbg_itype_unsigned_int},
-    {CV_ARM_R0 +  9,    "r9",           (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R9),     dbg_itype_unsigned_int},
-    {CV_ARM_R0 +  10,   "r10",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R10),    dbg_itype_unsigned_int},
-    {CV_ARM_R0 +  11,   "r11",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R11),    dbg_itype_unsigned_int},
-    {CV_ARM_R0 +  12,   "r12",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R12),    dbg_itype_unsigned_int},
-    {CV_ARM_SP,         "sp",           (DWORD_PTR*)FIELD_OFFSET(CONTEXT, Sp),     dbg_itype_unsigned_int},
-    {CV_ARM_LR,         "lr",           (DWORD_PTR*)FIELD_OFFSET(CONTEXT, Lr),     dbg_itype_unsigned_int},
-    {CV_ARM_PC,         "pc",           (DWORD_PTR*)FIELD_OFFSET(CONTEXT, Pc),     dbg_itype_unsigned_int},
-    {CV_ARM_CPSR,       "cpsr",         (DWORD_PTR*)FIELD_OFFSET(CONTEXT, Cpsr),   dbg_itype_unsigned_int},
+    {CV_ARM_R0 +  0,    "r0",           (void*)FIELD_OFFSET(CONTEXT, R0),     dbg_itype_unsigned_int},
+    {CV_ARM_R0 +  1,    "r1",           (void*)FIELD_OFFSET(CONTEXT, R1),     dbg_itype_unsigned_int},
+    {CV_ARM_R0 +  2,    "r2",           (void*)FIELD_OFFSET(CONTEXT, R2),     dbg_itype_unsigned_int},
+    {CV_ARM_R0 +  3,    "r3",           (void*)FIELD_OFFSET(CONTEXT, R3),     dbg_itype_unsigned_int},
+    {CV_ARM_R0 +  4,    "r4",           (void*)FIELD_OFFSET(CONTEXT, R4),     dbg_itype_unsigned_int},
+    {CV_ARM_R0 +  5,    "r5",           (void*)FIELD_OFFSET(CONTEXT, R5),     dbg_itype_unsigned_int},
+    {CV_ARM_R0 +  6,    "r6",           (void*)FIELD_OFFSET(CONTEXT, R6),     dbg_itype_unsigned_int},
+    {CV_ARM_R0 +  7,    "r7",           (void*)FIELD_OFFSET(CONTEXT, R7),     dbg_itype_unsigned_int},
+    {CV_ARM_R0 +  8,    "r8",           (void*)FIELD_OFFSET(CONTEXT, R8),     dbg_itype_unsigned_int},
+    {CV_ARM_R0 +  9,    "r9",           (void*)FIELD_OFFSET(CONTEXT, R9),     dbg_itype_unsigned_int},
+    {CV_ARM_R0 +  10,   "r10",          (void*)FIELD_OFFSET(CONTEXT, R10),    dbg_itype_unsigned_int},
+    {CV_ARM_R0 +  11,   "r11",          (void*)FIELD_OFFSET(CONTEXT, R11),    dbg_itype_unsigned_int},
+    {CV_ARM_R0 +  12,   "r12",          (void*)FIELD_OFFSET(CONTEXT, R12),    dbg_itype_unsigned_int},
+    {CV_ARM_SP,         "sp",           (void*)FIELD_OFFSET(CONTEXT, Sp),     dbg_itype_unsigned_int},
+    {CV_ARM_LR,         "lr",           (void*)FIELD_OFFSET(CONTEXT, Lr),     dbg_itype_unsigned_int},
+    {CV_ARM_PC,         "pc",           (void*)FIELD_OFFSET(CONTEXT, Pc),     dbg_itype_unsigned_int},
+    {CV_ARM_CPSR,       "cpsr",         (void*)FIELD_OFFSET(CONTEXT, Cpsr),   dbg_itype_unsigned_int},
     {0,                 NULL,           0,                                         dbg_itype_none}
 };
 
@@ -1772,7 +1772,7 @@ static BOOL be_arm_is_jump(const void* insn, ADDRESS64* jumpee)
 
 static BOOL be_arm_insert_Xpoint(HANDLE hProcess, const struct be_process_io* pio,
                                  dbg_ctx_t *ctx, enum be_xpoint_type type,
-                                 void* addr, unsigned long* val, unsigned size)
+                                 void* addr, unsigned *val, unsigned size)
 {
     SIZE_T              sz;
 
@@ -1790,7 +1790,7 @@ static BOOL be_arm_insert_Xpoint(HANDLE hProcess, const struct be_process_io* pi
 
 static BOOL be_arm_remove_Xpoint(HANDLE hProcess, const struct be_process_io* pio,
                                  dbg_ctx_t *ctx, enum be_xpoint_type type,
-                                 void* addr, unsigned long val, unsigned size)
+                                 void* addr, unsigned val, unsigned size)
 {
     SIZE_T              sz;
 
@@ -1829,51 +1829,6 @@ static int be_arm_adjust_pc_for_break(dbg_ctx_t *ctx, BOOL way)
     }
     ctx->ctx.Pc += step;
     return step;
-}
-
-static BOOL be_arm_fetch_integer(const struct dbg_lvalue* lvalue, unsigned size,
-                                 BOOL is_signed, LONGLONG* ret)
-{
-    if (size != 1 && size != 2 && size != 4 && size != 8) return FALSE;
-
-    memset(ret, 0, sizeof(*ret)); /* clear unread bytes */
-    /* FIXME: this assumes that debuggee and debugger use the same
-     * integral representation
-     */
-    if (!memory_read_value(lvalue, size, ret)) return FALSE;
-
-    /* propagate sign information */
-    if (is_signed && size < 8 && (*ret >> (size * 8 - 1)) != 0)
-    {
-        ULONGLONG neg = -1;
-        *ret |= neg << (size * 8);
-    }
-    return TRUE;
-}
-
-static BOOL be_arm_fetch_float(const struct dbg_lvalue* lvalue, unsigned size,
-                               long double* ret)
-{
-    char        tmp[sizeof(long double)];
-
-    /* FIXME: this assumes that debuggee and debugger use the same
-     * representation for reals
-     */
-    if (!memory_read_value(lvalue, size, tmp)) return FALSE;
-
-    if (size == sizeof(float)) *ret = *(float*)tmp;
-    else if (size == sizeof(double)) *ret = *(double*)tmp;
-    else if (size == sizeof(long double)) *ret = *(long double*)tmp;
-    else return FALSE;
-
-    return TRUE;
-}
-
-static BOOL be_arm_store_integer(const struct dbg_lvalue* lvalue, unsigned size,
-                                 BOOL is_signed, LONGLONG val)
-{
-    /* this is simple if we're on a little endian CPU */
-    return memory_write_value(lvalue, size, &val);
 }
 
 static BOOL be_arm_get_context(HANDLE thread, dbg_ctx_t *ctx)
@@ -1932,9 +1887,6 @@ struct backend_cpu be_arm =
     be_arm_is_watchpoint_set,
     be_arm_clear_watchpoint,
     be_arm_adjust_pc_for_break,
-    be_arm_fetch_integer,
-    be_arm_fetch_float,
-    be_arm_store_integer,
     be_arm_get_context,
     be_arm_set_context,
     be_arm_gdb_register_map,

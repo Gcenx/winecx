@@ -1,4 +1,8 @@
 MODULE    = avicap32.dll
+UNIXLIB   = avicap32.so
 IMPORTLIB = avicap32
+IMPORTS   = user32
 
-C_SRCS = avicap32_main.c
+C_SRCS = \
+	avicap32_main.c \
+	v4l.c

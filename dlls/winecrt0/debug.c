@@ -18,7 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifdef _WIN32
+#ifdef __WINE_PE_BUILD
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -160,7 +160,7 @@ static void init_options(void)
 static const char * __cdecl fallback__wine_dbg_strdup( const char *str )
 {
     static char *list[32];
-    static int pos;
+    static LONG pos;
     char *ret = strdup( str );
     int idx;
 
@@ -249,4 +249,4 @@ int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_
     return p__wine_dbg_header( cls, channel, function );
 }
 
-#endif  /* _WIN32 */
+#endif  /* __WINE_PE_BUILD */

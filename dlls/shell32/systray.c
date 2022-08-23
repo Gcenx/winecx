@@ -23,12 +23,6 @@
 #define NONAMELESSUNION
 
 #include <stdarg.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <errno.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -42,8 +36,6 @@
 #include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(systray);
-
-static const WCHAR classname[] = /* Shell_TrayWnd */ {'S','h','e','l','l','_','T','r','a','y','W','n','d','\0'};
 
 struct notify_data  /* platform-independent format for NOTIFYICONDATA */
 {
@@ -84,7 +76,7 @@ BOOL WINAPI Shell_NotifyIconA(DWORD dwMessage, PNOTIFYICONDATAA pnid)
         pnid->cbSize != NOTIFYICONDATAA_V3_SIZE &&
         pnid->cbSize != sizeof(NOTIFYICONDATAA))
     {
-        WARN("Invalid cbSize (%d) - using only Win95 fields (size=%d)\n",
+        WARN("Invalid cbSize (%ld) - using only Win95 fields (size=%ld)\n",
             pnid->cbSize, NOTIFYICONDATAA_V1_SIZE);
         cbSize = NOTIFYICONDATAA_V1_SIZE;
     }
@@ -134,12 +126,11 @@ BOOL WINAPI Shell_NotifyIconW(DWORD dwMessage, PNOTIFYICONDATAW nid)
 {
     HWND tray;
     COPYDATASTRUCT cds;
-    char * HOSTPTR socketname;
     struct notify_data data_buffer;
     struct notify_data *data = &data_buffer;
     BOOL ret;
 
-    TRACE("dwMessage = %d, nid->cbSize=%d\n", dwMessage, nid->cbSize);
+    TRACE("dwMessage = %ld, nid->cbSize=%ld\n", dwMessage, nid->cbSize);
 
     /* Validate the cbSize so that WM_COPYDATA doesn't crash the application */
     if (nid->cbSize != NOTIFYICONDATAW_V1_SIZE &&
@@ -149,14 +140,14 @@ BOOL WINAPI Shell_NotifyIconW(DWORD dwMessage, PNOTIFYICONDATAW nid)
     {
         NOTIFYICONDATAW newNid;
 
-        WARN("Invalid cbSize (%d) - using only Win95 fields (size=%d)\n",
+        WARN("Invalid cbSize (%ld) - using only Win95 fields (size=%ld)\n",
             nid->cbSize, NOTIFYICONDATAW_V1_SIZE);
         CopyMemory(&newNid, nid, NOTIFYICONDATAW_V1_SIZE);
         newNid.cbSize = NOTIFYICONDATAW_V1_SIZE;
         return Shell_NotifyIconW(dwMessage, &newNid);
     }
 
-    tray = FindWindowExW(0, NULL, classname, NULL);
+    tray = FindWindowExW(0, NULL, L"Shell_TrayWnd", NULL);
     if (!tray) return FALSE;
 
     cds.dwData = dwMessage;
@@ -249,35 +240,6 @@ noicon:
 
     cds.lpData = data;
     ret = SendMessageW(tray, WM_COPYDATA, (WPARAM)nid->hWnd, (LPARAM)&cds);
-
-    /* If there's a socket available for communicating back to CrossOver,
-        send a message with everything we know. */
-    if ((socketname = getenv("CX_SYSTRAY_SOCKET")))
-    {
-        struct sockaddr_un sa;
-        int sock = socket(AF_UNIX,SOCK_STREAM,0);
-
-        WINE_TRACE("Sending a systray notification to CrossOver.\n");
-
-        sa.sun_family=AF_UNIX;
-        lstrcpynA(sa.sun_path,socketname,sizeof(sa.sun_path));
-        sa.sun_path[sizeof(sa.sun_path) - 1] = 0;
-
-        if (!connect(sock, (struct sockaddr *) &sa, sizeof(sa)))
-        {
-            uint messageid = WM_COPYDATA;
-            write(sock,&messageid,sizeof(messageid));
-            write(sock,&dwMessage,sizeof(dwMessage));
-            write(sock,&cds.cbData,sizeof(cds.cbData));
-            write(sock,cds.lpData,cds.cbData);
-        }
-        else
-        {
-            WINE_WARN("When sending systray icon, failed to connect to launch-notification socket %s.  errno: %d\n",socketname,errno);
-        }
-        close(sock);
-    }
-
     if (data != &data_buffer) heap_free( data );
     return ret;
 }

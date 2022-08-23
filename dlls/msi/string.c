@@ -139,13 +139,11 @@ static int st_find_free_entry( string_table *st )
             return i;
 
     /* dynamically resize */
-    sz = st->maxcount + 1 + st->maxcount/2;
-    p = msi_realloc_zero( st->strings, sz * sizeof(struct msistring) );
-    if( !p )
-        return -1;
+    sz = st->maxcount + 1 + st->maxcount / 2;
+    if (!(p = msi_realloc( st->strings, sz * sizeof(*p) ))) return -1;
+    memset( p + st->maxcount, 0, (sz - st->maxcount) * sizeof(*p) );
 
-    s = msi_realloc( st->sorted, sz*sizeof(UINT) );
-    if( !s )
+    if (!(s = msi_realloc( st->sorted, sz * sizeof(*s) )))
     {
         msi_free( p );
         return -1;
@@ -546,15 +544,15 @@ string_table *msi_load_string_table( IStorage *stg, UINT *bytes_per_strref )
 
         r = add_string( st, n, data+offset, len, refs, TRUE );
         if( r != n )
-            ERR("Failed to add string %d\n", n );
+            ERR( "Failed to add string %lu\n", n );
         n++;
         offset += len;
     }
 
     if ( datasize != offset )
-        ERR("string table load failed! (%08x != %08x), please report\n", datasize, offset );
+        ERR( "string table load failed! (%u != %lu), please report\n", datasize, offset );
 
-    TRACE("Loaded %d strings\n", count);
+    TRACE( "loaded %lu strings\n", count );
 
 end:
     msi_free( pool );

@@ -9,7 +9,7 @@
 @ stdcall HidD_GetManufacturerString(long ptr long)
 @ stub HidD_GetMsGenreDescriptor
 @ stdcall HidD_GetNumInputBuffers(long ptr)
-@ stub HidD_GetPhysicalDescriptor
+@ stdcall HidD_GetPhysicalDescriptor(long ptr long)
 @ stdcall HidD_GetPreparsedData(ptr ptr)
 @ stdcall HidD_GetProductString(long ptr long)
 @ stdcall HidD_GetSerialNumberString(long ptr long)
@@ -35,10 +35,10 @@
 @ stdcall HidP_MaxDataListLength(long ptr)
 @ stdcall HidP_MaxUsageListLength(long long ptr)
 @ stub HidP_SetData
-@ stub HidP_SetScaledUsageValue
+@ stdcall HidP_SetScaledUsageValue(long long long long long ptr ptr long)
 @ stdcall HidP_SetUsageValue(long long long long long ptr ptr long)
-@ stub HidP_SetUsageValueArray
+@ stdcall HidP_SetUsageValueArray(long long long long ptr long ptr ptr long)
 @ stdcall HidP_SetUsages(long long long ptr ptr ptr ptr long)
 @ stdcall HidP_TranslateUsagesToI8042ScanCodes(ptr long long ptr ptr ptr)
-@ stub HidP_UnsetUsages
+@ stdcall HidP_UnsetUsages(long long long ptr ptr ptr ptr long)
 @ stub HidP_UsageListDifference

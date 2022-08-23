@@ -50,7 +50,7 @@ static ULONG STDMETHODCALLTYPE d2d_gradient_AddRef(ID2D1GradientStopCollection *
     struct d2d_gradient *gradient = impl_from_ID2D1GradientStopCollection(iface);
     ULONG refcount = InterlockedIncrement(&gradient->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -60,7 +60,7 @@ static ULONG STDMETHODCALLTYPE d2d_gradient_Release(ID2D1GradientStopCollection 
     struct d2d_gradient *gradient = impl_from_ID2D1GradientStopCollection(iface);
     ULONG refcount = InterlockedDecrement(&gradient->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -131,12 +131,12 @@ HRESULT d2d_gradient_create(ID2D1Factory *factory, ID3D11Device1 *device, const 
         UINT32 stop_count, D2D1_GAMMA gamma, D2D1_EXTEND_MODE extend_mode, struct d2d_gradient **out)
 {
     D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc;
-    D3D11_SUBRESOURCE_DATA texture_data;
-    D3D11_TEXTURE2D_DESC texture_desc;
+    D3D11_SUBRESOURCE_DATA buffer_data;
     ID3D11ShaderResourceView *view;
     struct d2d_gradient *gradient;
-    ID3D11Texture2D *texture;
+    D3D11_BUFFER_DESC buffer_desc;
     struct d2d_vec4 *data;
+    ID3D11Buffer *buffer;
     unsigned int i;
     HRESULT hr;
 
@@ -156,40 +156,34 @@ HRESULT d2d_gradient_create(ID2D1Factory *factory, ID3D11Device1 *device, const 
         data[i * 2 + 1].w = stops[i].color.a;
     }
 
-    texture_desc.Width = 2 * stop_count;
-    texture_desc.Height = 1;
-    texture_desc.MipLevels = 1;
-    texture_desc.ArraySize = 1;
-    texture_desc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
-    texture_desc.SampleDesc.Count = 1;
-    texture_desc.SampleDesc.Quality = 0;
-    texture_desc.Usage = D3D11_USAGE_DEFAULT;
-    texture_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    texture_desc.CPUAccessFlags = 0;
-    texture_desc.MiscFlags = 0;
+    buffer_desc.ByteWidth = 2 * stop_count * sizeof(*data);
+    buffer_desc.Usage = D3D11_USAGE_DEFAULT;
+    buffer_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    buffer_desc.CPUAccessFlags = 0;
+    buffer_desc.MiscFlags = 0;
 
-    texture_data.pSysMem = data;
-    texture_data.SysMemPitch = 0;
-    texture_data.SysMemSlicePitch = 0;
+    buffer_data.pSysMem = data;
+    buffer_data.SysMemPitch = 0;
+    buffer_data.SysMemSlicePitch = 0;
 
-    hr = ID3D11Device1_CreateTexture2D(device, &texture_desc, &texture_data, &texture);
+    hr = ID3D11Device1_CreateBuffer(device, &buffer_desc, &buffer_data, &buffer);
     heap_free(data);
     if (FAILED(hr))
     {
-        ERR("Failed to create texture, hr %#x.\n", hr);
+        ERR("Failed to create buffer, hr %#lx.\n", hr);
         return hr;
     }
 
     srv_desc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
-    srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srv_desc.Texture2D.MostDetailedMip = 0;
-    srv_desc.Texture2D.MipLevels = 1;
+    srv_desc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+    srv_desc.Buffer.ElementOffset = 0;
+    srv_desc.Buffer.ElementWidth = 2 * stop_count;
 
-    hr = ID3D11Device1_CreateShaderResourceView(device, (ID3D11Resource *)texture, &srv_desc, &view);
-    ID3D11Texture2D_Release(texture);
+    hr = ID3D11Device1_CreateShaderResourceView(device, (ID3D11Resource *)buffer, &srv_desc, &view);
+    ID3D11Buffer_Release(buffer);
     if (FAILED(hr))
     {
-        ERR("Failed to create view, hr %#x.\n", hr);
+        ERR("Failed to create view, hr %#lx.\n", hr);
         return hr;
     }
 
@@ -294,7 +288,7 @@ static ULONG STDMETHODCALLTYPE d2d_solid_color_brush_AddRef(ID2D1SolidColorBrush
     struct d2d_brush *brush = impl_from_ID2D1SolidColorBrush(iface);
     ULONG refcount = InterlockedIncrement(&brush->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -304,7 +298,7 @@ static ULONG STDMETHODCALLTYPE d2d_solid_color_brush_Release(ID2D1SolidColorBrus
     struct d2d_brush *brush = impl_from_ID2D1SolidColorBrush(iface);
     ULONG refcount = InterlockedDecrement(&brush->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
         d2d_brush_destroy(brush);
@@ -437,7 +431,7 @@ static ULONG STDMETHODCALLTYPE d2d_linear_gradient_brush_AddRef(ID2D1LinearGradi
     struct d2d_brush *brush = impl_from_ID2D1LinearGradientBrush(iface);
     ULONG refcount = InterlockedIncrement(&brush->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -447,7 +441,7 @@ static ULONG STDMETHODCALLTYPE d2d_linear_gradient_brush_Release(ID2D1LinearGrad
     struct d2d_brush *brush = impl_from_ID2D1LinearGradientBrush(iface);
     ULONG refcount = InterlockedDecrement(&brush->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -624,7 +618,7 @@ static ULONG STDMETHODCALLTYPE d2d_radial_gradient_brush_AddRef(ID2D1RadialGradi
     struct d2d_brush *brush = impl_from_ID2D1RadialGradientBrush(iface);
     ULONG refcount = InterlockedIncrement(&brush->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -634,7 +628,7 @@ static ULONG STDMETHODCALLTYPE d2d_radial_gradient_brush_Release(ID2D1RadialGrad
     struct d2d_brush *brush = impl_from_ID2D1RadialGradientBrush(iface);
     ULONG refcount = InterlockedDecrement(&brush->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -857,7 +851,7 @@ static ULONG STDMETHODCALLTYPE d2d_bitmap_brush_AddRef(ID2D1BitmapBrush1 *iface)
     struct d2d_brush *brush = impl_from_ID2D1BitmapBrush1(iface);
     ULONG refcount = InterlockedIncrement(&brush->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -867,7 +861,7 @@ static ULONG STDMETHODCALLTYPE d2d_bitmap_brush_Release(ID2D1BitmapBrush1 *iface
     struct d2d_brush *brush = impl_from_ID2D1BitmapBrush1(iface);
     ULONG refcount = InterlockedDecrement(&brush->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -1287,7 +1281,7 @@ static void d2d_brush_bind_bitmap(struct d2d_brush *brush, struct d2d_device_con
         sampler_desc.MaxLOD = 0.0f;
 
         if (FAILED(hr = ID3D11Device1_CreateSamplerState(context->d3d_device, &sampler_desc, sampler_state)))
-            ERR("Failed to create sampler state, hr %#x.\n", hr);
+            ERR("Failed to create sampler state, hr %#lx.\n", hr);
     }
 
     ID3D11DeviceContext_PSSetSamplers(d3d_context, brush_idx, 1, sampler_state);

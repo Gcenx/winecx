@@ -20,13 +20,9 @@
 
 #define COBJMACROS
 
-#include "config.h"
-
 #include <stdarg.h>
-#ifdef HAVE_LIBXML2
-# include <libxml/parser.h>
-# include <libxml/xmlerror.h>
-#endif
+#include <libxml/parser.h>
+#include <libxml/xmlerror.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -38,8 +34,6 @@
 #include "wine/debug.h"
 
 #include "msxml_private.h"
-
-#ifdef HAVE_LIBXML2
 
 WINE_DEFAULT_DEBUG_CHANNEL(msxml);
 
@@ -123,25 +117,19 @@ static HRESULT WINAPI xmlelem_GetTypeInfoCount(IXMLElement *iface, UINT* pctinfo
 static HRESULT WINAPI xmlelem_GetTypeInfo(IXMLElement *iface, UINT iTInfo,
                                           LCID lcid, ITypeInfo** ppTInfo)
 {
-    xmlelem *This = impl_from_IXMLElement(iface);
-    HRESULT hr;
+    TRACE("%p, %u, %lx, %p.\n", iface, iTInfo, lcid, ppTInfo);
 
-    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
-
-    hr = get_typeinfo(IXMLElement_tid, ppTInfo);
-
-    return hr;
+    return get_typeinfo(IXMLElement_tid, ppTInfo);
 }
 
 static HRESULT WINAPI xmlelem_GetIDsOfNames(IXMLElement *iface, REFIID riid,
                                             LPOLESTR* rgszNames, UINT cNames,
                                             LCID lcid, DISPID* rgDispId)
 {
-    xmlelem *This = impl_from_IXMLElement(iface);
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames,
+    TRACE("%p, %s, %p, %u, %lx, %p.\n", iface, debugstr_guid(riid), rgszNames, cNames,
           lcid, rgDispId);
 
     if(!rgszNames || cNames == 0 || !rgDispId)
@@ -162,18 +150,16 @@ static HRESULT WINAPI xmlelem_Invoke(IXMLElement *iface, DISPID dispIdMember,
                                      DISPPARAMS* pDispParams, VARIANT* pVarResult,
                                      EXCEPINFO* pExcepInfo, UINT* puArgErr)
 {
-    xmlelem *This = impl_from_IXMLElement(iface);
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+    TRACE("%p, %ld, %s, %lx, %d, %p, %p, %p, %p.\n", iface, dispIdMember, debugstr_guid(riid),
           lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo(IXMLElement_tid, &typeinfo);
     if(SUCCEEDED(hr))
     {
-        hr = ITypeInfo_Invoke(typeinfo, &This->IXMLElement_iface, dispIdMember, wFlags, pDispParams,
-                pVarResult, pExcepInfo, puArgErr);
+        hr = ITypeInfo_Invoke(typeinfo, iface, dispIdMember, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
         ITypeInfo_Release(typeinfo);
     }
 
@@ -386,7 +372,7 @@ static HRESULT WINAPI xmlelem_get_type(IXMLElement *iface, LONG *p)
         return E_INVALIDARG;
 
     *p = type_libxml_to_msxml(This->node->type);
-    TRACE("returning %d\n", *p);
+    TRACE("returning %ld\n", *p);
     return S_OK;
 }
 
@@ -434,7 +420,7 @@ static HRESULT WINAPI xmlelem_addChild(IXMLElement *iface, IXMLElement *pChildEl
     xmlelem *childElem = impl_from_IXMLElement(pChildElem);
     xmlNodePtr child;
 
-    TRACE("(%p)->(%p %d %d)\n", This, pChildElem, lIndex, lreserved);
+    TRACE("%p, %p, %ld, %ld.\n", iface, pChildElem, lIndex, lreserved);
 
     if (lIndex == 0)
         child = xmlAddChild(This->node, childElem->node);
@@ -637,8 +623,8 @@ static HRESULT WINAPI xmlelem_collection_Invoke(IXMLElementCollection *iface, DI
 
 static HRESULT WINAPI xmlelem_collection_put_length(IXMLElementCollection *iface, LONG v)
 {
-    xmlelem_collection *This = impl_from_IXMLElementCollection(iface);
-    TRACE("(%p)->(%d)\n", This, v);
+    TRACE("%p, %ld.\n", iface, v);
+
     return E_FAIL;
 }
 
@@ -755,7 +741,7 @@ static HRESULT WINAPI xmlelem_collection_IEnumVARIANT_Next(
     xmlelem_collection *This = impl_from_IEnumVARIANT(iface);
     HRESULT hr;
 
-    TRACE("(%p)->(%d %p %p)\n", This, celt, rgVar, fetched);
+    TRACE("%p, %lu, %p, %p.\n", iface, celt, rgVar, fetched);
 
     if (!rgVar)
         return E_INVALIDARG;
@@ -786,8 +772,7 @@ static HRESULT WINAPI xmlelem_collection_IEnumVARIANT_Next(
 static HRESULT WINAPI xmlelem_collection_IEnumVARIANT_Skip(
     IEnumVARIANT *iface, ULONG celt)
 {
-    xmlelem_collection *This = impl_from_IEnumVARIANT(iface);
-    FIXME("(%p)->(%d): stub\n", This, celt);
+    FIXME("%p, %lu: stub\n", iface, celt);
     return E_NOTIMPL;
 }
 
@@ -847,5 +832,3 @@ static HRESULT XMLElementCollection_create(xmlNodePtr node, LPVOID *ppObj)
     TRACE("returning iface %p\n", *ppObj);
     return S_OK;
 }
-
-#endif

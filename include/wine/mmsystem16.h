@@ -24,7 +24,6 @@
 #include <windef.h>
 #include <wine/windef16.h>
 #include <mmddk.h>
-#include <wine/winheader_enter.h>
 
 #include <pshpack1.h>
 
@@ -810,7 +809,5 @@ typedef struct {
 } MCI_DGV_WINDOW_PARMS16, *LPMCI_DGV_WINDOW_PARMS16;
 
 #include <poppack.h>
-
-#include <wine/winheader_exit.h>
 
 #endif  /* __WINE_WINE_MMSYSTEM16_H */

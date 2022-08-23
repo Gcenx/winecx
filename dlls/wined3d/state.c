@@ -25,13 +25,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdio.h>
-#ifdef HAVE_FLOAT_H
-# include <float.h>
-#endif
 
 #include "wined3d_private.h"
 
@@ -152,6 +146,27 @@ void * CDECL wined3d_depth_stencil_state_get_parent(const struct wined3d_depth_s
     return state->parent;
 }
 
+static bool stencil_op_writes_ds(const struct wined3d_stencil_op_desc *desc)
+{
+    return desc->fail_op != WINED3D_STENCIL_OP_KEEP
+            || desc->depth_fail_op != WINED3D_STENCIL_OP_KEEP
+            || desc->pass_op != WINED3D_STENCIL_OP_KEEP;
+}
+
+static bool depth_stencil_state_desc_writes_ds(const struct wined3d_depth_stencil_state_desc *desc)
+{
+    if (desc->depth && desc->depth_write)
+        return true;
+
+    if (desc->stencil && desc->stencil_write_mask)
+    {
+        if (stencil_op_writes_ds(&desc->front) || stencil_op_writes_ds(&desc->back))
+            return true;
+    }
+
+    return false;
+}
+
 HRESULT CDECL wined3d_depth_stencil_state_create(struct wined3d_device *device,
         const struct wined3d_depth_stencil_state_desc *desc, void *parent,
         const struct wined3d_parent_ops *parent_ops, struct wined3d_depth_stencil_state **state)
@@ -169,6 +184,8 @@ HRESULT CDECL wined3d_depth_stencil_state_create(struct wined3d_device *device,
     object->parent = parent;
     object->parent_ops = parent_ops;
     object->device = device;
+
+    object->writes_ds = depth_stencil_state_desc_writes_ds(desc);
 
     TRACE("Created depth/stencil state %p.\n", object);
     *state = object;
@@ -4649,7 +4666,7 @@ static void state_cs_uav_binding(struct wined3d_context *context,
 
 static void state_uav_warn(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
-    WARN("ARB_image_load_store is not supported by OpenGL implementation.\n");
+    WARN("ARB_shader_image_load_store is not supported by this OpenGL implementation.\n");
 }
 
 static void state_so(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)

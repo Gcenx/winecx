@@ -77,7 +77,7 @@ static void *get_proc_address(const char *name)
 
     RtlInitAnsiString(&name_a, name);
     status = RtlAnsiStringToUnicodeString(&name_u, &name_a, TRUE);
-    ok (!status, "RtlAnsiStringToUnicodeString failed: %#x\n", status);
+    ok (!status, "RtlAnsiStringToUnicodeString failed: %#lx\n", status);
     if (status) return NULL;
 
     ret = MmGetSystemRoutineAddress(&name_u);
@@ -141,6 +141,133 @@ static void test_irp_struct(IRP *irp, DEVICE_OBJECT *device)
     IoFreeIrp(irp);
 }
 
+static int cancel_queue_cnt;
+
+static void WINAPI cancel_queued_irp(DEVICE_OBJECT *device, IRP *irp)
+{
+    IoReleaseCancelSpinLock(irp->CancelIrql);
+    ok(irp->Cancel == TRUE, "Cancel = %x\n", irp->Cancel);
+    ok(!irp->CancelRoutine, "CancelRoutine = %p\n", irp->CancelRoutine);
+    irp->IoStatus.Status = STATUS_CANCELLED;
+    irp->IoStatus.Information = 0;
+    cancel_queue_cnt++;
+}
+
+static void test_queue(void)
+{
+    KDEVICE_QUEUE_ENTRY *entry;
+    KDEVICE_QUEUE queue;
+    BOOLEAN ret;
+    KIRQL irql;
+    IRP *irp;
+
+    irp = IoAllocateIrp(1, FALSE);
+
+    memset(&queue, 0xcd, sizeof(queue));
+    KeInitializeDeviceQueue(&queue);
+    ok(!queue.Busy, "unexpected Busy state\n");
+    ok(queue.Size == sizeof(queue), "unexpected Size %x\n", queue.Size);
+    ok(queue.Type == IO_TYPE_DEVICE_QUEUE, "unexpected Type %x\n", queue.Type);
+    ok(IsListEmpty(&queue.DeviceListHead), "expected empty queue list\n");
+
+    ret = KeInsertDeviceQueue(&queue, &irp->Tail.Overlay.DeviceQueueEntry);
+    ok(!ret, "expected KeInsertDeviceQueue to not insert IRP\n");
+    ok(queue.Busy, "expected Busy state\n");
+    ok(IsListEmpty(&queue.DeviceListHead), "expected empty queue list\n");
+    ok(!irp->Tail.Overlay.DeviceQueueEntry.Inserted, "expected not inserted\n");
+
+    entry = KeRemoveDeviceQueue(&queue);
+    ok(!entry, "expected KeRemoveDeviceQueue to return NULL\n");
+    ok(!queue.Busy, "unexpected Busy state\n");
+    ok(IsListEmpty(&queue.DeviceListHead), "expected empty queue list\n");
+    ok(!irp->Tail.Overlay.DeviceQueueEntry.Inserted, "expected not inserted\n");
+
+    ret = KeInsertDeviceQueue(&queue, &irp->Tail.Overlay.DeviceQueueEntry);
+    ok(!ret, "expected KeInsertDeviceQueue to not insert IRP\n");
+    ok(queue.Busy, "expected Busy state\n");
+    ok(IsListEmpty(&queue.DeviceListHead), "expected empty queue list\n");
+    ok(!irp->Tail.Overlay.DeviceQueueEntry.Inserted, "expected not inserted\n");
+
+    ret = KeInsertDeviceQueue(&queue, &irp->Tail.Overlay.DeviceQueueEntry);
+    ok(ret, "expected KeInsertDeviceQueue to insert IRP\n");
+    ok(queue.Busy, "expected Busy state\n");
+    ok(!IsListEmpty(&queue.DeviceListHead), "unexpected empty queue list\n");
+    ok(irp->Tail.Overlay.DeviceQueueEntry.Inserted, "expected inserted\n");
+    ok(queue.DeviceListHead.Flink == &irp->Tail.Overlay.DeviceQueueEntry.DeviceListEntry,
+       "unexpected queue list head\n");
+
+    entry = KeRemoveDeviceQueue(&queue);
+    ok(entry != NULL, "expected KeRemoveDeviceQueue to return non-NULL\n");
+    ok(CONTAINING_RECORD(entry, IRP, Tail.Overlay.DeviceQueueEntry) == irp,
+       "unexpected IRP returned\n");
+    ok(queue.Busy, "expected Busy state\n");
+    ok(IsListEmpty(&queue.DeviceListHead), "expected empty queue list\n");
+    ok(!irp->Tail.Overlay.DeviceQueueEntry.Inserted, "expected not inserted\n");
+
+    entry = KeRemoveDeviceQueue(&queue);
+    ok(entry == NULL, "expected KeRemoveDeviceQueue to return NULL\n");
+    ok(!queue.Busy, "unexpected Busy state\n");
+    ok(IsListEmpty(&queue.DeviceListHead), "expected empty queue list\n");
+    ok(!irp->Tail.Overlay.DeviceQueueEntry.Inserted, "expected not inserted\n");
+
+    IoCancelIrp(irp);
+    ok(irp->Cancel, "unexpected non-cancelled state\n");
+
+    ret = KeInsertDeviceQueue(&queue, &irp->Tail.Overlay.DeviceQueueEntry);
+    ok(!ret, "expected KeInsertDeviceQueue to not insert IRP\n");
+    ok(queue.Busy, "expected Busy state\n");
+    ok(IsListEmpty(&queue.DeviceListHead), "expected empty queue list\n");
+    ok(!irp->Tail.Overlay.DeviceQueueEntry.Inserted, "expected inserted\n");
+    ret = KeInsertDeviceQueue(&queue, &irp->Tail.Overlay.DeviceQueueEntry);
+    ok(ret, "expected KeInsertDeviceQueue to insert IRP\n");
+    ok(queue.Busy, "expected Busy state\n");
+    ok(!IsListEmpty(&queue.DeviceListHead), "unexpected empty queue list\n");
+    ok(irp->Tail.Overlay.DeviceQueueEntry.Inserted, "expected inserted\n");
+    ok(queue.DeviceListHead.Flink == &irp->Tail.Overlay.DeviceQueueEntry.DeviceListEntry,
+       "unexpected queue list head\n");
+
+    entry = KeRemoveDeviceQueue(&queue);
+    ok(entry != NULL, "expected KeRemoveDeviceQueue to return non-NULL\n");
+    ok(CONTAINING_RECORD(entry, IRP, Tail.Overlay.DeviceQueueEntry) == irp,
+       "unexpected IRP returned\n");
+    ok(queue.Busy, "expected Busy state\n");
+    ok(IsListEmpty(&queue.DeviceListHead), "expected empty queue list\n");
+    ok(!irp->Tail.Overlay.DeviceQueueEntry.Inserted, "expected inserted\n");
+    ok(irp->Cancel, "unexpected non-cancelled state\n");
+
+    IoFreeIrp(irp);
+
+    irp = IoAllocateIrp(1, FALSE);
+
+    IoAcquireCancelSpinLock(&irql);
+    IoSetCancelRoutine(irp, cancel_queued_irp);
+    IoReleaseCancelSpinLock(irql);
+
+    ret = KeInsertDeviceQueue(&queue, &irp->Tail.Overlay.DeviceQueueEntry);
+    ok(ret, "expected KeInsertDeviceQueue to insert IRP\n");
+    ok(queue.Busy, "expected Busy state\n");
+    ok(!IsListEmpty(&queue.DeviceListHead), "expected empty queue list\n");
+    ok(irp->Tail.Overlay.DeviceQueueEntry.Inserted, "expected inserted\n");
+    ok(queue.DeviceListHead.Flink == &irp->Tail.Overlay.DeviceQueueEntry.DeviceListEntry,
+       "unexpected queue list head\n");
+
+    IoCancelIrp(irp);
+    ok(irp->Cancel, "unexpected non-cancelled state\n");
+    ok(cancel_queue_cnt, "expected cancel routine to be called\n");
+
+    entry = KeRemoveDeviceQueue(&queue);
+    ok(entry != NULL, "expected KeRemoveDeviceQueue to return non-NULL\n");
+    ok(CONTAINING_RECORD(entry, IRP, Tail.Overlay.DeviceQueueEntry) == irp,
+       "unexpected IRP returned\n");
+    ok(irp->Cancel, "unexpected non-cancelled state\n");
+    ok(cancel_queue_cnt, "expected cancel routine to be called\n");
+    ok(queue.Busy, "expected Busy state\n");
+    ok(IsListEmpty(&queue.DeviceListHead), "expected empty queue list\n");
+    ok(!irp->Tail.Overlay.DeviceQueueEntry.Inserted, "expected inserted\n");
+
+    IoFreeIrp(irp);
+}
+
 static void test_mdl_map(void)
 {
     char buffer[20] = "test buffer";
@@ -153,7 +280,7 @@ static void test_mdl_map(void)
     MmProbeAndLockPages(mdl, KernelMode, IoReadAccess);
 
     addr = MmMapLockedPagesSpecifyCache(mdl, KernelMode, MmCached, NULL, FALSE, NormalPagePriority);
-todo_wine
+    todo_wine
     ok(addr != NULL, "MmMapLockedPagesSpecifyCache failed\n");
 
     MmUnmapLockedPages(addr, mdl);
@@ -168,12 +295,12 @@ static void test_init_funcs(void)
     KeInitializeTimerEx(&timer, NotificationTimer);
     ok(timer.Header.Type == 8, "got: %u\n", timer.Header.Type);
     ok(timer.Header.Size == 0 || timer.Header.Size == 10, "got: %u\n", timer.Header.Size);
-    ok(timer.Header.SignalState == 0, "got: %u\n", timer.Header.SignalState);
+    ok(timer.Header.SignalState == 0, "got: %lu\n", timer.Header.SignalState);
 
     KeInitializeTimerEx(&timer2, SynchronizationTimer);
     ok(timer2.Header.Type == 9, "got: %u\n", timer2.Header.Type);
     ok(timer2.Header.Size == 0 || timer2.Header.Size == 10, "got: %u\n", timer2.Header.Size);
-    ok(timer2.Header.SignalState == 0, "got: %u\n", timer2.Header.SignalState);
+    ok(timer2.Header.SignalState == 0, "got: %lu\n", timer2.Header.SignalState);
 }
 
 static const WCHAR driver2_path[] =
@@ -186,8 +313,7 @@ static WCHAR test_load_image_name[MAX_PATH];
 static void WINAPI test_load_image_notify_routine(UNICODE_STRING *image_name, HANDLE process_id,
         IMAGE_INFO *image_info)
 {
-    if (test_load_image_notify_count == -1
-            || (image_name->Buffer && wcsstr(image_name->Buffer, L".tmp")))
+    if (image_name->Buffer && wcsstr(image_name->Buffer, L".tmp"))
     {
         ++test_load_image_notify_count;
         test_image_info = *image_info;
@@ -197,17 +323,22 @@ static void WINAPI test_load_image_notify_routine(UNICODE_STRING *image_name, HA
 
 static void test_load_driver(void)
 {
+    char full_name_buffer[300];
+    OBJECT_NAME_INFORMATION *full_name = (OBJECT_NAME_INFORMATION *)full_name_buffer;
     static WCHAR image_path_key_name[] = L"ImagePath";
     RTL_QUERY_REGISTRY_TABLE query_table[2];
     UNICODE_STRING name, image_path;
+    OBJECT_ATTRIBUTES attr;
+    IO_STATUS_BLOCK io;
     NTSTATUS ret;
+    HANDLE file;
 
     ret = PsSetLoadImageNotifyRoutine(test_load_image_notify_routine);
-    ok(ret == STATUS_SUCCESS, "Got unexpected status %#x.\n", ret);
+    ok(ret == STATUS_SUCCESS, "Got unexpected status %#lx.\n", ret);
 
     /* Routine gets registered twice on Windows. */
     ret = PsSetLoadImageNotifyRoutine(test_load_image_notify_routine);
-    ok(ret == STATUS_SUCCESS, "Got unexpected status %#x.\n", ret);
+    ok(ret == STATUS_SUCCESS, "Got unexpected status %#lx.\n", ret);
 
     RtlInitUnicodeString(&image_path, NULL);
     memset(query_table, 0, sizeof(query_table));
@@ -218,13 +349,25 @@ static void test_load_driver(void)
     query_table[0].DefaultType = REG_EXPAND_SZ << RTL_QUERY_REGISTRY_TYPECHECK_SHIFT;
 
     ret = RtlQueryRegistryValues(RTL_REGISTRY_ABSOLUTE, driver2_path, query_table, NULL, NULL);
-    ok(ret == STATUS_SUCCESS, "Got unexpected status %#x.\n", ret);
+    ok(ret == STATUS_SUCCESS, "Got unexpected status %#lx.\n", ret);
     ok(!!image_path.Buffer, "image_path.Buffer is NULL.\n");
+
+    /* The image path name in the registry may contain NT symlinks (e.g. DOS
+     * drives), which are resolved before the callback is called on Windows 10. */
+    InitializeObjectAttributes(&attr, &image_path, OBJ_KERNEL_HANDLE, NULL, NULL);
+    ret = ZwOpenFile(&file, SYNCHRONIZE, &attr, &io, 0, FILE_SYNCHRONOUS_IO_NONALERT);
+    todo_wine ok(!ret, "Got unexpected status %#lx.\n", ret);
+    if (!ret)
+    {
+        ret = ZwQueryObject(file, ObjectNameInformation, full_name_buffer, sizeof(full_name_buffer), NULL);
+        ok(!ret, "Got unexpected status %#lx.\n", ret);
+        ZwClose(file);
+    }
 
     RtlInitUnicodeString(&name, driver2_path);
 
     ret = ZwLoadDriver(&name);
-    ok(!ret, "got %#x\n", ret);
+    ok(!ret, "got %#lx\n", ret);
 
     ok(test_load_image_notify_count == 2, "Got unexpected test_load_image_notify_count %u.\n",
             test_load_image_notify_count);
@@ -232,24 +375,26 @@ static void test_load_driver(void)
             "Got unexpected ImageAddressingMode %#x.\n", test_image_info.ImageAddressingMode);
     ok(test_image_info.SystemModeImage,
             "Got unexpected SystemModeImage %#x.\n", test_image_info.SystemModeImage);
-    ok(!wcscmp(test_load_image_name, image_path.Buffer), "Image path names do not match.\n");
+    ok(!wcscmp(test_load_image_name, image_path.Buffer) /* Win < 10 */
+            || !wcscmp(test_load_image_name, full_name->Name.Buffer),
+            "Expected image path name %ls, got %ls.\n", full_name->Name.Buffer, test_load_image_name);
 
-    test_load_image_notify_count = -1;
+    test_load_image_notify_count = 0;
 
     ret = ZwLoadDriver(&name);
-    ok(ret == STATUS_IMAGE_ALREADY_LOADED, "got %#x\n", ret);
+    ok(ret == STATUS_IMAGE_ALREADY_LOADED, "got %#lx\n", ret);
 
     ret = ZwUnloadDriver(&name);
-    ok(!ret, "got %#x\n", ret);
+    ok(!ret, "got %#lx\n", ret);
 
     ret = PsRemoveLoadImageNotifyRoutine(test_load_image_notify_routine);
-    ok(ret == STATUS_SUCCESS, "Got unexpected status %#x.\n", ret);
+    ok(ret == STATUS_SUCCESS, "Got unexpected status %#lx.\n", ret);
     ret = PsRemoveLoadImageNotifyRoutine(test_load_image_notify_routine);
-    ok(ret == STATUS_SUCCESS, "Got unexpected status %#x.\n", ret);
+    ok(ret == STATUS_SUCCESS, "Got unexpected status %#lx.\n", ret);
     ret = PsRemoveLoadImageNotifyRoutine(test_load_image_notify_routine);
-    ok(ret == STATUS_PROCEDURE_NOT_FOUND, "Got unexpected status %#x.\n", ret);
+    ok(ret == STATUS_PROCEDURE_NOT_FOUND, "Got unexpected status %#lx.\n", ret);
 
-    ok(test_load_image_notify_count == -1, "Got unexpected test_load_image_notify_count %u.\n",
+    ok(test_load_image_notify_count == 0, "Got unexpected test_load_image_notify_count %u.\n",
             test_load_image_notify_count);
     RtlFreeUnicodeString(&image_path);
 }
@@ -293,7 +438,7 @@ static void test_current_thread(BOOL is_system)
     header = (DISPATCHER_HEADER*)current;
     ok(header->Type == 3, "header->Type != 3, = %u\n", header->Type);
     ret = wait_single(current, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     if (is_system)
         ok(current == *pPsInitialSystemProcess, "current != PsInitialSystemProcess\n");
@@ -305,7 +450,7 @@ static void test_current_thread(BOOL is_system)
 
     thread = PsGetCurrentThread();
     ret = wait_single( thread, 0 );
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     ok(PsGetThreadId((PETHREAD)KeGetCurrentThread()) == PsGetCurrentThreadId(), "thread IDs don't match\n");
     ok(PsIsSystemThread((PETHREAD)KeGetCurrentThread()) == is_system, "unexpected system thread\n");
@@ -316,16 +461,16 @@ static void test_current_thread(BOOL is_system)
     }
 
     ret = ObOpenObjectByPointer(current, OBJ_KERNEL_HANDLE, NULL, PROCESS_QUERY_INFORMATION, NULL, KernelMode, &process_handle);
-    ok(!ret, "ObOpenObjectByPointer failed: %#x\n", ret);
+    ok(!ret, "ObOpenObjectByPointer failed: %#lx\n", ret);
 
     ret = ZwQueryInformationProcess(process_handle, ProcessBasicInformation, &info, sizeof(info), NULL);
-    ok(!ret, "ZwQueryInformationProcess failed: %#x\n", ret);
+    ok(!ret, "ZwQueryInformationProcess failed: %#lx\n", ret);
 
     id = PsGetProcessInheritedFromUniqueProcessId(current);
     ok(id == (HANDLE)info.InheritedFromUniqueProcessId, "unexpected process id %p\n", id);
 
     ret = ZwClose(process_handle);
-    ok(!ret, "ZwClose failed: %#x\n", ret);
+    ok(!ret, "ZwClose failed: %#lx\n", ret);
 }
 
 static void test_critical_region(BOOL is_dispatcher)
@@ -372,7 +517,7 @@ static HANDLE create_thread(PKSTART_ROUTINE proc, void *arg)
     attr.Length = sizeof(attr);
     attr.Attributes = OBJ_KERNEL_HANDLE;
     ret = PsCreateSystemThread(&thread, THREAD_ALL_ACCESS, &attr, NULL, NULL, proc, arg);
-    ok(!ret, "got %#x\n", ret);
+    ok(!ret, "got %#lx\n", ret);
 
     return thread;
 }
@@ -382,9 +527,9 @@ static void join_thread(HANDLE thread)
     NTSTATUS ret;
 
     ret = ZwWaitForSingleObject(thread, FALSE, NULL);
-    ok(!ret, "got %#x\n", ret);
+    ok(!ret, "got %#lx\n", ret);
     ret = ZwClose(thread);
-    ok(!ret, "got %#x\n", ret);
+    ok(!ret, "got %#lx\n", ret);
 }
 
 static void run_thread(PKSTART_ROUTINE proc, void *arg)
@@ -400,7 +545,7 @@ static void WINAPI mutex_thread(void *arg)
     NTSTATUS ret, expect = (NTSTATUS)(DWORD_PTR)arg;
 
     ret = wait_single(&test_mutex, 0);
-    ok(ret == expect, "expected %#x, got %#x\n", expect, ret);
+    ok(ret == expect, "expected %#lx, got %#lx\n", expect, ret);
 
     if (!ret) KeReleaseMutex(&test_mutex, FALSE);
     PsTerminateSystemThread(STATUS_SUCCESS);
@@ -414,7 +559,7 @@ static void WINAPI remove_lock_thread(void *arg)
     NTSTATUS ret;
 
     ret = IoAcquireRemoveLockEx(lock, NULL, "", 1, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
-    ok(ret == STATUS_SUCCESS, "got %#x\n", ret);
+    ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
     KeSetEvent(&remove_lock_ready, 0, FALSE);
 
     IoReleaseRemoveLockAndWaitEx(lock, NULL, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
@@ -452,86 +597,86 @@ static void test_sync(void)
     KeInitializeEvent(&manual_event, NotificationEvent, FALSE);
 
     ret = wait_single(&manual_event, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     ret = KeReadStateEvent(&manual_event);
-    ok(ret == 0, "got %d\n", ret);
+    ok(ret == 0, "got %ld\n", ret);
 
     KeSetEvent(&manual_event, 0, FALSE);
 
     ret = KeReadStateEvent(&manual_event);
-    ok(ret == 1, "got %d\n", ret);
+    ok(ret == 1, "got %ld\n", ret);
 
     ret = wait_single(&manual_event, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     ret = wait_single(&manual_event, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     KeResetEvent(&manual_event);
 
     ret = wait_single(&manual_event, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     KeInitializeEvent(&auto_event, SynchronizationEvent, FALSE);
 
     ret = wait_single(&auto_event, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     KeSetEvent(&auto_event, 0, FALSE);
 
     ret = wait_single(&auto_event, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     ret = wait_single(&auto_event, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     KeInitializeEvent(&auto_event, SynchronizationEvent, TRUE);
 
     ret = wait_single(&auto_event, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     objs[0] = &manual_event;
     objs[1] = &auto_event;
 
     ret = wait_multiple(2, objs, WaitAny, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     KeSetEvent(&manual_event, 0, FALSE);
     KeSetEvent(&auto_event, 0, FALSE);
 
     ret = wait_multiple(2, objs, WaitAny, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     ret = wait_single(&auto_event, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     KeResetEvent(&manual_event);
     KeSetEvent(&auto_event, 0, FALSE);
 
     ret = wait_multiple(2, objs, WaitAny, 0);
-    ok(ret == 1, "got %#x\n", ret);
+    ok(ret == 1, "got %#lx\n", ret);
 
     ret = wait_multiple(2, objs, WaitAny, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     KeSetEvent(&manual_event, 0, FALSE);
     KeSetEvent(&auto_event, 0, FALSE);
 
     ret = wait_multiple(2, objs, WaitAll, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     ret = wait_multiple(2, objs, WaitAll, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     KeSetEvent(&auto_event, 0, FALSE);
     KeResetEvent(&manual_event);
 
     ret = wait_multiple(2, objs, WaitAll, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     ret = wait_single(&auto_event, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     objs[0] = &auto_event;
     objs[1] = &manual_event;
@@ -539,39 +684,39 @@ static void test_sync(void)
     KeSetEvent(&auto_event, 0, FALSE);
 
     ret = wait_multiple(2, objs, WaitAny, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     ret = wait_multiple(2, objs, WaitAny, 0);
-    ok(ret == 1, "got %#x\n", ret);
+    ok(ret == 1, "got %#lx\n", ret);
 
     ret = wait_multiple(2, objs, WaitAny, 0);
-    ok(ret == 1, "got %#x\n", ret);
+    ok(ret == 1, "got %#lx\n", ret);
 
     InitializeObjectAttributes(&attr, NULL, OBJ_KERNEL_HANDLE, NULL, NULL);
     ret = ZwCreateEvent(&handle, SYNCHRONIZE, &attr, NotificationEvent, TRUE);
-    ok(!ret, "ZwCreateEvent failed: %#x\n", ret);
+    ok(!ret, "ZwCreateEvent failed: %#lx\n", ret);
 
     ret = ObReferenceObjectByHandle(handle, SYNCHRONIZE, *pExEventObjectType, KernelMode, (void **)&event, NULL);
-    ok(!ret, "ObReferenceObjectByHandle failed: %#x\n", ret);
+    ok(!ret, "ObReferenceObjectByHandle failed: %#lx\n", ret);
 
 
     ret = wait_single(event, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
     ret = KeReadStateEvent(event);
-    ok(ret == 1, "got %d\n", ret);
+    ok(ret == 1, "got %ld\n", ret);
     KeResetEvent(event);
     ret = KeReadStateEvent(event);
-    ok(ret == 0, "got %d\n", ret);
+    ok(ret == 0, "got %ld\n", ret);
     ret = wait_single(event, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
     ret = wait_single_handle(handle, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     KeSetEvent(event, 0, FALSE);
     ret = wait_single(event, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
     ret = wait_single_handle(handle, 0);
-    ok(!ret, "got %#x\n", ret);
+    ok(!ret, "got %#lx\n", ret);
 
     ZwClose(handle);
     ObDereferenceObject(event);
@@ -580,90 +725,90 @@ static void test_sync(void)
     ok(event != NULL, "IoCreateSynchronizationEvent failed\n");
 
     ret = wait_single(event, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
     KeResetEvent(event);
     ret = wait_single(event, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
     ret = wait_single_handle(handle, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     ret = ZwSetEvent(handle, NULL);
-    ok(!ret, "NtSetEvent returned %#x\n", ret);
+    ok(!ret, "NtSetEvent returned %#lx\n", ret);
     ret = wait_single(event, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
     ret = wait_single_handle(handle, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     KeSetEvent(event, 0, FALSE);
     ret = wait_single_handle(handle, 0);
-    ok(!ret, "got %#x\n", ret);
+    ok(!ret, "got %#lx\n", ret);
     ret = wait_single(event, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     ret = ZwClose(handle);
-    ok(!ret, "ZwClose returned %#x\n", ret);
+    ok(!ret, "ZwClose returned %#lx\n", ret);
 
     /* test semaphores */
     KeInitializeSemaphore(&semaphore, 0, 5);
 
     ret = wait_single(&semaphore, 0);
-    ok(ret == STATUS_TIMEOUT, "got %u\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %lu\n", ret);
 
     ret = KeReleaseSemaphore(&semaphore, 0, 1, FALSE);
-    ok(ret == 0, "got prev %d\n", ret);
+    ok(ret == 0, "got prev %ld\n", ret);
 
     ret = KeReleaseSemaphore(&semaphore, 0, 2, FALSE);
-    ok(ret == 1, "got prev %d\n", ret);
+    ok(ret == 1, "got prev %ld\n", ret);
 
     ret = KeReleaseSemaphore(&semaphore, 0, 1, FALSE);
-    ok(ret == 3, "got prev %d\n", ret);
+    ok(ret == 3, "got prev %ld\n", ret);
 
     for (i = 0; i < 4; i++)
     {
         ret = wait_single(&semaphore, 0);
-        ok(ret == 0, "got %#x\n", ret);
+        ok(ret == 0, "got %#lx\n", ret);
     }
 
     ret = wait_single(&semaphore, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     KeInitializeSemaphore(&semaphore2, 3, 5);
 
     ret = KeReleaseSemaphore(&semaphore2, 0, 1, FALSE);
-    ok(ret == 3, "got prev %d\n", ret);
+    ok(ret == 3, "got prev %ld\n", ret);
 
     for (i = 0; i < 4; i++)
     {
         ret = wait_single(&semaphore2, 0);
-        ok(ret == 0, "got %#x\n", ret);
+        ok(ret == 0, "got %#lx\n", ret);
     }
 
     objs[0] = &semaphore;
     objs[1] = &semaphore2;
 
     ret = wait_multiple(2, objs, WaitAny, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     KeReleaseSemaphore(&semaphore, 0, 1, FALSE);
     KeReleaseSemaphore(&semaphore2, 0, 1, FALSE);
 
     ret = wait_multiple(2, objs, WaitAny, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     ret = wait_multiple(2, objs, WaitAny, 0);
-    ok(ret == 1, "got %#x\n", ret);
+    ok(ret == 1, "got %#lx\n", ret);
 
     ret = wait_multiple(2, objs, WaitAny, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     KeReleaseSemaphore(&semaphore, 0, 1, FALSE);
     KeReleaseSemaphore(&semaphore2, 0, 1, FALSE);
 
     ret = wait_multiple(2, objs, WaitAll, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     ret = wait_multiple(2, objs, WaitAny, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     /* test mutexes */
     KeInitializeMutex(&test_mutex, 0);
@@ -671,24 +816,24 @@ static void test_sync(void)
     for (i = 0; i < 10; i++)
     {
         ret = wait_single(&test_mutex, 0);
-        ok(ret == 0, "got %#x\n", ret);
+        ok(ret == 0, "got %#lx\n", ret);
     }
 
     for (i = 0; i < 10; i++)
     {
         ret = KeReleaseMutex(&test_mutex, FALSE);
-        ok(ret == i - 9, "expected %d, got %d\n", i - 9, ret);
+        ok(ret == i - 9, "expected %d, got %ld\n", i - 9, ret);
     }
 
     run_thread(mutex_thread, (void *)0);
 
     ret = wait_single(&test_mutex, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     run_thread(mutex_thread, (void *)STATUS_TIMEOUT);
 
     ret = KeReleaseMutex(&test_mutex, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     run_thread(mutex_thread, (void *)0);
 
@@ -699,13 +844,13 @@ static void test_sync(void)
     KeSetTimerEx(&timer, timeout, 0, NULL);
 
     ret = wait_single(&timer, 0);
-    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "got %#lx\n", ret);
 
     ret = wait_single(&timer, -40 * 10000);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     ret = wait_single(&timer, 0);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     KeCancelTimer(&timer);
     KeInitializeTimerEx(&timer, SynchronizationTimer);
@@ -716,34 +861,36 @@ static void test_sync(void)
     KeSetTimerEx(&timer, timeout, 0, &dpc);
 
     ret = wait_single(&timer, 0);
-    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "got %#lx\n", ret);
     ok(!dpc_context.called, "DPC was called unexpectedly.\n");
 
     ret = wait_single(&timer, -40 * 10000);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
     sleep_1ms();
     ok(dpc_context.called, "DPC was not called.\n");
 
     ret = wait_single(&timer, -40 * 10000);
-    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "got %#lx\n", ret);
 
     KeCancelTimer(&timer);
     KeSetTimerEx(&timer, timeout, 20, NULL);
 
     ret = wait_single(&timer, 0);
-    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "got %#lx\n", ret);
 
     ret = wait_single(&timer, -40 * 10000);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     ret = wait_single(&timer, 0);
-    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+    /* aliasing makes it sometimes succeeds, try again in that case */
+    if (ret == 0) ret = wait_single(&timer, 0);
+    ok(ret == WAIT_TIMEOUT, "got %#lx\n", ret);
 
     ret = wait_single(&timer, -40 * 10000);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     ret = wait_single(&timer, -40 * 10000);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     KeCancelTimer(&timer);
 
@@ -752,31 +899,31 @@ static void test_sync(void)
     KeSetTimerEx(&timer, timeout, 0, &dpc);
 
     ret = wait_single(&timer, 0);
-    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "got %#lx\n", ret);
     ok(!dpc_context.called, "DPC was called.\n");
 
     KeCancelTimer(&timer);
     dpc_context.called = 0;
     ret = wait_single(&timer, -40 * 10000);
-    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "got %#lx\n", ret);
     ok(!dpc_context.called, "DPC was called.\n");
 
     KeSetTimerEx(&timer, timeout, 20, &dpc);
     KeSetTimerEx(&timer, timeout, 0, &dpc);
     ret = wait_single(&timer, 0);
-    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "got %#lx\n", ret);
 
     ret = wait_single(&timer, -40 * 10000);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
 
     ret = wait_single(&timer, 0);
-    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "got %#lx\n", ret);
 
     ret = wait_single(&timer, -40 * 10000);
-    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "got %#lx\n", ret);
 
     ret = wait_single(&timer, -40 * 10000);
-    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "got %#lx\n", ret);
 
     KeCancelTimer(&timer);
     /* Test reinitializing timer. */
@@ -784,19 +931,19 @@ static void test_sync(void)
     KeInitializeTimerEx(&timer, SynchronizationTimer);
     dpc_context.called = 0;
     ret = wait_single(&timer, -40 * 10000);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
     sleep_1ms();
     todo_wine ok(dpc_context.called, "DPC was not called.\n");
 
     ret = wait_single(&timer, 0);
-    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "got %#lx\n", ret);
     sleep_1ms();
     todo_wine ok(dpc_context.called, "DPC was not called.\n");
 
     dpc_context.called = 0;
     KeSetTimerEx(&timer, timeout, 0, &dpc);
     ret = wait_single(&timer, -40 * 10000);
-    ok(ret == 0, "got %#x\n", ret);
+    ok(ret == 0, "got %#lx\n", ret);
     sleep_1ms();
     ok(dpc_context.called, "DPC was not called.\n");
 
@@ -806,36 +953,36 @@ static void test_sync(void)
     IoInitializeRemoveLockEx(&remove_lock, wine_tag, 0, 0, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
 
     ret = IoAcquireRemoveLockEx(&remove_lock, NULL, "", 1, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
-    ok(ret == STATUS_SUCCESS, "got %#x\n", ret);
+    ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
 
     IoReleaseRemoveLockEx(&remove_lock, NULL, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
 
     ret = IoAcquireRemoveLockEx(&remove_lock, NULL, "", 1, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
-    ok(ret == STATUS_SUCCESS, "got %#x\n", ret);
+    ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
 
     ret = IoAcquireRemoveLockEx(&remove_lock, NULL, "", 1, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
-    ok(ret == STATUS_SUCCESS, "got %#x\n", ret);
+    ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
 
     KeInitializeEvent(&remove_lock_ready, SynchronizationEvent, FALSE);
     thread = create_thread(remove_lock_thread, &remove_lock);
     ret = wait_single(&remove_lock_ready, -1000 * 10000);
-    ok(!ret, "got %#x\n", ret);
+    ok(!ret, "got %#lx\n", ret);
     ret = wait_single_handle(thread, -50 * 10000);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     ret = IoAcquireRemoveLockEx(&remove_lock, NULL, "", 1, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
-    ok(ret == STATUS_DELETE_PENDING, "got %#x\n", ret);
+    ok(ret == STATUS_DELETE_PENDING, "got %#lx\n", ret);
 
     IoReleaseRemoveLockEx(&remove_lock, NULL, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
     ret = wait_single_handle(thread, 0);
-    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+    ok(ret == STATUS_TIMEOUT, "got %#lx\n", ret);
 
     IoReleaseRemoveLockEx(&remove_lock, NULL, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
     ret = wait_single_handle(thread, -10000 * 10000);
-    ok(ret == STATUS_SUCCESS, "got %#x\n", ret);
+    ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
 
     ret = IoAcquireRemoveLockEx(&remove_lock, NULL, "", 1, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
-    ok(ret == STATUS_DELETE_PENDING, "got %#x\n", ret);
+    ok(ret == STATUS_DELETE_PENDING, "got %#lx\n", ret);
 }
 
 static void test_call_driver(DEVICE_OBJECT *device)
@@ -846,34 +993,46 @@ static void test_call_driver(DEVICE_OBJECT *device)
     KEVENT event;
     NTSTATUS status;
 
+    iosb.Status = 0xdeadbeef;
+    iosb.Information = 0xdeadbeef;
     irp = IoBuildAsynchronousFsdRequest(IRP_MJ_FLUSH_BUFFERS, device, NULL, 0, NULL, &iosb);
     ok(irp->UserIosb == &iosb, "unexpected UserIosb\n");
     ok(!irp->Cancel, "Cancel = %x\n", irp->Cancel);
-    ok(!irp->CancelRoutine, "CancelRoutine = %x\n", irp->CancelRoutine);
+    ok(!irp->CancelRoutine, "CancelRoutine = %p\n", irp->CancelRoutine);
     ok(!irp->UserEvent, "UserEvent = %p\n", irp->UserEvent);
     ok(irp->CurrentLocation == 2, "CurrentLocation = %u\n", irp->CurrentLocation);
     ok(irp->Tail.Overlay.Thread == (PETHREAD)KeGetCurrentThread(),
        "IRP thread is not the current thread\n");
+    ok(!irp->IoStatus.Status, "got status %#lx\n", irp->IoStatus.Status);
+    ok(!irp->IoStatus.Information, "got information %#I64x\n", (UINT64)irp->IoStatus.Information);
+    ok(iosb.Status == 0xdeadbeef, "got status %#lx\n", iosb.Status);
+    ok(iosb.Information == 0xdeadbeef, "got information %#I64x\n", (UINT64)iosb.Information);
 
     irpsp = IoGetNextIrpStackLocation(irp);
     ok(irpsp->MajorFunction == IRP_MJ_FLUSH_BUFFERS, "MajorFunction = %u\n", irpsp->MajorFunction);
-    ok(!irpsp->DeviceObject, "DeviceObject = %u\n", irpsp->DeviceObject);
-    ok(!irpsp->FileObject, "FileObject = %u\n", irpsp->FileObject);
+    ok(!irpsp->DeviceObject, "DeviceObject = %p\n", irpsp->DeviceObject);
+    ok(!irpsp->FileObject, "FileObject = %p\n", irpsp->FileObject);
     ok(!irpsp->CompletionRoutine, "CompletionRoutine = %p\n", irpsp->CompletionRoutine);
 
     status = IoCallDriver(device, irp);
-    ok(status == STATUS_PENDING, "IoCallDriver returned %#x\n", status);
+    ok(status == STATUS_PENDING, "IoCallDriver returned %#lx\n", status);
+    ok(!irp->IoStatus.Status, "got status %#lx\n", irp->IoStatus.Status);
+    ok(!irp->IoStatus.Information, "got information %#I64x\n", (UINT64)irp->IoStatus.Information);
+    ok(iosb.Status == 0xdeadbeef, "got status %#lx\n", iosb.Status);
+    ok(iosb.Information == 0xdeadbeef, "got information %#I64x\n", (UINT64)iosb.Information);
 
     irp->IoStatus.Status = STATUS_SUCCESS;
-    irp->IoStatus.Information = 0;
+    irp->IoStatus.Information = 123;
     IoCompleteRequest(irp, IO_NO_INCREMENT);
+    ok(iosb.Status == STATUS_SUCCESS, "got status %#lx\n", iosb.Status);
+    ok(iosb.Information == 123, "got information %#I64x\n", (UINT64)iosb.Information);
 
     KeInitializeEvent(&event, NotificationEvent, FALSE);
 
     irp = IoBuildSynchronousFsdRequest(IRP_MJ_FLUSH_BUFFERS, device, NULL, 0, NULL, &event, &iosb);
     ok(irp->UserIosb == &iosb, "unexpected UserIosb\n");
     ok(!irp->Cancel, "Cancel = %x\n", irp->Cancel);
-    ok(!irp->CancelRoutine, "CancelRoutine = %x\n", irp->CancelRoutine);
+    ok(!irp->CancelRoutine, "CancelRoutine = %p\n", irp->CancelRoutine);
     ok(irp->UserEvent == &event, "UserEvent = %p\n", irp->UserEvent);
     ok(irp->CurrentLocation == 2, "CurrentLocation = %u\n", irp->CurrentLocation);
     ok(irp->Tail.Overlay.Thread == (PETHREAD)KeGetCurrentThread(),
@@ -881,25 +1040,25 @@ static void test_call_driver(DEVICE_OBJECT *device)
 
     irpsp = IoGetNextIrpStackLocation(irp);
     ok(irpsp->MajorFunction == IRP_MJ_FLUSH_BUFFERS, "MajorFunction = %u\n", irpsp->MajorFunction);
-    ok(!irpsp->DeviceObject, "DeviceObject = %u\n", irpsp->DeviceObject);
-    ok(!irpsp->FileObject, "FileObject = %u\n", irpsp->FileObject);
+    ok(!irpsp->DeviceObject, "DeviceObject = %p\n", irpsp->DeviceObject);
+    ok(!irpsp->FileObject, "FileObject = %p\n", irpsp->FileObject);
     ok(!irpsp->CompletionRoutine, "CompletionRoutine = %p\n", irpsp->CompletionRoutine);
 
     status = wait_single(&event, 0);
-    ok(status == STATUS_TIMEOUT, "got %#x\n", status);
+    ok(status == STATUS_TIMEOUT, "got %#lx\n", status);
 
     status = IoCallDriver(device, irp);
-    ok(status == STATUS_PENDING, "IoCallDriver returned %#x\n", status);
+    ok(status == STATUS_PENDING, "IoCallDriver returned %#lx\n", status);
 
     status = wait_single(&event, 0);
-    ok(status == STATUS_TIMEOUT, "got %#x\n", status);
+    ok(status == STATUS_TIMEOUT, "got %#lx\n", status);
 
     irp->IoStatus.Status = STATUS_SUCCESS;
     irp->IoStatus.Information = 0;
     IoCompleteRequest(irp, IO_NO_INCREMENT);
 
     status = wait_single(&event, 0);
-    ok(status == STATUS_SUCCESS, "got %#x\n", status);
+    ok(status == STATUS_SUCCESS, "got %#lx\n", status);
 }
 
 static int cancel_cnt;
@@ -954,11 +1113,11 @@ static void test_cancel_irp(DEVICE_OBJECT *device)
 
     /* cancel IRP with cancel routine */
     status = IoCallDriver(device, irp);
-    ok(status == STATUS_PENDING, "IoCallDriver returned %#x\n", status);
+    ok(status == STATUS_PENDING, "IoCallDriver returned %#lx\n", status);
 
     ok(irp->CurrentLocation == 1, "CurrentLocation = %u\n", irp->CurrentLocation);
     irpsp = IoGetCurrentIrpStackLocation(irp);
-    ok(irpsp->DeviceObject == device, "DeviceObject = %u\n", irpsp->DeviceObject);
+    ok(irpsp->DeviceObject == device, "DeviceObject = %p\n", irpsp->DeviceObject);
 
     IoSetCancelRoutine(irp, cancel_irp);
     cancel_cnt = 0;
@@ -980,7 +1139,7 @@ static void test_cancel_irp(DEVICE_OBJECT *device)
     IoSetCompletionRoutine(irp, cancel_test_completion, &completion_called, TRUE, FALSE, TRUE);
 
     status = IoCallDriver(device, irp);
-    ok(status == STATUS_PENDING, "IoCallDriver returned %#x\n", status);
+    ok(status == STATUS_PENDING, "IoCallDriver returned %#lx\n", status);
 
     IoSetCancelRoutine(irp, cancel_irp);
     cancel_cnt = 0;
@@ -998,7 +1157,7 @@ static void test_cancel_irp(DEVICE_OBJECT *device)
     IoSetCompletionRoutine(irp, cancel_test_completion, &completion_called, TRUE, TRUE, FALSE);
 
     status = IoCallDriver(device, irp);
-    ok(status == STATUS_PENDING, "IoCallDriver returned %#x\n", status);
+    ok(status == STATUS_PENDING, "IoCallDriver returned %#lx\n", status);
 
     IoSetCancelRoutine(irp, cancel_irp);
     cancel_cnt = 0;
@@ -1016,7 +1175,7 @@ static void test_cancel_irp(DEVICE_OBJECT *device)
     IoSetCompletionRoutine(irp, cancel_test_completion, &completion_called, TRUE, FALSE, FALSE);
 
     status = IoCallDriver(device, irp);
-    ok(status == STATUS_PENDING, "IoCallDriver returned %#x\n", status);
+    ok(status == STATUS_PENDING, "IoCallDriver returned %#lx\n", status);
 
     IoSetCancelRoutine(irp, cancel_irp);
     cancel_cnt = 0;
@@ -1049,7 +1208,7 @@ static void test_stack_callout(void)
     {
         callout_cnt = 0;
         ret = pKeExpandKernelStackAndCallout(callout, (void*)0xdeadbeef, 4096);
-        ok(ret == STATUS_SUCCESS, "KeExpandKernelStackAndCallout failed: %#x\n", ret);
+        ok(ret == STATUS_SUCCESS, "KeExpandKernelStackAndCallout failed: %#lx\n", ret);
         ok(callout_cnt == 1, "callout_cnt = %u\n", callout_cnt);
     }
     else win_skip("KeExpandKernelStackAndCallout is not available\n");
@@ -1059,7 +1218,7 @@ static void test_stack_callout(void)
     {
         callout_cnt = 0;
         ret = pKeExpandKernelStackAndCalloutEx(callout, (void*)0xdeadbeef, 4096, FALSE, NULL);
-        ok(ret == STATUS_SUCCESS, "KeExpandKernelStackAndCalloutEx failed: %#x\n", ret);
+        ok(ret == STATUS_SUCCESS, "KeExpandKernelStackAndCalloutEx failed: %#lx\n", ret);
         ok(callout_cnt == 1, "callout_cnt = %u\n", callout_cnt);
     }
     else win_skip("KeExpandKernelStackAndCalloutEx is not available\n");
@@ -1074,17 +1233,17 @@ static void test_lookaside_list(void)
     ExInitializeNPagedLookasideList(&list, NULL, NULL, POOL_NX_ALLOCATION, LOOKASIDE_MINIMUM_BLOCK_SIZE, tag, 0);
     ok(list.L.Depth == 4, "Expected 4 got %u\n", list.L.Depth);
     ok(list.L.MaximumDepth == 256, "Expected 256 got %u\n", list.L.MaximumDepth);
-    ok(list.L.TotalAllocates == 0, "Expected 0 got %u\n", list.L.TotalAllocates);
-    ok(list.L.AllocateMisses == 0, "Expected 0 got %u\n", list.L.AllocateMisses);
-    ok(list.L.TotalFrees == 0, "Expected 0 got %u\n", list.L.TotalFrees);
-    ok(list.L.FreeMisses == 0, "Expected 0 got %u\n", list.L.FreeMisses);
+    ok(list.L.TotalAllocates == 0, "Expected 0 got %lu\n", list.L.TotalAllocates);
+    ok(list.L.AllocateMisses == 0, "Expected 0 got %lu\n", list.L.AllocateMisses);
+    ok(list.L.TotalFrees == 0, "Expected 0 got %lu\n", list.L.TotalFrees);
+    ok(list.L.FreeMisses == 0, "Expected 0 got %lu\n", list.L.FreeMisses);
     ok(list.L.Type == (NonPagedPool|POOL_NX_ALLOCATION),
        "Expected NonPagedPool|POOL_NX_ALLOCATION got %u\n", list.L.Type);
-    ok(list.L.Tag == tag, "Expected %x got %x\n", tag, list.L.Tag);
+    ok(list.L.Tag == tag, "Expected %lx got %lx\n", tag, list.L.Tag);
     ok(list.L.Size == LOOKASIDE_MINIMUM_BLOCK_SIZE,
-       "Expected %u got %u\n", LOOKASIDE_MINIMUM_BLOCK_SIZE, list.L.Size);
-    ok(list.L.LastTotalAllocates == 0,"Expected 0 got %u\n", list.L.LastTotalAllocates);
-    ok(list.L.LastAllocateMisses == 0,"Expected 0 got %u\n", list.L.LastAllocateMisses);
+       "Expected %Iu got %lu\n", LOOKASIDE_MINIMUM_BLOCK_SIZE, list.L.Size);
+    ok(list.L.LastTotalAllocates == 0,"Expected 0 got %lu\n", list.L.LastTotalAllocates);
+    ok(list.L.LastAllocateMisses == 0,"Expected 0 got %lu\n", list.L.LastAllocateMisses);
     ExDeleteNPagedLookasideList(&list);
 
     list.L.Depth = 0;
@@ -1097,17 +1256,17 @@ static void test_lookaside_list(void)
     ExInitializePagedLookasideList(&paged_list, NULL, NULL, POOL_NX_ALLOCATION, LOOKASIDE_MINIMUM_BLOCK_SIZE, tag, 0);
     ok(paged_list.L.Depth == 4, "Expected 4 got %u\n", paged_list.L.Depth);
     ok(paged_list.L.MaximumDepth == 256, "Expected 256 got %u\n", paged_list.L.MaximumDepth);
-    ok(paged_list.L.TotalAllocates == 0, "Expected 0 got %u\n", paged_list.L.TotalAllocates);
-    ok(paged_list.L.AllocateMisses == 0, "Expected 0 got %u\n", paged_list.L.AllocateMisses);
-    ok(paged_list.L.TotalFrees == 0, "Expected 0 got %u\n", paged_list.L.TotalFrees);
-    ok(paged_list.L.FreeMisses == 0, "Expected 0 got %u\n", paged_list.L.FreeMisses);
+    ok(paged_list.L.TotalAllocates == 0, "Expected 0 got %lu\n", paged_list.L.TotalAllocates);
+    ok(paged_list.L.AllocateMisses == 0, "Expected 0 got %lu\n", paged_list.L.AllocateMisses);
+    ok(paged_list.L.TotalFrees == 0, "Expected 0 got %lu\n", paged_list.L.TotalFrees);
+    ok(paged_list.L.FreeMisses == 0, "Expected 0 got %lu\n", paged_list.L.FreeMisses);
     ok(paged_list.L.Type == (PagedPool|POOL_NX_ALLOCATION),
        "Expected PagedPool|POOL_NX_ALLOCATION got %u\n", paged_list.L.Type);
-    ok(paged_list.L.Tag == tag, "Expected %x got %x\n", tag, paged_list.L.Tag);
+    ok(paged_list.L.Tag == tag, "Expected %lx got %lx\n", tag, paged_list.L.Tag);
     ok(paged_list.L.Size == LOOKASIDE_MINIMUM_BLOCK_SIZE,
-       "Expected %u got %u\n", LOOKASIDE_MINIMUM_BLOCK_SIZE, paged_list.L.Size);
-    ok(paged_list.L.LastTotalAllocates == 0,"Expected 0 got %u\n", paged_list.L.LastTotalAllocates);
-    ok(paged_list.L.LastAllocateMisses == 0,"Expected 0 got %u\n", paged_list.L.LastAllocateMisses);
+       "Expected %Iu got %lu\n", LOOKASIDE_MINIMUM_BLOCK_SIZE, paged_list.L.Size);
+    ok(paged_list.L.LastTotalAllocates == 0,"Expected 0 got %lu\n", paged_list.L.LastTotalAllocates);
+    ok(paged_list.L.LastAllocateMisses == 0,"Expected 0 got %lu\n", paged_list.L.LastAllocateMisses);
     ExDeletePagedLookasideList(&paged_list);
 
     paged_list.L.Depth = 0;
@@ -1127,7 +1286,7 @@ static void test_version(void)
     ok(!!pNtBuildNumber, "Could not get pointer to NtBuildNumber\n");
 
     PsGetVersion(NULL, NULL, &build, NULL);
-    ok(*pNtBuildNumber == build, "Expected build number %u, got %u\n", build, *pNtBuildNumber);
+    ok(*pNtBuildNumber == build, "Expected build number %lu, got %u\n", build, *pNtBuildNumber);
 }
 
 static void WINAPI thread_proc(void *arg)
@@ -1135,7 +1294,7 @@ static void WINAPI thread_proc(void *arg)
     PsTerminateSystemThread(STATUS_SUCCESS);
 }
 
-static void test_ob_reference(const WCHAR *test_path)
+static void test_ob_reference(void)
 {
     POBJECT_TYPE (WINAPI *pObGetObjectType)(void*);
     OBJECT_ATTRIBUTES attr = { sizeof(attr) };
@@ -1146,8 +1305,6 @@ static void test_ob_reference(const WCHAR *test_path)
     POBJECT_TYPE obj1_type;
     UNICODE_STRING pathU;
     IO_STATUS_BLOCK io;
-    WCHAR *tmp_path;
-    SIZE_T len;
     NTSTATUS status;
 
     pObGetObjectType = get_proc_address("ObGetObjectType");
@@ -1156,37 +1313,31 @@ static void test_ob_reference(const WCHAR *test_path)
 
     InitializeObjectAttributes(&attr, NULL, OBJ_KERNEL_HANDLE, NULL, NULL);
     status = ZwCreateEvent(&event_handle, SYNCHRONIZE, &attr, NotificationEvent, TRUE);
-    ok(!status, "ZwCreateEvent failed: %#x\n", status);
+    ok(!status, "ZwCreateEvent failed: %#lx\n", status);
 
-    len = wcslen(test_path);
-    tmp_path = ExAllocatePool(PagedPool, len * sizeof(WCHAR) + sizeof(L".tmp"));
-    memcpy(tmp_path, test_path, len * sizeof(WCHAR));
-    memcpy(tmp_path + len, L".tmp", sizeof(L".tmp"));
-
-    RtlInitUnicodeString(&pathU, tmp_path);
+    RtlInitUnicodeString(&pathU, L"\\??\\C:\\windows\\winetest_ntoskrnl_file.tmp");
     attr.ObjectName = &pathU;
-    attr.Attributes = OBJ_KERNEL_HANDLE;
+    attr.Attributes = OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE;
     status = ZwCreateFile(&file_handle,  DELETE | FILE_WRITE_DATA | SYNCHRONIZE, &attr, &io, NULL, 0, 0, FILE_CREATE,
                           FILE_DELETE_ON_CLOSE | FILE_SYNCHRONOUS_IO_NONALERT, NULL, 0);
-    ok(!status, "ZwCreateFile failed: %#x\n", status);
-    ExFreePool(tmp_path);
+    ok(!status, "ZwCreateFile failed: %#lx\n", status);
 
     status = ZwDuplicateObject(NtCurrentProcess(), file_handle, NtCurrentProcess(), &file_handle2,
                                0, OBJ_KERNEL_HANDLE, DUPLICATE_SAME_ACCESS);
-    ok(!status, "ZwDuplicateObject failed: %#x\n", status);
+    ok(!status, "ZwDuplicateObject failed: %#lx\n", status);
 
     InitializeObjectAttributes(&attr, NULL, OBJ_KERNEL_HANDLE, NULL, NULL);
     status = PsCreateSystemThread(&thread_handle, SYNCHRONIZE, &attr, NULL, NULL, thread_proc, NULL);
-    ok(!status, "PsCreateSystemThread returned: %#x\n", status);
+    ok(!status, "PsCreateSystemThread returned: %#lx\n", status);
 
     status = ObReferenceObjectByHandle(NULL, SYNCHRONIZE, *pExEventObjectType, KernelMode, &obj1, NULL);
-    ok(status == STATUS_INVALID_HANDLE, "ObReferenceObjectByHandle failed: %#x\n", status);
+    ok(status == STATUS_INVALID_HANDLE, "ObReferenceObjectByHandle failed: %#lx\n", status);
 
     status = ObReferenceObjectByHandle(event_handle, SYNCHRONIZE, *pIoFileObjectType, KernelMode, &obj1, NULL);
-    ok(status == STATUS_OBJECT_TYPE_MISMATCH, "ObReferenceObjectByHandle returned: %#x\n", status);
+    ok(status == STATUS_OBJECT_TYPE_MISMATCH, "ObReferenceObjectByHandle returned: %#lx\n", status);
 
     status = ObReferenceObjectByHandle(event_handle, SYNCHRONIZE, NULL, KernelMode, &obj1, NULL);
-    ok(!status, "ObReferenceObjectByHandle failed: %#x\n", status);
+    ok(!status, "ObReferenceObjectByHandle failed: %#lx\n", status);
 
     if (pObGetObjectType)
     {
@@ -1201,26 +1352,26 @@ static void test_ob_reference(const WCHAR *test_path)
     }
 
     status = ObReferenceObjectByHandle(event_handle, SYNCHRONIZE, *pIoFileObjectType, KernelMode, &obj2, NULL);
-    ok(status == STATUS_OBJECT_TYPE_MISMATCH, "ObReferenceObjectByHandle returned: %#x\n", status);
+    ok(status == STATUS_OBJECT_TYPE_MISMATCH, "ObReferenceObjectByHandle returned: %#lx\n", status);
 
     status = ObReferenceObjectByHandle(event_handle, SYNCHRONIZE, *pExEventObjectType, KernelMode, &obj2, NULL);
-    ok(!status, "ObReferenceObjectByHandle failed: %#x\n", status);
+    ok(!status, "ObReferenceObjectByHandle failed: %#lx\n", status);
     ok(obj1 == obj2, "obj1 != obj2\n");
 
     ObDereferenceObject(obj2);
 
     status = ObReferenceObjectByHandle(event_handle, SYNCHRONIZE, NULL, KernelMode, &obj2, NULL);
-    ok(!status, "ObReferenceObjectByHandle failed: %#x\n", status);
+    ok(!status, "ObReferenceObjectByHandle failed: %#lx\n", status);
     ok(obj1 == obj2, "obj1 != obj2\n");
 
     ObDereferenceObject(obj2);
     ObDereferenceObject(obj1);
 
     status = ObReferenceObjectByHandle(file_handle, SYNCHRONIZE, *pIoFileObjectType, KernelMode, &obj1, NULL);
-    ok(!status, "ObReferenceObjectByHandle failed: %#x\n", status);
+    ok(!status, "ObReferenceObjectByHandle failed: %#lx\n", status);
 
     status = ObReferenceObjectByHandle(file_handle2, SYNCHRONIZE, *pIoFileObjectType, KernelMode, &obj2, NULL);
-    ok(!status, "ObReferenceObjectByHandle failed: %#x\n", status);
+    ok(!status, "ObReferenceObjectByHandle failed: %#lx\n", status);
     ok(obj1 == obj2, "obj1 != obj2\n");
 
     file = obj1;
@@ -1230,47 +1381,47 @@ static void test_ob_reference(const WCHAR *test_path)
     ObDereferenceObject(obj2);
 
     status = ObReferenceObjectByHandle(thread_handle, SYNCHRONIZE, *pPsThreadType, KernelMode, &obj1, NULL);
-    ok(!status, "ObReferenceObjectByHandle failed: %#x\n", status);
+    ok(!status, "ObReferenceObjectByHandle failed: %#lx\n", status);
 
     status = ObReferenceObjectByHandle(thread_handle, SYNCHRONIZE, *pPsThreadType, KernelMode, &obj2, NULL);
-    ok(!status, "ObReferenceObjectByHandle failed: %#x\n", status);
+    ok(!status, "ObReferenceObjectByHandle failed: %#lx\n", status);
     ok(obj1 == obj2, "obj1 != obj2\n");
 
     header = obj1;
     ok(header->Type == 6, "Type = %u\n", header->Type);
 
     status = wait_single(header, 0);
-    ok(status == 0 || status == STATUS_TIMEOUT, "got %#x\n", status);
+    ok(status == 0 || status == STATUS_TIMEOUT, "got %#lx\n", status);
 
     ObDereferenceObject(obj2);
 
     status = ObOpenObjectByPointer(obj1, OBJ_KERNEL_HANDLE, NULL, 0, NULL, KernelMode, &handle);
-    ok(status == STATUS_SUCCESS, "ObOpenObjectByPointer failed: %#x\n", status);
+    ok(status == STATUS_SUCCESS, "ObOpenObjectByPointer failed: %#lx\n", status);
 
     status = ZwClose(handle);
-    ok(!status, "ZwClose failed: %#x\n", status);
+    ok(!status, "ZwClose failed: %#lx\n", status);
 
     status = ObReferenceObjectByHandle(thread_handle, SYNCHRONIZE, *pPsThreadType, KernelMode, &obj2, NULL);
-    ok(!status, "ObReferenceObjectByHandle failed: %#x\n", status);
+    ok(!status, "ObReferenceObjectByHandle failed: %#lx\n", status);
     ok(obj1 == obj2, "obj1 != obj2\n");
     ObDereferenceObject(obj2);
 
     status = ObOpenObjectByPointer(obj1, OBJ_KERNEL_HANDLE, NULL, 0, *pIoFileObjectType, KernelMode, &handle);
-    ok(status == STATUS_OBJECT_TYPE_MISMATCH, "ObOpenObjectByPointer returned: %#x\n", status);
+    ok(status == STATUS_OBJECT_TYPE_MISMATCH, "ObOpenObjectByPointer returned: %#lx\n", status);
 
     ObDereferenceObject(obj1);
 
     status = ZwClose(thread_handle);
-    ok(!status, "ZwClose failed: %#x\n", status);
+    ok(!status, "ZwClose failed: %#lx\n", status);
 
     status = ZwClose(event_handle);
-    ok(!status, "ZwClose failed: %#x\n", status);
+    ok(!status, "ZwClose failed: %#lx\n", status);
 
     status = ZwClose(file_handle);
-    ok(!status, "ZwClose failed: %#x\n", status);
+    ok(!status, "ZwClose failed: %#lx\n", status);
 
     status = ZwClose(file_handle2);
-    ok(!status, "ZwClose failed: %#x\n", status);
+    ok(!status, "ZwClose failed: %#lx\n", status);
 }
 
 static void check_resource_(int line, ERESOURCE *resource, ULONG exclusive_waiters,
@@ -1280,17 +1431,17 @@ static void check_resource_(int line, ERESOURCE *resource, ULONG exclusive_waite
     ULONG count;
 
     count = ExGetExclusiveWaiterCount(resource);
-    ok_(__FILE__, line, count == exclusive_waiters,
-            "expected %u exclusive waiters, got %u\n", exclusive_waiters, count);
+    ok_(__FILE__, line)(count == exclusive_waiters,
+            "expected %lu exclusive waiters, got %lu\n", exclusive_waiters, count);
     count = ExGetSharedWaiterCount(resource);
-    ok_(__FILE__, line, count == shared_waiters,
-            "expected %u shared waiters, got %u\n", shared_waiters, count);
+    ok_(__FILE__, line)(count == shared_waiters,
+            "expected %lu shared waiters, got %lu\n", shared_waiters, count);
     ret = ExIsResourceAcquiredExclusiveLite(resource);
-    ok_(__FILE__, line, ret == exclusive,
+    ok_(__FILE__, line)(ret == exclusive,
             "expected exclusive %u, got %u\n", exclusive, ret);
     count = ExIsResourceAcquiredSharedLite(resource);
-    ok_(__FILE__, line, count == shared_count,
-            "expected shared %u, got %u\n", shared_count, count);
+    ok_(__FILE__, line)(count == shared_count,
+            "expected shared %lu, got %lu\n", shared_count, count);
 }
 #define check_resource(a,b,c,d,e) check_resource_(__LINE__,a,b,c,d,e)
 
@@ -1346,7 +1497,7 @@ static void test_resource(void)
     memset(&resource, 0xcc, sizeof(resource));
 
     status = ExInitializeResourceLite(&resource);
-    ok(status == STATUS_SUCCESS, "got status %#x\n", status);
+    ok(status == STATUS_SUCCESS, "got status %#lx\n", status);
     check_resource(&resource, 0, 0, FALSE, 0);
 
     KeEnterCriticalRegion();
@@ -1558,7 +1709,7 @@ static void test_resource(void)
     KeLeaveCriticalRegion();
 
     status = ExDeleteResourceLite(&resource);
-    ok(status == STATUS_SUCCESS, "got status %#x\n", status);
+    ok(status == STATUS_SUCCESS, "got status %#lx\n", status);
 }
 
 static void test_lookup_thread(void)
@@ -1567,13 +1718,13 @@ static void test_lookup_thread(void)
     PETHREAD thread = NULL;
 
     status = PsLookupThreadByThreadId(PsGetCurrentThreadId(), &thread);
-    ok(!status, "PsLookupThreadByThreadId failed: %#x\n", status);
+    ok(!status, "PsLookupThreadByThreadId failed: %#lx\n", status);
     ok((PKTHREAD)thread == KeGetCurrentThread(), "thread != KeGetCurrentThread\n");
     if (thread) ObDereferenceObject(thread);
 
     status = PsLookupThreadByThreadId(NULL, &thread);
     ok(status == STATUS_INVALID_CID || broken(status == STATUS_INVALID_PARAMETER) /* winxp */,
-       "PsLookupThreadByThreadId returned %#x\n", status);
+       "PsLookupThreadByThreadId returned %#lx\n", status);
 }
 
 static void test_stack_limits(void)
@@ -1586,11 +1737,42 @@ static void test_stack_limits(void)
     ok(low < (ULONG_PTR)&low && (ULONG_PTR)&low < high, "stack variable is not in stack limits\n");
 }
 
-static unsigned int got_completion;
+static unsigned int got_completion, completion_lower_pending, completion_upper_pending;
 
 static NTSTATUS WINAPI completion_cb(DEVICE_OBJECT *device, IRP *irp, void *context)
 {
+    IO_STACK_LOCATION *stack = IoGetCurrentIrpStackLocation(irp);
     ok(device == context, "Got device %p; expected %p.\n", device, context);
+
+    if (device == upper_device)
+    {
+        ok(irp->PendingReturned == completion_lower_pending, "Got PendingReturned %u, expected %u.\n",
+                irp->PendingReturned, completion_lower_pending);
+
+        ok(irp->CurrentLocation == 2, "Got current location %u.\n", irp->CurrentLocation);
+        ok(stack->Control == (SL_INVOKE_ON_CANCEL | SL_INVOKE_ON_ERROR | SL_INVOKE_ON_SUCCESS),
+                "Got control flags %#x.\n", stack->Control);
+        stack = IoGetNextIrpStackLocation(irp);
+        ok(!stack->Control, "Got control flags %#x.\n", stack->Control);
+        stack = irp->Tail.Overlay.CurrentStackLocation + 1; /* previous location */
+        ok(!stack->Control, "Got control flags %#x.\n", stack->Control);
+
+        if (irp->PendingReturned && completion_upper_pending)
+            IoMarkIrpPending(irp);
+    }
+    else
+    {
+        ok(irp->PendingReturned == completion_upper_pending, "Got PendingReturned %u, expected %u.\n",
+                irp->PendingReturned, completion_upper_pending);
+
+        ok(irp->CurrentLocation == 3, "Got current location %u.\n", irp->CurrentLocation);
+        ok(!stack->Control, "Got control flags %#x.\n", stack->Control);
+        stack = IoGetNextIrpStackLocation(irp);
+        ok(!stack->Control, "Got control flags %#x.\n", stack->Control);
+        stack = irp->Tail.Overlay.CurrentStackLocation - 2; /* lowest location */
+        ok(!stack->Control, "Got control flags %#x.\n", stack->Control);
+    }
+
     ++got_completion;
     return STATUS_SUCCESS;
 }
@@ -1602,14 +1784,49 @@ static void test_completion(void)
     KEVENT event;
     IRP *irp;
 
+    completion_lower_pending = completion_upper_pending = FALSE;
+
     KeInitializeEvent(&event, NotificationEvent, FALSE);
 
     irp = IoBuildDeviceIoControlRequest(IOCTL_WINETEST_COMPLETION, upper_device,
             NULL, 0, NULL, 0, FALSE, &event, &io);
-
     IoSetCompletionRoutine(irp, completion_cb, NULL, TRUE, TRUE, TRUE);
     ret = IoCallDriver(upper_device, irp);
-    ok(ret == STATUS_SUCCESS, "IoCallDriver returned %#x\n", ret);
+    ok(ret == STATUS_SUCCESS, "IoCallDriver returned %#lx\n", ret);
+    ok(got_completion == 2, "got %u calls to completion routine\n", got_completion);
+
+    completion_lower_pending = TRUE;
+    got_completion = 0;
+
+    irp = IoBuildDeviceIoControlRequest(IOCTL_WINETEST_COMPLETION, upper_device,
+            NULL, 0, NULL, 0, FALSE, &event, &io);
+    IoSetCompletionRoutine(irp, completion_cb, NULL, TRUE, TRUE, TRUE);
+    ret = IoCallDriver(upper_device, irp);
+    ok(ret == STATUS_PENDING, "IoCallDriver returned %#lx\n", ret);
+    ok(!got_completion, "got %u calls to completion routine\n", got_completion);
+
+    ok(irp->CurrentLocation == 1, "Got current location %u.\n", irp->CurrentLocation);
+    ok(!irp->PendingReturned, "Got pending flag %u.\n", irp->PendingReturned);
+
+    irp->IoStatus.Status = STATUS_SUCCESS;
+    IoCompleteRequest(irp, IO_NO_INCREMENT);
+    ok(got_completion == 2, "got %u calls to completion routine\n", got_completion);
+
+    completion_upper_pending = TRUE;
+    got_completion = 0;
+
+    irp = IoBuildDeviceIoControlRequest(IOCTL_WINETEST_COMPLETION, upper_device,
+            NULL, 0, NULL, 0, FALSE, &event, &io);
+    IoSetCompletionRoutine(irp, completion_cb, NULL, TRUE, TRUE, TRUE);
+    ret = IoCallDriver(upper_device, irp);
+    ok(ret == STATUS_PENDING, "IoCallDriver returned %#lx\n", ret);
+    ok(!got_completion, "got %u calls to completion routine\n", got_completion);
+
+    ok(irp->CurrentLocation == 1, "Got current location %u.\n", irp->CurrentLocation);
+    ok(!irp->PendingReturned, "Got pending flag %u.\n", irp->PendingReturned);
+
+    irp->IoStatus.Status = STATUS_SUCCESS;
+    IoCompleteRequest(irp, IO_NO_INCREMENT);
     ok(got_completion == 2, "got %u calls to completion routine\n", got_completion);
 }
 
@@ -1681,14 +1898,14 @@ static void test_object_name(void)
 
     ret_size = 0;
     ret = ObQueryNameString(lower_device, name, 0, &ret_size);
-    ok(ret == STATUS_INFO_LENGTH_MISMATCH, "got status %#x\n", ret);
-    ok(ret_size == sizeof(*name) + sizeof(device_nameW), "got size %u\n", ret_size);
+    ok(ret == STATUS_INFO_LENGTH_MISMATCH, "got status %#lx\n", ret);
+    ok(ret_size == sizeof(*name) + sizeof(device_nameW), "got size %lu\n", ret_size);
 
     ret_size = 0;
     ret = ObQueryNameString(lower_device, name, sizeof(buffer), &ret_size);
-    ok(!ret, "got status %#x\n", ret);
+    ok(!ret, "got status %#lx\n", ret);
     ok(!wcscmp(name->Name.Buffer, device_nameW), "got name %ls\n", name->Name.Buffer);
-    ok(ret_size == sizeof(*name) + sizeof(device_nameW), "got size %u\n", ret_size);
+    ok(ret_size == sizeof(*name) + sizeof(device_nameW), "got size %lu\n", ret_size);
     ok(name->Name.Length == wcslen(device_nameW) * sizeof(WCHAR), "got length %u\n", name->Name.Length);
     ok(name->Name.MaximumLength == sizeof(device_nameW), "got maximum length %u\n", name->Name.MaximumLength);
 
@@ -1697,60 +1914,56 @@ static void test_object_name(void)
 
     ret_size = 0;
     ret = ObQueryNameString(event, name, sizeof(buffer), &ret_size);
-    ok(!ret, "got status %#x\n", ret);
+    ok(!ret, "got status %#lx\n", ret);
     ok(!name->Name.Buffer, "got name %ls\n", name->Name.Buffer);
-    ok(ret_size == sizeof(*name), "got size %u\n", ret_size);
+    ok(ret_size == sizeof(*name), "got size %lu\n", ret_size);
     ok(!name->Name.Length, "got length %u\n", name->Name.Length);
     ok(!name->Name.MaximumLength, "got maximum length %u\n", name->Name.MaximumLength);
 
     ret = ZwClose(handle);
-    ok(!ret, "got status %#x\n", ret);
+    ok(!ret, "got status %#lx\n", ret);
 
     RtlInitUnicodeString(&string, event_nameW);
     InitializeObjectAttributes(&attr, &string, OBJ_KERNEL_HANDLE, NULL, NULL);
     ret = ZwCreateEvent(&handle, 0, &attr, NotificationEvent, TRUE);
-    ok(!ret, "got status %#x\n", ret);
+    ok(!ret, "got status %#lx\n", ret);
     ret = ObReferenceObjectByHandle(handle, 0, *pExEventObjectType, KernelMode, (void **)&event, NULL);
-    ok(!ret, "got status %#x\n", ret);
+    ok(!ret, "got status %#lx\n", ret);
 
     ret_size = 0;
     ret = ObQueryNameString(event, name, sizeof(buffer), &ret_size);
-    ok(!ret, "got status %#x\n", ret);
+    ok(!ret, "got status %#lx\n", ret);
     ok(!wcscmp(name->Name.Buffer, event_nameW), "got name %ls\n", name->Name.Buffer);
-    ok(ret_size == sizeof(*name) + sizeof(event_nameW), "got size %u\n", ret_size);
+    ok(ret_size == sizeof(*name) + sizeof(event_nameW), "got size %lu\n", ret_size);
     ok(name->Name.Length == wcslen(event_nameW) * sizeof(WCHAR), "got length %u\n", name->Name.Length);
     ok(name->Name.MaximumLength == sizeof(event_nameW), "got maximum length %u\n", name->Name.MaximumLength);
 
     ObDereferenceObject(event);
     ret = ZwClose(handle);
-    ok(!ret, "got status %#x\n", ret);
+    ok(!ret, "got status %#lx\n", ret);
 
     ret_size = 0;
     ret = ObQueryNameString(KeGetCurrentThread(), name, sizeof(buffer), &ret_size);
-    ok(!ret, "got status %#x\n", ret);
+    ok(!ret, "got status %#lx\n", ret);
     ok(!name->Name.Buffer, "got name %ls\n", name->Name.Buffer);
-    ok(ret_size == sizeof(*name), "got size %u\n", ret_size);
+    ok(ret_size == sizeof(*name), "got size %lu\n", ret_size);
     ok(!name->Name.Length, "got length %u\n", name->Name.Length);
     ok(!name->Name.MaximumLength, "got maximum length %u\n", name->Name.MaximumLength);
 
     ret_size = 0;
     ret = ObQueryNameString(IoGetCurrentProcess(), name, sizeof(buffer), &ret_size);
-    ok(!ret, "got status %#x\n", ret);
+    ok(!ret, "got status %#lx\n", ret);
     ok(!name->Name.Buffer, "got name %ls\n", name->Name.Buffer);
-    ok(ret_size == sizeof(*name), "got size %u\n", ret_size);
+    ok(ret_size == sizeof(*name), "got size %lu\n", ret_size);
     ok(!name->Name.Length, "got length %u\n", name->Name.Length);
     ok(!name->Name.MaximumLength, "got maximum length %u\n", name->Name.MaximumLength);
 }
 
-static PIO_WORKITEM main_test_work_item;
+static PIO_WORKITEM work_item;
 
 static void WINAPI main_test_task(DEVICE_OBJECT *device, void *context)
 {
     IRP *irp = context;
-    void *buffer = irp->AssociatedIrp.SystemBuffer;
-
-    IoFreeWorkItem(main_test_work_item);
-    main_test_work_item = NULL;
 
     test_current_thread(TRUE);
     test_critical_region(FALSE);
@@ -1759,19 +1972,8 @@ static void WINAPI main_test_task(DEVICE_OBJECT *device, void *context)
     test_stack_limits();
     test_completion();
 
-    /* print process report */
-    if (winetest_debug)
-    {
-        kprintf("%04x:ntoskrnl: %d tests executed (%d marked as todo, %d %s), %d skipped.\n",
-            PsGetCurrentProcessId(), successes + failures + todo_successes + todo_failures,
-            todo_successes, failures + todo_failures,
-            (failures + todo_failures != 1) ? "failures" : "failure", skipped );
-    }
-    ZwClose(okfile);
-
-    *((LONG *)buffer) = failures;
     irp->IoStatus.Status = STATUS_SUCCESS;
-    irp->IoStatus.Information = sizeof(failures);
+    irp->IoStatus.Information = 0;
     IoCompleteRequest(irp, IO_NO_INCREMENT);
 }
 
@@ -1821,45 +2023,45 @@ static void test_affinity(void)
     ok(!!pKeRevertToUserAffinityThreadEx, "KeRevertToUserAffinityThreadEx is not available.\n");
 
     count = pKeQueryActiveProcessorCountEx(1);
-    todo_wine ok(!count, "Got unexpected count %u.\n", count);
+    ok(!count, "Got unexpected count %lu.\n", count);
 
     cpu_count = pKeQueryActiveProcessorCountEx(0);
-    ok(cpu_count, "Got unexpected cpu_count %u.\n", cpu_count);
+    ok(cpu_count, "Got unexpected cpu_count %lu.\n", cpu_count);
 
     count = pKeQueryActiveProcessorCountEx(ALL_PROCESSOR_GROUPS);
-    ok(count == cpu_count, "Got unexpected count %u.\n", count);
+    ok(count == cpu_count, "Got unexpected count %lu.\n", count);
 
     mask_all_cpus = ~((~0u) << cpu_count);
 
     mask = pKeQueryActiveProcessors();
-    ok(mask == mask_all_cpus, "Got unexpected mask %#lx.\n", mask);
+    ok(mask == mask_all_cpus, "Got unexpected mask %#Ix.\n", mask);
 
     pKeRevertToUserAffinityThreadEx(0x2);
 
     mask = pKeSetSystemAffinityThreadEx(0);
-    ok(!mask, "Got unexpected mask %#lx.\n", mask);
+    ok(!mask, "Got unexpected mask %#Ix.\n", mask);
 
     pKeRevertToUserAffinityThreadEx(0x2);
 
     mask = pKeSetSystemAffinityThreadEx(0x1);
-    ok(mask == 0x2, "Got unexpected mask %#lx.\n", mask);
+    ok(mask == 0x2, "Got unexpected mask %#Ix.\n", mask);
 
     mask = pKeSetSystemAffinityThreadEx(~(KAFFINITY)0);
-    ok(mask == 0x1, "Got unexpected mask %#lx.\n", mask);
+    ok(mask == 0x1, "Got unexpected mask %#Ix.\n", mask);
 
     pKeRevertToUserAffinityThreadEx(~(KAFFINITY)0);
     mask = pKeSetSystemAffinityThreadEx(0x1);
-    ok(mask == mask_all_cpus, "Got unexpected mask %#lx.\n", mask);
+    ok(mask == mask_all_cpus, "Got unexpected mask %#Ix.\n", mask);
 
     pKeRevertToUserAffinityThreadEx(0);
 
     mask = pKeSetSystemAffinityThreadEx(0x1);
-    ok(!mask, "Got unexpected mask %#lx.\n", mask);
+    ok(!mask, "Got unexpected mask %#Ix.\n", mask);
 
     KeRevertToUserAffinityThread();
 
     mask = pKeSetSystemAffinityThreadEx(0x1);
-    ok(!mask, "Got unexpected mask %#lx.\n", mask);
+    ok(!mask, "Got unexpected mask %#Ix.\n", mask);
 
     KeRevertToUserAffinityThread();
 }
@@ -1947,35 +2149,35 @@ static void test_dpc(void)
     KeSetSystemAffinityThread(0x1);
 
     pKeGenericCallDpc(test_dpc_func, &data);
-    ok(data.call_count == cpu_count, "Got unexpected call_count %u.\n", data.call_count);
-    ok(data.selected_count == 2, "Got unexpected selected_count %u.\n", data.selected_count);
+    ok(data.call_count == cpu_count, "Got unexpected call_count %lu.\n", data.call_count);
+    ok(data.selected_count == 2, "Got unexpected selected_count %lu.\n", data.selected_count);
     ok(data.sync_barrier_start_value.Barrier == cpu_count,
-            "Got unexpected sync_barrier_start_value.Barrier %d.\n",
+            "Got unexpected sync_barrier_start_value.Barrier %ld.\n",
             data.sync_barrier_start_value.Barrier);
     ok(data.sync_barrier_start_value.TotalProcessors == cpu_count,
-            "Got unexpected sync_barrier_start_value.TotalProcessors %d.\n",
+            "Got unexpected sync_barrier_start_value.TotalProcessors %ld.\n",
             data.sync_barrier_start_value.TotalProcessors);
 
     ok(data.sync_barrier_mid_value.Barrier == (0x80000000 | cpu_count),
-            "Got unexpected sync_barrier_mid_value.Barrier %d.\n",
+            "Got unexpected sync_barrier_mid_value.Barrier %ld.\n",
             data.sync_barrier_mid_value.Barrier);
     ok(data.sync_barrier_mid_value.TotalProcessors == cpu_count,
-            "Got unexpected sync_barrier_mid_value.TotalProcessors %d.\n",
+            "Got unexpected sync_barrier_mid_value.TotalProcessors %ld.\n",
             data.sync_barrier_mid_value.TotalProcessors);
 
     ok(data.sync_barrier_end_value.Barrier == cpu_count,
-            "Got unexpected sync_barrier_end_value.Barrier %d.\n",
+            "Got unexpected sync_barrier_end_value.Barrier %ld.\n",
             data.sync_barrier_end_value.Barrier);
     ok(data.sync_barrier_end_value.TotalProcessors == cpu_count,
-            "Got unexpected sync_barrier_end_value.TotalProcessors %d.\n",
+            "Got unexpected sync_barrier_end_value.TotalProcessors %ld.\n",
             data.sync_barrier_end_value.TotalProcessors);
 
-    ok(data.done_barrier_start_value == cpu_count, "Got unexpected done_barrier_start_value %d.\n", data.done_barrier_start_value);
+    ok(data.done_barrier_start_value == cpu_count, "Got unexpected done_barrier_start_value %ld.\n", data.done_barrier_start_value);
 
     KeRevertToUserAffinityThread();
 }
 
-static void test_process_memory(const struct test_input *test_input)
+static void test_process_memory(const struct main_test_input *test_input)
 {
     NTSTATUS (WINAPI *pMmCopyVirtualMemory)(PEPROCESS fromprocess, void *fromaddress, PEPROCESS toprocess,
             void *toaddress, SIZE_T bufsize, KPROCESSOR_MODE mode, SIZE_T *copied);
@@ -1990,7 +2192,7 @@ static void test_process_memory(const struct test_input *test_input)
     pMmCopyVirtualMemory = get_proc_address("MmCopyVirtualMemory");
 
     status = PsLookupProcessByProcessId((HANDLE)(ULONG_PTR)test_input->process_id, &process);
-    ok(status == STATUS_SUCCESS, "Got unexpected status %#x.\n", status);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
 
     if (status)
         return;
@@ -2010,8 +2212,8 @@ static void test_process_memory(const struct test_input *test_input)
         size = 0xdeadbeef;
         status = pMmCopyVirtualMemory(process, base + test_input->teststr_offset, PsGetCurrentProcess(),
                 buffer, sizeof(buffer), UserMode, &size);
-        todo_wine ok(status == STATUS_ACCESS_VIOLATION, "Got unexpected status %#x.\n", status);
-        ok(!size, "Got unexpected size %#lx.\n", size);
+        todo_wine ok(status == STATUS_ACCESS_VIOLATION, "Got unexpected status %#lx.\n", status);
+        ok(!size, "Got unexpected size %#Ix.\n", size);
 
         memset(buffer, 0, sizeof(buffer));
         size = 0xdeadbeef;
@@ -2020,8 +2222,8 @@ static void test_process_memory(const struct test_input *test_input)
                                  buffer, sizeof(buffer), KernelMode, NULL);
         status = pMmCopyVirtualMemory(process, base + test_input->teststr_offset, PsGetCurrentProcess(),
                 buffer, sizeof(buffer), KernelMode, &size);
-        todo_wine ok(status == STATUS_SUCCESS, "Got unexpected status %#x.\n", status);
-        todo_wine ok(size == sizeof(buffer), "Got unexpected size %lu.\n", size);
+        todo_wine ok(status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status);
+        todo_wine ok(size == sizeof(buffer), "Got unexpected size %Iu.\n", size);
         todo_wine ok(!strcmp(buffer, teststr), "Got unexpected test string.\n");
     }
     else
@@ -2029,7 +2231,7 @@ static void test_process_memory(const struct test_input *test_input)
        win_skip("MmCopyVirtualMemory is not available.\n");
     }
 
-    if (!test_input->running_under_wine)
+    if (!running_under_wine)
     {
         KeStackAttachProcess((PKPROCESS)process, &state);
         todo_wine ok(!strcmp(teststr, (char *)(base + test_input->teststr_offset)),
@@ -2050,66 +2252,51 @@ static void test_permanence(void)
     RtlInitUnicodeString(&str, L"\\BaseNamedObjects\\wine_test_dir");
     InitializeObjectAttributes(&attr, &str, 0, 0, NULL);
     status = ZwCreateDirectoryObject( &handle, GENERIC_ALL, &attr );
-    ok(!status, "got %#x\n", status);
+    ok(!status, "got %#lx\n", status);
     status = ZwClose( handle );
-    ok(!status, "got %#x\n", status);
+    ok(!status, "got %#lx\n", status);
     status = ZwOpenDirectoryObject( &handle, 0, &attr );
-    ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %#x\n", status);
+    ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %#lx\n", status);
 
     attr.Attributes = OBJ_PERMANENT;
     status = ZwCreateDirectoryObject( &handle, GENERIC_ALL, &attr );
-    ok(!status, "got %#x\n", status);
+    ok(!status, "got %#lx\n", status);
     status = ZwClose( handle );
-    ok(!status, "got %#x\n", status);
+    ok(!status, "got %#lx\n", status);
 
     attr.Attributes = 0;
     status = ZwOpenDirectoryObject( &handle, 0, &attr );
-    ok(!status, "got %#x\n", status);
+    ok(!status, "got %#lx\n", status);
     status = ZwMakeTemporaryObject( handle );
-    ok(!status, "got %#x\n", status);
+    ok(!status, "got %#lx\n", status);
     status = ZwMakeTemporaryObject( handle );
-    ok(!status, "got %#x\n", status);
+    ok(!status, "got %#lx\n", status);
     status = ZwClose( handle );
-    ok(!status, "got %#x\n", status);
+    ok(!status, "got %#lx\n", status);
     status = ZwOpenDirectoryObject( &handle, 0, &attr );
-    ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %#x\n", status);
+    ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %#lx\n", status);
 
     status = ZwCreateDirectoryObject( &handle, GENERIC_ALL, &attr );
-    ok(!status, "got %#x\n", status);
+    ok(!status, "got %#lx\n", status);
     attr.Attributes = OBJ_PERMANENT;
     status = ZwOpenDirectoryObject( &handle2, 0, &attr );
-    ok(status == STATUS_SUCCESS, "got %#x\n", status);
+    ok(status == STATUS_SUCCESS, "got %#lx\n", status);
     status = ZwClose( handle2 );
-    ok(!status, "got %#x\n", status);
+    ok(!status, "got %#lx\n", status);
     status = ZwClose( handle );
-    ok(!status, "got %#x\n", status);
+    ok(!status, "got %#lx\n", status);
     attr.Attributes = 0;
     status = ZwOpenDirectoryObject( &handle, 0, &attr );
-    ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %#x\n", status);
+    ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %#lx\n", status);
 }
 
 static NTSTATUS main_test(DEVICE_OBJECT *device, IRP *irp, IO_STACK_LOCATION *stack)
 {
-    ULONG length = stack->Parameters.DeviceIoControl.OutputBufferLength;
     void *buffer = irp->AssociatedIrp.SystemBuffer;
-    struct test_input *test_input = (struct test_input *)buffer;
-    OBJECT_ATTRIBUTES attr = {0};
-    UNICODE_STRING pathU;
-    IO_STATUS_BLOCK io;
+    struct main_test_input *test_input = buffer;
 
     if (!buffer)
         return STATUS_ACCESS_VIOLATION;
-    if (length < sizeof(failures))
-        return STATUS_BUFFER_TOO_SMALL;
-
-    attr.Length = sizeof(attr);
-    RtlInitUnicodeString(&pathU, test_input->path);
-    running_under_wine = test_input->running_under_wine;
-    winetest_debug = test_input->winetest_debug;
-    winetest_report_success = test_input->winetest_report_success;
-    attr.ObjectName = &pathU;
-    attr.Attributes = OBJ_KERNEL_HANDLE; /* needed to be accessible from system threads */
-    ZwOpenFile(&okfile, FILE_APPEND_DATA | SYNCHRONIZE, &attr, &io, 0, FILE_SYNCHRONOUS_IO_NONALERT);
 
     pExEventObjectType = get_proc_address("ExEventObjectType");
     ok(!!pExEventObjectType, "ExEventObjectType not found\n");
@@ -2130,10 +2317,11 @@ static NTSTATUS main_test(DEVICE_OBJECT *device, IRP *irp, IO_STACK_LOCATION *st
     test_init_funcs();
     test_load_driver();
     test_sync();
+    test_queue();
     test_version();
     test_stack_callout();
     test_lookaside_list();
-    test_ob_reference(test_input->path);
+    test_ob_reference();
     test_resource();
     test_lookup_thread();
     test_IoAttachDeviceToDeviceStack();
@@ -2146,13 +2334,8 @@ static NTSTATUS main_test(DEVICE_OBJECT *device, IRP *irp, IO_STACK_LOCATION *st
     test_process_memory(test_input);
     test_permanence();
 
-    if (main_test_work_item) return STATUS_UNEXPECTED_IO_ERROR;
-
-    main_test_work_item = IoAllocateWorkItem(lower_device);
-    ok(main_test_work_item != NULL, "main_test_work_item = NULL\n");
-
     IoMarkIrpPending(irp);
-    IoQueueWorkItem(main_test_work_item, main_test_task, DelayedWorkQueue, irp);
+    IoQueueWorkItem(work_item, main_test_task, DelayedWorkQueue, irp);
 
     return STATUS_PENDING;
 }
@@ -2204,22 +2387,64 @@ static NTSTATUS get_fscontext(IRP *irp, IO_STACK_LOCATION *stack, ULONG_PTR *inf
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS return_status(IRP *irp, IO_STACK_LOCATION *stack, ULONG_PTR *info)
+static NTSTATUS return_status(IRP *irp, IO_STACK_LOCATION *stack, ULONG code)
 {
-    char *buffer = irp->AssociatedIrp.SystemBuffer;
-    NTSTATUS ret;
+    ULONG input_length = stack->Parameters.DeviceIoControl.InputBufferLength;
+    ULONG output_length = stack->Parameters.DeviceIoControl.OutputBufferLength;
+    const struct return_status_params *input_buffer;
+    struct return_status_params params;
+    void *output_buffer;
 
-    if (!buffer)
+    if (code == IOCTL_WINETEST_RETURN_STATUS_NEITHER)
+    {
+        input_buffer = stack->Parameters.DeviceIoControl.Type3InputBuffer;
+        output_buffer = irp->UserBuffer;
+    }
+    else if (code == IOCTL_WINETEST_RETURN_STATUS_DIRECT)
+    {
+        input_buffer = irp->AssociatedIrp.SystemBuffer;
+        output_buffer = MmGetSystemAddressForMdlSafe(irp->MdlAddress, NormalPagePriority);
+    }
+    else
+    {
+        input_buffer = irp->AssociatedIrp.SystemBuffer;
+        output_buffer = irp->AssociatedIrp.SystemBuffer;
+    }
+
+    if (!input_buffer || !output_buffer)
+    {
+        irp->IoStatus.Status = STATUS_ACCESS_VIOLATION;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
         return STATUS_ACCESS_VIOLATION;
+    }
 
-    if (stack->Parameters.DeviceIoControl.InputBufferLength < sizeof(DWORD)
-            || stack->Parameters.DeviceIoControl.OutputBufferLength < 3)
+    if (input_length < sizeof(params) || output_length < 6)
+    {
+        irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
         return STATUS_BUFFER_TOO_SMALL;
+    }
 
-    ret = *(DWORD *)irp->AssociatedIrp.SystemBuffer;
-    memcpy(buffer, "ghi", 3);
-    *info = 3;
-    return ret;
+    params = *input_buffer;
+
+    if (params.ret_status == STATUS_PENDING && !params.pending)
+    {
+        /* this causes kernel hangs under certain conditions */
+        irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    if (params.pending)
+        IoMarkIrpPending(irp);
+
+    /* intentionally report the wrong information (and status) */
+    memcpy(output_buffer, "ghijkl", 6);
+    irp->IoStatus.Information = 3;
+    irp->IoStatus.Status = params.iosb_status;
+    IoCompleteRequest(irp, IO_NO_INCREMENT);
+
+    return params.ret_status;
 }
 
 static NTSTATUS test_load_driver_ioctl(IRP *irp, IO_STACK_LOCATION *stack, ULONG_PTR *info)
@@ -2239,38 +2464,19 @@ static NTSTATUS test_load_driver_ioctl(IRP *irp, IO_STACK_LOCATION *stack, ULONG
         return ZwUnloadDriver(&name);
 }
 
-static NTSTATUS test_mismatched_status_ioctl(IRP *irp, IO_STACK_LOCATION *stack, ULONG_PTR *info)
-{
-    ULONG length = stack->Parameters.DeviceIoControl.OutputBufferLength;
-    char *buffer = irp->UserBuffer;
-
-    if (!buffer)
-    {
-        irp->IoStatus.Status = STATUS_ACCESS_VIOLATION;
-        IoCompleteRequest(irp, IO_NO_INCREMENT);
-        return STATUS_ACCESS_VIOLATION;
-    }
-
-    if (length < sizeof(teststr))
-    {
-        irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
-        IoCompleteRequest(irp, IO_NO_INCREMENT);
-        return STATUS_BUFFER_TOO_SMALL;
-    }
-
-    memcpy(buffer, teststr, sizeof(teststr));
-
-    /* This is deliberate; some broken drivers do this */
-    *info = 0;
-    irp->IoStatus.Status = STATUS_UNSUCCESSFUL;
-    IoCompleteRequest(irp, IO_NO_INCREMENT);
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS test_completion_ioctl(DEVICE_OBJECT *device, IRP *irp)
+static NTSTATUS completion_ioctl(DEVICE_OBJECT *device, IRP *irp, IO_STACK_LOCATION *stack)
 {
     if (device == upper_device)
     {
+        ok(irp->CurrentLocation == 2, "Got current location %u.\n", irp->CurrentLocation);
+        ok(!irp->PendingReturned, "Got pending flag %u.\n", irp->PendingReturned);
+        ok(stack->Control == (SL_INVOKE_ON_CANCEL | SL_INVOKE_ON_ERROR | SL_INVOKE_ON_SUCCESS),
+                "Got control flags %#x.\n", stack->Control);
+        stack = IoGetNextIrpStackLocation(irp);
+        ok(!stack->Control, "Got control flags %#x.\n", stack->Control);
+        stack = irp->Tail.Overlay.CurrentStackLocation + 1; /* previous location */
+        ok(!stack->Control, "Got control flags %#x.\n", stack->Control);
+
         IoCopyCurrentIrpStackLocationToNext(irp);
         IoSetCompletionRoutine(irp, completion_cb, upper_device, TRUE, TRUE, TRUE);
         return IoCallDriver(lower_device, irp);
@@ -2278,9 +2484,27 @@ static NTSTATUS test_completion_ioctl(DEVICE_OBJECT *device, IRP *irp)
     else
     {
         ok(device == lower_device, "Got wrong device.\n");
-        irp->IoStatus.Status = STATUS_SUCCESS;
-        IoCompleteRequest(irp, IO_NO_INCREMENT);
-        return STATUS_SUCCESS;
+        ok(irp->CurrentLocation == 1, "Got current location %u.\n", irp->CurrentLocation);
+        ok(!irp->PendingReturned, "Got pending flag %u.\n", irp->PendingReturned);
+        ok(stack->Control == (SL_INVOKE_ON_CANCEL | SL_INVOKE_ON_ERROR | SL_INVOKE_ON_SUCCESS),
+                "Got control flags %#x.\n", stack->Control);
+        stack = irp->Tail.Overlay.CurrentStackLocation + 1; /* previous location */
+        ok(stack->Control == (SL_INVOKE_ON_CANCEL | SL_INVOKE_ON_ERROR | SL_INVOKE_ON_SUCCESS),
+                "Got control flags %#x.\n", stack->Control);
+        stack = irp->Tail.Overlay.CurrentStackLocation + 2; /* top location */
+        ok(!stack->Control, "Got control flags %#x.\n", stack->Control);
+
+        if (completion_lower_pending)
+        {
+            IoMarkIrpPending(irp);
+            return STATUS_PENDING;
+        }
+        else
+        {
+            irp->IoStatus.Status = STATUS_SUCCESS;
+            IoCompleteRequest(irp, IO_NO_INCREMENT);
+            return STATUS_SUCCESS;
+        }
     }
 }
 
@@ -2346,17 +2570,16 @@ static NTSTATUS WINAPI driver_IoControl(DEVICE_OBJECT *device, IRP *irp)
         case IOCTL_WINETEST_GET_FSCONTEXT:
             status = get_fscontext(irp, stack, &irp->IoStatus.Information);
             break;
-        case IOCTL_WINETEST_RETURN_STATUS:
-            status = return_status(irp, stack, &irp->IoStatus.Information);
-            break;
+        case IOCTL_WINETEST_RETURN_STATUS_BUFFERED:
+        case IOCTL_WINETEST_RETURN_STATUS_DIRECT:
+        case IOCTL_WINETEST_RETURN_STATUS_NEITHER:
+            return return_status(irp, stack, stack->Parameters.DeviceIoControl.IoControlCode);
         case IOCTL_WINETEST_DETACH:
             IoDetachDevice(lower_device);
             status = STATUS_SUCCESS;
             break;
-        case IOCTL_WINETEST_MISMATCHED_STATUS:
-            return test_mismatched_status_ioctl(irp, stack, &irp->IoStatus.Information);
         case IOCTL_WINETEST_COMPLETION:
-            return test_completion_ioctl(device, irp);
+            return completion_ioctl(device, irp, stack);
         default:
             break;
     }
@@ -2378,6 +2601,32 @@ static NTSTATUS WINAPI driver_FlushBuffers(DEVICE_OBJECT *device, IRP *irp)
        "IRP thread is not the current thread\n");
     IoMarkIrpPending(irp);
     return STATUS_PENDING;
+}
+
+static void WINAPI blocking_irp_task(DEVICE_OBJECT *device, void *context)
+{
+    LARGE_INTEGER timeout;
+    IRP *irp = context;
+
+    timeout.QuadPart = -100 * 10000;
+    KeDelayExecutionThread( KernelMode, FALSE, &timeout );
+
+    irp->IoStatus.Status = STATUS_SUCCESS;
+    irp->IoStatus.Information = 0;
+    IoCompleteRequest(irp, IO_NO_INCREMENT);
+}
+
+static void WINAPI blocking_irp_failure_task(DEVICE_OBJECT *device, void *context)
+{
+    LARGE_INTEGER timeout;
+    IRP *irp = context;
+
+    timeout.QuadPart = -100 * 10000;
+    KeDelayExecutionThread( KernelMode, FALSE, &timeout );
+
+    irp->IoStatus.Status = STATUS_DEVICE_NOT_READY;
+    irp->IoStatus.Information = 0;
+    IoCompleteRequest(irp, IO_NO_INCREMENT);
 }
 
 static BOOL compare_file_name(const struct file_context *context, const WCHAR *expect)
@@ -2455,6 +2704,62 @@ static NTSTATUS WINAPI driver_QueryInformation(DEVICE_OBJECT *device, IRP *irp)
     return ret;
 }
 
+static NTSTATUS WINAPI driver_QueryVolumeInformation(DEVICE_OBJECT *device, IRP *irp)
+{
+    IO_STACK_LOCATION *stack = IoGetCurrentIrpStackLocation(irp);
+    ULONG length = stack->Parameters.QueryVolume.Length;
+    NTSTATUS ret;
+
+    switch (stack->Parameters.QueryVolume.FsInformationClass)
+    {
+    case FileFsVolumeInformation:
+    {
+        FILE_FS_VOLUME_INFORMATION *info = irp->AssociatedIrp.SystemBuffer;
+        static const WCHAR label[] = L"WineTestDriver";
+        ULONG serial = 0xdeadbeef;
+
+        if (length < sizeof(FILE_FS_VOLUME_INFORMATION))
+        {
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+            break;
+        }
+
+        info->VolumeCreationTime.QuadPart = 0;
+        info->VolumeSerialNumber = serial;
+        info->VolumeLabelLength = min( lstrlenW(label) * sizeof(WCHAR),
+                                       length - offsetof( FILE_FS_VOLUME_INFORMATION, VolumeLabel ) );
+        info->SupportsObjects = TRUE;
+        memcpy( info->VolumeLabel, label, info->VolumeLabelLength );
+
+        irp->IoStatus.Information = offsetof( FILE_FS_VOLUME_INFORMATION, VolumeLabel ) + info->VolumeLabelLength;
+        ret = STATUS_SUCCESS;
+        break;
+    }
+
+    case FileFsSizeInformation:
+    {
+        IoMarkIrpPending(irp);
+        IoQueueWorkItem(work_item, blocking_irp_task, DelayedWorkQueue, irp);
+        return STATUS_PENDING;
+    }
+
+    case FileFsFullSizeInformation:
+    {
+        IoMarkIrpPending(irp);
+        IoQueueWorkItem(work_item, blocking_irp_failure_task, DelayedWorkQueue, irp);
+        return STATUS_PENDING;
+    }
+
+    default:
+        ret = STATUS_NOT_IMPLEMENTED;
+        break;
+    }
+
+    irp->IoStatus.Status = ret;
+    IoCompleteRequest(irp, IO_NO_INCREMENT);
+    return ret;
+}
+
 static NTSTATUS WINAPI driver_Close(DEVICE_OBJECT *device, IRP *irp)
 {
     IO_STACK_LOCATION *stack = IoGetCurrentIrpStackLocation(irp);
@@ -2472,11 +2777,16 @@ static VOID WINAPI driver_Unload(DRIVER_OBJECT *driver)
 
     DbgPrint("unloading driver\n");
 
+    IoFreeWorkItem(work_item);
+    work_item = NULL;
+
     RtlInitUnicodeString(&linkW, L"\\DosDevices\\WineTestDriver");
     IoDeleteSymbolicLink(&linkW);
 
     IoDeleteDevice(upper_device);
     IoDeleteDevice(lower_device);
+
+    winetest_cleanup();
 }
 
 NTSTATUS WINAPI DriverEntry(DRIVER_OBJECT *driver, PUNICODE_STRING registry)
@@ -2484,6 +2794,9 @@ NTSTATUS WINAPI DriverEntry(DRIVER_OBJECT *driver, PUNICODE_STRING registry)
     UNICODE_STRING nameW, linkW;
     NTSTATUS status;
     void *obj;
+
+    if ((status = winetest_init()))
+        return status;
 
     DbgPrint("loading driver\n");
 
@@ -2497,44 +2810,36 @@ NTSTATUS WINAPI DriverEntry(DRIVER_OBJECT *driver, PUNICODE_STRING registry)
     driver->MajorFunction[IRP_MJ_DEVICE_CONTROL]    = driver_IoControl;
     driver->MajorFunction[IRP_MJ_FLUSH_BUFFERS]     = driver_FlushBuffers;
     driver->MajorFunction[IRP_MJ_QUERY_INFORMATION] = driver_QueryInformation;
+    driver->MajorFunction[IRP_MJ_QUERY_VOLUME_INFORMATION] = driver_QueryVolumeInformation;
     driver->MajorFunction[IRP_MJ_CLOSE]             = driver_Close;
 
     RtlInitUnicodeString(&nameW, L"IoDriverObjectType");
     pIoDriverObjectType = MmGetSystemRoutineAddress(&nameW);
 
     RtlInitUnicodeString(&nameW, L"\\Driver\\WineTestDriver");
-    if ((status = ObReferenceObjectByName(&nameW, 0, NULL, 0, *pIoDriverObjectType, KernelMode, NULL, &obj)))
-        return status;
-    if (obj != driver)
-    {
-        ObDereferenceObject(obj);
-        return STATUS_UNSUCCESSFUL;
-    }
+    status = ObReferenceObjectByName(&nameW, 0, NULL, 0, *pIoDriverObjectType, KernelMode, NULL, &obj);
+    ok(!status, "got %#lx\n", status);
+    ok(obj == driver, "expected %p, got %p\n", driver, obj);
     ObDereferenceObject(obj);
 
     RtlInitUnicodeString(&nameW, L"\\Device\\WineTestDriver");
     RtlInitUnicodeString(&linkW, L"\\DosDevices\\WineTestDriver");
 
-    if (!(status = IoCreateDevice(driver, 0, &nameW, FILE_DEVICE_UNKNOWN,
-                                  FILE_DEVICE_SECURE_OPEN, FALSE, &lower_device)))
-    {
-        status = IoCreateSymbolicLink(&linkW, &nameW);
-        lower_device->Flags &= ~DO_DEVICE_INITIALIZING;
-    }
+    status = IoCreateDevice(driver, 0, &nameW, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &lower_device);
+    ok(!status, "failed to create device, status %#lx\n", status);
+    status = IoCreateSymbolicLink(&linkW, &nameW);
+    ok(!status, "failed to create link, status %#lx\n", status);
+    lower_device->Flags &= ~DO_DEVICE_INITIALIZING;
 
-    if (!status)
-    {
-        RtlInitUnicodeString(&nameW, L"\\Device\\WineTestUpper");
+    RtlInitUnicodeString(&nameW, L"\\Device\\WineTestUpper");
+    status = IoCreateDevice(driver, 0, &nameW, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &upper_device);
+    ok(!status, "failed to create device, status %#lx\n", status);
 
-        status = IoCreateDevice(driver, 0, &nameW, FILE_DEVICE_UNKNOWN,
-                                FILE_DEVICE_SECURE_OPEN, FALSE, &upper_device);
-    }
+    IoAttachDeviceToDeviceStack(upper_device, lower_device);
+    upper_device->Flags &= ~DO_DEVICE_INITIALIZING;
 
-    if (!status)
-    {
-        IoAttachDeviceToDeviceStack(upper_device, lower_device);
-        upper_device->Flags &= ~DO_DEVICE_INITIALIZING;
-    }
+    work_item = IoAllocateWorkItem(lower_device);
+    ok(work_item != NULL, "work_item = NULL\n");
 
-    return status;
+    return STATUS_SUCCESS;
 }

@@ -19,40 +19,13 @@
 #ifndef _TWAIN32_H
 #define _TWAIN32_H
 
-#ifndef __WINE_CONFIG_H
-# error You must include config.h first
-#endif
-
 #include <stdarg.h>
-
-#ifdef SONAME_LIBSANE
-# include <sane/sane.h>
-# include <sane/saneopts.h>
-#endif
 
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
 #include "twain.h"
-
-#ifdef SONAME_LIBSANE
-#define MAKE_FUNCPTR(f) extern typeof(f) * p##f DECLSPEC_HIDDEN;
-MAKE_FUNCPTR(sane_init)
-MAKE_FUNCPTR(sane_exit)
-MAKE_FUNCPTR(sane_get_devices)
-MAKE_FUNCPTR(sane_open)
-MAKE_FUNCPTR(sane_close)
-MAKE_FUNCPTR(sane_get_option_descriptor)
-MAKE_FUNCPTR(sane_control_option)
-MAKE_FUNCPTR(sane_get_parameters)
-MAKE_FUNCPTR(sane_start)
-MAKE_FUNCPTR(sane_read)
-MAKE_FUNCPTR(sane_cancel)
-MAKE_FUNCPTR(sane_set_io_mode)
-MAKE_FUNCPTR(sane_get_select_fd)
-MAKE_FUNCPTR(sane_strstatus)
-#undef MAKE_FUNCPTR
-#endif
+#include "unixlib.h"
 
 extern HINSTANCE SANE_instance DECLSPEC_HIDDEN;
 
@@ -61,21 +34,15 @@ extern HINSTANCE SANE_instance DECLSPEC_HIDDEN;
 /* internal information about an active data source */
 struct tagActiveDS
 {
-    struct tagActiveDS	*next;			/* next active DS */
     TW_IDENTITY		identity;		/* identity of the DS */
     TW_UINT16		currentState;		/* current state */
     TW_UINT16		twCC;			/* condition code */
     TW_IDENTITY         appIdentity;            /* identity of the app */
     HWND		hwndOwner;		/* window handle of the app */
     HWND		progressWnd;		/* window handle of the scanning window */
-#ifdef SONAME_LIBSANE
-    SANE_Handle		deviceHandle;		/* device handle */
-    SANE_Parameters     sane_param;             /* parameters about the image
-                                                   transferred */
-    BOOL                sane_param_valid;  /* true if valid sane_param*/
-    BOOL                sane_started;      /* If sane_start has been called */
-    INT                 deviceIndex;    /* index of the current device */
-#endif
+
+    struct frame_parameters frame_params;       /* parameters about the image transferred */
+
     /* Capabilities */
     TW_UINT16		capXferMech;		/* ICAP_XFERMECH */
     BOOL                PixelTypeSet;
@@ -227,21 +194,20 @@ BOOL DoScannerUI(void) DECLSPEC_HIDDEN;
 HWND ScanningDialogBox(HWND dialog, LONG progress) DECLSPEC_HIDDEN;
 
 /* Option functions */
-#ifdef SONAME_LIBSANE
-SANE_Status sane_option_get_int(SANE_Handle h, const char *option_name, SANE_Int *val) DECLSPEC_HIDDEN;
-SANE_Status sane_option_set_int(SANE_Handle h, const char *option_name, SANE_Int val, SANE_Int *status) DECLSPEC_HIDDEN;
-SANE_Status sane_option_get_str(SANE_Handle h, const char *option_name, SANE_String val, size_t len, SANE_Int *status) DECLSPEC_HIDDEN;
-SANE_Status sane_option_set_str(SANE_Handle h, const char *option_name, SANE_String val, SANE_Int *status) DECLSPEC_HIDDEN;
-SANE_Status sane_option_probe_resolution(SANE_Handle h, const char *option_name, SANE_Int *minval, SANE_Int *maxval, SANE_Int *quant) DECLSPEC_HIDDEN;
-SANE_Status sane_option_probe_mode(SANE_Handle h, SANE_String_Const **choices, char *current, int current_size) DECLSPEC_HIDDEN;
-SANE_Status sane_option_probe_scan_area(SANE_Handle h, const char *option_name, SANE_Fixed *val,
-                                        SANE_Unit *unit, SANE_Fixed *min, SANE_Fixed *max, SANE_Fixed *quant) DECLSPEC_HIDDEN;
-SANE_Status sane_option_get_bool(SANE_Handle h, const char *option_name, SANE_Bool *val, SANE_Int *status) DECLSPEC_HIDDEN;
-SANE_Status sane_option_set_bool(SANE_Handle h, const char *option_name, SANE_Bool val, SANE_Int *status) DECLSPEC_HIDDEN;
-SANE_Status sane_option_set_fixed(SANE_Handle h, const char *option_name, SANE_Fixed val, SANE_Int *status) DECLSPEC_HIDDEN;
-TW_UINT16 sane_status_to_twcc(SANE_Status rc) DECLSPEC_HIDDEN;
-BOOL convert_sane_res_to_twain(double sane_res, SANE_Unit unit, TW_FIX32 *twain_res, TW_UINT16 twtype) DECLSPEC_HIDDEN;
-#endif
-
+TW_UINT16 sane_option_get_value( int optno, void *val ) DECLSPEC_HIDDEN;
+TW_UINT16 sane_option_set_value( int optno, void *val, BOOL *reload ) DECLSPEC_HIDDEN;
+TW_UINT16 sane_option_get_int( const char *option_name, int *val ) DECLSPEC_HIDDEN;
+TW_UINT16 sane_option_set_int( const char *option_name, int val, BOOL *reload ) DECLSPEC_HIDDEN;
+TW_UINT16 sane_option_get_str( const char *option_name, char *val, int len ) DECLSPEC_HIDDEN;
+TW_UINT16 sane_option_set_str( const char *option_name, char *val, BOOL *reload ) DECLSPEC_HIDDEN;
+TW_UINT16 sane_option_probe_resolution( const char *option_name, int *minval, int *maxval, int *quant) DECLSPEC_HIDDEN;
+TW_UINT16 sane_option_probe_mode(TW_UINT16 *current, TW_UINT32 *choices, int *count) DECLSPEC_HIDDEN;
+TW_UINT16 sane_option_get_bool( const char *option_name, BOOL *val ) DECLSPEC_HIDDEN;
+TW_UINT16 sane_option_set_bool( const char *option_name, BOOL val ) DECLSPEC_HIDDEN;
+TW_UINT16 sane_option_get_scan_area( int *tlx, int *tly, int *brx, int *bry ) DECLSPEC_HIDDEN;
+TW_UINT16 sane_option_get_max_scan_area( int *tlx, int *tly, int *brx, int *bry ) DECLSPEC_HIDDEN;
+TW_UINT16 sane_option_set_scan_area( int tlx, int tly, int brx, int bry, BOOL *reload ) DECLSPEC_HIDDEN;
+TW_FIX32 convert_sane_res_to_twain( int res ) DECLSPEC_HIDDEN;
+TW_UINT16 get_sane_params( struct frame_parameters *params ) DECLSPEC_HIDDEN;
 
 #endif

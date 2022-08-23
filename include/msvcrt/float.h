@@ -130,13 +130,14 @@ extern "C" {
 #define _FPE_STACKUNDERFLOW     0x8b
 #define _FPE_EXPLICITGEN        0x8c
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#if defined(__i386__)
 #define _CW_DEFAULT (_RC_NEAR + _PC_53 + _EM_INVALID + _EM_ZERODIVIDE + _EM_OVERFLOW + _EM_UNDERFLOW + _EM_INEXACT + _EM_DENORMAL)
 #elif defined(__x86_64__)
 #define _CW_DEFAULT (_RC_NEAR + _PC_64 + _EM_INVALID + _EM_ZERODIVIDE + _EM_OVERFLOW + _EM_UNDERFLOW + _EM_INEXACT + _EM_DENORMAL)
 #endif
 
 _ACRTIMP unsigned int __cdecl _clearfp(void);
+_ACRTIMP void __cdecl _fpreset(void);
 _ACRTIMP unsigned int __cdecl _statusfp(void);
 _ACRTIMP int __cdecl __fpe_flt_rounds(void);
 _ACRTIMP unsigned int __cdecl _control87(unsigned int, unsigned int);
@@ -155,7 +156,7 @@ _ACRTIMP int    __cdecl _finite(double);
 _ACRTIMP int    __cdecl _isnan(double);
 _ACRTIMP int    __cdecl _fpclass(double);
 
-#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
+#ifdef __x86_64__
 _ACRTIMP float __cdecl _scalbf(float, __msvcrt_long);
 #endif
 

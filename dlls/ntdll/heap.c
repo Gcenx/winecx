@@ -36,7 +36,6 @@
 #include "ntdll_misc.h"
 #include "wine/list.h"
 #include "wine/debug.h"
-#include "wine/server.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(heap);
 
@@ -144,17 +143,18 @@ typedef struct tagSUBHEAP
 #define SUBHEAP_MAGIC    ((DWORD)('S' | ('U'<<8) | ('B'<<16) | ('H'<<24)))
 
 typedef struct tagHEAP
-{
-    DWORD_PTR        unknown1[2];
-    DWORD            unknown2[2];
-    DWORD_PTR        unknown3[4];
-    DWORD            unknown4;
-    DWORD_PTR        unknown5[2];
-    DWORD            unknown6[3];
-    DWORD_PTR        unknown7[2];
-    /* For Vista through 10, 'flags' is at offset 0x40 (x86) / 0x70 (x64) */
-    DWORD            flags;         /* Heap flags */
-    DWORD            force_flags;   /* Forced heap flags for debugging */
+{                                  /* win32/win64 */
+    DWORD_PTR        unknown1[2];   /* 0000/0000 */
+    DWORD            ffeeffee;      /* 0008/0010 */
+    DWORD            auto_flags;    /* 000c/0014 */
+    DWORD_PTR        unknown2[7];   /* 0010/0018 */
+    DWORD            unknown3[2];   /* 002c/0050 */
+    DWORD_PTR        unknown4[3];   /* 0034/0058 */
+    DWORD            flags;         /* 0040/0070 */
+    DWORD            force_flags;   /* 0044/0074 */
+    /* end of the Windows 10 compatible struct layout */
+
+    BOOL             shared;        /* System shared heap */
     SUBHEAP          subheap;       /* First sub-heap */
     struct list      entry;         /* Entry in process heap list */
     struct list      subheap_list;  /* Sub-heap list */
@@ -174,6 +174,7 @@ typedef struct tagHEAP
 #define MAX_FREE_PENDING     1024    /* max number of free requests to delay */
 
 /* some undocumented flags (names are made up) */
+#define HEAP_PRIVATE          0x00001000
 #define HEAP_PAGE_ALLOCS      0x01000000
 #define HEAP_VALIDATE         0x10000000
 #define HEAP_VALIDATE_ALL     0x20000000
@@ -689,7 +690,7 @@ static void HEAP_MakeInUseBlockFree( SUBHEAP *subheap, ARENA_INUSE *pArena )
 
     /* Decommit the end of the heap */
 
-    if (!(subheap->heap->flags & HEAP_SHARED)) HEAP_Decommit( subheap, pFree + 1 );
+    if (!(subheap->heap->shared)) HEAP_Decommit( subheap, pFree + 1 );
 }
 
 
@@ -923,7 +924,10 @@ static SUBHEAP *HEAP_CreateSubHeap( HEAP *heap, LPVOID address, DWORD flags,
         /* If this is a primary subheap, initialize main heap */
 
         heap = address;
-        heap->flags         = flags;
+        heap->ffeeffee      = 0xffeeffee;
+        heap->auto_flags    = (flags & HEAP_GROWABLE);
+        heap->flags         = (flags & ~HEAP_SHARED);
+        heap->shared        = (flags & HEAP_SHARED) != 0;
         heap->magic         = HEAP_MAGIC;
         heap->grow_size     = max( HEAP_DEF_SIZE, totalSize );
         list_init( &heap->subheap_list );
@@ -969,14 +973,14 @@ static SUBHEAP *HEAP_CreateSubHeap( HEAP *heap, LPVOID address, DWORD flags,
             heap->critSection.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": HEAP.critSection");
         }
 
-        if (flags & HEAP_SHARED)
+        if (heap->shared)
         {
             /* let's assume that only one thread at a time will try to do this */
             HANDLE sem = heap->critSection.LockSemaphore;
             if (!sem) NtCreateSemaphore( &sem, SEMAPHORE_ALL_ACCESS, NULL, 0, 1 );
 
             NtDuplicateObject( NtCurrentProcess(), sem, NtCurrentProcess(), &sem, 0, 0,
-                               DUP_HANDLE_MAKE_GLOBAL | DUP_HANDLE_SAME_ACCESS | DUP_HANDLE_CLOSE_SOURCE );
+                               DUPLICATE_MAKE_GLOBAL | DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE );
             heap->critSection.LockSemaphore = sem;
             RtlFreeHeap( processHeap, 0, heap->critSection.DebugInfo );
             heap->critSection.DebugInfo = NULL;
@@ -1438,35 +1442,48 @@ static BOOL validate_block_pointer( HEAP *heap, SUBHEAP **ret_subheap, const ARE
     return ret;
 }
 
+static DWORD heap_flags_from_global_flag( DWORD flag )
+{
+    DWORD ret = 0;
+
+    if (flag & FLG_HEAP_ENABLE_TAIL_CHECK)
+        ret |= HEAP_TAIL_CHECKING_ENABLED;
+    if (flag & FLG_HEAP_ENABLE_FREE_CHECK)
+        ret |= HEAP_FREE_CHECKING_ENABLED;
+    if (flag & FLG_HEAP_VALIDATE_PARAMETERS)
+        ret |= HEAP_VALIDATE_PARAMS | HEAP_TAIL_CHECKING_ENABLED | HEAP_FREE_CHECKING_ENABLED;
+    if (flag & FLG_HEAP_VALIDATE_ALL)
+        ret |= HEAP_VALIDATE_ALL | HEAP_TAIL_CHECKING_ENABLED | HEAP_FREE_CHECKING_ENABLED;
+    if (flag & FLG_HEAP_DISABLE_COALESCING)
+        ret |= HEAP_DISABLE_COALESCE_ON_FREE;
+    if (flag & FLG_HEAP_PAGE_ALLOCS)
+        ret |= HEAP_PAGE_ALLOCS;
+
+    return ret;
+}
 
 /***********************************************************************
  *           heap_set_debug_flags
  */
-void heap_set_debug_flags( HANDLE handle )
+static void heap_set_debug_flags( HANDLE handle )
 {
     HEAP *heap = HEAP_GetPtr( handle );
     ULONG global_flags = RtlGetNtGlobalFlags();
-    ULONG flags = 0;
+    DWORD flags, force_flags;
 
     if (TRACE_ON(heap)) global_flags |= FLG_HEAP_VALIDATE_ALL;
     if (WARN_ON(heap)) global_flags |= FLG_HEAP_VALIDATE_PARAMETERS;
 
-    if (global_flags & FLG_HEAP_ENABLE_TAIL_CHECK) flags |= HEAP_TAIL_CHECKING_ENABLED;
-    if (global_flags & FLG_HEAP_ENABLE_FREE_CHECK) flags |= HEAP_FREE_CHECKING_ENABLED;
-    if (global_flags & FLG_HEAP_DISABLE_COALESCING) flags |= HEAP_DISABLE_COALESCE_ON_FREE;
-    if (global_flags & FLG_HEAP_PAGE_ALLOCS) flags |= HEAP_PAGE_ALLOCS | HEAP_GROWABLE;
+    flags = heap_flags_from_global_flag( global_flags );
+    force_flags = (heap->flags | flags) & ~(HEAP_SHARED|HEAP_DISABLE_COALESCE_ON_FREE);
 
-    if (global_flags & FLG_HEAP_VALIDATE_PARAMETERS)
-        flags |= HEAP_VALIDATE | HEAP_VALIDATE_PARAMS |
-                 HEAP_TAIL_CHECKING_ENABLED | HEAP_FREE_CHECKING_ENABLED;
-    if (global_flags & FLG_HEAP_VALIDATE_ALL)
-        flags |= HEAP_VALIDATE | HEAP_VALIDATE_ALL |
-                 HEAP_TAIL_CHECKING_ENABLED | HEAP_FREE_CHECKING_ENABLED;
+    if (global_flags & FLG_HEAP_ENABLE_TAGGING) flags |= HEAP_SHARED;
+    if (!(global_flags & FLG_HEAP_PAGE_ALLOCS)) force_flags &= ~(HEAP_GROWABLE|HEAP_PRIVATE);
 
     if (RUNNING_ON_VALGRIND) flags = 0; /* no sense in validating since Valgrind catches accesses */
 
     heap->flags |= flags;
-    heap->force_flags |= flags & ~(HEAP_VALIDATE | HEAP_DISABLE_COALESCE_ON_FREE);
+    heap->force_flags |= force_flags;
 
     if (flags & (HEAP_FREE_CHECKING_ENABLED | HEAP_TAIL_CHECKING_ENABLED))  /* fix existing blocks */
     {
@@ -1510,7 +1527,7 @@ void heap_set_debug_flags( HANDLE handle )
     if ((heap->flags & HEAP_GROWABLE) && !heap->pending_free &&
         ((flags & HEAP_FREE_CHECKING_ENABLED) || RUNNING_ON_VALGRIND))
     {
-        heap->pending_free = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY,
+        heap->pending_free = RtlAllocateHeap( handle, HEAP_ZERO_MEMORY,
                                               MAX_FREE_PENDING * sizeof(*heap->pending_free) );
         heap->pending_pos = 0;
     }
@@ -1541,11 +1558,9 @@ HANDLE WINAPI RtlCreateHeap( ULONG flags, PVOID addr, SIZE_T totalSize, SIZE_T c
 
     /* Allocate the heap block */
 
-    if (!totalSize)
-    {
-        totalSize = HEAP_DEF_SIZE;
-        flags |= HEAP_GROWABLE;
-    }
+    if (processHeap) flags |= HEAP_PRIVATE;
+    if (!processHeap || !totalSize || (flags & HEAP_SHARED)) flags |= HEAP_GROWABLE;
+    if (!totalSize) totalSize = HEAP_DEF_SIZE;
 
     if (!(subheap = HEAP_CreateSubHeap( NULL, addr, flags, commitSize, totalSize ))) return 0;
 

@@ -1,11 +1,13 @@
 MODULE    = opengl32.dll
-EXTRADEFS = -D_OPENGL32_
+EXTRADEFS = -DWINE_NO_LONG_TYPES -D_OPENGL32_
 IMPORTLIB = opengl32
-IMPORTS   = user32 gdi32 advapi32
+IMPORTS   = user32 gdi32 advapi32 win32u
 DELAYIMPORTS = glu32
-EXTRADLLFLAGS = -Wl,--image-base,0x7a800000
+
+EXTRADLLFLAGS = -Wl,--image-base,0x7a800000 -mcygwin
 
 C_SRCS = \
+	32on64hack.c \
 	opengl_ext.c \
 	opengl_norm.c \
 	wgl.c

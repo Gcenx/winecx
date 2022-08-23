@@ -38,6 +38,7 @@ struct parser
     HRESULT error;
     struct view **view;
     struct list *mem;
+    enum wbm_namespace ns;
 };
 
 struct string
@@ -48,7 +49,7 @@ struct string
 
 static void *alloc_mem( struct parser *parser, UINT size )
 {
-    struct list *mem = heap_alloc( sizeof(struct list) + size );
+    struct list *mem = malloc( sizeof(struct list) + size );
     list_add_tail( parser->mem, mem );
     return &mem[1];
 }
@@ -216,6 +217,7 @@ static int wql_lex( void *val, struct parser *parser );
 %lex-param { struct parser *ctx }
 %parse-param { struct parser *ctx }
 %define parse.error verbose
+%define api.prefix {wql_}
 %define api.pure
 
 %union
@@ -289,9 +291,12 @@ associatorsof:
             struct parser *parser = ctx;
             struct view *view;
 
-            hr = create_view( VIEW_TYPE_ASSOCIATORS, $3, NULL, NULL, NULL, NULL, &view );
+            hr = create_view( VIEW_TYPE_ASSOCIATORS, ctx->ns, $3, NULL, NULL, NULL, NULL, &view );
             if (hr != S_OK)
+            {
+                ctx->error = hr;
                 YYABORT;
+            }
 
             PARSER_BUBBLE_UP_VIEW( parser, $$, view );
         }
@@ -301,9 +306,12 @@ associatorsof:
             struct parser *parser = ctx;
             struct view *view;
 
-            hr = create_view( VIEW_TYPE_ASSOCIATORS, $3, $5, NULL, NULL, NULL, &view );
+            hr = create_view( VIEW_TYPE_ASSOCIATORS, ctx->ns, $3, $5, NULL, NULL, NULL, &view );
             if (hr != S_OK)
+            {
+                ctx->error = hr;
                 YYABORT;
+            }
 
             PARSER_BUBBLE_UP_VIEW( parser, $$, view );
         }
@@ -316,9 +324,12 @@ select:
             struct parser *parser = ctx;
             struct view *view;
 
-            hr = create_view( VIEW_TYPE_SELECT, NULL, NULL, $3, NULL, NULL, &view );
+            hr = create_view( VIEW_TYPE_SELECT, ctx->ns, NULL, NULL, $3, NULL, NULL, &view );
             if (hr != S_OK)
+            {
+                ctx->error = hr;
                 YYABORT;
+            }
 
             PARSER_BUBBLE_UP_VIEW( parser, $$, view );
         }
@@ -328,9 +339,12 @@ select:
             struct parser *parser = ctx;
             struct view *view;
 
-            hr = create_view( VIEW_TYPE_SELECT, NULL, NULL, $4, $2, NULL, &view );
+            hr = create_view( VIEW_TYPE_SELECT, ctx->ns, NULL, NULL, $4, $2, NULL, &view );
             if (hr != S_OK)
+            {
+                ctx->error = hr;
                 YYABORT;
+            }
 
             PARSER_BUBBLE_UP_VIEW( parser, $$, view );
         }
@@ -340,9 +354,12 @@ select:
             struct parser *parser = ctx;
             struct view *view;
 
-            hr = create_view( VIEW_TYPE_SELECT, NULL, NULL, $4, $2, $6, &view );
+            hr = create_view( VIEW_TYPE_SELECT, ctx->ns, NULL, NULL, $4, $2, $6, &view );
             if (hr != S_OK)
+            {
+                ctx->error = hr;
                 YYABORT;
+            }
 
             PARSER_BUBBLE_UP_VIEW( parser, $$, view );
         }
@@ -579,7 +596,7 @@ const_val:
 
 %%
 
-HRESULT parse_query( const WCHAR *str, struct view **view, struct list *mem )
+HRESULT parse_query( enum wbm_namespace ns, const WCHAR *str, struct view **view, struct list *mem )
 {
     struct parser parser;
     int ret;
@@ -592,6 +609,7 @@ HRESULT parse_query( const WCHAR *str, struct view **view, struct list *mem )
     parser.error = WBEM_E_INVALID_QUERY;
     parser.view  = view;
     parser.mem   = mem;
+    parser.ns    = ns;
 
     ret = wql_parse( &parser );
     TRACE("wql_parse returned %d\n", ret);

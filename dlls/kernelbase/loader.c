@@ -48,6 +48,14 @@ struct exclusive_datafile
 };
 static struct list exclusive_datafile_list = LIST_INIT( exclusive_datafile_list );
 
+static CRITICAL_SECTION exclusive_datafile_list_section;
+static CRITICAL_SECTION_DEBUG critsect_debug =
+{
+    0, 0, &exclusive_datafile_list_section,
+    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": exclusive_datafile_list_section") }
+};
+static CRITICAL_SECTION exclusive_datafile_list_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 /***********************************************************************
  * Modules
@@ -107,7 +115,11 @@ static BOOL load_library_as_datafile( LPCWSTR load_path, DWORD flags, LPCWSTR na
     if (!(flags & LOAD_LIBRARY_AS_IMAGE_RESOURCE))
     {
         /* make sure it's a valid PE file */
-        if (!RtlImageNtHeader( module )) goto failed;
+        if (!RtlImageNtHeader( module ))
+        {
+            SetLastError( ERROR_BAD_EXE_FORMAT );
+            goto failed;
+        }
         *mod_ret = (HMODULE)((char *)module + 1); /* set bit 0 for data file module */
 
         if (flags & LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE)
@@ -116,7 +128,9 @@ static BOOL load_library_as_datafile( LPCWSTR load_path, DWORD flags, LPCWSTR na
             if (!datafile) goto failed;
             datafile->module = *mod_ret;
             datafile->file   = file;
+            RtlEnterCriticalSection( &exclusive_datafile_list_section );
             list_add_head( &exclusive_datafile_list, &datafile->entry );
+            RtlLeaveCriticalSection( &exclusive_datafile_list_section );
             TRACE( "delaying close %p for module %p\n", datafile->file, datafile->module );
             return TRUE;
         }
@@ -143,42 +157,27 @@ static HMODULE load_library( const UNICODE_STRING *libname, DWORD flags )
     HMODULE module;
     WCHAR *load_path, *dummy;
 
-    if (flags & unsupported_flags) FIXME( "unsupported flag(s) used %#08x\n", flags );
+    if (flags & unsupported_flags) FIXME( "unsupported flag(s) used %#08lx\n", flags );
 
     if (!set_ntstatus( LdrGetDllPath( libname->Buffer, flags, &load_path, &dummy ))) return 0;
 
     if (flags & (LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE |
                  LOAD_LIBRARY_AS_IMAGE_RESOURCE))
     {
-        ULONG_PTR magic;
-
-        LdrLockLoaderLock( 0, NULL, &magic );
-        if (!LdrGetDllHandle( load_path, flags, libname, &module ))
-        {
-            LdrAddRefDll( 0, module );
-            LdrUnlockLoaderLock( 0, magic );
-            goto done;
-        }
-        if (load_library_as_datafile( load_path, flags, libname->Buffer, &module ))
-        {
-            LdrUnlockLoaderLock( 0, magic );
-            goto done;
-        }
-        LdrUnlockLoaderLock( 0, magic );
-        flags |= DONT_RESOLVE_DLL_REFERENCES; /* Just in case */
-        /* Fallback to normal behaviour */
+        if (LdrGetDllHandleEx( 0, load_path, NULL, libname, &module ))
+            load_library_as_datafile( load_path, flags, libname->Buffer, &module );
     }
-
-    status = LdrLoadDll( load_path, flags, libname, &module );
-    if (status != STATUS_SUCCESS)
+    else
     {
-        module = 0;
-        if (status == STATUS_DLL_NOT_FOUND && (GetVersion() & 0x80000000))
-            SetLastError( ERROR_DLL_NOT_FOUND );
-        else
-            SetLastError( RtlNtStatusToDosError( status ) );
+        status = LdrLoadDll( load_path, flags, libname, &module );
+        if (!set_ntstatus( status ))
+        {
+            module = 0;
+            if (status == STATUS_DLL_NOT_FOUND && (GetVersion() & 0x80000000))
+                SetLastError( ERROR_DLL_NOT_FOUND );
+        }
     }
-done:
+
     RtlReleasePath( load_path );
     return module;
 }
@@ -247,9 +246,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH FreeLibrary( HINSTANCE module )
         if ((ULONG_PTR)module & 1)
         {
             struct exclusive_datafile *file;
-            ULONG_PTR magic;
 
-            LdrLockLoaderLock( 0, NULL, &magic );
+            RtlEnterCriticalSection( &exclusive_datafile_list_section );
             LIST_FOR_EACH_ENTRY( file, &exclusive_datafile_list, struct exclusive_datafile, entry )
             {
                 if (file->module != module) continue;
@@ -259,7 +257,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH FreeLibrary( HINSTANCE module )
                 HeapFree( GetProcessHeap(), 0, file );
                 break;
             }
-            LdrUnlockLoaderLock( 0, magic );
+            RtlLeaveCriticalSection( &exclusive_datafile_list_section );
         }
         return UnmapViewOfFile( ptr );
     }
@@ -300,9 +298,9 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetModuleFileNameA( HMODULE module, LPSTR filenam
 DWORD WINAPI DECLSPEC_HOTPATCH GetModuleFileNameW( HMODULE module, LPWSTR filename, DWORD size )
 {
     ULONG len = 0;
-    ULONG_PTR magic;
-    LDR_DATA_TABLE_ENTRY *pldr;
     WIN16_SUBSYSTEM_TIB *win16_tib;
+    UNICODE_STRING name;
+    NTSTATUS status;
 
     if (!module && ((win16_tib = NtCurrentTeb()->Tib.SubSystemTib)) && win16_tib->exe_name)
     {
@@ -312,22 +310,11 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetModuleFileNameW( HMODULE module, LPWSTR filena
         goto done;
     }
 
-    LdrLockLoaderLock( 0, NULL, &magic );
-
-    if (!module) module = NtCurrentTeb()->Peb->ImageBaseAddress;
-    if (set_ntstatus( LdrFindEntryForAddress( module, &pldr )))
-    {
-        len = min( size, pldr->FullDllName.Length / sizeof(WCHAR) );
-        memcpy( filename, pldr->FullDllName.Buffer, len * sizeof(WCHAR) );
-        if (len < size)
-        {
-            filename[len] = 0;
-            SetLastError( 0 );
-        }
-        else SetLastError( ERROR_INSUFFICIENT_BUFFER );
-    }
-
-    LdrUnlockLoaderLock( 0, magic );
+    name.Buffer = filename;
+    name.MaximumLength = min( size, UNICODE_STRING_MAX_CHARS ) * sizeof(WCHAR);
+    status = LdrGetDllFullName( module, &name );
+    if (!status || status == STATUS_BUFFER_TOO_SMALL) len = name.Length / sizeof(WCHAR);
+    SetLastError( RtlNtStatusToDosError( status ));
 done:
     TRACE( "%s\n", debugstr_wn(filename, len) );
     return len;
@@ -378,10 +365,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetModuleHandleExA( DWORD flags, LPCSTR name, HMOD
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetModuleHandleExW( DWORD flags, LPCWSTR name, HMODULE *module )
 {
-    NTSTATUS status = STATUS_SUCCESS;
     HMODULE ret = NULL;
-    ULONG_PTR magic;
-    BOOL lock;
+    NTSTATUS status;
+    void *dummy;
 
     if (!module)
     {
@@ -389,35 +375,41 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetModuleHandleExW( DWORD flags, LPCWSTR name, HMO
         return FALSE;
     }
 
-    /* if we are messing with the refcount, grab the loader lock */
-    lock = (flags & GET_MODULE_HANDLE_EX_FLAG_PIN) || !(flags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT);
-    if (lock) LdrLockLoaderLock( 0, NULL, &magic );
-
-    if (!name)
+    if ((flags & ~(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT
+                  | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS))
+                  || (flags & (GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT))
+                  == (GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT))
     {
-        ret = NtCurrentTeb()->Peb->ImageBaseAddress;
+        *module = NULL;
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
     }
-    else if (flags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS)
+
+    if (name && !(flags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS))
     {
-        void *dummy;
-        if (!(ret = RtlPcToFileHeader( (void *)name, &dummy ))) status = STATUS_DLL_NOT_FOUND;
+        UNICODE_STRING wstr;
+        ULONG ldr_flags = 0;
+
+        if (flags & GET_MODULE_HANDLE_EX_FLAG_PIN)
+            ldr_flags |= LDR_GET_DLL_HANDLE_EX_FLAG_PIN;
+        if (flags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT)
+            ldr_flags |= LDR_GET_DLL_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+
+        RtlInitUnicodeString( &wstr, name );
+        status = LdrGetDllHandleEx( ldr_flags, NULL, NULL, &wstr, &ret );
     }
     else
     {
-        UNICODE_STRING wstr;
-        RtlInitUnicodeString( &wstr, name );
-        status = LdrGetDllHandle( NULL, 0, &wstr, &ret );
-    }
+        ret = name ? RtlPcToFileHeader( (void *)name, &dummy ) : NtCurrentTeb()->Peb->ImageBaseAddress;
 
-    if (status == STATUS_SUCCESS)
-    {
-        if (flags & GET_MODULE_HANDLE_EX_FLAG_PIN)
-            LdrAddRefDll( LDR_ADDREF_DLL_PIN, ret );
-        else if (!(flags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT))
-            LdrAddRefDll( 0, ret );
+        if (ret)
+        {
+            if (!(flags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT))
+                status = LdrAddRefDll( flags & GET_MODULE_HANDLE_EX_FLAG_PIN ? LDR_ADDREF_DLL_PIN : 0, ret );
+            else
+                status = STATUS_SUCCESS;
+        } else status = STATUS_DLL_NOT_FOUND;
     }
-
-    if (lock) LdrUnlockLoaderLock( 0, magic );
 
     *module = ret;
     return set_ntstatus( status );
@@ -473,6 +465,22 @@ FARPROC WINAPI DECLSPEC_HOTPATCH GetProcAddress( HMODULE module, LPCSTR function
 }
 
 #endif /* __x86_64__ */
+
+
+/***********************************************************************
+ *	IsApiSetImplemented   (kernelbase.@)
+ */
+BOOL WINAPI IsApiSetImplemented( LPCSTR name )
+{
+    UNICODE_STRING str;
+    NTSTATUS status;
+    BOOLEAN in_schema, present;
+
+    if (!RtlCreateUnicodeStringFromAsciiz( &str, name )) return FALSE;
+    status = ApiSetQueryApiSetPresenceEx( &str, &in_schema, &present );
+    RtlFreeUnicodeString( &str );
+    return !status && present;
+}
 
 
 /***********************************************************************
@@ -538,7 +546,7 @@ HMODULE WINAPI DECLSPEC_HOTPATCH LoadLibraryExW( LPCWSTR name, HANDLE file, DWOR
  */
 HMODULE WINAPI /* DECLSPEC_HOTPATCH */ LoadPackagedLibrary( LPCWSTR name, DWORD reserved )
 {
-    FIXME( "semi-stub, name %s, reserved %#x.\n", debugstr_w(name), reserved );
+    FIXME( "semi-stub, name %s, reserved %#lx.\n", debugstr_w(name), reserved );
     SetLastError( APPMODEL_ERROR_NO_PACKAGE );
     return NULL;
 }
@@ -637,11 +645,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceLanguagesExA( HMODULE module, LPCSTR t
     const IMAGE_RESOURCE_DIRECTORY *basedir, *resdir;
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *et;
 
-    TRACE( "%p %s %s %p %lx %x %d\n", module, debugstr_a(type), debugstr_a(name),
+    TRACE( "%p %s %s %p %Ix %lx %d\n", module, debugstr_a(type), debugstr_a(name),
            func, param, flags, lang );
 
     if (flags & (RESOURCE_ENUM_MUI | RESOURCE_ENUM_MUI_SYSTEM | RESOURCE_ENUM_VALIDATE))
-        FIXME( "unimplemented flags: %x\n", flags );
+        FIXME( "unimplemented flags: %lx\n", flags );
 
     if (!flags) flags = RESOURCE_ENUM_LN | RESOURCE_ENUM_MUI;
     if (!(flags & RESOURCE_ENUM_LN)) return ret;
@@ -697,11 +705,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceLanguagesExW( HMODULE module, LPCWSTR 
     const IMAGE_RESOURCE_DIRECTORY *basedir, *resdir;
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *et;
 
-    TRACE( "%p %s %s %p %lx %x %d\n", module, debugstr_w(type), debugstr_w(name),
+    TRACE( "%p %s %s %p %Ix %lx %d\n", module, debugstr_w(type), debugstr_w(name),
            func, param, flags, lang );
 
     if (flags & (RESOURCE_ENUM_MUI | RESOURCE_ENUM_MUI_SYSTEM | RESOURCE_ENUM_VALIDATE))
-        FIXME( "unimplemented flags: %x\n", flags );
+        FIXME( "unimplemented flags: %lx\n", flags );
 
     if (!flags) flags = RESOURCE_ENUM_LN | RESOURCE_ENUM_MUI;
     if (!(flags & RESOURCE_ENUM_LN)) return ret;
@@ -759,10 +767,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceNamesExA( HMODULE module, LPCSTR type,
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *et;
     const IMAGE_RESOURCE_DIR_STRING_U *str;
 
-    TRACE( "%p %s %p %lx\n", module, debugstr_a(type), func, param );
+    TRACE( "%p %s %p %Ix\n", module, debugstr_a(type), func, param );
 
     if (flags & (RESOURCE_ENUM_MUI | RESOURCE_ENUM_MUI_SYSTEM | RESOURCE_ENUM_VALIDATE))
-        FIXME( "unimplemented flags: %x\n", flags );
+        FIXME( "unimplemented flags: %lx\n", flags );
 
     if (!flags) flags = RESOURCE_ENUM_LN | RESOURCE_ENUM_MUI;
     if (!(flags & RESOURCE_ENUM_LN)) return ret;
@@ -838,10 +846,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceNamesExW( HMODULE module, LPCWSTR type
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *et;
     const IMAGE_RESOURCE_DIR_STRING_U *str;
 
-    TRACE( "%p %s %p %lx\n", module, debugstr_w(type), func, param );
+    TRACE( "%p %s %p %Ix\n", module, debugstr_w(type), func, param );
 
     if (flags & (RESOURCE_ENUM_MUI | RESOURCE_ENUM_MUI_SYSTEM | RESOURCE_ENUM_VALIDATE))
-        FIXME( "unimplemented flags: %x\n", flags );
+        FIXME( "unimplemented flags: %lx\n", flags );
 
     if (!flags) flags = RESOURCE_ENUM_LN | RESOURCE_ENUM_MUI;
     if (!(flags & RESOURCE_ENUM_LN)) return ret;
@@ -923,10 +931,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceTypesExA( HMODULE module, ENUMRESTYPEP
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *et;
     const IMAGE_RESOURCE_DIR_STRING_U *str;
 
-    TRACE( "%p %p %lx\n", module, func, param );
+    TRACE( "%p %p %Ix\n", module, func, param );
 
     if (flags & (RESOURCE_ENUM_MUI | RESOURCE_ENUM_MUI_SYSTEM | RESOURCE_ENUM_VALIDATE))
-        FIXME( "unimplemented flags: %x\n", flags );
+        FIXME( "unimplemented flags: %lx\n", flags );
 
     if (!flags) flags = RESOURCE_ENUM_LN | RESOURCE_ENUM_MUI;
     if (!(flags & RESOURCE_ENUM_LN)) return ret;
@@ -976,7 +984,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceTypesExW( HMODULE module, ENUMRESTYPEP
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *et;
     const IMAGE_RESOURCE_DIR_STRING_U *str;
 
-    TRACE( "%p %p %lx\n", module, func, param );
+    TRACE( "%p %p %Ix\n", module, func, param );
 
     if (!flags) flags = RESOURCE_ENUM_LN | RESOURCE_ENUM_MUI;
     if (!(flags & RESOURCE_ENUM_LN)) return ret;
@@ -1134,7 +1142,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateActCtxW( PCACTCTXW ctx )
 {
     HANDLE context;
 
-    TRACE( "%p %08x\n", ctx, ctx ? ctx->dwFlags : 0 );
+    TRACE( "%p %08lx\n", ctx, ctx ? ctx->dwFlags : 0 );
 
     if (!set_ntstatus( RtlCreateActivationContext( &context, ctx ))) return INVALID_HANDLE_VALUE;
     return context;

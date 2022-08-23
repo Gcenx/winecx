@@ -505,12 +505,12 @@ struct thiscall_thunk
 #include "poppack.h"
 
 static void * (WINAPI *call_thiscall_func1)( void *func, void *this );
-static void * (WINAPI *call_thiscall_func2)( void *func, void *this, const void *a );
-static void * (WINAPI *call_thiscall_func3)( void *func, void *this, const void *a, const void *b );
-static void * (WINAPI *call_thiscall_func4)( void *func, void *this, const void *a, const void *b,
-        const void *c );
-static void * (WINAPI *call_thiscall_func5)( void *func, void *this, const void *a, const void *b,
-        const void *c, const void *d );
+static void * (WINAPI *call_thiscall_func2)( void *func, void *this, void *a );
+static void * (WINAPI *call_thiscall_func3)( void *func, void *this, void *a, void *b );
+static void * (WINAPI *call_thiscall_func4)( void *func, void *this, void *a, void *b,
+        void *c );
+static void * (WINAPI *call_thiscall_func5)( void *func, void *this, void *a, void *b,
+        void *c, void *d );
 static void * (WINAPI *call_thiscall_func2_ptr_dbl)( void *func, void *this, double a );
 static void * (WINAPI *call_thiscall_func2_ptr_flt)( void *func, void *this, float a );
 
@@ -533,12 +533,12 @@ static void init_thiscall_thunk(void)
 }
 
 #define call_func1(func,_this) call_thiscall_func1(func,_this)
-#define call_func2(func,_this,a) call_thiscall_func2(func,_this,(const void*)(a))
-#define call_func3(func,_this,a,b) call_thiscall_func3(func,_this,(const void*)(a),(const void*)(b))
-#define call_func4(func,_this,a,b,c) call_thiscall_func4(func,_this,(const void*)(a),(const void*)(b), \
-        (const void*)(c))
-#define call_func5(func,_this,a,b,c,d) call_thiscall_func5(func,_this,(const void*)(a),(const void*)(b), \
-        (const void*)(c), (const void *)(d))
+#define call_func2(func,_this,a) call_thiscall_func2(func,_this,(void*)(a))
+#define call_func3(func,_this,a,b) call_thiscall_func3(func,_this,(void*)(a),(void*)(b))
+#define call_func4(func,_this,a,b,c) call_thiscall_func4(func,_this,(void*)(a),(void*)(b), \
+        (void*)(c))
+#define call_func5(func,_this,a,b,c,d) call_thiscall_func5(func,_this,(void*)(a),(void*)(b), \
+        (void*)(c), (void *)(d))
 #define call_func2_ptr_dbl(func,_this,a)  call_thiscall_func2_ptr_dbl(func,_this,a)
 #define call_func2_ptr_flt(func,_this,a)  call_thiscall_func2_ptr_flt(func,_this,a)
 
@@ -1198,13 +1198,13 @@ static void test_streambuf(void)
     ok(sb.unbuffered == 0, "wrong unbuffered value, expected 0 got %d\n", sb.unbuffered);
     ok(sb.base == NULL, "wrong base pointer, expected %p got %p\n", NULL, sb.base);
     ok(sb.ebuf == NULL, "wrong ebuf pointer, expected %p got %p\n", NULL, sb.ebuf);
-    ok(sb.lock.LockCount == -1, "wrong critical section state, expected -1 got %d\n", sb.lock.LockCount);
+    ok(sb.lock.LockCount == -1, "wrong critical section state, expected -1 got %lu\n", sb.lock.LockCount);
     call_func3(p_streambuf_reserve_ctor, &sb2, reserve, 16);
     ok(sb2.allocated == 0, "wrong allocate value, expected 0 got %d\n", sb2.allocated);
     ok(sb2.unbuffered == 0, "wrong unbuffered value, expected 0 got %d\n", sb2.unbuffered);
     ok(sb2.base == reserve, "wrong base pointer, expected %p got %p\n", reserve, sb2.base);
     ok(sb2.ebuf == reserve+16, "wrong ebuf pointer, expected %p got %p\n", reserve+16, sb2.ebuf);
-    ok(sb.lock.LockCount == -1, "wrong critical section state, expected -1 got %d\n", sb.lock.LockCount);
+    ok(sb.lock.LockCount == -1, "wrong critical section state, expected -1 got %lu\n", sb.lock.LockCount);
     call_func1(p_streambuf_ctor, &sb3);
     ok(sb3.allocated == 0, "wrong allocate value, expected 0 got %d\n", sb3.allocated);
     ok(sb3.unbuffered == 0, "wrong unbuffered value, expected 0 got %d\n", sb3.unbuffered);
@@ -3061,7 +3061,7 @@ static void test_ios(void)
     ok(ios_obj.fill == ' ', "expected ' ' got %d\n", ios_obj.fill);
     ok(ios_obj.width == 0, "expected 0 got %d\n", ios_obj.width);
     ok(ios_obj.do_lock == -1, "expected -1 got %d\n", ios_obj.do_lock);
-    ok(ios_obj.lock.LockCount == -1, "expected -1 got %d\n", ios_obj.lock.LockCount);
+    ok(ios_obj.lock.LockCount == -1, "expected -1 got %lu\n", ios_obj.lock.LockCount);
     ok(*p_ios_fLockcInit == 5, "expected 5 got %d\n", *p_ios_fLockcInit);
     ios_obj.state = 0x8;
     call_func1(p_ios_dtor, &ios_obj);
@@ -3194,64 +3194,64 @@ static void test_ios(void)
     /* flags */
     ios_obj.flags = 0x8000;
     ret = (LONG) call_func1(p_ios_flags_get, &ios_obj);
-    ok(ret == 0x8000, "expected %x got %x\n", 0x8000, ret);
+    ok(ret == 0x8000, "expected 0x8000 got %lx\n", ret);
     ret = (LONG) call_func2(p_ios_flags_set, &ios_obj, 0x444);
-    ok(ret == 0x8000, "expected %x got %x\n", 0x8000, ret);
-    ok(ios_obj.flags == 0x444, "expected %x got %x\n", 0x444, ios_obj.flags);
+    ok(ret == 0x8000, "expected 0x8000 got %lx\n", ret);
+    ok(ios_obj.flags == 0x444, "expected 0x444 got %x\n", ios_obj.flags);
     ret = (LONG) call_func2(p_ios_flags_set, &ios_obj, 0);
-    ok(ret == 0x444, "expected %x got %x\n", 0x444, ret);
+    ok(ret == 0x444, "expected 0x444 got %lx\n", ret);
     ok(ios_obj.flags == 0, "expected %x got %x\n", 0, ios_obj.flags);
 
     /* setf */
     ios_obj.do_lock = 0;
     ios_obj.flags = 0x8400;
     ret = (LONG) call_func2(p_ios_setf, &ios_obj, 0x444);
-    ok(ret == 0x8400, "expected %x got %x\n", 0x8400, ret);
-    ok(ios_obj.flags == 0x8444, "expected %x got %x\n", 0x8444, ios_obj.flags);
+    ok(ret == 0x8400, "expected 0x8400 got %lx\n", ret);
+    ok(ios_obj.flags == 0x8444, "expected 0x8444 got %x\n", ios_obj.flags);
     ret = (LONG) call_func3(p_ios_setf_mask, &ios_obj, 0x111, 0);
-    ok(ret == 0x8444, "expected %x got %x\n", 0x8444, ret);
-    ok(ios_obj.flags == 0x8444, "expected %x got %x\n", 0x8444, ios_obj.flags);
+    ok(ret == 0x8444, "expected 0x8444 got %lx\n", ret);
+    ok(ios_obj.flags == 0x8444, "expected 0x8444 got %x\n", ios_obj.flags);
     ret = (LONG) call_func3(p_ios_setf_mask, &ios_obj, 0x111, 0x105);
-    ok(ret == 0x8444, "expected %x got %x\n", 0x8444, ret);
-    ok(ios_obj.flags == 0x8541, "expected %x got %x\n", 0x8541, ios_obj.flags);
+    ok(ret == 0x8444, "expected 0x8444 got %lx\n", ret);
+    ok(ios_obj.flags == 0x8541, "expected 0x8541 got %x\n", ios_obj.flags);
 
     /* unsetf */
     ret = (LONG) call_func2(p_ios_unsetf, &ios_obj, 0x1111);
-    ok(ret == 0x8541, "expected %x got %x\n", 0x8541, ret);
-    ok(ios_obj.flags == 0x8440, "expected %x got %x\n", 0x8440, ios_obj.flags);
+    ok(ret == 0x8541, "expected 0x8541 got %lx\n", ret);
+    ok(ios_obj.flags == 0x8440, "expected 0x8440 got %x\n", ios_obj.flags);
     ret = (LONG) call_func2(p_ios_unsetf, &ios_obj, 0x8008);
-    ok(ret == 0x8440, "expected %x got %x\n", 0x8440, ret);
-    ok(ios_obj.flags == 0x440, "expected %x got %x\n", 0x440, ios_obj.flags);
+    ok(ret == 0x8440, "expected 0x8440 got %lx\n", ret);
+    ok(ios_obj.flags == 0x440, "expected 0x440 got %x\n", ios_obj.flags);
     ios_obj.do_lock = -1;
 
     /* state */
     ios_obj.state = 0x8;
     ret = (LONG) call_func1(p_ios_good, &ios_obj);
-    ok(ret == 0, "expected 0 got %d\n", ret);
+    ok(ret == 0, "expected 0 got %ld\n", ret);
     ios_obj.state = IOSTATE_goodbit;
     ret = (LONG) call_func1(p_ios_good, &ios_obj);
-    ok(ret == 1, "expected 1 got %d\n", ret);
+    ok(ret == 1, "expected 1 got %ld\n", ret);
     ret = (LONG) call_func1(p_ios_bad, &ios_obj);
-    ok(ret == 0, "expected 0 got %d\n", ret);
+    ok(ret == 0, "expected 0 got %ld\n", ret);
     ios_obj.state = (IOSTATE_eofbit|IOSTATE_badbit);
     ret = (LONG) call_func1(p_ios_bad, &ios_obj);
-    ok(ret == IOSTATE_badbit, "expected 4 got %d\n", ret);
+    ok(ret == IOSTATE_badbit, "expected 4 got %ld\n", ret);
     ret = (LONG) call_func1(p_ios_eof, &ios_obj);
-    ok(ret == IOSTATE_eofbit, "expected 1 got %d\n", ret);
+    ok(ret == IOSTATE_eofbit, "expected 1 got %ld\n", ret);
     ios_obj.state = 0x8;
     ret = (LONG) call_func1(p_ios_eof, &ios_obj);
-    ok(ret == 0, "expected 0 got %d\n", ret);
+    ok(ret == 0, "expected 0 got %ld\n", ret);
     ret = (LONG) call_func1(p_ios_fail, &ios_obj);
-    ok(ret == 0, "expected 0 got %d\n", ret);
+    ok(ret == 0, "expected 0 got %ld\n", ret);
     ios_obj.state = IOSTATE_badbit;
     ret = (LONG) call_func1(p_ios_fail, &ios_obj);
-    ok(ret == IOSTATE_badbit, "expected 4 got %d\n", ret);
+    ok(ret == IOSTATE_badbit, "expected 4 got %ld\n", ret);
     ios_obj.state = (IOSTATE_eofbit|IOSTATE_failbit);
     ret = (LONG) call_func1(p_ios_fail, &ios_obj);
-    ok(ret == IOSTATE_failbit, "expected 2 got %d\n", ret);
+    ok(ret == IOSTATE_failbit, "expected 2 got %ld\n", ret);
     ios_obj.state = (IOSTATE_eofbit|IOSTATE_failbit|IOSTATE_badbit);
     ret = (LONG) call_func1(p_ios_fail, &ios_obj);
-    ok(ret == (IOSTATE_failbit|IOSTATE_badbit), "expected 6 got %d\n", ret);
+    ok(ret == (IOSTATE_failbit|IOSTATE_badbit), "expected 6 got %ld\n", ret);
     ios_obj.do_lock = 0;
     call_func2(p_ios_clear, &ios_obj, 0);
     ok(ios_obj.state == IOSTATE_goodbit, "expected 0 got %d\n", ios_obj.state);
@@ -3265,8 +3265,8 @@ static void test_ios(void)
     expected = 0x10000;
     for (i = 0; i < 20; i++) {
         ret = p_ios_bitalloc();
-        ok(ret == expected, "expected %x got %x\n", expected, ret);
-        ok(*p_ios_maxbit == expected, "expected %x got %x\n", expected, *p_ios_maxbit);
+        ok(ret == expected, "expected %lx got %lx\n", expected, ret);
+        ok(*p_ios_maxbit == expected, "expected %lx got %lx\n", expected, *p_ios_maxbit);
         expected <<= 1;
     }
 
@@ -3275,17 +3275,17 @@ static void test_ios(void)
     expected = 0;
     for (i = 0; i < 8; i++) {
         ret = p_ios_xalloc();
-        ok(ret == expected, "expected %d got %d\n", expected, ret);
-        ok(*p_ios_curindex == expected, "expected %d got %d\n", expected, *p_ios_curindex);
+        ok(ret == expected, "expected %ld got %ld\n", expected, ret);
+        ok(*p_ios_curindex == expected, "expected %ld got %d\n", expected, *p_ios_curindex);
         pret = call_func2(p_ios_iword, &ios_obj, ret);
         ok(pret == &p_ios_statebuf[ret], "expected %p got %p\n", &p_ios_statebuf[ret], pret);
-        ok(*pret == 0, "expected 0 got %d\n", *pret);
+        ok(*pret == 0, "expected 0 got %ld\n", *pret);
         pret2 = call_func2(p_ios_pword, &ios_obj, ret);
         ok(pret2 == (void**)&p_ios_statebuf[ret], "expected %p got %p\n", (void**)&p_ios_statebuf[ret], pret2);
         expected++;
     }
     ret = p_ios_xalloc();
-    ok(ret == -1, "expected -1 got %d\n", ret);
+    ok(ret == -1, "expected -1 got %ld\n", ret);
     ok(*p_ios_curindex == 7, "expected 7 got %d\n", *p_ios_curindex);
 
     SetEvent(lock_arg.release[1]);
@@ -3586,8 +3586,8 @@ static void test_ostream(void) {
     ret = (int) call_func1(p_ostream_opfx, &os1);
     ok(ret == 1, "expected 1 got %d\n", ret);
     os1.base_ios.sb = NULL;
-if (0) /* crashes on native */
-    call_func1(p_ostream_osfx, &os1);
+    if (0) /* crashes on native */
+        call_func1(p_ostream_osfx, &os1);
     os1.base_ios.sb = &fb1.base;
     os1.base_ios.flags = FLAGS_unitbuf;
     call_func1(p_ostream_osfx, &os1);
@@ -4054,7 +4054,7 @@ static void test_ostream_print(void)
         ok(os.base_ios.state == tests[i].expected_flags, "Test %d: expected %d got %d\n", i,
             tests[i].expected_flags, os.base_ios.state);
         ok(os.base_ios.width == 0, "Test %d: expected 0 got %d\n", i, os.base_ios.width);
-        ok(expected_length == length, "Test %d: wrong output length, expected %d got %d\n", i, expected_length, length);
+        ok(expected_length == length, "Test %d: wrong output length, expected %ld got %ld\n", i, expected_length, length);
         ok(!strncmp(tests[i].expected_text, ssb.base.pbase, length),
             "Test %d: wrong output, expected '%s' got '%s'\n", i, tests[i].expected_text, ssb.base.pbase);
     }
@@ -6542,13 +6542,13 @@ static void test_istream_read(void)
         case type_long:
             l = 123456789l;
             pis = call_func2(p_istream_read_long, &is, &l);
-            ok(l == long_out[tests[i].expected_val], "Test %d: expected %d got %d\n", i,
+            ok(l == long_out[tests[i].expected_val], "Test %d: expected %ld got %ld\n", i,
                 long_out[tests[i].expected_val], l);
             break;
         case type_ulong:
             ul = 123456789ul;
             pis = call_func2(p_istream_read_unsigned_long, &is, &ul);
-            ok(ul == ulong_out[tests[i].expected_val], "Test %d: expected %u got %u\n", i,
+            ok(ul == ulong_out[tests[i].expected_val], "Test %d: expected %lu got %lu\n", i,
                 ulong_out[tests[i].expected_val], ul);
             break;
         case type_flt:
@@ -8828,24 +8828,24 @@ static void test_mtlock_mtunlock(void)
     p__mtlock(&crit);
 
     thread = CreateThread(NULL, 0, _try_enter_critical, &crit, 0, NULL);
-    ok(thread != NULL, "failed to create a thread, error: %x\n", GetLastError());
+    ok(thread != NULL, "failed to create a thread, error: %lx\n", GetLastError());
     ret = WaitForSingleObject(thread, 1000);
-    ok(ret == WAIT_OBJECT_0, "failed to wait for the thread, ret: %d, error: %x\n", ret, GetLastError());
+    ok(ret == WAIT_OBJECT_0, "failed to wait for the thread, ret: %ld, error: %lx\n", ret, GetLastError());
     ok(GetExitCodeThread(thread, &exit_code), "failed to get exit code of the thread\n");
     ok(exit_code == FALSE, "the thread entered critical section\n");
     ret = CloseHandle(thread);
-    ok(ret, "failed to close thread's handle, error: %x\n", GetLastError());
+    ok(ret, "failed to close thread's handle, error: %lx\n", GetLastError());
 
     p__mtunlock(&crit);
 
     thread = CreateThread(NULL, 0, _try_enter_critical, &crit, 0, NULL);
-    ok(thread != NULL, "failed to create a thread, error: %x\n", GetLastError());
+    ok(thread != NULL, "failed to create a thread, error: %lx\n", GetLastError());
     ret = WaitForSingleObject(thread, 1000);
-    ok(ret == WAIT_OBJECT_0, "failed to wait for the thread, ret: %d, error: %x\n", ret, GetLastError());
+    ok(ret == WAIT_OBJECT_0, "failed to wait for the thread, ret: %ld, error: %lx\n", ret, GetLastError());
     ok(GetExitCodeThread(thread, &exit_code), "failed to get exit code of the thread\n");
     ok(exit_code == TRUE, "the thread was not able to enter critical section\n");
     ret = CloseHandle(thread);
-    ok(ret, "failed to close thread's handle, error: %x\n", GetLastError());
+    ok(ret, "failed to close thread's handle, error: %lx\n", GetLastError());
 }
 
 START_TEST(msvcirt)

@@ -170,7 +170,7 @@
 @ cdecl _ismbstrail(ptr ptr)
 @ cdecl _isnan(double)
 @ cdecl _itoa(long ptr long)
-@ cdecl _itow(long ptr long) ntdll._itow
+@ cdecl _itow(long ptr long)
 @ cdecl _j0(double)
 @ cdecl _j1(double)
 @ cdecl _jn(long double)
@@ -184,8 +184,8 @@
 @ cdecl _lrotr(long long) MSVCRT__lrotr
 @ cdecl _lsearch(ptr ptr ptr long ptr)
 @ cdecl _lseek(long long long)
-@ cdecl _ltoa(long ptr long) ntdll._ltoa
-@ cdecl _ltow(long ptr long) ntdll._ltow
+@ cdecl _ltoa(long ptr long)
+@ cdecl _ltow(long ptr long)
 @ cdecl _makepath(ptr str str str str)
 @ cdecl _matherr(ptr)
 @ cdecl _mbbtombc(long)
@@ -236,7 +236,7 @@
 @ cdecl _mbstok(str str)
 @ cdecl _mbstrlen(str)
 @ cdecl _mbsupr(str)
-@ cdecl _memccpy(ptr ptr long long) ntdll._memccpy
+@ cdecl _memccpy(ptr ptr long long)
 @ cdecl _memicmp(str str long)
 @ cdecl _mkdir(str)
 @ cdecl _mktemp(str)
@@ -315,7 +315,7 @@
 @ cdecl _toupper(long)
 @ extern _tzname MSVCRT__tzname
 @ cdecl _tzset()
-@ cdecl _ultoa(long ptr long) ntdll._ultoa
+@ cdecl _ultoa(long ptr long)
 @ cdecl _umask(long)
 @ cdecl _ungetch(long)
 @ cdecl _unlink(str)
@@ -485,7 +485,7 @@
 @ cdecl strncpy(ptr str long)
 @ cdecl strpbrk(str str)
 @ cdecl strrchr(str long)
-@ cdecl strspn(str str) ntdll.strspn
+@ cdecl strspn(str str)
 @ cdecl strstr(str str)
 @ cdecl strtod(str ptr)
 @ cdecl strtok(str str)
@@ -518,15 +518,15 @@
 @ cdecl wcscmp(wstr wstr)
 @ cdecl wcscoll(wstr wstr)
 @ cdecl wcscpy(ptr wstr)
-@ cdecl wcscspn(wstr wstr) ntdll.wcscspn
+@ cdecl wcscspn(wstr wstr)
 @ cdecl wcsftime(ptr long wstr ptr)
 @ cdecl wcslen(wstr)
-@ cdecl wcsncat(wstr wstr long) ntdll.wcsncat
+@ cdecl wcsncat(wstr wstr long)
 @ cdecl wcsncmp(wstr wstr long)
 @ cdecl wcsncpy(ptr wstr long)
 @ cdecl wcspbrk(wstr wstr)
 @ cdecl wcsrchr(wstr long)
-@ cdecl wcsspn(wstr wstr) ntdll.wcsspn
+@ cdecl wcsspn(wstr wstr)
 @ cdecl wcsstr(wstr wstr)
 @ cdecl wcstod(wstr ptr)
 @ cdecl wcstok(wstr wstr)

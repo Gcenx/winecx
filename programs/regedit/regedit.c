@@ -50,7 +50,7 @@ static void output_writeconsole(const WCHAR *str, DWORD wlen)
     }
 }
 
-static void output_formatstring(const WCHAR *fmt, __ms_va_list va_args)
+static void output_formatstring(const WCHAR *fmt, va_list va_args)
 {
     WCHAR *str;
     DWORD len;
@@ -59,7 +59,7 @@ static void output_formatstring(const WCHAR *fmt, __ms_va_list va_args)
                          fmt, 0, 0, (WCHAR *)&str, 0, &va_args);
     if (len == 0 && GetLastError() != ERROR_NO_WORK_DONE)
     {
-        WINE_FIXME("Could not format string: le=%u, fmt=%s\n", GetLastError(), wine_dbgstr_w(fmt));
+        WINE_FIXME("Could not format string: le=%lu, fmt=%s\n", GetLastError(), wine_dbgstr_w(fmt));
         return;
     }
     output_writeconsole(str, len);
@@ -69,31 +69,31 @@ static void output_formatstring(const WCHAR *fmt, __ms_va_list va_args)
 void WINAPIV output_message(unsigned int id, ...)
 {
     WCHAR fmt[1536];
-    __ms_va_list va_args;
+    va_list va_args;
 
     if (!LoadStringW(GetModuleHandleW(NULL), id, fmt, ARRAY_SIZE(fmt)))
     {
-        WINE_FIXME("LoadString failed with %d\n", GetLastError());
+        WINE_FIXME("LoadString failed with %ld\n", GetLastError());
         return;
     }
-    __ms_va_start(va_args, id);
+    va_start(va_args, id);
     output_formatstring(fmt, va_args);
-    __ms_va_end(va_args);
+    va_end(va_args);
 }
 
 void WINAPIV error_exit(unsigned int id, ...)
 {
     WCHAR fmt[1536];
-    __ms_va_list va_args;
+    va_list va_args;
 
     if (!LoadStringW(GetModuleHandleW(NULL), id, fmt, ARRAY_SIZE(fmt)))
     {
-        WINE_FIXME("LoadString failed with %u\n", GetLastError());
+        WINE_FIXME("LoadString failed with %lu\n", GetLastError());
         return;
     }
-    __ms_va_start(va_args, id);
+    va_start(va_args, id);
     output_formatstring(fmt, va_args);
-    __ms_va_end(va_args);
+    va_end(va_args);
 
     exit(0); /* regedit.exe always terminates with error code zero */
 }
@@ -107,16 +107,14 @@ static void PerformRegAction(REGEDIT_ACTION action, WCHAR **argv, int *i)
     switch (action) {
     case ACTION_ADD: {
             WCHAR *filename = argv[*i];
-            WCHAR hyphen[] = {'-',0};
             WCHAR *realname = NULL;
             FILE *reg_file;
 
-            if (!lstrcmpW(filename, hyphen))
+            if (!lstrcmpW(filename, L"-"))
                 reg_file = stdin;
             else
             {
                 int size;
-                WCHAR rb_mode[] = {'r','b',0};
 
                 size = SearchPathW(NULL, filename, NULL, 0, NULL, NULL);
                 if (size > 0)
@@ -130,11 +128,10 @@ static void PerformRegAction(REGEDIT_ACTION action, WCHAR **argv, int *i)
                     heap_free(realname);
                     return;
                 }
-                reg_file = _wfopen(realname, rb_mode);
+                reg_file = _wfopen(realname, L"rb");
                 if (reg_file == NULL)
                 {
-                    WCHAR regedit[] = {'r','e','g','e','d','i','t',0};
-                    _wperror(regedit);
+                    _wperror(L"regedit");
                     output_message(STRING_CANNOT_OPEN_FILE, filename);
                     heap_free(realname);
                     return;

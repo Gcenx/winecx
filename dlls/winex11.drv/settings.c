@@ -45,6 +45,16 @@ struct x11drv_display_setting
     DEVMODEW desired_mode;
 };
 
+struct x11drv_display_depth
+{
+    struct list entry;
+    ULONG_PTR display_id;
+    DWORD depth;
+};
+
+/* Display device emulated depth list, protected by modes_section */
+static struct list x11drv_display_depth_list = LIST_INIT(x11drv_display_depth_list);
+
 /* All Windows drivers seen so far either support 32 bit depths, or 24 bit depths, but never both. So if we have
  * a 32 bit framebuffer, report 32 bit bpps, otherwise 24 bit ones.
  */
@@ -60,14 +70,7 @@ static DWORD cached_flags;
 static DEVMODEW *cached_modes;
 static UINT cached_mode_count;
 
-static CRITICAL_SECTION modes_section;
-static CRITICAL_SECTION_DEBUG modes_critsect_debug =
-{
-    0, 0, &modes_section,
-    {&modes_critsect_debug.ProcessLocksList, &modes_critsect_debug.ProcessLocksList},
-     0, 0, {(DWORD_PTR)(__FILE__ ": modes_section")}
-};
-static CRITICAL_SECTION modes_section = {&modes_critsect_debug, -1, 0, 0, 0, 0};
+static pthread_mutex_t settings_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void X11DRV_Settings_SetHandler(const struct x11drv_settings_handler *new_handler)
 {
@@ -182,16 +185,19 @@ void init_registry_display_settings(void)
 {
     DEVMODEW dm = {.dmSize = sizeof(dm)};
     DISPLAY_DEVICEW dd = {sizeof(dd)};
+    UNICODE_STRING device_name;
     DWORD i = 0;
     LONG ret;
 
-    while (EnumDisplayDevicesW(NULL, i++, &dd, 0))
+    while (!NtUserEnumDisplayDevices( NULL, i++, &dd, 0 ))
     {
+        RtlInitUnicodeString( &device_name, dd.DeviceName );
+
         /* Skip if the device already has registry display settings */
-        if (EnumDisplaySettingsExW(dd.DeviceName, ENUM_REGISTRY_SETTINGS, &dm, 0))
+        if (NtUserEnumDisplaySettings( &device_name, ENUM_REGISTRY_SETTINGS, &dm, 0 ))
             continue;
 
-        if (!EnumDisplaySettingsExW(dd.DeviceName, ENUM_CURRENT_SETTINGS, &dm, 0))
+        if (!NtUserEnumDisplaySettings( &device_name, ENUM_CURRENT_SETTINGS, &dm, 0 ))
         {
             ERR("Failed to query current display settings for %s.\n", wine_dbgstr_w(dd.DeviceName));
             continue;
@@ -201,24 +207,36 @@ void init_registry_display_settings(void)
               wine_dbgstr_w(dd.DeviceName), dm.dmPelsWidth, dm.dmPelsHeight, dm.dmBitsPerPel,
               dm.dmDisplayFrequency, dm.u1.s2.dmPosition.x, dm.u1.s2.dmPosition.y);
 
-        ret = ChangeDisplaySettingsExW(dd.DeviceName, &dm, NULL,
-                                       CDS_GLOBAL | CDS_NORESET | CDS_UPDATEREGISTRY, NULL);
+        ret = NtUserChangeDisplaySettings( &device_name, &dm, NULL,
+                                           CDS_GLOBAL | CDS_NORESET | CDS_UPDATEREGISTRY, NULL );
         if (ret != DISP_CHANGE_SUCCESSFUL)
             ERR("Failed to save registry display settings for %s, returned %d.\n",
                 wine_dbgstr_w(dd.DeviceName), ret);
     }
 }
 
-static BOOL get_display_device_reg_key(const WCHAR *device_name, WCHAR *key, unsigned len)
+static HKEY get_display_device_reg_key( const WCHAR *device_name )
 {
     static const WCHAR display[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y'};
     static const WCHAR video_value_fmt[] = {'\\','D','e','v','i','c','e','\\',
                                             'V','i','d','e','o','%','d',0};
-    static const WCHAR video_key[] = {'H','A','R','D','W','A','R','E','\\',
-                                      'D','E','V','I','C','E','M','A','P','\\',
-                                      'V','I','D','E','O','\\',0};
-    WCHAR value_name[MAX_PATH], buffer[MAX_PATH], *end_ptr;
+    static const WCHAR video_key[] = {
+        '\\','R','e','g','i','s','t','r','y',
+        '\\','M','a','c','h','i','n','e',
+        '\\','H','A','R','D','W','A','R','E',
+        '\\','D','E','V','I','C','E','M','A','P',
+        '\\','V','I','D','E','O'};
+    static const WCHAR current_config_key[] = {
+        '\\','R','e','g','i','s','t','r','y',
+        '\\','M','a','c','h','i','n','e',
+        '\\','S','y','s','t','e','m',
+        '\\','C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t',
+        '\\','H','a','r','d','w','a','r','e',' ','P','r','o','f','i','l','e','s',
+        '\\','C','u','r','r','e','n','t'};
+    WCHAR value_name[MAX_PATH], buffer[4096], *end_ptr;
+    KEY_VALUE_PARTIAL_INFORMATION *value = (void *)buffer;
     DWORD adapter_index, size;
+    HKEY hkey;
 
     /* Device name has to be \\.\DISPLAY%d */
     if (strncmpiW(device_name, display, ARRAY_SIZE(display)))
@@ -230,111 +248,104 @@ static BOOL get_display_device_reg_key(const WCHAR *device_name, WCHAR *key, uns
         return FALSE;
 
     /* Open \Device\Video* in HKLM\HARDWARE\DEVICEMAP\VIDEO\ */
+    if (!(hkey = reg_open_key( NULL, video_key, sizeof(video_key) ))) return FALSE;
     sprintfW(value_name, video_value_fmt, adapter_index);
-    size = sizeof(buffer);
-    if (RegGetValueW(HKEY_LOCAL_MACHINE, video_key, value_name, RRF_RT_REG_SZ, NULL, buffer, &size))
+    size = query_reg_value( hkey, value_name, value, sizeof(buffer) );
+    NtClose( hkey );
+    if (!size || value->Type != REG_SZ) return FALSE;
+
+    /* Replace \Registry\Machine\ prefix with HKEY_CURRENT_CONFIG */
+    memmove( buffer + ARRAYSIZE(current_config_key), (const WCHAR *)value->Data + 17,
+             size - 17 * sizeof(WCHAR) );
+    memcpy( buffer, current_config_key, sizeof(current_config_key) );
+    TRACE( "display device %s registry settings key %s.\n", wine_dbgstr_w(device_name),
+           wine_dbgstr_w(buffer) );
+    return reg_open_key( NULL, buffer, lstrlenW(buffer) * sizeof(WCHAR) );
+}
+
+static BOOL query_display_setting( HKEY hkey, const char *name, DWORD *ret )
+{
+    char buffer[1024];
+    WCHAR nameW[128];
+    KEY_VALUE_PARTIAL_INFORMATION *value = (void *)buffer;
+
+    asciiz_to_unicode( nameW, name );
+    if (query_reg_value( hkey, nameW, value, sizeof(buffer) ) != sizeof(DWORD) ||
+        value->Type != REG_DWORD)
         return FALSE;
 
-    if (len < lstrlenW(buffer + 18) + 1)
-        return FALSE;
-
-    /* Skip \Registry\Machine\ prefix */
-    lstrcpyW(key, buffer + 18);
-    TRACE("display device %s registry settings key %s.\n", wine_dbgstr_w(device_name), wine_dbgstr_w(key));
+    *ret = *(DWORD *)value->Data;
     return TRUE;
 }
 
 static BOOL read_registry_settings(const WCHAR *device_name, DEVMODEW *dm)
 {
-    WCHAR wine_x11_reg_key[MAX_PATH];
     HANDLE mutex;
     HKEY hkey;
-    DWORD type, size;
     BOOL ret = TRUE;
 
     dm->dmFields = 0;
 
     mutex = get_display_device_init_mutex();
-    if (!get_display_device_reg_key(device_name, wine_x11_reg_key, ARRAY_SIZE(wine_x11_reg_key)))
+    if (!(hkey = get_display_device_reg_key( device_name )))
     {
         release_display_device_init_mutex(mutex);
         return FALSE;
     }
 
-    if (RegOpenKeyExW(HKEY_CURRENT_CONFIG, wine_x11_reg_key, 0, KEY_READ, &hkey))
-    {
-        release_display_device_init_mutex(mutex);
-        return FALSE;
-    }
-
-#define query_value(name, data) \
-    size = sizeof(DWORD); \
-    if (RegQueryValueExA(hkey, name, 0, &type, (LPBYTE)(data), &size) || \
-        type != REG_DWORD || size != sizeof(DWORD)) \
-        ret = FALSE
-
-    query_value("DefaultSettings.BitsPerPel", &dm->dmBitsPerPel);
+    ret &= query_display_setting( hkey, "DefaultSettings.BitsPerPel", &dm->dmBitsPerPel );
     dm->dmFields |= DM_BITSPERPEL;
-    query_value("DefaultSettings.XResolution", &dm->dmPelsWidth);
+    ret &= query_display_setting( hkey, "DefaultSettings.XResolution", &dm->dmPelsWidth );
     dm->dmFields |= DM_PELSWIDTH;
-    query_value("DefaultSettings.YResolution", &dm->dmPelsHeight);
+    ret &= query_display_setting( hkey, "DefaultSettings.YResolution", &dm->dmPelsHeight );
     dm->dmFields |= DM_PELSHEIGHT;
-    query_value("DefaultSettings.VRefresh", &dm->dmDisplayFrequency);
+    ret &= query_display_setting( hkey, "DefaultSettings.VRefresh", &dm->dmDisplayFrequency );
     dm->dmFields |= DM_DISPLAYFREQUENCY;
-    query_value("DefaultSettings.Flags", &dm->u2.dmDisplayFlags);
+    ret &= query_display_setting( hkey, "DefaultSettings.Flags", &dm->u2.dmDisplayFlags );
     dm->dmFields |= DM_DISPLAYFLAGS;
-    query_value("DefaultSettings.XPanning", &dm->u1.s2.dmPosition.x);
-    query_value("DefaultSettings.YPanning", &dm->u1.s2.dmPosition.y);
+    ret &= query_display_setting( hkey, "DefaultSettings.XPanning", (DWORD *)&dm->u1.s2.dmPosition.x );
+    ret &= query_display_setting( hkey, "DefaultSettings.YPanning", (DWORD *)&dm->u1.s2.dmPosition.y );
     dm->dmFields |= DM_POSITION;
-    query_value("DefaultSettings.Orientation", &dm->u1.s2.dmDisplayOrientation);
+    ret &= query_display_setting( hkey, "DefaultSettings.Orientation", &dm->u1.s2.dmDisplayOrientation );
     dm->dmFields |= DM_DISPLAYORIENTATION;
-    query_value("DefaultSettings.FixedOutput", &dm->u1.s2.dmDisplayFixedOutput);
+    ret &= query_display_setting( hkey, "DefaultSettings.FixedOutput", &dm->u1.s2.dmDisplayFixedOutput );
 
-#undef query_value
-
-    RegCloseKey(hkey);
+    NtClose( hkey );
     release_display_device_init_mutex(mutex);
     return ret;
 }
 
+static BOOL set_setting_value( HKEY hkey, const char *name, DWORD val )
+{
+    WCHAR nameW[128];
+    UNICODE_STRING str = { asciiz_to_unicode( nameW, name ) - sizeof(WCHAR), sizeof(nameW), nameW };
+    return !NtSetValueKey( hkey, &str, 0, REG_DWORD, &val, sizeof(val) );
+}
+
 static BOOL write_registry_settings(const WCHAR *device_name, const DEVMODEW *dm)
 {
-    WCHAR wine_x11_reg_key[MAX_PATH];
     HANDLE mutex;
     HKEY hkey;
     BOOL ret = TRUE;
 
     mutex = get_display_device_init_mutex();
-    if (!get_display_device_reg_key(device_name, wine_x11_reg_key, ARRAY_SIZE(wine_x11_reg_key)))
+    if (!(hkey = get_display_device_reg_key( device_name )))
     {
         release_display_device_init_mutex(mutex);
         return FALSE;
     }
 
-    if (RegCreateKeyExW(HKEY_CURRENT_CONFIG, wine_x11_reg_key, 0, NULL,
-                        REG_OPTION_VOLATILE, KEY_WRITE, NULL, &hkey, NULL))
-    {
-        release_display_device_init_mutex(mutex);
-        return FALSE;
-    }
+    ret &= set_setting_value( hkey, "DefaultSettings.BitsPerPel", dm->dmBitsPerPel );
+    ret &= set_setting_value( hkey, "DefaultSettings.XResolution", dm->dmPelsWidth );
+    ret &= set_setting_value( hkey, "DefaultSettings.YResolution", dm->dmPelsHeight );
+    ret &= set_setting_value( hkey, "DefaultSettings.VRefresh", dm->dmDisplayFrequency );
+    ret &= set_setting_value( hkey, "DefaultSettings.Flags", dm->u2.dmDisplayFlags );
+    ret &= set_setting_value( hkey, "DefaultSettings.XPanning", dm->u1.s2.dmPosition.x );
+    ret &= set_setting_value( hkey, "DefaultSettings.YPanning", dm->u1.s2.dmPosition.y );
+    ret &= set_setting_value( hkey, "DefaultSettings.Orientation", dm->u1.s2.dmDisplayOrientation );
+    ret &= set_setting_value( hkey, "DefaultSettings.FixedOutput", dm->u1.s2.dmDisplayFixedOutput );
 
-#define set_value(name, data) \
-    if (RegSetValueExA(hkey, name, 0, REG_DWORD, (const BYTE*)(data), sizeof(DWORD))) \
-        ret = FALSE
-
-    set_value("DefaultSettings.BitsPerPel", &dm->dmBitsPerPel);
-    set_value("DefaultSettings.XResolution", &dm->dmPelsWidth);
-    set_value("DefaultSettings.YResolution", &dm->dmPelsHeight);
-    set_value("DefaultSettings.VRefresh", &dm->dmDisplayFrequency);
-    set_value("DefaultSettings.Flags", &dm->u2.dmDisplayFlags);
-    set_value("DefaultSettings.XPanning", &dm->u1.s2.dmPosition.x);
-    set_value("DefaultSettings.YPanning", &dm->u1.s2.dmPosition.y);
-    set_value("DefaultSettings.Orientation", &dm->u1.s2.dmDisplayOrientation);
-    set_value("DefaultSettings.FixedOutput", &dm->u1.s2.dmDisplayFixedOutput);
-
-#undef set_value
-
-    RegCloseKey(hkey);
+    NtClose( hkey );
     release_display_device_init_mutex(mutex);
     return ret;
 }
@@ -345,7 +356,7 @@ BOOL get_primary_adapter(WCHAR *name)
     DWORD i;
 
     dd.cb = sizeof(dd);
-    for (i = 0; EnumDisplayDevicesW(NULL, i, &dd, 0); ++i)
+    for (i = 0; !NtUserEnumDisplayDevices( NULL, i, &dd, 0 ); ++i)
     {
         if (dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
         {
@@ -405,11 +416,59 @@ static int mode_compare(const void *p1, const void *p2)
     return a->u1.s2.dmDisplayOrientation - b->u1.s2.dmDisplayOrientation;
 }
 
+static void set_display_depth(ULONG_PTR display_id, DWORD depth)
+{
+    struct x11drv_display_depth *display_depth;
+
+    pthread_mutex_lock( &settings_mutex );
+    LIST_FOR_EACH_ENTRY(display_depth, &x11drv_display_depth_list, struct x11drv_display_depth, entry)
+    {
+        if (display_depth->display_id == display_id)
+        {
+            display_depth->depth = depth;
+            pthread_mutex_unlock( &settings_mutex );
+            return;
+        }
+    }
+
+    display_depth = heap_alloc(sizeof(*display_depth));
+    if (!display_depth)
+    {
+        ERR("Failed to allocate memory.\n");
+        pthread_mutex_unlock( &settings_mutex );
+        return;
+    }
+
+    display_depth->display_id = display_id;
+    display_depth->depth = depth;
+    list_add_head(&x11drv_display_depth_list, &display_depth->entry);
+    pthread_mutex_unlock( &settings_mutex );
+}
+
+static DWORD get_display_depth(ULONG_PTR display_id)
+{
+    struct x11drv_display_depth *display_depth;
+    DWORD depth;
+
+    pthread_mutex_lock( &settings_mutex );
+    LIST_FOR_EACH_ENTRY(display_depth, &x11drv_display_depth_list, struct x11drv_display_depth, entry)
+    {
+        if (display_depth->display_id == display_id)
+        {
+            depth = display_depth->depth;
+            pthread_mutex_unlock( &settings_mutex );
+            return depth;
+        }
+    }
+    pthread_mutex_unlock( &settings_mutex );
+    return screen_bpp;
+}
+
 /***********************************************************************
  *		EnumDisplaySettingsEx  (X11DRV.@)
  *
  */
-BOOL CDECL X11DRV_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmode, DWORD flags)
+BOOL X11DRV_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmode, DWORD flags)
 {
     static const WCHAR dev_name[CCHDEVICENAME] =
         { 'W','i','n','e',' ','X','1','1',' ','d','r','i','v','e','r',0 };
@@ -434,16 +493,20 @@ BOOL CDECL X11DRV_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmo
             ERR("Failed to get %s current display settings.\n", wine_dbgstr_w(name));
             return FALSE;
         }
+
+        if (!is_detached_mode(devmode))
+            devmode->dmBitsPerPel = get_display_depth(id);
+
         goto done;
     }
 
-    EnterCriticalSection(&modes_section);
+    pthread_mutex_lock( &settings_mutex );
     if (n == 0 || lstrcmpiW(cached_device_name, name) || cached_flags != flags)
     {
         if (!handler.get_id(name, &id) || !handler.get_modes(id, flags, &modes, &mode_count))
         {
             ERR("Failed to get %s supported display modes.\n", wine_dbgstr_w(name));
-            LeaveCriticalSection(&modes_section);
+            pthread_mutex_unlock( &settings_mutex );
             return FALSE;
         }
 
@@ -459,14 +522,14 @@ BOOL CDECL X11DRV_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmo
 
     if (n >= cached_mode_count)
     {
-        LeaveCriticalSection(&modes_section);
+        pthread_mutex_unlock( &settings_mutex );
         WARN("handler:%s device:%s mode index:%#x not found.\n", handler.name, wine_dbgstr_w(name), n);
         SetLastError(ERROR_NO_MORE_FILES);
         return FALSE;
     }
 
     memcpy(devmode, (BYTE *)cached_modes + (sizeof(*cached_modes) + cached_modes[0].dmDriverExtra) * n, sizeof(*devmode));
-    LeaveCriticalSection(&modes_section);
+    pthread_mutex_unlock( &settings_mutex );
 
 done:
     /* Set generic fields */
@@ -560,9 +623,10 @@ static LONG get_display_settings(struct x11drv_display_setting **new_displays,
     INT display_idx, display_count = 0;
     DISPLAY_DEVICEW display_device;
     LONG ret = DISP_CHANGE_FAILED;
+    UNICODE_STRING device_name;
 
     display_device.cb = sizeof(display_device);
-    for (display_idx = 0; EnumDisplayDevicesW(NULL, display_idx, &display_device, 0); ++display_idx)
+    for (display_idx = 0; !NtUserEnumDisplayDevices( NULL, display_idx, &display_device, 0 ); ++display_idx)
         ++display_count;
 
     displays = heap_calloc(display_count, sizeof(*displays));
@@ -571,7 +635,7 @@ static LONG get_display_settings(struct x11drv_display_setting **new_displays,
 
     for (display_idx = 0; display_idx < display_count; ++display_idx)
     {
-        if (!EnumDisplayDevicesW(NULL, display_idx, &display_device, 0))
+        if (NtUserEnumDisplayDevices( NULL, display_idx, &display_device, 0 ))
             goto done;
 
         if (!handler.get_id(display_device.DeviceName, &displays[display_idx].id))
@@ -580,11 +644,13 @@ static LONG get_display_settings(struct x11drv_display_setting **new_displays,
             goto done;
         }
 
+        RtlInitUnicodeString( &device_name, display_device.DeviceName );
+
         if (!dev_mode)
         {
             memset(&registry_mode, 0, sizeof(registry_mode));
             registry_mode.dmSize = sizeof(registry_mode);
-            if (!EnumDisplaySettingsExW(display_device.DeviceName, ENUM_REGISTRY_SETTINGS, &registry_mode, 0))
+            if (!NtUserEnumDisplaySettings( &device_name, ENUM_REGISTRY_SETTINGS, &registry_mode, 0 ))
                 goto done;
 
             displays[display_idx].desired_mode = registry_mode;
@@ -596,7 +662,7 @@ static LONG get_display_settings(struct x11drv_display_setting **new_displays,
             {
                 memset(&current_mode, 0, sizeof(current_mode));
                 current_mode.dmSize = sizeof(current_mode);
-                if (!EnumDisplaySettingsExW(display_device.DeviceName, ENUM_CURRENT_SETTINGS, &current_mode, 0))
+                if (!NtUserEnumDisplaySettings( &device_name, ENUM_CURRENT_SETTINGS, &current_mode, 0 ))
                     goto done;
 
                 displays[display_idx].desired_mode.dmFields |= DM_POSITION;
@@ -607,7 +673,7 @@ static LONG get_display_settings(struct x11drv_display_setting **new_displays,
         {
             memset(&current_mode, 0, sizeof(current_mode));
             current_mode.dmSize = sizeof(current_mode);
-            if (!EnumDisplaySettingsExW(display_device.DeviceName, ENUM_CURRENT_SETTINGS, &current_mode, 0))
+            if (!NtUserEnumDisplaySettings( &device_name, ENUM_CURRENT_SETTINGS, &current_mode, 0 ))
                 goto done;
 
             displays[display_idx].desired_mode = current_mode;
@@ -842,6 +908,8 @@ static LONG apply_display_settings(struct x11drv_display_setting *displays, INT 
               full_mode->u1.s2.dmDisplayOrientation);
 
         ret = handler.set_current_mode(displays[display_idx].id, full_mode);
+        if (attached_mode && ret == DISP_CHANGE_SUCCESSFUL)
+            set_display_depth(displays[display_idx].id, full_mode->dmBitsPerPel);
         free_full_mode(full_mode);
         if (ret != DISP_CHANGE_SUCCESSFUL)
             return ret;
@@ -867,8 +935,8 @@ static BOOL all_detached_settings(const struct x11drv_display_setting *displays,
  *		ChangeDisplaySettingsEx  (X11DRV.@)
  *
  */
-LONG CDECL X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
-                                           HWND hwnd, DWORD flags, LPVOID lpvoid )
+LONG X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
+                                     HWND hwnd, DWORD flags, LPVOID lpvoid )
 {
     struct x11drv_display_setting *displays;
     INT display_idx, display_count;

@@ -17,17 +17,20 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdarg.h>
+#include <stdlib.h>
 
 #if defined(HAVE_IOKIT_USB_IOUSBLIB_H)
 #define DWORD UInt32
 #define LPDWORD UInt32*
 #define LONG SInt32
 #define LPLONG SInt32*
-#define LPVOID __carbon_LPVOID
 #define E_PENDING __carbon_E_PENDING
 #define ULONG __carbon_ULONG
 #define E_INVALIDARG __carbon_E_INVALIDARG
@@ -53,7 +56,6 @@
 #include <IOKit/IOKitLib.h>
 #include <IOKit/IOCFPlugIn.h>
 #include <IOKit/usb/IOUSBLib.h>
-#undef LPVOID
 #undef ULONG
 #undef E_INVALIDARG
 #undef E_OUTOFMEMORY
@@ -82,7 +84,7 @@
 #undef PAGE_SHIFT
 #endif /* HAVE_IOKIT_USB_IOUSBLIB_H */
 
-#define NONAMELESSUNION
+#include <pthread.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -93,28 +95,45 @@
 #include "ddk/hidtypes.h"
 #include "wine/debug.h"
 
-#include "bus.h"
+#include "unix_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(plugplay);
 
 #ifdef HAVE_IOSERVICEMATCHING
 
-static DRIVER_OBJECT *xbox_driver_obj = NULL;
+static pthread_mutex_t xbox_cs = PTHREAD_MUTEX_INITIALIZER;
+
 static CFRunLoopRef run_loop;
-static HANDLE run_loop_handle;
+static struct list event_queue = LIST_INIT(event_queue);
+static struct list device_list = LIST_INIT(device_list);
+static struct xbox_bus_options options;
 
-static const WCHAR busidW[] = {'X','B','O','X',0};
-
-struct platform_private {
+struct xbox_device
+{
+    struct unix_device unix_device;
     io_object_t object;
-    IOUSBDeviceInterface500 * HOSTPTR * HOSTPTR dev;
+    IOUSBDeviceInterface500 **dev;
 
-    IOUSBInterfaceInterface550 * HOSTPTR * HOSTPTR interface;
+    IOUSBInterfaceInterface550 **interface;
     CFRunLoopSourceRef source;
 
-    BOOL started;
     char buffer[64];
 };
+
+static inline struct xbox_device *impl_from_unix_device(struct unix_device *iface)
+{
+    return CONTAINING_RECORD(iface, struct xbox_device, unix_device);
+}
+
+static struct xbox_device *find_device_from_io_object(io_object_t object)
+{
+    struct xbox_device *impl;
+
+    LIST_FOR_EACH_ENTRY(impl, &device_list, struct xbox_device, unix_device.entry)
+        if (IOObjectIsEqualTo(impl->object, object)) return impl;
+
+    return NULL;
+}
 
 static const unsigned char ReportDescriptor[] = {
     0x05, 0x01,                    // USAGE_PAGE (Generic Desktop)
@@ -233,18 +252,11 @@ typedef struct _OUT_REPORT {
     char data[1];
 } __attribute__((__packed__)) OUT_REPORT;
 
-static int xbox_compare_platform_device(DEVICE_OBJECT *device, void * HOSTPTR platform_dev)
-{
-    struct platform_private *ext = get_platform_private(device);
-    io_object_t dev2 = (io_object_t)(size_t)platform_dev;
-
-    return IOObjectIsEqualTo(dev2, ext->object);
-}
-
-static HRESULT get_device_string(IOUSBDeviceInterface500 * HOSTPTR * HOSTPTR dev, UInt8 idx, WCHAR *buffer, DWORD length)
+static HRESULT get_device_string(IOUSBDeviceInterface500 **dev, UInt8 idx, WCHAR *buffer, DWORD length)
 {
     UInt16 buf[64];
     IOUSBDevRequest request;
+    kern_return_t err;
     int count;
 
     request.bmRequestType = USBmakebmRequestType( kUSBIn, kUSBStandard, kUSBDevice );
@@ -254,7 +266,7 @@ static HRESULT get_device_string(IOUSBDeviceInterface500 * HOSTPTR * HOSTPTR dev
     request.wLength = sizeof(buf);
     request.pData = buf;
 
-    kern_return_t err = (*dev)->DeviceRequest(dev, &request);
+    err = (*dev)->DeviceRequest(dev, &request);
     if ( err != 0 )
         return STATUS_UNSUCCESSFUL;
 
@@ -269,55 +281,12 @@ static HRESULT get_device_string(IOUSBDeviceInterface500 * HOSTPTR * HOSTPTR dev
     return STATUS_SUCCESS;
 }
 
-/* Handlers */
-
-static NTSTATUS xbox_get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length, DWORD *out_length)
+static void ReadCompletion(void *refCon, IOReturn result, void *arg0)
 {
-    int data_length = sizeof(ReportDescriptor);
-    *out_length = data_length;
-    if (length < data_length)
-        return STATUS_BUFFER_TOO_SMALL;
-
-    memcpy(buffer, ReportDescriptor, data_length);
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS xbox_get_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length)
-{
-    UInt8 idx;
-    struct platform_private *ext = get_platform_private(device);
-
-    switch (index)
-    {
-        case HID_STRING_ID_IPRODUCT:
-        {
-            (*ext->dev)->USBGetProductStringIndex(ext->dev, &idx);
-            return get_device_string(ext->dev, idx, buffer, length);
-        }
-        case HID_STRING_ID_IMANUFACTURER:
-        {
-            (*ext->dev)->USBGetManufacturerStringIndex(ext->dev, &idx);
-            return get_device_string(ext->dev, idx, buffer, length);
-        }
-        case HID_STRING_ID_ISERIALNUMBER:
-        {
-            (*ext->dev)->USBGetSerialNumberStringIndex(ext->dev, &idx);
-            return get_device_string(ext->dev, idx, buffer, length);
-        }
-        default:
-            ERR("Unknown string index\n");
-            return STATUS_NOT_IMPLEMENTED;
-    }
-
-    return STATUS_SUCCESS;
-}
-
-static void ReadCompletion(void * HOSTPTR refCon, IOReturn result, void * HOSTPTR arg0)
-{
-    DEVICE_OBJECT *device = ADDRSPACECAST(DEVICE_OBJECT *, refCon);
-    struct platform_private *private = (struct platform_private *)get_platform_private(device);
-    UInt32 numBytesRead;
+    struct unix_device *device = (struct unix_device *)refCon;
+    struct xbox_device *private = impl_from_unix_device(device);
     IN_REPORT *report = (IN_REPORT*)private->buffer;
+    UInt32 numBytesRead = (UINT_PTR)arg0;
     int hatswitch;
 
     /* Invert Y axis */
@@ -350,7 +319,7 @@ static void ReadCompletion(void * HOSTPTR refCon, IOReturn result, void * HOSTPT
     report->buttons &= 0xFFF0;
     report->buttons |= hatswitch;
 
-    process_hid_report(device, (BYTE*)report, FIELD_OFFSET(IN_REPORT, reserved));
+    bus_event_queue_input_report(&event_queue, device, (BYTE *)report, FIELD_OFFSET(IN_REPORT, reserved));
 
     numBytesRead = sizeof(private->buffer) - 1;
 
@@ -359,92 +328,67 @@ static void ReadCompletion(void * HOSTPTR refCon, IOReturn result, void * HOSTPT
                             device);
 }
 
-static NTSTATUS xbox_set_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *written)
+/* Handlers */
+
+static void xbox_device_destroy(struct unix_device *iface)
 {
-    struct platform_private *private = (struct platform_private *)get_platform_private(device);
-    OUT_REPORT *data;
-    IOReturn ret;
-    DWORD size;
+    struct xbox_device *impl = impl_from_unix_device(iface);
 
-    size = sizeof(HEADER) + length;
-    data = HeapAlloc(GetProcessHeap(), 0, size);
-    data->header.cmd = id;
-    data->header.size = size;
-    memcpy(data->data, report, length);
+    TRACE("iface %p.\n", iface);
 
-    ret = (*private->interface)->WritePipe(private->interface, 2, data, size);
-    HeapFree(GetProcessHeap(), 0, data);
-    if (ret == kIOReturnSuccess)
-    {
-        *written = length;
-        return STATUS_SUCCESS;
-    }
-    else
-    {
-        *written = 0;
-        return STATUS_UNSUCCESSFUL;
-    }
+    free(impl);
 }
 
-static NTSTATUS xbox_begin_report_processing(DEVICE_OBJECT *object)
+static NTSTATUS xbox_device_get_report_descriptor(struct unix_device *iface, BYTE *buffer,
+                                                  DWORD length, DWORD *out_length)
 {
-    struct platform_private *device = (struct platform_private *)get_platform_private(object);
-    UInt32 numBytesRead;
-    IOReturn ret;
+    int data_length = sizeof(ReportDescriptor);
 
-    if (device->started)
-        return STATUS_SUCCESS;
+    TRACE("iface %p, buffer %p, length %u, out_length %p.\n", iface, buffer, length, out_length);
 
-    /* Start event queue */
-    numBytesRead = sizeof(device->buffer) - 1;
-    ret = (*device->interface)->ReadPipeAsync(device->interface, 1,
-                            device->buffer, numBytesRead, ReadCompletion,
-                            object);
-    if (ret != kIOReturnSuccess)
-    {
-        ERR("Failed Start Device Read Loop\n");
-        return STATUS_UNSUCCESSFUL;
-    }
-    device->started = TRUE;
+    *out_length = data_length;
+    if (length < data_length)
+        return STATUS_BUFFER_TOO_SMALL;
 
+    memcpy(buffer, ReportDescriptor, data_length);
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS xbox_set_output_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *written)
+static void xbox_device_set_output_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
-    *written = 0;
-    return STATUS_UNSUCCESSFUL;
+    FIXME("iface %p, packet %p, io %p stub!\n", iface, packet, io);
+    io->Information = 0;
+    io->Status = STATUS_UNSUCCESSFUL;
 }
 
-static NTSTATUS xbox_get_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *read)
+static void xbox_device_get_feature_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
-    *read = 0;
-    return STATUS_UNSUCCESSFUL;
+    FIXME("iface %p, packet %p, io %p stub!\n", iface, packet, io);
+    io->Information = 0;
+    io->Status = STATUS_UNSUCCESSFUL;
 }
 
-static const platform_vtbl xbox_vtbl = {
-    xbox_compare_platform_device,
-    xbox_get_reportdescriptor,
-    xbox_get_string,
-    xbox_begin_report_processing,
-    xbox_set_output_report,
-    xbox_get_feature_report,
-    xbox_set_feature_report,
-};
-
-static NTSTATUS open_xbox_gamepad(DEVICE_OBJECT *object)
+static void xbox_device_set_feature_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
-    struct platform_private *private = (struct platform_private *)get_platform_private(object);
-    IOReturn ret;
-    IOUSBFindInterfaceRequest intf;
-    io_iterator_t iter;
-    io_service_t usbInterface;
-    UInt8 numConfig;
+    FIXME("iface %p, packet %p, io %p stub!\n", iface, packet, io);
+    io->Information = 0;
+    io->Status = STATUS_UNSUCCESSFUL;
+}
+
+static NTSTATUS xbox_device_start(struct unix_device *iface)
+{
+    struct xbox_device *private = impl_from_unix_device(iface);
+    IOCFPlugInInterface **plugInInterface = NULL;
     IOUSBConfigurationDescriptor *desc = NULL;
-    IOCFPlugInInterface * HOSTPTR * HOSTPTR plugInInterface = NULL;
+    IOUSBFindInterfaceRequest intf;
+    io_service_t usbInterface;
+    UInt32 numBytesRead;
+    io_iterator_t iter;
+    UInt8 numConfig;
+    IOReturn ret;
     SInt32 score;
-    UInt8 pattern;
-    ULONG_PTR written;
+
+    TRACE("iface %p.\n", iface);
 
     if (private->interface != NULL)
         return STATUS_SUCCESS;
@@ -509,22 +453,26 @@ static NTSTATUS open_xbox_gamepad(DEVICE_OBJECT *object)
 
     CFRunLoopAddSource(run_loop, private->source, kCFRunLoopCommonModes);
 
-    /* Turn Off LEDs */
-    pattern = 0;
-    ret = xbox_set_feature_report(object, 1, &pattern, sizeof(pattern), &written);
-    if (ret != STATUS_SUCCESS)
-        ERR("Failed to turn off LED\n");
-
-    private->started = FALSE;
+    /* Start event queue */
+    numBytesRead = sizeof(private->buffer) - 1;
+    ret = (*private->interface)->ReadPipeAsync(private->interface, 1,
+                            private->buffer, numBytesRead, ReadCompletion,
+                            iface);
+    if (ret != kIOReturnSuccess)
+    {
+        ERR("Failed Start Device Read Loop\n");
+        return STATUS_UNSUCCESSFUL;
+    }
 
     return STATUS_SUCCESS;
 }
 
-/*  END HACK ME */
-
-static void cleanupDevice(DEVICE_OBJECT *device)
+static void xbox_device_stop(struct unix_device *iface)
 {
-    struct platform_private *ext = (struct platform_private *)get_platform_private(device);
+    struct xbox_device *ext = impl_from_unix_device(iface);
+
+    TRACE("iface %p.\n", iface);
+
     if (ext->interface) {
         (*ext->interface)->USBInterfaceClose(ext->interface);
         (*ext->interface)->Release(ext->interface);
@@ -535,23 +483,42 @@ static void cleanupDevice(DEVICE_OBJECT *device)
     }
     IOObjectRelease(ext->object);
     (*ext->dev)->Release(ext->dev);
+
+    pthread_mutex_lock(&xbox_cs);
+    list_remove(&ext->unix_device.entry);
+    pthread_mutex_unlock(&xbox_cs);
 }
+
+static const struct raw_device_vtbl xbox_device_vtbl =
+{
+    xbox_device_destroy,
+    xbox_device_start,
+    xbox_device_stop,
+    xbox_device_get_report_descriptor,
+    xbox_device_set_output_report,
+    xbox_device_get_feature_report,
+    xbox_device_set_feature_report,
+};
 
 static void process_IOService_Device(io_object_t object)
 {
+    struct device_desc desc =
+    {
+        .input = -1,
+        .manufacturer = {'X','B','O','X',0},
+        .is_gamepad = TRUE,
+    };
+    struct xbox_device *impl;
     IOReturn err;
-    IOCFPlugInInterface * HOSTPTR * HOSTPTR plugInInterface=NULL;
-    IOUSBDeviceInterface500 * HOSTPTR * HOSTPTR dev=NULL;
+    IOCFPlugInInterface **plugInInterface=NULL;
+    IOUSBDeviceInterface500 **dev=NULL;
     SInt32 score;
     HRESULT res;
-    DEVICE_OBJECT *device=NULL;
     WORD vid, pid, rel;
-    UInt8 class, subclass;
     UInt32 uid;
     UInt8 idx;
-    WCHAR serial_string[256];
 
-    ERR("object 0x%x\n",object);
+    TRACE("object %#x\n", object);
 
     err = IOCreatePlugInInterfaceForService(object, kIOUSBDeviceUserClientTypeID, kIOCFPlugInInterfaceID, &plugInInterface, &score);
 
@@ -570,51 +537,35 @@ static void process_IOService_Device(io_object_t object)
     }
 
     (*dev)->GetLocationID(dev, &uid);
-
-    if (find_device_by_uid(uid))
-    {
-        WARN("Device ID 0x%04X (%d) already found. Not adding again\n", (DWORD)uid, (DWORD)uid);
-        goto failed;
-    }
-
+    desc.uid = uid;
     (*dev)->GetDeviceVendor(dev, &vid);
+    desc.vid = vid;
     (*dev)->GetDeviceProduct(dev, &pid);
+    desc.pid = pid;
     (*dev)->GetDeviceReleaseNumber(dev, &rel);
-    (*dev)->GetDeviceClass(dev, &class);
-    (*dev)->GetDeviceSubClass(dev, &subclass);
+    desc.version = rel;
 
+    (*dev)->USBGetProductStringIndex(dev, &idx);
+    get_device_string(dev, idx, desc.product, MAX_PATH);
+    (*dev)->USBGetManufacturerStringIndex(dev, &idx);
+    get_device_string(dev, idx, desc.manufacturer, MAX_PATH);
     (*dev)->USBGetSerialNumberStringIndex(dev, &idx);
-    get_device_string(dev, idx, serial_string, 256);
-;
-    TRACE("Found device VID 0x%04X (%d), PID 0x%04X (%d), release %d, class 0x%04X (%d), subclass 0x%04X (%d), UID 0x%04X (%d), Serial %s\n", vid, vid, pid, pid, rel, class, class, subclass, subclass, (DWORD)uid, (DWORD)uid, debugstr_w(serial_string));
+    get_device_string(dev, idx, desc.serialnumber, MAX_PATH);
 
-    if (is_xbox_gamepad(vid,pid))
+    TRACE("object %#x, dev %p, desc %s.\n", object, dev, debugstr_device_desc(&desc));
+
+    if (!is_xbox_gamepad(vid, pid))
     {
-        device = bus_create_hid_device(busidW, vid, pid, 0, 1, uid, serial_string,
-                                       1, &xbox_vtbl, sizeof(struct platform_private));
-    }
-    else
-    {
-        TRACE("Not an XBOX 360 controller\n");
+        TRACE("Not an xbox gamepad\n");
         goto failed;
     }
 
-    if (!device)
-    {
-        ERR("Failed to create device\n");
-        goto failed;
-    }
-    else
-    {
-        struct platform_private* ext = get_platform_private(device);
-        ext->object = object;
-        ext->dev = dev;
-        res = open_xbox_gamepad(device);
-        if (res != ERROR_SUCCESS)
-            cleanupDevice(device);
-        else
-            IoInvalidateDeviceRelations(bus_pdo, BusRelations);
-    }
+    if (!(impl = raw_device_create(&xbox_device_vtbl, sizeof(struct xbox_device)))) goto failed;
+    list_add_tail(&device_list, &impl->unix_device.entry);
+    impl->object = object;
+    impl->dev = dev;
+
+    bus_event_queue_device_created(&event_queue, &impl->unix_device, &desc);
     return;
 
 failed:
@@ -624,7 +575,7 @@ failed:
     return;
 }
 
-static void handle_IOServiceMatchingCallback(void * HOSTPTR refcon, io_iterator_t iter)
+static void handle_IOServiceMatchingCallback(void *refcon, io_iterator_t iter)
 {
     io_object_t object;
 
@@ -633,33 +584,32 @@ static void handle_IOServiceMatchingCallback(void * HOSTPTR refcon, io_iterator_
         process_IOService_Device(object);
 }
 
-static void handle_IOServiceTerminatedCallback(void * HOSTPTR refcon, io_iterator_t iter)
+static void handle_IOServiceTerminatedCallback(void *refcon, io_iterator_t iter)
 {
+    struct xbox_device *impl;
     io_object_t object;
 
     TRACE("Removal detected\n");
     while ((object = IOIteratorNext(iter)))
     {
-        DEVICE_OBJECT *device = NULL;
-        device = bus_find_hid_device(&xbox_vtbl, (VOID *)object);
-        if (device)
-        {
-            cleanupDevice(device);
-            bus_unlink_hid_device(device);
-            bus_remove_hid_device(device);
-        }
+        impl = find_device_from_io_object(object);
+        if (impl) bus_event_queue_device_removed(&event_queue, &impl->unix_device);
+        else WARN("failed to find device for io_object %#x\n", object);
         IOObjectRelease(object);
     }
 }
 
-/* This puts the relevent run loop for event handleing into a WINE thread */
-static DWORD CALLBACK runloop_thread(VOID *args)
+NTSTATUS xbox_bus_init(void *args)
 {
     IONotificationPortRef notificationObject;
     CFRunLoopSourceRef notificationRunLoopSource;
+    CFMutableDictionaryRef dict;
     io_iterator_t myIterator;
     io_object_t object;
-    CFMutableDictionaryRef dict;
+
+    TRACE("args %p\n", args);
+
+    options = *(struct xbox_bus_options *)args;
 
     run_loop = CFRunLoopGetCurrent();
 
@@ -684,26 +634,56 @@ static DWORD CALLBACK runloop_thread(VOID *args)
         IOObjectRelease(object);
     }
 
-    CFRunLoopRun();
-    TRACE("Run Loop exiting\n");
-    return 1;
+    return STATUS_SUCCESS;
 }
 
-NTSTATUS xbox_driver_init(void)
+NTSTATUS xbox_bus_wait(void *args)
 {
-    TRACE("XBOX 360 Driver Init\n");
+    struct bus_event *result = args;
+    CFRunLoopRunResult ret;
 
-    run_loop_handle = CreateThread(NULL, 0, runloop_thread, NULL, 0, NULL);
+    /* cleanup previously returned event */
+    bus_event_cleanup(result);
 
+    do
+    {
+        if (bus_event_queue_pop(&event_queue, result)) return STATUS_PENDING;
+        pthread_mutex_lock(&xbox_cs);
+        ret = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 10, TRUE);
+        pthread_mutex_unlock(&xbox_cs);
+    } while (ret != kCFRunLoopRunStopped);
+
+    TRACE("XBOX main loop exiting\n");
+    bus_event_queue_destroy(&event_queue);
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS xbox_bus_stop(void *args)
+{
+    if (!run_loop) return STATUS_SUCCESS;
+
+    CFRunLoopStop(run_loop);
     return STATUS_SUCCESS;
 }
 
 #else
 
-NTSTATUS xbox_driver_init(void)
+NTSTATUS xbox_bus_init(void *args)
 {
-    TRACE("Dummy XBOX 360 Driver Init\n");
-    return STATUS_SUCCESS;
+    WARN("XBOX support not compiled in!\n");
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS xbox_bus_wait(void *args)
+{
+    WARN("XBOX support not compiled in!\n");
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS xbox_bus_stop(void *args)
+{
+    WARN("XBOX support not compiled in!\n");
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 #endif /* HAVE_IOSERVICEMATCHING */

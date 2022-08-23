@@ -138,7 +138,7 @@ static IUnknown *create_activex_object(script_ctx_t *ctx, const WCHAR *progid)
     return obj;
 }
 
-static HRESULT ActiveXObject_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, unsigned argc, jsval_t *argv,
+static HRESULT ActiveXObject_value(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
         jsval_t *r)
 {
     jsstr_t * progid_str;
@@ -156,7 +156,7 @@ static HRESULT ActiveXObject_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flag
 
     if(ctx->safeopt != (INTERFACESAFE_FOR_UNTRUSTED_DATA|INTERFACE_USES_DISPEX|INTERFACE_USES_SECURITY_MANAGER)
         && ctx->safeopt != INTERFACE_USES_DISPEX) {
-        FIXME("Unsupported safeopt %x\n", ctx->safeopt);
+        FIXME("Unsupported safeopt %lx\n", ctx->safeopt);
         return E_NOTIMPL;
     }
 
@@ -181,7 +181,8 @@ static HRESULT ActiveXObject_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flag
         return E_NOTIMPL;
     }
 
-    *r = jsval_disp(disp);
+    if(r) *r = jsval_disp(disp);
+    else  IDispatch_Release(disp);
     return S_OK;
 }
 

@@ -69,6 +69,7 @@ struct pixelformatinfo {
     enum pixelformat format;
     const WICPixelFormatGUID *guid;
     copyfunc copy_function;
+    BOOL is_indexed_format;
 };
 
 typedef struct FormatConverter {
@@ -983,9 +984,9 @@ static HRESULT copypixels_to_32bppPBGRA(struct FormatConverter *This, const WICR
                     BYTE alpha = pbBuffer[cbStride*y+4*x+3];
                     if (alpha != 255)
                     {
-                        pbBuffer[cbStride*y+4*x] = pbBuffer[cbStride*y+4*x] * alpha / 255;
-                        pbBuffer[cbStride*y+4*x+1] = pbBuffer[cbStride*y+4*x+1] * alpha / 255;
-                        pbBuffer[cbStride*y+4*x+2] = pbBuffer[cbStride*y+4*x+2] * alpha / 255;
+                        pbBuffer[cbStride*y+4*x] = (pbBuffer[cbStride*y+4*x] * alpha + 127) / 255;
+                        pbBuffer[cbStride*y+4*x+1] = (pbBuffer[cbStride*y+4*x+1] * alpha + 127) / 255;
+                        pbBuffer[cbStride*y+4*x+2] = (pbBuffer[cbStride*y+4*x+2] * alpha + 127) / 255;
                     }
                 }
         }
@@ -1016,9 +1017,9 @@ static HRESULT copypixels_to_32bppPRGBA(struct FormatConverter *This, const WICR
                     BYTE alpha = pbBuffer[cbStride*y+4*x+3];
                     if (alpha != 255)
                     {
-                        pbBuffer[cbStride*y+4*x] = pbBuffer[cbStride*y+4*x] * alpha / 255;
-                        pbBuffer[cbStride*y+4*x+1] = pbBuffer[cbStride*y+4*x+1] * alpha / 255;
-                        pbBuffer[cbStride*y+4*x+2] = pbBuffer[cbStride*y+4*x+2] * alpha / 255;
+                        pbBuffer[cbStride*y+4*x] = (pbBuffer[cbStride*y+4*x] * alpha + 127) / 255;
+                        pbBuffer[cbStride*y+4*x+1] = (pbBuffer[cbStride*y+4*x+1] * alpha + 127) / 255;
+                        pbBuffer[cbStride*y+4*x+2] = (pbBuffer[cbStride*y+4*x+2] * alpha + 127) / 255;
                     }
                 }
         }
@@ -1493,10 +1494,10 @@ static HRESULT copypixels_to_8bppIndexed(struct FormatConverter *This, const WIC
 }
 
 static const struct pixelformatinfo supported_formats[] = {
-    {format_1bppIndexed, &GUID_WICPixelFormat1bppIndexed, NULL},
-    {format_2bppIndexed, &GUID_WICPixelFormat2bppIndexed, NULL},
-    {format_4bppIndexed, &GUID_WICPixelFormat4bppIndexed, NULL},
-    {format_8bppIndexed, &GUID_WICPixelFormat8bppIndexed, copypixels_to_8bppIndexed},
+    {format_1bppIndexed, &GUID_WICPixelFormat1bppIndexed, NULL, TRUE},
+    {format_2bppIndexed, &GUID_WICPixelFormat2bppIndexed, NULL, TRUE},
+    {format_4bppIndexed, &GUID_WICPixelFormat4bppIndexed, NULL, TRUE},
+    {format_8bppIndexed, &GUID_WICPixelFormat8bppIndexed, copypixels_to_8bppIndexed, TRUE},
     {format_BlackWhite, &GUID_WICPixelFormatBlackWhite, NULL},
     {format_2bppGray, &GUID_WICPixelFormat2bppGray, NULL},
     {format_4bppGray, &GUID_WICPixelFormat4bppGray, NULL},
@@ -1559,7 +1560,7 @@ static ULONG WINAPI FormatConverter_AddRef(IWICFormatConverter *iface)
     FormatConverter *This = impl_from_IWICFormatConverter(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     return ref;
 }
@@ -1569,7 +1570,7 @@ static ULONG WINAPI FormatConverter_Release(IWICFormatConverter *iface)
     FormatConverter *This = impl_from_IWICFormatConverter(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     if (ref == 0)
     {
@@ -1636,12 +1637,7 @@ static HRESULT WINAPI FormatConverter_CopyPalette(IWICFormatConverter *iface,
 
     if (!This->palette)
     {
-        HRESULT hr;
-        UINT bpp;
-
-        hr = get_pixelformat_bpp(This->dst_format->guid, &bpp);
-        if (hr != S_OK) return hr;
-        if (bpp <= 8) return WINCODEC_ERR_WRONGSTATE;
+        if (This->dst_format->is_indexed_format) return WINCODEC_ERR_WRONGSTATE;
         return IWICBitmapSource_CopyPalette(This->source, palette);
     }
 
@@ -1689,6 +1685,13 @@ static HRESULT WINAPI FormatConverter_Initialize(IWICFormatConverter *iface,
     TRACE("(%p,%p,%s,%u,%p,%0.3f,%u)\n", iface, source, debugstr_guid(dstFormat),
         dither, palette, alpha_threshold, palette_type);
 
+    dstinfo = get_formatinfo(dstFormat);
+    if (!dstinfo)
+    {
+        FIXME("Unsupported destination format %s\n", debugstr_guid(dstFormat));
+        return WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT;
+    }
+
     if (!palette)
     {
         UINT bpp;
@@ -1703,18 +1706,21 @@ static HRESULT WINAPI FormatConverter_Initialize(IWICFormatConverter *iface,
         case WICBitmapPaletteTypeCustom:
             IWICPalette_Release(palette);
             palette = NULL;
-            if (bpp <= 8) return E_INVALIDARG;
+
+            /* Indexed types require a palette */
+            if (dstinfo->is_indexed_format)
+                return E_INVALIDARG;
             break;
 
         case WICBitmapPaletteTypeMedianCut:
         {
-            if (bpp <= 8)
+            if (dstinfo->is_indexed_format)
                 res = IWICPalette_InitializeFromBitmap(palette, source, 1 << bpp, FALSE);
             break;
         }
 
         default:
-            if (bpp <= 8)
+            if (dstinfo->is_indexed_format)
                 res = IWICPalette_InitializePredefined(palette, palette_type, FALSE);
             break;
         }
@@ -1744,14 +1750,6 @@ static HRESULT WINAPI FormatConverter_Initialize(IWICFormatConverter *iface,
     {
         res = WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT;
         FIXME("Unsupported source format %s\n", debugstr_guid(&srcFormat));
-        goto end;
-    }
-
-    dstinfo = get_formatinfo(dstFormat);
-    if (!dstinfo)
-    {
-        res = WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT;
-        FIXME("Unsupported destination format %s\n", debugstr_guid(dstFormat));
         goto end;
     }
 

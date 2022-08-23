@@ -1,6 +1,8 @@
 MODULE    = mfplay.dll
+IMPORTLIB = mfplay
+IMPORTS   = mfplat mf ole32 user32 uuid mfuuid strmiids
 
-EXTRADLLFLAGS = -mno-cygwin
+EXTRADLLFLAGS = -Wb,--prefer-native
 
 C_SRCS = \
 	player.c

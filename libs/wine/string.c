@@ -229,36 +229,22 @@ int memicmpW( const WCHAR *str1, const WCHAR *str2, int n )
     return ret;
 }
 
-WCHAR * HOSTPTR strstrW( const WCHAR * HOSTPTR str, const WCHAR * HOSTPTR sub )
+WCHAR *strstrW( const WCHAR *str, const WCHAR *sub )
 {
     while (*str)
     {
-        const WCHAR * HOSTPTR p1 = str, * HOSTPTR p2 = sub;
+        const WCHAR *p1 = str, *p2 = sub;
         while (*p1 && *p2 && *p1 == *p2) { p1++; p2++; }
-        if (!*p2) return (WCHAR * HOSTPTR)str;
+        if (!*p2) return (WCHAR *)str;
         str++;
     }
     return NULL;
 }
-
-#ifdef __i386_on_x86_64__
-WCHAR * WIN32PTR strstrW( const WCHAR * WIN32PTR str, const WCHAR * HOSTPTR sub ) __attribute__((overloadable))
-{
-    while (*str)
-    {
-        const WCHAR * WIN32PTR p1 = str, * HOSTPTR p2 = sub;
-        while (*p1 && *p2 && *p1 == *p2) { p1++; p2++; }
-        if (!*p2) return (WCHAR * WIN32PTR)str;
-        str++;
-    }
-    return NULL;
-}
-#endif
 
 /* strtolW and strtoulW implementation based on the GNU C library code */
 /* Copyright (C) 1991,92,94,95,96,97,98,99,2000,2001 Free Software Foundation, Inc. */
 
-long int strtolW( const WCHAR * HOSTPTR nptr, WCHAR * HOSTPTR * HOSTPTR endptr, int base )
+long int strtolW( const WCHAR *nptr, WCHAR **endptr, int base )
 {
   int negative;
   register unsigned long int cutoff;
@@ -378,17 +364,8 @@ noconv:
   return 0L;
 }
 
-#ifdef __i386_on_x86_64__
-long int strtolW( const WCHAR * WIN32PTR nptr, WCHAR * WIN32PTR * WIN32PTR endptr, int base ) __attribute__((overloadable))
-{
-    WCHAR * HOSTPTR end;
-    long int ret = strtolW( (const WCHAR * HOSTPTR)nptr, &end, base );
-    if (endptr) *endptr = ADDRSPACECAST(WCHAR * WIN32PTR, end);
-    return ret;
-}
-#endif
 
-unsigned long int strtoulW( const WCHAR * HOSTPTR nptr, WCHAR * HOSTPTR * HOSTPTR endptr, int base )
+unsigned long int strtoulW( const WCHAR *nptr, WCHAR **endptr, int base )
 {
   int negative;
   register unsigned long int cutoff;
@@ -500,20 +477,9 @@ noconv:
   return 0L;
 }
 
-/* 32on64 FIXME: Is this still needed? */
-#ifdef __i386_on_x86_64__ && 0
-unsigned long int strtoulW( const WCHAR * WIN32PTR nptr, WCHAR * WIN32PTR * WIN32PTR endptr, int base ) __attribute__((overloadable))
-{
-    WCHAR * HOSTPTR end;
-    unsigned long int ret = strtoulW( (const WCHAR * HOSTPTR)nptr, &end, base );
-    if (endptr) *endptr = ADDRSPACECAST(WCHAR * WIN32PTR, end);
-    return ret;
-}
-#endif
-
 long int atolW( const WCHAR *str )
 {
-    return strtolW( str, (WCHAR **)0, 10 );
+    return strtolW( str, NULL, 10 );
 }
 
 int atoiW( const WCHAR *str )
@@ -749,6 +715,5 @@ int sprintfW( WCHAR *str, const WCHAR *format, ...)
     va_end(valist);
     return retval;
 }
-
 
 #endif /* __ASM_OBSOLETE */

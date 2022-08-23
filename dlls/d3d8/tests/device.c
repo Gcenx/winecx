@@ -1074,11 +1074,19 @@ static void test_cursor(void)
 
     IDirect3DSurface8_Release(cursor);
 
+    /* On the testbot the cursor handle does not behave as expected in rare situations,
+     * leading to random test failures. Either the cursor handle changes before we expect
+     * it to, or it doesn't change afterwards (or already changed before we read the
+     * initial handle?). I was not able to reproduce this on my own machines. Moving the
+     * mouse outside the window results in similar behavior. However, I tested various
+     * obvious failure causes: Was the mouse moved? Was the window hidden or moved? Is
+     * the window in the background? Neither of those applies. Making the window topmost
+     * or using a fullscreen device doesn't improve the test's reliability either. */
     memset(&info, 0, sizeof(info));
     info.cbSize = sizeof(info);
     ok(GetCursorInfo(&info), "GetCursorInfo failed\n");
     ok(info.flags & (CURSOR_SHOWING|CURSOR_SUPPRESSED), "The gdi cursor is hidden (%08x)\n", info.flags);
-    ok(info.hCursor == cur, "The cursor handle is %p\n", info.hCursor); /* unchanged */
+    ok(info.hCursor == cur || broken(1), "The cursor handle is %p\n", info.hCursor); /* unchanged */
 
     /* Still hidden */
     ret = IDirect3DDevice8_ShowCursor(device, TRUE);
@@ -1092,7 +1100,7 @@ static void test_cursor(void)
     info.cbSize = sizeof(info);
     ok(GetCursorInfo(&info), "GetCursorInfo failed\n");
     ok(info.flags & (CURSOR_SHOWING|CURSOR_SUPPRESSED), "The gdi cursor is hidden (%08x)\n", info.flags);
-    ok(info.hCursor != cur, "The cursor handle is %p\n", info.hCursor);
+    ok(info.hCursor != cur || broken(1), "The cursor handle is %p\n", info.hCursor);
 
     /* Cursor dimensions must all be powers of two */
     for (test_idx = 0; test_idx < ARRAY_SIZE(cursor_sizes); ++test_idx)
@@ -1210,6 +1218,7 @@ static void test_cursor_pos(void)
     HWND window;
     HRESULT hr;
     BOOL ret;
+    POINT pt;
 
     /* Note that we don't check for movement we're not supposed to receive.
      * That's because it's hard to distinguish from the user accidentally
@@ -1226,6 +1235,32 @@ static void test_cursor_pos(void)
         {150, 150},
         {0, 0},
     };
+
+    /* Windows 10 1709 is unreliable. One or more of the cursor movements we
+     * expect don't show up. Moving the mouse to a defined position beforehand
+     * seems to get it into better shape - only the final 150x150 move we do
+     * below is missing - it looks as if this Windows version filters redundant
+     * SetCursorPos calls on the user32 level, although I am not entirely sure.
+     *
+     * The weird thing is that the previous test leaves the cursor position
+     * reliably at 512x384 on the testbot. So the 50x50 mouse move shouldn't
+     * be stripped away anyway, but it might be a difference between moving the
+     * cursor through SetCursorPos vs moving it by changing the display mode. */
+    ret = SetCursorPos(99, 99);
+    ok(ret, "Failed to set cursor position.\n");
+    flush_events();
+
+    /* Check if we can move the cursor. If we're running in a virtual desktop
+     * that does not have focus or the mouse is outside the desktop window, some
+     * window managers (e.g. kwin) will refuse to let us steal the pointer. That
+     * is reasonable, but breaks the test. */
+    ret = GetCursorPos(&pt);
+    ok(ret, "Failed to get cursor position.\n");
+    if (pt.x != 99 || pt.y != 99)
+    {
+        skip("Could not warp the cursor (cur pos %ux%u), skipping test.\n", pt.x, pt.y);
+        return;
+    }
 
     wc.lpfnWndProc = test_cursor_proc;
     wc.lpszClassName = "d3d8_test_cursor_wc";
@@ -1259,7 +1294,8 @@ static void test_cursor_pos(void)
 
     IDirect3DDevice8_SetCursorPosition(device, 75, 75, 0);
     flush_events();
-    /* SetCursorPosition() eats duplicates. */
+    /* SetCursorPosition() eats duplicates. FIXME: Since we accept unexpected
+     * mouse moves the test doesn't actually demonstrate that. */
     IDirect3DDevice8_SetCursorPosition(device, 75, 75, 0);
     flush_events();
 
@@ -1280,13 +1316,14 @@ static void test_cursor_pos(void)
 
     IDirect3DDevice8_SetCursorPosition(device, 150, 150, 0);
     flush_events();
-    /* SetCursorPos() doesn't. */
+    /* SetCursorPos() doesn't. Except for Win10 1709. */
     ret = SetCursorPos(150, 150);
     ok(ret, "Failed to set cursor position.\n");
     flush_events();
 
-    ok(!expect_pos->x && !expect_pos->y, "Didn't receive MOUSEMOVE %u (%d, %d).\n",
-       (unsigned)(expect_pos - points), expect_pos->x, expect_pos->y);
+    ok((!expect_pos->x && !expect_pos->y) || broken(expect_pos - points == 7),
+        "Didn't receive MOUSEMOVE %u (%d, %d).\n",
+        (unsigned)(expect_pos - points), expect_pos->x, expect_pos->y);
 
     refcount = IDirect3DDevice8_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);

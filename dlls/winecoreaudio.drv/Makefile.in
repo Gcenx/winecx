@@ -1,10 +1,11 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE    = winecoreaudio.drv
+UNIXLIB   = winecoreaudio.so
 IMPORTS   = uuid ole32 user32 advapi32
 DELAYIMPORTS = winmm
 EXTRALIBS = $(COREAUDIO_LIBS) -framework AppKit $(AVFOUNDATION_LIBS)
 
 C_SRCS = \
-	audiounit.c \
 	coreaudio.c \
 	coremidi.c \
 	midi.c \
@@ -12,7 +13,3 @@ C_SRCS = \
 
 OBJC_SRCS = \
 	authorization.m
-
-coremidi_EXTRADEFS = $(HOSTSTACK_CFLAGS)
-midi_EXTRADEFS = $(HOSTSTACK_CFLAGS)
-mmdevdrv_EXTRADEFS = $(HOSTSTACK_CFLAGS)

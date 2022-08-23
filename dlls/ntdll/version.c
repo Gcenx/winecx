@@ -105,69 +105,69 @@ static const RTL_OSVERSIONINFOEXW VersionData[NB_WINDOWS_VERSIONS] =
     },
     /* NT351 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 3, 51, 0x421, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 3, 51, 1057, VER_PLATFORM_WIN32_NT,
         L"Service Pack 5", 5, 0, 0, VER_NT_WORKSTATION, 0
     },
     /* NT40 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 4, 0, 0x565, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 4, 0, 1381, VER_PLATFORM_WIN32_NT,
         L"Service Pack 6a", 6, 0, 0, VER_NT_WORKSTATION, 0
     },
     /* NT2K */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 5, 0, 0x893, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 5, 0, 2195, VER_PLATFORM_WIN32_NT,
         L"Service Pack 4", 4, 0, 0, VER_NT_WORKSTATION,
         30 /* FIXME: Great, a reserved field with a value! */
     },
     /* WINXP */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 5, 1, 0xA28, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 5, 1, 2600, VER_PLATFORM_WIN32_NT,
         L"Service Pack 3", 3, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION,
         30 /* FIXME: Great, a reserved field with a value! */
     },
     /* WINXP64 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 5, 2, 0xECE, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 5, 2, 3790, VER_PLATFORM_WIN32_NT,
         L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
     },
     /* WIN2K3 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 5, 2, 0xECE, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 5, 2, 3790, VER_PLATFORM_WIN32_NT,
         L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS, VER_NT_SERVER, 0
     },
     /* WINVISTA */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 6, 0, 0x1772, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 0, 6002, VER_PLATFORM_WIN32_NT,
         L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
     },
     /* WIN2K8 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 6, 0, 0x1772, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 0, 6002, VER_PLATFORM_WIN32_NT,
         L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS, VER_NT_SERVER, 0
     },
     /* WIN7 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 6, 1, 0x1DB1, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 1, 7601, VER_PLATFORM_WIN32_NT,
         L"Service Pack 1", 1, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
     },
     /* WIN2K8R2 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 6, 1, 0x1DB1, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 1, 7601, VER_PLATFORM_WIN32_NT,
         L"Service Pack 1", 1, 0, VER_SUITE_SINGLEUSERTS, VER_NT_SERVER, 0
     },
     /* WIN8 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 6, 2, 0x23F0, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 2, 9200, VER_PLATFORM_WIN32_NT,
         L"", 0, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
     },
     /* WIN81 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 6, 3, 0x2580, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 3, 9600, VER_PLATFORM_WIN32_NT,
         L"", 0, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
     },
     /* WIN10 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 10, 0, 0x4563, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 10, 0, 18362, VER_PLATFORM_WIN32_NT,
         L"", 0, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
     },
 
@@ -206,6 +206,41 @@ static const struct { WCHAR name[12]; WINDOWS_VERSION ver; } version_names[] =
 
 /* initialized to null so that we crash if we try to retrieve the version too early at startup */
 static const RTL_OSVERSIONINFOEXW *current_version;
+
+static char wine_version[256];
+
+/*********************************************************************
+ *                  wine_get_version
+ */
+const char * CDECL wine_get_version(void)
+{
+    return wine_version;
+}
+
+
+/*********************************************************************
+ *                  wine_get_build_id
+ */
+const char * CDECL wine_get_build_id(void)
+{
+    const char *p = wine_version;
+    p += strlen(p) + 1;  /* skip version */
+    return p;
+}
+
+
+/*********************************************************************
+ *                  wine_get_host_version
+ */
+void CDECL wine_get_host_version( const char **sysname, const char **release )
+{
+    const char *p = wine_version;
+    p += strlen(p) + 1;  /* skip version */
+    p += strlen(p) + 1;  /* skip build id */
+    if (sysname) *sysname = p;
+    p += strlen(p) + 1;
+    if (release) *release = p;
+}
 
 
 /**********************************************************************
@@ -438,6 +473,8 @@ void version_init(void)
     BOOL got_win_ver = FALSE;
     const WCHAR *p, *appname = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
     WCHAR appversion[MAX_PATH+20];
+
+    NtQuerySystemInformation( SystemWineVersionInformation, wine_version, sizeof(wine_version), NULL );
 
     current_version = &VersionData[WIN7];
 
@@ -747,4 +784,22 @@ NTSTATUS WINAPI RtlVerifyVersionInfo( const RTL_OSVERSIONINFOEXW *info,
     }
 
     return STATUS_SUCCESS;
+}
+
+
+/******************************************************************************
+ *        VerSetConditionMask   (NTDLL.@)
+ */
+ULONGLONG WINAPI VerSetConditionMask( ULONGLONG condition_mask, DWORD type_mask, BYTE condition )
+{
+    condition &= 0x07;
+    if (type_mask & VER_PRODUCT_TYPE) condition_mask |= condition << 7*3;
+    else if (type_mask & VER_SUITENAME) condition_mask |= condition << 6*3;
+    else if (type_mask & VER_SERVICEPACKMAJOR) condition_mask |= condition << 5*3;
+    else if (type_mask & VER_SERVICEPACKMINOR) condition_mask |= condition << 4*3;
+    else if (type_mask & VER_PLATFORMID) condition_mask |= condition << 3*3;
+    else if (type_mask & VER_BUILDNUMBER) condition_mask |= condition << 2*3;
+    else if (type_mask & VER_MAJORVERSION) condition_mask |= condition << 1*3;
+    else if (type_mask & VER_MINORVERSION) condition_mask |= condition << 0*3;
+    return condition_mask;
 }

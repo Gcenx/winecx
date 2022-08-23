@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -30,11 +28,10 @@
 #include "resource.h"
 #include "winternl.h"
 #include "wine/debug.h"
-#include "wine/exception.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(winedbg);
 
+static char*            dbg_executable;
 static char*            dbg_last_cmd_line;
 static struct be_process_io be_process_active_io;
 
@@ -77,7 +74,7 @@ BOOL dbg_attach_debuggee(DWORD pid)
 
     if (!DebugActiveProcess(pid)) 
     {
-        dbg_printf("Can't attach process %04x: error %u\n", pid, GetLastError());
+        dbg_printf("Can't attach process %04lx: error %lu\n", pid, GetLastError());
         dbg_del_process(dbg_curr_process);
 	return FALSE;
     }
@@ -199,7 +196,7 @@ static BOOL dbg_exception_prolog(BOOL is_debug, const EXCEPTION_RECORD* rec)
                 HeapFree(GetProcessHeap(), 0, last_file);
                 last_name = strcpy(HeapAlloc(GetProcessHeap(), 0, strlen(si->Name) + 1), si->Name);
                 last_file = strcpy(HeapAlloc(GetProcessHeap(), 0, strlen(il.FileName) + 1), il.FileName);
-                dbg_printf("%s () at %s:%u\n", last_name, last_file, il.LineNumber);
+                dbg_printf("%s () at %s:%lu\n", last_name, last_file, il.LineNumber);
             }
         }
     }
@@ -237,7 +234,7 @@ static DWORD dbg_handle_exception(const EXCEPTION_RECORD* rec, BOOL first_chance
 
     assert(dbg_curr_thread);
 
-    WINE_TRACE("exception=%x first_chance=%c\n",
+    WINE_TRACE("exception=%lx first_chance=%c\n",
                rec->ExceptionCode, first_chance ? 'Y' : 'N');
 
     switch (rec->ExceptionCode)
@@ -246,20 +243,26 @@ static DWORD dbg_handle_exception(const EXCEPTION_RECORD* rec, BOOL first_chance
     case EXCEPTION_SINGLE_STEP:
         is_debug = TRUE;
         break;
-    case EXCEPTION_NAME_THREAD:
+    case EXCEPTION_WINE_NAME_THREAD:
         pThreadName = (const THREADNAME_INFO*)(rec->ExceptionInformation);
+
+        if (pThreadName->dwType != 0x1000)
+            return DBG_EXCEPTION_NOT_HANDLED;
         if (pThreadName->dwThreadID == -1)
             pThread = dbg_curr_thread;
         else
             pThread = dbg_get_thread(dbg_curr_process, pThreadName->dwThreadID);
         if(!pThread)
         {
-            dbg_printf("Thread ID=%04x not in our list of threads -> can't rename\n", pThreadName->dwThreadID);
+            dbg_printf("Thread ID=%04lx not in our list of threads -> can't rename\n", pThreadName->dwThreadID);
             return DBG_CONTINUE;
         }
-        if (dbg_read_memory(pThreadName->szName, pThread->name, 9))
-            dbg_printf("Thread ID=%04x renamed using MS VC6 extension (name==\"%.9s\")\n",
+        if (dbg_read_memory(pThreadName->szName, pThread->name, sizeof(pThread->name)))
+        {
+            pThread->name[sizeof(pThread->name) - 1] = '\0';
+            dbg_printf("Thread ID=%04lx renamed using MSVC extension (name==\"%s\")\n",
                        pThread->tid, pThread->name);
+        }
         return DBG_CONTINUE;
     case EXCEPTION_INVALID_HANDLE:
         return DBG_CONTINUE;
@@ -296,34 +299,21 @@ static DWORD dbg_handle_exception(const EXCEPTION_RECORD* rec, BOOL first_chance
 
 static BOOL tgt_process_active_close_process(struct dbg_process* pcs, BOOL kill);
 
-static void fetch_module_name(void* name_addr, BOOL unicode, void* mod_addr,
-                              WCHAR* buffer, size_t bufsz, BOOL is_pcs)
+void fetch_module_name(void* name_addr, void* mod_addr, WCHAR* buffer, size_t bufsz)
 {
-    static const WCHAR pcspid[] = {'P','r','o','c','e','s','s','_','%','0','8','x',0};
-    static const WCHAR dlladdr[] = {'D','L','L','_','%','0','8','l','x',0};
-
-    memory_get_string_indirect(dbg_curr_process, name_addr, unicode, buffer, bufsz);
-    if (!buffer[0] &&
-        !GetModuleFileNameExW(dbg_curr_process->handle, mod_addr, buffer, bufsz))
+    memory_get_string_indirect(dbg_curr_process, name_addr, TRUE, buffer, bufsz);
+    if (!buffer[0] && !GetModuleFileNameExW(dbg_curr_process->handle, mod_addr, buffer, bufsz))
     {
-        if (is_pcs)
+        if (GetMappedFileNameW( dbg_curr_process->handle, mod_addr, buffer, bufsz ))
         {
-            HMODULE h;
-            WORD (WINAPI *gpif)(HANDLE, LPWSTR, DWORD);
+            /* FIXME: proper NT->Dos conversion */
+            static const WCHAR nt_prefixW[] = {'\\','?','?','\\'};
 
-            /* On Windows, when we get the process creation debug event for a process
-             * created by winedbg, the modules' list is not initialized yet. Hence,
-             * GetModuleFileNameExA (on the main module) will generate an error.
-             * Psapi (starting on XP) provides GetProcessImageFileName() which should
-             * give us the expected result
-             */
-            if (!(h = GetModuleHandleA("psapi")) ||
-                !(gpif = (void*)GetProcAddress(h, "GetProcessImageFileNameW")) ||
-                !(gpif)(dbg_curr_process->handle, buffer, bufsz))
-                snprintfW(buffer, bufsz, pcspid, dbg_curr_pid);
+            if (!wcsncmp( buffer, nt_prefixW, 4 ))
+                memmove( buffer, buffer + 4, (lstrlenW(buffer + 4) + 1) * sizeof(WCHAR) );
         }
         else
-            snprintfW(buffer, bufsz, dlladdr, (ULONG_PTR)mod_addr);
+            swprintf(buffer, bufsz, L"DLL_%08lx", (ULONG_PTR)mod_addr);
     }
 }
 
@@ -333,7 +323,7 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         char	bufferA[256];
         WCHAR	buffer[256];
     } u;
-    DWORD       cont = DBG_CONTINUE;
+    DWORD size, cont = DBG_CONTINUE;
 
     dbg_curr_pid = de->dwProcessId;
     dbg_curr_tid = de->dwThreadId;
@@ -348,12 +338,12 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
     case EXCEPTION_DEBUG_EVENT:
         if (!dbg_curr_thread)
         {
-            WINE_ERR("%04x:%04x: not a registered process or thread (perhaps a 16 bit one ?)\n",
+            WINE_ERR("%04lx:%04lx: not a registered process or thread (perhaps a 16 bit one ?)\n",
                      de->dwProcessId, de->dwThreadId);
             break;
         }
 
-        WINE_TRACE("%04x:%04x: exception code=%08x\n",
+        WINE_TRACE("%04lx:%04lx: exception code=%08lx\n",
                    de->dwProcessId, de->dwThreadId,
                    de->u.Exception.ExceptionRecord.ExceptionCode);
 
@@ -383,12 +373,13 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
             WINE_ERR("Couldn't create process\n");
             break;
         }
-        fetch_module_name(de->u.CreateProcessInfo.lpImageName,
-                          de->u.CreateProcessInfo.fUnicode,
-                          de->u.CreateProcessInfo.lpBaseOfImage,
-                          u.buffer, ARRAY_SIZE(u.buffer), TRUE);
+        size = ARRAY_SIZE(u.buffer);
+        if (!QueryFullProcessImageNameW( dbg_curr_process->handle, 0, u.buffer, &size ))
+        {
+            swprintf(u.buffer, ARRAY_SIZE(u.buffer), L"Process_%08x", dbg_curr_pid);
+        }
 
-        WINE_TRACE("%04x:%04x: create process '%s'/%p @%p (%u<%u>)\n",
+        WINE_TRACE("%04lx:%04lx: create process '%s'/%p @%p (%lu<%lu>)\n",
                    de->dwProcessId, de->dwThreadId,
                    wine_dbgstr_w(u.buffer),
                    de->u.CreateProcessInfo.lpImageName,
@@ -401,9 +392,9 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
             dbg_printf("Couldn't initiate DbgHelp\n");
         if (!dbg_load_module(dbg_curr_process->handle, de->u.CreateProcessInfo.hFile, u.buffer,
                              (DWORD_PTR)de->u.CreateProcessInfo.lpBaseOfImage, 0))
-            dbg_printf("couldn't load main module (%u)\n", GetLastError());
+            dbg_printf("couldn't load main module (%lu)\n", GetLastError());
 
-        WINE_TRACE("%04x:%04x: create thread I @%p\n",
+        WINE_TRACE("%04lx:%04lx: create thread I @%p\n",
                    de->dwProcessId, de->dwThreadId, de->u.CreateProcessInfo.lpStartAddress);
 
         dbg_curr_thread = dbg_add_thread(dbg_curr_process,
@@ -420,7 +411,7 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         break;
 
     case EXIT_PROCESS_DEBUG_EVENT:
-        WINE_TRACE("%04x:%04x: exit process (%d)\n",
+        WINE_TRACE("%04lx:%04lx: exit process (%ld)\n",
                    de->dwProcessId, de->dwThreadId, de->u.ExitProcess.dwExitCode);
 
         if (dbg_curr_process == NULL)
@@ -429,11 +420,11 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
             break;
         }
         tgt_process_active_close_process(dbg_curr_process, FALSE);
-        dbg_printf("Process of pid=%04x has terminated\n", de->dwProcessId);
+        dbg_printf("Process of pid=%04lx has terminated\n", de->dwProcessId);
         break;
 
     case CREATE_THREAD_DEBUG_EVENT:
-        WINE_TRACE("%04x:%04x: create thread D @%p\n",
+        WINE_TRACE("%04lx:%04lx: create thread D @%p\n",
                    de->dwProcessId, de->dwThreadId, de->u.CreateThread.lpStartAddress);
 
         if (dbg_curr_process == NULL)
@@ -460,7 +451,7 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         break;
 
     case EXIT_THREAD_DEBUG_EVENT:
-        WINE_TRACE("%04x:%04x: exit thread (%d)\n",
+        WINE_TRACE("%04lx:%04lx: exit thread (%ld)\n",
                    de->dwProcessId, de->dwThreadId, de->u.ExitThread.dwExitCode);
 
         if (dbg_curr_thread == NULL)
@@ -478,12 +469,10 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
             WINE_ERR("Unknown thread\n");
             break;
         }
-        fetch_module_name(de->u.LoadDll.lpImageName,
-                          de->u.LoadDll.fUnicode,
-                          de->u.LoadDll.lpBaseOfDll,
-                          u.buffer, ARRAY_SIZE(u.buffer), FALSE);
+        fetch_module_name(de->u.LoadDll.lpImageName, de->u.LoadDll.lpBaseOfDll,
+                          u.buffer, ARRAY_SIZE(u.buffer));
 
-        WINE_TRACE("%04x:%04x: loads DLL %s @%p (%u<%u>)\n",
+        WINE_TRACE("%04lx:%04lx: loads DLL %s @%p (%lu<%lu>)\n",
                    de->dwProcessId, de->dwThreadId,
                    wine_dbgstr_w(u.buffer), de->u.LoadDll.lpBaseOfDll,
                    de->u.LoadDll.dwDebugInfoFileOffset,
@@ -495,14 +484,14 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         break_set_xpoints(TRUE);
         if (DBG_IVAR(BreakOnDllLoad))
         {
-            dbg_printf("Stopping on DLL %s loading at %p\n",
-                       dbg_W2A(u.buffer, -1), de->u.LoadDll.lpBaseOfDll);
+            dbg_printf("Stopping on DLL %ls loading at %p\n",
+                       u.buffer, de->u.LoadDll.lpBaseOfDll);
             if (dbg_fetch_context()) cont = 0;
         }
         break;
 
     case UNLOAD_DLL_DEBUG_EVENT:
-        WINE_TRACE("%04x:%04x: unload DLL @%p\n",
+        WINE_TRACE("%04lx:%04lx: unload DLL @%p\n",
                    de->dwProcessId, de->dwThreadId,
                    de->u.UnloadDll.lpBaseOfDll);
         break_delete_xpoints_from_module((DWORD_PTR)de->u.UnloadDll.lpBaseOfDll);
@@ -519,18 +508,18 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         memory_get_string(dbg_curr_process,
                           de->u.DebugString.lpDebugStringData, TRUE,
                           de->u.DebugString.fUnicode, u.bufferA, sizeof(u.bufferA));
-        WINE_TRACE("%04x:%04x: output debug string (%s)\n",
+        WINE_TRACE("%04lx:%04lx: output debug string (%s)\n",
                    de->dwProcessId, de->dwThreadId, u.bufferA);
         break;
 
     case RIP_EVENT:
-        WINE_TRACE("%04x:%04x: rip error=%u type=%u\n",
+        WINE_TRACE("%04lx:%04lx: rip error=%lu type=%lu\n",
                    de->dwProcessId, de->dwThreadId, de->u.RipInfo.dwError,
                    de->u.RipInfo.dwType);
         break;
 
     default:
-        WINE_TRACE("%04x:%04x: unknown event (%x)\n",
+        WINE_TRACE("%04lx:%04lx: unknown event (%lx)\n",
                    de->dwProcessId, de->dwThreadId, de->dwDebugEventCode);
     }
     if (!cont) return TRUE;  /* stop execution */
@@ -559,7 +548,7 @@ static void dbg_resume_debuggee(DWORD cont)
     }
     dbg_interactiveP = FALSE;
     if (!ContinueDebugEvent(dbg_curr_pid, dbg_curr_tid, cont))
-        dbg_printf("Cannot continue on %04lx (%08x)\n", dbg_curr_tid, cont);
+        dbg_printf("Cannot continue on %04lx (%08lx)\n", dbg_curr_tid, cont);
 }
 
 static void wait_exception(void)
@@ -650,44 +639,152 @@ static BOOL dbg_start_debuggee(LPSTR cmdLine)
     dbg_curr_pid = info.dwProcessId;
     if (!(dbg_curr_process = dbg_add_process(&be_process_active_io, dbg_curr_pid, 0))) return FALSE;
     dbg_curr_process->active_debuggee = TRUE;
+    if (cmdLine != dbg_last_cmd_line)
+    {
+        free(dbg_last_cmd_line);
+        dbg_last_cmd_line = cmdLine;
+    }
 
     return TRUE;
 }
 
-void	dbg_run_debuggee(const char* args)
+/***********************************************************************
+ *           dbg_build_command_line
+ *
+ * (converted from dlls/ntdll/unix/env.c)
+ *
+ * Build the command line of a process from the argv array.
+ *
+ * We must quote and escape characters so that the argv array can be rebuilt
+ * from the command line:
+ * - spaces and tabs must be quoted
+ *   'a b'   -> '"a b"'
+ * - quotes must be escaped
+ *   '"'     -> '\"'
+ * - if '\'s are followed by a '"', they must be doubled and followed by '\"',
+ *   resulting in an odd number of '\' followed by a '"'
+ *   '\"'    -> '\\\"'
+ *   '\\"'   -> '\\\\\"'
+ * - '\'s are followed by the closing '"' must be doubled,
+ *   resulting in an even number of '\' followed by a '"'
+ *   ' \'    -> '" \\"'
+ *   ' \\'    -> '" \\\\"'
+ * - '\'s that are not followed by a '"' can be left as is
+ *   'a\b'   == 'a\b'
+ *   'a\\b'  == 'a\\b'
+ */
+static char *dbg_build_command_line( char **argv )
 {
-    if (args)
+    int len;
+    char **arg, *ret;
+    LPSTR p;
+
+    len = 1;
+    for (arg = argv; *arg; arg++) len += 3 + 2 * strlen( *arg );
+    if (!(ret = malloc( len ))) return NULL;
+
+    p = ret;
+    for (arg = argv; *arg; arg++)
     {
-        WINE_FIXME("Re-running current program with %s as args is broken\n", wine_dbgstr_a(args));
-        return;
-    }
-    else 
-    {
-	if (!dbg_last_cmd_line)
+        BOOL has_space, has_quote;
+        int i, bcount;
+        char *a;
+
+        /* check for quotes and spaces in this argument (first arg is always quoted) */
+        has_space = (arg == argv) || !**arg || strchr( *arg, ' ' ) || strchr( *arg, '\t' );
+        has_quote = strchr( *arg, '"' ) != NULL;
+
+        /* now transfer it to the command line */
+        if (has_space) *p++ = '"';
+        if (has_quote || has_space)
         {
-	    dbg_printf("Cannot find previously used command line.\n");
-	    return;
-	}
-	dbg_start_debuggee(dbg_last_cmd_line);
-        dbg_active_wait_for_first_exception();
-        source_list_from_addr(NULL, 0);
+            bcount = 0;
+            for (a = *arg; *a; a++)
+            {
+                if (*a == '\\') bcount++;
+                else
+                {
+                    if (*a == '"') /* double all the '\\' preceding this '"', plus one */
+                        for (i = 0; i <= bcount; i++) *p++ = '\\';
+                    bcount = 0;
+                }
+                *p++ = *a;
+            }
+        }
+        else
+        {
+            strcpy( p, *arg );
+            p += strlen( p );
+        }
+        if (has_space)
+        {
+            /* Double all the '\' preceding the closing quote */
+            for (i = 0; i < bcount; i++) *p++ = '\\';
+            *p++ = '"';
+        }
+        *p++ = ' ';
     }
+    if (p > ret) p--;  /* remove last space */
+    *p = 0;
+    return ret;
 }
 
-static BOOL str2int(const char* HOSTPTR str, DWORD_PTR* val)
-{
-    char* HOSTPTR ptr;
 
-    *val = strtol(str, &ptr, 10);
+void	dbg_run_debuggee(struct list_string* ls)
+{
+    if (dbg_curr_process)
+    {
+        dbg_printf("Already attached to a process. Use 'detach' or 'kill' before using 'run'\n");
+        return;
+    }
+    if (!dbg_executable)
+    {
+        dbg_printf("No active target to be restarted\n");
+        return;
+    }
+    if (ls)
+    {
+        char* cl;
+        char** argv;
+        unsigned argc = 2, i;
+        struct list_string* cls;
+
+        for (cls = ls; cls; cls = cls->next) argc++;
+        if (!(argv = malloc(argc * sizeof(argv[0])))) return;
+        argv[0] = dbg_executable;
+        for (i = 1, cls = ls; cls; cls = cls->next, i++) argv[i] = cls->string;
+        argv[i] = NULL;
+        cl = dbg_build_command_line(argv);
+        free(argv);
+
+        if (!cl || !dbg_start_debuggee(cl))
+        {
+            free(cl);
+            return;
+        }
+    }
+    else
+    {
+        if (!dbg_last_cmd_line) dbg_last_cmd_line = strdup(dbg_executable);
+        dbg_start_debuggee(dbg_last_cmd_line);
+    }
+    dbg_active_wait_for_first_exception();
+    source_list_from_addr(NULL, 0);
+}
+
+static BOOL str2int(const char* str, DWORD_PTR* val)
+{
+    char*   ptr;
+
+    *val = strtol(str, &ptr, 0);
     return str < ptr && !*ptr;
 }
 
 static HANDLE create_temp_file(void)
 {
-    static const WCHAR prefixW[] = {'w','d','b',0};
     WCHAR path[MAX_PATH], name[MAX_PATH];
 
-    if (!GetTempPathW( MAX_PATH, path ) || !GetTempFileNameW( path, prefixW, 0, name ))
+    if (!GetTempPathW( MAX_PATH, path ) || !GetTempFileNameW( path, L"wdb", 0, name ))
         return INVALID_HANDLE_VALUE;
     return CreateFileW( name, GENERIC_READ|GENERIC_WRITE|DELETE, FILE_SHARE_DELETE,
                         NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, 0 );
@@ -745,7 +842,7 @@ static const char *get_windows_version(void)
         }
     }
 
-    snprintf( str, sizeof(str), "%d.%d (%d)", info.dwMajorVersion,
+    snprintf( str, sizeof(str), "%ld.%ld (%d)", info.dwMajorVersion,
               info.dwMinorVersion, info.wProductType );
     return str;
 }
@@ -754,8 +851,6 @@ static void output_system_info(void)
 {
 #ifdef __i386__
     static const char platform[] = "i386";
-#elif defined(__i386_on_x86_64__)
-    static const char platform[] = "x86_32on64";
 #elif defined(__x86_64__)
     static const char platform[] = "x86_64";
 #elif defined(__arm__)
@@ -828,36 +923,19 @@ enum dbg_start  dbg_active_attach(int argc, char* argv[])
  */
 enum dbg_start    dbg_active_launch(int argc, char* argv[])
 {
-    int         i, len;
     LPSTR	cmd_line;
 
     if (argc == 0) return start_error_parse;
 
-    if (!(cmd_line = HeapAlloc(GetProcessHeap(), 0, len = 1)))
-    {
-    oom_leave:
-        dbg_printf("Out of memory\n");
-        return start_error_init;
-    }
-    cmd_line[0] = '\0';
-
-    for (i = 0; i < argc; i++)
-    {
-        len += strlen(argv[i]) + 1;
-        if (!(cmd_line = HeapReAlloc(GetProcessHeap(), 0, cmd_line, len)))
-            goto oom_leave;
-        strcat(cmd_line, argv[i]);
-        cmd_line[len - 2] = ' ';
-        cmd_line[len - 1] = '\0';
-    }
+    dbg_executable = strdup(argv[0]);
+    cmd_line = dbg_build_command_line(argv);
 
     if (!dbg_start_debuggee(cmd_line))
     {
-        HeapFree(GetProcessHeap(), 0, cmd_line);
+        free(cmd_line);
         return start_error_init;
     }
-    HeapFree(GetProcessHeap(), 0, dbg_last_cmd_line);
-    dbg_last_cmd_line = cmd_line;
+
     return start_ok;
 }
 
@@ -886,7 +964,7 @@ enum dbg_start dbg_active_auto(int argc, char* argv[])
     case ID_DEBUG:
         AllocConsole();
         dbg_init_console();
-        dbg_start_interactive(INVALID_HANDLE_VALUE);
+        dbg_start_interactive(NULL, INVALID_HANDLE_VALUE);
         return start_ok;
     case ID_DETAILS:
         event = CreateEventW( NULL, TRUE, FALSE, NULL );
@@ -903,7 +981,7 @@ enum dbg_start dbg_active_auto(int argc, char* argv[])
         dbg_active_wait_for_first_exception();
 
     dbg_interactiveP = TRUE;
-    parser_handle(input);
+    parser_handle(NULL, input);
     output_system_info();
 
     if (output != INVALID_HANDLE_VALUE)
@@ -984,7 +1062,7 @@ enum dbg_start dbg_active_minidump(int argc, char* argv[])
         dbg_active_wait_for_first_exception();
 
     dbg_interactiveP = TRUE;
-    parser_handle(hFile);
+    parser_handle(NULL, hFile);
 
     return start_ok;
 }
@@ -1025,46 +1103,16 @@ static BOOL tgt_process_active_close_process(struct dbg_process* pcs, BOOL kill)
     return TRUE;
 }
 
-static BOOL tgt_process_active_read(HANDLE hProcess, const void* HOSTPTR addr,
-                                    void* buffer, SIZE_T len, SIZE_T* HOSTPTR rlen)
+static BOOL tgt_process_active_read(HANDLE hProcess, const void* addr,
+                                    void* buffer, SIZE_T len, SIZE_T* rlen)
 {
-    const void * WIN32PTR guestptr;
-    SIZE_T guestlen;
-    BOOL ret;
-#ifdef __i386_on_x86_64__
-    guestptr = TRUNCCAST(const void *, addr);
-    if (addr != guestptr)
-    {
-        FIXME("Read of 64 bit address %p from 32 bit process.\n", addr);
-        return FALSE;
-    }
-#else
-    guestptr = addr;
-#endif
-    ret = ReadProcessMemory( hProcess, guestptr, buffer, len, &guestlen );
-    *rlen = guestlen;
-    return ret;
+    return ReadProcessMemory( hProcess, addr, buffer, len, rlen );
 }
 
-static BOOL tgt_process_active_write(HANDLE hProcess, void* HOSTPTR addr,
+static BOOL tgt_process_active_write(HANDLE hProcess, void* addr,
                                      const void* buffer, SIZE_T len, SIZE_T* wlen)
 {
-    void * WIN32PTR guestptr;
-    SIZE_T guestlen;
-    BOOL ret;
-#ifdef __i386_on_x86_64__
-    guestptr = TRUNCCAST(void *, addr);
-    if (addr != guestptr)
-    {
-        FIXME("Read of 64 bit address %p from 32 bit process.\n", addr);
-        return FALSE;
-    }
-#else
-    guestptr = addr;
-#endif
-    ret = WriteProcessMemory( hProcess, guestptr, buffer, len, &guestlen );
-    *wlen = guestlen;
-    return ret;
+    return WriteProcessMemory( hProcess, addr, buffer, len, wlen );
 }
 
 static BOOL tgt_process_active_get_selector(HANDLE hThread, DWORD sel, LDT_ENTRY* le)

@@ -83,7 +83,7 @@ typedef struct _lldiv_t {
 extern "C" {
 #endif
 
-#if defined(__i386__) || defined(__i386_on_x86_64__) || defined(_UCRT)
+#if defined(__i386__) || defined(_UCRT)
 
 _ACRTIMP unsigned int* __cdecl __p__osver(void);
 _ACRTIMP unsigned int* __cdecl __p__winver(void);
@@ -155,6 +155,9 @@ _ACRTIMP __int64       __cdecl _atoi64(const char*);
 _ACRTIMP long double   __cdecl _atold(const char*);
 _ACRTIMP int           __cdecl _atoldbl(_LDOUBLE*,char*);
 _ACRTIMP void          __cdecl _beep(unsigned int,unsigned int);
+_ACRTIMP unsigned short   __cdecl _byteswap_ushort(unsigned short);
+_ACRTIMP __msvcrt_ulong   __cdecl _byteswap_ulong(__msvcrt_ulong);
+_ACRTIMP unsigned __int64 __cdecl _byteswap_uint64(unsigned __int64);
 _ACRTIMP char*         __cdecl _ecvt(double,int,int*,int*);
 _ACRTIMP char*         __cdecl _fcvt(double,int,int*,int*);
 _ACRTIMP char*         __cdecl _fullpath(char*,const char*,size_t);
@@ -166,15 +169,23 @@ _ACRTIMP char*         __cdecl _itoa(int,char*,int);
 _ACRTIMP errno_t       __cdecl _itoa_s(int,char*,size_t,int);
 _ACRTIMP char*         __cdecl _ltoa(__msvcrt_long,char*,int);
 _ACRTIMP errno_t       __cdecl _ltoa_s(__msvcrt_long, char*, size_t, int);
+#ifndef _lrotl
 _ACRTIMP __msvcrt_ulong __cdecl _lrotl(__msvcrt_ulong,int);
+#endif
+#ifndef _lrotr
 _ACRTIMP __msvcrt_ulong __cdecl _lrotr(__msvcrt_ulong,int);
+#endif
 _ACRTIMP void          __cdecl _makepath(char*,const char*,const char*,const char*,const char*);
 _ACRTIMP int           __cdecl _makepath_s(char*,size_t,const char*,const char*,const char*,const char*);
 _ACRTIMP size_t        __cdecl _mbstrlen(const char*);
 _ACRTIMP _onexit_t     __cdecl _onexit(_onexit_t);
 _ACRTIMP int           __cdecl _putenv(const char*);
+#ifndef _rotl
 _ACRTIMP unsigned int  __cdecl _rotl(unsigned int,int);
+#endif
+#ifndef _rotr
 _ACRTIMP unsigned int  __cdecl _rotr(unsigned int,int);
+#endif
 _ACRTIMP void          __cdecl _searchenv(const char*,const char*,char*);
 _ACRTIMP int           __cdecl _set_error_mode(int);
 _ACRTIMP void          __cdecl _seterrormode(int);
@@ -197,7 +208,7 @@ _ACRTIMP int           __cdecl _atoi_l(const char*,_locale_t);
 _ACRTIMP __msvcrt_long __cdecl atol(const char*);
 _ACRTIMP __int64       __cdecl atoll(const char*);
 _ACRTIMP void*         __cdecl calloc(size_t,size_t);
-#if !defined(__i386__) && !defined(__i386_on_x86_64__)
+#ifndef __i386__
 _ACRTIMP div_t  __cdecl div(int,int);
 _ACRTIMP ldiv_t __cdecl ldiv(__msvcrt_long,__msvcrt_long);
 #endif
@@ -269,7 +280,7 @@ static inline unsigned __int64 __cdecl strtoull(const char *ptr, char **endptr, 
 static inline void swab(char* src, char* dst, int len) { _swab(src, dst, len); }
 static inline char* ultoa(__msvcrt_ulong value, char* str, int radix) { return _ultoa(value, str, radix); }
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 static inline div_t __wine_msvcrt_div(int num, int denom)
 {
     extern unsigned __int64 div(int,int);

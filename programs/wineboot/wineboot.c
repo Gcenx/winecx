@@ -265,7 +265,7 @@ static void create_user_shared_data(void)
     InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
     if ((status = NtOpenSection( &handle, SECTION_ALL_ACCESS, &attr )))
     {
-        ERR( "cannot open __wine_user_shared_data: %x\n", status );
+        ERR( "cannot open __wine_user_shared_data: %lx\n", status );
         return;
     }
     data = MapViewOfFile( handle, FILE_MAP_WRITE, 0, 0, sizeof(*data) );
@@ -286,49 +286,50 @@ static void create_user_shared_data(void)
     data->NtBuildNumber               = version.dwBuildNumber;
     data->NtProductType               = version.wProductType;
     data->ProductTypeIsValid          = TRUE;
-    data->NativeProcessorArchitecture = sci.Architecture;
+    data->NativeProcessorArchitecture = sci.ProcessorArchitecture;
     data->NtMajorVersion              = version.dwMajorVersion;
     data->NtMinorVersion              = version.dwMinorVersion;
     data->SuiteMask                   = version.wSuiteMask;
     data->NumberOfPhysicalPages       = sbi.MmNumberOfPhysicalPages;
+    data->NXSupportPolicy             = NX_SUPPORT_POLICY_OPTIN;
     wcscpy( data->NtSystemRoot, L"C:\\windows" );
 
     features = data->ProcessorFeatures;
-    switch (sci.Architecture)
+    switch (sci.ProcessorArchitecture)
     {
     case PROCESSOR_ARCHITECTURE_INTEL:
     case PROCESSOR_ARCHITECTURE_AMD64:
-        features[PF_COMPARE_EXCHANGE_DOUBLE]              = !!(sci.FeatureSet & CPU_FEATURE_CX8);
-        features[PF_MMX_INSTRUCTIONS_AVAILABLE]           = !!(sci.FeatureSet & CPU_FEATURE_MMX);
-        features[PF_XMMI_INSTRUCTIONS_AVAILABLE]          = !!(sci.FeatureSet & CPU_FEATURE_SSE);
-        features[PF_3DNOW_INSTRUCTIONS_AVAILABLE]         = !!(sci.FeatureSet & CPU_FEATURE_3DNOW);
-        features[PF_RDTSC_INSTRUCTION_AVAILABLE]          = !!(sci.FeatureSet & CPU_FEATURE_TSC);
-        features[PF_PAE_ENABLED]                          = !!(sci.FeatureSet & CPU_FEATURE_PAE);
-        features[PF_XMMI64_INSTRUCTIONS_AVAILABLE]        = !!(sci.FeatureSet & CPU_FEATURE_SSE2);
-        features[PF_SSE3_INSTRUCTIONS_AVAILABLE]          = !!(sci.FeatureSet & CPU_FEATURE_SSE3);
-        features[PF_SSSE3_INSTRUCTIONS_AVAILABLE]         = !!(sci.FeatureSet & CPU_FEATURE_SSSE3);
-        features[PF_XSAVE_ENABLED]                        = !!(sci.FeatureSet & CPU_FEATURE_XSAVE);
-        features[PF_COMPARE_EXCHANGE128]                  = !!(sci.FeatureSet & CPU_FEATURE_CX128);
-        features[PF_SSE_DAZ_MODE_AVAILABLE]               = !!(sci.FeatureSet & CPU_FEATURE_DAZ);
-        features[PF_NX_ENABLED]                           = !!(sci.FeatureSet & CPU_FEATURE_NX);
-        features[PF_SECOND_LEVEL_ADDRESS_TRANSLATION]     = !!(sci.FeatureSet & CPU_FEATURE_2NDLEV);
-        features[PF_VIRT_FIRMWARE_ENABLED]                = !!(sci.FeatureSet & CPU_FEATURE_VIRT);
-        features[PF_RDWRFSGSBASE_AVAILABLE]               = !!(sci.FeatureSet & CPU_FEATURE_RDFS);
+        features[PF_COMPARE_EXCHANGE_DOUBLE]              = !!(sci.ProcessorFeatureBits & CPU_FEATURE_CX8);
+        features[PF_MMX_INSTRUCTIONS_AVAILABLE]           = !!(sci.ProcessorFeatureBits & CPU_FEATURE_MMX);
+        features[PF_XMMI_INSTRUCTIONS_AVAILABLE]          = !!(sci.ProcessorFeatureBits & CPU_FEATURE_SSE);
+        features[PF_3DNOW_INSTRUCTIONS_AVAILABLE]         = !!(sci.ProcessorFeatureBits & CPU_FEATURE_3DNOW);
+        features[PF_RDTSC_INSTRUCTION_AVAILABLE]          = !!(sci.ProcessorFeatureBits & CPU_FEATURE_TSC);
+        features[PF_PAE_ENABLED]                          = !!(sci.ProcessorFeatureBits & CPU_FEATURE_PAE);
+        features[PF_XMMI64_INSTRUCTIONS_AVAILABLE]        = !!(sci.ProcessorFeatureBits & CPU_FEATURE_SSE2);
+        features[PF_SSE3_INSTRUCTIONS_AVAILABLE]          = !!(sci.ProcessorFeatureBits & CPU_FEATURE_SSE3);
+        features[PF_SSSE3_INSTRUCTIONS_AVAILABLE]         = !!(sci.ProcessorFeatureBits & CPU_FEATURE_SSSE3);
+        features[PF_XSAVE_ENABLED]                        = !!(sci.ProcessorFeatureBits & CPU_FEATURE_XSAVE);
+        features[PF_COMPARE_EXCHANGE128]                  = !!(sci.ProcessorFeatureBits & CPU_FEATURE_CX128);
+        features[PF_SSE_DAZ_MODE_AVAILABLE]               = !!(sci.ProcessorFeatureBits & CPU_FEATURE_DAZ);
+        features[PF_NX_ENABLED]                           = !!(sci.ProcessorFeatureBits & CPU_FEATURE_NX);
+        features[PF_SECOND_LEVEL_ADDRESS_TRANSLATION]     = !!(sci.ProcessorFeatureBits & CPU_FEATURE_2NDLEV);
+        features[PF_VIRT_FIRMWARE_ENABLED]                = !!(sci.ProcessorFeatureBits & CPU_FEATURE_VIRT);
+        features[PF_RDWRFSGSBASE_AVAILABLE]               = !!(sci.ProcessorFeatureBits & CPU_FEATURE_RDFS);
         features[PF_FASTFAIL_AVAILABLE]                   = TRUE;
-        features[PF_SSE4_1_INSTRUCTIONS_AVAILABLE]        = !!(sci.FeatureSet & CPU_FEATURE_SSE41);
-        features[PF_SSE4_2_INSTRUCTIONS_AVAILABLE]        = !!(sci.FeatureSet & CPU_FEATURE_SSE42);
-        features[PF_AVX_INSTRUCTIONS_AVAILABLE]           = !!(sci.FeatureSet & CPU_FEATURE_AVX);
-        features[PF_AVX2_INSTRUCTIONS_AVAILABLE]          = !!(sci.FeatureSet & CPU_FEATURE_AVX2);
+        features[PF_SSE4_1_INSTRUCTIONS_AVAILABLE]        = !!(sci.ProcessorFeatureBits & CPU_FEATURE_SSE41);
+        features[PF_SSE4_2_INSTRUCTIONS_AVAILABLE]        = !!(sci.ProcessorFeatureBits & CPU_FEATURE_SSE42);
+        features[PF_AVX_INSTRUCTIONS_AVAILABLE]           = !!(sci.ProcessorFeatureBits & CPU_FEATURE_AVX);
+        features[PF_AVX2_INSTRUCTIONS_AVAILABLE]          = !!(sci.ProcessorFeatureBits & CPU_FEATURE_AVX2);
         break;
     case PROCESSOR_ARCHITECTURE_ARM:
-        features[PF_ARM_VFP_32_REGISTERS_AVAILABLE]       = !!(sci.FeatureSet & CPU_FEATURE_ARM_VFP_32);
-        features[PF_ARM_NEON_INSTRUCTIONS_AVAILABLE]      = !!(sci.FeatureSet & CPU_FEATURE_ARM_NEON);
-        features[PF_ARM_V8_INSTRUCTIONS_AVAILABLE]        = (sci.Level >= 8);
+        features[PF_ARM_VFP_32_REGISTERS_AVAILABLE]       = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_VFP_32);
+        features[PF_ARM_NEON_INSTRUCTIONS_AVAILABLE]      = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_NEON);
+        features[PF_ARM_V8_INSTRUCTIONS_AVAILABLE]        = (sci.ProcessorLevel >= 8);
         break;
     case PROCESSOR_ARCHITECTURE_ARM64:
         features[PF_ARM_V8_INSTRUCTIONS_AVAILABLE]        = TRUE;
-        features[PF_ARM_V8_CRC32_INSTRUCTIONS_AVAILABLE]  = !!(sci.FeatureSet & CPU_FEATURE_ARM_V8_CRC32);
-        features[PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE] = !!(sci.FeatureSet & CPU_FEATURE_ARM_V8_CRYPTO);
+        features[PF_ARM_V8_CRC32_INSTRUCTIONS_AVAILABLE]  = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_V8_CRC32);
+        features[PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE] = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_V8_CRYPTO);
         break;
     }
     data->ActiveProcessorCount = NtCurrentTeb()->Peb->NumberOfProcessors;
@@ -665,12 +666,12 @@ static void create_hardware_registry_keys(void)
     if (NtPowerInformation( ProcessorInformation, NULL, 0, power_info, sizeof_power_info ))
         memset( power_info, 0, sizeof_power_info );
 
-    switch (sci.Architecture)
+    switch (sci.ProcessorArchitecture)
     {
     case PROCESSOR_ARCHITECTURE_ARM:
     case PROCESSOR_ARCHITECTURE_ARM64:
         swprintf( id, ARRAY_SIZE(id), L"ARM Family %u Model %u Revision %u",
-                  sci.Level, HIBYTE(sci.Revision), LOBYTE(sci.Revision) );
+                  sci.ProcessorLevel, HIBYTE(sci.ProcessorRevision), LOBYTE(sci.ProcessorRevision) );
         break;
 
     case PROCESSOR_ARCHITECTURE_AMD64:
@@ -690,7 +691,7 @@ static void create_hardware_registry_keys(void)
         return;
     }
 
-    switch (sci.Architecture)
+    switch (sci.ProcessorArchitecture)
     {
     case PROCESSOR_ARCHITECTURE_ARM:
     case PROCESSOR_ARCHITECTURE_ARM64:
@@ -704,8 +705,8 @@ static void create_hardware_registry_keys(void)
         break;
     }
 
-    if (sci.Architecture == PROCESSOR_ARCHITECTURE_ARM ||
-        sci.Architecture == PROCESSOR_ARCHITECTURE_ARM64 ||
+    if (sci.ProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM ||
+        sci.ProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM64 ||
         RegCreateKeyExW( system_key, L"FloatingPointProcessor", 0, NULL, REG_OPTION_VOLATILE,
                          KEY_ALL_ACCESS, NULL, &fpu_key, NULL ))
         fpu_key = 0;
@@ -721,7 +722,7 @@ static void create_hardware_registry_keys(void)
         if (!RegCreateKeyExW( cpu_key, numW, 0, NULL, REG_OPTION_VOLATILE,
                               KEY_ALL_ACCESS, NULL, &hkey, NULL ))
         {
-            RegSetValueExW( hkey, L"FeatureSet", 0, REG_DWORD, (BYTE *)&sci.FeatureSet, sizeof(DWORD) );
+            RegSetValueExW( hkey, L"FeatureSet", 0, REG_DWORD, (BYTE *)&sci.ProcessorFeatureBits, sizeof(DWORD) );
             set_reg_value( hkey, L"Identifier", id );
             /* TODO: report ARM properly */
             set_reg_value( hkey, L"ProcessorNameString", namestr );
@@ -729,8 +730,8 @@ static void create_hardware_registry_keys(void)
             RegSetValueExW( hkey, L"~MHz", 0, REG_DWORD, (BYTE *)&power_info[i].MaxMhz, sizeof(DWORD) );
             RegCloseKey( hkey );
         }
-        if (sci.Architecture != PROCESSOR_ARCHITECTURE_ARM &&
-            sci.Architecture != PROCESSOR_ARCHITECTURE_ARM64 &&
+        if (sci.ProcessorArchitecture != PROCESSOR_ARCHITECTURE_ARM &&
+            sci.ProcessorArchitecture != PROCESSOR_ARCHITECTURE_ARM64 &&
             !RegCreateKeyExW( fpu_key, numW, 0, NULL, REG_OPTION_VOLATILE,
                               KEY_ALL_ACCESS, NULL, &hkey, NULL ))
         {
@@ -775,7 +776,7 @@ static void create_environment_registry_keys( void )
     swprintf( buffer, ARRAY_SIZE(buffer), L"%u", NtCurrentTeb()->Peb->NumberOfProcessors );
     set_reg_value( env_key, L"NUMBER_OF_PROCESSORS", buffer );
 
-    switch (sci.Architecture)
+    switch (sci.ProcessorArchitecture)
     {
     case PROCESSOR_ARCHITECTURE_AMD64:
         arch = L"AMD64";
@@ -789,12 +790,12 @@ static void create_environment_registry_keys( void )
     }
     set_reg_value( env_key, L"PROCESSOR_ARCHITECTURE", arch );
 
-    switch (sci.Architecture)
+    switch (sci.ProcessorArchitecture)
     {
     case PROCESSOR_ARCHITECTURE_ARM:
     case PROCESSOR_ARCHITECTURE_ARM64:
         swprintf( buffer, ARRAY_SIZE(buffer), L"ARM Family %u Model %u Revision %u",
-                  sci.Level, HIBYTE(sci.Revision), LOBYTE(sci.Revision) );
+                  sci.ProcessorLevel, HIBYTE(sci.ProcessorRevision), LOBYTE(sci.ProcessorRevision) );
         break;
 
     case PROCESSOR_ARCHITECTURE_AMD64:
@@ -807,10 +808,10 @@ static void create_environment_registry_keys( void )
     }
     set_reg_value( env_key, L"PROCESSOR_IDENTIFIER", buffer );
 
-    swprintf( buffer, ARRAY_SIZE(buffer), L"%u", sci.Level );
+    swprintf( buffer, ARRAY_SIZE(buffer), L"%u", sci.ProcessorLevel );
     set_reg_value( env_key, L"PROCESSOR_LEVEL", buffer );
 
-    swprintf( buffer, ARRAY_SIZE(buffer), L"%04x", sci.Revision );
+    swprintf( buffer, ARRAY_SIZE(buffer), L"%04x", sci.ProcessorRevision );
     set_reg_value( env_key, L"PROCESSOR_REVISION", buffer );
 
     RegCloseKey( env_key );
@@ -825,7 +826,9 @@ static void create_computer_name_keys(void)
 
     if (gethostname( buffer, sizeof(buffer) )) return;
     hints.ai_flags = AI_CANONNAME;
-    if (!getaddrinfo( buffer, NULL, &hints, &res )) name = res->ai_canonname;
+    if (!getaddrinfo( buffer, NULL, &hints, &res ) &&
+        res->ai_canonname && strcasecmp(res->ai_canonname, "localhost") != 0)
+        name = res->ai_canonname;
     dot = strchr( name, '.' );
     if (dot) *dot++ = 0;
     else dot = name + strlen(name);
@@ -950,7 +953,7 @@ static BOOL wininit(void)
 
     if( !MoveFileExW( L"wininit.ini", L"wininit.bak", MOVEFILE_REPLACE_EXISTING) )
     {
-        WINE_ERR("Couldn't rename wininit.ini, error %d\n", GetLastError() );
+        WINE_ERR("Couldn't rename wininit.ini, error %ld\n", GetLastError() );
 
         return FALSE;
     }
@@ -1053,7 +1056,7 @@ static DWORD runCmd(LPWSTR cmdline, LPCWSTR dir, BOOL wait, BOOL minimized)
 
     if( !CreateProcessW(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, dir, &si, &info) )
     {
-        WINE_WARN("Failed to run command %s (%d)\n", wine_dbgstr_w(cmdline), GetLastError() );
+        WINE_WARN("Failed to run command %s (%ld)\n", wine_dbgstr_w(cmdline), GetLastError() );
         return INVALID_RUNCMD_RETURN;
     }
 
@@ -1110,23 +1113,23 @@ static void process_run_key( HKEY key, const WCHAR *keyname, BOOL delete, BOOL s
 
         if ((res = RegEnumValueW( runkey, --i, value, &len, 0, &type, (BYTE *)cmdline, &len_data )))
         {
-            WINE_ERR( "Couldn't read value %u (%d).\n", i, res );
+            WINE_ERR( "Couldn't read value %lu (%ld).\n", i, res );
             continue;
         }
         if (delete && (res = RegDeleteValueW( runkey, value )))
         {
-            WINE_ERR( "Couldn't delete value %u (%d). Running command anyways.\n", i, res );
+            WINE_ERR( "Couldn't delete value %lu (%ld). Running command anyways.\n", i, res );
         }
         if (type != REG_SZ)
         {
-            WINE_ERR( "Incorrect type of value %u (%u).\n", i, type );
+            WINE_ERR( "Incorrect type of value %lu (%lu).\n", i, type );
             continue;
         }
         if (runCmd( cmdline, NULL, synchronous, FALSE ) == INVALID_RUNCMD_RETURN)
         {
-            WINE_ERR( "Error running cmd %s (%u).\n", wine_dbgstr_w(cmdline), GetLastError() );
+            WINE_ERR( "Error running cmd %s (%lu).\n", wine_dbgstr_w(cmdline), GetLastError() );
         }
-        WINE_TRACE( "Done processing cmd %u.\n", i );
+        WINE_TRACE( "Done processing cmd %lu.\n", i );
     }
 
 end:
@@ -1242,7 +1245,7 @@ static int ProcessWindowsFileProtection(void)
                              dllcache, targetpath, currentpath, tempfile, &sz);
         if (rc != ERROR_SUCCESS)
         {
-            WINE_WARN("WFP: %s error 0x%x\n",wine_dbgstr_w(finddata.cFileName),rc);
+            WINE_WARN("WFP: %s error 0x%lx\n",wine_dbgstr_w(finddata.cFileName),rc);
             DeleteFileW(tempfile);
         }
 
@@ -1252,7 +1255,7 @@ static int ProcessWindowsFileProtection(void)
         targetpath[sz++] = '\\';
         lstrcpynW( targetpath + sz, finddata.cFileName, MAX_PATH - sz );
         if (!DeleteFileW( targetpath ))
-            WINE_WARN( "failed to delete %s: error %u\n", wine_dbgstr_w(targetpath), GetLastError() );
+            WINE_WARN( "failed to delete %s: error %lu\n", wine_dbgstr_w(targetpath), GetLastError() );
 
         find_rc = FindNextFileW(find_handle,&finddata);
     }
@@ -1271,7 +1274,7 @@ static BOOL start_services_process(void)
     if (!CreateProcessW(L"C:\\windows\\system32\\services.exe", NULL,
                         NULL, NULL, TRUE, DETACHED_PROCESS, NULL, NULL, &si, &pi))
     {
-        WINE_ERR("Couldn't start services.exe: error %u\n", GetLastError());
+        WINE_ERR("Couldn't start services.exe: error %lu\n", GetLastError());
         return FALSE;
     }
     CloseHandle(pi.hThread);
@@ -1284,7 +1287,7 @@ static BOOL start_services_process(void)
     {
         DWORD exit_code;
         GetExitCodeProcess(pi.hProcess, &exit_code);
-        WINE_ERR("Unexpected termination of services.exe - exit code %d\n", exit_code);
+        WINE_ERR("Unexpected termination of services.exe - exit code %ld\n", exit_code);
         CloseHandle(pi.hProcess);
         CloseHandle(wait_handles[0]);
         return FALSE;
@@ -1326,7 +1329,7 @@ static HWND show_wait_window(void)
     return hwnd;
 }
 
-static HANDLE start_rundll32( const WCHAR *inf_path, BOOL wow64 )
+static HANDLE start_rundll32( const WCHAR *inf_path, const WCHAR *install, WORD machine )
 {
     WCHAR app[MAX_PATH + ARRAY_SIZE(L"\\rundll32.exe" )];
     STARTUPINFOW si;
@@ -1337,23 +1340,14 @@ static HANDLE start_rundll32( const WCHAR *inf_path, BOOL wow64 )
     memset( &si, 0, sizeof(si) );
     si.cb = sizeof(si);
 
-    if (wow64)
-    {
-        if (!GetSystemWow64DirectoryW( app, MAX_PATH )) return 0;  /* not on 64-bit */
-    }
-    else GetSystemDirectoryW( app, MAX_PATH );
-
+    if (!GetSystemWow64Directory2W( app, MAX_PATH, machine )) return 0;
     lstrcatW( app, L"\\rundll32.exe" );
+    TRACE( "machine %x starting %s\n", machine, debugstr_w(app) );
 
     len = lstrlenW(app) + ARRAY_SIZE(L" setupapi,InstallHinfSection DefaultInstall 128 ") + lstrlenW(inf_path);
 
     if (!(buffer = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) return 0;
-
-    lstrcpyW( buffer, app );
-    lstrcatW( buffer, L" setupapi,InstallHinfSection" );
-    lstrcatW( buffer, wow64 ? L" Wow64Install" : L" DefaultInstall" );
-    lstrcatW( buffer, L" 128 " );
-    lstrcatW( buffer, inf_path );
+    swprintf( buffer, len, L"%s setupapi,InstallHinfSection %s 128 %s", app, install, inf_path );
 
     if (1)
     {
@@ -1437,7 +1431,7 @@ static void install_root_pnp_devices(void)
 
     if ((set = SetupDiCreateDeviceInfoList( NULL, NULL )) == INVALID_HANDLE_VALUE)
     {
-        WINE_ERR("Failed to create device info list, error %#x.\n", GetLastError());
+        WINE_ERR("Failed to create device info list, error %#lx.\n", GetLastError());
         return;
     }
 
@@ -1446,25 +1440,25 @@ static void install_root_pnp_devices(void)
         if (!SetupDiCreateDeviceInfoA( set, root_devices[i].name, &GUID_NULL, NULL, NULL, 0, &device))
         {
             if (GetLastError() != ERROR_DEVINST_ALREADY_EXISTS)
-                WINE_ERR("Failed to create device %s, error %#x.\n", debugstr_a(root_devices[i].name), GetLastError());
+                WINE_ERR("Failed to create device %s, error %#lx.\n", debugstr_a(root_devices[i].name), GetLastError());
             continue;
         }
 
         if (!SetupDiSetDeviceRegistryPropertyA(set, &device, SPDRP_HARDWAREID,
                 (const BYTE *)root_devices[i].hardware_id, (strlen(root_devices[i].hardware_id) + 2) * sizeof(WCHAR)))
         {
-            WINE_ERR("Failed to set hardware id for %s, error %#x.\n", debugstr_a(root_devices[i].name), GetLastError());
+            WINE_ERR("Failed to set hardware id for %s, error %#lx.\n", debugstr_a(root_devices[i].name), GetLastError());
             continue;
         }
 
         if (!SetupDiCallClassInstaller(DIF_REGISTERDEVICE, set, &device))
         {
-            WINE_ERR("Failed to register device %s, error %#x.\n", debugstr_a(root_devices[i].name), GetLastError());
+            WINE_ERR("Failed to register device %s, error %#lx.\n", debugstr_a(root_devices[i].name), GetLastError());
             continue;
         }
 
         if (!UpdateDriverForPlugAndPlayDevicesA(NULL, root_devices[i].hardware_id, root_devices[i].infpath, 0, NULL))
-            WINE_ERR("Failed to install drivers for %s, error %#x.\n", debugstr_a(root_devices[i].name), GetLastError());
+            WINE_ERR("Failed to install drivers for %s, error %#lx.\n", debugstr_a(root_devices[i].name), GetLastError());
     }
 
     SetupDiDestroyDeviceInfoList(set);
@@ -1530,11 +1524,41 @@ static void update_wineprefix( BOOL force )
 
     if (update_timestamp( config_dir, st.st_mtime ) || force)
     {
-        HANDLE process;
+        ULONG machines[8];
+        HANDLE process = 0;
         DWORD count = 0;
         char* old_dlloverrides = setup_dll_overrides();
+        HMODULE module;
+        HINF inf;
 
-        if ((process = start_rundll32( inf_path, FALSE )))
+        /* crossover hack 21088: initialize the prefix early, without using
+         * user32, so that explorer.exe can successfully register
+         * CLSID_ShellWindows.
+         *
+         * explorer needs actxprxy (for the COM proxy to be registered), rpcss
+         * (for the service to be found). both of these need dlls to exist on
+         * disk.
+         */
+        if ((inf = SetupOpenInfFileW( inf_path, NULL, INF_STYLE_WIN4, NULL )))
+        {
+            void *callback_context;
+
+            callback_context = SetupInitDefaultQueueCallback( NULL );
+            SetupInstallFromInfSectionW( NULL, inf, L"DefaultInstall", 0, NULL, NULL,
+                    SP_COPY_NEWER, SetupDefaultQueueCallbackW, callback_context, NULL, NULL );
+            SetupTermDefaultQueueCallback( callback_context );
+            SetupInstallServicesFromInfSectionW( inf, L"DefaultInstall.Services", 0 );
+            SetupCloseInfFile( inf );
+        }
+        else
+        {
+            ERR( "failed to open %s, error %lu\n", debugstr_w(inf_path), GetLastError() );
+        }
+
+        if (NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
+                                        machines, sizeof(machines), NULL )) machines[0] = 0;
+
+        if ((process = start_rundll32( inf_path, L"PreInstall", IMAGE_FILE_MACHINE_TARGET_HOST )))
         {
             /* HACK: Disable the wait window as it is deemed confusing */
             HWND hwnd = 1 ? NULL : show_wait_window();
@@ -1545,7 +1569,13 @@ static void update_wineprefix( BOOL force )
                 if (res == WAIT_OBJECT_0)
                 {
                     CloseHandle( process );
-                    if (count++ || !(process = start_rundll32( inf_path, TRUE ))) break;
+                    if (!machines[count]) break;
+                    if (HIWORD(machines[count]) & 4 /* native machine */)
+                        process = start_rundll32( inf_path, L"DefaultInstall", IMAGE_FILE_MACHINE_TARGET_HOST );
+                    else
+                        process = start_rundll32( inf_path, L"Wow64Install", LOWORD(machines[count]) );
+                    count++;
+                    if (!process) break;
                 }
                 else while (PeekMessageW( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessageW( &msg );
             }
@@ -1672,7 +1702,7 @@ int __cdecl main( int argc, char *argv[] )
     end_session = force = init = kill = restart = shutdown = update = FALSE;
     GetWindowsDirectoryW( windowsdir, MAX_PATH );
     if( !SetCurrentDirectoryW( windowsdir ) )
-        WINE_ERR("Cannot set the dir to %s (%d)\n", wine_dbgstr_w(windowsdir), GetLastError() );
+        WINE_ERR("Cannot set the dir to %s (%ld)\n", wine_dbgstr_w(windowsdir), GetLastError() );
 
     if (IsWow64Process( GetCurrentProcess(), &is_wow64 ) && is_wow64)
     {
@@ -1684,7 +1714,8 @@ int __cdecl main( int argc, char *argv[] )
 
         memset( &si, 0, sizeof(si) );
         si.cb = sizeof(si);
-        GetModuleFileNameW( 0, filename, MAX_PATH );
+        GetSystemDirectoryW( filename, MAX_PATH );
+        wcscat( filename, L"\\wineboot.exe" );
 
         Wow64DisableWow64FsRedirection( &redir );
         if (CreateProcessW( filename, GetCommandLineW(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi ))
@@ -1694,7 +1725,7 @@ int __cdecl main( int argc, char *argv[] )
             GetExitCodeProcess( pi.hProcess, &exit_code );
             ExitProcess( exit_code );
         }
-        else WINE_ERR( "failed to restart 64-bit %s, err %d\n", wine_dbgstr_w(filename), GetLastError() );
+        else WINE_ERR( "failed to restart 64-bit %s, err %ld\n", wine_dbgstr_w(filename), GetLastError() );
         Wow64RevertWow64FsRedirection( redir );
     }
 

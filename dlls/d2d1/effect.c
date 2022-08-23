@@ -26,6 +26,8 @@ static const struct d2d_effect_info builtin_effects[] =
     {&CLSID_D2D13DPerspectiveTransform, 1, 1, 1},
     {&CLSID_D2D1Composite,              2, 1, 0xffffffff},
     {&CLSID_D2D1Crop,                   1, 1, 1},
+    {&CLSID_D2D1Shadow,                 1, 1, 1},
+    {&CLSID_D2D1Grayscale,              1, 1, 1},
 };
 
 static inline struct d2d_effect *impl_from_ID2D1Effect(ID2D1Effect *iface)
@@ -79,7 +81,7 @@ static ULONG STDMETHODCALLTYPE d2d_effect_AddRef(ID2D1Effect *iface)
     struct d2d_effect *effect = impl_from_ID2D1Effect(iface);
     ULONG refcount = InterlockedIncrement(&effect->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -89,7 +91,7 @@ static ULONG STDMETHODCALLTYPE d2d_effect_Release(ID2D1Effect *iface)
     struct d2d_effect *effect = impl_from_ID2D1Effect(iface);
     ULONG refcount = InterlockedDecrement(&effect->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
     {

@@ -20,7 +20,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -155,7 +154,7 @@ void init_thread_context( struct thread *thread )
 /* retrieve the thread x86 registers */
 void get_thread_context( struct thread *thread, context_t *context, unsigned int flags )
 {
-#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
+#if defined(__i386__) || defined(__x86_64__)
     x86_debug_state_t state;
     mach_msg_type_number_t count = sizeof(state) / sizeof(int);
     mach_msg_type_name_t type;
@@ -174,54 +173,32 @@ void get_thread_context( struct thread *thread, context_t *context, unsigned int
 
     if (!thread_get_state( port, x86_DEBUG_STATE, (thread_state_t)&state, &count ))
     {
-#if defined(__x86_64__) || defined(__i386_on_x86_64__)
+#ifdef __x86_64__
         assert( state.dsh.flavor == x86_DEBUG_STATE32 ||
                 state.dsh.flavor == x86_DEBUG_STATE64 );
 #else
         assert( state.dsh.flavor == x86_DEBUG_STATE32 );
 #endif
 
-#if defined(__x86_64__) || defined(__i386_on_x86_64__)
+#ifdef __x86_64__
         if (state.dsh.flavor == x86_DEBUG_STATE64)
         {
-            if (thread->process->cpu == CPU_x86_64)
-            {
-                context->debug.x86_64_regs.dr0 = state.uds.ds64.__dr0;
-                context->debug.x86_64_regs.dr1 = state.uds.ds64.__dr1;
-                context->debug.x86_64_regs.dr2 = state.uds.ds64.__dr2;
-                context->debug.x86_64_regs.dr3 = state.uds.ds64.__dr3;
-                context->debug.x86_64_regs.dr6 = state.uds.ds64.__dr6;
-                context->debug.x86_64_regs.dr7 = state.uds.ds64.__dr7;
-            }
-            else
-            {
-                context->debug.i386_regs.dr0 = state.uds.ds64.__dr0;
-                context->debug.i386_regs.dr1 = state.uds.ds64.__dr1;
-                context->debug.i386_regs.dr2 = state.uds.ds64.__dr2;
-                context->debug.i386_regs.dr3 = state.uds.ds64.__dr3;
-                context->debug.i386_regs.dr6 = state.uds.ds64.__dr6;
-                context->debug.i386_regs.dr7 = state.uds.ds64.__dr7;
-            }
+            context->debug.x86_64_regs.dr0 = state.uds.ds64.__dr0;
+            context->debug.x86_64_regs.dr1 = state.uds.ds64.__dr1;
+            context->debug.x86_64_regs.dr2 = state.uds.ds64.__dr2;
+            context->debug.x86_64_regs.dr3 = state.uds.ds64.__dr3;
+            context->debug.x86_64_regs.dr6 = state.uds.ds64.__dr6;
+            context->debug.x86_64_regs.dr7 = state.uds.ds64.__dr7;
         }
         else
 #endif
         {
-/* work around silly renaming of struct members in OS X 10.5 */
-#if __DARWIN_UNIX03 && defined(_STRUCT_X86_DEBUG_STATE32)
             context->debug.i386_regs.dr0 = state.uds.ds32.__dr0;
             context->debug.i386_regs.dr1 = state.uds.ds32.__dr1;
             context->debug.i386_regs.dr2 = state.uds.ds32.__dr2;
             context->debug.i386_regs.dr3 = state.uds.ds32.__dr3;
             context->debug.i386_regs.dr6 = state.uds.ds32.__dr6;
             context->debug.i386_regs.dr7 = state.uds.ds32.__dr7;
-#else
-            context->debug.i386_regs.dr0 = state.uds.ds32.dr0;
-            context->debug.i386_regs.dr1 = state.uds.ds32.dr1;
-            context->debug.i386_regs.dr2 = state.uds.ds32.dr2;
-            context->debug.i386_regs.dr3 = state.uds.ds32.dr3;
-            context->debug.i386_regs.dr6 = state.uds.ds32.dr6;
-            context->debug.i386_regs.dr7 = state.uds.ds32.dr7;
-#endif
         }
         context->flags |= SERVER_CTX_DEBUG_REGISTERS;
     }
@@ -232,15 +209,12 @@ void get_thread_context( struct thread *thread, context_t *context, unsigned int
 /* set the thread x86 registers */
 void set_thread_context( struct thread *thread, const context_t *context, unsigned int flags )
 {
-#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
+#if defined(__i386__) || defined(__x86_64__)
     x86_debug_state_t state;
     mach_msg_type_number_t count = sizeof(state) / sizeof(int);
     mach_msg_type_name_t type;
     mach_port_t port, process_port = get_process_port( thread->process );
     unsigned int dr7;
-#if defined(__x86_64__) || defined(__i386_on_x86_64__)
-    int iter = 0;
-#endif
 
     /* all other regs are handled on the client side */
     assert( flags == SERVER_CTX_DEBUG_REGISTERS );
@@ -253,9 +227,9 @@ void set_thread_context( struct thread *thread, const context_t *context, unsign
         return;
     }
 
-#if defined(__x86_64__) || defined(__i386_on_x86_64__)
-try_again:
-    if (thread->process->cpu == CPU_x86_64)
+
+#ifdef __x86_64__
+    if (thread->process->machine == IMAGE_FILE_MACHINE_AMD64)
     {
         /* Mac OS doesn't allow setting the global breakpoint flags */
         dr7 = (context->debug.x86_64_regs.dr7 & ~0xaa) | ((context->debug.x86_64_regs.dr7 & 0xaa) >> 1);
@@ -271,21 +245,6 @@ try_again:
         state.uds.ds64.__dr6 = context->debug.x86_64_regs.dr6;
         state.uds.ds64.__dr7 = dr7;
     }
-    else if (iter == 0)
-    {
-        dr7 = (context->debug.i386_regs.dr7 & ~0xaa) | ((context->debug.i386_regs.dr7 & 0xaa) >> 1);
-
-        state.dsh.flavor = x86_DEBUG_STATE64;
-        state.dsh.count = sizeof(state.uds.ds64) / sizeof(int);
-        state.uds.ds64.__dr0 = context->debug.i386_regs.dr0;
-        state.uds.ds64.__dr1 = context->debug.i386_regs.dr1;
-        state.uds.ds64.__dr2 = context->debug.i386_regs.dr2;
-        state.uds.ds64.__dr3 = context->debug.i386_regs.dr3;
-        state.uds.ds64.__dr4 = 0;
-        state.uds.ds64.__dr5 = 0;
-        state.uds.ds64.__dr6 = context->debug.i386_regs.dr6;
-        state.uds.ds64.__dr7 = dr7;
-    }
     else
 #endif
     {
@@ -293,7 +252,6 @@ try_again:
 
         state.dsh.flavor = x86_DEBUG_STATE32;
         state.dsh.count = sizeof(state.uds.ds32) / sizeof(int);
-#if __DARWIN_UNIX03 && defined(_STRUCT_X86_DEBUG_STATE32)
         state.uds.ds32.__dr0 = context->debug.i386_regs.dr0;
         state.uds.ds32.__dr1 = context->debug.i386_regs.dr1;
         state.uds.ds32.__dr2 = context->debug.i386_regs.dr2;
@@ -302,16 +260,6 @@ try_again:
         state.uds.ds32.__dr5 = 0;
         state.uds.ds32.__dr6 = context->debug.i386_regs.dr6;
         state.uds.ds32.__dr7 = dr7;
-#else
-        state.uds.ds32.dr0 = context->debug.i386_regs.dr0;
-        state.uds.ds32.dr1 = context->debug.i386_regs.dr1;
-        state.uds.ds32.dr2 = context->debug.i386_regs.dr2;
-        state.uds.ds32.dr3 = context->debug.i386_regs.dr3;
-        state.uds.ds32.dr4 = 0;
-        state.uds.ds32.dr5 = 0;
-        state.uds.ds32.dr6 = context->debug.i386_regs.dr6;
-        state.uds.ds32.dr7 = dr7;
-#endif
     }
     thread_set_state( port, x86_DEBUG_STATE, (thread_state_t)&state, count );
     mach_port_deallocate( mach_task_self(), port );

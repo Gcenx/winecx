@@ -735,7 +735,7 @@ struct tagMSIMIME
 
 #define MSIHANDLE_MAGIC 0x4d434923
 
-/* handle unicode/ascii output in the Msi* API functions */
+/* handle unicode/ansi output in the Msi* API functions */
 typedef struct {
     BOOL unicode;
     union {
@@ -1039,7 +1039,7 @@ extern MSIFOLDER *msi_get_loaded_folder(MSIPACKAGE *package, const WCHAR *dir) D
 extern WCHAR *msi_create_temp_file(MSIDATABASE *db) DECLSPEC_HIDDEN;
 extern void msi_free_action_script(MSIPACKAGE *package, UINT script) DECLSPEC_HIDDEN;
 extern WCHAR *msi_build_icon_path(MSIPACKAGE *, const WCHAR *) DECLSPEC_HIDDEN;
-extern WCHAR *msi_build_directory_name(DWORD , ...) DECLSPEC_HIDDEN;
+extern WCHAR * WINAPIV msi_build_directory_name(DWORD , ...) DECLSPEC_HIDDEN;
 extern void msi_reduce_to_long_filename(WCHAR *) DECLSPEC_HIDDEN;
 extern WCHAR *msi_create_component_advertise_string(MSIPACKAGE *, MSICOMPONENT *, const WCHAR *) DECLSPEC_HIDDEN;
 extern void ACTION_UpdateComponentStates(MSIPACKAGE *package, MSIFEATURE *feature) DECLSPEC_HIDDEN;
@@ -1141,30 +1141,24 @@ extern void msi_ui_progress(MSIPACKAGE *, int, int, int, int) DECLSPEC_HIDDEN;
 static void *msi_alloc( size_t len ) __WINE_ALLOC_SIZE(1);
 static inline void *msi_alloc( size_t len )
 {
-    return HeapAlloc( GetProcessHeap(), 0, len );
+    return malloc( len );
 }
 
 static void *msi_alloc_zero( size_t len ) __WINE_ALLOC_SIZE(1);
 static inline void *msi_alloc_zero( size_t len )
 {
-    return HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, len );
+    return calloc( 1, len );
 }
 
 static void *msi_realloc( void *mem, size_t len ) __WINE_ALLOC_SIZE(2);
 static inline void *msi_realloc( void *mem, size_t len )
 {
-    return HeapReAlloc( GetProcessHeap(), 0, mem, len );
+    return realloc( mem, len );
 }
 
-static void *msi_realloc_zero( void *mem, size_t len ) __WINE_ALLOC_SIZE(2);
-static inline void *msi_realloc_zero( void *mem, size_t len )
+static inline void msi_free( void *mem )
 {
-    return HeapReAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, mem, len );
-}
-
-static inline BOOL msi_free( void *mem )
-{
-    return HeapFree( GetProcessHeap(), 0, mem );
+    free( mem );
 }
 
 static inline char *strdupWtoA( LPCWSTR str )

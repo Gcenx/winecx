@@ -56,19 +56,20 @@
 #include "winnls.h"
 #include "winternl.h"
 #include "gdi_private.h"
+
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(metafile);
 
-#include "pshpack1.h"
-typedef struct
-{
-    DWORD dw1, dw2, dw3;
-    WORD w4;
-    CHAR filename[0x100];
-} METAHEADERDISK;
-#include "poppack.h"
 
+static CRITICAL_SECTION metafile_cs;
+static CRITICAL_SECTION_DEBUG critsect_debug =
+{
+    0, 0, &metafile_cs,
+    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": metafile_cs") }
+};
+static CRITICAL_SECTION metafile_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 /******************************************************************
  *         MF_AddHandle
@@ -100,7 +101,34 @@ static int MF_AddHandle(HANDLETABLE *ht, UINT htlen, HGDIOBJ hobj)
  */
 HMETAFILE MF_Create_HMETAFILE(METAHEADER *mh)
 {
-    return alloc_gdi_handle( mh, OBJ_METAFILE, NULL );
+    HANDLE handle;
+
+    if (!(handle = NtGdiCreateClientObj( NTGDI_OBJ_METAFILE )))
+        return 0;
+
+    set_gdi_client_ptr( handle, mh );
+    return handle;
+}
+
+static int bitmap_info_size( const BITMAPINFO *info, WORD coloruse )
+{
+    unsigned int colors, size, masks = 0;
+
+    if (info->bmiHeader.biSize == sizeof(BITMAPCOREHEADER))
+    {
+        const BITMAPCOREHEADER *core = (const BITMAPCOREHEADER *)info;
+        colors = (core->bcBitCount <= 8) ? 1 << core->bcBitCount : 0;
+        return sizeof(BITMAPCOREHEADER) + colors *
+             ((coloruse == DIB_RGB_COLORS) ? sizeof(RGBTRIPLE) : sizeof(WORD));
+    }
+    else  /* assume BITMAPINFOHEADER */
+    {
+        if (info->bmiHeader.biClrUsed) colors = min( info->bmiHeader.biClrUsed, 256 );
+        else colors = info->bmiHeader.biBitCount > 8 ? 0 : 1 << info->bmiHeader.biBitCount;
+        if (info->bmiHeader.biCompression == BI_BITFIELDS) masks = 3;
+        size = max( info->bmiHeader.biSize, sizeof(BITMAPINFOHEADER) + masks * sizeof(DWORD) );
+        return size + colors * ((coloruse == DIB_RGB_COLORS) ? sizeof(RGBQUAD) : sizeof(WORD));
+    }
 }
 
 /******************************************************************
@@ -132,11 +160,19 @@ static POINT *convert_points( UINT count, const POINTS *pts )
 
 BOOL WINAPI DeleteMetaFile( HMETAFILE hmf )
 {
-    METAHEADER *mh = free_gdi_handle( hmf );
+    METAHEADER *data;
+    BOOL ret = FALSE;
 
-    if (!mh) return FALSE;
-    HeapFree( GetProcessHeap(), 0, mh );
-    return TRUE;
+    EnterCriticalSection( &metafile_cs );
+    if ((data = get_gdi_client_ptr( hmf, NTGDI_OBJ_METAFILE )))
+    {
+        ret = NtGdiDeleteClientObj( hmf );
+        if (ret) HeapFree( GetProcessHeap(), 0, data );
+    }
+    LeaveCriticalSection( &metafile_cs );
+
+    if (!ret) SetLastError( ERROR_INVALID_HANDLE );
+    return ret;
 }
 
 /******************************************************************
@@ -231,71 +267,20 @@ HMETAFILE WINAPI GetMetaFileW( LPCWSTR lpFilename )
 }
 
 
-/******************************************************************
- *         MF_LoadDiskBasedMetaFile
- *
- * Creates a new memory-based metafile from a disk-based one.
- */
-static METAHEADER *MF_LoadDiskBasedMetaFile(METAHEADER *mh)
-{
-    METAHEADERDISK *mhd;
-    HANDLE hfile;
-    METAHEADER *mh2;
-
-    if(mh->mtType != METAFILE_DISK) {
-        ERR("Not a disk based metafile\n");
-	return NULL;
-    }
-    mhd = (METAHEADERDISK *)((char *)mh + sizeof(METAHEADER));
-
-    if((hfile = CreateFileA(mhd->filename, GENERIC_READ, FILE_SHARE_READ, NULL,
-			    OPEN_EXISTING, 0, 0)) == INVALID_HANDLE_VALUE) {
-        WARN("Can't open file of disk based metafile\n");
-        return NULL;
-    }
-    mh2 = MF_ReadMetaFile(hfile);
-    CloseHandle(hfile);
-    return mh2;
-}
-
-/******************************************************************
- *         MF_CreateMetaHeaderDisk
- *
- * Take a memory based METAHEADER and change it to a disk based METAHEADER
- * associated with filename.  Note: Trashes contents of old one.
- */
-METAHEADER *MF_CreateMetaHeaderDisk(METAHEADER *mh, LPCVOID filename, BOOL uni )
-{
-    METAHEADERDISK *mhd;
-
-    mh = HeapReAlloc( GetProcessHeap(), 0, mh,
-		      sizeof(METAHEADER) + sizeof(METAHEADERDISK));
-    mh->mtType = METAFILE_DISK;
-    mhd = (METAHEADERDISK *)((char *)mh + sizeof(METAHEADER));
-
-    if( uni )
-        WideCharToMultiByte(CP_ACP, 0, filename, -1, 
-                   mhd->filename, sizeof mhd->filename, NULL, NULL);
-    else
-        lstrcpynA( mhd->filename, filename, sizeof mhd->filename );
-    return mh;
-}
-
 /* return a copy of the metafile bits, to be freed with HeapFree */
 static METAHEADER *get_metafile_bits( HMETAFILE hmf )
 {
-    METAHEADER *ret, *mh = GDI_GetObjPtr( hmf, OBJ_METAFILE );
+    METAHEADER *ret = NULL, *metafile;
 
-    if (!mh) return NULL;
-
-    if (mh->mtType != METAFILE_DISK)
+    EnterCriticalSection( &metafile_cs );
+    if ((metafile = get_gdi_client_ptr( hmf, NTGDI_OBJ_METAFILE )))
     {
-        ret = HeapAlloc( GetProcessHeap(), 0, mh->mtSize * 2 );
-        if (ret) memcpy( ret, mh, mh->mtSize * 2 );
+        ret = HeapAlloc( GetProcessHeap(), 0, metafile->mtSize * 2 );
+        if (ret) memcpy( ret, metafile, metafile->mtSize * 2 );
     }
-    else ret = MF_LoadDiskBasedMetaFile( mh );
+    else SetLastError( ERROR_INVALID_HANDLE );
+    LeaveCriticalSection( &metafile_cs );
 
-    GDI_ReleaseObj( hmf );
     return ret;
 }
 
@@ -392,7 +377,7 @@ BOOL WINAPI PlayMetaFile( HDC hdc, HMETAFILE hmf )
     hBrush = GetCurrentObject(hdc, OBJ_BRUSH);
     hPal = GetCurrentObject(hdc, OBJ_PAL);
 
-    hRgn = CreateRectRgn(0, 0, 0, 0);
+    hRgn = NtGdiCreateRectRgn(0, 0, 0, 0);
     if (!GetClipRgn(hdc, hRgn))
     {
         DeleteObject(hRgn);
@@ -413,10 +398,10 @@ BOOL WINAPI PlayMetaFile( HDC hdc, HMETAFILE hmf )
     while (offset < mh->mtSize * 2)
     {
         mr = (METARECORD *)((char *)mh + offset);
-	TRACE("offset=%04x,size=%08x\n",
+	TRACE("offset=%04x,size=%08lx\n",
             offset, mr->rdSize);
 	if (mr->rdSize < 3) { /* catch illegal record sizes */
-            TRACE("Entry got size %d at offset %d, total mf length is %d\n",
+            TRACE("Entry got size %ld at offset %d, total mf length is %ld\n",
                   mr->rdSize,offset,mh->mtSize*2);
             break;
 	}
@@ -469,7 +454,7 @@ BOOL WINAPI EnumMetaFile(HDC hdc, HMETAFILE hmf, MFENUMPROC lpEnumFunc, LPARAM l
     HBRUSH hBrush;
     HFONT hFont;
 
-    TRACE("(%p,%p,%p,%lx)\n", hdc, hmf, lpEnumFunc, lpData);
+    TRACE("(%p,%p,%p,%Ix)\n", hdc, hmf, lpEnumFunc, lpData);
 
     if (!mh) return FALSE;
 
@@ -825,7 +810,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
         break;
 
     case META_SELECTPALETTE:
-        GDISelectPalette(hdc, *(ht->objectHandle + mr->rdParm[1]), mr->rdParm[0]);
+        SelectPalette( hdc, *(ht->objectHandle + mr->rdParm[1]), mr->rdParm[0] );
         break;
 
     case META_SETMAPPERFLAGS:
@@ -833,7 +818,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
         break;
 
     case META_REALIZEPALETTE:
-        GDIRealizePalette(hdc);
+        RealizePalette(hdc);
         break;
 
     case META_ESCAPE:
@@ -877,7 +862,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
 
     case META_STRETCHBLT:
       {
-        HDC hdcSrc = CreateCompatibleDC(hdc);
+        HDC hdcSrc = NtGdiCreateCompatibleDC( hdc );
         HBITMAP hbitmap = CreateBitmap(mr->rdParm[10], /*Width */
                                        mr->rdParm[11], /*Height*/
                                        mr->rdParm[13], /*Planes*/
@@ -895,7 +880,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
 
     case META_BITBLT:
       {
-        HDC hdcSrc = CreateCompatibleDC(hdc);
+        HDC hdcSrc = NtGdiCreateCompatibleDC( hdc );
         HBITMAP hbitmap = CreateBitmap(mr->rdParm[7]/*Width */,
                                         mr->rdParm[8]/*Height*/,
                                         mr->rdParm[10]/*Planes*/,
@@ -912,7 +897,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
 
     case META_CREATEREGION:
       {
-        HRGN hrgn = CreateRectRgn(0,0,0,0);
+        HRGN hrgn = NtGdiCreateRectRgn(0,0,0,0);
 
         MF_Play_MetaCreateRegion(mr, hrgn);
         MF_AddHandle(ht, handles, hrgn);
@@ -1084,34 +1069,28 @@ HMETAFILE WINAPI SetMetaFileBitsEx( UINT size, const BYTE *lpData )
  *  If _buf_ is zero, returns size of buffer required. Otherwise,
  *  returns number of bytes copied.
  */
-UINT WINAPI GetMetaFileBitsEx( HMETAFILE hmf, UINT nSize, LPVOID buf )
+UINT WINAPI GetMetaFileBitsEx( HMETAFILE hmf, UINT buf_size, void *buf )
 {
-    METAHEADER *mh = GDI_GetObjPtr( hmf, OBJ_METAFILE );
-    UINT mfSize;
-    BOOL mf_copy = FALSE;
+    METAHEADER *metafile;
+    UINT size = 0;
 
-    TRACE("(%p,%d,%p)\n", hmf, nSize, buf);
-    if (!mh) return 0;  /* FIXME: error code */
-    if(mh->mtType == METAFILE_DISK)
+    TRACE( "(%p,%d,%p)\n", hmf, buf_size, buf );
+
+    EnterCriticalSection( &metafile_cs );
+    if ((metafile = get_gdi_client_ptr( hmf, NTGDI_OBJ_METAFILE )))
     {
-        mh = MF_LoadDiskBasedMetaFile( mh );
-        if (!mh)
+        size = metafile->mtSize * 2;
+        if (buf)
         {
-            GDI_ReleaseObj( hmf );
-            return 0;
+            if(size > buf_size) size = buf_size;
+            memmove( buf, metafile, size );
         }
-        mf_copy = TRUE;
     }
-    mfSize = mh->mtSize * 2;
-    if (buf)
-    {
-        if(mfSize > nSize) mfSize = nSize;
-        memmove(buf, mh, mfSize);
-    }
-    if (mf_copy) HeapFree( GetProcessHeap(), 0, mh );
-    GDI_ReleaseObj( hmf );
-    TRACE("returning size %d\n", mfSize);
-    return mfSize;
+    else SetLastError( ERROR_INVALID_HANDLE );
+    LeaveCriticalSection( &metafile_cs );
+
+    TRACE( "returning size %d\n", size );
+    return size;
 }
 
 /******************************************************************
@@ -1138,13 +1117,11 @@ static BOOL add_mf_comment(HDC hdc, HENHMETAFILE emf)
     chunk = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(emf_in_wmf_comment, emf_data[max_chunk_size]));
     if(!chunk) goto end;
 
-    chunk->magic = WMFC_MAGIC;
-    chunk->unk04 = 1;
-    chunk->unk06 = 0;
-    chunk->unk08 = 0;
-    chunk->unk0a = 1;
+    chunk->comment_id = WMFC_MAGIC;
+    chunk->comment_type = 0x1;
+    chunk->version = 0x00010000;
     chunk->checksum = 0; /* We fixup the first chunk's checksum before returning from GetWinMetaFileBits */
-    chunk->unk0e = 0;
+    chunk->flags = 0;
     chunk->num_chunks = (size + max_chunk_size - 1) / max_chunk_size;
     chunk->chunk_size = max_chunk_size;
     chunk->remaining_size = size;
@@ -1261,7 +1238,7 @@ UINT WINAPI GetWinMetaFileBits(HENHMETAFILE hemf,
     UINT ret, full_size;
     RECT rc;
 
-    GetClipBox(hdcRef, &rc);
+    NtGdiGetAppClipBox(hdcRef, &rc);
 
     TRACE("(%p,%d,%p,%d,%p) rc=%s\n", hemf, cbBuffer, lpbBuffer,
           map_mode, hdcRef, wine_dbgstr_rect(&rc));
@@ -1331,7 +1308,7 @@ static BOOL MF_Play_MetaCreateRegion( METARECORD *mr, HRGN hrgn )
     WORD band, pair;
     WORD *start, *end;
     INT16 y0, y1;
-    HRGN hrgn2 = CreateRectRgn( 0, 0, 0, 0 );
+    HRGN hrgn2 = NtGdiCreateRectRgn( 0, 0, 0, 0 );
 
     for(band  = 0, start = &(mr->rdParm[11]); band < mr->rdParm[5];
  					        band++, start = end + 1) {
@@ -1357,9 +1334,9 @@ static BOOL MF_Play_MetaCreateRegion( METARECORD *mr, HRGN hrgn )
 	y0 = *(INT16 *)(start + 1);
 	y1 = *(INT16 *)(start + 2);
 	for(pair = 0; pair < *start / 2; pair++) {
-	    SetRectRgn( hrgn2, *(INT16 *)(start + 3 + 2*pair), y0,
-				 *(INT16 *)(start + 4 + 2*pair), y1 );
-	    CombineRgn(hrgn, hrgn, hrgn2, RGN_OR);
+	    NtGdiSetRectRgn( hrgn2, *(INT16 *)(start + 3 + 2*pair), y0,
+                             *(INT16 *)(start + 4 + 2*pair), y1 );
+	    NtGdiCombineRgn( hrgn, hrgn, hrgn2, RGN_OR );
         }
     }
     DeleteObject( hrgn2 );
@@ -1409,8 +1386,8 @@ static BOOL MF_Play_MetaExtTextOut(HDC hdc, METARECORD *mr)
             if (dx) for (i = 0; i < s1; i++) dx[i] = dxx[i];
         }
 	else {
-            TRACE("%s  len: %d\n",  sot, mr->rdSize);
-            WARN("Please report: ExtTextOut len=%d slen=%d rdSize=%d opt=%04x\n",
+            TRACE("%s  len: %ld\n",  sot, mr->rdSize);
+            WARN("Please report: ExtTextOut len=%ld slen=%d rdSize=%ld opt=%04x\n",
 		 len, s1, mr->rdSize, mr->rdParm[3]);
 	    dxx = NULL; /* shouldn't happen -- but if, we continue with NULL */
 	}
@@ -1423,7 +1400,7 @@ static BOOL MF_Play_MetaExtTextOut(HDC hdc, METARECORD *mr)
                  s1, dx);                    /* length, dx array */
     if (dx)
     {
-        TRACE("%s  len: %d  dx0: %d\n", sot, mr->rdSize, dx[0]);
+        TRACE("%s  len: %ld  dx0: %d\n", sot, mr->rdSize, dx[0]);
         HeapFree( GetProcessHeap(), 0, dx );
     }
     return TRUE;

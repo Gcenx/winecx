@@ -33,6 +33,7 @@
 #include "commctrl.h"
 #include "advpub.h"
 #include "wininet.h"
+#include "pathcch.h"
 #include "shellapi.h"
 #include "urlmon.h"
 #include "msi.h"
@@ -57,10 +58,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(appwizcpl);
 #define GECKO_SHA "???"
 #endif
 
-#define MONO_VERSION "7.0.0"
+#define MONO_VERSION "7.2.0"
 #if defined(__i386__) || defined(__x86_64__)
 #define MONO_ARCH "x86"
-#define MONO_SHA "b37e6fc9e590e582243dc25d72a5fcc330c3a7970dfdc98a7a81d23845ba8900"
+#define MONO_SHA "5f06eafbae3a49ecc31dfcea777075bd44f0cc126e4fb4e28ecefa06eb436323"
 #else
 #define MONO_ARCH ""
 #define MONO_SHA "???"
@@ -126,7 +127,7 @@ static BOOL sha_check(const WCHAR *file_name)
 
     file = CreateFileW(file_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
     if(file == INVALID_HANDLE_VALUE) {
-        WARN("Could not open file: %u\n", GetLastError());
+        WARN("Could not open file: %lu\n", GetLastError());
         return FALSE;
     }
 
@@ -188,7 +189,7 @@ static enum install_res install_file(const WCHAR *file_name)
     if(res == ERROR_PRODUCT_VERSION)
         res = MsiInstallProductW(file_name, L"REINSTALL=ALL REINSTALLMODE=vomus");
     if(res != ERROR_SUCCESS) {
-        ERR("MsiInstallProduct failed: %u\n", res);
+        ERR("MsiInstallProduct failed: %lu\n", res);
         return INSTALL_FAILED;
     }
 
@@ -197,10 +198,11 @@ static enum install_res install_file(const WCHAR *file_name)
 
 static enum install_res install_from_dos_file(const WCHAR *dir, const WCHAR *subdir, const WCHAR *file_name)
 {
-    WCHAR *path;
+    WCHAR *path, *canonical_path;
     enum install_res ret;
     int len = lstrlenW( dir );
     int size = len + 1;
+    HRESULT hr;
 
     size += lstrlenW( subdir ) + lstrlenW( file_name ) + 2;
     if (!(path = heap_alloc( size * sizeof(WCHAR) ))) return INSTALL_FAILED;
@@ -213,16 +215,25 @@ static enum install_res install_from_dos_file(const WCHAR *dir, const WCHAR *sub
     lstrcatW( path, L"\\" );
     lstrcatW( path, file_name );
 
-    if (GetFileAttributesW( path ) == INVALID_FILE_ATTRIBUTES)
+    hr = PathAllocCanonicalize( path, PATHCCH_ALLOW_LONG_PATHS, &canonical_path );
+    if (FAILED( hr ))
     {
-        TRACE( "%s not found\n", debugstr_w(path) );
+        ERR( "Failed to canonicalize %s, hr %#lx\n", debugstr_w(path), hr );
         heap_free( path );
         return INSTALL_NEXT;
     }
-
-    ret = install_file( path );
-
     heap_free( path );
+
+    if (GetFileAttributesW( canonical_path ) == INVALID_FILE_ATTRIBUTES)
+    {
+        TRACE( "%s not found\n", debugstr_w(canonical_path) );
+        LocalFree( canonical_path );
+        return INSTALL_NEXT;
+    }
+
+    ret = install_file( canonical_path );
+
+    LocalFree( canonical_path );
     return ret;
 }
 
@@ -339,7 +350,7 @@ static WCHAR *get_cache_file_name(BOOL ensure_exists)
 
     if (ensure_exists && !CreateDirectoryW( cache_dir, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
     {
-        WARN( "%s does not exist and could not be created (%u)\n", debugstr_w(cache_dir), GetLastError() );
+        WARN( "%s does not exist and could not be created (%lu)\n", debugstr_w(cache_dir), GetLastError() );
         heap_free( cache_dir );
         return NULL;
     }
@@ -356,7 +367,7 @@ static WCHAR *get_cache_file_name(BOOL ensure_exists)
 
     if (ensure_exists && !CreateDirectoryW( ret, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
     {
-        WARN( "%s does not exist and could not be created (%u)\n", debugstr_w(ret), GetLastError() );
+        WARN( "%s does not exist and could not be created (%lu)\n", debugstr_w(ret), GetLastError() );
         heap_free( ret );
         return NULL;
     }
@@ -466,7 +477,7 @@ static HRESULT WINAPI InstallCallback_OnStopBinding(IBindStatusCallback *iface,
         if(hresult == E_ABORT)
             TRACE("Binding aborted\n");
         else
-            ERR("Binding failed %08x\n", hresult);
+            ERR("Binding failed %08lx\n", hresult);
         return S_OK;
     }
 

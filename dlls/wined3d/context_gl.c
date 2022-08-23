@@ -24,9 +24,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
@@ -467,6 +464,24 @@ static inline DWORD context_generate_rt_mask_from_resource(struct wined3d_resour
     }
 
     return (1u << 31) | wined3d_texture_get_gl_buffer(texture_from_resource(resource));
+}
+
+/* Context activation is done by the caller. */
+static void wined3d_context_gl_set_draw_buffer(struct wined3d_context_gl *context_gl, GLenum buffer)
+{
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
+    struct fbo_entry *current_fbo = context_gl->current_fbo;
+    uint32_t new_mask = context_generate_rt_mask(buffer);
+    uint32_t *current_mask;
+
+    current_mask = current_fbo ? &current_fbo->rt_mask : &context_gl->draw_buffers_mask;
+    if (new_mask == *current_mask)
+        return;
+
+    gl_info->gl_ops.gl.p_glDrawBuffer(buffer);
+    checkGLcall("glDrawBuffer()");
+
+    *current_mask = new_mask;
 }
 
 static inline void wined3d_context_gl_set_fbo_key_for_render_target(const struct wined3d_context_gl *context_gl,
@@ -1661,27 +1676,19 @@ static void wined3d_context_gl_enter(struct wined3d_context_gl *context_gl)
 }
 
 /* This function takes care of wined3d pixel format selection. */
-static int context_choose_pixel_format(const struct wined3d_device *device,
-        const struct wined3d_swapchain_gl *swapchain, HDC hdc, const struct wined3d_format *color_format,
-        const struct wined3d_format *ds_format, bool aux_buffers, bool swap_effect_copy)
+static int context_choose_pixel_format(const struct wined3d_device *device, HDC hdc,
+        const struct wined3d_format *color_format, const struct wined3d_format *ds_format,
+        bool aux_buffers, bool swap_effect_copy)
 {
-    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
     unsigned int cfg_count = wined3d_adapter_gl(device->adapter)->pixel_format_count;
     unsigned int current_value;
     PIXELFORMATDESCRIPTOR pfd;
-    BOOL double_buffer = TRUE;
     int iPixelFormat = 0;
     unsigned int i;
 
     TRACE("device %p, dc %p, color_format %s, ds_format %s, aux_buffers %#x, swap_effect_copy %#x.\n",
             device, hdc, debug_d3dformat(color_format->id), debug_d3dformat(ds_format->id),
             aux_buffers, swap_effect_copy);
-
-    /* CrossOver hack for bug 9330. */
-    if ((gl_info->quirks & WINED3D_CX_QUIRK_APPLE_DOUBLE_BUFFER)
-            && wined3d_settings.offscreen_rendering_mode == ORM_FBO
-            && !swapchain->s.state.desc.backbuffer_count)
-        double_buffer = FALSE;
 
     current_value = 0;
     for (i = 0; i < cfg_count; ++i)
@@ -1694,7 +1701,7 @@ static int context_choose_pixel_format(const struct wined3d_device *device,
         if (cfg->iPixelType != WGL_TYPE_RGBA_ARB)
             continue;
         /* In window mode we need a window drawable format and double buffering. */
-        if (!cfg->windowDrawable || (double_buffer && !cfg->doubleBuffer))
+        if (!(cfg->windowDrawable && cfg->doubleBuffer))
             continue;
         if (cfg->redSize < color_format->red_size)
             continue;
@@ -1719,19 +1726,17 @@ static int context_choose_pixel_format(const struct wined3d_device *device,
          * depth it is no problem to emulate 16-bit using e.g. 24-bit, so accept that. */
         if (cfg->depthSize == ds_format->depth_size)
             value += 2;
-        if (!cfg->doubleBuffer == !double_buffer)
-            value += 4;
         if (cfg->stencilSize == ds_format->stencil_size)
-            value += 8;
+            value += 4;
         if (cfg->alphaSize == color_format->alpha_size)
-            value += 16;
+            value += 8;
         /* We like to have aux buffers in backbuffer mode */
         if (aux_buffers && cfg->auxBuffers)
-            value += 32;
+            value += 16;
         if (cfg->redSize == color_format->red_size
                 && cfg->greenSize == color_format->green_size
                 && cfg->blueSize == color_format->blue_size)
-            value += 64;
+            value += 32;
 
         if (value > current_value)
         {
@@ -1747,9 +1752,7 @@ static int context_choose_pixel_format(const struct wined3d_device *device,
         memset(&pfd, 0, sizeof(pfd));
         pfd.nSize      = sizeof(pfd);
         pfd.nVersion   = 1;
-        pfd.dwFlags    = PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW;/*PFD_GENERIC_ACCELERATED*/
-        if (double_buffer)
-            pfd.dwFlags |= PFD_DOUBLEBUFFER;
+        pfd.dwFlags    = PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER | PFD_DRAW_TO_WINDOW;/*PFD_GENERIC_ACCELERATED*/
         pfd.iPixelType = PFD_TYPE_RGBA;
         pfd.cAlphaBits = color_format->alpha_size;
         pfd.cColorBits = color_format->red_size + color_format->green_size
@@ -1910,7 +1913,7 @@ HGLRC context_create_wgl_attribs(const struct wined3d_gl_info *gl_info, HDC hdc,
 }
 
 static BOOL wined3d_context_gl_create_wgl_ctx(struct wined3d_context_gl *context_gl,
-        struct wined3d_swapchain_gl *swapchain_gl)
+        struct wined3d_swapchain_gl *swapchain_gl, BOOL *new_drawable)
 {
     enum wined3d_swap_effect swap_effect = swapchain_gl->s.state.desc.swap_effect;
     const struct wined3d_format *colour_format, *ds_format;
@@ -1932,6 +1935,8 @@ static BOOL wined3d_context_gl_create_wgl_ctx(struct wined3d_context_gl *context
     target_bind_flags = target->bind_flags;
 
     swap_effect_copy = swap_effect == WINED3D_SWAP_EFFECT_COPY || swap_effect == WINED3D_SWAP_EFFECT_COPY_VSYNC;
+
+    *new_drawable = !GetPixelFormat(context_gl->dc);
 
     if (wined3d_settings.offscreen_rendering_mode == ORM_BACKBUFFER)
     {
@@ -1969,7 +1974,7 @@ static BOOL wined3d_context_gl_create_wgl_ctx(struct wined3d_context_gl *context
             {
                 ds_format = wined3d_get_format(adapter, ds_formats[i], WINED3D_BIND_DEPTH_STENCIL);
                 if ((context_gl->pixel_format = context_choose_pixel_format(device,
-                        swapchain_gl, context_gl->dc, colour_format, ds_format, true, swap_effect_copy)))
+                        context_gl->dc, colour_format, ds_format, true, swap_effect_copy)))
                 {
                     swapchain_gl->s.ds_format = ds_format;
                     break;
@@ -1981,7 +1986,7 @@ static BOOL wined3d_context_gl_create_wgl_ctx(struct wined3d_context_gl *context
         }
         else
         {
-            context_gl->pixel_format = context_choose_pixel_format(device, swapchain_gl,
+            context_gl->pixel_format = context_choose_pixel_format(device,
                     context_gl->dc, colour_format, swapchain_gl->s.ds_format, true, swap_effect_copy);
         }
     }
@@ -1997,7 +2002,7 @@ static BOOL wined3d_context_gl_create_wgl_ctx(struct wined3d_context_gl *context
          * conflicting pixel formats. */
         colour_format = wined3d_get_format(adapter, WINED3DFMT_B8G8R8A8_UNORM, target_bind_flags);
         ds_format = wined3d_get_format(adapter, WINED3DFMT_UNKNOWN, WINED3D_BIND_DEPTH_STENCIL);
-        context_gl->pixel_format = context_choose_pixel_format(device, swapchain_gl,
+        context_gl->pixel_format = context_choose_pixel_format(device,
                 context_gl->dc, colour_format, ds_format, false, swap_effect_copy);
     }
 
@@ -2031,7 +2036,7 @@ static BOOL wined3d_context_gl_create_wgl_ctx(struct wined3d_context_gl *context
         }
         context_gl->dc_is_private = TRUE;
 
-        return wined3d_context_gl_create_wgl_ctx(context_gl, swapchain_gl);
+        return wined3d_context_gl_create_wgl_ctx(context_gl, swapchain_gl, new_drawable);
     }
 
     share_ctx = device->context_count ? wined3d_context_gl(device->contexts[0])->gl_ctx : NULL;
@@ -2077,6 +2082,7 @@ HRESULT wined3d_context_gl_init(struct wined3d_context_gl *context_gl, struct wi
     const struct wined3d_d3d_info *d3d_info;
     const struct wined3d_gl_info *gl_info;
     struct wined3d_device *device;
+    BOOL new_drawable;
     unsigned int i;
 
     TRACE("context_gl %p, swapchain %p.\n", context_gl, swapchain_gl);
@@ -2155,7 +2161,7 @@ HRESULT wined3d_context_gl_init(struct wined3d_context_gl *context_gl, struct wi
             sizeof(*context_gl->texture_type))))
         goto fail;
 
-    if (!wined3d_context_gl_create_wgl_ctx(context_gl, swapchain_gl))
+    if (!wined3d_context_gl_create_wgl_ctx(context_gl, swapchain_gl, &new_drawable))
         goto fail;
 
     /* Set up the context defaults. */
@@ -2312,6 +2318,14 @@ HRESULT wined3d_context_gl_init(struct wined3d_context_gl *context_gl, struct wi
     gl_info->gl_ops.gl.p_glScissor(0, 0, 0, 0);
     checkGLcall("glScissor");
 
+    if (new_drawable)
+    {
+        gl_info->gl_ops.gl.p_glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        gl_info->gl_ops.gl.p_glClearDepth(1.0f);
+        gl_info->gl_ops.gl.p_glClearStencil(0);
+        gl_info->gl_ops.gl.p_glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+        checkGLcall("glClear");
+    }
     return WINED3D_OK;
 
 fail:
@@ -2510,24 +2524,6 @@ static void wined3d_context_gl_apply_draw_buffers(struct wined3d_context_gl *con
 }
 
 /* Context activation is done by the caller. */
-void wined3d_context_gl_set_draw_buffer(struct wined3d_context_gl *context_gl, GLenum buffer)
-{
-    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
-    struct fbo_entry *current_fbo = context_gl->current_fbo;
-    uint32_t new_mask = context_generate_rt_mask(buffer);
-    uint32_t *current_mask;
-
-    current_mask = current_fbo ? &current_fbo->rt_mask : &context_gl->draw_buffers_mask;
-    if (new_mask == *current_mask)
-        return;
-
-    gl_info->gl_ops.gl.p_glDrawBuffer(buffer);
-    checkGLcall("glDrawBuffer()");
-
-    *current_mask = new_mask;
-}
-
-/* Context activation is done by the caller. */
 void wined3d_context_gl_active_texture(struct wined3d_context_gl *context_gl,
         const struct wined3d_gl_info *gl_info, unsigned int unit)
 {
@@ -2634,6 +2630,45 @@ static void wined3d_context_gl_poll_fences(struct wined3d_context_gl *context_gl
     }
 }
 
+static void wined3d_device_gl_free_memory(struct wined3d_device_gl *device_gl, struct wined3d_allocator_block *block)
+{
+    assert(block->chunk->allocator == &device_gl->allocator);
+    wined3d_device_gl_allocator_lock(device_gl);
+    wined3d_allocator_block_free(block);
+    wined3d_device_gl_allocator_unlock(device_gl);
+}
+
+static void wined3d_context_gl_cleanup_resources(struct wined3d_context_gl *context_gl)
+{
+    struct wined3d_device_gl *device_gl = wined3d_device_gl(context_gl->c.device);
+    struct wined3d_retired_block_gl *r, *blocks;
+    SIZE_T count, i = 0;
+    uint64_t id;
+
+    wined3d_context_gl_poll_fences(context_gl);
+    id = device_gl->completed_fence_id;
+
+    blocks = device_gl->retired_blocks;
+    count = device_gl->retired_block_count;
+    while (i < count)
+    {
+        r = &blocks[i];
+
+        if (r->fence_id > id)
+        {
+            ++i;
+            continue;
+        }
+
+        wined3d_device_gl_free_memory(device_gl, r->block);
+        if (i != --count)
+            *r = blocks[count];
+        else
+            ++i;
+    }
+    device_gl->retired_block_count = count;
+}
+
 void wined3d_context_gl_wait_command_fence(struct wined3d_context_gl *context_gl, uint64_t id)
 {
     struct wined3d_device_gl *device_gl = wined3d_device_gl(context_gl->c.device);
@@ -2651,7 +2686,7 @@ void wined3d_context_gl_wait_command_fence(struct wined3d_context_gl *context_gl
 
         if ((ret = wined3d_fence_wait(context_gl->submitted.fences[i].fence, &device_gl->d)) != WINED3D_FENCE_OK)
             ERR("Failed to wait for command fence with id 0x%s, ret %#x.\n", wine_dbgstr_longlong(id), ret);
-        wined3d_context_gl_poll_fences(context_gl);
+        wined3d_context_gl_cleanup_resources(context_gl);
         return;
     }
 
@@ -2681,7 +2716,125 @@ void wined3d_context_gl_submit_command_fence(struct wined3d_context_gl *context_
         device_gl->completed_fence_id = 0;
         device_gl->current_fence_id = 1;
     }
-    wined3d_context_gl_poll_fences(context_gl);
+    device_gl->retired_bo_size = 0;
+    wined3d_context_gl_cleanup_resources(context_gl);
+}
+
+static void wined3d_context_gl_destroy_allocator_block(struct wined3d_context_gl *context_gl,
+        struct wined3d_allocator_block *block, uint64_t fence_id)
+{
+    struct wined3d_device_gl *device_gl = wined3d_device_gl(context_gl->c.device);
+    struct wined3d_retired_block_gl *r;
+
+    if (device_gl->completed_fence_id > fence_id)
+    {
+        wined3d_device_gl_free_memory(device_gl, block);
+        TRACE("Freed block %p.\n", block);
+        return;
+    }
+
+    if (!wined3d_array_reserve((void **)&device_gl->retired_blocks,
+            &device_gl->retired_blocks_size, device_gl->retired_block_count + 1,
+            sizeof(*device_gl->retired_blocks)))
+    {
+        ERR("Leaking block %p.\n", block);
+        return;
+    }
+
+    r = &device_gl->retired_blocks[device_gl->retired_block_count++];
+    r->block = block;
+    r->fence_id = fence_id;
+}
+
+/* We always have buffer storage here. */
+GLuint wined3d_context_gl_allocate_vram_chunk_buffer(struct wined3d_context_gl *context_gl,
+        unsigned int pool, size_t size)
+{
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
+    GLbitfield flags;
+    GLuint id = 0;
+
+    TRACE("context_gl %p, pool %u, size %Iu.\n", context_gl, pool, size);
+
+    GL_EXTCALL(glGenBuffers(1, &id));
+    if (!id)
+    {
+        checkGLcall("buffer object creation");
+        return 0;
+    }
+    wined3d_context_gl_bind_bo(context_gl, GL_PIXEL_UNPACK_BUFFER, id);
+
+    flags = wined3d_device_gl_get_memory_type_flags(pool) | GL_DYNAMIC_STORAGE_BIT;
+    if (flags & (GL_MAP_READ_BIT | GL_MAP_WRITE_BIT))
+        flags |= GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
+    GL_EXTCALL(glBufferStorage(GL_PIXEL_UNPACK_BUFFER, size, NULL, flags));
+
+    checkGLcall("buffer object creation");
+
+    TRACE("Created buffer object %u.\n", id);
+
+    return id;
+}
+
+static void *wined3d_allocator_chunk_gl_map(struct wined3d_allocator_chunk_gl *chunk_gl,
+        struct wined3d_context_gl *context_gl)
+{
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
+    void *map_ptr;
+
+    TRACE("chunk %p, gl_buffer %u, map_ptr %p.\n", chunk_gl, chunk_gl->gl_buffer, chunk_gl->c.map_ptr);
+
+    wined3d_allocator_chunk_gl_lock(chunk_gl);
+
+    if (!chunk_gl->c.map_ptr)
+    {
+        unsigned int flags = wined3d_device_gl_get_memory_type_flags(chunk_gl->memory_type) & ~GL_CLIENT_STORAGE_BIT;
+
+        flags |= GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
+        if (!(flags & GL_MAP_READ_BIT))
+            flags |= GL_MAP_UNSYNCHRONIZED_BIT;
+        if (flags & GL_MAP_WRITE_BIT)
+            flags |= GL_MAP_FLUSH_EXPLICIT_BIT;
+        wined3d_context_gl_bind_bo(context_gl, GL_PIXEL_UNPACK_BUFFER, chunk_gl->gl_buffer);
+        chunk_gl->c.map_ptr = GL_EXTCALL(glMapBufferRange(GL_PIXEL_UNPACK_BUFFER,
+                0, WINED3D_ALLOCATOR_CHUNK_SIZE, flags));
+        if (!chunk_gl->c.map_ptr)
+        {
+            wined3d_allocator_chunk_gl_unlock(chunk_gl);
+            ERR("Failed to map chunk memory.\n");
+            return NULL;
+        }
+
+        adapter_adjust_mapped_memory(context_gl->c.device->adapter, WINED3D_ALLOCATOR_CHUNK_SIZE);
+    }
+
+    ++chunk_gl->c.map_count;
+    map_ptr = chunk_gl->c.map_ptr;
+
+    wined3d_allocator_chunk_gl_unlock(chunk_gl);
+
+    return map_ptr;
+}
+
+static void wined3d_allocator_chunk_gl_unmap(struct wined3d_allocator_chunk_gl *chunk_gl,
+        struct wined3d_context_gl *context_gl)
+{
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
+
+    TRACE("chunk_gl %p, context_gl %p.\n", chunk_gl, context_gl);
+
+    wined3d_allocator_chunk_gl_lock(chunk_gl);
+
+    if (!--chunk_gl->c.map_count)
+    {
+        wined3d_context_gl_bind_bo(context_gl, GL_PIXEL_UNPACK_BUFFER, chunk_gl->gl_buffer);
+        GL_EXTCALL(glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER));
+        chunk_gl->c.map_ptr = NULL;
+
+        adapter_adjust_mapped_memory(context_gl->c.device->adapter, -WINED3D_ALLOCATOR_CHUNK_SIZE);
+    }
+
+    wined3d_allocator_chunk_gl_unlock(chunk_gl);
 }
 
 static void *wined3d_bo_gl_map(struct wined3d_bo_gl *bo, struct wined3d_context_gl *context_gl, uint32_t flags)
@@ -2690,14 +2843,13 @@ static void *wined3d_bo_gl_map(struct wined3d_bo_gl *bo, struct wined3d_context_
     const struct wined3d_gl_info *gl_info;
     struct wined3d_bo_user *bo_user;
     struct wined3d_bo_gl tmp;
-    uint8_t * WIN32PTR map_ptr;
 
     if (flags & WINED3D_MAP_NOOVERWRITE)
         goto map;
 
     if ((flags & WINED3D_MAP_DISCARD) && bo->command_fence_id > device_gl->completed_fence_id)
     {
-        if (wined3d_context_gl_create_bo(context_gl, bo->size,
+        if (wined3d_device_gl_create_bo(device_gl, context_gl, bo->size,
                 bo->binding, bo->usage, bo->b.coherent, bo->flags, &tmp))
         {
             list_move_head(&tmp.b.users, &bo->b.users);
@@ -2716,13 +2868,25 @@ static void *wined3d_bo_gl_map(struct wined3d_bo_gl *bo, struct wined3d_context_
         ERR("Failed to create new buffer object.\n");
     }
 
-    if (bo->command_fence_id == device_gl->current_fence_id)
-        wined3d_context_gl_submit_command_fence(context_gl);
-    wined3d_context_gl_wait_command_fence(context_gl, bo->command_fence_id);
+    if (context_gl->c.d3d_info->fences)
+    {
+        if (bo->command_fence_id == device_gl->current_fence_id)
+            wined3d_context_gl_submit_command_fence(context_gl);
+        wined3d_context_gl_wait_command_fence(context_gl, bo->command_fence_id);
+    }
 
 map:
     if (bo->b.map_ptr)
         return bo->b.map_ptr;
+
+    if (bo->memory)
+    {
+        struct wined3d_allocator_chunk_gl *chunk_gl = wined3d_allocator_chunk_gl(bo->memory->chunk);
+
+        if (!(bo->b.map_ptr = wined3d_allocator_chunk_gl_map(chunk_gl, context_gl)))
+            ERR("Failed to map chunk.\n");
+        return bo->b.map_ptr;
+    }
 
     gl_info = context_gl->gl_info;
     wined3d_context_gl_bind_bo(context_gl, bo->binding, bo->id);
@@ -2742,39 +2906,74 @@ map:
          * resources are mapped. On the other hand, we don't want to use the
          * access flags used to create the bo for non-persistent maps, because
          * that may imply dropping GL_MAP_UNSYNCHRONIZED_BIT. */
-        if (wined3d_map_persistent())
-        {
-            gl_flags = bo->flags & ~GL_CLIENT_STORAGE_BIT;
-            if (!(gl_flags & GL_MAP_READ_BIT))
-                gl_flags |= GL_MAP_UNSYNCHRONIZED_BIT;
-            if (gl_flags & GL_MAP_WRITE_BIT)
-                gl_flags |= GL_MAP_FLUSH_EXPLICIT_BIT;
-        }
-        else
-        {
-            gl_flags = wined3d_resource_gl_map_flags(bo, flags);
-        }
+        gl_flags = bo->flags & ~GL_CLIENT_STORAGE_BIT;
+        if (!(gl_flags & GL_MAP_READ_BIT))
+            gl_flags |= GL_MAP_UNSYNCHRONIZED_BIT;
+        if (gl_flags & GL_MAP_WRITE_BIT)
+            gl_flags |= GL_MAP_FLUSH_EXPLICIT_BIT;
         gl_flags |= GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
 
-        if ((map_ptr = ADDRSPACECAST(void*, GL_EXTCALL(glMapBufferRange(bo->binding, 0, bo->size, gl_flags))))
-                && wined3d_map_persistent())
-            bo->b.map_ptr = map_ptr;
+        bo->b.map_ptr = GL_EXTCALL(glMapBufferRange(bo->binding, 0, bo->size, gl_flags));
     }
     else if (gl_info->supported[ARB_MAP_BUFFER_RANGE])
     {
-        map_ptr = ADDRSPACECAST(void*, GL_EXTCALL(glMapBufferRange(bo->binding,
-                0, bo->size, wined3d_resource_gl_map_flags(bo, flags))));
+        bo->b.map_ptr = GL_EXTCALL(glMapBufferRange(bo->binding, 0, bo->size, wined3d_resource_gl_map_flags(bo, flags)));
     }
     else
     {
-        map_ptr = ADDRSPACECAST(void*, GL_EXTCALL(glMapBuffer(bo->binding,
-                wined3d_resource_gl_legacy_map_flags(flags))));
+        bo->b.map_ptr = GL_EXTCALL(glMapBuffer(bo->binding, wined3d_resource_gl_legacy_map_flags(flags)));
     }
+
+    if (bo->b.map_ptr)
+        adapter_adjust_mapped_memory(device_gl->d.adapter, bo->size);
 
     wined3d_context_gl_bind_bo(context_gl, bo->binding, 0);
     checkGLcall("Map buffer object");
 
-    return map_ptr;
+    return bo->b.map_ptr;
+}
+
+static void wined3d_bo_gl_unmap(struct wined3d_bo_gl *bo, struct wined3d_context_gl *context_gl)
+{
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
+
+    if (context_gl->c.d3d_info->persistent_map
+            && context_gl->c.device->adapter->mapped_size <= MAX_PERSISTENT_MAPPED_BYTES)
+    {
+        TRACE("Not unmapping BO %p.\n", bo);
+        return;
+    }
+
+    if (bo->memory)
+    {
+        struct wined3d_allocator_chunk_gl *chunk_gl = wined3d_allocator_chunk_gl(bo->memory->chunk);
+
+        wined3d_allocator_chunk_gl_unmap(chunk_gl, context_gl);
+        if (!chunk_gl->c.map_ptr)
+            bo->b.map_ptr = NULL;
+        return;
+    }
+
+    wined3d_device_bo_map_lock(context_gl->c.device);
+    /* The mapping is still in use by the client (viz. for an accelerated
+     * NOOVERWRITE map). The client will trigger another unmap request when the
+     * d3d application requests to unmap the BO. */
+    if (bo->b.client_map_count)
+    {
+        wined3d_device_bo_map_unlock(context_gl->c.device);
+        assert(context_gl->c.d3d_info->persistent_map);
+        TRACE("BO %p is still in use by a client thread; not unmapping.\n", bo);
+        return;
+    }
+    bo->b.map_ptr = NULL;
+    wined3d_device_bo_map_unlock(context_gl->c.device);
+
+    wined3d_context_gl_bind_bo(context_gl, bo->binding, bo->id);
+    GL_EXTCALL(glUnmapBuffer(bo->binding));
+    wined3d_context_gl_bind_bo(context_gl, bo->binding, 0);
+    checkGLcall("Unmap buffer object");
+
+    adapter_adjust_mapped_memory(context_gl->c.device->adapter, -bo->size);
 }
 
 void *wined3d_context_gl_map_bo_address(struct wined3d_context_gl *context_gl,
@@ -2792,7 +2991,7 @@ void *wined3d_context_gl_map_bo_address(struct wined3d_context_gl *context_gl,
         return NULL;
     }
 
-    return (uint8_t * WIN32PTR)map_ptr + bo->buffer_offset + (uintptr_t)data->addr;
+    return (uint8_t *)map_ptr + bo->buffer_offset + (uintptr_t)data->addr;
 }
 
 static void flush_bo_ranges(struct wined3d_context_gl *context_gl, const struct wined3d_const_bo_address *data,
@@ -2836,7 +3035,6 @@ static void flush_bo_ranges(struct wined3d_context_gl *context_gl, const struct 
 void wined3d_context_gl_unmap_bo_address(struct wined3d_context_gl *context_gl,
         const struct wined3d_bo_address *data, unsigned int range_count, const struct wined3d_range *ranges)
 {
-    const struct wined3d_gl_info *gl_info;
     struct wined3d_bo_gl *bo;
 
     if (!data->buffer_object)
@@ -2844,15 +3042,7 @@ void wined3d_context_gl_unmap_bo_address(struct wined3d_context_gl *context_gl,
     bo = wined3d_bo_gl(data->buffer_object);
 
     flush_bo_ranges(context_gl, wined3d_const_bo_address(data), range_count, ranges);
-
-    if (bo->b.map_ptr)
-        return;
-
-    gl_info = context_gl->gl_info;
-    wined3d_context_gl_bind_bo(context_gl, bo->binding, bo->id);
-    GL_EXTCALL(glUnmapBuffer(bo->binding));
-    wined3d_context_gl_bind_bo(context_gl, bo->binding, 0);
-    checkGLcall("Unmap buffer object");
+    wined3d_bo_gl_unmap(bo, context_gl);
 }
 
 void wined3d_context_gl_flush_bo_address(struct wined3d_context_gl *context_gl,
@@ -2860,7 +3050,7 @@ void wined3d_context_gl_flush_bo_address(struct wined3d_context_gl *context_gl,
 {
     struct wined3d_range range;
 
-    TRACE("context_gl %p, data %s, size %zu.\n", context_gl, debug_const_bo_address(data), size);
+    TRACE("context_gl %p, data %s, size %Iu.\n", context_gl, debug_const_bo_address(data), size);
 
     range.offset = (uintptr_t)data->addr;
     range.size = size;
@@ -2869,12 +3059,13 @@ void wined3d_context_gl_flush_bo_address(struct wined3d_context_gl *context_gl,
 }
 
 void wined3d_context_gl_copy_bo_address(struct wined3d_context_gl *context_gl,
-        const struct wined3d_bo_address *dst, const struct wined3d_bo_address *src, size_t size)
+        const struct wined3d_bo_address *dst, const struct wined3d_bo_address *src,
+        unsigned int range_count, const struct wined3d_range *ranges)
 {
     const struct wined3d_gl_info *gl_info;
     struct wined3d_bo_gl *src_bo, *dst_bo;
-    struct wined3d_range range;
     BYTE *dst_ptr, *src_ptr;
+    unsigned int i;
 
     gl_info = context_gl->gl_info;
     src_bo = src->buffer_object ? wined3d_bo_gl(src->buffer_object) : NULL;
@@ -2886,9 +3077,11 @@ void wined3d_context_gl_copy_bo_address(struct wined3d_context_gl *context_gl,
         {
             GL_EXTCALL(glBindBuffer(GL_COPY_READ_BUFFER, src_bo->id));
             GL_EXTCALL(glBindBuffer(GL_COPY_WRITE_BUFFER, dst_bo->id));
-            GL_EXTCALL(glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER,
-                    src_bo->b.buffer_offset + (WINEGLDEF(GLintptr))src->addr,
-                    dst_bo->b.buffer_offset + (WINEGLDEF(GLintptr))dst->addr, size));
+
+            for (i = 0; i < range_count; ++i)
+                GL_EXTCALL(glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER,
+                        src_bo->b.buffer_offset + (GLintptr)src->addr + ranges[i].offset,
+                        dst_bo->b.buffer_offset + (GLintptr)dst->addr + ranges[i].offset, ranges[i].size));
             checkGLcall("direct buffer copy");
 
             wined3d_context_gl_reference_bo(context_gl, src_bo);
@@ -2896,22 +3089,25 @@ void wined3d_context_gl_copy_bo_address(struct wined3d_context_gl *context_gl,
         }
         else
         {
-            src_ptr = wined3d_context_gl_map_bo_address(context_gl, src, size, WINED3D_MAP_READ);
-            dst_ptr = wined3d_context_gl_map_bo_address(context_gl, dst, size, WINED3D_MAP_WRITE);
+            src_ptr = wined3d_context_gl_map_bo_address(context_gl, src,
+                    src_bo->size - (uintptr_t)src->addr, WINED3D_MAP_READ);
+            dst_ptr = wined3d_context_gl_map_bo_address(context_gl, dst,
+                    dst_bo->size - (uintptr_t)dst->addr, WINED3D_MAP_WRITE);
 
-            memcpy(dst_ptr, src_ptr, size);
+            for (i = 0; i < range_count; ++i)
+                memcpy(dst_ptr + ranges[i].offset, src_ptr + ranges[i].offset, ranges[i].size);
 
-            range.offset = 0;
-            range.size = size;
-            wined3d_context_gl_unmap_bo_address(context_gl, dst, 1, &range);
+            wined3d_context_gl_unmap_bo_address(context_gl, dst, range_count, ranges);
             wined3d_context_gl_unmap_bo_address(context_gl, src, 0, NULL);
         }
     }
     else if (!dst_bo && src_bo)
     {
         wined3d_context_gl_bind_bo(context_gl, src_bo->binding, src_bo->id);
-        GL_EXTCALL(glGetBufferSubData(src_bo->binding,
-                src_bo->b.buffer_offset + (WINEGLDEF(GLintptr))src->addr, size, dst->addr));
+        for (i = 0; i < range_count; ++i)
+            GL_EXTCALL(glGetBufferSubData(src_bo->binding,
+                    src_bo->b.buffer_offset + (GLintptr)src->addr + ranges[i].offset,
+                    ranges[i].size, dst->addr + ranges[i].offset));
         checkGLcall("buffer download");
 
         wined3d_context_gl_reference_bo(context_gl, src_bo);
@@ -2919,81 +3115,59 @@ void wined3d_context_gl_copy_bo_address(struct wined3d_context_gl *context_gl,
     else if (dst_bo && !src_bo)
     {
         wined3d_context_gl_bind_bo(context_gl, dst_bo->binding, dst_bo->id);
-        GL_EXTCALL(glBufferSubData(dst_bo->binding,
-                dst_bo->b.buffer_offset + (WINEGLDEF(GLintptr))dst->addr, size, src->addr));
+        for (i = 0; i < range_count; ++i)
+            GL_EXTCALL(glBufferSubData(dst_bo->binding,
+                    dst_bo->b.buffer_offset + (GLintptr)dst->addr + ranges[i].offset,
+                    ranges[i].size, src->addr + ranges[i].offset));
         checkGLcall("buffer upload");
 
         wined3d_context_gl_reference_bo(context_gl, dst_bo);
     }
     else
     {
-        memcpy(dst->addr, src->addr, size);
+        for (i = 0; i < range_count; ++i)
+            memcpy(dst->addr + ranges[i].offset, src->addr + ranges[i].offset, ranges[i].size);
     }
 }
 
 void wined3d_context_gl_destroy_bo(struct wined3d_context_gl *context_gl, struct wined3d_bo_gl *bo)
 {
+    struct wined3d_device_gl *device_gl = wined3d_device_gl(context_gl->c.device);
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
 
     TRACE("context_gl %p, bo %p.\n", context_gl, bo);
 
+    if (bo->memory)
+    {
+        unsigned int order = bo->memory->order;
+
+        if (bo->b.map_ptr)
+            wined3d_allocator_chunk_gl_unmap(wined3d_allocator_chunk_gl(bo->memory->chunk), context_gl);
+        wined3d_context_gl_destroy_allocator_block(context_gl, bo->memory, bo->command_fence_id);
+
+        if (bo->command_fence_id == device_gl->current_fence_id)
+        {
+            device_gl->retired_bo_size += WINED3D_ALLOCATOR_CHUNK_SIZE >> order;
+            if (device_gl->retired_bo_size > WINED3D_RETIRED_BO_SIZE_THRESHOLD)
+                wined3d_context_gl_submit_command_fence(context_gl);
+        }
+
+        bo->id = 0;
+        return;
+    }
+
+    if (bo->b.map_ptr)
+    {
+        wined3d_context_gl_bind_bo(context_gl, bo->binding, bo->id);
+        GL_EXTCALL(glUnmapBuffer(bo->binding));
+        adapter_adjust_mapped_memory(context_gl->c.device->adapter, -bo->size);
+    }
+
     TRACE("Destroying GL buffer %u.\n", bo->id);
+
     GL_EXTCALL(glDeleteBuffers(1, &bo->id));
     checkGLcall("buffer object destruction");
     bo->id = 0;
-}
-
-bool wined3d_context_gl_create_bo(struct wined3d_context_gl *context_gl, GLsizeiptr size,
-        GLenum binding, GLenum usage, bool coherent, GLbitfield flags, struct wined3d_bo_gl *bo)
-{
-    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
-    GLuint id = 0;
-
-    TRACE("context_gl %p, size %lu, binding %#x, usage %#x, coherent %#x, flags %#x, bo %p.\n",
-            context_gl, size, binding, usage, coherent, flags, bo);
-
-    GL_EXTCALL(glGenBuffers(1, &id));
-    if (!id)
-    {
-        checkGLcall("buffer object creation");
-        return false;
-    }
-    wined3d_context_gl_bind_bo(context_gl, binding, id);
-
-    if (!coherent && gl_info->supported[APPLE_FLUSH_BUFFER_RANGE])
-    {
-        GL_EXTCALL(glBufferParameteriAPPLE(binding, GL_BUFFER_FLUSHING_UNMAP_APPLE, GL_FALSE));
-        GL_EXTCALL(glBufferParameteriAPPLE(binding, GL_BUFFER_SERIALIZED_MODIFY_APPLE, GL_FALSE));
-    }
-
-    if (gl_info->supported[ARB_BUFFER_STORAGE])
-    {
-        if (flags & (GL_MAP_READ_BIT | GL_MAP_WRITE_BIT))
-            flags |= GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
-        GL_EXTCALL(glBufferStorage(binding, size, NULL, flags | GL_DYNAMIC_STORAGE_BIT));
-    }
-    else
-    {
-        GL_EXTCALL(glBufferData(binding, size, NULL, usage));
-    }
-
-    wined3d_context_gl_bind_bo(context_gl, binding, 0);
-    checkGLcall("buffer object creation");
-
-    TRACE("Created buffer object %u.\n", id);
-    bo->id = id;
-    bo->size = size;
-    bo->binding = binding;
-    bo->usage = usage;
-    bo->flags = flags;
-    bo->b.coherent = coherent;
-    list_init(&bo->b.users);
-    bo->command_fence_id = 0;
-    bo->b.memory_offset = 0;
-    bo->b.buffer_offset = 0;
-    bo->b.map_ptr = NULL;
-
-    return true;
 }
 
 static void wined3d_context_gl_set_render_offscreen(struct wined3d_context_gl *context_gl, BOOL offscreen)
@@ -3445,6 +3619,44 @@ static uint32_t find_draw_buffers_mask(const struct wined3d_context_gl *context_
     }
 
     return rt_mask;
+}
+
+void context_gl_apply_texture_draw_state(struct wined3d_context_gl *context_gl,
+        struct wined3d_texture *texture, unsigned int sub_resource_idx, unsigned int location)
+{
+    const struct wined3d_format *format = texture->resource.format;
+    GLenum buffer;
+
+    if (wined3d_settings.offscreen_rendering_mode != ORM_FBO)
+        return;
+
+    if (format->depth_size || format->stencil_size)
+    {
+        wined3d_context_gl_apply_fbo_state_blit(context_gl, GL_DRAW_FRAMEBUFFER,
+                NULL, 0, &texture->resource, sub_resource_idx, location);
+
+        buffer = GL_NONE;
+    }
+    else
+    {
+        wined3d_context_gl_apply_fbo_state_blit(context_gl, GL_DRAW_FRAMEBUFFER,
+                &texture->resource, sub_resource_idx, NULL, 0, location);
+
+        if (location == WINED3D_LOCATION_DRAWABLE)
+        {
+            TRACE("Texture %p is onscreen.\n", texture);
+            buffer = wined3d_texture_get_gl_buffer(texture);
+        }
+        else
+        {
+            TRACE("Texture %p is offscreen.\n", texture);
+            buffer = GL_COLOR_ATTACHMENT0;
+        }
+    }
+
+    wined3d_context_gl_set_draw_buffer(context_gl, buffer);
+    wined3d_context_gl_check_fbo_status(context_gl, GL_DRAW_FRAMEBUFFER);
+    context_invalidate_state(&context_gl->c, STATE_FRAMEBUFFER);
 }
 
 /* Context activation is done by the caller. */
@@ -4406,7 +4618,7 @@ void dispatch_compute(struct wined3d_device *device, const struct wined3d_state 
         struct wined3d_bo_gl *bo_gl = wined3d_bo_gl(indirect->buffer->buffer_object);
 
         GL_EXTCALL(glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, bo_gl->id));
-        GL_EXTCALL(glDispatchComputeIndirect(bo_gl->b.buffer_offset + (WINEGLDEF(GLintptr))indirect->offset));
+        GL_EXTCALL(glDispatchComputeIndirect(bo_gl->b.buffer_offset + (GLintptr)indirect->offset));
         GL_EXTCALL(glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, 0));
         wined3d_context_gl_reference_bo(context_gl, bo_gl);
     }
@@ -4800,7 +5012,7 @@ static void wined3d_context_gl_draw_indirect(struct wined3d_context_gl *context_
 
     GL_EXTCALL(glBindBuffer(GL_DRAW_INDIRECT_BUFFER, bo_gl->id));
 
-    offset = (const uint8_t * WIN32PTR)(UINT_PTR)bo_gl->b.buffer_offset + parameters->offset;
+    offset = (const uint8_t *)bo_gl->b.buffer_offset + parameters->offset;
     if (idx_size)
     {
         GLenum idx_type = idx_size == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT;
@@ -4959,7 +5171,7 @@ void draw_primitive(struct wined3d_device *device, const struct wined3d_state *s
         return;
     }
 
-    if (dsv && (!state->depth_stencil_state || state->depth_stencil_state->desc.depth_write))
+    if (dsv && (!state->depth_stencil_state || state->depth_stencil_state->writes_ds))
     {
         DWORD location = context->render_offscreen ? dsv->resource->draw_binding : WINED3D_LOCATION_DRAWABLE;
 
@@ -4977,7 +5189,7 @@ void draw_primitive(struct wined3d_device *device, const struct wined3d_state *s
         if (!bo || !stream_info->all_vbo)
             idx_data = index_buffer->resource.heap_memory;
         else
-            idx_data = (void *)(UINT_PTR)bo->buffer_offset;
+            idx_data = (void *)bo->buffer_offset;
         idx_data = (const BYTE *)idx_data + state->index_offset;
 
         if (state->index_format == WINED3DFMT_R16_UINT)
@@ -5136,7 +5348,7 @@ void wined3d_context_gl_unload_tex_coords(const struct wined3d_context_gl *conte
 static const void *get_vertex_attrib_pointer(const struct wined3d_stream_info_element *element,
         const struct wined3d_state *state)
 {
-    const uint8_t * WIN32PTR offset = element->data.addr + state->load_base_vertex_index * element->stride;
+    const uint8_t *offset = element->data.addr + state->load_base_vertex_index * element->stride;
 
     if (element->data.buffer_object)
         offset += element->data.buffer_object->buffer_offset;

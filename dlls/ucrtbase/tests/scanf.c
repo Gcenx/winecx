@@ -30,10 +30,10 @@
 static int WINAPIV vsscanf_wrapper(unsigned __int64 options, const char *str, size_t len, const char *format, ...)
 {
     int ret;
-    __ms_va_list valist;
-    __ms_va_start(valist, format);
+    va_list valist;
+    va_start(valist, format);
     ret = __stdio_common_vsscanf(options, str, len, format, NULL, valist);
-    __ms_va_end(valist);
+    va_end(valist);
     return ret;
 }
 
@@ -43,11 +43,13 @@ static void test_sscanf(void)
     char buffer[100], buffer1[100];
     int result, ret, hour, min, count;
     LONGLONG result64;
+    DWORD_PTR result_ptr;
     char c;
     void *ptr;
     float ret_float1, ret_float2;
     double double_res;
     unsigned int i;
+    size_t ret_size;
 
     static const unsigned int tests[] =
     {
@@ -289,6 +291,36 @@ static void test_sscanf(void)
 
         ret = vsscanf_wrapper(tests[i], "infi", -1, "%lf%n", &double_res, &count);
         ok(ret == -1, "sscanf returned %d for flags %#x\n", ret, tests[i]);
+
+        ret_size = ~0;
+        ret = vsscanf_wrapper(tests[i], "1", -1, "%zd", &ret_size);
+        ok(ret == 1, "sscanf returned %d for flags %#x\n", ret, tests[i]);
+        ok(ret_size == 1, "got wrong size_t %s for flags %#x\n",
+                wine_dbgstr_longlong((LONGLONG)ret_size), tests[i]);
+
+        result64 = 0;
+        ret = vsscanf_wrapper(tests[i], "12345678901234", -1, "%I64d", &result64);
+        ok(ret == 1, "sscanf returned %d for flags %#x\n", ret, tests[i]);
+        ok(result64 == 12345678901234ll, "got wrong number 0x%s for flags %#x\n",
+                wine_dbgstr_longlong(result64), tests[i]);
+
+        result = 0;
+        ret = vsscanf_wrapper(tests[i], "12345678901234", -1, "%I32d", &result);
+        ok(ret == 1, "sscanf returned %d for flags %#x\n", ret, tests[i]);
+        ok(result == (int)12345678901234ll, /* this is always truncated to 32bit */
+           "got wrong number 0x%d for flags %#x\n", result, tests[i]);
+
+        result_ptr = 0;
+        ret = vsscanf_wrapper(tests[i], "0x87654321", -1, "%Ix", &result_ptr);
+        ok(ret == 1, "sscanf returned %d for flags %#x\n", ret, tests[i]);
+        ok(result_ptr == 0x87654321,
+           "got wrong number %Ix for flags %#x\n", result_ptr, tests[i]);
+
+        result_ptr = 0;
+        ret = vsscanf_wrapper(tests[i], "0x123456789", -1, "%Ix", &result_ptr);
+        ok(ret == 1, "sscanf returned %d for flags %#x\n", ret, tests[i]);
+        ok(result_ptr == (DWORD_PTR)0x123456789ull, /* this is truncated on 32bit systems */
+           "got wrong number %Ix for flags %#x\n", result_ptr, tests[i]);
     }
 }
 

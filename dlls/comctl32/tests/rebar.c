@@ -18,11 +18,9 @@
  */
 
 #include <assert.h>
-#include <stdarg.h>
 
 #include <windows.h>
 #include <commctrl.h>
-#include <uxtheme.h>
 
 #include "wine/heap.h"
 #include "wine/test.h"
@@ -72,16 +70,16 @@ static void init_system_font_height(void) {
 
     hDC = CreateCompatibleDC(NULL);
     GetTextMetricsA(hDC, &tm);
-    DeleteDC(NULL);
+    DeleteDC(hDC);
 
     system_font_height = tm.tmHeight;
 }
 
-static HWND create_rebar_control(void)
+static HWND create_rebar_control(DWORD style)
 {
     HWND hwnd;
 
-    hwnd = CreateWindowA(REBARCLASSNAMEA, NULL, WS_CHILD | WS_VISIBLE, 0, 0, 0, 0,
+    hwnd = CreateWindowA(REBARCLASSNAMEA, NULL, style | WS_CHILD | WS_VISIBLE, 0, 0, 0, 0,
         hMainWnd, (HMENU)17, GetModuleHandleA(NULL), NULL);
     ok(hwnd != NULL, "Failed to create Rebar\n");
 
@@ -197,7 +195,7 @@ static int string_width(const CHAR *s) {
 
 typedef struct {
     RECT rc;
-    DWORD fStyle;
+    UINT fStyle;
     UINT cx;
 } rbband_result_t;
 
@@ -499,7 +497,7 @@ static void test_layout(void)
 
     rbsize_results_init();
 
-    hRebar = create_rebar_control();
+    hRebar = create_rebar_control(0);
     check_sizes();
     rbi.cbSize = REBARBANDINFOA_V6_SIZE;
     rbi.fMask = RBBIM_SIZE | RBBIM_CHILDSIZE | RBBIM_CHILD;
@@ -559,7 +557,7 @@ static void test_layout(void)
 
     DestroyWindow(hRebar);
 
-    hRebar = create_rebar_control();
+    hRebar = create_rebar_control(0);
     add_band_w(hRebar, "ABC",     70,  40, 100);
     add_band_w(hRebar, NULL,      40,  70, 100);
     add_band_w(hRebar, NULL,     170, 240, 100);
@@ -602,7 +600,7 @@ static void test_layout(void)
     DestroyWindow(hRebar);
 
     /* VARHEIGHT resizing test on a horizontal rebar */
-    hRebar = create_rebar_control();
+    hRebar = create_rebar_control(0);
     SetWindowLongA(hRebar, GWL_STYLE, GetWindowLongA(hRebar, GWL_STYLE) | RBS_AUTOSIZE);
     check_sizes();
     rbi.fMask = RBBIM_CHILD | RBBIM_CHILDSIZE | RBBIM_SIZE | RBBIM_STYLE;
@@ -630,7 +628,7 @@ static void test_layout(void)
     DestroyWindow(hRebar);
 
     /* VARHEIGHT resizing on a vertical rebar */
-    hRebar = create_rebar_control();
+    hRebar = create_rebar_control(0);
     SetWindowLongA(hRebar, GWL_STYLE, GetWindowLongA(hRebar, GWL_STYLE) | CCS_VERT | RBS_AUTOSIZE);
     check_sizes();
     rbi.fMask = RBBIM_CHILD | RBBIM_CHILDSIZE | RBBIM_SIZE | RBBIM_STYLE;
@@ -661,7 +659,7 @@ static void test_layout(void)
     pImageList_Destroy(himl);
 
     /* One hidden band. */
-    hRebar = create_rebar_control();
+    hRebar = create_rebar_control(0);
 
     rbi.cbSize = REBARBANDINFOA_V6_SIZE;
     rbi.fMask = RBBIM_STYLE | RBBIM_SIZE | RBBIM_CHILDSIZE | RBBIM_CHILD;
@@ -932,8 +930,8 @@ static void expect_band_content_(int line, HWND hRebar, UINT uBand, INT fStyle, 
     rb.cch = MAX_PATH;
     ok(SendMessageA(hRebar, RB_GETBANDINFOA, uBand, (LPARAM)&rb), "RB_GETBANDINFOA failed from line %d\n", line);
     expect_eq(line, rb.fStyle, fStyle, int, "%x");
-    expect_eq(line, rb.clrFore, clrFore, COLORREF, "%x");
-    expect_eq(line, rb.clrBack, clrBack, COLORREF, "%x");
+    expect_eq(line, rb.clrFore, clrFore, COLORREF, "%lx");
+    expect_eq(line, rb.clrBack, clrBack, COLORREF, "%lx");
     expect_eq(line, strcmp(rb.lpText, lpText), 0, int, "%d");
     expect_eq(line, rb.iImage, iImage, int, "%x");
     expect_eq(line, rb.hwndChild, hwndChild, HWND, "%p");
@@ -947,7 +945,7 @@ static void expect_band_content_(int line, HWND hRebar, UINT uBand, INT fStyle, 
     expect_eq(line, rb.cyMaxChild, cyMaxChild, int, "%x");
     expect_eq(line, rb.cyIntegral, cyIntegral, int, "%x");
     expect_eq(line, rb.cxIdeal, cxIdeal, int, "%d");
-    expect_eq(line, rb.lParam, lParam, LPARAM, "%ld");
+    expect_eq(line, rb.lParam, lParam, LPARAM, "%Id");
     ok(rb.cxHeader == cxHeader || rb.cxHeader == cxHeader + 1 || broken(rb.cxHeader == cxHeader_broken),
         "expected %d for %d from line %d\n", cxHeader, rb.cxHeader, line);
 }
@@ -966,7 +964,7 @@ static void test_bandinfo(void)
     CHAR szABCD[] = "ABCD";
     HWND hRebar;
 
-    hRebar = create_rebar_control();
+    hRebar = create_rebar_control(0);
     rb.cbSize = REBARBANDINFOA_V6_SIZE;
     rb.fMask = 0;
     if (!SendMessageA(hRebar, RB_INSERTBANDA, 0, (LPARAM)&rb))
@@ -1027,13 +1025,13 @@ static void test_colors(void)
     HWND hRebar;
     REBARBANDINFOA bi;
 
-    hRebar = create_rebar_control();
+    hRebar = create_rebar_control(0);
 
     /* test default colors */
     clr = SendMessageA(hRebar, RB_GETTEXTCOLOR, 0, 0);
-    compare(clr, CLR_NONE, "%x");
+    compare(clr, CLR_NONE, "%lx");
     clr = SendMessageA(hRebar, RB_GETBKCOLOR, 0, 0);
-    compare(clr, CLR_NONE, "%x");
+    compare(clr, CLR_NONE, "%lx");
 
     scheme.dwSize = sizeof(scheme);
     scheme.clrBtnHighlight = 0;
@@ -1041,8 +1039,8 @@ static void test_colors(void)
     ret = SendMessageA(hRebar, RB_GETCOLORSCHEME, 0, (LPARAM)&scheme);
     if (ret)
     {
-        compare(scheme.clrBtnHighlight, CLR_DEFAULT, "%x");
-        compare(scheme.clrBtnShadow, CLR_DEFAULT, "%x");
+        compare(scheme.clrBtnHighlight, CLR_DEFAULT, "%lx");
+        compare(scheme.clrBtnShadow, CLR_DEFAULT, "%lx");
     }
     else
         skip("RB_GETCOLORSCHEME not supported\n");
@@ -1054,14 +1052,14 @@ static void test_colors(void)
     bi.clrFore = bi.clrBack = 0xc0ffe;
     ret = SendMessageA(hRebar, RB_GETBANDINFOA, 0, (LPARAM)&bi);
     ok(ret, "RB_GETBANDINFOA failed\n");
-    compare(bi.clrFore, RGB(0, 0, 0), "%x");
-    compare(bi.clrBack, GetSysColor(COLOR_3DFACE), "%x");
+    compare(bi.clrFore, RGB(0, 0, 0), "%lx");
+    compare(bi.clrBack, GetSysColor(COLOR_3DFACE), "%lx");
 
     SendMessageA(hRebar, RB_SETTEXTCOLOR, 0, RGB(255, 0, 0));
     bi.clrFore = bi.clrBack = 0xc0ffe;
     ret = SendMessageA(hRebar, RB_GETBANDINFOA, 0, (LPARAM)&bi);
     ok(ret, "RB_GETBANDINFOA failed\n");
-    compare(bi.clrFore, RGB(0, 0, 0), "%x");
+    compare(bi.clrFore, RGB(0, 0, 0), "%lx");
 
     DestroyWindow(hRebar);
 }
@@ -1106,7 +1104,7 @@ static void test_showband(void)
     REBARBANDINFOA rbi;
     BOOL ret;
 
-    hRebar = create_rebar_control();
+    hRebar = create_rebar_control(0);
 
     /* no bands */
     ret = SendMessageA(hRebar, RB_SHOWBAND, 0, TRUE);
@@ -1135,13 +1133,40 @@ static void test_notification(void)
     MEASUREITEMSTRUCT mis;
     HWND rebar;
 
-    rebar = create_rebar_control();
+    rebar = create_rebar_control(0);
 
     g_parent_measureitem = 0;
     SendMessageA(rebar, WM_MEASUREITEM, 0, (LPARAM)&mis);
     ok(g_parent_measureitem == 1, "got %d\n", g_parent_measureitem);
 
     DestroyWindow(rebar);
+}
+
+static void test_style(void)
+{
+    STYLESTRUCT style_struct;
+    LONG style;
+    HWND hwnd;
+    RECT rect;
+
+    /* WS_BORDER */
+    hwnd = create_rebar_control(WS_BORDER);
+    ok(GetWindowLongW(hwnd, GWL_STYLE) & WS_BORDER, "Expected WS_BORDER.\n");
+
+    GetClientRect(hwnd, &rect);
+    SendMessageW(hwnd, WM_NCCALCSIZE, 0, (LPARAM)&rect);
+    ok(GetWindowLongW(hwnd, GWL_STYLE) & WS_BORDER, "Expected WS_BORDER.\n");
+
+    SendMessageW(hwnd, WM_THEMECHANGED, 0, 0);
+    style = GetWindowLongW(hwnd, GWL_STYLE);
+    ok(style & WS_BORDER, "Expected WS_BORDER.\n");
+
+    style_struct.styleOld = style;
+    style_struct.styleNew = style | WS_DLGFRAME;
+    SendMessageW(hwnd, WM_STYLECHANGED, (WPARAM)GWL_STYLE, (LPARAM)&style_struct);
+    ok(GetWindowLongW(hwnd, GWL_STYLE) & WS_BORDER, "Expected WS_BORDER.\n");
+
+    DestroyWindow(hwnd);
 }
 
 static void init_functions(void)
@@ -1176,6 +1201,7 @@ START_TEST(rebar)
 
     test_layout();
     test_resize();
+    test_style();
 
 out:
     PostQuitMessage(0);

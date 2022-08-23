@@ -1,0 +1,358 @@
+/*
+ * Copyright 2022 Ziqing Hui for CodeWeavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+import "d2d1_2.idl";
+import "d2d1effects_2.idl";
+
+typedef enum D2D1_INK_NIB_SHAPE
+{
+    D2D1_INK_NIB_SHAPE_ROUND = 0x0,
+    D2D1_INK_NIB_SHAPE_SQUARE = 0x1,
+    D2D1_INK_NIB_SHAPE_FORCE_DWORD = 0xffffffff
+} D2D1_INK_NIB_SHAPE;
+
+typedef enum D2D1_PATCH_EDGE_MODE
+{
+    D2D1_PATCH_EDGE_MODE_ALIASED = 0x0,
+    D2D1_PATCH_EDGE_MODE_ANTIALIASED = 0x1,
+    D2D1_PATCH_EDGE_MODE_ALIASED_INFLATED = 0x2,
+    D2D1_PATCH_EDGE_MODE_FORCE_DWORD = 0xffffffff
+} D2D1_PATCH_EDGE_MODE;
+
+typedef enum D2D1_ORIENTATION
+{
+    D2D1_ORIENTATION_DEFAULT = 0x1,
+    D2D1_ORIENTATION_FLIP_HORIZONTAL = 0x2,
+    D2D1_ORIENTATION_ROTATE_CLOCKWISE180 = 0x3,
+    D2D1_ORIENTATION_ROTATE_CLOCKWISE180_FLIP_HORIZONTAL = 0x4,
+    D2D1_ORIENTATION_ROTATE_CLOCKWISE90_FLIP_HORIZONTAL = 0x5,
+    D2D1_ORIENTATION_ROTATE_CLOCKWISE270 = 0x6,
+    D2D1_ORIENTATION_ROTATE_CLOCKWISE270_FLIP_HORIZONTAL = 0x7,
+    D2D1_ORIENTATION_ROTATE_CLOCKWISE90 = 0x8,
+    D2D1_ORIENTATION_FORCE_DWORD = 0xffffffff
+} D2D1_ORIENTATION;
+
+typedef enum D2D1_TRANSFORMED_IMAGE_SOURCE_OPTIONS
+{
+    D2D1_TRANSFORMED_IMAGE_SOURCE_OPTIONS_NONE = 0x0,
+    D2D1_TRANSFORMED_IMAGE_SOURCE_OPTIONS_DISABLE_DPI_SCALE = 0x1,
+    D2D1_TRANSFORMED_IMAGE_SOURCE_OPTIONS_FORCE_DWORD = 0xffffffff
+} D2D1_TRANSFORMED_IMAGE_SOURCE_OPTIONS;
+
+typedef enum D2D1_IMAGE_SOURCE_LOADING_OPTIONS
+{
+    D2D1_IMAGE_SOURCE_LOADING_OPTIONS_NONE = 0x0,
+    D2D1_IMAGE_SOURCE_LOADING_OPTIONS_RELEASE_SOURCE = 0x1,
+    D2D1_IMAGE_SOURCE_LOADING_OPTIONS_CACHE_ON_DEMAND = 0x2,
+    D2D1_IMAGE_SOURCE_LOADING_OPTIONS_FORCE_DWORD = 0xffffffff
+} D2D1_IMAGE_SOURCE_LOADING_OPTIONS;
+
+typedef enum D2D1_IMAGE_SOURCE_FROM_DXGI_OPTIONS
+{
+    D2D1_IMAGE_SOURCE_FROM_DXGI_OPTIONS_NONE = 0x0,
+    D2D1_IMAGE_SOURCE_FROM_DXGI_OPTIONS_LOW_QUALITY_PRIMARY_CONVERSION = 0x1,
+    D2D1_IMAGE_SOURCE_FROM_DXGI_OPTIONS_FORCE_DWORD = 0xffffffff
+} D2D1_IMAGE_SOURCE_FROM_DXGI_OPTIONS;
+
+typedef struct D2D1_INK_POINT
+{
+    float x;
+    float y;
+    float radius;
+} D2D1_INK_POINT;
+
+typedef struct D2D1_INK_BEZIER_SEGMENT
+{
+    D2D1_INK_POINT point1;
+    D2D1_INK_POINT point2;
+    D2D1_INK_POINT point3;
+} D2D1_INK_BEZIER_SEGMENT;
+
+typedef struct D2D1_INK_STYLE_PROPERTIES
+{
+    D2D1_INK_NIB_SHAPE nibShape;
+    D2D1_MATRIX_3X2_F nibTransform;
+} D2D1_INK_STYLE_PROPERTIES;
+
+typedef struct D2D1_GRADIENT_MESH_PATCH
+{
+    D2D1_POINT_2F point00;
+    D2D1_POINT_2F point01;
+    D2D1_POINT_2F point02;
+    D2D1_POINT_2F point03;
+    D2D1_POINT_2F point10;
+    D2D1_POINT_2F point11;
+    D2D1_POINT_2F point12;
+    D2D1_POINT_2F point13;
+    D2D1_POINT_2F point20;
+    D2D1_POINT_2F point21;
+    D2D1_POINT_2F point22;
+    D2D1_POINT_2F point23;
+    D2D1_POINT_2F point30;
+    D2D1_POINT_2F point31;
+    D2D1_POINT_2F point32;
+    D2D1_POINT_2F point33;
+    D2D1_COLOR_F color00;
+    D2D1_COLOR_F color03;
+    D2D1_COLOR_F color30;
+    D2D1_COLOR_F color33;
+    D2D1_PATCH_EDGE_MODE topEdgeMode;
+    D2D1_PATCH_EDGE_MODE leftEdgeMode;
+    D2D1_PATCH_EDGE_MODE bottomEdgeMode;
+    D2D1_PATCH_EDGE_MODE rightEdgeMode;
+} D2D1_GRADIENT_MESH_PATCH;
+
+typedef struct D2D1_TRANSFORMED_IMAGE_SOURCE_PROPERTIES
+{
+    D2D1_ORIENTATION orientation;
+    float scaleX;
+    float scaleY;
+    D2D1_INTERPOLATION_MODE interpolationMode;
+    D2D1_TRANSFORMED_IMAGE_SOURCE_OPTIONS options;
+} D2D1_TRANSFORMED_IMAGE_SOURCE_PROPERTIES;
+
+[
+    object,
+    uuid(bae8b344-23fc-4071-8cb5-d05d6f073848),
+    local,
+]
+interface ID2D1InkStyle : ID2D1Resource
+{
+    void SetNibTransform(
+        [in] const D2D1_MATRIX_3X2_F *transform
+    );
+    void GetNibTransform(
+        [out] D2D1_MATRIX_3X2_F *transform
+    );
+    void SetNibShape(
+        [in] D2D1_INK_NIB_SHAPE shape
+    );
+    D2D1_INK_NIB_SHAPE GetNibShape();
+};
+
+[
+    object,
+    uuid(b499923b-7029-478f-a8b3-432c7c5f5312),
+    local,
+]
+interface ID2D1Ink : ID2D1Resource
+{
+    void SetStartPoint(
+        [in] const D2D1_INK_POINT *start_point
+    );
+    D2D1_INK_POINT GetStartPoint();
+    HRESULT AddSegments(
+        [in] const D2D1_INK_BEZIER_SEGMENT *segments,
+        [in] UINT32 segment_count
+    );
+    HRESULT RemoveSegmentsAtEnd(
+        [in] UINT32 segment_count
+    );
+    HRESULT SetSegments(
+        [in] UINT32 start_segment,
+        [in] const D2D1_INK_BEZIER_SEGMENT *segments,
+        [in] UINT32 segment_count
+    );
+    HRESULT SetSegmentAtEnd(
+        [in] const D2D1_INK_BEZIER_SEGMENT *segment
+    );
+    UINT32 GetSegmentCount();
+    HRESULT GetSegments(
+        [in] UINT32 start_segment,
+        [out] D2D1_INK_BEZIER_SEGMENT *segments,
+        [in] UINT32 segment_count
+    );
+    HRESULT StreamAsGeometry(
+        [in, optional] ID2D1InkStyle *ink_style,
+        [in, optional] const D2D1_MATRIX_3X2_F *world_transform,
+        [in] float flattening_tolerance,
+        [in] ID2D1SimplifiedGeometrySink *geometry_sink
+    );
+    HRESULT GetBounds(
+        [in, optional] ID2D1InkStyle *ink_style,
+        [in, optional] const D2D1_MATRIX_3X2_F *world_transform,
+        [out] D2D1_RECT_F *bounds
+    );
+};
+
+[
+    object,
+    uuid(f292e401-c050-4cde-83d7-04962d3b23c2),
+    local,
+]
+interface ID2D1GradientMesh : ID2D1Resource
+{
+    UINT32 GetPatchCount();
+    HRESULT GetPatches(
+        [in] UINT32 start_index,
+        [out] D2D1_GRADIENT_MESH_PATCH *patches,
+        [in] UINT32 patch_count
+    );
+};
+
+[
+    object,
+    uuid(c9b664e5-74a1-4378-9ac2-eefc37a3f4d8),
+    local,
+]
+interface ID2D1ImageSource : ID2D1Image
+{
+    HRESULT OfferResources();
+    HRESULT TryReclaimResources(
+        [out] BOOL *resources_discarded
+    );
+};
+
+[
+    object,
+    uuid(77395441-1c8f-4555-8683-f50dab0fe792),
+    local,
+]
+interface ID2D1ImageSourceFromWic : ID2D1ImageSource
+{
+    HRESULT EnsureCached(
+        [in, optional] const D2D1_RECT_U *rect_to_fill
+    );
+    HRESULT TrimCache(
+        [in, optional] const D2D1_RECT_U *rect_to_preserve
+    );
+    void GetSource(
+        [out] IWICBitmapSource **source
+    );
+};
+
+[
+    object,
+    uuid(7f1f79e5-2796-416c-8f55-700f911445e5),
+    local,
+]
+interface ID2D1TransformedImageSource : ID2D1Image
+{
+    void GetSource(
+        [out] ID2D1ImageSource **source
+    );
+    void GetProperties(
+        [out] D2D1_TRANSFORMED_IMAGE_SOURCE_PROPERTIES *out
+    );
+};
+
+[
+    object,
+    uuid(53dd9855-a3b0-4d5b-82e1-26e25c5e5797),
+    local,
+]
+interface ID2D1LookupTable3D : ID2D1Resource
+{
+}
+
+[
+    object,
+    uuid(394ea6a3-0c34-4321-950b-6ca20f0be6c7),
+    local,
+]
+interface ID2D1DeviceContext2 : ID2D1DeviceContext1
+{
+    HRESULT CreateInk(
+        [in] const D2D1_INK_POINT *start_point,
+        [out] ID2D1Ink **ink
+    );
+    HRESULT CreateInkStyle(
+        [in, optional] const D2D1_INK_STYLE_PROPERTIES *ink_style_properties,
+        [out] ID2D1InkStyle **ink_style
+    );
+    HRESULT CreateGradientMesh(
+        [in] const D2D1_GRADIENT_MESH_PATCH *patches,
+        [in] UINT32 patches_count,
+        [out] ID2D1GradientMesh **gradient_mesh
+    );
+    HRESULT CreateImageSourceFromWic(
+        [in] IWICBitmapSource *wic_bitmap_source,
+        [in] D2D1_IMAGE_SOURCE_LOADING_OPTIONS loading_options,
+        [in] D2D1_ALPHA_MODE alpha_mode,
+        [out] ID2D1ImageSourceFromWic **image_source
+    );
+    HRESULT CreateLookupTable3D(
+        [in] D2D1_BUFFER_PRECISION precision,
+        [in] const UINT32 *extents,
+        [in] const BYTE *data,
+        [in] UINT32 data_count,
+        [in] const UINT32 *strides,
+        [out] ID2D1LookupTable3D **lookup_table
+    );
+    HRESULT CreateImageSourceFromDxgi(
+        [in] IDXGISurface **surfaces,
+        [in] UINT32 surface_count,
+        [in] DXGI_COLOR_SPACE_TYPE color_space,
+        [in] D2D1_IMAGE_SOURCE_FROM_DXGI_OPTIONS options,
+        [out] ID2D1ImageSource **image_source
+    );
+    HRESULT GetGradientMeshWorldBounds(
+        [in] ID2D1GradientMesh *gradient_mesh,
+        [out] D2D1_RECT_F *bounds
+    );
+    void DrawInk(
+        [in] ID2D1Ink *ink,
+        [in] ID2D1Brush *brush,
+        [in, optional] ID2D1InkStyle *ink_style
+    );
+    void DrawGradientMesh(
+        [in] ID2D1GradientMesh *gradient_mesh
+    );
+    void DrawGdiMetafile(
+        [in] ID2D1GdiMetafile *gdi_metafile,
+        [in, optional] const D2D1_RECT_F *dst_rect,
+        [in, optional] const D2D1_RECT_F *src_rect
+    );
+    HRESULT CreateTransformedImageSource(
+        [in] ID2D1ImageSource *source,
+        [in] const D2D1_TRANSFORMED_IMAGE_SOURCE_PROPERTIES *props,
+        [out] ID2D1TransformedImageSource **transformed
+    );
+}
+
+[
+    object,
+    uuid(a44472e1-8dfb-4e60-8492-6e2861c9ca8b),
+    local,
+]
+interface ID2D1Device2 : ID2D1Device1
+{
+    HRESULT CreateDeviceContext(
+        [in] D2D1_DEVICE_CONTEXT_OPTIONS options,
+        [out] ID2D1DeviceContext2 **context
+    );
+    void FlushDeviceContexts(
+        [in] ID2D1Bitmap *bitmap
+    );
+    HRESULT GetDxgiDevice(
+        [out] IDXGIDevice **dxgi_device
+    );
+}
+
+[
+    object,
+    uuid(0869759f-4f00-413f-b03e-2bda45404d0f),
+    local,
+]
+interface ID2D1Factory3 : ID2D1Factory2
+{
+    HRESULT CreateDevice(
+        [in] IDXGIDevice *dxgi_device,
+        [out] ID2D1Device2 **d2d_device
+    );
+}

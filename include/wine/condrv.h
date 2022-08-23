@@ -27,6 +27,7 @@
 /* common console input and output ioctls */
 #define IOCTL_CONDRV_GET_MODE              CTL_CODE(FILE_DEVICE_CONSOLE,  0, METHOD_BUFFERED, FILE_READ_ACCESS)
 #define IOCTL_CONDRV_SET_MODE              CTL_CODE(FILE_DEVICE_CONSOLE,  1, METHOD_BUFFERED, FILE_WRITE_ACCESS)
+#define IOCTL_CONDRV_IS_UNIX               CTL_CODE(FILE_DEVICE_CONSOLE,  2, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 /* console input ioctls */
 #define IOCTL_CONDRV_READ_CONSOLE          CTL_CODE(FILE_DEVICE_CONSOLE, 10, METHOD_BUFFERED, FILE_READ_ACCESS)
@@ -41,6 +42,9 @@
 #define IOCTL_CONDRV_CTRL_EVENT            CTL_CODE(FILE_DEVICE_CONSOLE, 19, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_CONDRV_BEEP                  CTL_CODE(FILE_DEVICE_CONSOLE, 20, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_CONDRV_FLUSH                 CTL_CODE(FILE_DEVICE_CONSOLE, 21, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_CONDRV_GET_WINDOW            CTL_CODE(FILE_DEVICE_CONSOLE, 22, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_CONDRV_GET_PROCESS_LIST      CTL_CODE(FILE_DEVICE_CONSOLE, 23, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_CONDRV_READ_CONSOLE_CONTROL  CTL_CODE(FILE_DEVICE_CONSOLE, 24, METHOD_BUFFERED, FILE_READ_ACCESS)
 
 /* console output ioctls */
 #define IOCTL_CONDRV_WRITE_CONSOLE         CTL_CODE(FILE_DEVICE_CONSOLE, 30, METHOD_BUFFERED, FILE_WRITE_ACCESS)
@@ -86,7 +90,6 @@ struct condrv_input_info
     unsigned int  input_cp;       /* console input codepage */
     unsigned int  output_cp;      /* console output codepage */
     unsigned int  input_count;    /* number of available input records */
-    condrv_handle_t win;          /* renderer window handle */
 };
 
 /* IOCTL_CONDRV_SET_INPUT_INFO params */
@@ -154,6 +157,7 @@ struct condrv_output_info_params
 #define SET_CONSOLE_OUTPUT_INFO_DISPLAY_WINDOW  0x0010
 #define SET_CONSOLE_OUTPUT_INFO_MAX_SIZE        0x0020
 #define SET_CONSOLE_OUTPUT_INFO_POPUP_ATTR      0x0040
+#define SET_CONSOLE_OUTPUT_INFO_FONT            0x0080
 
 /* IOCTL_CONDRV_FILL_OUTPUT params */
 struct condrv_fill_output_params
@@ -184,7 +188,9 @@ struct condrv_ctrl_event
 };
 
 /* Wine specific values for console inheritance (params->ConsoleHandle) */
-#define CONSOLE_HANDLE_ALLOC  ((HANDLE)1)
-#define CONSOLE_HANDLE_SHELL  ((HANDLE)2)
+#define CONSOLE_HANDLE_ALLOC            LongToHandle(-1)
+#define CONSOLE_HANDLE_ALLOC_NO_WINDOW  LongToHandle(-2)
+#define CONSOLE_HANDLE_SHELL            LongToHandle(-3)
+#define CONSOLE_HANDLE_SHELL_NO_WINDOW  LongToHandle(-4)
 
 #endif /* _INC_CONDRV */

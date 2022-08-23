@@ -42,7 +42,7 @@ static BOOL CALLBACK FormatTagEnumProc(HACMDRIVERID hadid,
     HACMDRIVER had;
 
     if (winetest_interactive)
-        trace("   Format 0x%04x: %s\n", paftd->dwFormatTag, paftd->szFormatTag);
+        trace("   Format 0x%04lx: %s\n", paftd->dwFormatTag, paftd->szFormatTag);
 
     rc = acmDriverOpen(&had, hadid, 0);
     ok(rc == MMSYSERR_NOERROR || rc == MMSYSERR_NODRIVER,
@@ -243,7 +243,7 @@ static BOOL CALLBACK FormatEnumProc(HACMDRIVERID hadid,
     acmMetrics((HACMOBJ)hadid, ACM_METRIC_DRIVER_SUPPORT, &fdwSupport);
 
     if (winetest_interactive)
-        trace("   0x%04x, %s\n", pafd->dwFormatTag, pafd->szFormat);
+        trace("   0x%04lx, %s\n", pafd->dwFormatTag, pafd->szFormat);
 
     acmDriverOpen(&had, hadid, 0);
     dwSize = pafd->cbwfx;
@@ -278,7 +278,7 @@ static BOOL CALLBACK FormatEnumProc(HACMDRIVERID hadid,
            "expected %d, got %d\n", pafd->pwfx->nChannels, dst->nChannels);
         if (pafd->dwFormatTag != 0x42) /* codec 0x0042 returns a different sample rate */
             ok(dst->nSamplesPerSec == pafd->pwfx->nSamplesPerSec,
-               "expected %d, got %d\n", pafd->pwfx->nSamplesPerSec, dst->nSamplesPerSec);
+               "expected %ld, got %ld\n", pafd->pwfx->nSamplesPerSec, dst->nSamplesPerSec);
         ok(dst->wBitsPerSample == 16,
            "expected %d, got %d\n", 16, dst->wBitsPerSample);
         ok(dst->nBlockAlign == 2*pafd->pwfx->nChannels,
@@ -402,7 +402,7 @@ static BOOL CALLBACK DriverEnumProc(HACMDRIVERID hadid,
         };
 
         ok(dd.cbStruct == sizeof(dd),
-            "acmDriverDetailsA(): cbStruct = %08x\n", dd.cbStruct);
+            "acmDriverDetailsA(): cbStruct = %08lx\n", dd.cbStruct);
 
         for (iter = expected_ids; iter->shortname; ++iter) {
             if (!strcmp(iter->shortname, dd.szShortName)) {
@@ -427,8 +427,8 @@ static BOOL CALLBACK DriverEnumProc(HACMDRIVERID hadid,
         trace("  Copyright: %s\n", dd.szCopyright);
         trace("  Licensing: %s\n", dd.szLicensing);
         trace("  Features: %s\n", dd.szFeatures);
-        trace("  Supports %u formats\n", dd.cFormatTags);
-        trace("  Supports %u filter formats\n", dd.cFilterTags);
+        trace("  Supports %lu formats\n", dd.cFormatTags);
+        trace("  Supports %lu filter formats\n", dd.cFilterTags);
         trace("  Mid: 0x%x\n", dd.wMid);
         trace("  Pid: 0x%x\n", dd.wPid);
     }
@@ -802,7 +802,7 @@ static void check_count(UINT uMetric)
     ok(rc == MMSYSERR_NOERROR, "acmMetrics() failed: rc = 0x%08x\n", rc);
 
     if (rc == MMSYSERR_NOERROR && winetest_interactive)
-        trace("%s: %u\n", get_metric(uMetric), dwMetric);
+        trace("%s: %lu\n", get_metric(uMetric), dwMetric);
 }
 
 static void driver_tests(void)
@@ -896,11 +896,11 @@ static void test_prepareheader(void)
 
     mr = acmStreamPrepareHeader(has, &hdr, 0);
     ok(mr == MMSYSERR_NOERROR, "prepare failed: 0x%x\n", mr);
-    ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_PREPARED, "header wasn't prepared: 0x%x\n", hdr.fdwStatus);
+    ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_PREPARED, "header wasn't prepared: 0x%lx\n", hdr.fdwStatus);
 
     mr = acmStreamUnprepareHeader(has, &hdr, 0);
     ok(mr == MMSYSERR_NOERROR, "unprepare failed: 0x%x\n", mr);
-    ok(hdr.fdwStatus == 0, "header wasn't unprepared: 0x%x\n", hdr.fdwStatus);
+    ok(hdr.fdwStatus == 0, "header wasn't unprepared: 0x%lx\n", hdr.fdwStatus);
 
     memset(&hdr, 0, sizeof(hdr));
     hdr.cbStruct = sizeof(hdr);
@@ -943,21 +943,21 @@ static void test_prepareheader(void)
 
     mr = acmStreamPrepareHeader(has, &hdr, 0);
     ok(mr == MMSYSERR_NOERROR, "prepare failed: 0x%x\n", mr);
-    ok(hdr.fdwStatus == (ACMSTREAMHEADER_STATUSF_PREPARED | ACMSTREAMHEADER_STATUSF_DONE), "header wasn't prepared: 0x%x\n", hdr.fdwStatus);
+    ok(hdr.fdwStatus == (ACMSTREAMHEADER_STATUSF_PREPARED | ACMSTREAMHEADER_STATUSF_DONE), "header wasn't prepared: 0x%lx\n", hdr.fdwStatus);
 
     hdr.cbSrcLengthUsed = 12345;
     hdr.cbDstLengthUsed = 12345;
     hdr.fdwStatus &= ~ACMSTREAMHEADER_STATUSF_DONE;
     mr = acmStreamConvert(has, &hdr, ACM_STREAMCONVERTF_BLOCKALIGN);
     ok(mr == MMSYSERR_NOERROR, "convert failed: 0x%x\n", mr);
-    ok(hdr.fdwStatus & ACMSTREAMHEADER_STATUSF_DONE, "conversion was not done: 0x%x\n", hdr.fdwStatus);
-    ok(hdr.cbSrcLengthUsed == hdr.cbSrcLength, "expected %d, got %d\n", hdr.cbSrcLength, hdr.cbSrcLengthUsed);
-todo_wine
-    ok(hdr.cbDstLengthUsed == 1010, "expected 1010, got %d\n", hdr.cbDstLengthUsed);
+    ok(hdr.fdwStatus & ACMSTREAMHEADER_STATUSF_DONE, "conversion was not done: 0x%lx\n", hdr.fdwStatus);
+    ok(hdr.cbSrcLengthUsed == hdr.cbSrcLength, "expected %ld, got %ld\n", hdr.cbSrcLength, hdr.cbSrcLengthUsed);
+    todo_wine
+    ok(hdr.cbDstLengthUsed == 1010, "expected 1010, got %ld\n", hdr.cbDstLengthUsed);
 
     mr = acmStreamUnprepareHeader(has, &hdr, 0);
     ok(mr == MMSYSERR_NOERROR, "unprepare failed: 0x%x\n", mr);
-    ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_DONE, "header wasn't unprepared: 0x%x\n", hdr.fdwStatus);
+    ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_DONE, "header wasn't unprepared: 0x%lx\n", hdr.fdwStatus);
 
     /* The 2 next tests are related to Lost Horizon (bug 24723) */
     memset(&hdr, 0, sizeof(hdr));
@@ -971,24 +971,24 @@ todo_wine
     if (sizeof(void *) == 4) /* 64 bit fails on this test */
     {
         ok(mr == MMSYSERR_NOERROR, "prepare failed: 0x%x\n", mr);
-        ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_PREPARED, "header wasn't prepared: 0x%x\n", hdr.fdwStatus);
+        ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_PREPARED, "header wasn't prepared: 0x%lx\n", hdr.fdwStatus);
 
         hdr.cbSrcLengthUsed = 12345;
         hdr.cbDstLengthUsed = 12345;
         hdr.fdwStatus &= ~ACMSTREAMHEADER_STATUSF_DONE;
         mr = acmStreamConvert(has, &hdr, ACM_STREAMCONVERTF_BLOCKALIGN);
         ok(mr == MMSYSERR_NOERROR, "convert failed: 0x%x\n", mr);
-        ok(hdr.fdwStatus & ACMSTREAMHEADER_STATUSF_DONE, "conversion was not done: 0x%x\n", hdr.fdwStatus);
-        ok(hdr.cbSrcLengthUsed == hdr.cbSrcLength, "expected %d, got %d\n", hdr.cbSrcLength, hdr.cbSrcLengthUsed);
-todo_wine
-        ok(hdr.cbDstLengthUsed == 1010, "expected 1010, got %d\n", hdr.cbDstLengthUsed);
+        ok(hdr.fdwStatus & ACMSTREAMHEADER_STATUSF_DONE, "conversion was not done: 0x%lx\n", hdr.fdwStatus);
+        ok(hdr.cbSrcLengthUsed == hdr.cbSrcLength, "expected %ld, got %ld\n", hdr.cbSrcLength, hdr.cbSrcLengthUsed);
+        todo_wine
+        ok(hdr.cbDstLengthUsed == 1010, "expected 1010, got %ld\n", hdr.cbDstLengthUsed);
 
         mr = acmStreamUnprepareHeader(has, &hdr, 0);
         ok(mr == MMSYSERR_NOERROR, "unprepare failed: 0x%x\n", mr);
-        ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_DONE, "header wasn't unprepared: 0x%x\n", hdr.fdwStatus);
+        ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_DONE, "header wasn't unprepared: 0x%lx\n", hdr.fdwStatus);
     }
     else
-todo_wine
+        todo_wine
         ok(mr == MMSYSERR_INVALPARAM, "expected 0x0b, got 0x%x\n", mr);
 
     memset(&hdr, 0, sizeof(hdr));
@@ -999,14 +999,14 @@ todo_wine
     hdr.cbDstLength = -4;
     mr = acmStreamPrepareHeader(has, &hdr, 0);
     ok(mr == ACMERR_NOTPOSSIBLE, "expected 0x200, got 0x%x\n", mr);
-    ok(hdr.fdwStatus == 0, "expected 0, got 0x%x\n", hdr.fdwStatus);
+    ok(hdr.fdwStatus == 0, "expected 0, got 0x%lx\n", hdr.fdwStatus);
 
     hdr.cbSrcLengthUsed = 12345;
     hdr.cbDstLengthUsed = 12345;
     mr = acmStreamConvert(has, &hdr, ACM_STREAMCONVERTF_BLOCKALIGN);
     ok(mr == ACMERR_UNPREPARED, "expected 0x202, got 0x%x\n", mr);
-    ok(hdr.cbSrcLengthUsed == 12345, "expected 12345, got %d\n", hdr.cbSrcLengthUsed);
-    ok(hdr.cbDstLengthUsed == 12345, "expected 12345, got %d\n", hdr.cbDstLengthUsed);
+    ok(hdr.cbSrcLengthUsed == 12345, "expected 12345, got %ld\n", hdr.cbSrcLengthUsed);
+    ok(hdr.cbDstLengthUsed == 12345, "expected 12345, got %ld\n", hdr.cbDstLengthUsed);
 
     mr = acmStreamUnprepareHeader(has, &hdr, 0);
     ok(mr == ACMERR_UNPREPARED, "expected 0x202, got 0x%x\n", mr);
@@ -1021,22 +1021,22 @@ todo_wine
 
     mr = acmStreamPrepareHeader(has, &hdr, 0);
     ok(mr == MMSYSERR_NOERROR, "prepare failed: 0x%x\n", mr);
-    ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_PREPARED, "header wasn't prepared: 0x%x\n", hdr.fdwStatus);
+    ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_PREPARED, "header wasn't prepared: 0x%lx\n", hdr.fdwStatus);
 
     hdr.cbSrcLengthUsed = 12345;
     hdr.cbDstLengthUsed = 12345;
     hdr.fdwStatus &= ~ACMSTREAMHEADER_STATUSF_DONE;
     mr = acmStreamConvert(has, &hdr, ACM_STREAMCONVERTF_BLOCKALIGN);
     ok(mr == MMSYSERR_NOERROR, "convert failed: 0x%x\n", mr);
-    ok(hdr.fdwStatus & ACMSTREAMHEADER_STATUSF_DONE, "conversion was not done: 0x%x\n", hdr.fdwStatus);
-todo_wine
-    ok(hdr.cbSrcLengthUsed == hdr.cbSrcLength, "expected %d, got %d\n", hdr.cbSrcLength, hdr.cbSrcLengthUsed);
-todo_wine
-    ok(hdr.cbDstLengthUsed == hdr.cbDstLength, "expected %d, got %d\n", hdr.cbDstLength, hdr.cbDstLengthUsed);
+    ok(hdr.fdwStatus & ACMSTREAMHEADER_STATUSF_DONE, "conversion was not done: 0x%lx\n", hdr.fdwStatus);
+    todo_wine
+    ok(hdr.cbSrcLengthUsed == hdr.cbSrcLength, "expected %ld, got %ld\n", hdr.cbSrcLength, hdr.cbSrcLengthUsed);
+    todo_wine
+    ok(hdr.cbDstLengthUsed == hdr.cbDstLength, "expected %ld, got %ld\n", hdr.cbDstLength, hdr.cbDstLengthUsed);
 
     mr = acmStreamUnprepareHeader(has, &hdr, 0);
     ok(mr == MMSYSERR_NOERROR, "unprepare failed: 0x%x\n", mr);
-    ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_DONE, "header wasn't unprepared: 0x%x\n", hdr.fdwStatus);
+    ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_DONE, "header wasn't unprepared: 0x%lx\n", hdr.fdwStatus);
 
     mr = acmStreamClose(has, 0);
     ok(mr == MMSYSERR_NOERROR, "close failed: 0x%x\n", mr);
@@ -1056,6 +1056,7 @@ struct stream_output
 static const struct stream_output expected_output[] = {
     /* #0: Identical conversion */
     {{WAVE_FORMAT_PCM, 1, 8000, 8000, 1, 8}, {WAVE_FORMAT_PCM, 1, 8000, 8000, 1, 8}, {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63}, 64, FALSE},
+    {{WAVE_FORMAT_PCM, 1, 44100, 88200, 2, 16}, {WAVE_FORMAT_PCM, 1, 44100, 88200, 2, 16}, {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63}, 64, FALSE},
 
     /* #1: 1 -> 2 channels */
     {{WAVE_FORMAT_PCM, 1, 8000, 8000, 1, 8}, {WAVE_FORMAT_PCM, 2, 8000, 16000, 2, 8}, {0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,14,14,15,15,16,16,17,17,18,18,19,19,20,20,21,21,22,22,23,23,24,24,25,25,26,26,27,27,28,28,29,29,30,30,31,31,32,32,33,33,34,34,35,35,36,36,37,37,38,38,39,39,40,40,41,41,42,42,43,43,44,44,45,45,46,46,47,47,48,48,49,49,50,50,51,51,52,52,53,53,54,54,55,55,56,56,57,57,58,58,59,59,60,60,61,61,62,62,63,63}, 128, FALSE},
@@ -1120,20 +1121,20 @@ static void test_convert(void)
 
         mmr = acmStreamPrepareHeader(has, &hdr, 0);
         ok(mmr == MMSYSERR_NOERROR, "#%d: prepare failed: 0x%x\n", i, mmr);
-        ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_PREPARED, "#%d: header wasn't prepared: 0x%x\n", i, hdr.fdwStatus);
+        ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_PREPARED, "#%d: header wasn't prepared: 0x%lx\n", i, hdr.fdwStatus);
 
         memset(&output, 0, sizeof(output));
         mmr = acmStreamConvert(has, &hdr, ACM_STREAMCONVERTF_BLOCKALIGN);
         ok(mmr == MMSYSERR_NOERROR, "#%d: convert failed: 0x%x\n", i, mmr);
-        ok(hdr.fdwStatus & ACMSTREAMHEADER_STATUSF_DONE, "#%d: conversion was not done: 0x%x\n", i, hdr.fdwStatus);
-        ok(hdr.cbSrcLengthUsed == hdr.cbSrcLength, "#%d: expected %d, got %d\n", i, hdr.cbSrcLength, hdr.cbSrcLengthUsed);
-        ok(hdr.cbDstLengthUsed == expected_output[i].dst_used, "#%d: expected %d, got %d\n", i, expected_output[i].dst_used, hdr.cbDstLengthUsed);
-todo_wine_if(expected_output[i].todo)
+        ok(hdr.fdwStatus & ACMSTREAMHEADER_STATUSF_DONE, "#%d: conversion was not done: 0x%lx\n", i, hdr.fdwStatus);
+        ok(hdr.cbSrcLengthUsed == hdr.cbSrcLength, "#%d: expected %ld, got %ld\n", i, hdr.cbSrcLength, hdr.cbSrcLengthUsed);
+        ok(hdr.cbDstLengthUsed == expected_output[i].dst_used, "#%d: expected %ld, got %ld\n", i, expected_output[i].dst_used, hdr.cbDstLengthUsed);
+        todo_wine_if(expected_output[i].todo)
         ok(!memcmp(expected_output[i].output, output, hdr.cbDstLengthUsed), "#%d: output does not match\n", i);
 
         mmr = acmStreamUnprepareHeader(has, &hdr, 0);
         ok(mmr == MMSYSERR_NOERROR, "#%d: unprepare failed: 0x%x\n", i, mmr);
-        ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_DONE, "#%d: header wasn't unprepared: 0x%x\n", i, hdr.fdwStatus);
+        ok(hdr.fdwStatus == ACMSTREAMHEADER_STATUSF_DONE, "#%d: header wasn't unprepared: 0x%lx\n", i, hdr.fdwStatus);
 
         mmr = acmStreamClose(has, 0);
         ok(mmr == MMSYSERR_NOERROR, "#%d: close failed: 0x%x\n", i, mmr);
@@ -1163,8 +1164,8 @@ static void test_acmFormatSuggest(void)
     ok(rc == MMSYSERR_NOERROR, "failed with error 0x%x\n", rc);
     ok(src.wFormatTag == dst.wFormatTag, "expected %d, got %d\n", src.wFormatTag, dst.wFormatTag);
     ok(src.nChannels == dst.nChannels, "expected %d, got %d\n", src.nChannels, dst.nChannels);
-    ok(src.nSamplesPerSec == dst.nSamplesPerSec, "expected %d, got %d\n", src.nSamplesPerSec, dst.nSamplesPerSec);
-    ok(src.nAvgBytesPerSec == dst.nAvgBytesPerSec, "expected %d, got %d\n", src.nAvgBytesPerSec, dst.nAvgBytesPerSec);
+    ok(src.nSamplesPerSec == dst.nSamplesPerSec, "expected %ld, got %ld\n", src.nSamplesPerSec, dst.nSamplesPerSec);
+    ok(src.nAvgBytesPerSec == dst.nAvgBytesPerSec, "expected %ld, got %ld\n", src.nAvgBytesPerSec, dst.nAvgBytesPerSec);
     ok(src.nBlockAlign == dst.nBlockAlign, "expected %d, got %d\n", src.nBlockAlign, dst.nBlockAlign);
     ok(src.wBitsPerSample == dst.wBitsPerSample, "expected %d, got %d\n", src.wBitsPerSample, dst.wBitsPerSample);
 
@@ -1178,8 +1179,8 @@ static void test_acmFormatSuggest(void)
     ok(rc == MMSYSERR_NOERROR, "failed with error 0x%x\n", rc);
     ok(src.wFormatTag == dst.wFormatTag, "expected %d, got %d\n", src.wFormatTag, dst.wFormatTag);
     ok(src.nChannels == dst.nChannels, "expected %d, got %d\n", src.nChannels, dst.nChannels);
-    ok(src.nSamplesPerSec == dst.nSamplesPerSec, "expected %d, got %d\n", src.nSamplesPerSec, dst.nSamplesPerSec);
-    ok(src.nAvgBytesPerSec == dst.nAvgBytesPerSec, "expected %d, got %d\n", src.nAvgBytesPerSec, dst.nAvgBytesPerSec);
+    ok(src.nSamplesPerSec == dst.nSamplesPerSec, "expected %ld, got %ld\n", src.nSamplesPerSec, dst.nSamplesPerSec);
+    ok(src.nAvgBytesPerSec == dst.nAvgBytesPerSec, "expected %ld, got %ld\n", src.nAvgBytesPerSec, dst.nAvgBytesPerSec);
     ok(src.nBlockAlign == dst.nBlockAlign, "expected %d, got %d\n", src.nBlockAlign, dst.nBlockAlign);
     ok(src.wBitsPerSample == dst.wBitsPerSample, "expected %d, got %d\n", src.wBitsPerSample, dst.wBitsPerSample);
 
@@ -1191,7 +1192,7 @@ static void test_acmFormatSuggest(void)
     todo_wine {
     ok(rc == MMSYSERR_NOERROR, "failed with error 0x%x\n", rc);
     ok(dst.wFormatTag == WAVE_FORMAT_PCM, "expected %d, got %d\n", WAVE_FORMAT_PCM, dst.wFormatTag);
-    ok(dst.nSamplesPerSec == 0xdeadbeef, "expected %d, got %d\n", 0xdeadbeef, dst.nSamplesPerSec);
+    ok(dst.nSamplesPerSec == 0xdeadbeef, "expected %d, got %ld\n", 0xdeadbeef, dst.nSamplesPerSec);
     }
     src.nSamplesPerSec = 8000;
 
@@ -1246,7 +1247,7 @@ static void test_acmFormatTagDetails(void)
     aftd.dwFormatTag = WAVE_FORMAT_MPEGLAYER3;
     rc = acmFormatTagDetailsW(NULL, &aftd, ACM_FORMATTAGDETAILSF_FORMATTAG);
     if (rc == MMSYSERR_NOERROR)
-        ok(aftd.cbFormatSize == sizeof(MPEGLAYER3WAVEFORMAT), "got %d\n", aftd.cbFormatSize);
+        ok(aftd.cbFormatSize == sizeof(MPEGLAYER3WAVEFORMAT), "got %ld\n", aftd.cbFormatSize);
 }
 
 static void test_acmFormatChoose(void)
@@ -1502,7 +1503,7 @@ static void test_acmDriverAdd(void)
 
     res = acmDriverAddA(&drvid, GetModuleHandleA(NULL), (LPARAM)acm_driver_func, 0, ACM_DRIVERADDF_FUNCTION);
     ok(res == MMSYSERR_NOERROR, "Expected 0, got %d\n", res);
-todo_wine
+    todo_wine
     ok(driver_calls.driver.open == 1, "Expected 1, got %d\n", driver_calls.driver.open);
     ok(driver_calls.driver.details == 1, "Expected 1, got %d\n", driver_calls.driver.details);
 
@@ -1513,10 +1514,10 @@ todo_wine
     acm.drv_details.cbStruct = sizeof(acm.drv_details);
     res = acmDriverDetailsA(drvid, &acm.drv_details, 0);
     ok(res == MMSYSERR_NOERROR, "Expected 0, got %d\n", res);
-todo_wine
+    todo_wine
     ok(driver_calls.driver.open == 1, "Expected 1, got %d\n", driver_calls.driver.open);
     ok(driver_calls.driver.details == 2, "Expected 2, got %d\n", driver_calls.driver.details);
-todo_wine
+    todo_wine
     ok(driver_calls.driver.close == 0, "Expected 0, got %d\n", driver_calls.driver.close);
 }
 

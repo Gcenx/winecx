@@ -1,7 +1,7 @@
 MODULE    = loadperf.dll
 IMPORTLIB = loadperf
 
-EXTRADLLFLAGS = -mno-cygwin
+EXTRADLLFLAGS = -Wb,--prefer-native
 
 C_SRCS = \
 	loadperf_main.c

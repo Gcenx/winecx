@@ -14,6 +14,9 @@
 @ stub WlanGetProfileCustomUserData
 @ stub WlanGetProfileList
 @ stub WlanGetSecuritySettings
+@ stdcall WlanHostedNetworkQueryProperty(ptr long ptr ptr ptr ptr)
+@ stdcall WlanHostedNetworkQuerySecondaryKey(ptr ptr ptr ptr ptr ptr ptr)
+@ stdcall WlanHostedNetworkQueryStatus(ptr ptr ptr)
 @ stub WlanIhvControl
 @ stdcall WlanOpenHandle(long ptr ptr ptr)
 @ stub WlanQueryAutoConfigParameter

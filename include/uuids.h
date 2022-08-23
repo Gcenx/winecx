@@ -19,8 +19,6 @@
 #ifndef OUR_GUID_ENTRY
 #define OUR_GUID_ENTRY(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
            DEFINE_GUID(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8);
-#include "wine/winheader_enter.h"
-#define UUIDS_NEED_WINHEADER_EXIT
 #endif
 
 #define MEDIATYPE_NULL       GUID_NULL
@@ -442,8 +440,3 @@ OUR_GUID_ENTRY(UUID_WMDRMTagTables,                  0x5dcd1101, 0x9263, 0x45bb,
 #include <ksuuids.h>
 
 #undef OUR_GUID_ENTRY
-
-#ifdef UUIDS_NEED_WINHEADER_EXIT
-#include "wine/winheader_exit.h"
-#undef UUIDS_NEED_WINHEADER_EXIT
-#endif

@@ -101,51 +101,51 @@ static HRESULT load_LSD_metadata(IStream *stream, const GUID *vendor, DWORD opti
     }
 
     result[0].id.vt = VT_LPWSTR;
-    result[0].id.u.pwszVal = strdupAtoW("Signature");
+    result[0].id.pwszVal = strdupAtoW("Signature");
     result[0].value.vt = VT_UI1|VT_VECTOR;
-    result[0].value.u.caub.cElems = sizeof(lsd_data.signature);
-    result[0].value.u.caub.pElems = HeapAlloc(GetProcessHeap(), 0, sizeof(lsd_data.signature));
-    memcpy(result[0].value.u.caub.pElems, lsd_data.signature, sizeof(lsd_data.signature));
+    result[0].value.caub.cElems = sizeof(lsd_data.signature);
+    result[0].value.caub.pElems = HeapAlloc(GetProcessHeap(), 0, sizeof(lsd_data.signature));
+    memcpy(result[0].value.caub.pElems, lsd_data.signature, sizeof(lsd_data.signature));
 
     result[1].id.vt = VT_LPWSTR;
-    result[1].id.u.pwszVal = strdupAtoW("Width");
+    result[1].id.pwszVal = strdupAtoW("Width");
     result[1].value.vt = VT_UI2;
-    result[1].value.u.uiVal = lsd_data.width;
+    result[1].value.uiVal = lsd_data.width;
 
     result[2].id.vt = VT_LPWSTR;
-    result[2].id.u.pwszVal = strdupAtoW("Height");
+    result[2].id.pwszVal = strdupAtoW("Height");
     result[2].value.vt = VT_UI2;
-    result[2].value.u.uiVal = lsd_data.height;
+    result[2].value.uiVal = lsd_data.height;
 
     result[3].id.vt = VT_LPWSTR;
-    result[3].id.u.pwszVal = strdupAtoW("GlobalColorTableFlag");
+    result[3].id.pwszVal = strdupAtoW("GlobalColorTableFlag");
     result[3].value.vt = VT_BOOL;
-    result[3].value.u.boolVal = (lsd_data.packed >> 7) & 1;
+    result[3].value.boolVal = (lsd_data.packed >> 7) & 1;
 
     result[4].id.vt = VT_LPWSTR;
-    result[4].id.u.pwszVal = strdupAtoW("ColorResolution");
+    result[4].id.pwszVal = strdupAtoW("ColorResolution");
     result[4].value.vt = VT_UI1;
-    result[4].value.u.bVal = (lsd_data.packed >> 4) & 7;
+    result[4].value.bVal = (lsd_data.packed >> 4) & 7;
 
     result[5].id.vt = VT_LPWSTR;
-    result[5].id.u.pwszVal = strdupAtoW("SortFlag");
+    result[5].id.pwszVal = strdupAtoW("SortFlag");
     result[5].value.vt = VT_BOOL;
-    result[5].value.u.boolVal = (lsd_data.packed >> 3) & 1;
+    result[5].value.boolVal = (lsd_data.packed >> 3) & 1;
 
     result[6].id.vt = VT_LPWSTR;
-    result[6].id.u.pwszVal = strdupAtoW("GlobalColorTableSize");
+    result[6].id.pwszVal = strdupAtoW("GlobalColorTableSize");
     result[6].value.vt = VT_UI1;
-    result[6].value.u.bVal = lsd_data.packed & 7;
+    result[6].value.bVal = lsd_data.packed & 7;
 
     result[7].id.vt = VT_LPWSTR;
-    result[7].id.u.pwszVal = strdupAtoW("BackgroundColorIndex");
+    result[7].id.pwszVal = strdupAtoW("BackgroundColorIndex");
     result[7].value.vt = VT_UI1;
-    result[7].value.u.bVal = lsd_data.background_color_index;
+    result[7].value.bVal = lsd_data.background_color_index;
 
     result[8].id.vt = VT_LPWSTR;
-    result[8].id.u.pwszVal = strdupAtoW("PixelAspectRatio");
+    result[8].id.pwszVal = strdupAtoW("PixelAspectRatio");
     result[8].value.vt = VT_UI1;
-    result[8].value.u.bVal = lsd_data.pixel_aspect_ratio;
+    result[8].value.bVal = lsd_data.pixel_aspect_ratio;
 
     *items = result;
     *count = 9;
@@ -189,44 +189,44 @@ static HRESULT load_IMD_metadata(IStream *stream, const GUID *vendor, DWORD opti
     }
 
     result[0].id.vt = VT_LPWSTR;
-    result[0].id.u.pwszVal = strdupAtoW("Left");
+    result[0].id.pwszVal = strdupAtoW("Left");
     result[0].value.vt = VT_UI2;
-    result[0].value.u.uiVal = imd_data.left;
+    result[0].value.uiVal = imd_data.left;
 
     result[1].id.vt = VT_LPWSTR;
-    result[1].id.u.pwszVal = strdupAtoW("Top");
+    result[1].id.pwszVal = strdupAtoW("Top");
     result[1].value.vt = VT_UI2;
-    result[1].value.u.uiVal = imd_data.top;
+    result[1].value.uiVal = imd_data.top;
 
     result[2].id.vt = VT_LPWSTR;
-    result[2].id.u.pwszVal = strdupAtoW("Width");
+    result[2].id.pwszVal = strdupAtoW("Width");
     result[2].value.vt = VT_UI2;
-    result[2].value.u.uiVal = imd_data.width;
+    result[2].value.uiVal = imd_data.width;
 
     result[3].id.vt = VT_LPWSTR;
-    result[3].id.u.pwszVal = strdupAtoW("Height");
+    result[3].id.pwszVal = strdupAtoW("Height");
     result[3].value.vt = VT_UI2;
-    result[3].value.u.uiVal = imd_data.height;
+    result[3].value.uiVal = imd_data.height;
 
     result[4].id.vt = VT_LPWSTR;
-    result[4].id.u.pwszVal = strdupAtoW("LocalColorTableFlag");
+    result[4].id.pwszVal = strdupAtoW("LocalColorTableFlag");
     result[4].value.vt = VT_BOOL;
-    result[4].value.u.boolVal = (imd_data.packed >> 7) & 1;
+    result[4].value.boolVal = (imd_data.packed >> 7) & 1;
 
     result[5].id.vt = VT_LPWSTR;
-    result[5].id.u.pwszVal = strdupAtoW("InterlaceFlag");
+    result[5].id.pwszVal = strdupAtoW("InterlaceFlag");
     result[5].value.vt = VT_BOOL;
-    result[5].value.u.boolVal = (imd_data.packed >> 6) & 1;
+    result[5].value.boolVal = (imd_data.packed >> 6) & 1;
 
     result[6].id.vt = VT_LPWSTR;
-    result[6].id.u.pwszVal = strdupAtoW("SortFlag");
+    result[6].id.pwszVal = strdupAtoW("SortFlag");
     result[6].value.vt = VT_BOOL;
-    result[6].value.u.boolVal = (imd_data.packed >> 5) & 1;
+    result[6].value.boolVal = (imd_data.packed >> 5) & 1;
 
     result[7].id.vt = VT_LPWSTR;
-    result[7].id.u.pwszVal = strdupAtoW("LocalColorTableSize");
+    result[7].id.pwszVal = strdupAtoW("LocalColorTableSize");
     result[7].value.vt = VT_UI1;
-    result[7].value.u.bVal = imd_data.packed & 7;
+    result[7].value.bVal = imd_data.packed & 7;
 
     *items = result;
     *count = 8;
@@ -282,29 +282,29 @@ static HRESULT load_GCE_metadata(IStream *stream, const GUID *vendor, DWORD opti
     }
 
     result[0].id.vt = VT_LPWSTR;
-    result[0].id.u.pwszVal = strdupAtoW("Disposal");
+    result[0].id.pwszVal = strdupAtoW("Disposal");
     result[0].value.vt = VT_UI1;
-    result[0].value.u.bVal = (gce_data.packed >> 2) & 7;
+    result[0].value.bVal = (gce_data.packed >> 2) & 7;
 
     result[1].id.vt = VT_LPWSTR;
-    result[1].id.u.pwszVal = strdupAtoW("UserInputFlag");
+    result[1].id.pwszVal = strdupAtoW("UserInputFlag");
     result[1].value.vt = VT_BOOL;
-    result[1].value.u.boolVal = (gce_data.packed >> 1) & 1;
+    result[1].value.boolVal = (gce_data.packed >> 1) & 1;
 
     result[2].id.vt = VT_LPWSTR;
-    result[2].id.u.pwszVal = strdupAtoW("TransparencyFlag");
+    result[2].id.pwszVal = strdupAtoW("TransparencyFlag");
     result[2].value.vt = VT_BOOL;
-    result[2].value.u.boolVal = gce_data.packed & 1;
+    result[2].value.boolVal = gce_data.packed & 1;
 
     result[3].id.vt = VT_LPWSTR;
-    result[3].id.u.pwszVal = strdupAtoW("Delay");
+    result[3].id.pwszVal = strdupAtoW("Delay");
     result[3].value.vt = VT_UI2;
-    result[3].value.u.uiVal = gce_data.delay;
+    result[3].value.uiVal = gce_data.delay;
 
     result[4].id.vt = VT_LPWSTR;
-    result[4].id.u.pwszVal = strdupAtoW("TransparentColorIndex");
+    result[4].id.pwszVal = strdupAtoW("TransparentColorIndex");
     result[4].value.vt = VT_UI1;
-    result[4].value.u.bVal = gce_data.transparent_color_index;
+    result[4].value.bVal = gce_data.transparent_color_index;
 
     *items = result;
     *count = 5;
@@ -401,17 +401,17 @@ static HRESULT load_APE_metadata(IStream *stream, const GUID *vendor, DWORD opti
     }
 
     result[0].id.vt = VT_LPWSTR;
-    result[0].id.u.pwszVal = strdupAtoW("Application");
+    result[0].id.pwszVal = strdupAtoW("Application");
     result[0].value.vt = VT_UI1|VT_VECTOR;
-    result[0].value.u.caub.cElems = sizeof(ape_data.application);
-    result[0].value.u.caub.pElems = HeapAlloc(GetProcessHeap(), 0, sizeof(ape_data.application));
-    memcpy(result[0].value.u.caub.pElems, ape_data.application, sizeof(ape_data.application));
+    result[0].value.caub.cElems = sizeof(ape_data.application);
+    result[0].value.caub.pElems = HeapAlloc(GetProcessHeap(), 0, sizeof(ape_data.application));
+    memcpy(result[0].value.caub.pElems, ape_data.application, sizeof(ape_data.application));
 
     result[1].id.vt = VT_LPWSTR;
-    result[1].id.u.pwszVal = strdupAtoW("Data");
+    result[1].id.pwszVal = strdupAtoW("Data");
     result[1].value.vt = VT_UI1|VT_VECTOR;
-    result[1].value.u.caub.cElems = data_size;
-    result[1].value.u.caub.pElems = data;
+    result[1].value.caub.cElems = data_size;
+    result[1].value.caub.pElems = data;
 
     *items = result;
     *count = 2;
@@ -503,9 +503,9 @@ static HRESULT load_GifComment_metadata(IStream *stream, const GUID *vendor, DWO
     PropVariantInit(&result->value);
 
     result->id.vt = VT_LPWSTR;
-    result->id.u.pwszVal = strdupAtoW("TextEntry");
+    result->id.pwszVal = strdupAtoW("TextEntry");
     result->value.vt = VT_LPSTR;
-    result->value.u.pszVal = data;
+    result->value.pszVal = data;
 
     *items = result;
     *count = 1;
@@ -646,7 +646,7 @@ static ULONG WINAPI GifFrameDecode_AddRef(IWICBitmapFrameDecode *iface)
     GifFrameDecode *This = impl_from_IWICBitmapFrameDecode(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     return ref;
 }
@@ -656,7 +656,7 @@ static ULONG WINAPI GifFrameDecode_Release(IWICBitmapFrameDecode *iface)
     GifFrameDecode *This = impl_from_IWICBitmapFrameDecode(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     if (ref == 0)
     {
@@ -1045,7 +1045,7 @@ static ULONG WINAPI GifDecoder_AddRef(IWICBitmapDecoder *iface)
     GifDecoder *This = impl_from_IWICBitmapDecoder(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     return ref;
 }
@@ -1055,7 +1055,7 @@ static ULONG WINAPI GifDecoder_Release(IWICBitmapDecoder *iface)
     GifDecoder *This = impl_from_IWICBitmapDecoder(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     if (ref == 0)
     {
@@ -1473,6 +1473,7 @@ static inline GifEncoder *impl_from_IWICBitmapEncoder(IWICBitmapEncoder *iface)
 typedef struct GifFrameEncode
 {
     IWICBitmapFrameEncode IWICBitmapFrameEncode_iface;
+    IWICMetadataBlockWriter IWICMetadataBlockWriter_iface;
     LONG ref;
     GifEncoder *encoder;
     BOOL initialized, interlace, committed;
@@ -1488,8 +1489,15 @@ static inline GifFrameEncode *impl_from_IWICBitmapFrameEncode(IWICBitmapFrameEnc
     return CONTAINING_RECORD(iface, GifFrameEncode, IWICBitmapFrameEncode_iface);
 }
 
+static inline GifFrameEncode *impl_from_IWICMetadataBlockWriter(IWICMetadataBlockWriter *iface)
+{
+    return CONTAINING_RECORD(iface, GifFrameEncode, IWICMetadataBlockWriter_iface);
+}
+
 static HRESULT WINAPI GifFrameEncode_QueryInterface(IWICBitmapFrameEncode *iface, REFIID iid, void **ppv)
 {
+    GifFrameEncode *encoder = impl_from_IWICBitmapFrameEncode(iface);
+
     TRACE("%p,%s,%p\n", iface, debugstr_guid(iid), ppv);
 
     if (!ppv) return E_INVALIDARG;
@@ -1497,13 +1505,20 @@ static HRESULT WINAPI GifFrameEncode_QueryInterface(IWICBitmapFrameEncode *iface
     if (IsEqualIID(&IID_IUnknown, iid) ||
         IsEqualIID(&IID_IWICBitmapFrameEncode, iid))
     {
-        IWICBitmapFrameEncode_AddRef(iface);
         *ppv = iface;
-        return S_OK;
+    }
+    else if (IsEqualIID(&IID_IWICMetadataBlockWriter, iid))
+    {
+        *ppv = &encoder->IWICMetadataBlockWriter_iface;
+    }
+    else
+    {
+        *ppv = NULL;
+        return E_NOINTERFACE;
     }
 
-    *ppv = NULL;
-    return E_NOINTERFACE;
+    IUnknown_AddRef((IUnknown *)*ppv);
+    return S_OK;
 }
 
 static ULONG WINAPI GifFrameEncode_AddRef(IWICBitmapFrameEncode *iface)
@@ -1511,7 +1526,7 @@ static ULONG WINAPI GifFrameEncode_AddRef(IWICBitmapFrameEncode *iface)
     GifFrameEncode *This = impl_from_IWICBitmapFrameEncode(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("%p -> %u\n", iface, ref);
+    TRACE("%p -> %lu\n", iface, ref);
     return ref;
 }
 
@@ -1520,7 +1535,7 @@ static ULONG WINAPI GifFrameEncode_Release(IWICBitmapFrameEncode *iface)
     GifFrameEncode *This = impl_from_IWICBitmapFrameEncode(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("%p -> %u\n", iface, ref);
+    TRACE("%p -> %lu\n", iface, ref);
 
     if (!ref)
     {
@@ -2102,8 +2117,17 @@ static HRESULT WINAPI GifFrameEncode_Commit(IWICBitmapFrameEncode *iface)
 
 static HRESULT WINAPI GifFrameEncode_GetMetadataQueryWriter(IWICBitmapFrameEncode *iface, IWICMetadataQueryWriter **writer)
 {
-    FIXME("%p, %p: stub\n", iface, writer);
-    return E_NOTIMPL;
+    GifFrameEncode *encode = impl_from_IWICBitmapFrameEncode(iface);
+
+    TRACE("iface, %p, writer %p.\n", iface, writer);
+
+    if (!writer)
+        return E_INVALIDARG;
+
+    if (!encode->initialized)
+        return WINCODEC_ERR_NOTINITIALIZED;
+
+    return MetadataQueryWriter_CreateInstance(&encode->IWICMetadataBlockWriter_iface, NULL, writer);
 }
 
 static const IWICBitmapFrameEncodeVtbl GifFrameEncode_Vtbl =
@@ -2147,7 +2171,7 @@ static ULONG WINAPI GifEncoder_AddRef(IWICBitmapEncoder *iface)
     GifEncoder *This = impl_from_IWICBitmapEncoder(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("%p -> %u\n", iface, ref);
+    TRACE("%p -> %lu\n", iface, ref);
     return ref;
 }
 
@@ -2156,7 +2180,7 @@ static ULONG WINAPI GifEncoder_Release(IWICBitmapEncoder *iface)
     GifEncoder *This = impl_from_IWICBitmapEncoder(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("%p -> %u\n", iface, ref);
+    TRACE("%p -> %lu\n", iface, ref);
 
     if (!ref)
     {
@@ -2259,6 +2283,109 @@ static HRESULT WINAPI GifEncoder_SetPreview(IWICBitmapEncoder *iface, IWICBitmap
     return WINCODEC_ERR_UNSUPPORTEDOPERATION;
 }
 
+static HRESULT WINAPI GifEncoderFrame_Block_QueryInterface(IWICMetadataBlockWriter *iface, REFIID iid, void **ppv)
+{
+    GifFrameEncode *frame_encoder = impl_from_IWICMetadataBlockWriter(iface);
+
+    return IWICBitmapFrameEncode_QueryInterface(&frame_encoder->IWICBitmapFrameEncode_iface, iid, ppv);
+}
+
+static ULONG WINAPI GifEncoderFrame_Block_AddRef(IWICMetadataBlockWriter *iface)
+{
+    GifFrameEncode *frame_encoder = impl_from_IWICMetadataBlockWriter(iface);
+
+    return IWICBitmapFrameEncode_AddRef(&frame_encoder->IWICBitmapFrameEncode_iface);
+}
+
+static ULONG WINAPI GifEncoderFrame_Block_Release(IWICMetadataBlockWriter *iface)
+{
+    GifFrameEncode *frame_encoder = impl_from_IWICMetadataBlockWriter(iface);
+
+    return IWICBitmapFrameEncode_Release(&frame_encoder->IWICBitmapFrameEncode_iface);
+}
+
+static HRESULT WINAPI GifEncoderFrame_Block_GetContainerFormat(IWICMetadataBlockWriter *iface, GUID *container_format)
+{
+    FIXME("iface %p, container_format %p stub.\n", iface, container_format);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI GifEncoderFrame_Block_GetCount(IWICMetadataBlockWriter *iface, UINT *count)
+{
+    FIXME("iface %p, count %p stub.\n", iface, count);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI GifEncoderFrame_Block_GetReaderByIndex(IWICMetadataBlockWriter *iface,
+        UINT index, IWICMetadataReader **metadata_reader)
+{
+    FIXME("iface %p, index %d, metadata_reader %p stub.\n", iface, index, metadata_reader);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI GifEncoderFrame_Block_GetEnumerator(IWICMetadataBlockWriter *iface, IEnumUnknown **enum_metadata)
+{
+    FIXME("iface %p, enum_metadata %p stub.\n", iface, enum_metadata);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI GifEncoderFrame_Block_InitializeFromBlockReader(IWICMetadataBlockWriter *iface,
+        IWICMetadataBlockReader *block_reader)
+{
+    FIXME("iface %p, block_reader %p stub.\n", iface, block_reader);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI GifEncoderFrame_Block_GetWriterByIndex(IWICMetadataBlockWriter *iface, UINT index,
+        IWICMetadataWriter **metadata_writer)
+{
+    FIXME("iface %p, index %u, metadata_writer %p stub.\n", iface, index, metadata_writer);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI GifEncoderFrame_Block_AddWriter(IWICMetadataBlockWriter *iface, IWICMetadataWriter *metadata_writer)
+{
+    FIXME("iface %p, metadata_writer %p stub.\n", iface, metadata_writer);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI GifEncoderFrame_Block_SetWriterByIndex(IWICMetadataBlockWriter *iface, UINT index,
+        IWICMetadataWriter *metadata_writer)
+{
+    FIXME("iface %p, index %u, metadata_writer %p stub.\n", iface, index, metadata_writer);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI GifEncoderFrame_Block_RemoveWriterByIndex(IWICMetadataBlockWriter *iface, UINT index)
+{
+    FIXME("iface %p, index %u stub.\n", iface, index);
+
+    return E_NOTIMPL;
+}
+
+static const IWICMetadataBlockWriterVtbl GifFrameEncode_BlockVtbl = {
+    GifEncoderFrame_Block_QueryInterface,
+    GifEncoderFrame_Block_AddRef,
+    GifEncoderFrame_Block_Release,
+    GifEncoderFrame_Block_GetContainerFormat,
+    GifEncoderFrame_Block_GetCount,
+    GifEncoderFrame_Block_GetReaderByIndex,
+    GifEncoderFrame_Block_GetEnumerator,
+    GifEncoderFrame_Block_InitializeFromBlockReader,
+    GifEncoderFrame_Block_GetWriterByIndex,
+    GifEncoderFrame_Block_AddWriter,
+    GifEncoderFrame_Block_SetWriterByIndex,
+    GifEncoderFrame_Block_RemoveWriterByIndex,
+};
+
 static HRESULT WINAPI GifEncoder_CreateNewFrame(IWICBitmapEncoder *iface, IWICBitmapFrameEncode **frame, IPropertyBag2 **options)
 {
     GifEncoder *This = impl_from_IWICBitmapEncoder(iface);
@@ -2278,6 +2405,8 @@ static HRESULT WINAPI GifEncoder_CreateNewFrame(IWICBitmapEncoder *iface, IWICBi
             This->n_frames++;
 
             ret->IWICBitmapFrameEncode_iface.lpVtbl = &GifFrameEncode_Vtbl;
+            ret->IWICMetadataBlockWriter_iface.lpVtbl = &GifFrameEncode_BlockVtbl;
+
             ret->ref = 1;
             ret->encoder = This;
             ret->initialized = FALSE;

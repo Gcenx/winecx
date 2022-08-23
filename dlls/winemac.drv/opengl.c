@@ -20,15 +20,14 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include "macdrv.h"
 
 #include "winuser.h"
 #include "winternl.h"
 #include "winnt.h"
-#include "wine/heap.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "wine/wgl.h"
 #include "wine/wgl_driver.h"
 #include "wine/static_strings.h"
@@ -63,6 +62,13 @@ static struct gl_info gl_info;
 DECLARE_STATIC_STRINGS(gl_strings);
 
 
+struct gl_resources
+{
+    CFMutableDictionaryRef mapped_buffers;
+    LONG refcount;
+};
+
+
 struct wgl_context
 {
     struct list             entry;
@@ -85,7 +91,7 @@ struct wgl_context
     UINT                    major;
 #ifdef __i386_on_x86_64__
     LONG                    last_error;
-    CFMutableDictionaryRef  mapped_buffers;
+    struct gl_resources *HOSTPTR resources;
     void                   *pending_mapped;
 #endif
 };
@@ -133,14 +139,14 @@ static const char *opengl_func_names[] = { ALL_WGL_FUNCS };
 #include "wine/hostaddrspace_enter.h"
 
 static void (*pglCopyColorTable)(GLenum target, GLenum internalformat, GLint x, GLint y,
-                                          GLsizei width);
+                                 GLsizei width);
 static void (*pglCopyPixels)(GLint x, GLint y, GLsizei width, GLsizei height, GLenum type);
 static void (*pglFinish)(void);
 static void (*pglFlush)(void);
 static void (*pglFlushRenderAPPLE)(void);
 static const GLubyte *(*pglGetString)(GLenum name);
 static void (*pglReadPixels)(GLint x, GLint y, GLsizei width, GLsizei height,
-                                      GLenum format, GLenum type, void *pixels);
+                             GLenum format, GLenum type, void *pixels);
 static void (*pglViewport)(GLint x, GLint y, GLsizei width, GLsizei height);
 
 #ifdef __i386_on_x86_64__
@@ -1277,7 +1283,6 @@ static BOOL init_gl_info(void)
         kCGLPFADisplayMask, displayMask,
         0
     };
-#if defined(MAC_OS_X_VERSION_10_7) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_7
     CGLPixelFormatAttribute core_attribs[] =
     {
         kCGLPFADisplayMask, displayMask,
@@ -1285,7 +1290,6 @@ static BOOL init_gl_info(void)
         kCGLPFAOpenGLProfile, (CGLPixelFormatAttribute)kCGLOGLPVersion_3_2_Core,
         0
     };
-#endif
     CGLPixelFormatObj pix;
     GLint virtualScreens;
     CGLError err;
@@ -1337,7 +1341,6 @@ static BOOL init_gl_info(void)
     CGLSetCurrentContext(old_context);
     CGLReleaseContext(context);
 
-#if defined(MAC_OS_X_VERSION_10_7) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_7
     err = CGLChoosePixelFormat(core_attribs, &pix, &virtualScreens);
     if (err != kCGLNoError || !pix)
     {
@@ -1369,7 +1372,6 @@ static BOOL init_gl_info(void)
     sscanf(str, "%u.%u", &gl_info.max_major, &gl_info.max_minor);
     CGLSetCurrentContext(old_context);
     CGLReleaseContext(context);
-#endif
 
     return TRUE;
 }
@@ -1416,7 +1418,7 @@ static int get_dc_pixel_format(HDC hdc)
 /**********************************************************************
  *              create_context
  */
-static BOOL create_context(struct wgl_context *context, CGLContextObj share, unsigned int major)
+static BOOL create_context(struct wgl_context *context, struct wgl_context *share, unsigned int major)
 {
     const pixel_format *pf;
     CGLPixelFormatAttribute attribs[64];
@@ -1425,14 +1427,6 @@ static BOOL create_context(struct wgl_context *context, CGLContextObj share, uns
     GLint virtualScreens;
     CGLError err;
     BOOL core = major >= 3;
-
-#if !defined(MAC_OS_X_VERSION_10_7) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
-    if (core)
-    {
-        WARN("OS X version >= 10.7 is required to be able to create core contexts\n");
-        return FALSE;
-    }
-#endif
 
     pf = get_pixel_format(context->format, TRUE /* non-displayable */);
     if (!pf)
@@ -1509,7 +1503,6 @@ static BOOL create_context(struct wgl_context *context, CGLContextObj share, uns
     if (force_backing_store || pf->backing_store) /* CrossOver Hack 14364 */
         attribs[n++] = kCGLPFABackingStore;
 
-#if defined(MAC_OS_X_VERSION_10_7) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_7
     if (core)
     {
         attribs[n++] = kCGLPFAOpenGLProfile;
@@ -1522,7 +1515,6 @@ static BOOL create_context(struct wgl_context *context, CGLContextObj share, uns
         attribs[n++] = (int)kCGLOGLPVersion_3_2_Core;
 #endif
     }
-#endif
 
     attribs[n] = 0;
 
@@ -1534,7 +1526,7 @@ static BOOL create_context(struct wgl_context *context, CGLContextObj share, uns
         return FALSE;
     }
 
-    err = CGLCreateContext(pix, share, &context->cglcontext);
+    err = CGLCreateContext(pix, share ? share->cglcontext : NULL, &context->cglcontext);
     CGLReleasePixelFormat(pix);
     if (err != kCGLNoError || !context->cglcontext)
     {
@@ -1571,14 +1563,34 @@ static BOOL create_context(struct wgl_context *context, CGLContextObj share, uns
 
 #ifdef __i386_on_x86_64__
     InterlockedExchange(&context->last_error, GL_NO_ERROR);
-    context->mapped_buffers = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
-    if (!context->mapped_buffers)
+
+    EnterCriticalSection(&context_section);
+    if (share)
     {
-        WARN("CFDictionaryCreateMutable() failed\n");
-        macdrv_dispose_opengl_context(context->context);
-        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-        return FALSE;
+        InterlockedIncrement(&share->resources->refcount);
+        context->resources = share->resources;
     }
+    else
+    {
+        if (!(context->resources = malloc(sizeof(*context->resources))))
+        {
+            LeaveCriticalSection(&context_section);
+            macdrv_dispose_opengl_context(context->context);
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return FALSE;
+        }
+        if (!(context->resources->mapped_buffers = CFDictionaryCreateMutable(NULL, 0, NULL, NULL)))
+        {
+            LeaveCriticalSection(&context_section);
+            WARN("CFDictionaryCreateMutable() failed\n");
+            free(context->resources);
+            macdrv_dispose_opengl_context(context->context);
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return FALSE;
+        }
+        context->resources->refcount = 1;
+    }
+    LeaveCriticalSection(&context_section);
 #endif
 
     InterlockedExchange(&context->update_swap_interval, TRUE);
@@ -1656,7 +1668,7 @@ static BOOL set_pixel_format(HDC hdc, int fmt, BOOL allow_reset)
 
 done:
     release_win_data(data);
-    if (ret && gl_surface_mode == GL_SURFACE_BEHIND) __wine_set_pixel_format(hwnd, fmt);
+    if (ret && gl_surface_mode == GL_SURFACE_BEHIND) NtUserSetWindowPixelFormat(hwnd, fmt);
     return ret;
 }
 
@@ -1897,12 +1909,8 @@ static CGLPixelFormatObj create_pixel_format_for_renderer(CGLRendererInfoObj ren
 
     if (core)
     {
-#if defined(MAC_OS_X_VERSION_10_7) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_7
         attrs[3] = kCGLPFAOpenGLProfile;
         attrs[4] = (CGLPixelFormatAttribute)kCGLOGLPVersion_3_2_Core;
-#else
-        return NULL;
-#endif
     }
 
     if (!get_renderer_property(renderer_info, renderer, kCGLRPRendererID, &renderer_id))
@@ -2198,12 +2206,10 @@ static BOOL query_renderer_integer(CGLRendererInfoObj renderer_info, GLint rende
         }
 
         case WGL_RENDERER_VIDEO_MEMORY_WINE:
-#if defined(MAC_OS_X_VERSION_10_7) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_7
             err = CGLDescribeRenderer(renderer_info, renderer, kCGLRPVideoMemoryMegabytes, (GLint*)value);
             if (err != kCGLNoError && err != kCGLBadProperty)
                 WARN("CGLDescribeRenderer(kCGLRPVideoMemoryMegabytes) failed: %d %s\n", err, CGLErrorString(err));
             if (err != kCGLNoError)
-#endif
             {
                 if (get_renderer_property(renderer_info, renderer, kCGLRPVideoMemory, (GLint*)value))
                     *value /= 1024 * 1024;
@@ -2239,7 +2245,7 @@ static void set_mapped_buffer(CFMutableDictionaryRef mapped_buffers, GLuint buff
  */
 static void free_mapped_buffer(struct wgl_context *context, GLuint buffer)
 {
-    CFMutableDictionaryRef mapped_buffers = context->mapped_buffers;
+    CFMutableDictionaryRef mapped_buffers = context->resources->mapped_buffers;
     const void * HOSTPTR addr;
     if ((addr = CFDictionaryGetValue(mapped_buffers, (const void * HOSTPTR)(ULONG_HOSTPTR)buffer)))
     {
@@ -2269,13 +2275,20 @@ static void free_mapped_buffer_applier(const void * HOSTPTR key, const void * HO
  */
 static void free_mapped_buffers(struct wgl_context *context)
 {
-    CFMutableDictionaryRef mapped_buffers = context->mapped_buffers;
+    struct gl_resources *HOSTPTR resources = context->resources;
 
     if (context->pending_mapped)
         VirtualFree(context->pending_mapped, 0, MEM_RELEASE);
     context->pending_mapped = NULL;
-    CFDictionaryApplyFunction(mapped_buffers, free_mapped_buffer_applier, NULL);
-    CFRelease(mapped_buffers);
+
+    if (!InterlockedDecrement(&context->resources->refcount))
+    {
+        CFMutableDictionaryRef mapped_buffers = resources->mapped_buffers;
+
+        CFDictionaryApplyFunction(mapped_buffers, free_mapped_buffer_applier, NULL);
+        CFRelease(mapped_buffers);
+        free(resources);
+    }
 }
 
 static GLenum binding_for_target(GLenum target)
@@ -2496,7 +2509,7 @@ static void macdrv_glGetBufferPointerv(GLenum target, GLenum pname, void * HOSTP
         opengl_funcs.gl.p_glGetIntegerv(binding_for_target(target), (GLint * HOSTPTR)&buffer);
         /* Let the native GL handle the default buffer (that is, no buffer at all). */
         if (buffer != 0 &&
-            (addr = (void * HOSTPTR)CFDictionaryGetValue(current->mapped_buffers, (const void * HOSTPTR)(ULONG_HOSTPTR)buffer)))
+            (addr = (void * HOSTPTR)CFDictionaryGetValue(current->resources->mapped_buffers, (const void * HOSTPTR)(ULONG_HOSTPTR)buffer)))
         {
             TRACE("buffer %u address %p\n", buffer, addr);
             *params = addr;
@@ -2566,7 +2579,7 @@ static void * HOSTPTR remap_memory(void * HOSTPTR hostaddr, GLint size, GLenum t
     }
 
     opengl_funcs.gl.p_glGetIntegerv(binding_for_target(target), (GLint * HOSTPTR)&buffer);
-    set_mapped_buffer(current->mapped_buffers, buffer, (void *)(UINT32)lowaddr);
+    set_mapped_buffer(current->resources->mapped_buffers, buffer, (void *)(UINT32)lowaddr);
     TRACE("    remapped buffer %u to address 0x%08llx\n", buffer, lowaddr);
     return (void * HOSTPTR)(lowaddr + ((vm_map_offset_t)hostaddr - base));
 
@@ -3193,7 +3206,7 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
 
     context->format = format;
     context->renderer_id = renderer_id;
-    if (!create_context(context, share_context ? share_context->cglcontext : NULL, major))
+    if (!create_context(context, share_context, major))
     {
         HeapFree(GetProcessHeap(), 0, context);
         return NULL;
@@ -3360,7 +3373,7 @@ static BOOL macdrv_wglDestroyPbufferARB(struct wgl_pbuffer *pbuffer)
     TRACE("pbuffer %p\n", pbuffer);
     if (pbuffer && pbuffer->pbuffer)
         CGLReleasePBuffer(pbuffer->pbuffer);
-    heap_free(pbuffer);
+    HeapFree(GetProcessHeap(), 0, pbuffer);
     return GL_TRUE;
 }
 
@@ -3748,7 +3761,7 @@ static BOOL macdrv_wglGetPixelFormatAttribfvARB(HDC hdc, int iPixelFormat, int i
             pfValues[i] = attr[i];
     }
 
-    heap_free(attr);
+    HeapFree(GetProcessHeap(), 0, attr);
     return ret;
 }
 
@@ -4867,7 +4880,7 @@ static BOOL WINAPI macdrv_wglShareLists(struct wgl_context *org, struct wgl_cont
     saved_cglcontext = dest->cglcontext;
     dest->context = NULL;
     dest->cglcontext = NULL;
-    if (!create_context(dest, org->cglcontext, dest->major))
+    if (!create_context(dest, org, dest->major))
     {
         dest->context = saved_context;
         dest->cglcontext = saved_cglcontext;
@@ -4972,7 +4985,7 @@ static struct opengl_funcs opengl_funcs =
 /**********************************************************************
  *              macdrv_wine_get_wgl_driver
  */
-struct opengl_funcs * CDECL macdrv_wine_get_wgl_driver(PHYSDEV dev, UINT version)
+struct opengl_funcs *macdrv_wine_get_wgl_driver(UINT version)
 {
     static INIT_ONCE opengl_init = INIT_ONCE_STATIC_INIT;
 

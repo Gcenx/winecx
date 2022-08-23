@@ -70,7 +70,7 @@ void* __thiscall MSVCP_allocator_char_assign(void *this, const void *assign)
 DEFINE_THISCALL_WRAPPER(MSVCP_allocator_char_deallocate, 12)
 void __thiscall MSVCP_allocator_char_deallocate(void *this, char *ptr, size_t size)
 {
-    MSVCRT_operator_delete(ptr);
+    operator_delete(ptr);
 }
 
 /* ?allocate@?$allocator@D@std@@QAEPADI@Z */
@@ -78,7 +78,7 @@ void __thiscall MSVCP_allocator_char_deallocate(void *this, char *ptr, size_t si
 DEFINE_THISCALL_WRAPPER(MSVCP_allocator_char_allocate, 8)
 char* __thiscall MSVCP_allocator_char_allocate(void *this, size_t count)
 {
-    return MSVCRT_operator_new(count);
+    return operator_new(count);
 }
 
 /* ?allocate@?$allocator@D@std@@QAEPADIPBX@Z */
@@ -162,7 +162,7 @@ DEFINE_THISCALL_WRAPPER(MSVCP_allocator_wchar_deallocate, 12)
 void __thiscall MSVCP_allocator_wchar_deallocate(void *this,
         wchar_t *ptr, size_t size)
 {
-    MSVCRT_operator_delete(ptr);
+    operator_delete(ptr);
 }
 
 /* ?allocate@?$allocator@_W@std@@QAEPA_WI@Z */
@@ -170,12 +170,8 @@ void __thiscall MSVCP_allocator_wchar_deallocate(void *this,
 DEFINE_THISCALL_WRAPPER(MSVCP_allocator_wchar_allocate, 8)
 wchar_t* __thiscall MSVCP_allocator_wchar_allocate(void *this, size_t count)
 {
-    if(UINT_MAX/count < sizeof(wchar_t)) {
-        throw_exception(EXCEPTION_BAD_ALLOC, NULL);
-        return NULL;
-    }
-
-    return MSVCRT_operator_new(count * sizeof(wchar_t));
+    if(UINT_MAX/count < sizeof(wchar_t)) _Xmem();
+    return operator_new(count * sizeof(wchar_t));
 }
 
 /* ?allocate@?$allocator@_W@std@@QAEPA_WIPBX@Z */
@@ -260,7 +256,7 @@ DEFINE_THISCALL_WRAPPER(MSVCP_allocator_short_deallocate, 12)
 void __thiscall MSVCP_allocator_short_deallocate(void *this,
         unsigned short *ptr, size_t size)
 {
-    MSVCRT_operator_delete(ptr);
+    operator_delete(ptr);
 }
 
 /* ?allocate@?$allocator@G@std@@QAEPAGI@Z */
@@ -269,12 +265,8 @@ DEFINE_THISCALL_WRAPPER(MSVCP_allocator_short_allocate, 8)
 unsigned short* __thiscall MSVCP_allocator_short_allocate(
         void *this, size_t count)
 {
-    if(UINT_MAX/count < sizeof(unsigned short)) {
-        throw_exception(EXCEPTION_BAD_ALLOC, NULL);
-        return NULL;
-    }
-
-    return MSVCRT_operator_new(count * sizeof(unsigned short));
+    if(UINT_MAX/count < sizeof(unsigned short)) _Xmem();
+    return operator_new(count * sizeof(unsigned short));
 }
 
 /* ?allocate@?$allocator@G@std@@QAEPAGIPBX@Z */

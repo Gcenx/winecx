@@ -1,18 +1,19 @@
-EXTRADEFS = -D_NTSYSTEM_ -D_ACRTIMP= -DWINBASEAPI=
+EXTRADEFS = -DWINE_NO_LONG_TYPES -D_NTSYSTEM_ -D_ACRTIMP= -DWINBASEAPI=
 MODULE    = ntdll.dll
+UNIXLIB   = ntdll.so
 IMPORTLIB = ntdll
 IMPORTS   = winecrt0
 EXTRAINCL = $(UNWIND_CFLAGS)
 EXTRALIBS = $(IOKIT_LIBS) $(COREFOUNDATION_LIBS) $(CORESERVICES_LIBS) $(RT_LIBS) $(PTHREAD_LIBS) $(UNWIND_LIBS) $(I386_LIBS) $(PROCSTAT_LIBS)
-EXTRADLLFLAGS = -mno-cygwin -nodefaultlibs -Wl,--image-base,0x7bc00000
+
+EXTRADLLFLAGS = -nodefaultlibs -Wl,--image-base,0x7bc00000
+x86_64_EXTRADLLFLAGS = -nodefaultlibs -Wl,--image-base,0x170000000
 
 C_SRCS = \
 	actctx.c \
 	atom.c \
-	critsection.c \
 	crypt.c \
 	debugbuffer.c \
-	directory.c \
 	env.c \
 	error.c \
 	exception.c \
@@ -20,10 +21,9 @@ C_SRCS = \
 	heap.c \
 	large_int.c \
 	loader.c \
-	loadorder.c \
 	locale.c \
+	math.c \
 	misc.c \
-	nt.c \
 	path.c \
 	printf.c \
 	process.c \
@@ -49,6 +49,7 @@ C_SRCS = \
 	unix/esync.c \
 	unix/file.c \
 	unix/loader.c \
+	unix/loadorder.c \
 	unix/process.c \
 	unix/registry.c \
 	unix/security.c \
@@ -57,27 +58,22 @@ C_SRCS = \
 	unix/signal_arm.c \
 	unix/signal_arm64.c \
 	unix/signal_i386.c \
-	unix/signal_x86_32on64.c \
 	unix/signal_x86_64.c \
+	unix/socket.c \
 	unix/sync.c \
 	unix/system.c \
 	unix/tape.c \
 	unix/thread.c \
 	unix/virtual.c \
 	version.c \
-	virtual.c \
 	wcstring.c
 
 RC_SRCS = version.rc
 
 EXTRA_OBJS = unix/version.o
 
-server_EXTRADEFS = \
-	-DBINDIR=\"${bindir}\" \
-	-DBIN_TO_DLLDIR=\"`${MAKEDEP} -R ${bindir} ${dlldir}`\" \
-	-DDLL_TO_BINDIR=\"`${MAKEDEP} -R ${dlldir} ${bindir}`\"
-
 unix_loader_EXTRADEFS = \
 	-DBINDIR=\"${bindir}\" \
+	-DSYSTEMDLLPATH=\"${system_dllpath}\" \
 	-DDLL_TO_BINDIR=\"`${MAKEDEP} -R ${dlldir} ${bindir}`\" \
 	-DBIN_TO_DATADIR=\"`${MAKEDEP} -R ${bindir} ${datadir}/wine`\"

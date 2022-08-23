@@ -1,4 +1,0 @@
-MODULE    = libwbemuuid.a
-
-C_SRCS = \
-	wbemuuid.c

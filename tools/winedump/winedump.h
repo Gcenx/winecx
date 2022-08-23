@@ -42,6 +42,7 @@
 #include <assert.h>
 #include <stdarg.h>
 
+#include "../tools.h"
 #include "windef.h"
 #include "winbase.h"
 
@@ -138,7 +139,7 @@ typedef struct __globals
 
 extern _globals globals;
 extern void *dump_base;
-extern unsigned long dump_total_len;
+extern size_t dump_total_len;
 
 /* Names to use for output DLL */
 #define OUTPUT_DLL_NAME \
@@ -198,10 +199,6 @@ void  output_prototype (FILE *file, const parsed_symbol *sym);
 void  output_makefile (void);
 
 /* Misc functions */
-char *str_create (size_t num_str, ...);
-
-char *str_create_num (size_t num_str, int num, ...);
-
 char *str_substring(const char *start, const char *end);
 
 char *str_replace (char *str, const char *oldstr, const char *newstr);
@@ -216,7 +213,7 @@ const char *get_machine_str(int mach);
 
 /* file dumping functions */
 enum FileSig {SIG_UNKNOWN, SIG_DOS, SIG_PE, SIG_DBG, SIG_PDB, SIG_NE, SIG_LE, SIG_MDMP, SIG_COFFLIB, SIG_LNK,
-              SIG_EMF, SIG_FNT, SIG_TLB, SIG_NLS};
+              SIG_EMF, SIG_MF, SIG_FNT, SIG_TLB, SIG_NLS};
 
 const void*	PRD(unsigned long prd, unsigned long len);
 unsigned long	Offset(const void* ptr);
@@ -251,6 +248,8 @@ enum FileSig    get_kind_lnk(void);
 void	        lnk_dump( void );
 enum FileSig    get_kind_emf(void);
 void            emf_dump( void );
+enum FileSig    get_kind_mf(void);
+void            mf_dump(void);
 enum FileSig    get_kind_pdb(void);
 void            pdb_dump(void);
 enum FileSig    get_kind_fnt(void);
@@ -260,7 +259,7 @@ void            tlb_dump(void);
 enum FileSig    get_kind_nls(void);
 void            nls_dump(void);
 
-BOOL            codeview_dump_symbols(const void* root, unsigned long size);
+BOOL            codeview_dump_symbols(const void* root, unsigned long start, unsigned long size);
 BOOL            codeview_dump_types_from_offsets(const void* table, const DWORD* offsets, unsigned num_types);
 BOOL            codeview_dump_types_from_block(const void* table, unsigned long len);
 void            codeview_dump_linetab(const char* linetab, BOOL pascal_str, const char* pfx);

@@ -21,6 +21,7 @@
 #include "winbase.h"
 #define COBJMACROS
 #include "objbase.h"
+#include "msdasc.h"
 #include "msado15_backcompat.h"
 
 #include "wine/debug.h"
@@ -90,32 +91,60 @@ static HRESULT WINAPI stream_QueryInterface( _Stream *iface, REFIID riid, void *
 
 static HRESULT WINAPI stream_GetTypeInfoCount( _Stream *iface, UINT *count )
 {
-    FIXME( "%p, %p\n", iface, count );
-    return E_NOTIMPL;
+    struct stream *stream = impl_from_Stream( iface );
+    TRACE( "%p, %p\n", stream, count );
+    *count = 1;
+    return S_OK;
 }
 
 static HRESULT WINAPI stream_GetTypeInfo( _Stream *iface, UINT index, LCID lcid, ITypeInfo **info )
 {
-    FIXME( "%p, %u, %u, %p\n", iface, index, lcid, info );
-    return E_NOTIMPL;
+    struct stream *stream = impl_from_Stream( iface );
+    TRACE( "%p, %u, %lu, %p\n", stream, index, lcid, info );
+    return get_typeinfo(Stream_tid, info);
 }
 
 static HRESULT WINAPI stream_GetIDsOfNames( _Stream *iface, REFIID riid, LPOLESTR *names, UINT count,
                                             LCID lcid, DISPID *dispid )
 {
-    FIXME( "%p, %s, %p, %u, %u, %p\n", iface, debugstr_guid(riid), names, count, lcid, dispid );
-    return E_NOTIMPL;
+    struct stream *stream = impl_from_Stream( iface );
+    HRESULT hr;
+    ITypeInfo *typeinfo;
+
+    TRACE( "%p, %s, %p, %u, %lu, %p\n", stream, debugstr_guid(riid), names, count, lcid, dispid );
+
+    hr = get_typeinfo(Stream_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, names, count, dispid);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI stream_Invoke( _Stream *iface, DISPID member, REFIID riid, LCID lcid, WORD flags,
                                      DISPPARAMS *params, VARIANT *result, EXCEPINFO *excep_info, UINT *arg_err )
 {
-    FIXME( "%p, %d, %s, %d, %d, %p, %p, %p, %p\n", iface, member, debugstr_guid(riid), lcid, flags, params,
+    struct stream *stream = impl_from_Stream( iface );
+    HRESULT hr;
+    ITypeInfo *typeinfo;
+
+    TRACE( "%p, %ld, %s, %ld, %d, %p, %p, %p, %p\n", stream, member, debugstr_guid(riid), lcid, flags, params,
            result, excep_info, arg_err );
-    return E_NOTIMPL;
+
+    hr = get_typeinfo(Stream_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, &stream->Stream_iface, member, flags, params,
+                               result, excep_info, arg_err);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
 }
 
-static HRESULT WINAPI stream_get_Size( _Stream *iface, LONG *size )
+static HRESULT WINAPI stream_get_Size( _Stream *iface, ADO_LONGPTR *size )
 {
     struct stream *stream = impl_from_Stream( iface );
     TRACE( "%p, %p\n", stream, size );
@@ -137,7 +166,7 @@ static HRESULT WINAPI stream_get_EOS( _Stream *iface, VARIANT_BOOL *eos )
     return S_OK;
 }
 
-static HRESULT WINAPI stream_get_Position( _Stream *iface, LONG *pos )
+static HRESULT WINAPI stream_get_Position( _Stream *iface, ADO_LONGPTR *pos )
 {
     struct stream *stream = impl_from_Stream( iface );
     TRACE( "%p, %p\n", stream, pos );
@@ -162,12 +191,12 @@ static HRESULT resize_buffer( struct stream *stream, LONG size )
     return S_OK;
 }
 
-static HRESULT WINAPI stream_put_Position( _Stream *iface, LONG pos )
+static HRESULT WINAPI stream_put_Position( _Stream *iface, ADO_LONGPTR pos )
 {
     struct stream *stream = impl_from_Stream( iface );
     HRESULT hr;
 
-    TRACE( "%p, %d\n", stream, pos );
+    TRACE( "%p, %Id\n", stream, pos );
 
     if (stream->state == adStateClosed) return MAKE_ADO_HRESULT( adErrObjectClosed );
     if (pos < 0) return MAKE_ADO_HRESULT( adErrInvalidArgument );
@@ -297,7 +326,7 @@ static HRESULT WINAPI stream_Read( _Stream *iface, LONG size, VARIANT *val )
     struct stream *stream = impl_from_Stream( iface );
     HRESULT hr;
 
-    TRACE( "%p, %d, %p\n", stream, size, val );
+    TRACE( "%p, %ld, %p\n", stream, size, val );
 
     if (stream->state == adStateClosed) return MAKE_ADO_HRESULT( adErrObjectClosed );
     if (stream->type != adTypeBinary) return MAKE_ADO_HRESULT( adErrIllegalOperation );
@@ -377,9 +406,9 @@ static HRESULT WINAPI stream_SetEOS( _Stream *iface )
     return resize_buffer( stream, stream->pos );
 }
 
-static HRESULT WINAPI stream_CopyTo( _Stream *iface, _Stream *dst, LONG size )
+static HRESULT WINAPI stream_CopyTo( _Stream *iface, _Stream *dst, ADO_LONGPTR size )
 {
-    FIXME( "%p, %p, %d\n", iface, dst, size );
+    FIXME( "%p, %p, %Id\n", iface, dst, size );
     return E_NOTIMPL;
 }
 
@@ -406,7 +435,7 @@ static HRESULT WINAPI stream_ReadText( _Stream *iface, LONG len, BSTR *ret )
     struct stream *stream = impl_from_Stream( iface );
     BSTR str;
 
-    TRACE( "%p, %d, %p\n", stream, len, ret );
+    TRACE( "%p, %ld, %p\n", stream, len, ret );
     if (len == adReadLine)
     {
         FIXME( "adReadLine not supported\n" );

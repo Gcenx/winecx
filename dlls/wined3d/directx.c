@@ -21,9 +21,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include "wined3d_private.h"
 #include "winternl.h"
 
@@ -156,6 +153,15 @@ UINT64 adapter_adjust_memory(struct wined3d_adapter *adapter, INT64 amount)
             wine_dbgstr_longlong(amount),
             wine_dbgstr_longlong(adapter->vram_bytes_used));
     return adapter->vram_bytes_used;
+}
+
+ssize_t adapter_adjust_mapped_memory(struct wined3d_adapter *adapter, ssize_t size)
+{
+    /* Note that this needs to be thread-safe; the Vulkan adapter may map from
+     * client threads. */
+    ssize_t ret = InterlockedExchangeAddSizeT(&adapter->mapped_size, size) + size;
+    TRACE("Adjusted mapped adapter memory by %Id to %Id.\n", size, ret);
+    return ret;
 }
 
 void wined3d_adapter_cleanup(struct wined3d_adapter *adapter)
@@ -457,6 +463,7 @@ static const struct wined3d_gpu_description gpu_description_table[] =
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_RTX2070,    "NVIDIA GeForce RTX 2070",          DRIVER_NVIDIA_KEPLER,  8192},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_RTX2080,    "NVIDIA GeForce RTX 2080",          DRIVER_NVIDIA_KEPLER,  8192},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_RTX2080TI,  "NVIDIA GeForce RTX 2080 Ti",       DRIVER_NVIDIA_KEPLER,  11264},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_TESLA_T4,           "NVIDIA Tesla T4",                  DRIVER_NVIDIA_KEPLER,  16384},
 
     /* AMD cards */
     {HW_VENDOR_AMD,        CARD_AMD_RAGE_128PRO,           "ATI Rage Fury",                    DRIVER_AMD_RAGE_128PRO,  16  },
@@ -1229,8 +1236,8 @@ HRESULT CDECL wined3d_output_find_closest_matching_mode(const struct wined3d_out
     closest = ~0u;
     for (i = 0, j = 0; i < matching_mode_count; ++i)
     {
-        unsigned int d = abs(mode->width - matching_modes[i]->width)
-                + abs(mode->height - matching_modes[i]->height);
+        unsigned int d = abs((int)(mode->width - matching_modes[i]->width))
+            + abs((int)(mode->height - matching_modes[i]->height));
 
         if (closest > d)
         {
@@ -1556,15 +1563,13 @@ HRESULT CDECL wined3d_adapter_get_identifier(const struct wined3d_adapter *adapt
 
     {
         WCHAR name[MAX_PATH], *module_exe;
-        static const WCHAR gtaivW[] = {'G','T','A','I','V','.','e','x','e',0};
-        static const WCHAR gta5W[] = {'G','T','A','5','.','e','x','e',0};
         if (GetModuleFileNameW(NULL, name, sizeof(name)))
         {
-            module_exe = strrchrW(name, '\\');
+            module_exe = wcsrchr(name, '\\');
             module_exe = module_exe ? module_exe + 1 : name;
 
             /* CW HACK 19356 */
-            if (!strcmpW(module_exe, gtaivW))
+            if (!lstrcmpW(module_exe, L"GTAIV.exe"))
             {
                 /* GTA IV hangs on launch trying to init nvapi if it sees an NVIDIA GPU */
                 if (identifier->vendor_id == HW_VENDOR_NVIDIA)
@@ -1584,7 +1589,7 @@ HRESULT CDECL wined3d_adapter_get_identifier(const struct wined3d_adapter *adapt
             }
 
             /* CW HACK 19355: GTA 5 crashes on launch trying to init nvapi if it sees an NVIDIA GPU */
-            if (!strcmpW(module_exe, gta5W) && (identifier->vendor_id == HW_VENDOR_NVIDIA))
+            if (!lstrcmpW(module_exe, L"GTA5.exe") && (identifier->vendor_id == HW_VENDOR_NVIDIA))
             {
                     identifier->vendor_id = HW_VENDOR_AMD;
                     identifier->device_id = CARD_AMD_RADEON_RX_480;
@@ -2834,15 +2839,20 @@ static void adapter_no3d_unmap_bo_address(struct wined3d_context *context,
 }
 
 static void adapter_no3d_copy_bo_address(struct wined3d_context *context,
-        const struct wined3d_bo_address *dst, const struct wined3d_bo_address *src, size_t size)
+        const struct wined3d_bo_address *dst, const struct wined3d_bo_address *src,
+        unsigned int range_count, const struct wined3d_range *ranges)
 {
+    unsigned int i;
+
     if (dst->buffer_object)
         ERR("Unsupported dst buffer object %p.\n", dst->buffer_object);
     if (src->buffer_object)
         ERR("Unsupported src buffer object %p.\n", src->buffer_object);
     if (dst->buffer_object || src->buffer_object)
         return;
-    memcpy(dst->addr, src->addr, size);
+
+    for (i = 0; i < range_count; ++i)
+        memcpy(dst->addr + ranges[i].offset, src->addr + ranges[i].offset, ranges[i].size);
 }
 
 static void adapter_no3d_flush_bo_address(struct wined3d_context *context,
@@ -3325,12 +3335,10 @@ static struct wined3d_adapter *wined3d_adapter_create(unsigned int ordinal, DWOR
     if (wined3d_settings.renderer == WINED3D_RENDERER_OPENGL)
         return wined3d_adapter_gl_create(ordinal, wined3d_creation_flags);
 
-#ifdef __APPLE__
-    if (!(wined3d_creation_flags & WINED3D_PIXEL_CENTER_INTEGER))
-    {
-        if ((adapter = wined3d_adapter_vk_create(ordinal, wined3d_creation_flags)))
-            ERR_(winediag)("Defaulting to the Vulkan renderer for d3d10/11 applications on macOS.\n");
-    }
+/* CW HACK 18311: Use VK on 64-bit macOS. */
+#ifdef _WIN64
+    if ((adapter = wined3d_adapter_vk_create(ordinal, wined3d_creation_flags)))
+        ERR_(winediag)("Using the Vulkan renderer for d3d10/11 applications.\n");
 #endif
 
     if (!adapter)

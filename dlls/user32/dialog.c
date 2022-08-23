@@ -508,7 +508,7 @@ static HWND DIALOG_CreateIndirect( HINSTANCE hInst, LPCVOID dlgTemplate,
             }
             SelectObject( dc, hOldFont );
         }
-        ReleaseDC(0, dc);
+        NtUserReleaseDC( 0, dc );
         TRACE("units = %d,%d\n", xBaseUnit, yBaseUnit );
     }
 
@@ -639,7 +639,7 @@ static HWND DIALOG_CreateIndirect( HINSTANCE hInst, LPCVOID dlgTemplate,
     if (!hwnd)
     {
         if (hUserFont) DeleteObject( hUserFont );
-        if (hMenu) DestroyMenu( hMenu );
+        if (hMenu) NtUserDestroyMenu( hMenu );
         if (disabled_owner) EnableWindow( disabled_owner, TRUE );
         return 0;
     }
@@ -687,12 +687,12 @@ static HWND DIALOG_CreateIndirect( HINSTANCE hInst, LPCVOID dlgTemplate,
                 {
                     if (SendMessageW( focus, WM_GETDLGCODE, 0, 0 ) & DLGC_HASSETSEL)
                         SendMessageW( focus, EM_SETSEL, 0, MAXLONG );
-                    SetFocus( focus );
+                    NtUserSetFocus( focus );
                 }
                 else
                 {
                     if (!(template.style & WS_CHILD))
-                        SetFocus( hwnd );
+                        NtUserSetFocus( hwnd );
                 }
             }
         }
@@ -702,12 +702,12 @@ static HWND DIALOG_CreateIndirect( HINSTANCE hInst, LPCVOID dlgTemplate,
 
         if (template.style & WS_VISIBLE && !(GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE))
         {
-           ShowWindow( hwnd, SW_SHOWNORMAL );   /* SW_SHOW doesn't always work */
+           NtUserShowWindow( hwnd, SW_SHOWNORMAL );   /* SW_SHOW doesn't always work */
         }
         return hwnd;
     }
     if (disabled_owner) EnableWindow( disabled_owner, TRUE );
-    if( IsWindow(hwnd) ) DestroyWindow( hwnd );
+    if (IsWindow(hwnd)) NtUserDestroyWindow( hwnd );
     return 0;
 }
 
@@ -793,7 +793,7 @@ INT DIALOG_DoDialogBox( HWND hwnd, HWND owner )
                 if (bFirstEmpty)
                 {
                     /* ShowWindow the first time the queue goes empty */
-                    ShowWindow( hwnd, SW_SHOWNORMAL );
+                    NtUserShowWindow( hwnd, SW_SHOWNORMAL );
                     bFirstEmpty = FALSE;
                 }
                 if (!(GetWindowLongW( hwnd, GWL_STYLE ) & DS_NOIDLEMSG))
@@ -821,13 +821,13 @@ INT DIALOG_DoDialogBox( HWND hwnd, HWND owner )
 
             if (bFirstEmpty && msg.message == WM_TIMER)
             {
-                ShowWindow( hwnd, SW_SHOWNORMAL );
+                NtUserShowWindow( hwnd, SW_SHOWNORMAL );
                 bFirstEmpty = FALSE;
             }
         }
     }
     retval = dlgInfo->idResult;
-    DestroyWindow( hwnd );
+    NtUserDestroyWindow( hwnd );
     return retval;
 }
 
@@ -926,13 +926,13 @@ BOOL WINAPI EndDialog( HWND hwnd, INT_PTR retval )
     /* Windows sets the focus to the dialog itself in EndDialog */
 
     if (IsChild(hwnd, GetFocus()))
-       SetFocus( hwnd );
+       NtUserSetFocus( hwnd );
 
     /* Don't have to send a ShowWindow(SW_HIDE), just do
        SetWindowPos with SWP_HIDEWINDOW as done in Windows */
 
-    SetWindowPos(hwnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE
-                 | SWP_NOZORDER | SWP_NOACTIVATE | SWP_HIDEWINDOW);
+    NtUserSetWindowPos( hwnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE
+                        | SWP_NOZORDER | SWP_NOACTIVATE | SWP_HIDEWINDOW );
 
     if (hwnd == GetActiveWindow())
     {
@@ -1198,7 +1198,7 @@ BOOL WINAPI IsDialogMessageW( HWND hwndDlg, LPMSG msg )
                  * do so but I presume someone has)
                  */
                 if (fIsDialog)
-                    SendMessageW( hwndDlg, WM_NEXTDLGCTL, (GetKeyState(VK_SHIFT) & 0x8000), 0 );
+                    SendMessageW( hwndDlg, WM_NEXTDLGCTL, (NtUserGetKeyState(VK_SHIFT) & 0x8000), 0 );
                 else
                 {
                     /* It would appear that GetNextDlgTabItem can handle being
@@ -1208,7 +1208,7 @@ BOOL WINAPI IsDialogMessageW( HWND hwndDlg, LPMSG msg )
                     HWND hwndFocus = GetFocus();
                     HWND hwndNext = GetNextDlgTabItem (hwndDlg,
                             hwndFocus == hwndDlg ? NULL : hwndFocus,
-                            GetKeyState (VK_SHIFT) & 0x8000);
+                            NtUserGetKeyState (VK_SHIFT) & 0x8000);
                     if (hwndNext)
                     {
                         dlgCode = SendMessageW (hwndNext, WM_GETDLGCODE,
@@ -1226,7 +1226,7 @@ BOOL WINAPI IsDialogMessageW( HWND hwndDlg, LPMSG msg )
                                 SendMessageW (hwndNext, EM_SETSEL, 0, length);
                             }
                         }
-                        SetFocus (hwndNext);
+                        NtUserSetFocus( hwndNext );
                         DIALOG_FixChildrenOnChangeFocus (hwndDlg, hwndNext);
                     }
                     else
@@ -1246,7 +1246,7 @@ BOOL WINAPI IsDialogMessageW( HWND hwndDlg, LPMSG msg )
                 HWND hwndNext = GetNextDlgGroupItem( hwndDlg, msg->hwnd, fPrevious );
                 if (hwndNext && SendMessageW( hwndNext, WM_GETDLGCODE, msg->wParam, (LPARAM)msg ) == (DLGC_BUTTON | DLGC_RADIOBUTTON))
                 {
-                    SetFocus( hwndNext );
+                    NtUserSetFocus( hwndNext );
                     if ((GetWindowLongW( hwndNext, GWL_STYLE ) & BS_TYPEMASK) == BS_AUTORADIOBUTTON &&
                         SendMessageW( hwndNext, BM_GETCHECK, 0, 0 ) != BST_CHECKED)
                         SendMessageW( hwndNext, BM_CLICK, 1, 0 );
@@ -1424,8 +1424,8 @@ UINT WINAPI GetDlgItemInt( HWND hwnd, INT id, BOOL *translated,
                                BOOL fSigned )
 {
     char str[30];
-    char * HOSTPTR endptr;
-    long result = 0;
+    char * endptr;
+    LONG_PTR result = 0;
 
     if (translated) *translated = FALSE;
     if (!SendDlgItemMessageA(hwnd, id, WM_GETTEXT, sizeof(str), (LPARAM)str))
@@ -1528,7 +1528,7 @@ DWORD WINAPI GetDialogBaseUnits(void)
         if ((hdc = GetDC(0)))
         {
             cx = GdiGetCharDimensions( hdc, NULL, &cy );
-            ReleaseDC( 0, hdc );
+            NtUserReleaseDC( 0, hdc );
         }
         TRACE( "base units = %d,%d\n", cx, cy );
     }

@@ -45,7 +45,7 @@ typedef struct _heapinfo
 } _HEAPINFO;
 #endif /* _HEAPINFO_DEFINED */
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 _ACRTIMP unsigned int* __cdecl __p__amblksiz(void);
 #define _amblksiz (*__p__amblksiz());
 #else

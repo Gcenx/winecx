@@ -26,29 +26,22 @@
 #endif
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <errno.h>
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+#include <stdlib.h>
+#include <unistd.h>
 #include <fcntl.h>
-#ifdef HAVE_SYS_STAT_H
-# include <sys/stat.h>
-#endif
+#include <sys/stat.h>
 #ifdef MAJOR_IN_MKDEV
 # include <sys/mkdev.h>
 #elif defined(MAJOR_IN_SYSMACROS)
 # include <sys/sysmacros.h>
 #endif
 #include <sys/types.h>
-
-#ifdef HAVE_SYS_IOCTL_H
 #include <sys/ioctl.h>
-#endif
 #ifdef HAVE_SCSI_SG_H
 # include <scsi/sg.h>
 #endif
@@ -2821,16 +2814,14 @@ static NTSTATUS GetInquiryData(int fd, PSCSI_ADAPTER_BUS_INFO BufferOut, DWORD O
  *		cdrom_DeviceIoControl
  */
 NTSTATUS cdrom_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
-                                IO_STATUS_BLOCK *io, ULONG code, void *in_buffer,
+                                client_ptr_t io, ULONG code, void *in_buffer,
                                 ULONG in_size, void *out_buffer, ULONG out_size )
 {
     DWORD       sz = 0;
     NTSTATUS    status = STATUS_SUCCESS;
     int fd, needs_close, dev = 0;
 
-    TRACE( "%p %s %p %d %p %d %p\n", device, iocodex(code), in_buffer, in_size, out_buffer, out_size, io );
-
-    io->Information = 0;
+    TRACE( "%p %s %p %d %p %d\n", device, iocodex(code), in_buffer, in_size, out_buffer, out_size );
 
     if ((status = server_get_unix_fd( device, 0, &fd, &needs_close, NULL, NULL )))
     {
@@ -3130,8 +3121,7 @@ NTSTATUS cdrom_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc
     }
     if (needs_close) close( fd );
  error:
-    io->u.Status = status;
-    io->Information = sz;
+    set_async_iosb( io, status, sz );
     if (event) NtSetEvent(event, NULL);
     return status;
 }

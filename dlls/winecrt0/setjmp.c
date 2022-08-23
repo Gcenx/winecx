@@ -50,62 +50,6 @@ __ASM_GLOBAL_FUNC( __wine_longjmp,
                    "addl $4,%esp\n\t"        /* get rid of return address */
                    "jmp *20(%ecx)\n\t"       /* jmp_buf.Eip */ )
 
-#elif defined(__i386_on_x86_64__)
-
-__ASM_GLOBAL_FUNC( __wine_setjmpex,
-                   "movl " __ASM_EXTRA_DIST "+4(%rsp),%ecx\n\t"   /* jmp_buf */
-                   "movl " __ASM_EXTRA_DIST "+8(%rsp),%edx\n\t"   /* frame */
-                   "movq %rdx,(%rcx)\n\t"          /* jmp_buf->Frame */
-                   "movq %rbx,0x8(%rcx)\n\t"       /* jmp_buf->Rbx */
-                   "leaq 0x8(%rsp),%rax\n\t"
-                   "movq %rax,0x10(%rcx)\n\t"      /* jmp_buf->Rsp */
-                   "movq %rbp,0x18(%rcx)\n\t"      /* jmp_buf->Rbp */
-                   "movq %rsi,0x20(%rcx)\n\t"      /* jmp_buf->Rsi */
-                   "movq %rdi,0x28(%rcx)\n\t"      /* jmp_buf->Rdi */
-                   "movq %r12,0x30(%rcx)\n\t"      /* jmp_buf->R12 */
-                   "movq %r13,0x38(%rcx)\n\t"      /* jmp_buf->R13 */
-                   "movq %r14,0x40(%rcx)\n\t"      /* jmp_buf->R14 */
-                   "movq %r15,0x48(%rcx)\n\t"      /* jmp_buf->R15 */
-                   "movq (%rsp),%rax\n\t"
-                   "movq %rax,0x50(%rcx)\n\t"      /* jmp_buf->Rip */
-                   "movdqa %xmm6,0x60(%rcx)\n\t"   /* jmp_buf->Xmm6 */
-                   "movdqa %xmm7,0x70(%rcx)\n\t"   /* jmp_buf->Xmm7 */
-                   "movdqa %xmm8,0x80(%rcx)\n\t"   /* jmp_buf->Xmm8 */
-                   "movdqa %xmm9,0x90(%rcx)\n\t"   /* jmp_buf->Xmm9 */
-                   "movdqa %xmm10,0xa0(%rcx)\n\t"  /* jmp_buf->Xmm10 */
-                   "movdqa %xmm11,0xb0(%rcx)\n\t"  /* jmp_buf->Xmm11 */
-                   "movdqa %xmm12,0xc0(%rcx)\n\t"  /* jmp_buf->Xmm12 */
-                   "movdqa %xmm13,0xd0(%rcx)\n\t"  /* jmp_buf->Xmm13 */
-                   "movdqa %xmm14,0xe0(%rcx)\n\t"  /* jmp_buf->Xmm14 */
-                   "movdqa %xmm15,0xf0(%rcx)\n\t"  /* jmp_buf->Xmm15 */
-                   "xorq %rax,%rax\n\t"
-                   "retq" )
-
-__ASM_GLOBAL_FUNC( __wine_longjmp,
-                   "movl " __ASM_EXTRA_DIST "+4(%esp),%ecx\n\t"   /* jmp_buf */
-                   "movl " __ASM_EXTRA_DIST "+8(%esp),%eax\n\t"   /* retval */
-                   "movq 0x8(%rcx),%rbx\n\t"       /* jmp_buf->Rbx */
-                   "movq 0x18(%rcx),%rbp\n\t"      /* jmp_buf->Rbp */
-                   "movq 0x20(%rcx),%rsi\n\t"      /* jmp_buf->Rsi */
-                   "movq 0x28(%rcx),%rdi\n\t"      /* jmp_buf->Rdi */
-                   "movq 0x30(%rcx),%r12\n\t"      /* jmp_buf->R12 */
-                   "movq 0x38(%rcx),%r13\n\t"      /* jmp_buf->R13 */
-                   "movq 0x40(%rcx),%r14\n\t"      /* jmp_buf->R14 */
-                   "movq 0x48(%rcx),%r15\n\t"      /* jmp_buf->R15 */
-                   "movdqa 0x60(%rcx),%xmm6\n\t"   /* jmp_buf->Xmm6 */
-                   "movdqa 0x70(%rcx),%xmm7\n\t"   /* jmp_buf->Xmm7 */
-                   "movdqa 0x80(%rcx),%xmm8\n\t"   /* jmp_buf->Xmm8 */
-                   "movdqa 0x90(%rcx),%xmm9\n\t"   /* jmp_buf->Xmm9 */
-                   "movdqa 0xa0(%rcx),%xmm10\n\t"  /* jmp_buf->Xmm10 */
-                   "movdqa 0xb0(%rcx),%xmm11\n\t"  /* jmp_buf->Xmm11 */
-                   "movdqa 0xc0(%rcx),%xmm12\n\t"  /* jmp_buf->Xmm12 */
-                   "movdqa 0xd0(%rcx),%xmm13\n\t"  /* jmp_buf->Xmm13 */
-                   "movdqa 0xe0(%rcx),%xmm14\n\t"  /* jmp_buf->Xmm14 */
-                   "movdqa 0xf0(%rcx),%xmm15\n\t"  /* jmp_buf->Xmm15 */
-                   "movq 0x50(%rcx),%rdx\n\t"      /* jmp_buf->Rip */
-                   "movq 0x10(%rcx),%rsp\n\t"      /* jmp_buf->Rsp */
-                   "jmp *%rdx" )
-
 #elif defined(__x86_64__)
 
 __ASM_GLOBAL_FUNC( __wine_setjmpex,
@@ -122,6 +66,8 @@ __ASM_GLOBAL_FUNC( __wine_setjmpex,
                    "movq %r15,0x48(%rcx)\n\t"      /* jmp_buf->R15 */
                    "movq (%rsp),%rax\n\t"
                    "movq %rax,0x50(%rcx)\n\t"      /* jmp_buf->Rip */
+                   "stmxcsr 0x58(%rcx)\n\t"        /* jmp_buf->MxCsr */
+                   "fnstcw 0x5c(%rcx)\n\t"         /* jmp_buf->FpCsr */
                    "movdqa %xmm6,0x60(%rcx)\n\t"   /* jmp_buf->Xmm6 */
                    "movdqa %xmm7,0x70(%rcx)\n\t"   /* jmp_buf->Xmm7 */
                    "movdqa %xmm8,0x80(%rcx)\n\t"   /* jmp_buf->Xmm8 */
@@ -145,6 +91,9 @@ __ASM_GLOBAL_FUNC( __wine_longjmp,
                    "movq 0x38(%rcx),%r13\n\t"      /* jmp_buf->R13 */
                    "movq 0x40(%rcx),%r14\n\t"      /* jmp_buf->R14 */
                    "movq 0x48(%rcx),%r15\n\t"      /* jmp_buf->R15 */
+                   "ldmxcsr 0x58(%rcx)\n\t"        /* jmp_buf->MxCsr */
+                   "fnclex\n\t"
+                   "fldcw 0x5c(%rcx)\n\t"          /* jmp_buf->FpCsr */
                    "movdqa 0x60(%rcx),%xmm6\n\t"   /* jmp_buf->Xmm6 */
                    "movdqa 0x70(%rcx),%xmm7\n\t"   /* jmp_buf->Xmm7 */
                    "movdqa 0x80(%rcx),%xmm8\n\t"   /* jmp_buf->Xmm8 */
@@ -162,54 +111,27 @@ __ASM_GLOBAL_FUNC( __wine_longjmp,
 #elif defined(__arm__)
 
 __ASM_GLOBAL_FUNC( __wine_setjmpex,
-                   "str r1, [r0]\n\t"              /* jmp_buf->Frame */
-                   "str r4, [r0, #0x4]\n\t"        /* jmp_buf->R4 */
-                   "str r5, [r0, #0x8]\n\t"        /* jmp_buf->R5 */
-                   "str r6, [r0, #0xc]\n\t"        /* jmp_buf->R6 */
-                   "str r7, [r0, #0x10]\n\t"       /* jmp_buf->R7 */
-                   "str r8, [r0, #0x14]\n\t"       /* jmp_buf->R8 */
-                   "str r9, [r0, #0x18]\n\t"       /* jmp_buf->R9 */
-                   "str r10, [r0, #0x1c]\n\t"      /* jmp_buf->R10 */
-                   "str r11, [r0, #0x20]\n\t"      /* jmp_buf->R11 */
+                   "stm r0, {r1,r4-r11}\n"         /* jmp_buf->Frame,R4..R11 */
                    "str sp, [r0, #0x24]\n\t"       /* jmp_buf->Sp */
                    "str lr, [r0, #0x28]\n\t"       /* jmp_buf->Pc */
 #ifndef __SOFTFP__
                    "vmrs r2, fpscr\n\t"
                    "str r2, [r0, #0x2c]\n\t"       /* jmp_buf->Fpscr */
-                   "vstr d8,  [r0, #0x30]\n\t"     /* jmp_buf->D[0] */
-                   "vstr d9,  [r0, #0x38]\n\t"     /* jmp_buf->D[1] */
-                   "vstr d10, [r0, #0x40]\n\t"     /* jmp_buf->D[2] */
-                   "vstr d11, [r0, #0x48]\n\t"     /* jmp_buf->D[3] */
-                   "vstr d12, [r0, #0x50]\n\t"     /* jmp_buf->D[4] */
-                   "vstr d13, [r0, #0x58]\n\t"     /* jmp_buf->D[5] */
-                   "vstr d14, [r0, #0x60]\n\t"     /* jmp_buf->D[6] */
-                   "vstr d15, [r0, #0x68]\n\t"     /* jmp_buf->D[7] */
+                   "add r0, r0, #0x30\n\t"
+                   "vstm r0, {d8-d15}\n\t"         /* jmp_buf->D[0..7] */
 #endif
                    "mov r0, #0\n\t"
                    "bx lr" )
 
 __ASM_GLOBAL_FUNC( __wine_longjmp,
-                   "ldr r4, [r0, #0x4]\n\t"        /* jmp_buf->R4 */
-                   "ldr r5, [r0, #0x8]\n\t"        /* jmp_buf->R5 */
-                   "ldr r6, [r0, #0xc]\n\t"        /* jmp_buf->R6 */
-                   "ldr r7, [r0, #0x10]\n\t"       /* jmp_buf->R7 */
-                   "ldr r8, [r0, #0x14]\n\t"       /* jmp_buf->R8 */
-                   "ldr r9, [r0, #0x18]\n\t"       /* jmp_buf->R9 */
-                   "ldr r10, [r0, #0x1c]\n\t"      /* jmp_buf->R10 */
-                   "ldr r11, [r0, #0x20]\n\t"      /* jmp_buf->R11 */
+                   "ldm r0, {r3-r11}\n\t"          /* jmp_buf->Frame,R4..R11 */
                    "ldr sp, [r0, #0x24]\n\t"       /* jmp_buf->Sp */
                    "ldr r2, [r0, #0x28]\n\t"       /* jmp_buf->Pc */
 #ifndef __SOFTFP__
                    "ldr r3, [r0, #0x2c]\n\t"       /* jmp_buf->Fpscr */
                    "vmsr fpscr, r3\n\t"
-                   "vldr d8,  [r0, #0x30]\n\t"     /* jmp_buf->D[0] */
-                   "vldr d9,  [r0, #0x38]\n\t"     /* jmp_buf->D[1] */
-                   "vldr d10, [r0, #0x40]\n\t"     /* jmp_buf->D[2] */
-                   "vldr d11, [r0, #0x48]\n\t"     /* jmp_buf->D[3] */
-                   "vldr d12, [r0, #0x50]\n\t"     /* jmp_buf->D[4] */
-                   "vldr d13, [r0, #0x58]\n\t"     /* jmp_buf->D[5] */
-                   "vldr d14, [r0, #0x60]\n\t"     /* jmp_buf->D[6] */
-                   "vldr d15, [r0, #0x68]\n\t"     /* jmp_buf->D[7] */
+                   "add r0, r0, #0x30\n\t"
+                   "vldm r0, {d8-d15}\n\t"         /* jmp_buf->D[0..7] */
 #endif
                    "mov r0, r1\n\t"                /* retval */
                    "bx r2" )

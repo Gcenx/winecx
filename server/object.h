@@ -21,13 +21,9 @@
 #ifndef __WINE_SERVER_OBJECT_H
 #define __WINE_SERVER_OBJECT_H
 
-#ifdef HAVE_SYS_POLL_H
-#include <sys/poll.h>
-#endif
-
+#include <poll.h>
 #include <sys/time.h>
 #include "wine/server_protocol.h"
-#define WINE_LIST_HOSTADDRSPACE
 #include "wine/list.h"
 
 #define DEBUG_OBJECTS
@@ -54,15 +50,28 @@ struct unicode_str
     data_size_t  len;
 };
 
+/* object type descriptor */
+struct type_descr
+{
+    struct unicode_str name;          /* type name */
+    unsigned int       valid_access;  /* mask for valid access bits */
+    generic_map_t      mapping;       /* generic access mapping */
+    unsigned int       index;         /* index in global array of types */
+    unsigned int       obj_count;     /* count of objects of this type */
+    unsigned int       handle_count;  /* count of handles of this type */
+    unsigned int       obj_max;       /* max count of objects of this type */
+    unsigned int       handle_max;    /* max count of handles of this type */
+};
+
 /* operations valid on all objects */
 struct object_ops
 {
     /* size of this object type */
     size_t size;
+    /* type descriptor */
+    struct type_descr *type;
     /* dump the object (for debugging) */
     void (*dump)(struct object *,int);
-    /* return the object type */
-    struct object_type *(*get_type)(struct object *);
     /* add a thread to the object wait queue */
     int  (*add_queue)(struct object *,struct wait_queue_entry *);
     /* remove a thread from the object wait queue */
@@ -157,12 +166,11 @@ extern void release_object( void *obj );
 extern struct object *find_object( const struct namespace *namespace, const struct unicode_str *name,
                                    unsigned int attributes );
 extern struct object *find_object_index( const struct namespace *namespace, unsigned int index );
-extern struct object_type *no_get_type( struct object *obj );
 extern int no_add_queue( struct object *obj, struct wait_queue_entry *entry );
 extern void no_satisfied( struct object *obj, struct wait_queue_entry *entry );
 extern int no_signal( struct object *obj, unsigned int access );
 extern struct fd *no_get_fd( struct object *obj );
-extern unsigned int no_map_access( struct object *obj, unsigned int access );
+extern unsigned int default_map_access( struct object *obj, unsigned int access );
 extern struct security_descriptor *default_get_sd( struct object *obj );
 extern int default_set_sd( struct object *obj, const struct security_descriptor *sd, unsigned int set_info );
 extern int set_sd_defaults_from_token( struct object *obj, const struct security_descriptor *sd,
@@ -185,6 +193,15 @@ extern void close_objects(void);
 static inline void make_object_permanent( struct object *obj ) { obj->is_permanent = 1; }
 static inline void make_object_temporary( struct object *obj ) { obj->is_permanent = 0; }
 
+static inline unsigned int map_access( unsigned int access, const generic_map_t *mapping )
+{
+    if (access & GENERIC_READ)    access |= mapping->read;
+    if (access & GENERIC_WRITE)   access |= mapping->write;
+    if (access & GENERIC_EXECUTE) access |= mapping->exec;
+    if (access & GENERIC_ALL)     access |= mapping->all;
+    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
+}
+
 /* event functions */
 
 struct event;
@@ -197,7 +214,6 @@ extern struct keyed_event *create_keyed_event( struct object *root, const struct
                                                unsigned int attr, const struct security_descriptor *sd );
 extern struct event *get_event_obj( struct process *process, obj_handle_t handle, unsigned int access );
 extern struct keyed_event *get_keyed_event_obj( struct process *process, obj_handle_t handle, unsigned int access );
-extern void pulse_event( struct event *event );
 extern void set_event( struct event *event );
 extern void reset_event( struct event *event );
 
@@ -215,17 +231,33 @@ extern void sock_init(void);
 
 /* debugger functions */
 
-extern int set_process_debugger( struct process *process, struct thread *debugger );
 extern void generate_debug_event( struct thread *thread, int code, const void *arg );
 extern void resume_delayed_debug_events( struct thread *thread );
-extern void generate_startup_debug_events( struct process *process, client_ptr_t entry );
-extern void debug_exit_thread( struct thread *thread );
+extern void generate_startup_debug_events( struct process *process );
 
 /* registry functions */
 
-extern unsigned int get_prefix_cpu_mask(void);
+extern unsigned int supported_machines_count;
+extern unsigned short supported_machines[8];
+extern unsigned short native_machine;
+extern int wow64_using_32bit_prefix;
 extern void init_registry(void);
 extern void flush_registry(void);
+
+static inline int is_machine_32bit( unsigned short machine )
+{
+    return machine == IMAGE_FILE_MACHINE_I386 || machine == IMAGE_FILE_MACHINE_ARMNT;
+}
+static inline int is_machine_64bit( unsigned short machine )
+{
+    return machine == IMAGE_FILE_MACHINE_AMD64 || machine == IMAGE_FILE_MACHINE_ARM64;
+}
+static inline int is_machine_supported( unsigned short machine )
+{
+    unsigned int i;
+    for (i = 0; i < supported_machines_count; i++) if (supported_machines[i] == machine) return 1;
+    return 0;
+}
 
 /* signal functions */
 
@@ -245,12 +277,13 @@ extern void release_global_atom( struct winstation *winstation, atom_t atom );
 
 extern struct object *get_root_directory(void);
 extern struct object *get_directory_obj( struct process *process, obj_handle_t handle );
-extern struct object_type *get_object_type( const struct unicode_str *name );
 extern int directory_link_name( struct object *obj, struct object_name *name, struct object *parent );
 extern void init_directories( struct fd *intl_fd );
 
 /* symbolic link functions */
 
+extern struct object *create_root_symlink( struct object *root, const struct unicode_str *name,
+                                           unsigned int attr, const struct security_descriptor *sd );
 extern struct object *create_obj_symlink( struct object *root, const struct unicode_str *name,
                                           unsigned int attr, struct object *target,
                                           const struct security_descriptor *sd );
@@ -268,6 +301,29 @@ extern const char *server_argv0;
 
   /* server start time used for GetTickCount() */
 extern timeout_t server_start_time;
+
+/* object types */
+extern struct type_descr no_type;
+extern struct type_descr objtype_type;
+extern struct type_descr directory_type;
+extern struct type_descr symlink_type;
+extern struct type_descr token_type;
+extern struct type_descr job_type;
+extern struct type_descr process_type;
+extern struct type_descr thread_type;
+extern struct type_descr debug_obj_type;
+extern struct type_descr event_type;
+extern struct type_descr mutex_type;
+extern struct type_descr semaphore_type;
+extern struct type_descr timer_type;
+extern struct type_descr keyed_event_type;
+extern struct type_descr winstation_type;
+extern struct type_descr desktop_type;
+extern struct type_descr device_type;
+extern struct type_descr completion_type;
+extern struct type_descr file_type;
+extern struct type_descr mapping_type;
+extern struct type_descr key_type;
 
 #define KEYEDEVENT_WAIT       0x0001
 #define KEYEDEVENT_WAKE       0x0002

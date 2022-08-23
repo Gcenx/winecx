@@ -223,7 +223,6 @@ struct wined3d_vk_info
 
     VkInstance instance;
     unsigned int api_version;
-    bool is_mvk;
 
     BOOL supported[WINED3D_VK_EXT_COUNT];
 #ifdef USE_WIN32_VULKAN

@@ -19,22 +19,15 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
-#include "winedump.h"
 
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
-#ifdef HAVE_SYS_TYPES_H
-# include <sys/types.h>
-#endif
-#include <fcntl.h>
 #include <stdarg.h>
+#include <fcntl.h>
 
 #include "windef.h"
 #include "winbase.h"
+#include "winedump.h"
 
 #include "pshpack1.h"
 
@@ -71,85 +64,85 @@ typedef enum {
 
 typedef struct tagDATABLOCKHEADER
 {
-    DWORD cbSize;
-    DWORD dwSignature;
+    UINT  cbSize;
+    UINT  dwSignature;
 } DATABLOCK_HEADER;
 
 typedef struct _LINK_HEADER
 {
-    DWORD    dwSize;        /* 0x00 size of the header - 0x4c */
+    UINT     dwSize;        /* 0x00 size of the header - 0x4c */
     GUID     MagicGuid;     /* 0x04 is CLSID_ShellLink */
-    DWORD    dwFlags;       /* 0x14 describes elements following */
-    DWORD    dwFileAttr;    /* 0x18 attributes of the target file */
+    UINT     dwFlags;       /* 0x14 describes elements following */
+    UINT     dwFileAttr;    /* 0x18 attributes of the target file */
     FILETIME Time1;         /* 0x1c */
     FILETIME Time2;         /* 0x24 */
     FILETIME Time3;         /* 0x2c */
-    DWORD    dwFileLength;  /* 0x34 File length */
-    DWORD    nIcon;         /* 0x38 icon number */
-    DWORD   fStartup;       /* 0x3c startup type */
-    DWORD   wHotKey;        /* 0x40 hotkey */
-    DWORD   Unknown5;       /* 0x44 */
-    DWORD   Unknown6;       /* 0x48 */
+    UINT     dwFileLength;  /* 0x34 File length */
+    UINT     nIcon;         /* 0x38 icon number */
+    UINT     fStartup;      /* 0x3c startup type */
+    UINT     wHotKey;       /* 0x40 hotkey */
+    UINT     Unknown5;      /* 0x44 */
+    UINT     Unknown6;      /* 0x48 */
 } LINK_HEADER, * PLINK_HEADER;
 
 typedef struct tagLINK_SZ_BLOCK
 {
-    DWORD size;
-    DWORD magic;
+    UINT  size;
+    UINT  magic;
     CHAR  bufA[MAX_PATH];
     WCHAR bufW[MAX_PATH];
 } LINK_SZ_BLOCK;
 
 typedef struct tagLINK_PROPERTYSTORAGE_GUID
 {
-    DWORD size;
-    DWORD magic;
+    UINT  size;
+    UINT  magic;
     GUID fmtid;
 } LINK_PROPERTYSTORAGE_GUID;
 
 typedef struct tagLINK_PROPERTYSTORAGE_VALUE
 {
-    DWORD size;
-    DWORD pid;
+    UINT  size;
+    UINT  pid;
     BYTE unknown8;
-    DWORD vt;
-    DWORD unknown25;
+    UINT  vt;
+    UINT  unknown25;
 } LINK_PROPERTYSTORAGE_VALUE;
 
 typedef struct _LOCATION_INFO
 {
-    DWORD  dwTotalSize;
-    DWORD  dwHeaderSize;
-    DWORD  dwFlags;
-    DWORD  dwVolTableOfs;
-    DWORD  dwLocalPathOfs;
-    DWORD  dwNetworkVolTableOfs;
-    DWORD  dwFinalPathOfs;
+    UINT   dwTotalSize;
+    UINT   dwHeaderSize;
+    UINT   dwFlags;
+    UINT   dwVolTableOfs;
+    UINT   dwLocalPathOfs;
+    UINT   dwNetworkVolTableOfs;
+    UINT   dwFinalPathOfs;
 } LOCATION_INFO;
 
 typedef struct _LOCAL_VOLUME_INFO
 {
-    DWORD dwSize;
-    DWORD dwType;
-    DWORD dwVolSerial;
-    DWORD dwVolLabelOfs;
+    UINT  dwSize;
+    UINT  dwType;
+    UINT  dwVolSerial;
+    UINT  dwVolLabelOfs;
 } LOCAL_VOLUME_INFO;
 
 typedef struct _NETWORK_VOLUME_INFO
 {
-    DWORD dwSize;
-    DWORD dwUnknown1;
-    DWORD dwShareNameOfs;
-    DWORD dwReserved;
-    DWORD dwUnknown2;
+    UINT  dwSize;
+    UINT  dwUnknown1;
+    UINT  dwShareNameOfs;
+    UINT  dwReserved;
+    UINT  dwUnknown2;
 } NETWORK_VOLUME_INFO;
 
 typedef struct
 {
-    DWORD cbSize;
-    DWORD dwSignature;
-    DWORD idSpecialFolder;
-    DWORD cbOffset;
+    UINT  cbSize;
+    UINT  dwSignature;
+    UINT  idSpecialFolder;
+    UINT  cbOffset;
 } EXP_SPECIAL_FOLDER;
 
 typedef struct lnk_string_tag
@@ -306,7 +299,7 @@ static const unsigned char table_dec85[0x80] = {
 0x47,0x48,0x49,0x4a,0x4b,0x4c,0x4d,0x4e,0x4f,0x50,0x51,0x52,0xff,0x53,0x54,0xff,
 };
 
-static BOOL base85_to_guid( const char *str, GUID * HOSTPTR guid )
+static BOOL base85_to_guid( const char *str, LPGUID guid )
 {
     DWORD i, val = 0, base = 1, *p;
     unsigned char ch;
@@ -536,7 +529,7 @@ void lnk_dump(void)
 {
     const LINK_HEADER*        hdr;
     const DATABLOCK_HEADER*   bhdr;
-    DWORD dwFlags;
+    UINT dwFlags;
 
     offset = 0;
     hdr = fetch_block();

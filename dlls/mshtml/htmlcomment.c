@@ -115,7 +115,7 @@ static HRESULT WINAPI HTMLCommentElement_get_text(IHTMLCommentElement *iface, BS
 static HRESULT WINAPI HTMLCommentElement_put_atomic(IHTMLCommentElement *iface, LONG v)
 {
     HTMLCommentElement *This = impl_from_IHTMLCommentElement(iface);
-    FIXME("(%p)->(%d)\n", This, v);
+    FIXME("(%p)->(%ld)\n", This, v);
     return E_NOTIMPL;
 }
 
@@ -199,6 +199,7 @@ static const tid_t HTMLCommentElement_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLCommentElement_dispex = {
+    L"Comment",
     NULL,
     DispHTMLCommentElement_tid,
     HTMLCommentElement_iface_tids,

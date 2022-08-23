@@ -23,7 +23,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -32,9 +31,6 @@
 #include <string.h>
 #include <stdarg.h>
 #include <ctype.h>
-#ifdef HAVE_GETOPT_H
-# include <getopt.h>
-#endif
 
 #include "build.h"
 
@@ -49,34 +45,10 @@ int unwind_tables = 0;
 int use_msvcrt = 0;
 int unix_lib = 0;
 int safe_seh = 0;
+int prefer_native = 0;
+int data_only = 0;
 
-#ifdef __i386__
-enum target_cpu target_cpu = CPU_x86;
-#elif defined(__i386_on_x86_64__)
-enum target_cpu target_cpu = CPU_x86_32on64;
-#elif defined(__x86_64__)
-enum target_cpu target_cpu = CPU_x86_64;
-#elif defined(__powerpc__)
-enum target_cpu target_cpu = CPU_POWERPC;
-#elif defined(__arm__)
-enum target_cpu target_cpu = CPU_ARM;
-#elif defined(__aarch64__)
-enum target_cpu target_cpu = CPU_ARM64;
-#else
-#error Unsupported CPU
-#endif
-
-#ifdef __APPLE__
-enum target_platform target_platform = PLATFORM_APPLE;
-#elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
-enum target_platform target_platform = PLATFORM_FREEBSD;
-#elif defined(__sun)
-enum target_platform target_platform = PLATFORM_SOLARIS;
-#elif defined(_WIN32)
-enum target_platform target_platform = PLATFORM_WINDOWS;
-#else
-enum target_platform target_platform = PLATFORM_UNSPECIFIED;
-#endif
+struct target target = { 0 };
 
 char *target_alias = NULL;
 
@@ -84,8 +56,11 @@ char *input_file_name = NULL;
 char *spec_file_name = NULL;
 FILE *output_file = NULL;
 const char *output_file_name = NULL;
+static int save_temps;
 static int fake_module;
+static DLLSPEC *main_spec;
 
+static const struct strarray empty_strarray;
 struct strarray lib_path = { 0 };
 struct strarray tools_path = { 0 };
 struct strarray as_command = { 0 };
@@ -125,20 +100,6 @@ enum exec_mode_values
 
 static enum exec_mode_values exec_mode = MODE_NONE;
 
-static const struct
-{
-    const char *name;
-    enum target_platform platform;
-} platform_names[] =
-{
-    { "macos",   PLATFORM_APPLE },
-    { "darwin",  PLATFORM_APPLE },
-    { "freebsd", PLATFORM_FREEBSD },
-    { "solaris", PLATFORM_SOLARIS },
-    { "mingw32", PLATFORM_WINDOWS },
-    { "windows", PLATFORM_WINDOWS },
-    { "winnt",   PLATFORM_WINDOWS }
-};
 
 /* set the dll file name from the input file name */
 static void set_dll_file_name( const char *name, DLLSPEC *spec )
@@ -147,8 +108,7 @@ static void set_dll_file_name( const char *name, DLLSPEC *spec )
 
     if (spec->file_name) return;
 
-    if ((p = strrchr( name, '\\' ))) name = p + 1;
-    if ((p = strrchr( name, '/' ))) name = p + 1;
+    name = get_basename( name );
     spec->file_name = xmalloc( strlen(name) + 5 );
     strcpy( spec->file_name, name );
     if ((p = strrchr( spec->file_name, '.' )))
@@ -199,55 +159,22 @@ static void set_subsystem( const char *subsystem, DLLSPEC *spec )
     free( str );
 }
 
-/* set the target CPU and platform */
-static void set_target( const char *target )
+/* set the syscall table id */
+static void set_syscall_table( const char *id, DLLSPEC *spec )
 {
-    unsigned int i;
-    char *p, *spec = xstrdup( target );
+    int val = atoi( id );
 
-    /* target specification is in the form CPU-MANUFACTURER-OS or CPU-MANUFACTURER-KERNEL-OS */
+    if (val < 0 || val > 3) fatal_error( "Invalid syscall table id '%s', must be 0-3\n", id );
+    spec->syscall_table = val;
+}
 
-    target_alias = xstrdup( target );
+/* set the target CPU and platform */
+static void set_target( const char *name )
+{
+    target_alias = xstrdup( name );
 
-    /* get the CPU part */
-
-    if ((p = strchr( spec, '-' )))
-    {
-        int cpu;
-
-        *p++ = 0;
-        cpu = get_cpu_from_name( spec );
-        if (cpu == -1) fatal_error( "Unrecognized CPU '%s'\n", spec );
-        target_cpu = cpu;
-    }
-    else if (!strcmp( spec, "mingw32" ))
-    {
-        target_cpu = CPU_x86;
-        p = spec;
-    }
-    else
-        fatal_error( "Invalid target specification '%s'\n", target );
-
-    /* get the OS part */
-
-    target_platform = PLATFORM_UNSPECIFIED;  /* default value */
-    for (;;)
-    {
-        for (i = 0; i < ARRAY_SIZE(platform_names); i++)
-        {
-            if (!strncmp( platform_names[i].name, p, strlen(platform_names[i].name) ))
-            {
-                target_platform = platform_names[i].platform;
-                break;
-            }
-        }
-        if (target_platform != PLATFORM_UNSPECIFIED || !(p = strchr( p, '-' ))) break;
-        p++;
-    }
-
-    free( spec );
-
-    if (target_cpu == CPU_ARM && target_platform == PLATFORM_WINDOWS) thumb_mode = 1;
+    if (!parse_target( name, &target )) fatal_error( "Unrecognized target '%s'\n", name );
+    if (target.cpu == CPU_ARM && is_pe()) thumb_mode = 1;
 }
 
 /* cleanup on program exit */
@@ -272,6 +199,7 @@ static const char usage_str[] =
 "   -b, --target=TARGET       Specify target CPU and platform for cross-compiling\n"
 "   -B PREFIX                 Look for build tools in the PREFIX directory\n"
 "       --cc-cmd=CC           C compiler to use for assembling (default: fall back to --as-cmd)\n"
+"       --data-only           Generate a data-only dll (i.e. without any executable code)\n"
 "   -d, --delay-lib=LIB       Import the specified library in delayed mode\n"
 "   -D SYM                    Ignored for C flags compatibility\n"
 "   -e, --entry=FUNC          Set the DLL entry point function (default: DllMain)\n"
@@ -296,10 +224,12 @@ static const char usage_str[] =
 "       --nxcompat=y|n        Set the NX compatibility flag (default: yes)\n"
 "   -N, --dll-name=DLLNAME    Set the DLL name (default: from input file name)\n"
 "   -o, --output=NAME         Set the output file name (default: stdout)\n"
+"       --prefer-native       Set the flag to prefer loading native at run time\n"
 "   -r, --res=RSRC.RES        Load resources from RSRC.RES\n"
 "       --safeseh             Mark object files as SEH compatible\n"
 "       --save-temps          Do not delete the generated intermediate files\n"
 "       --subsystem=SUBSYS    Set the subsystem (one of native, windows, console, wince)\n"
+"       --syscall-table=ID    Set the syscall table id (between 0 and 3)\n"
 "   -u, --undefined=SYMBOL    Add an undefined reference to SYMBOL when linking\n"
 "   -v, --verbose             Display the programs invoked\n"
 "       --version             Print the version and exit\n"
@@ -324,6 +254,7 @@ enum long_options_values
     LONG_OPT_BUILTIN,
     LONG_OPT_ASCMD,
     LONG_OPT_CCCMD,
+    LONG_OPT_DATA_ONLY,
     LONG_OPT_EXTERNAL_SYMS,
     LONG_OPT_FAKE_MODULE,
     LONG_OPT_FIXUP_CTORS,
@@ -331,57 +262,64 @@ enum long_options_values
     LONG_OPT_LDCMD,
     LONG_OPT_NMCMD,
     LONG_OPT_NXCOMPAT,
+    LONG_OPT_PREFER_NATIVE,
     LONG_OPT_RESOURCES,
     LONG_OPT_SAFE_SEH,
     LONG_OPT_SAVE_TEMPS,
     LONG_OPT_STATICLIB,
     LONG_OPT_SUBSYSTEM,
+    LONG_OPT_SYSCALL_TABLE,
     LONG_OPT_VERSION
 };
 
 static const char short_options[] = "B:C:D:E:F:H:I:K:L:M:N:b:d:e:f:hkl:m:o:r:u:vw";
 
-static const struct option long_options[] =
+static const struct long_option long_options[] =
 {
-    { "dll",           0, 0, LONG_OPT_DLL },
-    { "def",           0, 0, LONG_OPT_DEF },
-    { "exe",           0, 0, LONG_OPT_EXE },
-    { "implib",        0, 0, LONG_OPT_IMPLIB },
-    { "staticlib",     0, 0, LONG_OPT_STATICLIB },
-    { "builtin",       0, 0, LONG_OPT_BUILTIN },
-    { "as-cmd",        1, 0, LONG_OPT_ASCMD },
-    { "cc-cmd",        1, 0, LONG_OPT_CCCMD },
-    { "external-symbols", 0, 0, LONG_OPT_EXTERNAL_SYMS },
-    { "fake-module",   0, 0, LONG_OPT_FAKE_MODULE },
-    { "fixup-ctors",   0, 0, LONG_OPT_FIXUP_CTORS },
-    { "large-address-aware", 0, 0, LONG_OPT_LARGE_ADDRESS_AWARE },
-    { "ld-cmd",        1, 0, LONG_OPT_LDCMD },
-    { "nm-cmd",        1, 0, LONG_OPT_NMCMD },
-    { "nxcompat",      1, 0, LONG_OPT_NXCOMPAT },
-    { "resources",     0, 0, LONG_OPT_RESOURCES },
-    { "safeseh",       0, 0, LONG_OPT_SAFE_SEH },
-    { "save-temps",    0, 0, LONG_OPT_SAVE_TEMPS },
-    { "subsystem",     1, 0, LONG_OPT_SUBSYSTEM },
-    { "version",       0, 0, LONG_OPT_VERSION },
+    /* mode options */
+    { "dll",                 0, LONG_OPT_DLL },
+    { "def",                 0, LONG_OPT_DEF },
+    { "exe",                 0, LONG_OPT_EXE },
+    { "implib",              0, LONG_OPT_IMPLIB },
+    { "staticlib",           0, LONG_OPT_STATICLIB },
+    { "builtin",             0, LONG_OPT_BUILTIN },
+    { "resources",           0, LONG_OPT_RESOURCES },
+    { "fixup-ctors",         0, LONG_OPT_FIXUP_CTORS },
+    /* other long options */
+    { "as-cmd",              1, LONG_OPT_ASCMD },
+    { "cc-cmd",              1, LONG_OPT_CCCMD },
+    { "data-only",           0, LONG_OPT_DATA_ONLY },
+    { "external-symbols",    0, LONG_OPT_EXTERNAL_SYMS },
+    { "fake-module",         0, LONG_OPT_FAKE_MODULE },
+    { "large-address-aware", 0, LONG_OPT_LARGE_ADDRESS_AWARE },
+    { "ld-cmd",              1, LONG_OPT_LDCMD },
+    { "nm-cmd",              1, LONG_OPT_NMCMD },
+    { "nxcompat",            1, LONG_OPT_NXCOMPAT },
+    { "prefer-native",       0, LONG_OPT_PREFER_NATIVE },
+    { "safeseh",             0, LONG_OPT_SAFE_SEH },
+    { "save-temps",          0, LONG_OPT_SAVE_TEMPS },
+    { "subsystem",           1, LONG_OPT_SUBSYSTEM },
+    { "syscall-table",       1, LONG_OPT_SYSCALL_TABLE },
+    { "version",             0, LONG_OPT_VERSION },
     /* aliases for short options */
-    { "target",        1, 0, 'b' },
-    { "delay-lib",     1, 0, 'd' },
-    { "export",        1, 0, 'E' },
-    { "entry",         1, 0, 'e' },
-    { "filename",      1, 0, 'F' },
-    { "help",          0, 0, 'h' },
-    { "heap",          1, 0, 'H' },
-    { "kill-at",       0, 0, 'k' },
-    { "library",       1, 0, 'l' },
-    { "library-path",  1, 0, 'L' },
-    { "main-module",   1, 0, 'M' },
-    { "dll-name",      1, 0, 'N' },
-    { "output",        1, 0, 'o' },
-    { "res",           1, 0, 'r' },
-    { "undefined",     1, 0, 'u' },
-    { "verbose",       0, 0, 'v' },
-    { "warnings",      0, 0, 'w' },
-    { NULL,            0, 0, 0 }
+    { "target",              1, 'b' },
+    { "delay-lib",           1, 'd' },
+    { "export",              1, 'E' },
+    { "entry",               1, 'e' },
+    { "filename",            1, 'F' },
+    { "help",                0, 'h' },
+    { "heap",                1, 'H' },
+    { "kill-at",             0, 'k' },
+    { "library",             1, 'l' },
+    { "library-path",        1, 'L' },
+    { "main-module",         1, 'M' },
+    { "dll-name",            1, 'N' },
+    { "output",              1, 'o' },
+    { "res",                 1, 'r' },
+    { "undefined",           1, 'u' },
+    { "verbose",             0, 'v' },
+    { "warnings",            0, 'w' },
+    { NULL }
 };
 
 static void usage( int exit_code )
@@ -424,215 +362,196 @@ static const char *get_default_entry_point( const DLLSPEC *spec )
     }
 }
 
-/* parse options from the argv array and remove all the recognized ones */
-static char **parse_options( int argc, char **argv, DLLSPEC *spec )
+static void option_callback( int optc, char *optarg )
 {
     char *p;
-    int optc;
-    int save_temps = 0;
 
-    while ((optc = getopt_long( argc, argv, short_options, long_options, NULL )) != -1)
+    switch (optc)
     {
-        switch(optc)
-        {
-        case 'B':
-            strarray_add( &tools_path, xstrdup( optarg ), NULL );
-            break;
-        case 'D':
-            /* ignored */
-            break;
-        case 'E':
-            spec_file_name = xstrdup( optarg );
-            set_dll_file_name( optarg, spec );
-            break;
-        case 'F':
-            spec->file_name = xstrdup( optarg );
-            break;
-        case 'H':
-            if (!isdigit(optarg[0]))
-                fatal_error( "Expected number argument with -H option instead of '%s'\n", optarg );
-            spec->heap_size = atoi(optarg);
-            if (spec->heap_size > 65535)
-                fatal_error( "Invalid heap size %d, maximum is 65535\n", spec->heap_size );
-            break;
-        case 'I':
-            /* ignored */
-            break;
-        case 'K':
-            /* ignored, because cc generates correct code. */
-            break;
-        case 'L':
-            strarray_add( &lib_path, xstrdup( optarg ), NULL );
-            break;
-        case 'm':
-            if (!strcmp( optarg, "16" )) spec->type = SPEC_WIN16;
-            else if (!strcmp( optarg, "32" )) force_pointer_size = 4;
-            else if (!strcmp( optarg, "64" )) force_pointer_size = 8;
-            else if (!strcmp( optarg, "wine32" )) { force_pointer_size = 8; target_cpu = CPU_x86_32on64; }
-            else if (!strcmp( optarg, "arm" )) thumb_mode = 0;
-            else if (!strcmp( optarg, "thumb" )) thumb_mode = 1;
-            else if (!strcmp( optarg, "no-cygwin" )) use_msvcrt = 1;
-            else if (!strcmp( optarg, "unix" )) unix_lib = 1;
-            else if (!strcmp( optarg, "unicode" )) spec->unicode_app = 1;
-            else if (!strncmp( optarg, "cpu=", 4 )) cpu_option = xstrdup( optarg + 4 );
-            else if (!strncmp( optarg, "fpu=", 4 )) fpu_option = xstrdup( optarg + 4 );
-            else if (!strncmp( optarg, "arch=", 5 )) arch_option = xstrdup( optarg + 5 );
-            else if (!strncmp( optarg, "float-abi=", 10 )) float_abi_option = xstrdup( optarg + 10 );
-            else fatal_error( "Unknown -m option '%s'\n", optarg );
-            break;
-        case 'M':
-            spec->main_module = xstrdup( optarg );
-            break;
-        case 'N':
-            spec->dll_name = xstrdup( optarg );
-            break;
-        case 'b':
-            set_target( optarg );
-            break;
-        case 'd':
-            add_delayed_import( optarg );
-            break;
-        case 'e':
-            spec->init_func = xstrdup( optarg );
-            if ((p = strchr( spec->init_func, '@' ))) *p = 0;  /* kill stdcall decoration */
-            break;
-        case 'f':
-            if (!strcmp( optarg, "PIC") || !strcmp( optarg, "pic")) UsePIC = 1;
-            else if (!strcmp( optarg, "asynchronous-unwind-tables")) unwind_tables = 1;
-            else if (!strcmp( optarg, "no-asynchronous-unwind-tables")) unwind_tables = 0;
-            /* ignore all other flags */
-            break;
-        case 'h':
-            usage(0);
-            break;
-        case 'k':
-            kill_at = 1;
-            break;
-        case 'l':
-            add_import_dll( optarg, NULL );
-            break;
-        case 'o':
-            if (unlink( optarg ) == -1 && errno != ENOENT)
-                fatal_error( "Unable to create output file '%s'\n", optarg );
-            output_file_name = xstrdup( optarg );
-            break;
-        case 'r':
-            strarray_add( &res_files, xstrdup( optarg ), NULL );
-            break;
-        case 'u':
-            add_extra_ld_symbol( optarg );
-            break;
-        case 'v':
-            verbose++;
-            break;
-        case 'w':
-            display_warnings = 1;
-            break;
-        case LONG_OPT_DLL:
-            set_exec_mode( MODE_DLL );
-            break;
-        case LONG_OPT_DEF:
-            set_exec_mode( MODE_DEF );
-            break;
-        case LONG_OPT_EXE:
-            set_exec_mode( MODE_EXE );
-            if (!spec->subsystem) spec->subsystem = IMAGE_SUBSYSTEM_WINDOWS_GUI;
-            break;
-        case LONG_OPT_IMPLIB:
-            set_exec_mode( MODE_IMPLIB );
-            break;
-        case LONG_OPT_STATICLIB:
-            set_exec_mode( MODE_STATICLIB );
-            break;
-        case LONG_OPT_BUILTIN:
-            set_exec_mode( MODE_BUILTIN );
-            break;
-        case LONG_OPT_FIXUP_CTORS:
-            set_exec_mode( MODE_FIXUP_CTORS );
-            break;
-        case LONG_OPT_ASCMD:
-            as_command = strarray_fromstring( optarg, " " );
-            break;
-        case LONG_OPT_CCCMD:
-            cc_command = strarray_fromstring( optarg, " " );
-            break;
-        case LONG_OPT_FAKE_MODULE:
-            fake_module = 1;
-            break;
-        case LONG_OPT_EXTERNAL_SYMS:
-            link_ext_symbols = 1;
-            break;
-        case LONG_OPT_LARGE_ADDRESS_AWARE:
-            spec->characteristics |= IMAGE_FILE_LARGE_ADDRESS_AWARE;
-            break;
-        case LONG_OPT_LDCMD:
-            ld_command = strarray_fromstring( optarg, " " );
-            break;
-        case LONG_OPT_NMCMD:
-            nm_command = strarray_fromstring( optarg, " " );
-            break;
-        case LONG_OPT_NXCOMPAT:
-            if (optarg[0] == 'n' || optarg[0] == 'N')
-                spec->dll_characteristics &= ~IMAGE_DLLCHARACTERISTICS_NX_COMPAT;
-            break;
-        case LONG_OPT_SAFE_SEH:
-            safe_seh = 1;
-            break;
-        case LONG_OPT_RESOURCES:
-            set_exec_mode( MODE_RESOURCES );
-            break;
-        case LONG_OPT_SAVE_TEMPS:
-            save_temps = 1;
-            break;
-        case LONG_OPT_SUBSYSTEM:
-            set_subsystem( optarg, spec );
-            break;
-        case LONG_OPT_VERSION:
-            printf( "winebuild version " PACKAGE_VERSION "\n" );
-            exit(0);
-        case '?':
-            usage(1);
-            break;
-        }
-    }
-
-    if (!save_temps) atexit( cleanup_tmp_files );
-
-    if (spec->file_name && !strchr( spec->file_name, '.' ))
-        strcat( spec->file_name, exec_mode == MODE_EXE ? ".exe" : ".dll" );
-    init_dll_name( spec );
-
-    switch (target_cpu)
-    {
-    case CPU_x86:
-        if (force_pointer_size == 8) target_cpu = CPU_x86_64;
+    case 'B':
+        strarray_add( &tools_path, xstrdup( optarg ));
         break;
-    case CPU_x86_64:
-        if (force_pointer_size == 4) target_cpu = CPU_x86;
+    case 'D':
+        /* ignored */
         break;
-    case CPU_x86_32on64:
+    case 'E':
+        spec_file_name = xstrdup( optarg );
+        set_dll_file_name( optarg, main_spec );
         break;
-    default:
-        if (force_pointer_size == 8)
-            fatal_error( "Cannot build 64-bit code for this CPU\n" );
+    case 'F':
+        main_spec->file_name = xstrdup( optarg );
+        break;
+    case 'H':
+        if (!isdigit(optarg[0]))
+            fatal_error( "Expected number argument with -H option instead of '%s'\n", optarg );
+        main_spec->heap_size = atoi(optarg);
+        if (main_spec->heap_size > 65535)
+            fatal_error( "Invalid heap size %d, maximum is 65535\n", main_spec->heap_size );
+        break;
+    case 'I':
+        /* ignored */
+        break;
+    case 'K':
+        /* ignored, because cc generates correct code. */
+        break;
+    case 'L':
+        strarray_add( &lib_path, xstrdup( optarg ));
+        break;
+    case 'm':
+        if (!strcmp( optarg, "16" )) main_spec->type = SPEC_WIN16;
+        else if (!strcmp( optarg, "32" )) force_pointer_size = 4;
+        else if (!strcmp( optarg, "64" )) force_pointer_size = 8;
+        else if (!strcmp( optarg, "wine32" )) { force_pointer_size = 8; target.cpu = CPU_x86_32on64; }
+        else if (!strcmp( optarg, "arm" )) thumb_mode = 0;
+        else if (!strcmp( optarg, "thumb" )) thumb_mode = 1;
+        else if (!strcmp( optarg, "no-cygwin" )) use_msvcrt = 1;
+        else if (!strcmp( optarg, "unix" )) unix_lib = 1;
+        else if (!strcmp( optarg, "unicode" )) main_spec->unicode_app = 1;
+        else if (!strncmp( optarg, "cpu=", 4 )) cpu_option = xstrdup( optarg + 4 );
+        else if (!strncmp( optarg, "fpu=", 4 )) fpu_option = xstrdup( optarg + 4 );
+        else if (!strncmp( optarg, "arch=", 5 )) arch_option = xstrdup( optarg + 5 );
+        else if (!strncmp( optarg, "float-abi=", 10 )) float_abi_option = xstrdup( optarg + 10 );
+        else fatal_error( "Unknown -m option '%s'\n", optarg );
+        break;
+    case 'M':
+        main_spec->main_module = xstrdup( optarg );
+        break;
+    case 'N':
+        main_spec->dll_name = xstrdup( optarg );
+        break;
+    case 'b':
+        set_target( optarg );
+        break;
+    case 'd':
+        add_delayed_import( optarg );
+        break;
+    case 'e':
+        main_spec->init_func = xstrdup( optarg );
+        if ((p = strchr( main_spec->init_func, '@' ))) *p = 0;  /* kill stdcall decoration */
+        break;
+    case 'f':
+        if (!strcmp( optarg, "PIC") || !strcmp( optarg, "pic")) UsePIC = 1;
+        else if (!strcmp( optarg, "asynchronous-unwind-tables")) unwind_tables = 1;
+        else if (!strcmp( optarg, "no-asynchronous-unwind-tables")) unwind_tables = 0;
+        /* ignore all other flags */
+        break;
+    case 'h':
+        usage(0);
+        break;
+    case 'k':
+        kill_at = 1;
+        break;
+    case 'l':
+        add_import_dll( optarg, NULL );
+        break;
+    case 'o':
+        if (unlink( optarg ) == -1 && errno != ENOENT)
+            fatal_error( "Unable to create output file '%s'\n", optarg );
+        output_file_name = xstrdup( optarg );
+        break;
+    case 'r':
+        strarray_add( &res_files, xstrdup( optarg ));
+        break;
+    case 'u':
+        add_extra_ld_symbol( optarg );
+        break;
+    case 'v':
+        verbose++;
+        break;
+    case 'w':
+        display_warnings = 1;
+        break;
+    case LONG_OPT_DLL:
+        set_exec_mode( MODE_DLL );
+        break;
+    case LONG_OPT_DEF:
+        set_exec_mode( MODE_DEF );
+        break;
+    case LONG_OPT_EXE:
+        set_exec_mode( MODE_EXE );
+        if (!main_spec->subsystem) main_spec->subsystem = IMAGE_SUBSYSTEM_WINDOWS_GUI;
+        break;
+    case LONG_OPT_IMPLIB:
+        set_exec_mode( MODE_IMPLIB );
+        break;
+    case LONG_OPT_STATICLIB:
+        set_exec_mode( MODE_STATICLIB );
+        break;
+    case LONG_OPT_BUILTIN:
+        set_exec_mode( MODE_BUILTIN );
+        break;
+    case LONG_OPT_FIXUP_CTORS:
+        set_exec_mode( MODE_FIXUP_CTORS );
+        break;
+    case LONG_OPT_ASCMD:
+        as_command = strarray_fromstring( optarg, " " );
+        break;
+    case LONG_OPT_CCCMD:
+        cc_command = strarray_fromstring( optarg, " " );
+        break;
+    case LONG_OPT_DATA_ONLY:
+        data_only = 1;
+        break;
+    case LONG_OPT_FAKE_MODULE:
+        fake_module = 1;
+        break;
+    case LONG_OPT_EXTERNAL_SYMS:
+        link_ext_symbols = 1;
+        break;
+    case LONG_OPT_LARGE_ADDRESS_AWARE:
+        main_spec->characteristics |= IMAGE_FILE_LARGE_ADDRESS_AWARE;
+        break;
+    case LONG_OPT_LDCMD:
+        ld_command = strarray_fromstring( optarg, " " );
+        break;
+    case LONG_OPT_NMCMD:
+        nm_command = strarray_fromstring( optarg, " " );
+        break;
+    case LONG_OPT_NXCOMPAT:
+        if (optarg[0] == 'n' || optarg[0] == 'N')
+            main_spec->dll_characteristics &= ~IMAGE_DLLCHARACTERISTICS_NX_COMPAT;
+        break;
+    case LONG_OPT_SAFE_SEH:
+        safe_seh = 1;
+        break;
+    case LONG_OPT_PREFER_NATIVE:
+        prefer_native = 1;
+        main_spec->dll_characteristics |= IMAGE_DLLCHARACTERISTICS_PREFER_NATIVE;
+        break;
+    case LONG_OPT_RESOURCES:
+        set_exec_mode( MODE_RESOURCES );
+        break;
+    case LONG_OPT_SAVE_TEMPS:
+        save_temps = 1;
+        break;
+    case LONG_OPT_SUBSYSTEM:
+        set_subsystem( optarg, main_spec );
+        break;
+    case LONG_OPT_SYSCALL_TABLE:
+        set_syscall_table( optarg, main_spec );
+        break;
+    case LONG_OPT_VERSION:
+        printf( "winebuild version " PACKAGE_VERSION "\n" );
+        exit(0);
+    case '?':
+        fprintf( stderr, "winebuild: %s\n\n", optarg );
+        usage(1);
         break;
     }
-
-    return &argv[optind];
 }
 
 
 /* load all specified resource files */
-static void load_resources( char *argv[], DLLSPEC *spec )
+static struct strarray load_resources( struct strarray files, DLLSPEC *spec )
 {
+    struct strarray ret = empty_strarray;
     int i;
-    char **ptr, **last;
 
     switch (spec->type)
     {
     case SPEC_WIN16:
         for (i = 0; i < res_files.count; i++) load_res16_file( res_files.str[i], spec );
-        break;
+        return files;
 
     case SPEC_WIN32:
         for (i = 0; i < res_files.count; i++)
@@ -642,39 +561,39 @@ static void load_resources( char *argv[], DLLSPEC *spec )
         }
 
         /* load any resource file found in the remaining arguments */
-        for (ptr = last = argv; *ptr; ptr++)
+        for (i = 0; i < files.count; i++)
         {
-            if (!load_res32_file( *ptr, spec ))
-                *last++ = *ptr; /* not a resource file, keep it in the list */
+            if (!load_res32_file( files.str[i], spec ))
+                strarray_add( &ret, files.str[i] ); /* not a resource file, keep it in the list */
         }
-        *last = NULL;
         break;
     }
+    return ret;
 }
 
 /* add input files that look like import libs to the import list */
-static void load_import_libs( char *argv[] )
+static struct strarray load_import_libs( struct strarray files )
 {
-    char **ptr, **last;
+    struct strarray ret = empty_strarray;
+    int i;
 
-    for (ptr = last = argv; *ptr; ptr++)
+    for (i = 0; i < files.count; i++)
     {
-        if (strendswith( *ptr, ".def" ))
-            add_import_dll( NULL, *ptr );
+        if (strendswith( files.str[i], ".def" ))
+            add_import_dll( NULL, files.str[i] );
         else
-            *last++ = *ptr; /* not an import dll, keep it in the list */
+            strarray_add( &ret, files.str[i] ); /* not an import dll, keep it in the list */
     }
-    *last = NULL;
+    return ret;
 }
 
 static int parse_input_file( DLLSPEC *spec )
 {
     FILE *input_file = open_input_file( NULL, spec_file_name );
-    char *extension = strrchr( spec_file_name, '.' );
     int result;
 
     spec->src_name = xstrdup( input_file_name );
-    if (extension && !strcmp( extension, ".def" ))
+    if (strendswith( spec_file_name, ".def" ))
         result = parse_def_file( input_file, spec );
     else
         result = parse_spec_file( input_file, spec );
@@ -688,7 +607,8 @@ static int parse_input_file( DLLSPEC *spec )
  */
 int main(int argc, char **argv)
 {
-    DLLSPEC *spec = alloc_dll_spec();
+    struct strarray files;
+    DLLSPEC *spec = main_spec = alloc_dll_spec();
 
 #ifdef SIGHUP
     signal( SIGHUP, exit_on_signal );
@@ -696,8 +616,19 @@ int main(int argc, char **argv)
     signal( SIGTERM, exit_on_signal );
     signal( SIGINT, exit_on_signal );
 
-    argv = parse_options( argc, argv, spec );
+    target = init_argv0_target( argv[0] );
+    if (target.platform == PLATFORM_CYGWIN) target.platform = PLATFORM_MINGW;
+
+    files = parse_options( argc, argv, short_options, long_options, 0, option_callback );
+
     atexit( cleanup );  /* make sure we remove the output file on exit */
+    if (!save_temps) atexit( cleanup_tmp_files );
+
+    if (spec->file_name && !strchr( spec->file_name, '.' ))
+        strcat( spec->file_name, exec_mode == MODE_EXE ? ".exe" : ".dll" );
+    init_dll_name( spec );
+
+    if (force_pointer_size && target.cpu != CPU_x86_32on64) set_target_ptr_size( &target, force_pointer_size );
 
     switch(exec_mode)
     {
@@ -706,27 +637,31 @@ int main(int argc, char **argv)
             spec->characteristics |= IMAGE_FILE_DLL;
         /* fall through */
     case MODE_EXE:
-        load_resources( argv, spec );
+        files = load_resources( files, spec );
         if (spec_file_name && !parse_input_file( spec )) break;
         if (!spec->init_func && !unix_lib) spec->init_func = xstrdup( get_default_entry_point( spec ));
 
         if (fake_module)
         {
-            if (spec->type == SPEC_WIN16) output_fake_module16( spec );
-            else output_fake_module( spec );
+            output_fake_module( spec );
             break;
         }
-        if (target_platform != PLATFORM_WINDOWS)
+        if (data_only)
         {
-            load_import_libs( argv );
-            read_undef_symbols( spec, argv );
+            output_data_module( spec );
+            break;
+        }
+        if (!is_pe())
+        {
+            files = load_import_libs( files );
+            read_undef_symbols( spec, files );
             resolve_imports( spec );
         }
         if (spec->type == SPEC_WIN16) output_spec16_file( spec );
         else output_spec32_file( spec );
         break;
     case MODE_DEF:
-        if (argv[0]) fatal_error( "file argument '%s' not allowed in this mode\n", argv[0] );
+        if (files.count) fatal_error( "file argument '%s' not allowed in this mode\n", files.str[0] );
         if (!spec_file_name) fatal_error( "missing .spec file\n" );
         if (!parse_input_file( spec )) break;
         open_output_file();
@@ -736,21 +671,21 @@ int main(int argc, char **argv)
     case MODE_IMPLIB:
         if (!spec_file_name) fatal_error( "missing .spec file\n" );
         if (!parse_input_file( spec )) break;
-        output_static_lib( spec, argv );
+        output_static_lib( spec, files );
         break;
     case MODE_STATICLIB:
-        output_static_lib( NULL, argv );
+        output_static_lib( NULL, files );
         break;
     case MODE_BUILTIN:
-        if (!argv[0]) fatal_error( "missing file argument for --builtin option\n" );
-        make_builtin_files( argv );
+        if (!files.count) fatal_error( "missing file argument for --builtin option\n" );
+        make_builtin_files( files );
         break;
     case MODE_FIXUP_CTORS:
-        if (!argv[0]) fatal_error( "missing file argument for --fixup-ctors option\n" );
-        fixup_constructors( argv );
+        if (!files.count) fatal_error( "missing file argument for --fixup-ctors option\n" );
+        fixup_constructors( files );
         break;
     case MODE_RESOURCES:
-        load_resources( argv, spec );
+        files = load_resources( files, spec );
         output_res_o_file( spec );
         break;
     default:

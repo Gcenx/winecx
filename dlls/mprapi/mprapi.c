@@ -25,25 +25,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mprapi);
 
-/*****************************************************
- *      DllMain
- */
-BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
-{
-    TRACE("(%p, %d, %p)\n", hinst, reason, reserved);
-
-    switch(reason)
-    {
-    case DLL_WINE_PREATTACH:
-        return FALSE;  /* prefer native version */
-
-    case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls( hinst );
-        break;
-    }
-    return TRUE;
-}
-
 /***********************************************************************
  * MprAdminGetErrorString (MPRAPI.@)
  *
@@ -64,7 +45,7 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
  */
 DWORD APIENTRY MprAdminGetErrorString(DWORD mprerror, LPWSTR *localstr)
 {
-    FIXME("(0x%x/%u, %p): stub!\n", mprerror, mprerror, localstr);
+    FIXME("(0x%lx/%lu, %p): stub!\n", mprerror, mprerror, localstr);
 
     *localstr = NULL;
     return ERROR_MR_MID_NOT_FOUND;
@@ -78,4 +59,16 @@ BOOL APIENTRY MprAdminIsServiceRunning(LPWSTR server)
     FIXME("(%s): stub!\n", debugstr_w(server));
 
     return FALSE;
+}
+
+/***********************************************************************
+ *      MprConfigServerConnect (MPRAPI.@)
+ */
+DWORD APIENTRY MprConfigServerConnect(LPWSTR server_name, HANDLE *hmprconfig)
+{
+    FIXME("server_name %s, hmprconfig %p stub.\n", debugstr_w(server_name), hmprconfig);
+
+    *hmprconfig = NULL;
+
+    return ERROR_NOT_SUPPORTED;
 }

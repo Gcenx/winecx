@@ -19,13 +19,13 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <sys/ioctl.h>
+#include <unistd.h>
 
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
@@ -36,8 +36,6 @@
 #include "winbase.h"
 #include "winternl.h"
 #include "winioctl.h"
-#include "winreg.h"
-#include "psapi.h"
 #include "ddk/wdm.h"
 #include "android.h"
 #include "wine/server.h"
@@ -72,16 +70,6 @@ enum android_ioctl
     IOCTL_SET_SWAP_INT,
     IOCTL_SET_CAPTURE,
     IOCTL_SET_CURSOR,
-    IOCTL_SET_WINDOW_FOCUS,
-    IOCTL_SET_WINDOW_TEXT,
-    IOCTL_SET_WINDOW_ICON,
-    IOCTL_GAMEPAD_QUERY,
-    IOCTL_IMETEXT,
-    IOCTL_IMEFINISH,
-    IOCTL_POLL_CLIPDATA,
-    IOCTL_GET_CLIPDATA,
-    IOCTL_SET_CLIPDATA,
-    IOCTL_CLOSE_DESKTOP,
     NB_IOCTLS
 };
 
@@ -219,25 +207,6 @@ struct ioctl_android_set_window_parent
     float               scale;
 };
 
-struct ioctl_android_set_window_focus
-{
-    struct ioctl_header hdr;
-};
-
-struct ioctl_android_set_window_text
-{
-    struct ioctl_header hdr;
-    WCHAR               text[1];
-};
-
-struct ioctl_android_set_window_icon
-{
-    struct ioctl_header hdr;
-    int                 width;
-    int                 height;
-    int                 bits[1];
-};
-
 struct ioctl_android_set_capture
 {
     struct ioctl_header hdr;
@@ -252,58 +221,6 @@ struct ioctl_android_set_cursor
     int                 hotspotx;
     int                 hotspoty;
     int                 bits[1];
-};
-
-struct ioctl_android_gamepad_value
-{
-    struct ioctl_header hdr;
-    int                 index;
-    int                 device;
-    union
-    {
-            int          count;
-            di_name      name;
-            di_value_set value;
-    } data;
-};
-
-struct ioctl_android_ime_text
-{
-    struct ioctl_header hdr;
-    INT                 target;
-    INT                 length;
-    INT                 cursor;
-    WCHAR               text[1];
-};
-
-struct ioctl_android_ime_finish
-{
-    struct ioctl_header hdr;
-    INT                 target;
-};
-
-struct ioctl_android_poll_clipdata
-{
-    struct ioctl_header hdr;
-};
-
-struct ioctl_android_get_clipdata
-{
-    struct ioctl_header hdr;
-    DWORD flags;
-    DWORD length;
-    WCHAR text[1];
-};
-
-struct ioctl_android_set_clipdata
-{
-    struct ioctl_header hdr;
-    WCHAR               text[1];
-};
-
-struct ioctl_android_close_desktop
-{
-    struct ioctl_header hdr;
 };
 
 static struct gralloc_module_t *gralloc_module;
@@ -395,8 +312,8 @@ static struct native_win_data *get_ioctl_native_win_data( const struct ioctl_hea
 
 static int get_ioctl_win_parent( HWND parent )
 {
-    if (parent == GetDesktopWindow()) return 0;
-    if (!GetAncestor( parent, GA_PARENT )) return HandleToLong( HWND_MESSAGE );
+    if (parent != GetDesktopWindow() && !GetAncestor( parent, GA_PARENT ))
+        return HandleToLong( HWND_MESSAGE );
     return HandleToLong( parent );
 }
 
@@ -415,7 +332,7 @@ static int duplicate_fd( HANDLE client, int fd )
 
     if (!wine_server_fd_to_handle( dup(fd), GENERIC_READ | SYNCHRONIZE, 0, &handle ))
         DuplicateHandle( GetCurrentProcess(), handle, client, &ret,
-                         DUPLICATE_SAME_ACCESS, FALSE, DUP_HANDLE_CLOSE_SOURCE );
+                         0, FALSE, DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE );
 
     if (!ret) return -1;
     return HandleToLong( ret );
@@ -431,7 +348,7 @@ static int map_native_handle( union native_handle_buffer *dest, const native_han
     {
         HANDLE ret = 0;
         if (!DuplicateHandle( GetCurrentProcess(), mapping, client, &ret,
-                              DUPLICATE_SAME_ACCESS, FALSE, DUP_HANDLE_CLOSE_SOURCE ))
+                              0, FALSE, DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE ))
             return -ENOSPC;
         dest->handle.numFds = 0;
         dest->handle.numInts = 1;
@@ -795,23 +712,11 @@ static void create_desktop_window( HWND hwnd )
 {
     static jmethodID method;
     jobject object;
-    HKEY hkey;
-    DWORD scale = 0;
 
-    /* @@ Wine registry key: HKCU\Software\Wine\Android Driver */
-    if (!RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\Android Driver", &hkey ))
-    {
-        char buffer[16];
-        DWORD type, size = sizeof(buffer);
-        if (!RegQueryValueExA( hkey, "DPIScaling", 0, &type, (LPBYTE)buffer, &size ) && type == REG_DWORD)
-            scale = *(DWORD *)buffer;
-        RegCloseKey( hkey );
-    }
-
-    if (!(object = load_java_method( &method, "createDesktopWindow", "(II)V" ))) return;
+    if (!(object = load_java_method( &method, "createDesktopWindow", "(I)V" ))) return;
 
     wrap_java_call();
-    (*jni_env)->CallVoidMethod( jni_env, object, method, HandleToLong( hwnd ), scale );
+    (*jni_env)->CallVoidMethod( jni_env, object, method, HandleToLong( hwnd ));
     unwrap_java_call();
 }
 
@@ -821,40 +726,20 @@ static NTSTATUS createWindow_ioctl( void *data, DWORD in_size, DWORD out_size, U
     jobject object;
     struct ioctl_android_create_window *res = data;
     struct native_win_data *win_data;
-    jstring str;
-    WCHAR modpath[MAX_PATH];
-    const WCHAR *modname;
     DWORD pid = current_client_id();
-    HANDLE process = OpenProcess( PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid );
-    DWORD rc;
-    static const WCHAR none[] = {'n','o','n','e',0};
 
     if (in_size < sizeof(*res)) return STATUS_INVALID_PARAMETER;
 
-    if (!(win_data = create_native_win_data( LongToHandle(res->hdr.hwnd), res->hdr.opengl ))) return STATUS_NO_MEMORY;
+    if (!(win_data = create_native_win_data( LongToHandle(res->hdr.hwnd), res->hdr.opengl )))
+        return STATUS_NO_MEMORY;
 
-    if ((rc = GetModuleFileNameExW( process, NULL, modpath, MAX_PATH )))
-    {
-        modname = strrchrW( modpath, '\\' );
-        modname = modname ? modname + 1 : modpath;
-    }
-    else
-    {
-        ERR( "Failed to get client executable name: %d\n", GetLastError() );
-        modname = none;
-    }
+    TRACE( "hwnd %08x opengl %u parent %08x\n", res->hdr.hwnd, res->hdr.opengl, res->parent );
 
-    TRACE( "hwnd %08x opengl %u parent %08x modname %s\n", res->hdr.hwnd, res->hdr.opengl, res->parent,
-           wine_dbgstr_w( modname ) );
-
-    if (!(object = load_java_method( &method, "createWindow", "(IZIFILjava/lang/String;)V" ))) return STATUS_NOT_SUPPORTED;
+    if (!(object = load_java_method( &method, "createWindow", "(IZIFI)V" ))) return STATUS_NOT_SUPPORTED;
 
     wrap_java_call();
-    str = (*jni_env)->NewString( jni_env, modname, strlenW( modname ) );
-    (*jni_env)->CallVoidMethod( jni_env, object, method, res->hdr.hwnd, res->hdr.opengl, res->parent, res->scale, pid, str );
-    (*jni_env)->DeleteLocalRef( jni_env, str );
+    (*jni_env)->CallVoidMethod( jni_env, object, method, res->hdr.hwnd, res->hdr.opengl, res->parent, res->scale, pid );
     unwrap_java_call();
-    CloseHandle( process );
     return STATUS_SUCCESS;
 }
 
@@ -885,11 +770,8 @@ static NTSTATUS windowPosChanged_ioctl( void *data, DWORD in_size, DWORD out_siz
     static jmethodID method;
     jobject object;
     struct ioctl_android_window_pos_changed *res = data;
-    struct native_win_data *win_data;
 
     if (in_size < sizeof(*res)) return STATUS_INVALID_PARAMETER;
-
-    if (!(win_data = get_ioctl_native_win_data( &res->hdr ))) return STATUS_INVALID_HANDLE;
 
     TRACE( "hwnd %08x win %s client %s visible %s style %08x flags %08x after %08x owner %08x\n",
            res->hdr.hwnd, wine_dbgstr_rect(&res->window_rect), wine_dbgstr_rect(&res->client_rect),
@@ -1155,95 +1037,6 @@ static NTSTATUS setWindowParent_ioctl( void *data, DWORD in_size, DWORD out_size
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS setWindowFocus_ioctl( void *data, DWORD in_size, DWORD out_size, ULONG_PTR *ret_size )
-{
-    static jmethodID method;
-    jobject object;
-    struct ioctl_android_set_window_focus *res = data;
-    struct native_win_data *win_data;
-
-    if (in_size < sizeof(*res)) return STATUS_INVALID_PARAMETER;
-
-    if (!(win_data = get_ioctl_native_win_data( &res->hdr ))) return STATUS_INVALID_HANDLE;
-
-    TRACE( "hwnd %08x\n", res->hdr.hwnd );
-
-    if (!(object = load_java_method( &method, "setFocus", "(I)V" ))) return STATUS_NOT_SUPPORTED;
-
-    wrap_java_call();
-    (*jni_env)->CallVoidMethod( jni_env, object, method, res->hdr.hwnd );
-    unwrap_java_call();
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS setWindowText_ioctl( void *data, DWORD in_size, DWORD out_size, ULONG_PTR *ret_size )
-{
-    static jmethodID method;
-    jobject object;
-    jstring str;
-    int len;
-    struct ioctl_android_set_window_text *res = data;
-    struct native_win_data *win_data;
-
-    len = in_size - offsetof( struct ioctl_android_set_window_text, text );
-    if (len < 0 || (len % sizeof(WCHAR))) return STATUS_INVALID_PARAMETER;
-    len /= sizeof(WCHAR);
-
-    if (!(win_data = get_ioctl_native_win_data( &res->hdr ))) return STATUS_INVALID_HANDLE;
-
-    TRACE( "hwnd %08x text %s\n", res->hdr.hwnd, wine_dbgstr_wn( res->text, len ));
-
-    if (!(object = load_java_method( &method, "setWindowText", "(ILjava/lang/String;)V" )))
-        return STATUS_NOT_SUPPORTED;
-
-    wrap_java_call();
-    str = (*jni_env)->NewString( jni_env, res->text, len );
-    (*jni_env)->CallVoidMethod( jni_env, object, method, res->hdr.hwnd, str );
-    (*jni_env)->DeleteLocalRef( jni_env, str );
-    unwrap_java_call();
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS setWindowIcon_ioctl( void *data, DWORD in_size, DWORD out_size, ULONG_PTR *ret_size )
-{
-    static jmethodID method;
-    jobject object;
-    int size;
-    struct ioctl_android_set_window_icon *res = data;
-    struct native_win_data *win_data;
-
-    if (in_size < offsetof( struct ioctl_android_set_window_icon, bits )) return STATUS_INVALID_PARAMETER;
-
-    if (!(win_data = get_ioctl_native_win_data( &res->hdr ))) return STATUS_INVALID_HANDLE;
-
-    if (res->width < 0 || res->height < 0 || res->width > 256 || res->height > 256)
-        return STATUS_INVALID_PARAMETER;
-
-    size = res->width * res->height;
-    if (in_size != offsetof( struct ioctl_android_set_window_icon, bits[size] ))
-        return STATUS_INVALID_PARAMETER;
-
-    TRACE( "hwnd %08x size %d\n", res->hdr.hwnd, size );
-
-    if (!(object = load_java_method( &method, "setWindowIcon", "(III[I)V" )))
-        return STATUS_NOT_SUPPORTED;
-
-    wrap_java_call();
-
-    if (size)
-    {
-        jintArray array = (*jni_env)->NewIntArray( jni_env, size );
-        (*jni_env)->SetIntArrayRegion( jni_env, array, 0, size, (jint *)res->bits );
-        (*jni_env)->CallVoidMethod( jni_env, object, method, res->hdr.hwnd, res->width, res->height, array );
-        (*jni_env)->DeleteLocalRef( jni_env, array );
-    }
-    else (*jni_env)->CallVoidMethod( jni_env, object, method, res->hdr.hwnd, 0, 0, 0 );
-
-    unwrap_java_call();
-
-    return STATUS_SUCCESS;
-}
-
 static NTSTATUS setCapture_ioctl( void *data, DWORD in_size, DWORD out_size, ULONG_PTR *ret_size )
 {
     struct ioctl_android_set_capture *res = data;
@@ -1296,155 +1089,6 @@ static NTSTATUS setCursor_ioctl( void *data, DWORD in_size, DWORD out_size, ULON
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS gamepad_query( void *data, DWORD in_size, DWORD out_size, ULONG_PTR *ret_size )
-{
-    struct ioctl_android_gamepad_value *res = data;
-
-    if (res->device > di_controllers) return STATUS_INVALID_PARAMETER;
-    if (in_size < sizeof(*res)) return STATUS_INVALID_PARAMETER;
-    if (out_size < sizeof(*res)) return STATUS_BUFFER_OVERFLOW;
-
-    switch (res->index) {
-    case 0:  /* Count */
-        res->data.count =  di_controllers;
-        break;
-    case 1: /* name */
-        lstrcpynW(res->data.name, di_names[res->device], DI_NAME_LENGTH);
-        break;
-    case 2: /* values*/
-        memcpy(res->data.value, di_value[res->device], sizeof(res->data.value));
-        break;
-    }
-    *ret_size = sizeof(*res);
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS imeText_ioctl( void *data, DWORD in_size, DWORD out_size, ULONG_PTR *ret_size )
-{
-    WORD length;
-    struct ioctl_android_ime_text *res = data;
-
-    if (in_size < sizeof(*res)) return STATUS_INVALID_PARAMETER;
-    if (out_size < sizeof(*res) + ((res->length-1) * sizeof(WCHAR))) return STATUS_BUFFER_OVERFLOW;
-    if (res->target < 0 || res->target > java_ime_count) return STATUS_INVALID_PARAMETER;
-    if (!java_ime_text[res->target]) return STATUS_INVALID_PARAMETER;
-
-    length = min(java_ime_text[res->target]->length, res->length);
-    res->length = java_ime_text[res->target]->length;
-    lstrcpynW(res->text, java_ime_text[res->target]->text, length);
-    res->cursor = java_ime_text[res->target]->cursor_pos;
-
-    *ret_size = sizeof(*res) + (length * sizeof(WCHAR));
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS imeFinish_ioctl( void *data, DWORD in_size, DWORD out_size, ULONG_PTR *ret_size )
-{
-    struct ioctl_android_ime_finish *res = data;
-
-    if (in_size < sizeof(*res)) return STATUS_INVALID_PARAMETER;
-    if (res->target < 0 || res->target > java_ime_count) return STATUS_INVALID_PARAMETER;
-
-    if (java_ime_text[res->target])
-    {
-        if (java_ime_text[res->target]->text)
-            free(java_ime_text[res->target]->text);
-        free(java_ime_text[res->target]);
-        java_ime_text[res->target] = NULL;
-    }
-    *ret_size = 0;
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS getClipdata_ioctl( void *data, DWORD in_size, DWORD out_size, ULONG_PTR *ret_size )
-{
-    struct ioctl_android_get_clipdata *res = data;
-    static jmethodID method;
-    jobject object;
-    jobject str;
-    const jchar *chars;
-    jsize length;
-
-    if (in_size < sizeof(*res)) return STATUS_INVALID_PARAMETER;
-    if (out_size < offsetof( struct ioctl_android_get_clipdata, text[res->length] ))
-        return STATUS_BUFFER_OVERFLOW;
-
-    if (!(object = load_java_method( &method, "getClipdata", "(I)Ljava/lang/String;" ))) return STATUS_NOT_SUPPORTED;
-
-    wrap_java_call();
-    str = (*jni_env)->CallObjectMethod( jni_env, object, method, res->flags );
-    length = (*jni_env)->GetStringLength( jni_env, str ) + 1;
-    if (length <= res->length)
-    {
-        chars = (*jni_env)->GetStringChars( jni_env, str, NULL );
-        memcpy( res->text, chars, sizeof(WCHAR) * (length - 1) );
-        res->text[length - 1] = 0;
-        (*jni_env)->ReleaseStringChars( jni_env, str, chars );
-    }
-    res->length = length;
-    (*jni_env)->DeleteLocalRef( jni_env, str );
-    unwrap_java_call();
-
-    *ret_size = min( in_size, offsetof( struct ioctl_android_get_clipdata, text[res->length] ) );
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS pollClipdata_ioctl( void *data, DWORD in_size, DWORD out_size, ULONG_PTR *ret_size )
-{
-    struct ioctl_android_poll_clipdata *res = data;
-    static jmethodID method;
-    jobject object;
-
-    if (in_size < sizeof(*res)) return STATUS_INVALID_PARAMETER;
-
-    if (!(object = load_java_method( &method, "pollClipdata", "()V" ))) return STATUS_NOT_SUPPORTED;
-
-    wrap_java_call();
-    (*jni_env)->CallVoidMethod( jni_env, object, method );
-    unwrap_java_call();
-    *ret_size = 0;
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS setClipdata_ioctl( void *data, DWORD in_size, DWORD out_size, ULONG_PTR *ret_size )
-{
-    static jmethodID method;
-    jobject object;
-    jstring str;
-    int len;
-    struct ioctl_android_set_clipdata *res = data;
-
-    len = in_size - offsetof( struct ioctl_android_set_clipdata, text );
-    if (len < 0 || (len % sizeof(WCHAR))) return STATUS_INVALID_PARAMETER;
-    len /= sizeof(WCHAR);
-
-    TRACE( "text %s\n", wine_dbgstr_wn( res->text, len ));
-
-    if (!(object = load_java_method( &method, "setClipdata", "(Ljava/lang/String;)V" )))
-        return STATUS_NOT_SUPPORTED;
-
-    wrap_java_call();
-    str = (*jni_env)->NewString( jni_env, res->text, len );
-    (*jni_env)->CallVoidMethod( jni_env, object, method, str );
-    (*jni_env)->DeleteLocalRef( jni_env, str );
-    unwrap_java_call();
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS closeDesktop_ioctl( void *data, DWORD in_size, DWORD out_size, ULONG_PTR *ret_size )
-{
-    static jmethodID method;
-    jobject object;
-
-    if (!(object = load_java_method( &method, "closeDesktop", "()V" ))) return STATUS_NOT_SUPPORTED;
-
-    wrap_java_call();
-    (*jni_env)->CallVoidMethod( jni_env, object, method );
-    unwrap_java_call();
-    *ret_size = 0;
-    return STATUS_SUCCESS;
-}
-
 typedef NTSTATUS (*ioctl_func)( void *in, DWORD in_size, DWORD out_size, ULONG_PTR *ret_size );
 static const ioctl_func ioctl_funcs[] =
 {
@@ -1460,16 +1104,6 @@ static const ioctl_func ioctl_funcs[] =
     setSwapInterval_ioctl,      /* IOCTL_SET_SWAP_INT */
     setCapture_ioctl,           /* IOCTL_SET_CAPTURE */
     setCursor_ioctl,            /* IOCTL_SET_CURSOR */
-    setWindowFocus_ioctl,       /* IOCTL_SET_WINDOW_FOCUS */
-    setWindowText_ioctl,        /* IOCTL_SET_WINDOW_TEXT */
-    setWindowIcon_ioctl,        /* IOCTL_SET_WINDOW_ICON */
-    gamepad_query,              /* IOCTL_GAMEPAD_QUERY */
-    imeText_ioctl,              /* IOCTL_IMETEXT */
-    imeFinish_ioctl,            /* IOCTL_IMEFINISH */
-    pollClipdata_ioctl,         /* IOCTL_POLL_CLIPDATA */
-    getClipdata_ioctl,          /* IOCTL_GET_CLIPDATA */
-    setClipdata_ioctl,          /* IOCTL_SET_CLIPDATA */
-    closeDesktop_ioctl,         /* IOCTL_CLOSE_DESKTOP */
 };
 
 static NTSTATUS WINAPI ioctl_callback( DEVICE_OBJECT *device, IRP *irp )
@@ -1991,47 +1625,6 @@ int ioctl_set_window_parent( HWND hwnd, HWND parent, float scale )
     return android_ioctl( IOCTL_SET_WINDOW_PARENT, &req, sizeof(req), NULL, NULL );
 }
 
-int ioctl_set_window_focus( HWND hwnd )
-{
-    struct ioctl_android_set_window_focus req;
-
-    req.hdr.hwnd = HandleToLong( hwnd );
-    req.hdr.opengl = FALSE;
-    return android_ioctl( IOCTL_SET_WINDOW_FOCUS, &req, sizeof(req), NULL, NULL );
-}
-
-int ioctl_set_window_text( HWND hwnd, const WCHAR *text )
-{
-    struct ioctl_android_set_window_text *req;
-    unsigned int size = offsetof( struct ioctl_android_set_window_text, text[strlenW(text)] );
-    int ret;
-
-    if (!(req = HeapAlloc( GetProcessHeap(), 0, size ))) return -ENOMEM;
-    req->hdr.hwnd = HandleToLong( hwnd );
-    req->hdr.opengl = FALSE;
-    memcpy( req->text, text, strlenW( text ) * sizeof(WCHAR) );
-    ret = android_ioctl( IOCTL_SET_WINDOW_TEXT, req, size, NULL, NULL );
-    HeapFree( GetProcessHeap(), 0, req );
-    return ret;
-}
-
-int ioctl_set_window_icon( HWND hwnd, int width, int height, const unsigned int *bits )
-{
-    struct ioctl_android_set_window_icon *req;
-    unsigned int size = offsetof( struct ioctl_android_set_window_icon, bits[width * height] );
-    int ret;
-
-    if (!(req = HeapAlloc( GetProcessHeap(), 0, size ))) return -ENOMEM;
-    req->hdr.hwnd = HandleToLong( hwnd );
-    req->hdr.opengl = FALSE;
-    req->width    = width;
-    req->height   = height;
-    memcpy( req->bits, bits, width * height * sizeof(req->bits[0]) );
-    ret = android_ioctl( IOCTL_SET_WINDOW_ICON, req, size, NULL, NULL );
-    HeapFree( GetProcessHeap(), 0, req );
-    return ret;
-}
-
 int ioctl_set_capture( HWND hwnd )
 {
     struct ioctl_android_set_capture req;
@@ -2059,136 +1652,5 @@ int ioctl_set_cursor( int id, int width, int height,
     memcpy( req->bits, bits, width * height * sizeof(req->bits[0]) );
     ret = android_ioctl( IOCTL_SET_CURSOR, req, size, NULL, NULL );
     HeapFree( GetProcessHeap(), 0, req );
-    return ret;
-}
-
-int ioctl_gamepad_query( int index, int device, void* data)
-{
-    struct ioctl_android_gamepad_value query;
-    DWORD size = sizeof( query );
-    int ret;
-
-    query.index = index;
-    query.device = device;
-    ret = android_ioctl( IOCTL_GAMEPAD_QUERY, &query , sizeof(query), &query, &size );
-    switch (index)
-    {
-        case 0:  /* Count */
-            *(int*)data = query.data.count;
-            break;
-        case 1: /* Name */
-            lstrcpynW((WCHAR*)data, query.data.name, DI_NAME_LENGTH);
-            break;
-        case 2: /* Values*/
-            memcpy(data, query.data.value, sizeof(query.data.value));
-            break;
-    }
-    return ret;
-}
-
-int ioctl_imeText( int target, int *cursor, int *length, WCHAR* string)
-{
-    struct ioctl_android_ime_text *query;
-    DWORD size = sizeof( *query ) + ((*length - 1) * sizeof(WCHAR));
-    int ret;
-
-    query = HeapAlloc(GetProcessHeap(), 0, size);
-
-    query->length = (*length);
-    query->target = target;
-    ret = android_ioctl( IOCTL_IMETEXT, query , size, query, &size );
-    lstrcpynW(string, query->text, query->length);
-    *length = query->length;
-    *cursor = query->cursor;
-
-    HeapFree(GetProcessHeap(), 0, query);
-
-    return ret;
-}
-
-int ioctl_imeFinish( int target )
-{
-    struct ioctl_android_ime_finish *query;
-    DWORD size = sizeof( *query );
-    int ret;
-
-    query = HeapAlloc(GetProcessHeap(), 0, size);
-    query->target = target;
-    ret = android_ioctl( IOCTL_IMEFINISH, query , size, query, &size );
-    HeapFree(GetProcessHeap(), 0, query);
-
-    return ret;
-}
-
-int ioctl_poll_clipdata(void)
-{
-    struct ioctl_android_poll_clipdata query;
-    DWORD size = sizeof(query);
-
-    return android_ioctl( IOCTL_POLL_CLIPDATA, &query, size, &query, &size );
-}
-
-int ioctl_get_clipdata( DWORD flags, LPWSTR* result )
-{
-    struct ioctl_android_get_clipdata *query;
-    DWORD size = sizeof(*query);
-    DWORD length = 1;
-    int ret;
-
-    query = HeapAlloc( GetProcessHeap(), 0, size );
-    query->flags = flags;
-    query->length = length;
-    while (!(ret = android_ioctl( IOCTL_GET_CLIPDATA, query, size, query, &size )) &&
-           query->length > length)
-    {
-        length = query->length;
-        size = sizeof(*query) + sizeof(WCHAR) * (length - 1);
-
-        HeapFree( GetProcessHeap(), 0, query );
-
-        query = HeapAlloc( GetProcessHeap(), 0, size );
-        query->flags = flags;
-        query->length = length;
-    }
-
-    if (!ret)
-    {
-        *result = HeapAlloc( GetProcessHeap(), 0, sizeof(WCHAR) * query->length );
-        memcpy( *result, query->text, sizeof(WCHAR) * query->length );
-    }
-
-    HeapFree( GetProcessHeap(), 0, query );
-
-    return ret;
-}
-
-int ioctl_set_clipdata( const WCHAR *text )
-{
-    struct ioctl_android_set_clipdata *req;
-    unsigned int size;
-    int ret;
-    static const WCHAR empty[] = { 0 };
-
-    if (!text) text = empty;
-
-    size = offsetof( struct ioctl_android_set_clipdata, text[strlenW(text)] );
-
-    if (!(req = HeapAlloc( GetProcessHeap(), 0, size ))) return -ENOMEM;
-    memcpy( req->text, text, strlenW( text ) * sizeof(WCHAR) );
-    ret = android_ioctl( IOCTL_SET_CLIPDATA, req, size, NULL, NULL );
-    HeapFree( GetProcessHeap(), 0, req );
-    return ret;
-}
-
-int ioctl_close_desktop(void)
-{
-    struct ioctl_android_close_desktop *query;
-    DWORD size = sizeof( *query );
-    int ret;
-
-    query = HeapAlloc(GetProcessHeap(), 0, size);
-    ret = android_ioctl( IOCTL_CLOSE_DESKTOP, query , size, query, &size );
-    HeapFree(GetProcessHeap(), 0, query);
-
     return ret;
 }

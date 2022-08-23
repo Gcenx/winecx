@@ -20,6 +20,7 @@
 #define __WINE_D3D10_PRIVATE_H
 
 #include <math.h>
+#include <stdint.h>
 
 #include "wine/debug.h"
 #include "wine/rbtree.h"
@@ -32,6 +33,7 @@
 
 #include "d3d10.h"
 #include "d3dcompiler.h"
+#include "utils.h"
 
 /*
  * This doesn't belong here, but for some functions it is possible to return that value,
@@ -73,8 +75,8 @@ struct d3d10_effect_shader_resource
 struct d3d10_effect_shader_signature
 {
     char *signature;
-    UINT signature_size;
-    UINT element_count;
+    unsigned int signature_size;
+    unsigned int element_count;
     D3D10_SIGNATURE_PARAMETER_DESC *elements;
 };
 
@@ -160,13 +162,13 @@ struct d3d10_effect_type
     struct wine_rb_entry entry;
     struct d3d10_effect *effect;
 
-    DWORD element_count;
-    DWORD size_unpacked;
-    DWORD stride;
-    DWORD size_packed;
-    DWORD member_count;
-    DWORD column_count;
-    DWORD row_count;
+    unsigned int element_count;
+    unsigned int size_unpacked;
+    unsigned int stride;
+    unsigned int size_packed;
+    unsigned int member_count;
+    unsigned int column_count;
+    unsigned int row_count;
     struct d3d10_effect_type *elementtype;
     struct d3d10_effect_type_member *members;
 };
@@ -175,7 +177,7 @@ struct d3d10_effect_type_member
 {
     char *name;
     char *semantic;
-    DWORD buffer_offset;
+    uint32_t buffer_offset;
     struct d3d10_effect_type *type;
 };
 
@@ -195,10 +197,10 @@ struct d3d10_effect_variable
 
     char *name;
     char *semantic;
-    DWORD buffer_offset;
-    DWORD flag;
-    DWORD data_size;
-    DWORD explicit_bind_point;
+    uint32_t buffer_offset;
+    uint32_t flag;
+    uint32_t data_size;
+    unsigned int explicit_bind_point;
     struct d3d10_effect *effect;
     struct d3d10_effect_variable *elements;
     struct d3d10_effect_variable *members;
@@ -248,7 +250,7 @@ struct d3d10_effect_technique
     struct d3d10_effect *effect;
     char *name;
     struct d3d10_effect_annotations annotations;
-    DWORD pass_count;
+    unsigned int pass_count;
     struct d3d10_effect_pass *passes;
 };
 
@@ -280,19 +282,19 @@ struct d3d10_effect
 
     ID3D10Device *device;
     struct d3d10_effect *pool;
-    DWORD version;
-    DWORD local_buffer_count;
-    DWORD variable_count;
-    DWORD local_variable_count;
-    DWORD shared_buffer_count;
-    DWORD shared_object_count;
-    DWORD technique_count;
-    DWORD index_offset;
-    DWORD texture_count;
-    DWORD anonymous_shader_count;
-    DWORD flags;
+    uint32_t version;
+    unsigned int local_buffer_count;
+    unsigned int variable_count;
+    unsigned int local_variable_count;
+    unsigned int shared_buffer_count;
+    unsigned int shared_object_count;
+    unsigned int technique_count;
+    uint32_t index_offset;
+    unsigned int texture_count;
+    unsigned int anonymous_shader_count;
+    uint32_t flags;
 
-    DWORD anonymous_shader_current;
+    unsigned int anonymous_shader_current;
 
     struct wine_rb_tree types;
     struct d3d10_effect_variable *local_buffers;
@@ -308,7 +310,7 @@ struct d3d10_effect
     struct d3d10_effect_technique *techniques;
 };
 
-HRESULT d3d10_effect_parse(struct d3d10_effect *This, const void *data, SIZE_T data_size) DECLSPEC_HIDDEN;
+HRESULT d3d10_effect_parse(struct d3d10_effect *effect, const void *data, SIZE_T data_size) DECLSPEC_HIDDEN;
 
 /* D3D10Core */
 HRESULT WINAPI D3D10CoreCreateDevice(IDXGIFactory *factory, IDXGIAdapter *adapter,

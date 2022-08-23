@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL = nsi.dll
+IMPORTS = nsi uuid iphlpapi
+
+C_SRCS = \
+	nsi.c

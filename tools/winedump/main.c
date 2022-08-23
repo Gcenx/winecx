@@ -19,7 +19,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include "winedump.h"
 
@@ -28,15 +27,10 @@ _globals globals; /* All global variables */
 
 static void do_include (const char *arg)
 {
-  char *newIncludes;
-
   if (!globals.directory)
-    globals.directory = strdup(arg);
-  else {
-    newIncludes = str_create (3,globals.directory," ",arg);
-    free(globals.directory);
-    globals.directory = newIncludes;
-  }
+    globals.directory = xstrdup(arg);
+  else
+    globals.directory = strmake( "%s %s", globals.directory, arg );
   globals.do_code = TRUE;
 }
 
@@ -47,7 +41,7 @@ static inline const char* strip_ext (const char *str)
   if (len>4 && strcmp(str+len-4,".dll") == 0)
     return str_substring (str, str+len-4);
   else
-    return strdup (str);
+    return xstrdup (str);
 }
 
 
@@ -145,8 +139,7 @@ static void do_symfile (const char *arg)
   while (1 == fscanf(f, "%255s", symstring))    /* keep count with [<width>] above */
   {
     symstring[sizeof(symstring)-1] = '\0';
-    if (!(symbolp = malloc(sizeof(*symbolp) + strlen(symstring))))
-      fatal ("Out of memory");
+    symbolp = xmalloc(sizeof(*symbolp) + strlen(symstring));
     strcpy(symbolp->symbolname, symstring);
     symbolp->found = FALSE;
     symbolp->next = NULL;
@@ -214,7 +207,8 @@ static const struct my_option option_table[] = {
   {"-C",    DUMP, 0, do_symdmngl, "-C              Turn on symbol demangling"},
   {"-f",    DUMP, 0, do_dumphead, "-f              Dump file header information"},
   {"-G",    DUMP, 0, do_rawdebug, "-G              Dump raw debug information"},
-  {"-j",    DUMP, 1, do_dumpsect, "-j <sect_name>  Dump only the content of section 'sect_name' (import, export, debug, resource, tls, loadcfg, clr, reloc, except)"},
+  {"-j",    DUMP, 1, do_dumpsect, "-j <sect_name>  Dump only the content of section 'sect_name'\n"
+                            "                        (import, export, debug, resource, tls, loadcfg, clr, reloc, except, apiset)"},
   {"-t",    DUMP, 0, do_symtable, "-t              Dump symbol table"},
   {"-x",    DUMP, 0, do_dumpall,  "-x              Dump everything"},
   {"sym",   DMGL, 0, do_demangle, "sym <sym>       Demangle C++ symbol <sym> and exit"},
@@ -239,22 +233,22 @@ void do_usage (const char *arg)
     const struct my_option *opt;
     printf ("Usage: winedump [-h | sym <sym> | spec <dll> | dump <file>]\n");
     printf ("Mode options (can be put as the mode (sym/spec/dump...) is declared):\n");
-    printf ("\tWhen used in --help mode\n");
+    printf ("   When used in --help mode\n");
     for (opt = option_table; opt->name; opt++)
 	if (opt->mode == NONE)
-	    printf ("\t   %s\n", opt->usage);
-    printf ("\tWhen used in sym mode\n");
+	    printf ("      %s\n", opt->usage);
+    printf ("   When used in sym mode\n");
     for (opt = option_table; opt->name; opt++)
 	if (opt->mode == DMGL)
-	    printf ("\t   %s\n", opt->usage);
-    printf ("\tWhen used in spec mode\n");
+	    printf ("      %s\n", opt->usage);
+    printf ("   When used in spec mode\n");
     for (opt = option_table; opt->name; opt++)
 	if (opt->mode == SPEC)
-	    printf ("\t   %s\n", opt->usage);
-    printf ("\tWhen used in dump mode\n");
+	    printf ("      %s\n", opt->usage);
+    printf ("   When used in dump mode\n");
     for (opt = option_table; opt->name; opt++)
 	if (opt->mode == DUMP)
-	    printf ("\t   %s\n", opt->usage);
+	    printf ("      %s\n", opt->usage);
 
     puts ("");
     exit (1);
@@ -262,11 +256,11 @@ void do_usage (const char *arg)
 
 
 /*******************************************************************
- *          parse_options
+ *          parse_cmdline
  *
  * Parse options from the argv array
  */
-static void parse_options (char *argv[])
+static void parse_cmdline (char *argv[])
 {
   const struct my_option *opt;
   char *const *ptr;
@@ -322,26 +316,11 @@ static void parse_options (char *argv[])
 
 static void set_module_name(BOOL setUC)
 {
-    const char*	ptr;
-    char*	buf;
-    int		len;
-
     /* FIXME: we shouldn't assume all module extensions are .dll in winedump
      * in some cases, we could have some .drv for example
      */
-    /* get module name from name */
-    if ((ptr = strrchr (globals.input_name, '/')))
-	ptr++;
-    else
-	ptr = globals.input_name;
-    len = strlen(ptr);
-    if (len > 4 && strcmp(ptr + len - 4, ".dll") == 0)
-	len -= 4;
-    buf = malloc(len + 1);
-    memcpy(buf, (const void*)ptr, len);
-    buf[len] = 0;
-    globals.input_module = buf;
-    OUTPUT_UC_DLL_NAME = (setUC) ? str_toupper( strdup (OUTPUT_DLL_NAME)) : "";
+    globals.input_module = replace_extension( get_basename( globals.input_name ), ".dll", "" );
+    OUTPUT_UC_DLL_NAME = (setUC) ? str_toupper( xstrdup (OUTPUT_DLL_NAME)) : "";
 }
 
 /* Marks the symbol as 'found'! */
@@ -408,7 +387,7 @@ int   main (int argc, char *argv[])
     globals.input_name = NULL;
     globals.dumpsect = NULL;
 
-    parse_options (argv);
+    parse_cmdline (argv);
 
     memset (&symbol, 0, sizeof (parsed_symbol));
 

@@ -42,18 +42,15 @@ static inline IDirectPlay8LobbiedApplicationImpl *impl_from_IDirectPlay8LobbiedA
 
 /* IDirectPlay8LobbiedApplication IUnknown parts follow: */
 static HRESULT WINAPI IDirectPlay8LobbiedApplicationImpl_QueryInterface(IDirectPlay8LobbiedApplication *iface,
-        REFIID riid, void **ppobj)
+        REFIID riid, void **ret_iface)
 {
-    IDirectPlay8LobbiedApplicationImpl *This = impl_from_IDirectPlay8LobbiedApplication(iface);
-
-    if (IsEqualGUID(riid, &IID_IUnknown)
-        || IsEqualGUID(riid, &IID_IDirectPlay8LobbiedApplication)) {
-        IUnknown_AddRef(iface);
-        *ppobj = This;
-        return DPN_OK;
+    if (IsEqualGUID(riid, &IID_IUnknown) || IsEqualGUID(riid, &IID_IDirectPlay8LobbiedApplication)) {
+        IDirectPlay8LobbiedApplication_AddRef(iface);
+        *ret_iface = iface;
+        return S_OK;
     }
 
-    WARN("(%p)->(%s,%p),not found\n",This,debugstr_guid(riid),ppobj);
+    WARN("(%p)->(%s,%p): not found\n", iface, debugstr_guid(riid), ret_iface);
     return E_NOINTERFACE;
 }
 
@@ -62,7 +59,7 @@ static ULONG WINAPI IDirectPlay8LobbiedApplicationImpl_AddRef(IDirectPlay8Lobbie
     IDirectPlay8LobbiedApplicationImpl *This = impl_from_IDirectPlay8LobbiedApplication(iface);
     ULONG refCount = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->(ref before=%u)\n", This, refCount - 1);
+    TRACE("(%p)->(ref before=%lu)\n", This, refCount - 1);
 
     return refCount;
 }
@@ -72,7 +69,7 @@ static ULONG WINAPI IDirectPlay8LobbiedApplicationImpl_Release(IDirectPlay8Lobbi
     IDirectPlay8LobbiedApplicationImpl *This = impl_from_IDirectPlay8LobbiedApplication(iface);
     ULONG refCount = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(ref before=%u)\n", This, refCount + 1);
+    TRACE("(%p)->(ref before=%lu)\n", This, refCount + 1);
 
     if (!refCount) {
         HeapFree(GetProcessHeap(), 0, This);
@@ -88,7 +85,7 @@ static HRESULT WINAPI IDirectPlay8LobbiedApplicationImpl_Initialize(IDirectPlay8
 {
     IDirectPlay8LobbiedApplicationImpl *This = impl_from_IDirectPlay8LobbiedApplication(iface);
 
-    TRACE("(%p)->(%p %p %p %x)\n", This, pvUserContext, pfn, pdpnhConnection, dwFlags);
+    TRACE("(%p)->(%p %p %p %lx)\n", This, pvUserContext, pfn, pdpnhConnection, dwFlags);
 
     if(!pfn)
         return DPNERR_INVALIDPOINTER;

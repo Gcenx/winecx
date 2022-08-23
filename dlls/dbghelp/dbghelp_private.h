@@ -151,6 +151,11 @@ struct symt_ht
     struct hash_table_elt       hash_elt;        /* if global symbol or type */
 };
 
+static inline BOOL symt_check_tag(const struct symt* s, enum SymTagEnum tag)
+{
+    return s && s->tag == tag;
+}
+
 /* lexical tree */
 struct symt_block
 {
@@ -161,12 +166,21 @@ struct symt_block
     struct vector               vchildren;      /* sub-blocks & local variables */
 };
 
+struct symt_module /* in fact any of .exe, .dll... */
+{
+    struct symt                 symt;           /* module */
+    struct vector               vchildren;      /* compilation units */
+    struct module*              module;
+};
+
 struct symt_compiland
 {
     struct symt                 symt;
+    struct symt_module*         container;      /* symt_module */
     ULONG_PTR                   address;
     unsigned                    source;
     struct vector               vchildren;      /* global variables & functions */
+    void*                       user;           /* when debug info provider needs to store information */
 };
 
 struct symt_data
@@ -194,23 +208,83 @@ struct symt_data
         struct
         {
             LONG_PTR                    offset;
-            ULONG_PTR                   length;
+            ULONG_PTR                   bit_length;
+            ULONG_PTR                   bit_offset;
         } member;
         /* DataIsConstant */
         VARIANT                 value;
     } u;
 };
 
+/* We must take into account that most debug formats (dwarf and pdb) report for
+ * code (esp. inlined functions) inside functions the following way:
+ * - block
+ *   + is represented by a contiguous area of memory,
+ *     or at least have lo/hi addresses to encompass it's contents
+ *   + but most importantly, block A's lo/hi range is always embedded within
+ *     its parent (block or function)
+ * - inline site:
+ *   + is most of the times represented by a set of ranges (instead of a
+ *     contiguous block)
+ *   + native dbghelp only exports the start address, not its size
+ *   + the set of ranges isn't always embedded in enclosing block (if any)
+ *   + the set of ranges is always embedded in top function
+ * - (top) function
+ *   + is described as a contiguous block of memory
+ *
+ * On top of the items above (taken as assumptions), we also assume that:
+ * - a range in inline site A, is disjoint from all the other ranges in
+ *   inline site A
+ * - a range in inline site A, is either disjoint or embedded into any of
+ *   the ranges of inline sites parent of A
+ *
+ * Therefore, we also store all inline sites inside a function:
+ * - available as a linked list to simplify the walk among them
+ * - this linked list shall preserve the weak order of the lexical-parent
+ *   relationship (eg for any inline site A, which has inline site B
+ *   as lexical parent, then A is present before B in the linked list)
+ * - hence (from the assumptions above), when looking up which inline site
+ *   contains a given address, the first range containing that address found
+ *   while walking the list of inline sites is the right one.
+ */
+
 struct symt_function
 {
-    struct symt                 symt;
+    struct symt                 symt;           /* SymTagFunction (or SymTagInlineSite when embedded in symt_inlinesite) */
     struct hash_table_elt       hash_elt;       /* if global symbol */
     ULONG_PTR                   address;
     struct symt*                container;      /* compiland */
     struct symt*                type;           /* points to function_signature */
     ULONG_PTR                   size;
     struct vector               vlines;
-    struct vector               vchildren;      /* locals, params, blocks, start/end, labels */
+    struct vector               vchildren;      /* locals, params, blocks, start/end, labels, inline sites */
+    struct symt_inlinesite*     next_inlinesite;/* linked list of inline sites in this function */
+};
+
+/* FIXME: this could be optimized later on by using relative offsets and smaller integral sizes */
+struct addr_range
+{
+    DWORD64                     low;            /* absolute address of first byte of the range */
+    DWORD64                     high;           /* absolute address of first byte after the range */
+};
+
+/* tests whether ar2 is inside ar1 */
+static inline BOOL addr_range_inside(const struct addr_range* ar1, const struct addr_range* ar2)
+{
+    return ar1->low <= ar2->low && ar2->high <= ar1->high;
+}
+
+/* tests whether ar1 and ar2 are disjoint */
+static inline BOOL addr_range_disjoint(const struct addr_range* ar1, const struct addr_range* ar2)
+{
+    return ar1->high <= ar2->low || ar2->high <= ar1->low;
+}
+
+/* a symt_inlinesite* can be casted to a symt_function* to access all function bits */
+struct symt_inlinesite
+{
+    struct symt_function        func;
+    struct vector               vranges;        /* of addr_range: where the inline site is actually defined */
 };
 
 struct symt_hierarchy_point
@@ -241,12 +315,20 @@ struct symt_thunk
     THUNK_ORDINAL               ordinal;        /* FIXME: doesn't seem to be accessible */
 };
 
+struct symt_custom
+{
+    struct symt                 symt;
+    struct hash_table_elt       hash_elt;
+    DWORD64                     address;
+    DWORD                       size;
+};
+
 /* class tree */
 struct symt_array
 {
     struct symt                 symt;
     int		                start;
-    int		                end;            /* end index if > 0, or -array_len (in bytes) if < 0 */
+    DWORD                       count;
     struct symt*                base_type;
     struct symt*                index_type;
 };
@@ -262,8 +344,8 @@ struct symt_basic
 struct symt_enum
 {
     struct symt                 symt;
+    struct hash_table_elt       hash_elt;
     struct symt*                base_type;
-    const char*                 name;
     struct vector               vchildren;
 };
 
@@ -279,7 +361,6 @@ struct symt_function_arg_type
 {
     struct symt                 symt;
     struct symt*                arg_type;
-    struct symt*                container;
 };
 
 struct symt_pointer
@@ -349,6 +430,8 @@ struct module_format
     } u;
 };
 
+struct cpu;
+
 struct module
 {
     struct process*             process;
@@ -357,6 +440,7 @@ struct module
     struct module*              next;
     enum module_type		type : 16;
     unsigned short              is_virtual : 1;
+    struct cpu*                 cpu;
     DWORD64                     reloc_delta;
     WCHAR*                      real_path;
 
@@ -368,12 +452,14 @@ struct module
 
     /* symbols & symbol tables */
     struct vector               vsymt;
+    struct vector               vcustom_symt;
     int                         sortlist_valid;
     unsigned                    num_sorttab;    /* number of symbols with addresses */
     unsigned                    num_symbols;
     unsigned                    sorttab_size;
     struct symt_ht**            addr_sorttab;
     struct hash_table           ht_symbols;
+    struct symt_module*         top;
 
     /* types */
     struct hash_table           ht_types;
@@ -414,6 +500,8 @@ struct process
     ULONG_PTR                   dbg_hdr_addr;
 
     IMAGEHLP_STACK_FRAME        ctx_frame;
+    DWORD64                     localscope_pc;
+    struct symt*                localscope_symt;
 
     unsigned                    buffer_size;
     void*                       buffer;
@@ -434,7 +522,7 @@ struct line_info
                                 line_number;
     union
     {
-        ULONG_PTR                   pc_offset;   /* if is_source_file isn't set */
+        ULONG_PTR                   address;     /* absolute, if is_source_file isn't set */
         unsigned                    source_file; /* if is_source_file is set */
     } u;
 };
@@ -452,8 +540,8 @@ struct pdb_lookup
 {
     const char*                 filename;
     enum pdb_kind               kind;
-    DWORD                       age;
-    DWORD                       timestamp;
+    unsigned int                age;
+    unsigned int                timestamp;
     GUID                        guid;
 };
 
@@ -578,26 +666,20 @@ struct cpu
 
 extern struct cpu*      dbghelp_current_cpu DECLSPEC_HIDDEN;
 
-/* Abbreviated 32-bit PEB */
-typedef struct _PEB32
+/* PDB and Codeview */
+
+struct msc_debug_info
 {
-    BOOLEAN InheritedAddressSpace;
-    BOOLEAN ReadImageFileExecOptions;
-    BOOLEAN BeingDebugged;
-    BOOLEAN SpareBool;
-    DWORD   Mutant;
-    DWORD   ImageBaseAddress;
-    DWORD   LdrData;
-    DWORD   ProcessParameters;
-    DWORD   SubSystemData;
-    DWORD   ProcessHeap;
-    DWORD   FastPebLock;
-    DWORD   FastPebLockRoutine;
-    DWORD   FastPebUnlockRoutine;
-    ULONG   EnvironmentUpdateCount;
-    DWORD   KernelCallbackTable;
-    ULONG   Reserved[2];
-} PEB32;
+    struct module*              module;
+    int                         nsect;
+    const IMAGE_SECTION_HEADER* sectp;
+    int                         nomap;
+    const OMAP*                 omapp;
+    const BYTE*                 root;
+};
+
+/* coff.c */
+extern BOOL coff_process_info(const struct msc_debug_info* msc_dbg) DECLSPEC_HIDDEN;
 
 /* dbghelp.c */
 extern struct process* process_find_by_handle(HANDLE hProcess) DECLSPEC_HIDDEN;
@@ -623,9 +705,10 @@ void minidump_add_memory_block(struct dump_context* dc, ULONG64 base, ULONG size
 /* module.c */
 extern const WCHAR      S_ElfW[] DECLSPEC_HIDDEN;
 extern const WCHAR      S_WineLoaderW[] DECLSPEC_HIDDEN;
-extern const WCHAR      S_SlashW[] DECLSPEC_HIDDEN;
 extern const struct loader_ops no_loader_ops DECLSPEC_HIDDEN;
 
+extern BOOL         module_init_pair(struct module_pair* pair, HANDLE hProcess,
+                                     DWORD64 addr) DECLSPEC_HIDDEN;
 extern struct module*
                     module_find_by_addr(const struct process* pcs, DWORD64 addr,
                                         enum module_type type) DECLSPEC_HIDDEN;
@@ -643,7 +726,7 @@ extern struct module*
                     module_new(struct process* pcs, const WCHAR* name,
                                enum module_type type, BOOL virtual,
                                DWORD64 addr, DWORD64 size,
-                               ULONG_PTR stamp, ULONG_PTR checksum) DECLSPEC_HIDDEN;
+                               ULONG_PTR stamp, ULONG_PTR checksum, WORD machine) DECLSPEC_HIDDEN;
 extern struct module*
                     module_get_containee(const struct process* pcs,
                                          const struct module* inner) DECLSPEC_HIDDEN;
@@ -651,7 +734,7 @@ extern void         module_reset_debug_info(struct module* module) DECLSPEC_HIDD
 extern BOOL         module_remove(struct process* pcs,
                                   struct module* module) DECLSPEC_HIDDEN;
 extern void         module_set_module(struct module* module, const WCHAR* name) DECLSPEC_HIDDEN;
-extern const WCHAR *get_wine_loader_name(struct process *pcs) DECLSPEC_HIDDEN;
+extern WCHAR*       get_wine_loader_name(struct process *pcs) DECLSPEC_HIDDEN;
 
 /* msc.c */
 extern BOOL         pe_load_debug_directory(const struct process* pcs,
@@ -725,8 +808,11 @@ extern WCHAR*       symt_get_nameW(const struct symt* sym) DECLSPEC_HIDDEN;
 extern BOOL         symt_get_address(const struct symt* type, ULONG64* addr) DECLSPEC_HIDDEN;
 extern int __cdecl  symt_cmp_addr(const void* p1, const void* p2) DECLSPEC_HIDDEN;
 extern void         copy_symbolW(SYMBOL_INFOW* siw, const SYMBOL_INFO* si) DECLSPEC_HIDDEN;
+extern void         symbol_setname(SYMBOL_INFO* si, const char* name) DECLSPEC_HIDDEN;
 extern struct symt_ht*
                     symt_find_nearest(struct module* module, DWORD_PTR addr) DECLSPEC_HIDDEN;
+extern struct symt_module*
+                    symt_new_module(struct module* module) DECLSPEC_HIDDEN;
 extern struct symt_compiland*
                     symt_new_compiland(struct module* module, ULONG_PTR address,
                                        unsigned src_idx) DECLSPEC_HIDDEN;
@@ -749,8 +835,13 @@ extern struct symt_function*
                                       const char* name,
                                       ULONG_PTR addr, ULONG_PTR size,
                                       struct symt* type) DECLSPEC_HIDDEN;
-extern BOOL         symt_normalize_function(struct module* module, 
-                                            const struct symt_function* func) DECLSPEC_HIDDEN;
+extern struct symt_inlinesite*
+                    symt_new_inlinesite(struct module* module,
+                                        struct symt_function* func,
+                                        struct symt* parent,
+                                        const char* name,
+                                        ULONG_PTR addr,
+                                        struct symt* type) DECLSPEC_HIDDEN;
 extern void         symt_add_func_line(struct module* module,
                                        struct symt_function* func, 
                                        unsigned source_idx, int line_num, 
@@ -761,6 +852,10 @@ extern struct symt_data*
                                         enum DataKind dt, const struct location* loc,
                                         struct symt_block* block,
                                         struct symt* type, const char* name) DECLSPEC_HIDDEN;
+extern struct symt_data*
+                    symt_add_func_constant(struct module* module,
+                                           struct symt_function* func, struct symt_block* block,
+                                           struct symt* type, const char* name, VARIANT* v) DECLSPEC_HIDDEN;
 extern struct symt_block*
                     symt_open_func_block(struct module* module, 
                                          struct symt_function* func,
@@ -776,10 +871,9 @@ extern struct symt_hierarchy_point*
                                             enum SymTagEnum point, 
                                             const struct location* loc,
                                             const char* name) DECLSPEC_HIDDEN;
-extern BOOL         symt_fill_func_line_info(const struct module* module,
-                                             const struct symt_function* func,
-                                             DWORD64 addr, IMAGEHLP_LINE64* line) DECLSPEC_HIDDEN;
-extern BOOL         symt_get_func_line_next(const struct module* module, PIMAGEHLP_LINE64 line) DECLSPEC_HIDDEN;
+extern BOOL         symt_add_inlinesite_range(struct module* module,
+                                              struct symt_inlinesite* inlined,
+                                              ULONG_PTR low, ULONG_PTR high) DECLSPEC_HIDDEN;
 extern struct symt_thunk*
                     symt_new_thunk(struct module* module, 
                                    struct symt_compiland* parent,
@@ -796,6 +890,9 @@ extern struct symt_hierarchy_point*
                                    const char* name, ULONG_PTR address) DECLSPEC_HIDDEN;
 extern struct symt* symt_index2ptr(struct module* module, DWORD id) DECLSPEC_HIDDEN;
 extern DWORD        symt_ptr2index(struct module* module, const struct symt* sym) DECLSPEC_HIDDEN;
+extern struct symt_custom*
+                    symt_new_custom(struct module* module, const char* name,
+                                    DWORD64 addr, DWORD size) DECLSPEC_HIDDEN;
 
 /* type.c */
 extern void         symt_init_basic(struct module* module) DECLSPEC_HIDDEN;
@@ -813,7 +910,7 @@ extern BOOL         symt_add_udt_element(struct module* module,
                                          struct symt_udt* udt_type, 
                                          const char* name,
                                          struct symt* elt_type, unsigned offset, 
-                                         unsigned size) DECLSPEC_HIDDEN;
+                                         unsigned bit_offset, unsigned bit_size) DECLSPEC_HIDDEN;
 extern struct symt_enum*
                     symt_new_enum(struct module* module, const char* typename,
                                   struct symt* basetype) DECLSPEC_HIDDEN;
@@ -821,7 +918,7 @@ extern BOOL         symt_add_enum_element(struct module* module,
                                           struct symt_enum* enum_type, 
                                           const char* name, int value) DECLSPEC_HIDDEN;
 extern struct symt_array*
-                    symt_new_array(struct module* module, int min, int max, 
+                    symt_new_array(struct module* module, int min, DWORD count,
                                    struct symt* base, struct symt* index) DECLSPEC_HIDDEN;
 extern struct symt_function_signature*
                     symt_new_function_signature(struct module* module, 
@@ -837,3 +934,39 @@ extern struct symt_pointer*
 extern struct symt_typedef*
                     symt_new_typedef(struct module* module, struct symt* ref, 
                                      const char* name) DECLSPEC_HIDDEN;
+extern struct symt_inlinesite*
+                    symt_find_lowest_inlined(struct symt_function* func, DWORD64 addr) DECLSPEC_HIDDEN;
+extern struct symt*
+                    symt_get_upper_inlined(struct symt_inlinesite* inlined) DECLSPEC_HIDDEN;
+static inline struct symt_function*
+                    symt_get_function_from_inlined(struct symt_inlinesite* inlined)
+{
+    while (!symt_check_tag(&inlined->func.symt, SymTagFunction))
+        inlined = (struct symt_inlinesite*)symt_get_upper_inlined(inlined);
+    return &inlined->func;
+}
+extern struct symt_inlinesite*
+                    symt_find_inlined_site(struct module* module,
+                                           DWORD64 addr, DWORD inline_ctx) DECLSPEC_HIDDEN;
+extern DWORD        symt_get_inlinesite_depth(HANDLE hProcess, DWORD64 addr) DECLSPEC_HIDDEN;
+
+/* Inline context encoding (different from what native does):
+ * bits 31:30: 3 ignore (includes INLINE_FRAME_CONTEXT_IGNORE=0xFFFFFFFF)
+ *             2 regular frame
+ *             1 frame with inlined function(s).
+ *             0 init   (includes INLINE_FRAME_CONTEXT_INIT=0)
+ * so either stackwalkex is called with:
+ * - inlinectx=IGNORE, and we use (old) StackWalk64 behavior:
+ * - inlinectx=INIT, and StackWalkEx will upon return swing back&forth between:
+ *      INLINE when the frame is from an inline site (inside a function)
+ *      REGULAR when the frame is for a function without inline site
+ * bits 29:00  depth of inline site (way too big!!)
+ *             0 being the lowest inline site
+ */
+#define IFC_MODE_IGNORE  0xC0000000
+#define IFC_MODE_REGULAR 0x80000000
+#define IFC_MODE_INLINE  0x40000000
+#define IFC_MODE_INIT    0x00000000
+#define IFC_DEPTH_MASK   0x3FFFFFFF
+#define IFC_MODE(x)      ((x) & ~IFC_DEPTH_MASK)
+#define IFC_DEPTH(x)     ((x) & IFC_DEPTH_MASK)

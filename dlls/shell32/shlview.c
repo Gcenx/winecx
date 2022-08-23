@@ -36,9 +36,6 @@
  * Release() ???
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,7 +55,6 @@
 #include "winuser.h"
 #include "shlobj.h"
 #include "shobjidl.h"
-#include "undocshell.h"
 #include "shresdef.h"
 #include "wine/debug.h"
 
@@ -69,7 +65,44 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
-static const WCHAR SV_CLASS_NAME[] = {'S','H','E','L','L','D','L','L','_','D','e','f','V','i','e','w',0};
+/* Generic structure used by several messages */
+typedef struct
+{
+  DWORD dwReserved;
+  DWORD dwReserved2;
+  LPCITEMIDLIST pidl;
+  DWORD *lpdwUser;
+} SFVCBINFO;
+
+/* SFVCB_SELECTIONCHANGED structure */
+typedef struct
+{
+  UINT uOldState;
+  UINT uNewState;
+  LPCITEMIDLIST pidl;
+  DWORD *lpdwUser;
+} SFVSELECTSTATE;
+
+/* SFVCB_COPYHOOKCALLBACK structure */
+typedef struct
+{
+  HWND hwnd;
+  UINT wFunc;
+  UINT wFlags;
+  const char *pszSrcFile;
+  DWORD dwSrcAttribs;
+  const char *pszDestFile;
+  DWORD dwDestAttribs;
+} SFVCOPYHOOKINFO;
+
+/* SFVCB_GETDETAILSOF structure */
+typedef struct
+{
+    LPCITEMIDLIST pidl;
+    int fmt;
+    int cx;
+    STRRET lpText;
+} SFVCOLUMNINFO;
 
 typedef struct
 {   BOOL    bIsAscending;
@@ -215,7 +248,7 @@ static HRESULT IncludeObject(IShellViewImpl * This, LPCITEMIDLIST pidl)
     {
         TRACE("ICommDlgBrowser::IncludeObject pidl=%p\n", pidl);
         ret = ICommDlgBrowser_IncludeObject(This->pCommDlgBrowser, (IShellView *)&This->IShellView3_iface, pidl);
-        TRACE("-- returns 0x%08x\n", ret);
+        TRACE("-- returns 0x%08lx\n", ret);
     }
 
     return ret;
@@ -229,7 +262,7 @@ static HRESULT OnDefaultCommand(IShellViewImpl * This)
     {
         TRACE("ICommDlgBrowser::OnDefaultCommand\n");
         ret = ICommDlgBrowser_OnDefaultCommand(This->pCommDlgBrowser, (IShellView *)&This->IShellView3_iface);
-        TRACE("-- returns 0x%08x\n", ret);
+        TRACE("-- returns 0x%08lx\n", ret);
     }
 
     return ret;
@@ -243,7 +276,7 @@ static HRESULT OnStateChange(IShellViewImpl * This, UINT change)
     {
         TRACE("ICommDlgBrowser::OnStateChange change=%d\n", change);
         ret = ICommDlgBrowser_OnStateChange(This->pCommDlgBrowser, (IShellView *)&This->IShellView3_iface, change);
-        TRACE("-- returns 0x%08x\n", ret);
+        TRACE("-- returns 0x%08lx\n", ret);
     }
 
     return ret;
@@ -673,7 +706,6 @@ static HRESULT ShellView_FillList(IShellViewImpl *This)
 static LRESULT ShellView_OnCreate(IShellViewImpl *This)
 {
     IShellView3 *iface = &This->IShellView3_iface;
-    static const WCHAR accel_nameW[] = {'s','h','v','_','a','c','c','e','l',0};
     IPersistFolder2 *ppf2;
     IDropTarget* pdt;
     HRESULT hr;
@@ -726,7 +758,7 @@ static LRESULT ShellView_OnCreate(IShellViewImpl *This)
         IPersistFolder2_Release(ppf2);
     }
 
-    This->hAccel = LoadAcceleratorsW(shell32_hInstance, accel_nameW);
+    This->hAccel = LoadAcceleratorsW(shell32_hInstance, L"shv_accel");
 
     return S_OK;
 }
@@ -783,7 +815,6 @@ static void ShellView_MergeFileMenu(IShellViewImpl *This, HMENU hSubMenu)
 {
      if (hSubMenu)
      {
-         static const WCHAR dummyW[] = {'d','u','m','m','y','4','5',0};
          MENUITEMINFOW mii;
 
          /* insert This item at the beginning of the menu */
@@ -796,7 +827,7 @@ static void ShellView_MergeFileMenu(IShellViewImpl *This, HMENU hSubMenu)
 
          mii.cbSize = sizeof(mii);
          mii.fMask = MIIM_ID | MIIM_TYPE | MIIM_STATE;
-         mii.dwTypeData = (LPWSTR)dummyW;
+         mii.dwTypeData = (LPWSTR)L"dummy45";
          mii.fState = MFS_ENABLED;
          mii.wID = IDM_MYFILEITEM;
          mii.fType = MFT_STRING;
@@ -815,8 +846,6 @@ static void ShellView_MergeViewMenu(IShellViewImpl *This, HMENU hSubMenu)
     /* add a separator at the correct position in the menu */
     if (hSubMenu)
     {
-        static const WCHAR menuW[] = {'M','E','N','U','_','0','0','1',0};
-	static const WCHAR viewW[] = {'V','i','e','w',0};
         MENUITEMINFOW mii;
 
         memset(&mii, 0, sizeof(mii));
@@ -829,8 +858,8 @@ static void ShellView_MergeViewMenu(IShellViewImpl *This, HMENU hSubMenu)
         mii.cbSize = sizeof(mii);
         mii.fMask = MIIM_SUBMENU | MIIM_TYPE | MIIM_DATA;
         mii.fType = MFT_STRING;
-        mii.dwTypeData = (LPWSTR)viewW;
-        mii.hSubMenu = LoadMenuW(shell32_hInstance, menuW);
+        mii.dwTypeData = (LPWSTR)L"View";
+        mii.hSubMenu = LoadMenuW(shell32_hInstance, L"MENU_001");
         InsertMenuItemW(hSubMenu, FCIDM_MENU_VIEW_SEP_OPTIONS, FALSE, &mii);
     }
 }
@@ -1143,8 +1172,6 @@ static LRESULT ShellView_OnActivate(IShellViewImpl *This, UINT uState)
 
         if (This->hMenu)
 	{
-            static const WCHAR dummyW[] = {'d','u','m','m','y',' ','3','1',0};
-
             IShellBrowser_InsertMenusSB(This->pShellBrowser, This->hMenu, &omw);
 	    TRACE("-- after fnInsertMenusSB\n");
 
@@ -1158,7 +1185,7 @@ static LRESULT ShellView_OnActivate(IShellViewImpl *This, UINT uState)
             mii.hbmpUnchecked = NULL;
             mii.dwItemData = 0;
             /* build the top level menu get the menu item's text */
-            mii.dwTypeData = (LPWSTR)dummyW;
+            mii.dwTypeData = (LPWSTR)L"dummy 31";
             mii.cch = 0;
             mii.hbmpItem = NULL;
 
@@ -1241,7 +1268,7 @@ static LRESULT ShellView_OnKillFocus(IShellViewImpl * This)
 */
 static LRESULT ShellView_OnCommand(IShellViewImpl * This,DWORD dwCmdID, DWORD dwCmd, HWND hwndCmd)
 {
-	TRACE("(%p)->(0x%08x 0x%08x %p) stub\n",This, dwCmdID, dwCmd, hwndCmd);
+	TRACE("(%p)->(0x%08lx 0x%08lx %p) stub\n",This, dwCmdID, dwCmd, hwndCmd);
 
 	switch(dwCmdID)
 	{
@@ -1281,7 +1308,7 @@ static LRESULT ShellView_OnCommand(IShellViewImpl * This,DWORD dwCmdID, DWORD dw
 	    break;
 
 	  default:
-	    TRACE("-- COMMAND 0x%04x unhandled\n", dwCmdID);
+	    TRACE("-- COMMAND 0x%04lx unhandled\n", dwCmdID);
 	}
 	return 0;
 }
@@ -1618,7 +1645,7 @@ static LRESULT ShellView_OnChange(IShellViewImpl * This, const LPCITEMIDLIST *pi
     LPCITEMIDLIST pidl;
     BOOL ret = TRUE;
 
-    TRACE("(%p)->(%p, %p, 0x%08x)\n", This, pidls[0], pidls[1], event);
+    TRACE("(%p)->(%p, %p, 0x%08lx)\n", This, pidls[0], pidls[1], event);
 
     switch (event)
     {
@@ -1652,7 +1679,7 @@ static LRESULT CALLBACK ShellView_WndProc(HWND hWnd, UINT uMessage, WPARAM wPara
 	IShellViewImpl * pThis = (IShellViewImpl*)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
 	LPCREATESTRUCTW lpcs;
 
-	TRACE("(hwnd=%p msg=%x wparm=%lx lparm=%lx)\n",hWnd, uMessage, wParam, lParam);
+	TRACE("(hwnd=%p msg=%x wparm=%Ix lparm=%Ix)\n",hWnd, uMessage, wParam, lParam);
 
 	switch (uMessage)
 	{
@@ -1768,7 +1795,7 @@ static ULONG WINAPI IShellView_fnAddRef(IShellView3 *iface)
     IShellViewImpl *This = impl_from_IShellView3(iface);
     ULONG refCount = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->(count=%u)\n", This, refCount - 1);
+    TRACE("(%p)->(count=%lu)\n", This, refCount - 1);
 
     return refCount;
 }
@@ -1780,7 +1807,7 @@ static ULONG WINAPI IShellView_fnRelease(IShellView3 *iface)
 	IShellViewImpl *This = impl_from_IShellView3(iface);
 	ULONG refCount = InterlockedDecrement(&This->ref);
 
-	TRACE("(%p)->(count=%i)\n", This, refCount + 1);
+	TRACE("(%p)->(count=%li)\n", This, refCount + 1);
 
 	if (!refCount)
 	{
@@ -1840,7 +1867,7 @@ static HRESULT WINAPI IShellView_fnTranslateAccelerator(IShellView3 *iface, MSG 
 
 	if ((lpmsg->message>=WM_KEYFIRST) && (lpmsg->message<=WM_KEYLAST))
 	{
-	  TRACE("-- key=0x04%lx\n",lpmsg->wParam) ;
+	  TRACE("-- key=0x04%Ix\n",lpmsg->wParam) ;
 	}
 	return S_FALSE; /* not handled */
 }
@@ -2026,7 +2053,7 @@ static HRESULT WINAPI IShellView_fnGetItemObject(IShellView3 *iface, UINT uItem,
 
 static HRESULT WINAPI IShellView2_fnGetView(IShellView3 *iface, SHELLVIEWID *view_guid, ULONG view_type)
 {
-    FIXME("(%p)->(%s, %#x) stub!\n", iface, debugstr_guid(view_guid), view_type);
+    FIXME("(%p)->(%s, %#lx) stub!\n", iface, debugstr_guid(view_guid), view_type);
     return E_NOTIMPL;
 }
 
@@ -2063,7 +2090,7 @@ static HRESULT WINAPI IShellView3_fnCreateViewWindow3(IShellView3 *iface, IShell
     HRESULT hr;
     HWND wnd;
 
-    TRACE("(%p)->(%p %p 0x%08x 0x%08x 0x%08x %d %s %s %p)\n", This, owner, prev_view, view_flags,
+    TRACE("(%p)->(%p %p 0x%08lx 0x%08x 0x%08x %d %s %s %p)\n", This, owner, prev_view, view_flags,
         mask, flags, mode, debugstr_guid(view_id), wine_dbgstr_rect(rect), hwnd);
 
     icex.dwSize = sizeof(icex);
@@ -2076,7 +2103,7 @@ static HRESULT WINAPI IShellView3_fnCreateViewWindow3(IShellView3 *iface, IShell
         return E_UNEXPECTED;
 
     if (view_flags != SV3CVW3_DEFAULT)
-        FIXME("unsupported view flags 0x%08x\n", view_flags);
+        FIXME("unsupported view flags 0x%08lx\n", view_flags);
 
     /* Set up the member variables */
     This->pShellBrowser = owner;
@@ -2114,7 +2141,7 @@ static HRESULT WINAPI IShellView3_fnCreateViewWindow3(IShellView3 *iface, IShell
         TRACE("-- CommDlgBrowser %p\n", This->pCommDlgBrowser);
 
     /* If our window class has not been registered, then do so */
-    if (!GetClassInfoW(shell32_hInstance, SV_CLASS_NAME, &wc))
+    if (!GetClassInfoW(shell32_hInstance, L"SHELLDLL_DefView", &wc))
     {
         wc.style            = CS_HREDRAW | CS_VREDRAW;
         wc.lpfnWndProc      = ShellView_WndProc;
@@ -2125,12 +2152,12 @@ static HRESULT WINAPI IShellView3_fnCreateViewWindow3(IShellView3 *iface, IShell
         wc.hCursor          = LoadCursorW(0, (LPWSTR)IDC_ARROW);
         wc.hbrBackground    = (HBRUSH)(COLOR_WINDOW + 1);
         wc.lpszMenuName     = NULL;
-        wc.lpszClassName    = SV_CLASS_NAME;
+        wc.lpszClassName    = L"SHELLDLL_DefView";
 
         if (!RegisterClassW(&wc)) return E_FAIL;
     }
 
-    wnd = CreateWindowExW(0, SV_CLASS_NAME, NULL, WS_CHILD | WS_TABSTOP,
+    wnd = CreateWindowExW(0, L"SHELLDLL_DefView", NULL, WS_CHILD | WS_TABSTOP,
             rect->left, rect->top,
             rect->right - rect->left,
             rect->bottom - rect->top,
@@ -2218,14 +2245,14 @@ static HRESULT WINAPI ISVOleCmdTarget_QueryStatus(
     IShellViewImpl *This = impl_from_IOleCommandTarget(iface);
     UINT i;
 
-    FIXME("(%p)->(%s %d %p %p)\n",
+    FIXME("(%p)->(%s %ld %p %p)\n",
               This, debugstr_guid(pguidCmdGroup), cCmds, prgCmds, pCmdText);
 
     if (!prgCmds)
         return E_INVALIDARG;
     for (i = 0; i < cCmds; i++)
     {
-        FIXME("\tprgCmds[%d].cmdID = %d\n", i, prgCmds[i].cmdID);
+        FIXME("\tprgCmds[%d].cmdID = %ld\n", i, prgCmds[i].cmdID);
         prgCmds[i].cmdf = 0;
     }
     return OLECMDERR_E_UNKNOWNGROUP;
@@ -2246,7 +2273,7 @@ static HRESULT WINAPI ISVOleCmdTarget_Exec(
 {
 	IShellViewImpl *This = impl_from_IOleCommandTarget(iface);
 
-	FIXME("(%p)->(%s %d 0x%08x %s %p)\n",
+	FIXME("(%p)->(%s %ld 0x%08lx %s %p)\n",
               This, debugstr_guid(pguidCmdGroup), nCmdID, nCmdexecopt, debugstr_variant(pvaIn), pvaOut);
 
 	if (!pguidCmdGroup)
@@ -2599,7 +2626,7 @@ static HRESULT WINAPI ISVViewObject_SetAdvise(
 
 	IShellViewImpl *This = impl_from_IViewObject(iface);
 
-	FIXME("partial stub: %p %08x %08x %p\n",
+	FIXME("partial stub: %p %08lx %08lx %p\n",
               This, aspects, advf, pAdvSink);
 
 	/* FIXME: we set the AdviseSink, but never use it to send any advice */
@@ -2825,7 +2852,7 @@ static HRESULT WINAPI FolderView_SelectItem(IFolderView2 *iface, int item, DWORD
     IShellViewImpl *This = impl_from_IFolderView2(iface);
     LVITEMW lvItem;
 
-    TRACE("(%p)->(%d, %x)\n", This, item, flags);
+    TRACE("(%p)->(%d, %lx)\n", This, item, flags);
 
     lvItem.state = 0;
     lvItem.stateMask = LVIS_SELECTED;
@@ -2856,7 +2883,7 @@ static HRESULT WINAPI FolderView_SelectAndPositionItems(IFolderView2 *iface, UIN
                                      PCUITEMID_CHILD_ARRAY apidl, POINT *apt, DWORD flags)
 {
     IShellViewImpl *This = impl_from_IFolderView2(iface);
-    FIXME("(%p)->(%u %p %p %x), stub\n", This, cidl, apidl, apt, flags);
+    FIXME("(%p)->(%u %p %p %lx), stub\n", This, cidl, apidl, apt, flags);
     return E_NOTIMPL;
 }
 
@@ -2916,7 +2943,7 @@ static HRESULT WINAPI FolderView2_SetText(IFolderView2 *iface, FVTEXTTYPE type, 
 static HRESULT WINAPI FolderView2_SetCurrentFolderFlags(IFolderView2 *iface, DWORD mask, DWORD flags)
 {
     IShellViewImpl *This = impl_from_IFolderView2(iface);
-    FIXME("(%p)->(0x%08x 0x%08x), stub\n", This, mask, flags);
+    FIXME("(%p)->(0x%08lx 0x%08lx), stub\n", This, mask, flags);
     return E_NOTIMPL;
 }
 
@@ -3115,7 +3142,7 @@ static ULONG WINAPI IShellFolderView_fnRelease(IShellFolderView *iface)
 static HRESULT WINAPI IShellFolderView_fnRearrange(IShellFolderView *iface, LPARAM sort)
 {
     IShellViewImpl *This = impl_from_IShellFolderView(iface);
-    FIXME("(%p)->(%ld) stub\n", This, sort);
+    FIXME("(%p)->(%Id) stub\n", This, sort);
     return E_NOTIMPL;
 }
 
@@ -3254,7 +3281,7 @@ static HRESULT WINAPI IShellFolderView_fnGetSelectedCount(
     if (FAILED(hr))
         return hr;
 
-    hr = IShellItemArray_GetCount(selection, count);
+    hr = IShellItemArray_GetCount(selection, (DWORD *)count);
     IShellItemArray_Release(selection);
     return hr;
 }
@@ -3484,7 +3511,7 @@ static HRESULT WINAPI shellfolderviewdual_GetTypeInfo(IShellFolderViewDual3 *ifa
     IShellViewImpl *This = impl_from_IShellFolderViewDual3(iface);
     HRESULT hr;
 
-    TRACE("(%p,%u,%d,%p)\n", This, iTInfo, lcid, ppTInfo);
+    TRACE("(%p,%u,%ld,%p)\n", This, iTInfo, lcid, ppTInfo);
 
     hr = get_typeinfo(IShellFolderViewDual3_tid, ppTInfo);
     if (SUCCEEDED(hr))
@@ -3500,7 +3527,7 @@ static HRESULT WINAPI shellfolderviewdual_GetIDsOfNames(
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p, %s, %p, %u, %d, %p)\n", This, debugstr_guid(riid), rgszNames,
+    TRACE("(%p, %s, %p, %u, %ld, %p)\n", This, debugstr_guid(riid), rgszNames,
             cNames, lcid, rgDispId);
 
     hr = get_typeinfo(IShellFolderViewDual3_tid, &ti);
@@ -3518,7 +3545,7 @@ static HRESULT WINAPI shellfolderviewdual_Invoke(IShellFolderViewDual3 *iface,
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p, %d, %s, %d, %u, %p, %p, %p, %p)\n", This, dispIdMember,
+    TRACE("(%p, %ld, %s, %ld, %u, %p, %p, %p, %p)\n", This, dispIdMember,
             debugstr_guid(riid), lcid, wFlags, pDispParams, pVarResult,
             pExcepInfo, puArgErr);
 
@@ -3647,7 +3674,7 @@ static HRESULT WINAPI shellfolderviewdual_get_FolderFlags(IShellFolderViewDual3 
 static HRESULT WINAPI shellfolderviewdual_put_FolderFlags(IShellFolderViewDual3 *iface, DWORD flags)
 {
     IShellViewImpl *This = impl_from_IShellFolderViewDual3(iface);
-    FIXME("%p 0x%08x\n", This, flags);
+    FIXME("%p 0x%08lx\n", This, flags);
     return E_NOTIMPL;
 }
 

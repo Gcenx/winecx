@@ -27,24 +27,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(authz);
 
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
-{
-    TRACE("(0x%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
-
-    switch (fdwReason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(hinstDLL);
-            break;
-        default:
-            break;
-    }
-
-    return TRUE;
-}
-
 /***********************************************************************
  *              AuthzInitializeResourceManager (AUTHZ.@)
  */
@@ -52,7 +34,7 @@ BOOL WINAPI AuthzInitializeResourceManager(DWORD flags, PFN_AUTHZ_DYNAMIC_ACCESS
         PFN_AUTHZ_COMPUTE_DYNAMIC_GROUPS compute_dyn_groups, PFN_AUTHZ_FREE_DYNAMIC_GROUPS free_dyn_groups,
         const WCHAR *managername, AUTHZ_RESOURCE_MANAGER_HANDLE *handle )
 {
-    FIXME("(0x%x,%p,%p,%p,%s,%p): stub\n", flags, access_checker,
+    FIXME("(0x%lx,%p,%p,%p,%s,%p): stub\n", flags, access_checker,
         compute_dyn_groups, free_dyn_groups,
         debugstr_w(managername), handle);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
@@ -74,7 +56,7 @@ BOOL WINAPI AuthzFreeResourceManager(AUTHZ_RESOURCE_MANAGER_HANDLE handle)
  */
 BOOL WINAPI AuthzInstallSecurityEventSource(DWORD flags, AUTHZ_SOURCE_SCHEMA_REGISTRATION *registration)
 {
-    FIXME("(0x%x,%p): stub\n", flags, registration);
+    FIXME("(0x%lx,%p): stub\n", flags, registration);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
@@ -89,7 +71,7 @@ BOOL WINAPI AuthzAccessCheck(DWORD flags, AUTHZ_CLIENT_CONTEXT_HANDLE client_con
         DWORD optional_security_count, AUTHZ_ACCESS_REPLY *reply,
         AUTHZ_ACCESS_CHECK_RESULTS_HANDLE *access_check_result)
 {
-    FIXME("(0x%x,%p,%p,%p,%p,%p,0x%x,%p,%p): stub\n", flags, client_context,
+    FIXME("(0x%lx,%p,%p,%p,%p,%p,0x%lx,%p,%p): stub\n", flags, client_context,
             request, audit_event, security, optional_security,
             optional_security_count, reply, access_check_result);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
@@ -115,7 +97,7 @@ BOOL WINAPI AuthzInitializeContextFromSid(DWORD flags, PSID sid,
         AUTHZ_RESOURCE_MANAGER_HANDLE resource_manager, LARGE_INTEGER *expire_time,
         LUID id, void *dynamic_group, AUTHZ_CLIENT_CONTEXT_HANDLE *client_context)
 {
-    FIXME("(0x%x,%p,%p,%p,%08x:%08x,%p,%p): stub\n", flags, sid, resource_manager,
+    FIXME("(0x%lx,%p,%p,%p,%08lx:%08lx,%p,%p): stub\n", flags, sid, resource_manager,
             expire_time, id.HighPart, id.LowPart, dynamic_group, client_context);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
@@ -129,7 +111,7 @@ BOOL WINAPI AuthzInitializeContextFromToken(DWORD flags, HANDLE token_handle,
         AUTHZ_RESOURCE_MANAGER_HANDLE resource_manager, LARGE_INTEGER *expire_time,
         LUID id, void *dynamic_group, AUTHZ_CLIENT_CONTEXT_HANDLE *client_context)
 {
-    FIXME("(0x%x,%p,%p,%p,%08x:%08x,%p,%p): stub\n", flags, token_handle, resource_manager,
+    FIXME("(0x%lx,%p,%p,%p,%08lx:%08lx,%p,%p): stub\n", flags, token_handle, resource_manager,
             expire_time, id.HighPart, id.LowPart, dynamic_group, client_context);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;

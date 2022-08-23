@@ -1,11 +1,12 @@
-EXTRADEFS = -DUSE_WS_PREFIX
 MODULE    = ws2_32.dll
+UNIXLIB   = ws2_32.so
 IMPORTLIB = ws2_32
-DELAYIMPORTS = iphlpapi user32
-EXTRALIBS = $(POLL_LIBS) $(RT_LIBS)
+DELAYIMPORTS = dnsapi advapi32 iphlpapi user32
 
 C_SRCS = \
 	async.c \
-	socket.c
+	protocol.c \
+	socket.c \
+	unixlib.c
 
 RC_SRCS = version.rc

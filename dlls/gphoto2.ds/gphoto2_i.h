@@ -20,39 +20,13 @@
 #ifndef _TWAIN32_H
 #define _TWAIN32_H
 
-#ifndef __WINE_CONFIG_H
-# error You must include config.h first
-#endif
-
-#if defined(HAVE_GPHOTO2) && !defined(SONAME_LIBJPEG)
-# warning "gphoto2 support in twain needs jpeg development headers"
-# undef HAVE_GPHOTO2
-#endif
-
-#ifdef HAVE_GPHOTO2
-/* Hack for gphoto2, which changes behaviour when WIN32 is set. */
-#undef WIN32
-#include <gphoto2/gphoto2-camera.h>
-#define WIN32
-#endif
-
 #include <stdio.h>
-
-#ifdef SONAME_LIBJPEG
-/* This is a hack, so jpeglib.h does not redefine INT32 and the like*/
-# define XMD_H
-# define UINT8 JPEG_UINT8
-# define UINT16 JPEG_UINT16
-# undef FAR
-# undef HAVE_STDLIB_H
-#  include <jpeglib.h>
-# undef HAVE_STDLIB_H
-# define HAVE_STDLIB_H 1
-# undef UINT8
-# undef UINT16
-#endif
-
 #include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+#include <setjmp.h>
+#include <basetsd.h>
+#include <jpeglib.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -61,14 +35,6 @@
 #include "wine/list.h"
 
 extern HINSTANCE GPHOTO2_instance DECLSPEC_HIDDEN;
-
-struct gphoto2_file  {
-    struct list entry;
-
-    char	*folder;
-    char	*filename;
-    BOOL	download;	/* flag for downloading, set by GUI or so */
-};
 
 /* internal information about an active data source */
 struct tagActiveDS
@@ -79,27 +45,22 @@ struct tagActiveDS
     TW_UINT16		twCC;			/* condition code */
     HWND		progressWnd;		/* window handle of the scanning window */
 
-#ifdef HAVE_GPHOTO2
-    Camera		*camera;
-    GPContext		*context;
-#endif
-
     /* Capabilities */
     TW_UINT32		capXferMech;		/* ICAP_XFERMECH */
     TW_UINT16		pixeltype;		/* ICAP_PIXELTYPE */
     TW_UINT16		pixelflavor;		/* ICAP_PIXELFLAVOR */
 
-    struct list 	files;
+    unsigned int        file_count;
+    unsigned int        download_count;
+    BOOL               *download_flags;
 
     /* Download and decode JPEG STATE */
-#ifdef HAVE_GPHOTO2
-    CameraFile				*file;
-#endif
-#ifdef SONAME_LIBJPEG
+    UINT64              file_handle;
+    unsigned char      *file_data;
+    unsigned int        file_size;
     struct jpeg_source_mgr		xjsm;
     struct jpeg_decompress_struct	jd;
     struct jpeg_error_mgr		jerr;
-#endif
 };
 
 extern struct tagActiveDS activeDS DECLSPEC_HIDDEN;
@@ -158,12 +119,8 @@ TW_UINT16 GPHOTO2_RGBResponseSet
 BOOL DoCameraUI(void) DECLSPEC_HIDDEN;
 HWND TransferringDialogBox(HWND dialog, LONG progress) DECLSPEC_HIDDEN;
 
-#ifdef HAVE_GPHOTO2
 /* Helper function for GUI */
 TW_UINT16
-_get_gphoto2_file_as_DIB(
-        const char *folder, const char *filename, CameraFileType type,
-        HWND hwnd, HBITMAP *hDIB
-) DECLSPEC_HIDDEN;
-#endif
+_get_gphoto2_file_as_DIB( unsigned int idx, BOOL preview, HWND hwnd, HBITMAP *hDIB ) DECLSPEC_HIDDEN;
+
 #endif

@@ -33,6 +33,9 @@
 #include "winerror.h"
 #include "winnt.h"
 #include "winternl.h"
+
+#include "kernel_private.h"
+
 #include "wine/exception.h"
 #include "wine/debug.h"
 
@@ -140,42 +143,58 @@ BOOL WINAPI HeapDestroy( HANDLE heap /* [in] Handle of heap */ )
 }
 
 
-/*
- * Win32 Global heap functions (GlobalXXX).
- * These functions included in Win32 for compatibility with 16 bit Windows
- * Especially the moveable blocks and handles are oldish.
- * But the ability to directly allocate memory with GPTR and LPTR is widely
- * used.
- *
- * The handle stuff looks horrible, but it's implemented almost like Win95
- * does it.
- *
- */
+/***********************************************************************
+ * Global/local heap functions, keep in sync with kernelbase/memory.c
+ ***********************************************************************/
 
-#define MAGIC_GLOBAL_USED 0x5342
-#define HANDLE_TO_INTERN(h)  ((PGLOBAL32_INTERN)(((char *)(h))-2))
-#define INTERN_TO_HANDLE(i)  (&((i)->Pointer))
-#define POINTER_TO_HANDLE(p) (*(((const HGLOBAL *)(p))-2))
-#define ISHANDLE(h)          (((ULONG_PTR)(h)&2)!=0)
-#define ISPOINTER(h)         (((ULONG_PTR)(h)&2)==0)
-/* align the storage needed for the HGLOBAL on an 8byte boundary thus
- * GlobalAlloc/GlobalReAlloc'ing with GMEM_MOVEABLE of memory with
- * size = 8*k, where k=1,2,3,... alloc's exactly the given size.
+#define MEM_FLAG_USED        1
+#define MEM_FLAG_MOVEABLE    2
+#define MEM_FLAG_DISCARDABLE 4
+#define MEM_FLAG_DISCARDED   8
+#define MEM_FLAG_DDESHARE    0x8000
+
+struct mem_entry
+{
+    union
+    {
+        struct
+        {
+            WORD flags;
+            BYTE lock;
+        };
+        void *next_free;
+    };
+    void *ptr;
+};
+
+C_ASSERT(sizeof(struct mem_entry) == 2 * sizeof(void *));
+
+struct kernelbase_global_data *kernelbase_global_data;
+
+#define POINTER_TO_HANDLE( p ) (*(((const HGLOBAL *)( p )) - 2))
+/* align the storage needed for the HLOCAL on an 8-byte boundary thus
+ * LocalAlloc/LocalReAlloc'ing with LMEM_MOVEABLE of memory with
+ * size = 8*k, where k=1,2,3,... allocs exactly the given size.
  * The Minolta DiMAGE Image Viewer heavily relies on this, corrupting
  * the output jpeg's > 1 MB if not */
-#define HGLOBAL_STORAGE      (sizeof(HGLOBAL)*2)
+#define HLOCAL_STORAGE      (sizeof(HLOCAL) * 2)
 
-#include "pshpack1.h"
-
-typedef struct __GLOBAL32_INTERN
+static inline struct mem_entry *unsafe_mem_from_HLOCAL( HLOCAL handle )
 {
-   WORD         Magic;
-   LPVOID       Pointer;
-   BYTE         Flags;
-   BYTE         LockCount;
-} GLOBAL32_INTERN, *PGLOBAL32_INTERN;
+    struct mem_entry *mem = CONTAINING_RECORD( handle, struct mem_entry, ptr );
+    struct kernelbase_global_data *data = kernelbase_global_data;
+    if (((UINT_PTR)handle & ((sizeof(void *) << 1) - 1)) != sizeof(void *)) return NULL;
+    if (mem < data->mem_entries || mem >= data->mem_entries_end) return NULL;
+    if (!(mem->flags & MEM_FLAG_USED)) return NULL;
+    return mem;
+}
 
-#include "poppack.h"
+static inline void *unsafe_ptr_from_HLOCAL( HLOCAL handle )
+{
+    if (((UINT_PTR)handle & ((sizeof(void *) << 1) - 1))) return NULL;
+    return handle;
+}
+
 
 /***********************************************************************
  *           GlobalLock   (KERNEL32.@)
@@ -183,7 +202,7 @@ typedef struct __GLOBAL32_INTERN
  * Lock a global memory object and return a pointer to first byte of the memory
  *
  * PARAMS
- *  hmem [I] Handle of the global memory object
+ *  handle [I] Handle of the global memory object
  *
  * RETURNS
  *  Success: Pointer to first byte of the memory block
@@ -193,9 +212,9 @@ typedef struct __GLOBAL32_INTERN
  *   When the handle is invalid, last error is set to ERROR_INVALID_HANDLE
  *
  */
-LPVOID WINAPI GlobalLock(HGLOBAL hmem)
+void *WINAPI GlobalLock( HGLOBAL handle )
 {
-    return LocalLock( hmem );
+    return LocalLock( handle );
 }
 
 
@@ -205,7 +224,7 @@ LPVOID WINAPI GlobalLock(HGLOBAL hmem)
  * Unlock a global memory object.
  *
  * PARAMS
- *  hmem [I] Handle of the global memory object
+ *  handle [I] Handle of the global memory object
  *
  * RETURNS
  *  Success: Object is still locked
@@ -215,10 +234,10 @@ LPVOID WINAPI GlobalLock(HGLOBAL hmem)
  *   When the handle is invalid, last error is set to ERROR_INVALID_HANDLE
  *
  */
-BOOL WINAPI GlobalUnlock(HGLOBAL hmem)
+BOOL WINAPI GlobalUnlock( HGLOBAL handle )
 {
-    if (ISPOINTER( hmem )) return TRUE;
-    return LocalUnlock( hmem );
+    if (unsafe_ptr_from_HLOCAL( handle )) return TRUE;
+    return LocalUnlock( handle );
 }
 
 
@@ -231,43 +250,45 @@ BOOL WINAPI GlobalUnlock(HGLOBAL hmem)
  *      Handle: Success
  *      NULL: Failure
  */
-HGLOBAL WINAPI GlobalHandle(
-                 LPCVOID pmem /* [in] Pointer to global memory block */
-) {
+HGLOBAL WINAPI GlobalHandle( const void *ptr )
+{
+    struct mem_entry *mem;
     HGLOBAL handle;
-    PGLOBAL32_INTERN  maybe_intern;
     LPCVOID test;
 
-    if (!pmem)
+    TRACE_(globalmem)( "ptr %p\n", ptr );
+
+    if (!ptr)
     {
         SetLastError( ERROR_INVALID_PARAMETER );
         return 0;
     }
 
-    RtlLockHeap(GetProcessHeap());
+    RtlLockHeap( GetProcessHeap() );
     __TRY
     {
         handle = 0;
 
-        /* note that if pmem is a pointer to a block allocated by        */
+        /* note that if ptr is a pointer to a block allocated by           */
         /* GlobalAlloc with GMEM_MOVEABLE then magic test in HeapValidate  */
         /* will fail.                                                      */
-        if (ISPOINTER(pmem)) {
-            if (HeapValidate( GetProcessHeap(), HEAP_NO_SERIALIZE, pmem )) {
-                handle = (HGLOBAL)pmem;  /* valid fixed block */
+        if ((ptr = unsafe_ptr_from_HLOCAL( (HLOCAL)ptr )))
+        {
+            if (HeapValidate( GetProcessHeap(), HEAP_NO_SERIALIZE, ptr ))
+            {
+                handle = (HGLOBAL)ptr; /* valid fixed block */
                 break;
             }
-            handle = POINTER_TO_HANDLE(pmem);
-        } else
-            handle = (HGLOBAL)pmem;
+            handle = POINTER_TO_HANDLE( ptr );
+        }
+        else handle = (HGLOBAL)ptr;
 
         /* Now test handle either passed in or retrieved from pointer */
-        maybe_intern = HANDLE_TO_INTERN( handle );
-        if (maybe_intern->Magic == MAGIC_GLOBAL_USED) {
-            test = maybe_intern->Pointer;
-            if (HeapValidate( GetProcessHeap(), HEAP_NO_SERIALIZE, (const char *)test - HGLOBAL_STORAGE ) && /* obj(-handle) valid arena? */
-                HeapValidate( GetProcessHeap(), HEAP_NO_SERIALIZE, maybe_intern ))  /* intern valid arena? */
-                break;  /* valid moveable block */
+        if ((mem = unsafe_mem_from_HLOCAL( handle )))
+        {
+            test = mem->ptr;
+            if (HeapValidate( GetProcessHeap(), HEAP_NO_SERIALIZE, (const char *)test - HLOCAL_STORAGE )) /* obj(-handle) valid arena? */
+                break; /* valid moveable block */
         }
         handle = 0;
         SetLastError( ERROR_INVALID_HANDLE );
@@ -278,11 +299,10 @@ HGLOBAL WINAPI GlobalHandle(
         handle = 0;
     }
     __ENDTRY
-    RtlUnlockHeap(GetProcessHeap());
+    RtlUnlockHeap( GetProcessHeap() );
 
     return handle;
 }
-
 
 /***********************************************************************
  *           GlobalReAlloc   (KERNEL32.@)
@@ -293,9 +313,9 @@ HGLOBAL WINAPI GlobalHandle(
  *      Handle: Success
  *      NULL: Failure
  */
-HGLOBAL WINAPI GlobalReAlloc( HGLOBAL hmem, SIZE_T size, UINT flags )
+HGLOBAL WINAPI GlobalReAlloc( HGLOBAL handle, SIZE_T size, UINT flags )
 {
-    return LocalReAlloc( hmem, size, flags );
+    return LocalReAlloc( handle, size, flags );
 }
 
 
@@ -305,7 +325,7 @@ HGLOBAL WINAPI GlobalReAlloc( HGLOBAL hmem, SIZE_T size, UINT flags )
  * Get the size of a global memory object.
  *
  * PARAMS
- *  hmem [I] Handle of the global memory object
+ *  handle [I] Handle of the global memory object
  *
  * RETURNS
  *  Failure: 0
@@ -315,88 +335,88 @@ HGLOBAL WINAPI GlobalReAlloc( HGLOBAL hmem, SIZE_T size, UINT flags )
  *   When the handle is invalid, last error is set to ERROR_INVALID_HANDLE
  *
  */
-SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
+SIZE_T WINAPI GlobalSize( HGLOBAL handle )
 {
-   SIZE_T               retval;
-   PGLOBAL32_INTERN     pintern;
+    struct mem_entry *mem;
+    SIZE_T retval;
+    void *ptr;
 
-   if (!((ULONG_PTR)hmem >> 16))
-   {
-       SetLastError(ERROR_INVALID_HANDLE);
-       return 0;
-   }
+    TRACE_(globalmem)( "handle %p\n", handle );
 
-   if(ISPOINTER(hmem))
-   {
-      retval=HeapSize(GetProcessHeap(), 0, hmem);
+    if (!((ULONG_PTR)handle >> 16))
+    {
+        SetLastError( ERROR_INVALID_HANDLE );
+        return 0;
+    }
 
-      if (retval == ~(SIZE_T)0) /* It might be a GMEM_MOVEABLE data pointer */
-      {
-          retval = HeapSize(GetProcessHeap(), 0, (char*)hmem - HGLOBAL_STORAGE);
-          if (retval != ~(SIZE_T)0) retval -= HGLOBAL_STORAGE;
-      }
-   }
-   else
-   {
-      RtlLockHeap(GetProcessHeap());
-      pintern=HANDLE_TO_INTERN(hmem);
-
-      if(pintern->Magic==MAGIC_GLOBAL_USED)
-      {
-         if (!pintern->Pointer) /* handle case of GlobalAlloc( ??,0) */
-             retval = 0;
-         else
-         {
-             retval = HeapSize(GetProcessHeap(), 0, (char *)pintern->Pointer - HGLOBAL_STORAGE );
-             if (retval != ~(SIZE_T)0) retval -= HGLOBAL_STORAGE;
-         }
-      }
-      else
-      {
-         WARN("invalid handle %p (Magic: 0x%04x)\n", hmem, pintern->Magic);
-         SetLastError(ERROR_INVALID_HANDLE);
-         retval=0;
-      }
-      RtlUnlockHeap(GetProcessHeap());
-   }
-   if (retval == ~(SIZE_T)0) retval = 0;
-   return retval;
+    if ((ptr = unsafe_ptr_from_HLOCAL( handle )))
+    {
+        retval = HeapSize( GetProcessHeap(), 0, ptr );
+        if (retval == ~(SIZE_T)0) /* It might be a GMEM_MOVEABLE data pointer */
+        {
+            retval = HeapSize( GetProcessHeap(), 0, (char *)ptr - HLOCAL_STORAGE );
+            if (retval != ~(SIZE_T)0) retval -= HLOCAL_STORAGE;
+        }
+    }
+    else
+    {
+        RtlLockHeap( GetProcessHeap() );
+        if ((mem = unsafe_mem_from_HLOCAL( handle )))
+        {
+            if (!mem->ptr) /* handle case of GlobalAlloc( ??,0) */
+                retval = 0;
+            else
+            {
+                retval = HeapSize( GetProcessHeap(), 0, (char *)mem->ptr - HLOCAL_STORAGE );
+                if (retval != ~(SIZE_T)0) retval -= HLOCAL_STORAGE;
+            }
+        }
+        else
+        {
+            WARN_(globalmem)( "invalid handle %p\n", handle );
+            SetLastError( ERROR_INVALID_HANDLE );
+            retval = 0;
+        }
+        RtlUnlockHeap( GetProcessHeap() );
+    }
+    if (retval == ~(SIZE_T)0) retval = 0;
+    return retval;
 }
 
 
 /***********************************************************************
  *           GlobalWire   (KERNEL32.@)
  */
-LPVOID WINAPI GlobalWire(HGLOBAL hmem)
+void *WINAPI GlobalWire( HGLOBAL handle )
 {
-   return GlobalLock( hmem );
+    return GlobalLock( handle );
 }
 
 
 /***********************************************************************
  *           GlobalUnWire   (KERNEL32.@)
  */
-BOOL WINAPI GlobalUnWire(HGLOBAL hmem)
+BOOL WINAPI GlobalUnWire( HGLOBAL handle )
 {
-   return GlobalUnlock( hmem);
+    return GlobalUnlock( handle );
 }
 
 
 /***********************************************************************
  *           GlobalFix   (KERNEL32.@)
  */
-VOID WINAPI GlobalFix(HGLOBAL hmem)
+VOID WINAPI GlobalFix( HGLOBAL handle )
 {
-    GlobalLock( hmem );
+    GlobalLock( handle );
 }
 
 
 /***********************************************************************
  *           GlobalUnfix   (KERNEL32.@)
  */
-VOID WINAPI GlobalUnfix(HGLOBAL hmem)
+VOID WINAPI GlobalUnfix( HGLOBAL handle )
 {
-   GlobalUnlock( hmem);
+    GlobalUnlock( handle );
 }
 
 
@@ -406,41 +426,38 @@ VOID WINAPI GlobalUnfix(HGLOBAL hmem)
  * Get information about a global memory object.
  *
  * PARAMS
- *  hmem [I] Handle of the global memory object 
+ *  handle [I] Handle of the global memory object
  *
  * RETURNS
- *  Failure: GMEM_INVALID_HANDLE, when the provided handle is invalid 
+ *  Failure: GMEM_INVALID_HANDLE, when the provided handle is invalid
  *  Success: Value specifying allocation flags and lock count
  *
  */
-UINT WINAPI GlobalFlags(HGLOBAL hmem)
+UINT WINAPI GlobalFlags( HGLOBAL handle )
 {
-   DWORD                retval;
-   PGLOBAL32_INTERN     pintern;
+    HANDLE heap = GetProcessHeap();
+    struct mem_entry *mem;
+    UINT flags;
 
-   if(ISPOINTER(hmem))
-   {
-      retval=0;
-   }
-   else
-   {
-      RtlLockHeap(GetProcessHeap());
-      pintern=HANDLE_TO_INTERN(hmem);
-      if(pintern->Magic==MAGIC_GLOBAL_USED)
-      {
-         retval=pintern->LockCount + (pintern->Flags<<8);
-         if(pintern->Pointer==0)
-            retval|= GMEM_DISCARDED;
-      }
-      else
-      {
-         WARN("invalid handle %p (Magic: 0x%04x)\n", hmem, pintern->Magic);
-         SetLastError(ERROR_INVALID_HANDLE);
-         retval = GMEM_INVALID_HANDLE;
-      }
-      RtlUnlockHeap(GetProcessHeap());
-   }
-   return retval;
+    if (unsafe_ptr_from_HLOCAL( handle )) return 0;
+
+    RtlLockHeap( heap );
+    if ((mem = unsafe_mem_from_HLOCAL( handle )))
+    {
+        flags = mem->lock;
+        if (mem->flags & MEM_FLAG_DISCARDABLE) flags |= GMEM_DISCARDABLE;
+        if (mem->flags & MEM_FLAG_DISCARDED) flags |= GMEM_DISCARDED;
+        if (mem->flags & MEM_FLAG_DDESHARE) flags |= GMEM_DDESHARE;
+    }
+    else
+    {
+        WARN_(globalmem)( "invalid handle %p\n", handle );
+        SetLastError( ERROR_INVALID_HANDLE );
+        flags = GMEM_INVALID_HANDLE;
+    }
+    RtlUnlockHeap( heap );
+
+    return flags;
 }
 
 
@@ -475,10 +492,11 @@ SIZE_T WINAPI LocalCompact( UINT minfree )
  *  Windows memory management does not provide a separate local heap
  *  and global heap.
  */
-UINT WINAPI LocalFlags(
-              HLOCAL handle /* [in] Handle of memory object */
-) {
-    return GlobalFlags( handle );
+UINT WINAPI LocalFlags( HLOCAL handle )
+{
+    UINT flags = GlobalFlags( handle );
+    if (flags & GMEM_DISCARDABLE) flags |= LMEM_DISCARDABLE;
+    return flags;
 }
 
 
@@ -553,11 +571,6 @@ static BOOL large_address_enabled(void)
 
     return result;
 }
-#else
-static BOOL large_address_enabled(void)
-{
-    return FALSE;
-}
 #endif
 
 /***********************************************************************
@@ -572,7 +585,9 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
 {
     MEMORYSTATUSEX memstatus;
     OSVERSIONINFOW osver;
+#ifndef _WIN64
     IMAGE_NT_HEADERS *nt = RtlImageNtHeader( GetModuleHandleW(0) );
+#endif
 
     /* Because GlobalMemoryStatus is identical to GlobalMemoryStatusEX save
        for one extra field in the struct, and the lack of a bug, we simply
@@ -590,6 +605,14 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
     osver.dwOSVersionInfoSize = sizeof(osver);
     GetVersionExW(&osver);
 
+    lpBuffer->dwTotalPhys = memstatus.ullTotalPhys;
+    lpBuffer->dwAvailPhys = memstatus.ullAvailPhys;
+    lpBuffer->dwTotalPageFile = memstatus.ullTotalPageFile;
+    lpBuffer->dwAvailPageFile = memstatus.ullAvailPageFile;
+    lpBuffer->dwTotalVirtual = memstatus.ullTotalVirtual;
+    lpBuffer->dwAvailVirtual = memstatus.ullAvailVirtual;
+
+#ifndef _WIN64
     if ( osver.dwMajorVersion >= 5 || osver.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS )
     {
         lpBuffer->dwTotalPhys = min( memstatus.ullTotalPhys, MAXDWORD );
@@ -599,16 +622,6 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
         lpBuffer->dwAvailPageFile = min( memstatus.ullAvailPageFile, MAXDWORD );
         lpBuffer->dwTotalVirtual = min( memstatus.ullTotalVirtual, MAXDWORD );
         lpBuffer->dwAvailVirtual = min( memstatus.ullAvailVirtual, MAXDWORD );
-
-    }
-    else /* duplicate NT bug */
-    {
-        lpBuffer->dwTotalPhys = memstatus.ullTotalPhys;
-        lpBuffer->dwAvailPhys = memstatus.ullAvailPhys;
-        lpBuffer->dwTotalPageFile = memstatus.ullTotalPageFile;
-        lpBuffer->dwAvailPageFile = memstatus.ullAvailPageFile;
-        lpBuffer->dwTotalVirtual = memstatus.ullTotalVirtual;
-        lpBuffer->dwAvailVirtual = memstatus.ullAvailVirtual;
     }
 
     /* values are limited to 2Gb unless the app has the IMAGE_FILE_LARGE_ADDRESS_AWARE flag */
@@ -633,9 +646,10 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
         if (lpBuffer->dwTotalPageFile > MAXLONG) lpBuffer->dwTotalPageFile = MAXLONG;
         if (lpBuffer->dwAvailPageFile > MAXLONG) lpBuffer->dwAvailPageFile = MAXLONG;
     }
+#endif
 
-    TRACE("Length %u, MemoryLoad %u, TotalPhys %lx, AvailPhys %lx,"
-          " TotalPageFile %lx, AvailPageFile %lx, TotalVirtual %lx, AvailVirtual %lx\n",
+    TRACE("Length %lu, MemoryLoad %lu, TotalPhys %Ix, AvailPhys %Ix,"
+          " TotalPageFile %Ix, AvailPageFile %Ix, TotalVirtual %Ix, AvailVirtual %Ix\n",
           lpBuffer->dwLength, lpBuffer->dwMemoryLoad, lpBuffer->dwTotalPhys,
           lpBuffer->dwAvailPhys, lpBuffer->dwTotalPageFile, lpBuffer->dwAvailPageFile,
           lpBuffer->dwTotalVirtual, lpBuffer->dwAvailVirtual );

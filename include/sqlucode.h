@@ -29,6 +29,11 @@
 extern "C" {
 #endif
 
+#define SQL_WCHAR             (-8)
+#define SQL_C_WCHAR           SQL_WCHAR
+#define SQL_WVARCHAR          (-9)
+#define SQL_WLONGVARCHAR      (-10)
+
 SQLRETURN WINAPI SQLConnectW(SQLHDBC ConnectionHandle,
            SQLWCHAR *ServerName, SQLSMALLINT NameLength1,
            SQLWCHAR *UserName, SQLSMALLINT NameLength2,
@@ -58,6 +63,10 @@ SQLRETURN WINAPI SQLPrepareW(SQLHSTMT StatementHandle,
 SQLRETURN WINAPI SQLSetStmtAttrW(SQLHSTMT StatementHandle,
            SQLINTEGER Attribute, SQLPOINTER Value,
            SQLINTEGER StringLength);
+
+SQLRETURN WINAPI SQLGetDiagFieldW(SQLSMALLINT type, SQLHANDLE handle,
+           SQLSMALLINT record, SQLSMALLINT field, SQLPOINTER info,
+           SQLSMALLINT info_len, SQLSMALLINT *ret_len);
 
 #ifdef __cplusplus
 }

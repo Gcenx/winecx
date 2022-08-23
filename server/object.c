@@ -19,7 +19,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <limits.h>
@@ -28,6 +27,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdarg.h>
+#include <sys/types.h>
 #ifdef HAVE_VALGRIND_MEMCHECK_H
 #include <valgrind/memcheck.h>
 #endif
@@ -49,6 +49,18 @@ struct namespace
     struct list         names[1];        /* array of hash entry lists */
 };
 
+
+struct type_descr no_type =
+{
+    { NULL, 0 },                /* name */
+    STANDARD_RIGHTS_REQUIRED,   /* valid_access */
+    {                           /* mapping */
+        STANDARD_RIGHTS_READ,
+        STANDARD_RIGHTS_WRITE,
+        STANDARD_RIGHTS_EXECUTE,
+        STANDARD_RIGHTS_REQUIRED
+    },
+};
 
 #ifdef DEBUG_OBJECTS
 static struct list object_list = LIST_INIT(object_list);
@@ -197,6 +209,8 @@ void *alloc_object( const struct object_ops *ops )
 #ifdef DEBUG_OBJECTS
         list_add_head( &object_list, &obj->obj_list );
 #endif
+        obj->ops->type->obj_count++;
+        obj->ops->type->obj_max = max( obj->ops->type->obj_max, obj->ops->type->obj_count );
         return obj;
     }
     return NULL;
@@ -206,6 +220,7 @@ void *alloc_object( const struct object_ops *ops )
 static void free_object( struct object *obj )
 {
     free( obj->sd );
+    obj->ops->type->obj_count--;
 #ifdef DEBUG_OBJECTS
     list_remove( &obj->obj_list );
     memset( obj, 0xaa, obj->ops->size );
@@ -491,11 +506,6 @@ struct namespace *create_namespace( unsigned int hash_size )
 
 /* functions for unimplemented/default object operations */
 
-struct object_type *no_get_type( struct object *obj )
-{
-    return NULL;
-}
-
 int no_add_queue( struct object *obj, struct wait_queue_entry *entry )
 {
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
@@ -518,13 +528,9 @@ struct fd *no_get_fd( struct object *obj )
     return NULL;
 }
 
-unsigned int no_map_access( struct object *obj, unsigned int access )
+unsigned int default_map_access( struct object *obj, unsigned int access )
 {
-    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ;
-    if (access & GENERIC_WRITE)   access |= STANDARD_RIGHTS_WRITE;
-    if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE;
-    if (access & GENERIC_ALL)     access |= STANDARD_RIGHTS_ALL;
-    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
+    return map_access( access, &obj->ops->type->mapping );
 }
 
 struct security_descriptor *default_get_sd( struct object *obj )
@@ -537,9 +543,9 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
 {
     struct security_descriptor new_sd, *new_sd_ptr;
     int present;
-    const SID *owner = NULL, *group = NULL;
-    const ACL *sacl, *dacl;
-    ACL *replaced_sacl = NULL;
+    const struct sid *owner = NULL, *group = NULL;
+    const struct acl *sacl, *dacl;
+    struct acl *replaced_sacl = NULL;
     char *ptr;
 
     if (!set_info) return 1;
@@ -559,7 +565,7 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     else if (token)
     {
         owner = token_get_user( token );
-        new_sd.owner_len = security_sid_len( owner );
+        new_sd.owner_len = sid_len( owner );
     }
     else new_sd.owner_len = 0;
 
@@ -576,7 +582,7 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     else if (token)
     {
         group = token_get_primary_group( token );
-        new_sd.group_len = security_sid_len( group );
+        new_sd.group_len = sid_len( group );
     }
     else new_sd.group_len = 0;
 
@@ -588,11 +594,11 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     }
     else if (set_info & LABEL_SECURITY_INFORMATION && present)
     {
-        const ACL *old_sacl = NULL;
+        const struct acl *old_sacl = NULL;
         if (obj->sd && obj->sd->control & SE_SACL_PRESENT) old_sacl = sd_get_sacl( obj->sd, &present );
         if (!(replaced_sacl = replace_security_labels( old_sacl, sacl ))) return 0;
         new_sd.control |= SE_SACL_PRESENT;
-        new_sd.sacl_len = replaced_sacl->AclSize;
+        new_sd.sacl_len = replaced_sacl->size;
         sacl = replaced_sacl;
     }
     else
@@ -627,7 +633,7 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
         {
             dacl = token_get_default_dacl( token );
             new_sd.control |= SE_DACL_PRESENT;
-            new_sd.dacl_len = dacl->AclSize;
+            new_sd.dacl_len = dacl->size;
         }
         else new_sd.dacl_len = 0;
     }

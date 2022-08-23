@@ -831,8 +831,7 @@ static void set_cocoa_view_parent(struct macdrv_win_data *data, HWND parent)
     macdrv_window cocoa_window = parent_data ? parent_data->cocoa_window : NULL;
     macdrv_view superview = parent_data ? parent_data->client_cocoa_view : NULL;
 
-    TRACE("win %p/%p parent %p/%p\n", data->hwnd, data->cocoa_view, parent,
-          cocoa_window ? (void* HOSTPTR)cocoa_window : (void* HOSTPTR)superview);
+    TRACE("win %p/%p parent %p/%p\n", data->hwnd, data->cocoa_view, parent, cocoa_window ? (void* HOSTPTR)cocoa_window : (void* HOSTPTR)superview);
 
     if (!cocoa_window && !superview)
         WARN("hwnd %p new parent %p has no Cocoa window or view in this process\n", data->hwnd, parent);
@@ -1625,7 +1624,7 @@ static void perform_window_command(HWND hwnd, DWORD style_any, DWORD style_none,
 /**********************************************************************
  *              CreateDesktopWindow   (MACDRV.@)
  */
-BOOL CDECL macdrv_CreateDesktopWindow(HWND hwnd)
+BOOL macdrv_CreateDesktopWindow(HWND hwnd)
 {
     unsigned int width, height;
 
@@ -1695,7 +1694,7 @@ static LRESULT CALLBACK desktop_wndproc_wrapper( HWND hwnd, UINT msg, WPARAM wp,
 /**********************************************************************
  *              CreateWindow   (MACDRV.@)
  */
-BOOL CDECL macdrv_CreateWindow(HWND hwnd)
+BOOL macdrv_CreateWindow(HWND hwnd)
 {
     if (hwnd == GetDesktopWindow())
     {
@@ -1711,7 +1710,7 @@ BOOL CDECL macdrv_CreateWindow(HWND hwnd)
 /***********************************************************************
  *              DestroyWindow   (MACDRV.@)
  */
-void CDECL macdrv_DestroyWindow(HWND hwnd)
+void macdrv_DestroyWindow(HWND hwnd)
 {
     struct macdrv_win_data *data;
 
@@ -1737,7 +1736,7 @@ void CDECL macdrv_DestroyWindow(HWND hwnd)
  *
  * Set the Mac focus.
  */
-void CDECL macdrv_SetFocus(HWND hwnd)
+void macdrv_SetFocus(HWND hwnd)
 {
     struct macdrv_thread_data *thread_data = macdrv_thread_data();
 
@@ -1754,7 +1753,7 @@ void CDECL macdrv_SetFocus(HWND hwnd)
  *
  * Set transparency attributes for a layered window.
  */
-void CDECL macdrv_SetLayeredWindowAttributes(HWND hwnd, COLORREF key, BYTE alpha, DWORD flags)
+void macdrv_SetLayeredWindowAttributes(HWND hwnd, COLORREF key, BYTE alpha, DWORD flags)
 {
     struct macdrv_win_data *data = get_win_data(hwnd);
 
@@ -1782,7 +1781,7 @@ void CDECL macdrv_SetLayeredWindowAttributes(HWND hwnd, COLORREF key, BYTE alpha
 /*****************************************************************
  *              SetParent   (MACDRV.@)
  */
-void CDECL macdrv_SetParent(HWND hwnd, HWND parent, HWND old_parent)
+void macdrv_SetParent(HWND hwnd, HWND parent, HWND old_parent)
 {
     struct macdrv_win_data *data;
 
@@ -1816,7 +1815,7 @@ void CDECL macdrv_SetParent(HWND hwnd, HWND parent, HWND old_parent)
  *
  * Assign specified region to window (for non-rectangular windows)
  */
-void CDECL macdrv_SetWindowRgn(HWND hwnd, HRGN hrgn, BOOL redraw)
+void macdrv_SetWindowRgn(HWND hwnd, HRGN hrgn, BOOL redraw)
 {
     struct macdrv_win_data *data;
 
@@ -1843,7 +1842,7 @@ void CDECL macdrv_SetWindowRgn(HWND hwnd, HRGN hrgn, BOOL redraw)
  *
  * Update the state of the Cocoa window to reflect a style change
  */
-void CDECL macdrv_SetWindowStyle(HWND hwnd, INT offset, STYLESTRUCT *style)
+void macdrv_SetWindowStyle(HWND hwnd, INT offset, STYLESTRUCT *style)
 {
     struct macdrv_win_data *data;
 
@@ -1877,7 +1876,7 @@ void CDECL macdrv_SetWindowStyle(HWND hwnd, INT offset, STYLESTRUCT *style)
 /*****************************************************************
  *              SetWindowText   (MACDRV.@)
  */
-void CDECL macdrv_SetWindowText(HWND hwnd, LPCWSTR text)
+void macdrv_SetWindowText(HWND hwnd, LPCWSTR text)
 {
     macdrv_window win;
     WCHAR buf[1024];
@@ -1930,7 +1929,7 @@ static BOOL needs_zorder_hack(void)
 /***********************************************************************
  *              ShowWindow   (MACDRV.@)
  */
-UINT CDECL macdrv_ShowWindow(HWND hwnd, INT cmd, RECT *rect, UINT swp)
+UINT macdrv_ShowWindow(HWND hwnd, INT cmd, RECT *rect, UINT swp)
 {
     struct macdrv_thread_data *thread_data = macdrv_thread_data();
     struct macdrv_win_data *data = get_win_data(hwnd);
@@ -1958,20 +1957,18 @@ UINT CDECL macdrv_ShowWindow(HWND hwnd, INT cmd, RECT *rect, UINT swp)
 
             if (owner_pid != GetCurrentProcessId())
             {
-                /* Out-of-process owner? Bring the window to the front. */
-                if (cmd == SW_SHOW)
-                    macdrv_give_cocoa_window_focus(data->cocoa_window, TRUE);
-                else {
-                    /* Activating the steamwebhelper app will cause dropdowns to dismiss
-                     * themselves, so this just forces the window on top without focusing
-                     * the app. */
-                    macdrv_force_popup_order_front(data->cocoa_window);
-                }
+                /* Out-of-process owner? Bring the window to the front.
+                 * We don't want to activate the app though, especially with
+                 * steamwebhelper, as that causes dropdowns to dismiss
+                 * themselves. This just forces the window on top without focusing
+                 * the app. */
+                macdrv_force_popup_order_front(data->cocoa_window);
             }
         }
     }
 
     if (IsRectEmpty(rect)) goto done;
+
     if (GetWindowLongW(hwnd, GWL_STYLE) & WS_MINIMIZE)
     {
         if (rect->left != -32000 || rect->top != -32000)
@@ -2009,7 +2006,7 @@ done:
  *
  * Perform WM_SYSCOMMAND handling.
  */
-LRESULT CDECL macdrv_SysCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
+LRESULT macdrv_SysCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
 {
     struct macdrv_win_data *data;
     LRESULT ret = -1;
@@ -2044,8 +2041,8 @@ done:
 /***********************************************************************
  *              UpdateLayeredWindow   (MACDRV.@)
  */
-BOOL CDECL macdrv_UpdateLayeredWindow(HWND hwnd, const UPDATELAYEREDWINDOWINFO *info,
-                                      const RECT *window_rect)
+BOOL macdrv_UpdateLayeredWindow(HWND hwnd, const UPDATELAYEREDWINDOWINFO *info,
+                                const RECT *window_rect)
 {
     struct window_surface *surface;
     struct macdrv_win_data *data;
@@ -2154,7 +2151,7 @@ done:
 /**********************************************************************
  *              WindowMessage   (MACDRV.@)
  */
-LRESULT CDECL macdrv_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+LRESULT macdrv_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     struct macdrv_win_data *data;
 
@@ -2226,9 +2223,9 @@ static inline RECT get_surface_rect(const RECT *visible_rect)
 /***********************************************************************
  *              WindowPosChanging   (MACDRV.@)
  */
-void CDECL macdrv_WindowPosChanging(HWND hwnd, HWND insert_after, UINT swp_flags,
-                                    const RECT *window_rect, const RECT *client_rect,
-                                    RECT *visible_rect, struct window_surface **surface)
+BOOL macdrv_WindowPosChanging(HWND hwnd, HWND insert_after, UINT swp_flags,
+                              const RECT *window_rect, const RECT *client_rect,
+                              RECT *visible_rect, struct window_surface **surface)
 {
     struct macdrv_win_data *data = get_win_data(hwnd);
     DWORD style = GetWindowLongW(hwnd, GWL_STYLE);
@@ -2238,7 +2235,7 @@ void CDECL macdrv_WindowPosChanging(HWND hwnd, HWND insert_after, UINT swp_flags
           swp_flags, wine_dbgstr_rect(window_rect), wine_dbgstr_rect(client_rect),
           wine_dbgstr_rect(visible_rect), surface);
 
-    if (!data && !(data = macdrv_create_win_data(hwnd, window_rect, client_rect))) return;
+    if (!data && !(data = macdrv_create_win_data(hwnd, window_rect, client_rect))) return TRUE;
 
     *visible_rect = *window_rect;
     macdrv_window_to_mac_rect(data, style, visible_rect, window_rect, client_rect);
@@ -2271,16 +2268,17 @@ void CDECL macdrv_WindowPosChanging(HWND hwnd, HWND insert_after, UINT swp_flags
 
 done:
     release_win_data(data);
+    return TRUE;
 }
 
 
 /***********************************************************************
  *              WindowPosChanged   (MACDRV.@)
  */
-void CDECL macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,
-                                   const RECT *window_rect, const RECT *client_rect,
-                                   const RECT *visible_rect, const RECT *valid_rects,
-                                   struct window_surface *surface)
+void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,
+                             const RECT *window_rect, const RECT *client_rect,
+                             const RECT *visible_rect, const RECT *valid_rects,
+                             struct window_surface *surface)
 {
     struct macdrv_thread_data *thread_data;
     struct macdrv_win_data *data;
@@ -2529,7 +2527,7 @@ void macdrv_window_got_focus(HWND hwnd, const macdrv_event *event)
           hwnd, event->window, top, event->window_got_focus.serial, IsWindowEnabled(top),
           IsWindowVisible(top), style, GetFocus(), GetActiveWindow(), GetForegroundWindow());
 
-    if (can_window_become_foreground(top) && !(style & WS_MINIMIZE))
+    if (can_window_become_foreground(hwnd) && !(style & WS_MINIMIZE))
     {
         /* CrossOver Hack #18896: don't send WM_MOUSEACTIVATE, it breaks Unity games */
         {

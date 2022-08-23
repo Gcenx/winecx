@@ -77,7 +77,7 @@
 @ stdcall NCryptGetProperty(ptr wstr ptr long ptr long)
 @ stub NCryptGetProtectionDescriptorInfo
 @ stdcall NCryptImportKey(long long wstr ptr ptr ptr long long)
-@ stub NCryptIsAlgSupported(long wstr long)
+@ stdcall NCryptIsAlgSupported(long wstr long)
 @ stdcall NCryptIsKeyHandle(long)
 @ stub NCryptKeyDerivation
 @ stub NCryptNotifyChangeKey
@@ -101,7 +101,7 @@
 @ stub NCryptUnprotectKey
 @ stub NCryptUnprotectSecret
 @ stub NCryptVerifyClaim
-@ stub NCryptVerifySignature
+@ stdcall NCryptVerifySignature(ptr ptr ptr long ptr long long)
 @ stub SslChangeNotify
 @ stub SslComputeClientAuthHash
 @ stub SslComputeEapKeyBlock

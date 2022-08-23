@@ -17,6 +17,7 @@
  */
 
 #include <stdarg.h>
+#include <stdlib.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -24,7 +25,6 @@
 #include "webservices.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wine/list.h"
 #include "webservices_private.h"
 
@@ -166,7 +166,7 @@ HRESULT WINAPI WsAlloc( WS_HEAP *handle, SIZE_T size, void **ptr, WS_ERROR *erro
 {
     void *mem;
 
-    TRACE( "%p %u %p %p\n", handle, (ULONG)size, ptr, error );
+    TRACE( "%p %Iu %p %p\n", handle, size, ptr, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!handle || !ptr) return E_INVALIDARG;
@@ -181,7 +181,7 @@ static struct heap *alloc_heap(void)
     struct heap *ret;
     ULONG size = sizeof(*ret) + prop_size( heap_props, count );
 
-    if (!(ret = heap_alloc_zero( size ))) return NULL;
+    if (!(ret = calloc( 1, size ))) return NULL;
 
     ret->magic      = HEAP_MAGIC;
     InitializeCriticalSection( &ret->cs );
@@ -200,7 +200,7 @@ HRESULT WINAPI WsCreateHeap( SIZE_T max_size, SIZE_T trim_size, const WS_HEAP_PR
 {
     struct heap *heap;
 
-    TRACE( "%u %u %p %u %p %p\n", (ULONG)max_size, (ULONG)trim_size, properties, count, handle, error );
+    TRACE( "%Iu %Iu %p %lu %p %p\n", max_size, trim_size, properties, count, handle, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!handle || count) return E_INVALIDARG;
@@ -247,7 +247,7 @@ void WINAPI WsFreeHeap( WS_HEAP *handle )
 
     heap->cs.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection( &heap->cs );
-    heap_free( heap );
+    free( heap );
 }
 
 /**************************************************************************
@@ -274,7 +274,7 @@ HRESULT WINAPI WsResetHeap( WS_HEAP *handle, WS_ERROR *error )
     reset_heap( heap );
 
     LeaveCriticalSection( &heap->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -287,7 +287,7 @@ HRESULT WINAPI WsGetHeapProperty( WS_HEAP *handle, WS_HEAP_PROPERTY_ID id, void 
     struct heap *heap = (struct heap *)handle;
     HRESULT hr = S_OK;
 
-    TRACE( "%p %u %p %u %p\n", handle, id, buf, size, error );
+    TRACE( "%p %u %p %lu %p\n", handle, id, buf, size, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!heap) return E_INVALIDARG;
@@ -315,7 +315,7 @@ HRESULT WINAPI WsGetHeapProperty( WS_HEAP *handle, WS_HEAP_PROPERTY_ID id, void 
     }
 
     LeaveCriticalSection( &heap->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -357,7 +357,7 @@ HRESULT WINAPI WsCreateXmlBuffer( WS_HEAP *heap, const WS_XML_BUFFER_PROPERTY *p
 {
     struct xmlbuf *xmlbuf;
 
-    TRACE( "%p %p %u %p %p\n", heap, properties, count, handle, error );
+    TRACE( "%p %p %lu %p %p\n", heap, properties, count, handle, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!heap || !handle) return E_INVALIDARG;

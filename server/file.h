@@ -57,17 +57,19 @@ struct fd_ops
     /* get file information */
     enum server_fd_type (*get_fd_type)(struct fd *fd);
     /* perform a read on the file */
-    int (*read)(struct fd *, struct async *, file_pos_t );
+    void (*read)(struct fd *, struct async *, file_pos_t );
     /* perform a write on the file */
-    int (*write)(struct fd *, struct async *, file_pos_t );
+    void (*write)(struct fd *, struct async *, file_pos_t );
     /* flush the object buffers */
-    int (*flush)(struct fd *, struct async *);
+    void (*flush)(struct fd *, struct async *);
     /* query file info */
     void (*get_file_info)( struct fd *, obj_handle_t, unsigned int );
     /* query volume info */
-    void (*get_volume_info)( struct fd *, unsigned int );
+    void (*get_volume_info)( struct fd *, struct async *, unsigned int );
     /* perform an ioctl on the file */
-    int (*ioctl)(struct fd *fd, ioctl_code_t code, struct async *async );
+    void (*ioctl)(struct fd *fd, ioctl_code_t code, struct async *async );
+    /* cancel an async operation */
+    void (*cancel_async)(struct fd *fd, struct async *async);
     /* queue an async operation */
     void (*queue_async)(struct fd *, struct async *async, int type, int count);
     /* selected events for async i/o need an update */
@@ -78,8 +80,9 @@ struct fd_ops
 
 extern struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct object *user,
                                    unsigned int options );
-extern struct fd *open_fd( struct fd *root, const char *name, int flags, mode_t *mode,
-                           unsigned int access, unsigned int sharing, unsigned int options );
+extern struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_name,
+                           int flags, mode_t *mode, unsigned int access,
+                           unsigned int sharing, unsigned int options );
 extern struct fd *create_anonymous_fd( const struct fd_ops *fd_user_ops,
                                        int unix_fd, struct object *user, unsigned int options );
 extern struct fd *dup_fd_object( struct fd *orig, unsigned int access, unsigned int sharing,
@@ -88,11 +91,11 @@ extern struct fd *get_fd_object_for_mapping( struct fd *fd, unsigned int access,
 extern void *get_fd_user( struct fd *fd );
 extern void set_fd_user( struct fd *fd, const struct fd_ops *ops, struct object *user );
 extern unsigned int get_fd_options( struct fd *fd );
+extern unsigned int get_fd_comp_flags( struct fd *fd );
 extern int is_fd_overlapped( struct fd *fd );
 extern int get_unix_fd( struct fd *fd );
 extern int is_same_file_fd( struct fd *fd1, struct fd *fd2 );
 extern int is_fd_removable( struct fd *fd );
-extern int fd_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
 extern int check_fd_events( struct fd *fd, int events );
 extern void set_fd_events( struct fd *fd, int events );
 extern obj_handle_t lock_fd( struct fd *fd, file_pos_t offset, file_pos_t count, int shared, int wait );
@@ -100,23 +103,25 @@ extern void unlock_fd( struct fd *fd, file_pos_t offset, file_pos_t count );
 extern void allow_fd_caching( struct fd *fd );
 extern void set_fd_signaled( struct fd *fd, int signaled );
 extern char *dup_fd_name( struct fd *root, const char *name );
+extern void get_nt_name( struct fd *fd, struct unicode_str *name );
 
 extern int default_fd_signaled( struct object *obj, struct wait_queue_entry *entry );
 extern struct esync_fd *default_fd_get_esync_fd( struct object *obj, enum esync_type *type );
-extern unsigned int default_fd_map_access( struct object *obj, unsigned int access );
 extern int default_fd_get_poll_events( struct fd *fd );
 extern void default_poll_event( struct fd *fd, int event );
+extern void fd_cancel_async( struct fd *fd, struct async *async );
 extern void fd_queue_async( struct fd *fd, struct async *async, int type );
 extern void fd_async_wake_up( struct fd *fd, int type, unsigned int status );
 extern void fd_reselect_async( struct fd *fd, struct async_queue *queue );
-extern int no_fd_read( struct fd *fd, struct async *async, file_pos_t pos );
-extern int no_fd_write( struct fd *fd, struct async *async, file_pos_t pos );
-extern int no_fd_flush( struct fd *fd, struct async *async );
+extern void no_fd_read( struct fd *fd, struct async *async, file_pos_t pos );
+extern void no_fd_write( struct fd *fd, struct async *async, file_pos_t pos );
+extern void no_fd_flush( struct fd *fd, struct async *async );
 extern void no_fd_get_file_info( struct fd *fd, obj_handle_t handle, unsigned int info_class );
 extern void default_fd_get_file_info( struct fd *fd, obj_handle_t handle, unsigned int info_class );
-extern void no_fd_get_volume_info( struct fd *fd, unsigned int info_class );
-extern int no_fd_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
-extern int default_fd_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
+extern void no_fd_get_volume_info( struct fd *fd, struct async *async, unsigned int info_class );
+extern void no_fd_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
+extern void default_fd_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
+extern void default_fd_cancel_async( struct fd *fd, struct async *async );
 extern void no_fd_queue_async( struct fd *fd, struct async *async, int type, int count );
 extern void default_fd_queue_async( struct fd *fd, struct async *async, int type, int count );
 extern void default_fd_reselect_async( struct fd *fd, struct async_queue *queue );
@@ -160,26 +165,30 @@ extern int get_file_unix_fd( struct file *file );
 extern struct file *create_file_for_fd( int fd, unsigned int access, unsigned int sharing );
 extern struct file *create_file_for_fd_obj( struct fd *fd, unsigned int access, unsigned int sharing );
 extern void file_set_error(void);
-extern struct object_type *file_get_type( struct object *obj );
-extern struct security_descriptor *mode_to_sd( mode_t mode, const SID *user, const SID *group );
-extern mode_t sd_to_mode( const struct security_descriptor *sd, const SID *owner );
+extern struct security_descriptor *mode_to_sd( mode_t mode, const struct sid *user, const struct sid *group );
+extern mode_t sd_to_mode( const struct security_descriptor *sd, const struct sid *owner );
 extern int is_file_executable( const char *name );
 
 /* file mapping functions */
 
-extern struct mapping *create_mapping( struct object *root, const struct unicode_str *name,
-                                       unsigned int attr, mem_size_t size, unsigned int flags,
-                                       obj_handle_t handle, unsigned int file_access,
-                                       const struct security_descriptor *sd );
-extern struct file *get_mapping_file( struct process *process, client_ptr_t base,
-                                      unsigned int access, unsigned int sharing );
-extern const pe_image_info_t *get_mapping_image_info( struct process *process, client_ptr_t base );
+struct memory_view;
+
+extern int grow_file( int unix_fd, file_pos_t new_size );
+extern struct memory_view *find_mapped_view( struct process *process, client_ptr_t base );
+extern struct memory_view *get_exe_view( struct process *process );
+extern struct file *get_view_file( const struct memory_view *view, unsigned int access, unsigned int sharing );
+extern const pe_image_info_t *get_view_image_info( const struct memory_view *view, client_ptr_t *base );
+extern int get_view_nt_name( const struct memory_view *view, struct unicode_str *name );
 extern void free_mapped_views( struct process *process );
 extern int get_page_size(void);
 extern struct mapping *create_fd_mapping( struct object *root, const struct unicode_str *name, struct fd *fd,
                                           unsigned int attr, const struct security_descriptor *sd );
 extern struct object *create_user_data_mapping( struct object *root, const struct unicode_str *name,
                                                 unsigned int attr, const struct security_descriptor *sd );
+extern struct mapping *create_mapping( struct object *root, const struct unicode_str *name,
+                                       unsigned int attr, mem_size_t size, unsigned int flags,
+                                       obj_handle_t handle, unsigned int file_access,
+                                       const struct security_descriptor *sd );
 
 /* device functions */
 
@@ -213,23 +222,32 @@ extern int is_serial_fd( struct fd *fd );
 extern struct object *create_serial( struct fd *fd );
 
 /* async I/O functions */
+
+typedef void (*async_completion_callback)( void *private );
+
 extern void free_async_queue( struct async_queue *queue );
 extern struct async *create_async( struct fd *fd, struct thread *thread, const async_data_t *data, struct iosb *iosb );
 extern struct async *create_request_async( struct fd *fd, unsigned int comp_flags, const async_data_t *data );
-extern obj_handle_t async_handoff( struct async *async, int success, data_size_t *result, int force_blocking );
+extern obj_handle_t async_handoff( struct async *async, data_size_t *result, int force_blocking );
 extern void queue_async( struct async_queue *queue, struct async *async );
 extern void async_set_timeout( struct async *async, timeout_t timeout, unsigned int status );
 extern void async_set_result( struct object *obj, unsigned int status, apc_param_t total );
-extern void set_async_pending( struct async *async, int signal );
+extern void async_set_completion_callback( struct async *async, async_completion_callback func, void *private );
+extern void async_set_unknown_status( struct async *async );
+extern void set_async_pending( struct async *async );
+extern void async_set_initial_status( struct async *async, unsigned int status );
+extern void async_wake_obj( struct async *async );
 extern int async_waiting( struct async_queue *queue );
 extern void async_terminate( struct async *async, unsigned int status );
+extern void async_request_complete( struct async *async, unsigned int status, data_size_t result,
+                                    data_size_t out_size, void *out_data );
+extern void async_request_complete_alloc( struct async *async, unsigned int status, data_size_t result,
+                                          data_size_t out_size, const void *out_data );
 extern void async_wake_up( struct async_queue *queue, unsigned int status );
 extern struct completion *fd_get_completion( struct fd *fd, apc_param_t *p_key );
 extern void fd_copy_completion( struct fd *src, struct fd *dst );
-extern struct iosb *create_iosb( const void *in_data, data_size_t in_size, data_size_t out_size );
 extern struct iosb *async_get_iosb( struct async *async );
 extern struct thread *async_get_thread( struct async *async );
-extern int async_is_blocking( struct async *async );
 extern struct async *find_pending_async( struct async_queue *queue );
 extern void cancel_process_asyncs( struct process *process );
 

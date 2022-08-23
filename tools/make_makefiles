@@ -229,7 +229,7 @@ sub parse_makefile($)
         {
             die "Configure substitution is not allowed in $file" unless $file eq "Makefile";
         }
-        if (/^\s*(MODULE|IMPORTLIB|TESTDLL|PARENTSRC|APPMODE|EXTRADLLFLAGS)\s*=\s*(.*)/)
+        if (/^\s*(MODULE|IMPORTLIB|TESTDLL|STATICLIB|PARENTSRC|EXTRADLLFLAGS)\s*=\s*(.*)/)
         {
             my $var = $1;
             $make{$var} = $2;
@@ -433,31 +433,28 @@ sub update_makefiles(@)
             die "MODULE should not be defined in $file" if defined $make{"MODULE"};
             die "STATICLIB should not be defined in $file" if defined $make{"STATICLIB"};
         }
-        elsif (defined($make{"MODULE"}) && $make{"MODULE"} =~ /\.a$/)  # import lib
+        elsif (defined($make{"STATICLIB"}))
         {
-            die "MODULE should not be defined as static lib in $file" unless $file =~ /^dlls\//;
-            die "APPMODE should not be defined in $file" if defined $make{"APPMODE"};
-            die "STATICLIB should not be defined in $file" if defined $make{"STATICLIB"};
+            die "MODULE should not be defined in $file" if defined $make{"MODULE"};
+            die "invalid STATICLIB name" unless $make{"STATICLIB"} =~ /\.a$/;
         }
         elsif (defined($make{"MODULE"}))  # dll or program
         {
             (my $name = $file) =~ s/^(dlls|programs)\/(.*)\/Makefile/$2/;
             my $dllflags = $make{"EXTRADLLFLAGS"} || "";
-            if (defined $make{"APPMODE"}) { $dllflags .= " " . $make{"APPMODE"}; }
+            die "invalid MODULE name" if $make{"MODULE"} =~ /\.a$/;
             die "MODULE should not be defined in $file" unless $file =~ /^(dlls|programs)\//;
             die "STATICLIB should not be defined in $file" if defined $make{"STATICLIB"};
-            die "Invalid MODULE in $file" if $name =~ /\./ && $make{"MODULE"} ne $name;
             if ($file =~ /^programs\//)
             {
                 die "EXTRADLLFLAGS should be defined in $file" unless $dllflags;
                 die "EXTRADLLFLAGS should contain -mconsole or -mwindows in $file" unless $dllflags =~ /-m(console|windows)/;
-                die "Invalid MODULE in $file" unless $name =~ /\./ || $make{"MODULE"} eq "$name.exe";
+                die "Invalid MODULE in $file" unless ($name =~ /\./ && $make{"MODULE"} eq $name) || $make{"MODULE"} eq "$name.exe";
             }
             else
             {
-                die "APPMODE should not be defined in $file" if defined $make{"APPMODE"} ;
                 die "EXTRADLLFLAGS should not contain -mconsole or -mwindows in $file" if $dllflags =~ /-m(console|windows)/;
-                die "Invalid MODULE in $file" unless $name =~ /\./ || $make{"MODULE"} eq "$name.dll";
+                die "Invalid MODULE in $file" unless ($name =~ /\./ && $make{"MODULE"} eq $name) || $make{"MODULE"} eq "$name.dll";
             }
             if (defined $make{"IMPORTLIB"})
             {
@@ -468,9 +465,9 @@ sub update_makefiles(@)
         }
         elsif ($file =~ /^tools.*\/Makefile$/)
         {
-            die "APPMODE should not be defined in $file" if defined $make{"APPMODE"};
-            die "EXTRADLLFLAGS should not be defined in $file" if defined $make{"EXTRADLLFLAGS"};
+            die "MODULE should not be defined in $file" if defined $make{"MODULE"};
             die "STATICLIB should not be defined in $file" if defined $make{"STATICLIB"};
+            die "EXTRADLLFLAGS should not be defined in $file" if defined $make{"EXTRADLLFLAGS"};
             $args = ",,[test \"x\$enable_tools\" = xno]";
         }
         push @lines, "WINE_CONFIG_MAKEFILE($dir$args)\n";

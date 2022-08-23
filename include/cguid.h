@@ -19,8 +19,6 @@
 #ifndef __CGUID_H__
 #define __CGUID_H__
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -108,7 +106,5 @@ extern const GUID GUID_TRISTATE;
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __CGUID_H__ */

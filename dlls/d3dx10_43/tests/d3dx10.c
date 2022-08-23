@@ -22,6 +22,8 @@
 #include "d3dx10.h"
 #include "wine/test.h"
 
+#define D3DERR_INVALIDCALL 0x8876086c
+
 /* 1x1 1bpp bmp image */
 static const BYTE test_bmp_1bpp[] =
 {
@@ -30,6 +32,10 @@ static const BYTE test_bmp_1bpp[] =
     0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x12, 0x0b, 0x00, 0x00, 0x12, 0x0b, 0x00, 0x00, 0x02, 0x00,
     0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0xf1, 0xf2, 0xf3, 0x80, 0xf4, 0xf5, 0xf6, 0x81, 0x00, 0x00,
     0x00, 0x00
+};
+static const BYTE test_bmp_1bpp_data[] =
+{
+    0xf3, 0xf2, 0xf1, 0xff
 };
 
 /* 1x1 4bpp bmp image */
@@ -41,6 +47,10 @@ static const BYTE test_bmp_4bpp[] =
     0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0xf1, 0xf2, 0xf3, 0x80, 0xf4, 0xf5, 0xf6, 0x81, 0x00, 0x00,
     0x00, 0x00
 };
+static const BYTE test_bmp_4bpp_data[] =
+{
+    0xf3, 0xf2, 0xf1, 0xff
+};
 
 /* 1x1 8bpp bmp image */
 static const BYTE test_bmp_8bpp[] =
@@ -51,6 +61,10 @@ static const BYTE test_bmp_8bpp[] =
     0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0xf1, 0xf2, 0xf3, 0x80, 0xf4, 0xf5, 0xf6, 0x81, 0x00, 0x00,
     0x00, 0x00
 };
+static const BYTE test_bmp_8bpp_data[] =
+{
+    0xf3, 0xf2, 0xf1, 0xff
+};
 
 /* 1x1 16bpp bmp image */
 static const BYTE test_bmp_16bpp[] =
@@ -60,6 +74,10 @@ static const BYTE test_bmp_16bpp[] =
     0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x12, 0x0b, 0x00, 0x00, 0x12, 0x0b, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0e, 0x42, 0x00, 0x00, 0x00, 0x00
 };
+static const BYTE test_bmp_16bpp_data[] =
+{
+    0x84, 0x84, 0x73, 0xff
+};
 
 /* 1x1 24bpp bmp image */
 static const BYTE test_bmp_24bpp[] =
@@ -68,6 +86,10 @@ static const BYTE test_bmp_24bpp[] =
     0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x18, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x12, 0x0b, 0x00, 0x00, 0x12, 0x0b, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x73, 0x84, 0x84, 0x00, 0x00, 0x00
+};
+static const BYTE test_bmp_24bpp_data[] =
+{
+    0x84, 0x84, 0x73, 0xff
 };
 
 /* 2x2 32bpp XRGB bmp image */
@@ -79,6 +101,11 @@ static const BYTE test_bmp_32bpp_xrgb[] =
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xa0, 0xb0, 0xc0, 0x00, 0xa1, 0xb1, 0xc1, 0x00, 0xa2, 0xb2,
     0xc2, 0x00, 0xa3, 0xb3, 0xc3, 0x00
 };
+static const BYTE test_bmp_32bpp_xrgb_data[] =
+{
+    0xc2, 0xb2, 0xa2, 0xff, 0xc3, 0xb3, 0xa3, 0xff, 0xc0, 0xb0, 0xa0, 0xff, 0xc1, 0xb1, 0xa1, 0xff
+
+};
 
 /* 2x2 32bpp ARGB bmp image */
 static const BYTE test_bmp_32bpp_argb[] =
@@ -89,6 +116,11 @@ static const BYTE test_bmp_32bpp_argb[] =
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xa0, 0xb0, 0xc0, 0x00, 0xa1, 0xb1, 0xc1, 0x00, 0xa2, 0xb2,
     0xc2, 0x00, 0xa3, 0xb3, 0xc3, 0x01
 };
+static const BYTE test_bmp_32bpp_argb_data[] =
+{
+    0xc2, 0xb2, 0xa2, 0xff, 0xc3, 0xb3, 0xa3, 0xff, 0xc0, 0xb0, 0xa0, 0xff, 0xc1, 0xb1, 0xa1, 0xff
+
+};
 
 /* 1x1 8bpp gray png image */
 static const BYTE test_png_8bpp_gray[] =
@@ -98,6 +130,10 @@ static const BYTE test_png_8bpp_gray[] =
     0x55, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x08, 0xd7, 0x63, 0xf8, 0x0f, 0x00, 0x01,
     0x01, 0x01, 0x00, 0x1b, 0xb6, 0xee, 0x56, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
     0x42, 0x60, 0x82
+};
+static const BYTE test_png_8bpp_gray_data[] =
+{
+    0xff, 0xff, 0xff, 0xff
 };
 
 /* 1x1 jpg image */
@@ -122,6 +158,10 @@ static const BYTE test_jpg[] =
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xda, 0x00, 0x0c, 0x03, 0x01,
     0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00, 0xb2, 0xc0, 0x07, 0xff, 0xd9
 };
+static const BYTE test_jpg_data[] =
+{
+    0xff, 0xff, 0xff, 0xff
+};
 
 /* 1x1 gif image */
 static const BYTE test_gif[] =
@@ -129,6 +169,10 @@ static const BYTE test_gif[] =
     0x47, 0x49, 0x46, 0x38, 0x37, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0xff, 0xff, 0xff,
     0xff, 0xff, 0xff, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44,
     0x01, 0x00, 0x3b
+};
+static const BYTE test_gif_data[] =
+{
+    0xff, 0xff, 0xff, 0xff
 };
 
 /* 1x1 tiff image */
@@ -152,6 +196,10 @@ static const BYTE test_tiff[] =
     0x69, 0x66, 0x00, 0x00, 0x00, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x48,
     0x00, 0x00, 0x00, 0x01
 };
+static const BYTE test_tiff_data[] =
+{
+    0x00, 0x00, 0x00, 0xff
+};
 
 /* 1x1 alpha dds image */
 static const BYTE test_dds_alpha[] =
@@ -164,6 +212,10 @@ static const BYTE test_dds_alpha[] =
     0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xff
+};
+static const BYTE test_dds_alpha_data[] =
+{
     0xff
 };
 
@@ -180,6 +232,10 @@ static const BYTE test_dds_luminance[] =
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x82
 };
+static const BYTE test_dds_luminance_data[] =
+{
+    0x82, 0x82, 0x82, 0xff
+};
 
 /* 1x1 16bpp dds image */
 static const BYTE test_dds_16bpp[] =
@@ -193,6 +249,10 @@ static const BYTE test_dds_16bpp[] =
     0xe0, 0x03, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x0e, 0x42
+};
+static const BYTE test_dds_16bpp_data[] =
+{
+    0x84, 0x84, 0x73, 0xff
 };
 
 /* 1x1 24bpp dds image */
@@ -208,6 +268,10 @@ static const BYTE test_dds_24bpp[] =
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x70, 0x81, 0x83
 };
+static const BYTE test_dds_24bpp_data[] =
+{
+    0x83, 0x81, 0x70, 0xff
+};
 
 /* 1x1 32bpp dds image */
 static const BYTE test_dds_32bpp[] =
@@ -222,6 +286,10 @@ static const BYTE test_dds_32bpp[] =
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x70, 0x81, 0x83, 0xff
 };
+static const BYTE test_dds_32bpp_data[] =
+{
+    0x83, 0x81, 0x70, 0xff
+};
 
 /* 1x1 64bpp dds image */
 static const BYTE test_dds_64bpp[] =
@@ -234,6 +302,10 @@ static const BYTE test_dds_64bpp[] =
     0x04, 0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x83, 0x83, 0x81, 0x81, 0x70, 0x70, 0xff, 0xff
+};
+static const BYTE test_dds_64bpp_data[] =
+{
     0x83, 0x83, 0x81, 0x81, 0x70, 0x70, 0xff, 0xff
 };
 
@@ -251,6 +323,10 @@ static const BYTE test_dds_96bpp[] =
     0x06, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x84, 0x83, 0x03, 0x3f, 0x82, 0x81, 0x01, 0x3f, 0xe2, 0xe0, 0xe0, 0x3e
 };
+static const BYTE test_dds_96bpp_data[] =
+{
+    0x84, 0x83, 0x03, 0x3f, 0x82, 0x81, 0x01, 0x3f, 0xe2, 0xe0, 0xe0, 0x3e
+};
 
 /* 1x1 128bpp dds image */
 static const BYTE test_dds_128bpp[] =
@@ -265,6 +341,11 @@ static const BYTE test_dds_128bpp[] =
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x84, 0x83, 0x03, 0x3f, 0x82, 0x81, 0x01, 0x3f, 0xe2, 0xe0, 0xe0, 0x3e, 0x00, 0x00, 0x80, 0x3f
 };
+static const BYTE test_dds_128bpp_data[] =
+{
+    0x84, 0x83, 0x03, 0x3f, 0x82, 0x81, 0x01, 0x3f, 0xe2, 0xe0, 0xe0, 0x3e, 0x00, 0x00, 0x80, 0x3f
+
+};
 
 /* 4x4 DXT1 dds image */
 static const BYTE test_dds_dxt1[] =
@@ -277,6 +358,10 @@ static const BYTE test_dds_dxt1[] =
     0x04, 0x00, 0x00, 0x00, 0x44, 0x58, 0x54, 0x31, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x2a, 0x31, 0xf5, 0xbc, 0xe3, 0x6e, 0x2a, 0x3a
+};
+static const BYTE test_dds_dxt1_data[] =
+{
     0x2a, 0x31, 0xf5, 0xbc, 0xe3, 0x6e, 0x2a, 0x3a
 };
 
@@ -295,6 +380,11 @@ static const BYTE test_dds_dxt2[] =
     0xff, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x57, 0x53, 0x00, 0x00, 0x52, 0x52, 0x55, 0x55,
     0x0f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xce, 0x59, 0x00, 0x00, 0x54, 0x55, 0x55, 0x55
 };
+static const BYTE test_dds_dxt2_data[] =
+{
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfd, 0xde, 0xc4, 0x10, 0x2f, 0xbf, 0xff, 0x7b
+
+};
 
 /* 1x3 DXT3 dds image */
 static const BYTE test_dds_dxt3[] =
@@ -309,6 +399,11 @@ static const BYTE test_dds_dxt3[] =
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x0c, 0x92, 0x38, 0x84, 0x00, 0xff, 0x55, 0xff,
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x53, 0x8b, 0x53, 0x8b, 0x00, 0x00, 0x00, 0x00
+};
+static const BYTE test_dds_dxt3_data[] =
+{
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x4e, 0x92, 0xd6, 0x83, 0x00, 0xaa, 0x55, 0x55
+
 };
 
 /* 4x4 DXT4 dds image */
@@ -326,6 +421,11 @@ static const BYTE test_dds_dxt4[] =
     0xff, 0x00, 0x40, 0x02, 0x24, 0x49, 0x92, 0x24, 0x57, 0x53, 0x00, 0x00, 0x52, 0x52, 0x55, 0x55,
     0xff, 0x00, 0x48, 0x92, 0x24, 0x49, 0x92, 0x24, 0xce, 0x59, 0x00, 0x00, 0x54, 0x55, 0x55, 0x55
 };
+static const BYTE test_dds_dxt4_data[] =
+{
+    0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xfd, 0xde, 0xc4, 0x10, 0x2f, 0xbf, 0xff, 0x7b
+
+};
 
 /* 4x2 DXT5 dds image */
 static const BYTE test_dds_dxt5[] =
@@ -339,6 +439,11 @@ static const BYTE test_dds_dxt5[] =
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x10, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xef, 0x87, 0x0f, 0x78, 0x05, 0x05, 0x50, 0x50
+};
+static const BYTE test_dds_dxt5_data[] =
+{
+    0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xef, 0x87, 0x0f, 0x78, 0x05, 0x05, 0x05, 0x05
+
 };
 
 /* 4x4 BC4 dds image */
@@ -354,6 +459,10 @@ static const BYTE test_dds_bc4[] =
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0xd9, 0x15, 0xbc, 0x41, 0x5b, 0xa3, 0x3d, 0x3a, 0x8f, 0x3d, 0x45, 0x81, 0x20, 0x45, 0x81, 0x20,
     0x6f, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+static const BYTE test_dds_bc4_data[] =
+{
+    0xd9, 0x15, 0xbc, 0x41, 0x5b, 0xa3, 0x3d, 0x3a
 };
 
 /* 6x3 BC5 dds image */
@@ -371,6 +480,12 @@ static const BYTE test_dds_bc5[] =
     0xd5, 0x0f, 0xc3, 0x50, 0x96, 0xcf, 0x53, 0x96, 0xdf, 0x16, 0xc3, 0x50, 0x96, 0xcf, 0x53, 0x96,
     0x83, 0x55, 0x08, 0x83, 0x30, 0x08, 0x83, 0x30, 0x79, 0x46, 0x31, 0x1c, 0xc3, 0x31, 0x1c, 0xc3,
     0x6d, 0x6d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5c, 0x5c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+static const BYTE test_dds_bc5_data[] =
+{
+    0x95, 0x35, 0xe2, 0xa3, 0xf5, 0xd2, 0x28, 0x68, 0x65, 0x32, 0x7c, 0x4e, 0xdb, 0xe4, 0x56, 0x0a,
+    0xb9, 0x33, 0xaf, 0xf0, 0x52, 0xbe, 0xed, 0x27, 0xb4, 0x2e, 0xa6, 0x60, 0x4e, 0xb6, 0x5d, 0x3f
+
 };
 
 /* 4x4 DXT1 cube map */
@@ -393,6 +508,10 @@ static const BYTE test_dds_cube[] =
     0xf5, 0xa7, 0x08, 0x69, 0x74, 0xc0, 0xbf, 0xd7, 0x32, 0x96, 0x0b, 0x7b, 0xcc, 0x55, 0xcc, 0x55,
     0x0e, 0x84, 0x0e, 0x84, 0x00, 0x00, 0x00, 0x00, 0xf5, 0xa7, 0x08, 0x69, 0x74, 0xc0, 0xbf, 0xd7,
     0x32, 0x96, 0x0b, 0x7b, 0xcc, 0x55, 0xcc, 0x55, 0x0e, 0x84, 0x0e, 0x84, 0x00, 0x00, 0x00, 0x00
+};
+static const BYTE test_dds_cube_data[] =
+{
+    0xf5, 0xa7, 0x08, 0x69, 0x74, 0xc0, 0xbf, 0xd7
 };
 
 /* 1x1 wmp image */
@@ -417,125 +536,130 @@ static const BYTE test_wmp[] =
     0x82, 0x76, 0x71, 0x13, 0xde, 0x50, 0xd4, 0x2d, 0xc2, 0xda, 0x1e, 0x3b, 0xa6, 0xa1, 0x62, 0x7b,
     0xca, 0x1a, 0x85, 0x4b, 0x6e, 0x74, 0xec, 0x60
 };
+static const BYTE test_wmp_data[] =
+{
+    0xff, 0xff, 0xff, 0xff
+};
 
 static const struct test_image
 {
     const BYTE *data;
     unsigned int size;
-    D3DX10_IMAGE_INFO expected;
+    const BYTE *expected_data;
+    D3DX10_IMAGE_INFO expected_info;
 }
 test_image[] =
 {
     {
-        test_bmp_1bpp,       sizeof(test_bmp_1bpp),
+        test_bmp_1bpp,       sizeof(test_bmp_1bpp),          test_bmp_1bpp_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_BMP}
     },
     {
-        test_bmp_4bpp,       sizeof(test_bmp_4bpp),
+        test_bmp_4bpp,       sizeof(test_bmp_4bpp),          test_bmp_4bpp_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_BMP}
     },
     {
-        test_bmp_8bpp,       sizeof(test_bmp_8bpp),
+        test_bmp_8bpp,       sizeof(test_bmp_8bpp),          test_bmp_8bpp_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_BMP}
     },
     {
-        test_bmp_16bpp,      sizeof(test_bmp_16bpp),
+        test_bmp_16bpp,      sizeof(test_bmp_16bpp),         test_bmp_16bpp_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_BMP}
     },
     {
-        test_bmp_24bpp,      sizeof(test_bmp_24bpp),
+        test_bmp_24bpp,      sizeof(test_bmp_24bpp),         test_bmp_24bpp_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_BMP}
     },
     {
-        test_bmp_32bpp_xrgb, sizeof(test_bmp_32bpp_xrgb),
+        test_bmp_32bpp_xrgb, sizeof(test_bmp_32bpp_xrgb),    test_bmp_32bpp_xrgb_data,
         {2, 2, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_BMP}
     },
     {
-        test_bmp_32bpp_argb, sizeof(test_bmp_32bpp_argb),
+        test_bmp_32bpp_argb, sizeof(test_bmp_32bpp_argb),    test_bmp_32bpp_argb_data,
         {2, 2, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_BMP}
     },
     {
-        test_png_8bpp_gray,  sizeof(test_png_8bpp_gray),
+        test_png_8bpp_gray,  sizeof(test_png_8bpp_gray),     test_png_8bpp_gray_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_PNG}
     },
     {
-        test_jpg,            sizeof(test_jpg),
+        test_jpg,            sizeof(test_jpg),               test_jpg_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_JPG}
     },
     {
-        test_gif,            sizeof(test_gif),
+        test_gif,            sizeof(test_gif),               test_gif_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_GIF}
     },
     {
-        test_tiff,           sizeof(test_tiff),
+        test_tiff,           sizeof(test_tiff),              test_tiff_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_TIFF}
     },
     {
-        test_dds_alpha,      sizeof(test_dds_alpha),
+        test_dds_alpha,      sizeof(test_dds_alpha),         test_dds_alpha_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_A8_UNORM,           D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_dds_luminance,  sizeof(test_dds_luminance),
+        test_dds_luminance,  sizeof(test_dds_luminance),     test_dds_luminance_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_dds_16bpp,      sizeof(test_dds_16bpp),
+        test_dds_16bpp,      sizeof(test_dds_16bpp),         test_dds_16bpp_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_dds_24bpp,      sizeof(test_dds_24bpp),
+        test_dds_24bpp,      sizeof(test_dds_24bpp),         test_dds_24bpp_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_dds_32bpp,      sizeof(test_dds_32bpp),
+        test_dds_32bpp,      sizeof(test_dds_32bpp),         test_dds_32bpp_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_dds_64bpp,      sizeof(test_dds_64bpp),
+        test_dds_64bpp,      sizeof(test_dds_64bpp),         test_dds_64bpp_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R16G16B16A16_UNORM, D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_dds_96bpp,      sizeof(test_dds_96bpp),
+        test_dds_96bpp,      sizeof(test_dds_96bpp),         test_dds_96bpp_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R32G32B32_FLOAT,    D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_dds_128bpp,     sizeof(test_dds_128bpp),
+        test_dds_128bpp,     sizeof(test_dds_128bpp),        test_dds_128bpp_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R32G32B32A32_FLOAT, D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_dds_dxt1,       sizeof(test_dds_dxt1),
+        test_dds_dxt1,       sizeof(test_dds_dxt1),          test_dds_dxt1_data,
         {4, 4, 1, 1, 1, 0,   DXGI_FORMAT_BC1_UNORM,          D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_dds_dxt2,       sizeof(test_dds_dxt2),
+        test_dds_dxt2,       sizeof(test_dds_dxt2),          test_dds_dxt2_data,
         {4, 4, 1, 1, 3, 0,   DXGI_FORMAT_BC2_UNORM,          D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_dds_dxt3,       sizeof(test_dds_dxt3),
+        test_dds_dxt3,       sizeof(test_dds_dxt3),          test_dds_dxt3_data,
         {1, 3, 1, 1, 2, 0,   DXGI_FORMAT_BC2_UNORM,          D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_dds_dxt4,       sizeof(test_dds_dxt4),
+        test_dds_dxt4,       sizeof(test_dds_dxt4),          test_dds_dxt4_data,
         {4, 4, 1, 1, 3, 0,   DXGI_FORMAT_BC3_UNORM,          D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_dds_dxt5,       sizeof(test_dds_dxt5),
+        test_dds_dxt5,       sizeof(test_dds_dxt5),          test_dds_dxt5_data,
         {4, 2, 1, 1, 1, 0,   DXGI_FORMAT_BC3_UNORM,          D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_dds_bc4,        sizeof(test_dds_bc4),
+        test_dds_bc4,        sizeof(test_dds_bc4),           test_dds_bc4_data,
         {4, 4, 1, 1, 3, 0,   DXGI_FORMAT_BC4_UNORM,          D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_dds_bc5,        sizeof(test_dds_bc5),
+        test_dds_bc5,        sizeof(test_dds_bc5),           test_dds_bc5_data,
         {6, 3, 1, 1, 3, 0,   DXGI_FORMAT_BC5_UNORM,          D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_dds_cube,       sizeof(test_dds_cube),
+        test_dds_cube,       sizeof(test_dds_cube),          test_dds_cube_data,
         {4, 4, 1, 6, 3, 0x4, DXGI_FORMAT_BC1_UNORM,          D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_DDS}
     },
     {
-        test_wmp,            sizeof(test_wmp),
+        test_wmp,            sizeof(test_wmp),               test_wmp_data,
         {1, 1, 1, 1, 1, 0,   DXGI_FORMAT_R8G8B8A8_UNORM,     D3D10_RESOURCE_DIMENSION_TEXTURE2D, D3DX10_IFF_WMP}
     },
 };
@@ -562,6 +686,147 @@ static BOOL is_block_compressed(DXGI_FORMAT format)
             return TRUE;
 
     return FALSE;
+}
+
+static unsigned int get_bpp_from_format(DXGI_FORMAT format)
+{
+    switch (format)
+    {
+        case DXGI_FORMAT_R32G32B32A32_TYPELESS:
+        case DXGI_FORMAT_R32G32B32A32_FLOAT:
+        case DXGI_FORMAT_R32G32B32A32_UINT:
+        case DXGI_FORMAT_R32G32B32A32_SINT:
+            return 128;
+        case DXGI_FORMAT_R32G32B32_TYPELESS:
+        case DXGI_FORMAT_R32G32B32_FLOAT:
+        case DXGI_FORMAT_R32G32B32_UINT:
+        case DXGI_FORMAT_R32G32B32_SINT:
+            return 96;
+        case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+        case DXGI_FORMAT_R16G16B16A16_FLOAT:
+        case DXGI_FORMAT_R16G16B16A16_UNORM:
+        case DXGI_FORMAT_R16G16B16A16_UINT:
+        case DXGI_FORMAT_R16G16B16A16_SNORM:
+        case DXGI_FORMAT_R16G16B16A16_SINT:
+        case DXGI_FORMAT_R32G32_TYPELESS:
+        case DXGI_FORMAT_R32G32_FLOAT:
+        case DXGI_FORMAT_R32G32_UINT:
+        case DXGI_FORMAT_R32G32_SINT:
+        case DXGI_FORMAT_R32G8X24_TYPELESS:
+        case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+        case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS:
+        case DXGI_FORMAT_X32_TYPELESS_G8X24_UINT:
+        case DXGI_FORMAT_Y416:
+        case DXGI_FORMAT_Y210:
+        case DXGI_FORMAT_Y216:
+            return 64;
+        case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+        case DXGI_FORMAT_R10G10B10A2_UNORM:
+        case DXGI_FORMAT_R10G10B10A2_UINT:
+        case DXGI_FORMAT_R11G11B10_FLOAT:
+        case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+        case DXGI_FORMAT_R8G8B8A8_UNORM:
+        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+        case DXGI_FORMAT_R8G8B8A8_UINT:
+        case DXGI_FORMAT_R8G8B8A8_SNORM:
+        case DXGI_FORMAT_R8G8B8A8_SINT:
+        case DXGI_FORMAT_R16G16_TYPELESS:
+        case DXGI_FORMAT_R16G16_FLOAT:
+        case DXGI_FORMAT_R16G16_UNORM:
+        case DXGI_FORMAT_R16G16_UINT:
+        case DXGI_FORMAT_R16G16_SNORM:
+        case DXGI_FORMAT_R16G16_SINT:
+        case DXGI_FORMAT_R32_TYPELESS:
+        case DXGI_FORMAT_D32_FLOAT:
+        case DXGI_FORMAT_R32_FLOAT:
+        case DXGI_FORMAT_R32_UINT:
+        case DXGI_FORMAT_R32_SINT:
+        case DXGI_FORMAT_R24G8_TYPELESS:
+        case DXGI_FORMAT_D24_UNORM_S8_UINT:
+        case DXGI_FORMAT_R24_UNORM_X8_TYPELESS:
+        case DXGI_FORMAT_X24_TYPELESS_G8_UINT:
+        case DXGI_FORMAT_R9G9B9E5_SHAREDEXP:
+        case DXGI_FORMAT_R8G8_B8G8_UNORM:
+        case DXGI_FORMAT_G8R8_G8B8_UNORM:
+        case DXGI_FORMAT_B8G8R8A8_UNORM:
+        case DXGI_FORMAT_B8G8R8X8_UNORM:
+        case DXGI_FORMAT_R10G10B10_XR_BIAS_A2_UNORM:
+        case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+        case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+        case DXGI_FORMAT_B8G8R8X8_TYPELESS:
+        case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+        case DXGI_FORMAT_AYUV:
+        case DXGI_FORMAT_Y410:
+        case DXGI_FORMAT_YUY2:
+            return 32;
+        case DXGI_FORMAT_P010:
+        case DXGI_FORMAT_P016:
+            return 24;
+        case DXGI_FORMAT_R8G8_TYPELESS:
+        case DXGI_FORMAT_R8G8_UNORM:
+        case DXGI_FORMAT_R8G8_UINT:
+        case DXGI_FORMAT_R8G8_SNORM:
+        case DXGI_FORMAT_R8G8_SINT:
+        case DXGI_FORMAT_R16_TYPELESS:
+        case DXGI_FORMAT_R16_FLOAT:
+        case DXGI_FORMAT_D16_UNORM:
+        case DXGI_FORMAT_R16_UNORM:
+        case DXGI_FORMAT_R16_UINT:
+        case DXGI_FORMAT_R16_SNORM:
+        case DXGI_FORMAT_R16_SINT:
+        case DXGI_FORMAT_B5G6R5_UNORM:
+        case DXGI_FORMAT_B5G5R5A1_UNORM:
+        case DXGI_FORMAT_A8P8:
+        case DXGI_FORMAT_B4G4R4A4_UNORM:
+            return 16;
+        case DXGI_FORMAT_NV12:
+        case DXGI_FORMAT_420_OPAQUE:
+        case DXGI_FORMAT_NV11:
+            return 12;
+        case DXGI_FORMAT_R8_TYPELESS:
+        case DXGI_FORMAT_R8_UNORM:
+        case DXGI_FORMAT_R8_UINT:
+        case DXGI_FORMAT_R8_SNORM:
+        case DXGI_FORMAT_R8_SINT:
+        case DXGI_FORMAT_A8_UNORM:
+        case DXGI_FORMAT_AI44:
+        case DXGI_FORMAT_IA44:
+        case DXGI_FORMAT_P8:
+        case DXGI_FORMAT_BC2_TYPELESS:
+        case DXGI_FORMAT_BC2_UNORM:
+        case DXGI_FORMAT_BC2_UNORM_SRGB:
+        case DXGI_FORMAT_BC3_TYPELESS:
+        case DXGI_FORMAT_BC3_UNORM:
+        case DXGI_FORMAT_BC3_UNORM_SRGB:
+        case DXGI_FORMAT_BC5_TYPELESS:
+        case DXGI_FORMAT_BC5_UNORM:
+        case DXGI_FORMAT_BC5_SNORM:
+        case DXGI_FORMAT_BC6H_TYPELESS:
+        case DXGI_FORMAT_BC6H_UF16:
+        case DXGI_FORMAT_BC6H_SF16:
+        case DXGI_FORMAT_BC7_TYPELESS:
+        case DXGI_FORMAT_BC7_UNORM:
+        case DXGI_FORMAT_BC7_UNORM_SRGB:
+            return 8;
+        case DXGI_FORMAT_BC1_TYPELESS:
+        case DXGI_FORMAT_BC1_UNORM:
+        case DXGI_FORMAT_BC1_UNORM_SRGB:
+        case DXGI_FORMAT_BC4_TYPELESS:
+        case DXGI_FORMAT_BC4_UNORM:
+        case DXGI_FORMAT_BC4_SNORM:
+            return 4;
+        case DXGI_FORMAT_R1_UNORM:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static ULONG get_refcount(void *iface)
+{
+    IUnknown *unknown = iface;
+    IUnknown_AddRef(unknown);
+    return IUnknown_Release(unknown);
 }
 
 static BOOL compare_float(float f, float g, unsigned int ulps)
@@ -685,38 +950,64 @@ static void delete_resource_module(const WCHAR *filename, HMODULE module)
     DeleteFileW(path);
 }
 
-static void check_image_info(D3DX10_IMAGE_INFO *image_info, unsigned int i, unsigned int line)
+static void check_image_info(D3DX10_IMAGE_INFO *image_info, const struct test_image *image, unsigned int line)
 {
-    ok_(__FILE__, line)(image_info->Width == test_image[i].expected.Width,
-            "Test %u: Got unexpected Width %u, expected %u.\n",
-            i, image_info->Width, test_image[i].expected.Width);
-    ok_(__FILE__, line)(image_info->Height == test_image[i].expected.Height,
-            "Test %u: Got unexpected Height %u, expected %u.\n",
-            i, image_info->Height, test_image[i].expected.Height);
-    ok_(__FILE__, line)(image_info->Depth == test_image[i].expected.Depth,
-            "Test %u: Got unexpected Depth %u, expected %u.\n",
-            i, image_info->Depth, test_image[i].expected.Depth);
-    ok_(__FILE__, line)(image_info->ArraySize == test_image[i].expected.ArraySize,
-            "Test %u: Got unexpected ArraySize %u, expected %u.\n",
-            i, image_info->ArraySize, test_image[i].expected.ArraySize);
-    ok_(__FILE__, line)(image_info->MipLevels == test_image[i].expected.MipLevels,
-            "Test %u: Got unexpected MipLevels %u, expected %u.\n",
-            i, image_info->MipLevels, test_image[i].expected.MipLevels);
-    ok_(__FILE__, line)(image_info->MiscFlags == test_image[i].expected.MiscFlags,
-            "Test %u: Got unexpected MiscFlags %#x, expected %#x.\n",
-            i, image_info->MiscFlags, test_image[i].expected.MiscFlags);
-    ok_(__FILE__, line)(image_info->Format == test_image[i].expected.Format,
-            "Test %u: Got unexpected Format %#x, expected %#x.\n",
-            i, image_info->Format, test_image[i].expected.Format);
-    ok_(__FILE__, line)(image_info->ResourceDimension == test_image[i].expected.ResourceDimension,
-            "Test %u: Got unexpected ResourceDimension %u, expected %u.\n",
-            i, image_info->ResourceDimension, test_image[i].expected.ResourceDimension);
-    ok_(__FILE__, line)(image_info->ImageFileFormat == test_image[i].expected.ImageFileFormat,
-            "Test %u: Got unexpected ImageFileFormat %u, expected %u.\n",
-            i, image_info->ImageFileFormat, test_image[i].expected.ImageFileFormat);
+    ok_(__FILE__, line)(image_info->Width == image->expected_info.Width,
+            "Got unexpected Width %u, expected %u.\n",
+            image_info->Width, image->expected_info.Width);
+    ok_(__FILE__, line)(image_info->Height == image->expected_info.Height,
+            "Got unexpected Height %u, expected %u.\n",
+            image_info->Height, image->expected_info.Height);
+    ok_(__FILE__, line)(image_info->Depth == image->expected_info.Depth,
+            "Got unexpected Depth %u, expected %u.\n",
+            image_info->Depth, image->expected_info.Depth);
+    ok_(__FILE__, line)(image_info->ArraySize == image->expected_info.ArraySize,
+            "Got unexpected ArraySize %u, expected %u.\n",
+            image_info->ArraySize, image->expected_info.ArraySize);
+    ok_(__FILE__, line)(image_info->MipLevels == image->expected_info.MipLevels,
+            "Got unexpected MipLevels %u, expected %u.\n",
+            image_info->MipLevels, image->expected_info.MipLevels);
+    ok_(__FILE__, line)(image_info->MiscFlags == image->expected_info.MiscFlags,
+            "Got unexpected MiscFlags %#x, expected %#x.\n",
+            image_info->MiscFlags, image->expected_info.MiscFlags);
+    ok_(__FILE__, line)(image_info->Format == image->expected_info.Format,
+            "Got unexpected Format %#x, expected %#x.\n",
+            image_info->Format, image->expected_info.Format);
+    ok_(__FILE__, line)(image_info->ResourceDimension == image->expected_info.ResourceDimension,
+            "Got unexpected ResourceDimension %u, expected %u.\n",
+            image_info->ResourceDimension, image->expected_info.ResourceDimension);
+    ok_(__FILE__, line)(image_info->ImageFileFormat == image->expected_info.ImageFileFormat,
+            "Got unexpected ImageFileFormat %u, expected %u.\n",
+            image_info->ImageFileFormat, image->expected_info.ImageFileFormat);
 }
 
-static void check_resource_info(ID3D10Resource *resource, unsigned int i, unsigned int line)
+static ID3D10Texture2D *get_texture_readback(ID3D10Texture2D *texture)
+{
+    D3D10_TEXTURE2D_DESC desc;
+    ID3D10Texture2D *readback;
+    ID3D10Device *device;
+    HRESULT hr;
+
+    ID3D10Texture2D_GetDevice(texture, &device);
+
+    ID3D10Texture2D_GetDesc(texture, &desc);
+    desc.Usage = D3D10_USAGE_STAGING;
+    desc.BindFlags = 0;
+    desc.CPUAccessFlags = D3D10_CPU_ACCESS_READ;
+
+    hr = ID3D10Device_CreateTexture2D(device, &desc, NULL, &readback);
+    if (hr != S_OK)
+    {
+        ID3D10Device_Release(device);
+        return NULL;
+    }
+    ID3D10Device_CopyResource(device, (ID3D10Resource *)readback, (ID3D10Resource *)texture);
+
+    ID3D10Device_Release(device);
+    return readback;
+}
+
+static void check_resource_info(ID3D10Resource *resource, const struct test_image *image, unsigned int line)
 {
     unsigned int expected_mip_levels, expected_width, expected_height, max_dimension;
     D3D10_RESOURCE_DIMENSION resource_dimension;
@@ -726,9 +1017,9 @@ static void check_resource_info(ID3D10Resource *resource, unsigned int i, unsign
     ID3D10Texture3D *texture_3d;
     HRESULT hr;
 
-    expected_width = test_image[i].expected.Width;
-    expected_height = test_image[i].expected.Height;
-    if (is_block_compressed(test_image[i].expected.Format))
+    expected_width = image->expected_info.Width;
+    expected_height = image->expected_info.Height;
+    if (is_block_compressed(image->expected_info.Format))
     {
         expected_width = (expected_width + 3) & ~3;
         expected_height = (expected_height + 3) & ~3;
@@ -742,65 +1033,137 @@ static void check_resource_info(ID3D10Resource *resource, unsigned int i, unsign
     }
 
     ID3D10Resource_GetType(resource, &resource_dimension);
-    ok(resource_dimension == test_image[i].expected.ResourceDimension,
-            "Test %u: Got unexpected ResourceDimension %u, expected %u.\n",
-            i, resource_dimension, test_image[i].expected.ResourceDimension);
+    ok(resource_dimension == image->expected_info.ResourceDimension,
+            "Got unexpected ResourceDimension %u, expected %u.\n",
+             resource_dimension, image->expected_info.ResourceDimension);
 
     switch (resource_dimension)
     {
         case D3D10_RESOURCE_DIMENSION_TEXTURE2D:
             hr = ID3D10Resource_QueryInterface(resource, &IID_ID3D10Texture2D, (void **)&texture_2d);
-            ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+            ok(hr == S_OK, "Got unexpected hr %#x.\n",  hr);
             ID3D10Texture2D_GetDesc(texture_2d, &desc_2d);
             ok_(__FILE__, line)(desc_2d.Width == expected_width,
-                    "Test %u: Got unexpected Width %u, expected %u.\n",
-                    i, desc_2d.Width, expected_width);
+                    "Got unexpected Width %u, expected %u.\n",
+                     desc_2d.Width, expected_width);
             ok_(__FILE__, line)(desc_2d.Height == expected_height,
-                    "Test %u: Got unexpected Height %u, expected %u.\n",
-                    i, desc_2d.Height, expected_height);
+                    "Got unexpected Height %u, expected %u.\n",
+                     desc_2d.Height, expected_height);
+            todo_wine_if(expected_mip_levels != 1)
             ok_(__FILE__, line)(desc_2d.MipLevels == expected_mip_levels,
-                    "Test %u: Got unexpected MipLevels %u, expected %u.\n",
-                    i, desc_2d.MipLevels, expected_mip_levels);
-            ok_(__FILE__, line)(desc_2d.ArraySize == test_image[i].expected.ArraySize,
-                    "Test %u: Got unexpected ArraySize %u, expected %u.\n",
-                    i, desc_2d.ArraySize, test_image[i].expected.ArraySize);
-            ok_(__FILE__, line)(desc_2d.Format == test_image[i].expected.Format,
-                    "Test %u: Got unexpected Format %u, expected %u.\n",
-                    i, desc_2d.Format, test_image[i].expected.Format);
-            ok_(__FILE__, line)(desc_2d.MiscFlags == test_image[i].expected.MiscFlags,
-                    "Test %u: Got unexpected MiscFlags %u, expected %u.\n",
-                    i, desc_2d.MiscFlags, test_image[i].expected.MiscFlags);
+                    "Got unexpected MipLevels %u, expected %u.\n",
+                     desc_2d.MipLevels, expected_mip_levels);
+            ok_(__FILE__, line)(desc_2d.ArraySize == image->expected_info.ArraySize,
+                    "Got unexpected ArraySize %u, expected %u.\n",
+                     desc_2d.ArraySize, image->expected_info.ArraySize);
+            ok_(__FILE__, line)(desc_2d.Format == image->expected_info.Format,
+                    "Got unexpected Format %u, expected %u.\n",
+                     desc_2d.Format, image->expected_info.Format);
+            ok_(__FILE__, line)(desc_2d.SampleDesc.Count == 1,
+                    "Got unexpected SampleDesc.Count %u, expected %u\n",
+                     desc_2d.SampleDesc.Count, 1);
+            ok_(__FILE__, line)(desc_2d.SampleDesc.Quality == 0,
+                    "Got unexpected SampleDesc.Quality %u, expected %u\n",
+                     desc_2d.SampleDesc.Quality, 0);
+            ok_(__FILE__, line)(desc_2d.Usage == D3D10_USAGE_DEFAULT,
+                    "Got unexpected Usage %u, expected %u\n",
+                     desc_2d.Usage, D3D10_USAGE_DEFAULT);
+            ok_(__FILE__, line)(desc_2d.BindFlags == D3D10_BIND_SHADER_RESOURCE,
+                    "Got unexpected BindFlags %#x, expected %#x\n",
+                     desc_2d.BindFlags, D3D10_BIND_SHADER_RESOURCE);
+            ok_(__FILE__, line)(desc_2d.CPUAccessFlags == 0,
+                    "Got unexpected CPUAccessFlags %#x, expected %#x\n",
+                     desc_2d.CPUAccessFlags, 0);
+            ok_(__FILE__, line)(desc_2d.MiscFlags == image->expected_info.MiscFlags,
+                    "Got unexpected MiscFlags %#x, expected %#x.\n",
+                     desc_2d.MiscFlags, image->expected_info.MiscFlags);
+
             ID3D10Texture2D_Release(texture_2d);
             break;
 
         case D3D10_RESOURCE_DIMENSION_TEXTURE3D:
             hr = ID3D10Resource_QueryInterface(resource, &IID_ID3D10Texture3D, (void **)&texture_3d);
-            ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+            ok(hr == S_OK, "Got unexpected hr %#x.\n",  hr);
             ID3D10Texture3D_GetDesc(texture_3d, &desc_3d);
             ok_(__FILE__, line)(desc_3d.Width == expected_width,
-                    "Test %u: Got unexpected Width %u, expected %u.\n",
-                    i, desc_3d.Width, expected_width);
+                    "Got unexpected Width %u, expected %u.\n",
+                     desc_3d.Width, expected_width);
             ok_(__FILE__, line)(desc_3d.Height == expected_height,
-                    "Test %u: Got unexpected Height %u, expected %u.\n",
-                    i, desc_3d.Height, expected_height);
-            ok_(__FILE__, line)(desc_3d.Depth == test_image[i].expected.Depth,
-                    "Test %u: Got unexpected Depth %u, expected %u.\n",
-                    i, desc_3d.Depth, test_image[i].expected.Depth);
+                    "Got unexpected Height %u, expected %u.\n",
+                     desc_3d.Height, expected_height);
+            ok_(__FILE__, line)(desc_3d.Depth == image->expected_info.Depth,
+                    "Got unexpected Depth %u, expected %u.\n",
+                     desc_3d.Depth, image->expected_info.Depth);
             ok_(__FILE__, line)(desc_3d.MipLevels == expected_mip_levels,
-                    "Test %u: Got unexpected MipLevels %u, expected %u.\n",
-                    i, desc_3d.MipLevels, expected_mip_levels);
-            ok_(__FILE__, line)(desc_3d.Format == test_image[i].expected.Format,
-                    "Test %u: Got unexpected Format %u, expected %u.\n",
-                    i, desc_3d.Format, test_image[i].expected.Format);
-            ok_(__FILE__, line)(desc_3d.MiscFlags == test_image[i].expected.MiscFlags,
-                    "Test %u: Got unexpected MiscFlags %u, expected %u.\n",
-                    i, desc_3d.MiscFlags, test_image[i].expected.MiscFlags);
+                    "Got unexpected MipLevels %u, expected %u.\n",
+                     desc_3d.MipLevels, expected_mip_levels);
+            ok_(__FILE__, line)(desc_3d.Format == image->expected_info.Format,
+                    "Got unexpected Format %u, expected %u.\n",
+                     desc_3d.Format, image->expected_info.Format);
+            ok_(__FILE__, line)(desc_3d.Usage == D3D10_USAGE_DEFAULT,
+                    "Got unexpected Usage %u, expected %u\n",
+                     desc_3d.Usage, D3D10_USAGE_DEFAULT);
+            ok_(__FILE__, line)(desc_3d.BindFlags == D3D10_BIND_SHADER_RESOURCE,
+                    "Got unexpected BindFlags %#x, expected %#x\n",
+                     desc_3d.BindFlags, D3D10_BIND_SHADER_RESOURCE);
+            ok_(__FILE__, line)(desc_3d.CPUAccessFlags == 0,
+                    "Got unexpected CPUAccessFlags %#x, expected %#x\n",
+                     desc_3d.CPUAccessFlags, 0);
+            ok_(__FILE__, line)(desc_3d.MiscFlags == image->expected_info.MiscFlags,
+                    "Got unexpected MiscFlags %#x, expected %#x.\n",
+                     desc_3d.MiscFlags, image->expected_info.MiscFlags);
             ID3D10Texture3D_Release(texture_3d);
             break;
 
         default:
             break;
     }
+}
+
+static void check_resource_data(ID3D10Resource *resource, const struct test_image *image, unsigned int line)
+{
+    unsigned int width, height, stride, i;
+    D3D10_MAPPED_TEXTURE2D map;
+    D3D10_TEXTURE2D_DESC desc;
+    ID3D10Texture2D *readback;
+    BOOL line_match;
+    HRESULT hr;
+
+    readback = get_texture_readback((ID3D10Texture2D *)resource);
+    ok_(__FILE__, line)(readback != NULL, "Failed to get texture readback.\n");
+    if (!readback)
+        return;
+
+    ID3D10Texture2D_GetDesc(readback, &desc);
+    width = desc.Width;
+    height = desc.Height;
+    stride = (width * get_bpp_from_format(desc.Format) + 7) / 8;
+    if (is_block_compressed(desc.Format))
+    {
+        stride *= 4;
+        height = (height + 3) / 4;
+    }
+
+    hr = ID3D10Texture2D_Map(readback, 0, D3D10_MAP_READ, 0, &map);
+    ok_(__FILE__, line)(hr == S_OK, "Map failed, hr %#x.\n", hr);
+    if (hr != S_OK)
+    {
+        ID3D10Texture2D_Unmap(readback, 0);
+        return;
+    }
+
+    for (i = 0; i < height; ++i)
+    {
+        line_match = !memcmp(image->expected_data + stride * i,
+                (BYTE *)map.pData + map.RowPitch * i, stride);
+        todo_wine_if(is_block_compressed(image->expected_info.Format)
+                && (image->expected_info.Width % 4 != 0 || image->expected_info.Height % 4 != 0))
+        ok_(__FILE__, line)(line_match, "Data mismatch for line %u.\n", i);
+        if (!line_match)
+            break;
+    }
+
+    ID3D10Texture2D_Unmap(readback, 0);
 }
 
 static void test_D3DX10UnsetAllDeviceObjects(void)
@@ -1530,12 +1893,15 @@ static void test_get_image_info(void)
 
     for (i = 0; i < ARRAY_SIZE(test_image); ++i)
     {
+        winetest_push_context("Test %u", i);
+
         hr = D3DX10GetImageInfoFromMemory(test_image[i].data, test_image[i].size, NULL, &image_info, NULL);
-        todo_wine_if(test_image[i].expected.ImageFileFormat == D3DX10_IFF_WMP)
-            ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
-        if (hr != S_OK)
-            continue;
-        check_image_info(&image_info, i, __LINE__);
+        ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
+                "Got unexpected hr %#x.\n", hr);
+        if (hr == S_OK)
+            check_image_info(&image_info, test_image + i, __LINE__);
+
+        winetest_pop_context();
     }
 
     hr = D3DX10GetImageInfoFromFileW(NULL, NULL, &image_info, NULL);
@@ -1549,21 +1915,23 @@ static void test_get_image_info(void)
 
     for (i = 0; i < ARRAY_SIZE(test_image); ++i)
     {
+        winetest_push_context("Test %u", i);
         create_file(test_filename, test_image[i].data, test_image[i].size, path);
 
         hr = D3DX10GetImageInfoFromFileW(path, NULL, &image_info, NULL);
-        todo_wine_if(test_image[i].expected.ImageFileFormat == D3DX10_IFF_WMP)
-        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
+                "Got unexpected hr %#x.\n", hr);
         if (hr == S_OK)
-            check_image_info(&image_info, i, __LINE__);
+            check_image_info(&image_info, test_image + i, __LINE__);
 
         hr = D3DX10GetImageInfoFromFileA(get_str_a(path), NULL, &image_info, NULL);
-        todo_wine_if(test_image[i].expected.ImageFileFormat == D3DX10_IFF_WMP)
-        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
+                "Got unexpected hr %#x.\n", hr);
         if (hr == S_OK)
-            check_image_info(&image_info, i, __LINE__);
+            check_image_info(&image_info, test_image + i, __LINE__);
 
         delete_file(test_filename);
+        winetest_pop_context();
     }
 
 
@@ -1580,21 +1948,25 @@ static void test_get_image_info(void)
 
     for (i = 0; i < ARRAY_SIZE(test_image); ++i)
     {
+        winetest_push_context("Test %u", i);
         resource_module = create_resource_module(test_resource_name, test_image[i].data, test_image[i].size);
 
         hr = D3DX10GetImageInfoFromResourceW(resource_module, test_resource_name, NULL, &image_info, NULL);
-        todo_wine_if(test_image[i].expected.ImageFileFormat == D3DX10_IFF_WMP)
-        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP)
+                || broken(hr == D3DX10_ERR_INVALID_DATA) /* Vista */,
+                "Got unexpected hr %#x.\n", hr);
         if (hr == S_OK)
-            check_image_info(&image_info, i, __LINE__);
+            check_image_info(&image_info, test_image + i, __LINE__);
 
         hr = D3DX10GetImageInfoFromResourceA(resource_module, get_str_a(test_resource_name), NULL, &image_info, NULL);
-        todo_wine_if(test_image[i].expected.ImageFileFormat == D3DX10_IFF_WMP)
-        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP)
+                || broken(hr == D3DX10_ERR_INVALID_DATA) /* Vista */,
+                "Got unexpected hr %#x.\n", hr);
         if (hr == S_OK)
-            check_image_info(&image_info, i, __LINE__);
+            check_image_info(&image_info, test_image + i, __LINE__);
 
         delete_resource_module(test_resource_name, resource_module);
+        winetest_pop_context();
     }
 
     CoUninitialize();
@@ -1602,8 +1974,12 @@ static void test_get_image_info(void)
 
 static void test_create_texture(void)
 {
+    static const WCHAR test_resource_name[] = L"resource.data";
+    static const WCHAR test_filename[] = L"image.data";
     ID3D10Resource *resource;
+    HMODULE resource_module;
     ID3D10Device *device;
+    WCHAR path[MAX_PATH];
     unsigned int i;
     HRESULT hr;
 
@@ -1618,30 +1994,1273 @@ static void test_create_texture(void)
 
     /* D3DX10CreateTextureFromMemory tests */
 
-    todo_wine
-    {
+    resource = (ID3D10Resource *)0xdeadbeef;
     hr = D3DX10CreateTextureFromMemory(device, NULL, 0, NULL, NULL, &resource, NULL);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(resource == (ID3D10Resource *)0xdeadbeef, "Got unexpected resource %p.\n", resource);
+
+    resource = (ID3D10Resource *)0xdeadbeef;
     hr = D3DX10CreateTextureFromMemory(device, NULL, sizeof(test_bmp_1bpp), NULL, NULL, &resource, NULL);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(resource == (ID3D10Resource *)0xdeadbeef, "Got unexpected resource %p.\n", resource);
+
+    resource = (ID3D10Resource *)0xdeadbeef;
     hr = D3DX10CreateTextureFromMemory(device, test_bmp_1bpp, 0, NULL, NULL, &resource, NULL);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(resource == (ID3D10Resource *)0xdeadbeef, "Got unexpected resource %p.\n", resource);
+
+    resource = (ID3D10Resource *)0xdeadbeef;
     hr = D3DX10CreateTextureFromMemory(device, test_bmp_1bpp, sizeof(test_bmp_1bpp) - 1, NULL, NULL, &resource, NULL);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    }
+    ok(resource == (ID3D10Resource *)0xdeadbeef, "Got unexpected resource %p.\n", resource);
 
     for (i = 0; i < ARRAY_SIZE(test_image); ++i)
     {
+        winetest_push_context("Test %u", i);
+
         hr = D3DX10CreateTextureFromMemory(device, test_image[i].data, test_image[i].size, NULL, NULL, &resource, NULL);
-        todo_wine
-        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
+        ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
+                "Got unexpected hr %#x.\n", hr);
         if (hr == S_OK)
-            check_resource_info(resource, i, __LINE__);
+        {
+            check_resource_info(resource, test_image + i, __LINE__);
+            check_resource_data(resource, test_image + i, __LINE__);
+            ID3D10Resource_Release(resource);
+        }
+
+        winetest_pop_context();
+    }
+
+    /* D3DX10CreateTextureFromFile tests */
+
+    hr = D3DX10CreateTextureFromFileW(device, NULL, NULL, NULL, &resource, NULL);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    hr = D3DX10CreateTextureFromFileW(device, L"deadbeef", NULL, NULL, &resource, NULL);
+    ok(hr == D3D10_ERROR_FILE_NOT_FOUND, "Got unexpected hr %#x.\n", hr);
+    hr = D3DX10CreateTextureFromFileA(device, NULL, NULL, NULL, &resource, NULL);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    hr = D3DX10CreateTextureFromFileA(device, "deadbeef", NULL, NULL, &resource, NULL);
+    ok(hr == D3D10_ERROR_FILE_NOT_FOUND, "Got unexpected hr %#x.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(test_image); ++i)
+    {
+        winetest_push_context("Test %u", i);
+        create_file(test_filename, test_image[i].data, test_image[i].size, path);
+
+        hr = D3DX10CreateTextureFromFileW(device, path, NULL, NULL, &resource, NULL);
+        todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
+        ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
+                "Got unexpected hr %#x.\n", hr);
+        if (hr == S_OK)
+        {
+            check_resource_info(resource, test_image + i, __LINE__);
+            check_resource_data(resource, test_image + i, __LINE__);
+            ID3D10Resource_Release(resource);
+        }
+
+        hr = D3DX10CreateTextureFromFileA(device, get_str_a(path), NULL, NULL, &resource, NULL);
+        todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
+        ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
+                "Got unexpected hr %#x.\n", hr);
+        if (hr == S_OK)
+        {
+            check_resource_info(resource, test_image + i, __LINE__);
+            check_resource_data(resource, test_image + i, __LINE__);
+            ID3D10Resource_Release(resource);
+        }
+
+        delete_file(test_filename);
+        winetest_pop_context();
+    }
+
+    /* D3DX10CreateTextureFromResource tests */
+
+    hr = D3DX10CreateTextureFromResourceW(device, NULL, NULL, NULL, NULL, &resource, NULL);
+    ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#x.\n", hr);
+    hr = D3DX10CreateTextureFromResourceW(device, NULL, L"deadbeef", NULL, NULL, &resource, NULL);
+    ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#x.\n", hr);
+    hr = D3DX10CreateTextureFromResourceA(device, NULL, NULL, NULL, NULL, &resource, NULL);
+    ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#x.\n", hr);
+    hr = D3DX10CreateTextureFromResourceA(device, NULL, "deadbeef", NULL, NULL, &resource, NULL);
+    ok(hr == D3DX10_ERR_INVALID_DATA, "Got unexpected hr %#x.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(test_image); ++i)
+    {
+        winetest_push_context("Test %u", i);
+        resource_module = create_resource_module(test_resource_name, test_image[i].data, test_image[i].size);
+
+        hr = D3DX10CreateTextureFromResourceW(device, resource_module,
+                test_resource_name, NULL, NULL, &resource, NULL);
+        todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
+        ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
+                "Got unexpected hr %#x.\n", hr);
+        if (hr == S_OK)
+        {
+            check_resource_info(resource, test_image + i, __LINE__);
+            check_resource_data(resource, test_image + i, __LINE__);
+            ID3D10Resource_Release(resource);
+        }
+
+        hr = D3DX10CreateTextureFromResourceA(device, resource_module,
+                get_str_a(test_resource_name), NULL, NULL, &resource, NULL);
+        todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
+        ok(hr == S_OK || broken(hr == E_FAIL && test_image[i].expected_info.ImageFileFormat == D3DX10_IFF_WMP),
+                "Got unexpected hr %#x.\n", hr);
+        if (hr == S_OK)
+        {
+            check_resource_info(resource, test_image + i, __LINE__);
+            check_resource_data(resource, test_image + i, __LINE__);
+            ID3D10Resource_Release(resource);
+        }
+
+        delete_resource_module(test_resource_name, resource_module);
+        winetest_pop_context();
     }
 
     CoUninitialize();
 
     ID3D10Device_Release(device);
+}
+
+#define check_rect(rect, left, top, right, bottom) _check_rect(__LINE__, rect, left, top, right, bottom)
+static inline void _check_rect(unsigned int line, const RECT *rect, int left, int top, int right, int bottom)
+{
+    ok_(__FILE__, line)(rect->left == left, "Unexpected rect.left %d\n", rect->left);
+    ok_(__FILE__, line)(rect->top == top, "Unexpected rect.top %d\n", rect->top);
+    ok_(__FILE__, line)(rect->right == right, "Unexpected rect.right %d\n", rect->right);
+    ok_(__FILE__, line)(rect->bottom == bottom, "Unexpected rect.bottom %d\n", rect->bottom);
+}
+
+static void test_font(void)
+{
+    static const WCHAR testW[] = L"test";
+    static const char long_text[] = "Example text to test clipping and other related things";
+    static const WCHAR long_textW[] = L"Example text to test clipping and other related things";
+    static const MAT2 mat = { {0,1}, {0,0}, {0,0}, {0,1} };
+    static const D3DXCOLOR color = { 1.0f, 0.0f, 1.0f, 0.0f };
+    static const D3DXCOLOR white = { 1.0f, 1.0f, 1.0f, 0.0f };
+    static const struct
+    {
+        int font_height;
+        unsigned int expected_size;
+        unsigned int expected_levels;
+    }
+    tests[] =
+    {
+        {   2,  32,  2 },
+        {   6, 128,  4 },
+        {  10, 256,  5 },
+        {  12, 256,  5 },
+        {  72, 256,  8 },
+        { 250, 256,  9 },
+        { 258, 512, 10 },
+        { 512, 512, 10 },
+    };
+    const unsigned int size = ARRAY_SIZE(testW);
+    TEXTMETRICA metrics, expmetrics;
+    D3D10_TEXTURE2D_DESC texture_desc;
+    ID3D10Device *device, *device2;
+    ID3D10ShaderResourceView *srv;
+    GLYPHMETRICS glyph_metrics;
+    int ref, i, height, count;
+    ID3D10Texture2D *texture;
+    ID3D10Resource *resource;
+    D3DX10_FONT_DESCA desc;
+    ID3DX10Sprite *sprite;
+    RECT rect, blackbox;
+    ID3DX10Font *font;
+    TEXTMETRICW tm;
+    POINT cellinc;
+    HRESULT hr;
+    WORD glyph;
+    BOOL ret;
+    HDC hdc;
+    char c;
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+
+    ref = get_refcount(device);
+    hr = D3DX10CreateFontA(device, 12, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, "Tahoma", &font);
+    ok(hr == S_OK, "Failed to create a font, hr %#x.\n", hr);
+    ok(ref < get_refcount(device), "Unexpected device refcount.\n");
+    ID3DX10Font_Release(font);
+    ok(ref == get_refcount(device), "Unexpected device refcount.\n");
+
+    /* Zero size */
+    hr = D3DX10CreateFontA(device, 0, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, "Tahoma", &font);
+    ok(hr == S_OK, "Failed to create a font, hr %#x.\n", hr);
+    ID3DX10Font_Release(font);
+
+    /* Unspecified font name */
+    hr = D3DX10CreateFontA(device, 12, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, NULL, &font);
+    ok(hr == S_OK, "Failed to create a font, hr %#x.\n", hr);
+    ID3DX10Font_Release(font);
+
+    /* Empty font name */
+    hr = D3DX10CreateFontA(device, 12, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, "", &font);
+    ok(hr == S_OK, "Failed to create a font, hr %#x.\n", hr);
+    ID3DX10Font_Release(font);
+
+    hr = D3DX10CreateFontA(NULL, 12, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, "Tahoma", &font);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    hr = D3DX10CreateFontA(device, 12, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, "Tahoma", NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    hr = D3DX10CreateFontA(NULL, 12, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, "Tahoma", NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    /* D3DX10CreateFontIndirect */
+    desc.Height = 12;
+    desc.Width = 0;
+    desc.Weight = FW_DONTCARE;
+    desc.MipLevels = 0;
+    desc.Italic = FALSE;
+    desc.CharSet = DEFAULT_CHARSET;
+    desc.OutputPrecision = OUT_DEFAULT_PRECIS;
+    desc.Quality = DEFAULT_QUALITY;
+    desc.PitchAndFamily = DEFAULT_PITCH;
+    strcpy(desc.FaceName, "Tahoma");
+    hr = D3DX10CreateFontIndirectA(device, &desc, &font);
+    ok(hr == S_OK, "Failed to create a font, hr %#x.\n", hr);
+    ID3DX10Font_Release(font);
+
+    hr = D3DX10CreateFontIndirectA(NULL, &desc, &font);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    hr = D3DX10CreateFontIndirectA(device, NULL, &font);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    hr = D3DX10CreateFontIndirectA(device, &desc, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    /* GetDevice */
+    hr = D3DX10CreateFontA(device, 12, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+            DEFAULT_QUALITY, DEFAULT_PITCH, "Tahoma", &font);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Font_GetDevice(font, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Font_GetDevice(font, &device2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ID3D10Device_Release(device2);
+
+    ID3DX10Font_Release(font);
+
+    /* GetDesc */
+    hr = D3DX10CreateFontA(device, 12, 8, FW_BOLD, 2, TRUE, ANSI_CHARSET, OUT_RASTER_PRECIS,
+            ANTIALIASED_QUALITY, VARIABLE_PITCH, "Tahoma", &font);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Font_GetDescA(font, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Font_GetDescA(font, &desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    ok(desc.Height == 12, "Unexpected height %d.\n", desc.Height);
+    ok(desc.Width == 8, "Unexpected width %u.\n", desc.Width);
+    ok(desc.Weight == FW_BOLD, "Unexpected weight %u.\n", desc.Weight);
+    ok(desc.MipLevels == 2, "Unexpected miplevels %u.\n", desc.MipLevels);
+    ok(desc.Italic == TRUE, "Unexpected italic %#x.\n", desc.Italic);
+    ok(desc.CharSet == ANSI_CHARSET, "Unexpected charset %u.\n", desc.CharSet);
+    ok(desc.OutputPrecision == OUT_RASTER_PRECIS, "Unexpected output precision %u.\n", desc.OutputPrecision);
+    ok(desc.Quality == ANTIALIASED_QUALITY, "Unexpected quality %u.\n", desc.Quality);
+    ok(desc.PitchAndFamily == VARIABLE_PITCH, "Unexpected pitch and family %#x.\n", desc.PitchAndFamily);
+    ok(!strcmp(desc.FaceName, "Tahoma"), "Unexpected facename %s.\n", debugstr_a(desc.FaceName));
+
+    ID3DX10Font_Release(font);
+
+    /* GetDC + GetTextMetrics */
+    hr = D3DX10CreateFontA(device, 12, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+            DEFAULT_QUALITY, DEFAULT_PITCH, "Tahoma", &font);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hdc = ID3DX10Font_GetDC(font);
+    ok(!!hdc, "Unexpected hdc %p.\n", hdc);
+
+    ret = GetTextMetricsA(hdc, &expmetrics);
+    ok(ret, "Unexpected ret %#x.\n", ret);
+
+    ret = ID3DX10Font_GetTextMetricsA(font, &metrics);
+    ok(ret, "Unexpected ret %#x.\n", ret);
+
+    ok(metrics.tmHeight == expmetrics.tmHeight, "Unexpected height %d, expected %d.\n",
+            metrics.tmHeight, expmetrics.tmHeight);
+    ok(metrics.tmAscent == expmetrics.tmAscent, "Unexpected ascent %d, expected %d.\n",
+            metrics.tmAscent, expmetrics.tmAscent);
+    ok(metrics.tmDescent == expmetrics.tmDescent, "Unexpected descent %d, expected %d.\n",
+            metrics.tmDescent, expmetrics.tmDescent);
+    ok(metrics.tmInternalLeading == expmetrics.tmInternalLeading, "Unexpected internal leading %d, expected %d.\n",
+            metrics.tmInternalLeading, expmetrics.tmInternalLeading);
+    ok(metrics.tmExternalLeading == expmetrics.tmExternalLeading, "Unexpected external leading %d, expected %d.\n",
+            metrics.tmExternalLeading, expmetrics.tmExternalLeading);
+    ok(metrics.tmAveCharWidth == expmetrics.tmAveCharWidth, "Unexpected average char width %d, expected %d.\n",
+            metrics.tmAveCharWidth, expmetrics.tmAveCharWidth);
+    ok(metrics.tmMaxCharWidth == expmetrics.tmMaxCharWidth, "Unexpected maximum char width %d, expected %d.\n",
+            metrics.tmMaxCharWidth, expmetrics.tmMaxCharWidth);
+    ok(metrics.tmWeight == expmetrics.tmWeight, "Unexpected weight %d, expected %d.\n",
+            metrics.tmWeight, expmetrics.tmWeight);
+    ok(metrics.tmOverhang == expmetrics.tmOverhang, "Unexpected overhang %d, expected %d.\n",
+            metrics.tmOverhang, expmetrics.tmOverhang);
+    ok(metrics.tmDigitizedAspectX == expmetrics.tmDigitizedAspectX, "Unexpected digitized x aspect %d, expected %d.\n",
+            metrics.tmDigitizedAspectX, expmetrics.tmDigitizedAspectX);
+    ok(metrics.tmDigitizedAspectY == expmetrics.tmDigitizedAspectY, "Unexpected digitized y aspect %d, expected %d.\n",
+            metrics.tmDigitizedAspectY, expmetrics.tmDigitizedAspectY);
+    ok(metrics.tmFirstChar == expmetrics.tmFirstChar, "Unexpected first char %u, expected %u.\n",
+            metrics.tmFirstChar, expmetrics.tmFirstChar);
+    ok(metrics.tmLastChar == expmetrics.tmLastChar, "Unexpected last char %u, expected %u.\n",
+            metrics.tmLastChar, expmetrics.tmLastChar);
+    ok(metrics.tmDefaultChar == expmetrics.tmDefaultChar, "Unexpected default char %u, expected %u.\n",
+            metrics.tmDefaultChar, expmetrics.tmDefaultChar);
+    ok(metrics.tmBreakChar == expmetrics.tmBreakChar, "Unexpected break char %u, expected %u.\n",
+            metrics.tmBreakChar, expmetrics.tmBreakChar);
+    ok(metrics.tmItalic == expmetrics.tmItalic, "Unexpected italic %u, expected %u.\n",
+            metrics.tmItalic, expmetrics.tmItalic);
+    ok(metrics.tmUnderlined == expmetrics.tmUnderlined, "Unexpected underlined %u, expected %u.\n",
+            metrics.tmUnderlined, expmetrics.tmUnderlined);
+    ok(metrics.tmStruckOut == expmetrics.tmStruckOut, "Unexpected struck out %u, expected %u.\n",
+            metrics.tmStruckOut, expmetrics.tmStruckOut);
+    ok(metrics.tmPitchAndFamily == expmetrics.tmPitchAndFamily, "Unexpected pitch and family %u, expected %u.\n",
+            metrics.tmPitchAndFamily, expmetrics.tmPitchAndFamily);
+    ok(metrics.tmCharSet == expmetrics.tmCharSet, "Unexpected charset %u, expected %u.\n",
+            metrics.tmCharSet, expmetrics.tmCharSet);
+
+    ID3DX10Font_Release(font);
+
+    /* PreloadText */
+    hr = D3DX10CreateFontA(device, 12, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+            DEFAULT_QUALITY, DEFAULT_PITCH, "Tahoma", &font);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Font_PreloadTextA(font, NULL, -1);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+    hr = ID3DX10Font_PreloadTextA(font, NULL, 0);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = ID3DX10Font_PreloadTextA(font, NULL, 1);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+    hr = ID3DX10Font_PreloadTextA(font, "test", -1);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = ID3DX10Font_PreloadTextA(font, "", 0);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = ID3DX10Font_PreloadTextA(font, "", -1);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Font_PreloadTextW(font, NULL, -1);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+    hr = ID3DX10Font_PreloadTextW(font, NULL, 0);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = ID3DX10Font_PreloadTextW(font, NULL, 1);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+    hr = ID3DX10Font_PreloadTextW(font, testW, -1);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = ID3DX10Font_PreloadTextW(font, L"", 0);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = ID3DX10Font_PreloadTextW(font, L"", -1);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    ID3DX10Font_Release(font);
+
+    /* GetGlyphData, PreloadGlyphs, PreloadCharacters */
+    hr = D3DX10CreateFontA(device, 12, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+            DEFAULT_QUALITY, DEFAULT_PITCH, "Tahoma", &font);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hdc = ID3DX10Font_GetDC(font);
+    ok(!!hdc, "Unexpected hdc %p.\n", hdc);
+
+    hr = ID3DX10Font_GetGlyphData(font, 0, NULL, &blackbox, &cellinc);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = ID3DX10Font_GetGlyphData(font, 0, &srv, NULL, &cellinc);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    if (SUCCEEDED(hr))
+        ID3D10ShaderResourceView_Release(srv);
+    hr = ID3DX10Font_GetGlyphData(font, 0, &srv, &blackbox, NULL);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    if (SUCCEEDED(hr))
+        ID3D10ShaderResourceView_Release(srv);
+
+    hr = ID3DX10Font_PreloadCharacters(font, 'b', 'a');
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = ID3DX10Font_PreloadGlyphs(font, 1, 0);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Font_PreloadCharacters(font, 'a', 'a');
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    for (c = 'b'; c <= 'z'; ++c)
+    {
+        winetest_push_context("Character %c", c);
+        count = GetGlyphIndicesA(hdc, &c, 1, &glyph, 0);
+        ok(count != GDI_ERROR, "Unexpected count %u.\n", count);
+
+        hr = ID3DX10Font_GetGlyphData(font, glyph, &srv, &blackbox, &cellinc);
+        todo_wine
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+        if (FAILED(hr))
+        {
+            winetest_pop_context();
+            break;
+        }
+
+        ID3D10ShaderResourceView_GetResource(srv, &resource);
+        hr = ID3D10Resource_QueryInterface(resource, &IID_ID3D10Texture2D, (void **)&texture);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+        ID3D10Resource_Release(resource);
+
+        ID3D10Texture2D_GetDesc(texture, &texture_desc);
+        ok(texture_desc.Width == 256, "Unexpected width %u.\n", texture_desc.Width);
+        ok(texture_desc.Height == 256, "Unexpected height %u.\n", texture_desc.Height);
+        ok(texture_desc.MipLevels == 5, "Unexpected miplevels %u.\n", texture_desc.MipLevels);
+        ok(texture_desc.ArraySize == 1, "Unexpected array size %u.\n", texture_desc.ArraySize);
+        ok(texture_desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM, "Unexpected format %#x.\n",
+                texture_desc.Format);
+        ok(texture_desc.SampleDesc.Count == 1, "Unexpected samples count %u.\n",
+                texture_desc.SampleDesc.Count);
+        ok(texture_desc.SampleDesc.Quality == 0, "Unexpected quality level %u.\n",
+                texture_desc.SampleDesc.Quality);
+        ok(texture_desc.Usage == 0, "Unexpected usage %#x.\n", texture_desc.Usage);
+        ok(texture_desc.BindFlags == D3D10_BIND_SHADER_RESOURCE, "Unexpected bind flags %#x.\n",
+                texture_desc.BindFlags);
+        ok(texture_desc.CPUAccessFlags == 0, "Unexpected access flags %#x.\n",
+                texture_desc.CPUAccessFlags);
+        ok(texture_desc.MiscFlags == 0, "Unexpected misc flags %#x.\n", texture_desc.MiscFlags);
+
+        count = GetGlyphOutlineW(hdc, glyph, GGO_GLYPH_INDEX | GGO_METRICS, &glyph_metrics, 0, NULL, &mat);
+        ok(count != GDI_ERROR, "Unexpected count %#x.\n", count);
+
+        ret = ID3DX10Font_GetTextMetricsW(font, &tm);
+        ok(ret, "Unexpected ret %#x.\n", ret);
+
+        todo_wine ok(blackbox.right - blackbox.left == glyph_metrics.gmBlackBoxX + 2, "Got %d, expected %d.\n",
+                blackbox.right - blackbox.left, glyph_metrics.gmBlackBoxX + 2);
+        todo_wine ok(blackbox.bottom - blackbox.top == glyph_metrics.gmBlackBoxY + 2, "Got %d, expected %d.\n",
+                blackbox.bottom - blackbox.top, glyph_metrics.gmBlackBoxY + 2);
+        ok(cellinc.x == glyph_metrics.gmptGlyphOrigin.x - 1, "Got %d, expected %d.\n",
+                cellinc.x, glyph_metrics.gmptGlyphOrigin.x - 1);
+        ok(cellinc.y == tm.tmAscent - glyph_metrics.gmptGlyphOrigin.y - 1, "Got %d, expected %d.\n",
+                cellinc.y, tm.tmAscent - glyph_metrics.gmptGlyphOrigin.y - 1);
+
+        ID3D10Texture2D_Release(texture);
+        winetest_pop_context();
+    }
+
+    hr = ID3DX10Font_PreloadCharacters(font, 'a', 'z');
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    /* Test glyphs that are not rendered */
+    hr = ID3DX10Font_PreloadGlyphs(font, 0, 5);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    for (glyph = 1; glyph < 4; ++glyph)
+    {
+        srv = (void *)0xdeadbeef;
+        hr = ID3DX10Font_GetGlyphData(font, glyph, &srv, &blackbox, &cellinc);
+    todo_wine {
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+        ok(!srv, "Unexpected resource view %p.\n", srv);
+    }
+    }
+
+    ID3DX10Font_Release(font);
+
+    c = 'a';
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        winetest_push_context("Test %u", i);
+        hr = D3DX10CreateFontA(device, tests[i].font_height, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, "Tahoma", &font);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+        hdc = ID3DX10Font_GetDC(font);
+        ok(!!hdc, "Unexpected hdc %p.\n", hdc);
+
+        count = GetGlyphIndicesA(hdc, &c, 1, &glyph, 0);
+        ok(count != GDI_ERROR, "Unexpected count %u.\n", count);
+
+        hr = ID3DX10Font_GetGlyphData(font, glyph, &srv, NULL, NULL);
+        todo_wine
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+        if (FAILED(hr))
+        {
+            ID3DX10Font_Release(font);
+            winetest_pop_context();
+            break;
+        }
+
+        ID3D10ShaderResourceView_GetResource(srv, &resource);
+        hr = ID3D10Resource_QueryInterface(resource, &IID_ID3D10Texture2D, (void **)&texture);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+        ID3D10Resource_Release(resource);
+
+        ID3D10Texture2D_GetDesc(texture, &texture_desc);
+
+        ok(texture_desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM, "Unexpected format %#x.\n",
+                texture_desc.Format);
+        ok(texture_desc.Usage == 0, "Unexpected usage %#x.\n", texture_desc.Usage);
+        ok(texture_desc.Width == tests[i].expected_size, "Unexpected width %u.\n", texture_desc.Width);
+        ok(texture_desc.Height == tests[i].expected_size, "Unexpected height %u.\n", texture_desc.Height);
+        ok(texture_desc.CPUAccessFlags == 0, "Unexpected access flags %#x.\n",
+                texture_desc.CPUAccessFlags);
+        ok(texture_desc.BindFlags == D3D10_BIND_SHADER_RESOURCE, "Unexpected bind flags %#x.\n",
+                texture_desc.BindFlags);
+
+        ID3D10Texture2D_Release(texture);
+
+        /* DrawText */
+        hr = D3DX10CreateSprite(device, 0, &sprite);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+        SetRect(&rect, 0, 0, 640, 480);
+
+        hr = ID3DX10Sprite_Begin(sprite, 0);
+        ok (hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+        height = ID3DX10Font_DrawTextW(font, sprite, testW, -1, &rect, DT_TOP, white);
+        ok(height == tests[i].font_height, "Unexpected height %u.\n", height);
+        height = ID3DX10Font_DrawTextW(font, sprite, testW, size, &rect, DT_TOP, white);
+        ok(height == tests[i].font_height, "Unexpected height %u.\n", height);
+        height = ID3DX10Font_DrawTextW(font, sprite, testW, size, &rect, DT_RIGHT, white);
+        ok(height == tests[i].font_height, "Unexpected height %u.\n", height);
+        height = ID3DX10Font_DrawTextW(font, sprite, testW, size, &rect, DT_LEFT | DT_NOCLIP, white);
+        ok(height == tests[i].font_height, "Unexpected height %u.\n", height);
+
+        SetRectEmpty(&rect);
+        height = ID3DX10Font_DrawTextW(font, sprite, testW, size, &rect,
+                DT_LEFT | DT_CALCRECT, white);
+        ok(height == tests[i].font_height, "Unexpected height %u.\n", height);
+        ok(!rect.left, "Unexpected rect left %d.\n", rect.left);
+        ok(!rect.top, "Unexpected rect top %d.\n", rect.top);
+        ok(rect.right, "Unexpected rect right %d.\n", rect.right);
+        ok(rect.bottom == tests[i].font_height, "Unexpected rect bottom %d.\n", rect.bottom);
+
+        hr = ID3DX10Sprite_End(sprite);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+        ID3DX10Sprite_Release(sprite);
+
+        ID3DX10Font_Release(font);
+        winetest_pop_context();
+    }
+
+    if (!strcmp(winetest_platform, "wine"))
+        return;
+
+    /* DrawText */
+    hr = D3DX10CreateFontA(device, 12, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+            DEFAULT_QUALITY, DEFAULT_PITCH, "Tahoma", &font);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    SetRect(&rect, 10, 10, 200, 200);
+
+    height = ID3DX10Font_DrawTextA(font, NULL, "test", -2, &rect, 0, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextA(font, NULL, "test", -1, &rect, 0, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextA(font, NULL, "test", 0, &rect, 0, color);
+    ok(height == 0, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextA(font, NULL, "test", 1, &rect, 0, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextA(font, NULL, "test", 2, &rect, 0, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextA(font, NULL, "", 0, &rect, 0, color);
+    ok(height == 0, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextA(font, NULL, "", -1, &rect, 0, color);
+    ok(height == 0, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextA(font, NULL, "test", -1, NULL, 0, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextA(font, NULL, "test", -1, NULL, DT_CALCRECT, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextA(font, NULL, NULL, -1, NULL, 0, color);
+    ok(height == 0, "Unexpected height %d.\n", height);
+
+    SetRect(&rect, 10, 10, 50, 50);
+
+    height = ID3DX10Font_DrawTextA(font, NULL, long_text, -1, &rect, DT_WORDBREAK, color);
+    ok(height == 60, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextA(font, NULL, long_text, -1, &rect, DT_WORDBREAK | DT_NOCLIP, color);
+    ok(height == 96, "Unexpected height %d.\n", height);
+
+    SetRect(&rect, 10, 10, 200, 200);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, testW, -1, &rect, 0, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, testW, 0, &rect, 0, color);
+    ok(height == 0, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, testW, 1, &rect, 0, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, testW, 2, &rect, 0, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"", 0, &rect, 0, color);
+    ok(height == 0, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"", -1, &rect, 0, color);
+    ok(height == 0, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, testW, -1, NULL, 0, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, testW, -1, NULL, DT_CALCRECT, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, NULL, -1, NULL, 0, color);
+    ok(height == 0, "Unexpected height %d.\n", height);
+
+    SetRect(&rect, 10, 10, 50, 50);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, long_textW, -1, &rect, DT_WORDBREAK, color);
+    ok(height == 60, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, long_textW, -1, &rect, DT_WORDBREAK | DT_NOCLIP, color);
+    ok(height == 96, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"a\na", -1, NULL, 0, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"a\na", -1, &rect, 0, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"a\r\na", -1, &rect, 0, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"a\ra", -1, &rect, 0, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"a\na", -1, &rect, DT_SINGLELINE, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"a\naaaaa aaaa", -1, &rect, DT_SINGLELINE, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"a\naaaaa aaaa", -1, &rect, 0, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"a\naaaaa aaaa", -1, &rect, DT_WORDBREAK, color);
+    ok(height == 36, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"a\naaaaa aaaa", -1, &rect, DT_WORDBREAK | DT_SINGLELINE, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"1\n2\n3\n4\n5\n6", -1, &rect, 0, color);
+    ok(height == 48, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"1\n2\n3\n4\n5\n6", -1, &rect, DT_NOCLIP, color);
+    ok(height == 72, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"\t\t\t\t\t\t\t\t\t\t", -1, &rect, DT_WORDBREAK, color);
+    ok(height == 0, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"\t\t\t\t\t\t\t\t\t\ta", -1, &rect, DT_WORDBREAK, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"\taaaaaaaaaa", -1, &rect, DT_WORDBREAK, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"\taaaaaaaaaa", -1, &rect, DT_EXPANDTABS | DT_WORDBREAK, color);
+    ok(height == 36, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"\taaa\taaa\taaa", -1, &rect, DT_WORDBREAK, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"\taaa\taaa\taaa", -1, &rect, DT_EXPANDTABS | DT_WORDBREAK, color);
+    ok(height == 48, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"\t\t\t\t\t\t\t\t\t\t", -1, &rect, DT_EXPANDTABS | DT_WORDBREAK, color);
+    ok(height == 60, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"a\ta", -1, &rect, DT_EXPANDTABS | DT_WORDBREAK, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"a\ta\ta", -1, &rect, DT_EXPANDTABS | DT_WORDBREAK, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaaaaaaaaaaaaaaaaaa", -1, &rect, DT_WORDBREAK, color);
+    ok(height == 36, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"a                        a", -1, &rect, DT_WORDBREAK, color);
+    ok(height == 36, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa              aaaa", -1, &rect, DT_WORDBREAK, color);
+    ok(height == 36, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa              aaaa", -1, &rect, DT_WORDBREAK | DT_RIGHT, color);
+    ok(height == 36, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa              aaaa", -1, &rect, DT_WORDBREAK | DT_CENTER, color);
+    ok(height == 36, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_BOTTOM, color);
+    ok(height == 40, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_VCENTER, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_RIGHT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CENTER, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+
+    SetRect(&rect, 10, 10, 50, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 10, 30, 34);
+
+    SetRect(&rect, -10, 10, 30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, -10, 10, 10, 34);
+
+    SetRect(&rect, 10, -10, 50, 30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, -10, 30, 14);
+
+    SetRect(&rect, 10, 10, -30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 10, 30, 34);
+
+    SetRect(&rect, 10, 10, 50, -30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 10, 30, 34);
+
+    SetRect(&rect, 10, 10, 50, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 10, 30, 34);
+
+    SetRect(&rect, -10, 10, 30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, -10, 10, 10, 34);
+
+    SetRect(&rect, 10, -10, 50, 30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, -10, 30, 14);
+
+    SetRect(&rect, 10, 10, -30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 10, 53, 22);
+
+    SetRect(&rect, 10, 10, 50, -30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 10, 30, 34);
+
+    SetRect(&rect, 10, 10, 50, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_BOTTOM | DT_CALCRECT, color);
+    ok(height == 40, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 26, 30, 50);
+
+    SetRect(&rect, -10, 10, 30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_BOTTOM | DT_CALCRECT, color);
+    ok(height == 40, "Unexpected height %d.\n", height);
+    check_rect(&rect, -10, 26, 10, 50);
+
+    SetRect(&rect, 10, -10, 50, 30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_BOTTOM | DT_CALCRECT, color);
+    ok(height == 40, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 6, 30, 30);
+
+    SetRect(&rect, 10, 10, -30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_BOTTOM | DT_CALCRECT, color);
+    ok(height == 40, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 26, 30, 50);
+
+    SetRect(&rect, 10, 10, 50, -30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_BOTTOM | DT_CALCRECT, color);
+    ok(height == -40, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, -54, 30, -30);
+
+    SetRect(&rect, 10, 10, 50, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_BOTTOM | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 40, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 26, 30, 50);
+
+    SetRect(&rect, -10, 10, 30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_BOTTOM | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 40, "Unexpected height %d.\n", height);
+    check_rect(&rect, -10, 26, 10, 50);
+
+    SetRect(&rect, 10, -10, 50, 30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_BOTTOM | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 40, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 6, 30, 30);
+
+    SetRect(&rect, 10, 10, -30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_BOTTOM | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 40, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 38, 53, 50);
+
+    SetRect(&rect, 10, 10, 50, -30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_BOTTOM | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == -40, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, -54, 30, -30);
+
+    SetRect(&rect, 10, 10, 50, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_VCENTER | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 18, 30, 42);
+
+    SetRect(&rect, -10, 10, 30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_VCENTER | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, -10, 18, 10, 42);
+
+    SetRect(&rect, 10, -10, 50, 30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_VCENTER | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, -2, 30, 22);
+
+    SetRect(&rect, 10, 10, -30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_VCENTER | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 18, 30, 42);
+
+    SetRect(&rect, 10, 10, 50, -30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_VCENTER | DT_CALCRECT, color);
+    ok(height == -8, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, -22, 30, 2);
+
+    SetRect(&rect, 10, 10, 50, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_VCENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 18, 30, 42);
+
+    SetRect(&rect, -10, 10, 30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_VCENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, -10, 18, 10, 42);
+
+    SetRect(&rect, 10, -10, 50, 30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_VCENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, -2, 30, 22);
+
+    SetRect(&rect, 10, 10, -30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_VCENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 26, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 24, 53, 36);
+
+    SetRect(&rect, 10, 10, 50, -30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_VCENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == -8, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, -22, 30, 2);
+
+    SetRect(&rect, 10, 10, 50, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_RIGHT | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 30, 10, 50, 34);
+
+    SetRect(&rect, -10, 10, 30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_RIGHT | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 10, 30, 34);
+
+    SetRect(&rect, 10, -10, 50, 30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_RIGHT | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 30, -10, 50, 14);
+
+    SetRect(&rect, 10, 10, -30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_RIGHT | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, -50, 10, -30, 34);
+
+    SetRect(&rect, 10, 10, 50, -30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_RIGHT | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 30, 10, 50, 34);
+
+    SetRect(&rect, 10, 10, 50, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_RIGHT | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 30, 10, 50, 34);
+
+    SetRect(&rect, -10, 10, 30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_RIGHT | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 10, 10, 30, 34);
+
+    SetRect(&rect, 10, -10, 50, 30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_RIGHT | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 30, -10, 50, 14);
+
+    SetRect(&rect, 10, 10, -30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_RIGHT | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+    check_rect(&rect, -73, 10, -30, 22);
+
+    SetRect(&rect, 10, 10, 50, -30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_RIGHT | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 30, 10, 50, 34);
+
+    SetRect(&rect, 10, 10, 50, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CENTER | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 20, 10, 40, 34);
+
+    SetRect(&rect, -10, 10, 30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CENTER | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 0, 10, 20, 34);
+
+    SetRect(&rect, 10, -10, 50, 30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CENTER | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 20, -10, 40, 14);
+
+    SetRect(&rect, 10, 10, -30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CENTER | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, -20, 10, 0, 34);
+
+    SetRect(&rect, 10, 10, 50, -30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CENTER | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 20, 10, 40, 34);
+
+    SetRect(&rect, 10, 10, 50, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_CENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 20, 10, 40, 34);
+
+    SetRect(&rect, -10, 10, 30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_CENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 0, 10, 20, 34);
+
+    SetRect(&rect, 10, -10, 50, 30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_CENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 20, -10, 40, 14);
+
+    SetRect(&rect, 10, 10, -30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_CENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 12, "Unexpected height %d.\n", height);
+    check_rect(&rect, -31, 10, 12, 22);
+
+    SetRect(&rect, 10, 10, 50, -30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_CENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 24, "Unexpected height %d.\n", height);
+    check_rect(&rect, 20, 10, 40, 34);
+
+    SetRect(&rect, 10, 10, 50, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CENTER | DT_VCENTER | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, 20, 18, 40, 42);
+
+    SetRect(&rect, 10, 10, 50, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CENTER | DT_VCENTER | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, 20, 18, 40, 42);
+
+    SetRect(&rect, -10, 10, 30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CENTER | DT_VCENTER | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, 0, 18, 20, 42);
+
+    SetRect(&rect, 10, -10, 50, 30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CENTER | DT_VCENTER | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, 20, -2, 40, 22);
+
+    SetRect(&rect, 10, 10, -30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CENTER | DT_VCENTER | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, -20, 18, 0, 42);
+
+    SetRect(&rect, 10, 10, 50, -30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa\naaaa", -1, &rect, DT_CENTER | DT_VCENTER | DT_CALCRECT, color);
+    ok(height == -8, "Unexpected height %d.\n", height);
+    check_rect(&rect, 20, -22, 40, 2);
+
+    SetRect(&rect, 10, 10, 50, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, 20, 18, 40, 42);
+
+    SetRect(&rect, 10, 10, 50, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, 20, 18, 40, 42);
+
+    SetRect(&rect, -10, 10, 30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, 0, 18, 20, 42);
+
+    SetRect(&rect, 10, -10, 50, 30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 32, "Unexpected height %d.\n", height);
+    check_rect(&rect, 20, -2, 40, 22);
+
+    SetRect(&rect, 10, 10, -30, 50);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == 26, "Unexpected height %d.\n", height);
+    check_rect(&rect, -31, 24, 12, 36);
+
+    SetRect(&rect, 10, 10, 50, -30);
+    height = ID3DX10Font_DrawTextW(font, NULL, L"aaaa aaaa", -1, &rect, DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_CALCRECT, color);
+    ok(height == -8, "Unexpected height %d.\n", height);
+    check_rect(&rect, 20, -22, 40, 2);
+
+    ID3DX10Font_Release(font);
+}
+
+static void test_sprite(void)
+{
+    ID3D10ShaderResourceView *srv1, *srv2;
+    ID3D10Texture2D *texture1, *texture2;
+    D3D10_TEXTURE2D_DESC texture_desc;
+    ID3D10Device *device, *device2;
+    D3DX10_SPRITE sprite_desc;
+    ID3DX10Sprite *sprite;
+    D3DXMATRIX mat, mat2;
+    ULONG refcount;
+    HRESULT hr;
+    static const D3DXMATRIX identity =
+    {
+        ._11 = 1.0f,
+        ._22 = 1.0f,
+        ._33 = 1.0f,
+        ._44 = 1.0f,
+    };
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+
+    texture_desc.Width = 64;
+    texture_desc.Height = 64;
+    texture_desc.MipLevels = 1;
+    texture_desc.ArraySize = 1;
+    texture_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    texture_desc.SampleDesc.Count = 1;
+    texture_desc.SampleDesc.Quality = 0;
+    texture_desc.Usage = D3D10_USAGE_DEFAULT;
+    texture_desc.BindFlags = D3D10_BIND_SHADER_RESOURCE;
+    texture_desc.CPUAccessFlags = 0;
+    texture_desc.MiscFlags = 0;
+
+    hr = ID3D10Device_CreateTexture2D(device, &texture_desc, NULL, &texture1);
+    ok(SUCCEEDED(hr), "Failed to create texture, hr %#x.\n", hr);
+
+    hr = ID3D10Device_CreateTexture2D(device, &texture_desc, NULL, &texture2);
+    ok(SUCCEEDED(hr), "Failed to create texture, hr %#x.\n", hr);
+
+    hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)texture1, NULL, &srv1);
+    ok(SUCCEEDED(hr), "Failed to create srv, hr %#x.\n", hr);
+
+    hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)texture1, NULL, &srv2);
+    ok(SUCCEEDED(hr), "Failed to create srv, hr %#x.\n", hr);
+
+    hr = D3DX10CreateSprite(device, 0, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    hr = D3DX10CreateSprite(NULL, 0, &sprite);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    hr = D3DX10CreateSprite(device, 0, &sprite);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    /* GetDevice */
+    hr = ID3DX10Sprite_GetDevice(sprite, NULL);
+    ok(hr == E_FAIL, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Sprite_GetDevice(sprite, &device2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(device == device2, "Unexpected device.\n");
+
+    ID3D10Device_Release(device2);
+
+    /* Projection transform */
+    hr = ID3DX10Sprite_GetProjectionTransform(sprite, NULL);
+    ok(hr == E_FAIL, "Unexpected hr %#x.\n", hr);
+    hr = ID3DX10Sprite_GetProjectionTransform(sprite, &mat);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!memcmp(&mat, &identity, sizeof(mat)), "Unexpected projection transform.\n");
+
+    /* Set a transform and test if it gets returned correctly */
+    mat.m[0][0] = 2.1f; mat.m[0][1] = 6.5f; mat.m[0][2] =-9.6f; mat.m[0][3] = 1.7f;
+    mat.m[1][0] = 4.2f; mat.m[1][1] =-2.5f; mat.m[1][2] = 2.1f; mat.m[1][3] = 5.5f;
+    mat.m[2][0] =-2.6f; mat.m[2][1] = 0.3f; mat.m[2][2] = 8.6f; mat.m[2][3] = 8.4f;
+    mat.m[3][0] = 6.7f; mat.m[3][1] =-5.1f; mat.m[3][2] = 6.1f; mat.m[3][3] = 2.2f;
+
+    hr = ID3DX10Sprite_SetProjectionTransform(sprite, NULL);
+    ok(hr == E_FAIL, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Sprite_SetProjectionTransform(sprite, &mat);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Sprite_GetProjectionTransform(sprite, &mat2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!memcmp(&mat, &mat2, sizeof(mat)), "Unexpected matrix.\n");
+
+    /* View transform */
+    hr = ID3DX10Sprite_SetViewTransform(sprite, NULL);
+    todo_wine
+    ok(hr == E_FAIL, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Sprite_SetViewTransform(sprite, &mat);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    /* Begin */
+    hr = ID3DX10Sprite_Begin(sprite, 0);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    /* Flush/End */
+    hr = ID3DX10Sprite_Flush(sprite);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Sprite_End(sprite);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    /* May not be called before next Begin */
+    hr = ID3DX10Sprite_Flush(sprite);
+    todo_wine
+    ok(hr == E_FAIL, "Unexpected hr %#x.\n", hr);
+    hr = ID3DX10Sprite_End(sprite);
+    todo_wine
+    ok(hr == E_FAIL, "Unexpected hr %#x.\n", hr);
+
+    /* Draw */
+    hr = ID3DX10Sprite_DrawSpritesBuffered(sprite, NULL, 0);
+    todo_wine
+    ok(hr == E_FAIL, "Unexpected hr %#x.\n", hr);
+
+    memset(&sprite_desc, 0, sizeof(sprite_desc));
+    hr = ID3DX10Sprite_DrawSpritesBuffered(sprite, &sprite_desc, 0);
+    todo_wine
+    ok(hr == E_FAIL, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Sprite_DrawSpritesBuffered(sprite, &sprite_desc, 1);
+    todo_wine
+    ok(hr == E_FAIL, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Sprite_Begin(sprite, 0);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    memset(&sprite_desc, 0, sizeof(sprite_desc));
+    hr = ID3DX10Sprite_DrawSpritesBuffered(sprite, &sprite_desc, 1);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    sprite_desc.pTexture = srv1;
+    hr = ID3DX10Sprite_DrawSpritesBuffered(sprite, &sprite_desc, 1);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Sprite_Flush(sprite);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Sprite_Flush(sprite);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = ID3DX10Sprite_End(sprite);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    /* D3DX10_SPRITE_ADDREF_TEXTURES */
+    hr = ID3DX10Sprite_Begin(sprite, D3DX10_SPRITE_ADDREF_TEXTURES);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    memset(&sprite_desc, 0, sizeof(sprite_desc));
+    sprite_desc.pTexture = srv1;
+
+    refcount = get_refcount(srv1);
+    hr = ID3DX10Sprite_DrawSpritesBuffered(sprite, &sprite_desc, 1);
+todo_wine {
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(get_refcount(srv1) > refcount, "Unexpected refcount.\n");
+}
+
+    hr = ID3DX10Sprite_Flush(sprite);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(get_refcount(srv1) == refcount, "Unexpected refcount.\n");
+
+    hr = ID3DX10Sprite_End(sprite);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    ID3DX10Sprite_Release(sprite);
+    ID3D10Texture2D_Release(texture1);
+    ID3D10Texture2D_Release(texture2);
+    ID3D10ShaderResourceView_Release(srv1);
+    ID3D10ShaderResourceView_Release(srv2);
+
+    refcount = ID3D10Device_Release(device);
+    ok(!refcount, "Unexpected refcount.\n");
+}
+
+static void test_create_effect_from_resource(void)
+{
+    ID3D10Device *device;
+    ID3D10Effect *effect;
+    ULONG refcount;
+    HRESULT hr;
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+
+    hr = D3DX10CreateEffectFromResourceA(GetModuleHandleA(NULL), "resource", NULL, NULL, NULL,
+            "fx_4_0", 0, 0, device, NULL, NULL, &effect, NULL, NULL);
+    ok(hr == D3DX10_ERR_INVALID_DATA, "Unexpected hr %#x.\n", hr);
+
+    refcount = ID3D10Device_Release(device);
+    ok(!refcount, "Unexpected refcount.\n");
 }
 
 START_TEST(d3dx10)
@@ -1652,4 +3271,7 @@ START_TEST(d3dx10)
     test_D3DX10CreateAsyncResourceLoader();
     test_get_image_info();
     test_create_texture();
+    test_font();
+    test_sprite();
+    test_create_effect_from_resource();
 }

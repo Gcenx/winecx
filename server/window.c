@@ -19,7 +19,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <stdarg.h>
@@ -28,9 +27,7 @@
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
-#include "wingdi.h"
-#include "winuser.h"
-#include "winternl.h"
+#include "ntuser.h"
 
 #include "object.h"
 #include "request.h"
@@ -59,6 +56,7 @@ enum property_type
 
 struct window
 {
+    struct object    obj;             /* object header */
     struct window   *parent;          /* parent window */
     user_handle_t    owner;           /* owner of this window */
     struct list      children;        /* list of children in Z-order */
@@ -78,11 +76,12 @@ struct window
     struct region   *update_region;   /* update region (relative to window rect) */
     unsigned int     style;           /* window style */
     unsigned int     ex_style;        /* window extended style */
-    unsigned int     id;              /* window id */
+    lparam_t         id;              /* window id */
     mod_handle_t     instance;        /* creator instance */
     unsigned int     is_unicode : 1;  /* ANSI or unicode */
     unsigned int     is_linked : 1;   /* is it linked into the parent z-order list? */
     unsigned int     is_layered : 1;  /* has layered info been set? */
+    unsigned int     is_orphan : 1;   /* is window orphaned */
     unsigned int     color_key;       /* color key for a layered window */
     unsigned int     alpha;           /* alpha value for a layered window */
     unsigned int     layered_flags;   /* flags for a layered window */
@@ -96,7 +95,35 @@ struct window
     int              prop_alloc;      /* number of allocated window properties */
     struct property *properties;      /* window properties array */
     int              nb_extra_bytes;  /* number of extra bytes */
-    char             extra_bytes[1];  /* extra bytes storage */
+    char            *extra_bytes;     /* extra bytes storage */
+};
+
+static void window_dump( struct object *obj, int verbose );
+static void window_destroy( struct object *obj );
+
+static const struct object_ops window_ops =
+{
+    sizeof(struct window),    /* size */
+    &no_type,                 /* type */
+    window_dump,              /* dump */
+    no_add_queue,             /* add_queue */
+    NULL,                     /* remove_queue */
+    NULL,                     /* signaled */
+    NULL,                     /* get_esync_fd */
+    NULL,                     /* satisfied */
+    no_signal,                /* signal */
+    no_get_fd,                /* get_fd */
+    default_map_access,       /* map_access */
+    default_get_sd,           /* get_sd */
+    default_set_sd,           /* set_sd */
+    no_get_full_name,         /* get_full_name */
+    no_lookup_name,           /* lookup_name */
+    no_link_name,             /* link_name */
+    NULL,                     /* unlink_name */
+    no_open_file,             /* open_file */
+    no_kernel_obj_list,       /* get_kernel_obj_list */
+    no_close_handle,          /* close_handle */
+    window_destroy            /* destroy */
 };
 
 static void shm_surface_dump( struct object *obj, int verbose );
@@ -112,15 +139,14 @@ struct shm_surface
     rectangle_t      bounds;          /* bounds of region requiring flush */
     struct process  *process;         /* flushing process */
     struct mapping  *mapping;         /* mapping of surface data */
-    obj_handle_t     mapping_handle;  /* handle of mapping in flushing process */
     struct list      entry;           /* entry in process list */
 };
 
 static const struct object_ops shm_surface_ops =
 {
     sizeof(struct shm_surface),  /* size */
+    &no_type,                    /* type */
     shm_surface_dump,            /* dump */
-    no_get_type,                 /* get_type */
     add_queue,                   /* add_queue */
     remove_queue,                /* remove_queue */
     shm_surface_signaled,        /* signaled */
@@ -128,10 +154,10 @@ static const struct object_ops shm_surface_ops =
     no_satisfied,                /* satisfied */
     no_signal,                   /* signal */
     no_get_fd,                   /* get_fd */
-    no_map_access,               /* map_access */
+    default_map_access,          /* map_access */
     default_get_sd,              /* get_sd */
     default_set_sd,              /* set_sd */
-    no_get_full_name,
+    no_get_full_name,            /* get_full_name */
     no_lookup_name,              /* lookup_name */
     no_link_name,                /* link_name */
     NULL,                        /* unlink_name */
@@ -174,6 +200,37 @@ static struct window *taskman_window;
 #define WINPTR_TOPMOST   ((struct window *)3L)
 #define WINPTR_NOTOPMOST ((struct window *)4L)
 
+static void window_dump( struct object *obj, int verbose )
+{
+    struct window *win = (struct window *)obj;
+    assert( obj->ops == &window_ops );
+    fprintf( stderr, "window %p handle %x\n", win, win->handle );
+}
+
+static void window_destroy( struct object *obj )
+{
+    struct window *win = (struct window *)obj;
+
+    assert( !win->handle );
+
+    if (win->parent)
+    {
+        list_remove( &win->entry );
+        release_object( win->parent );
+    }
+
+    if (win->win_region) free_region( win->win_region );
+    if (win->update_region) free_region( win->update_region );
+    if (win->class) release_class( win->class );
+    free( win->text );
+
+    if (win->nb_extra_bytes)
+    {
+        memset( win->extra_bytes, 0x55, win->nb_extra_bytes );
+        free( win->extra_bytes );
+    }
+}
+
 /* retrieve a pointer to a window from its handle */
 static inline struct window *get_window( user_handle_t handle )
 {
@@ -186,6 +243,14 @@ static inline struct window *get_window( user_handle_t handle )
 static inline int is_desktop_window( const struct window *win )
 {
     return !win->parent;  /* only desktop windows have no parent */
+}
+
+/* check if window is orphaned */
+static int is_orphan_window( struct window *win )
+{
+    do if (win->is_orphan) return 1;
+    while ((win = win->parent));
+    return 0;
 }
 
 /* get next window in Z-order list */
@@ -316,7 +381,8 @@ static int set_parent_window( struct window *win, struct window *parent )
 
     if (parent)
     {
-        win->parent = parent;
+        if (win->parent) release_object( win->parent );
+        win->parent = (struct window *)grab_object( parent );
         link_window( win, WINPTR_TOP );
 
         if (!is_desktop_window( parent ))
@@ -338,6 +404,7 @@ static int set_parent_window( struct window *win, struct window *parent )
         list_remove( &win->entry );  /* unlink it from the previous location */
         list_add_head( &win->parent->unlinked, &win->entry );
         win->is_linked = 0;
+        win->is_orphan = 1;
     }
     return 1;
 }
@@ -540,10 +607,8 @@ static struct window *create_window( struct window *parent, struct window *owner
         goto failed;
     }
 
-    if (!(win = mem_alloc( sizeof(*win) + extra_bytes - 1 ))) goto failed;
-    if (!(win->handle = alloc_user_handle( win, USER_WINDOW ))) goto failed;
-
-    win->parent         = parent;
+    if (!(win = alloc_object( &window_ops ))) goto failed;
+    win->parent         = parent ? (struct window *)grab_object( parent ) : NULL;
     win->owner          = owner ? owner->handle : 0;
     win->thread         = current;
     win->desktop        = desktop;
@@ -559,6 +624,7 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->is_unicode     = 1;
     win->is_linked      = 0;
     win->is_layered     = 0;
+    win->is_orphan      = 0;
     win->dpi_awareness  = DPI_AWARENESS_PER_MONITOR_AWARE;
     win->dpi            = 0;
     win->user_data      = 0;
@@ -568,11 +634,19 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->prop_inuse     = 0;
     win->prop_alloc     = 0;
     win->properties     = NULL;
-    win->nb_extra_bytes = extra_bytes;
+    win->nb_extra_bytes = 0;
+    win->extra_bytes    = NULL;
     win->window_rect = win->visible_rect = win->surface_rect = win->client_rect = empty_rect;
-    memset( win->extra_bytes, 0, extra_bytes );
     list_init( &win->children );
     list_init( &win->unlinked );
+
+    if (extra_bytes)
+    {
+        if (!(win->extra_bytes = mem_alloc( extra_bytes ))) goto failed;
+        memset( win->extra_bytes, 0, extra_bytes );
+        win->nb_extra_bytes = extra_bytes;
+    }
+    if (!(win->handle = alloc_user_handle( win, USER_WINDOW ))) goto failed;
 
     /* if parent belongs to a different thread and the window isn't */
     /* top-level, attach the two threads */
@@ -609,8 +683,12 @@ static struct window *create_window( struct window *parent, struct window *owner
 failed:
     if (win)
     {
-        if (win->handle) free_user_handle( win->handle );
-        free( win );
+        if (win->handle)
+        {
+            free_user_handle( win->handle );
+            win->handle = 0;
+        }
+        release_object( win );
     }
     release_object( desktop );
     release_class( class );
@@ -627,7 +705,7 @@ void destroy_thread_windows( struct thread *thread )
     {
         if (win->thread != thread) continue;
         if (is_desktop_window( win )) detach_window_thread( win );
-        else destroy_window( win );
+        else free_window_handle( win );
     }
 }
 
@@ -1928,8 +2006,12 @@ static void set_window_region( struct window *win, struct region *region, int re
 
 
 /* destroy a window */
-void destroy_window( struct window *win )
+void free_window_handle( struct window *win )
 {
+    struct window *child, *next;
+
+    assert( win->handle );
+
     /* hide the window */
     if (is_visible(win))
     {
@@ -1946,10 +2028,22 @@ void destroy_window( struct window *win )
     }
 
     /* destroy all children */
-    while (!list_empty(&win->children))
-        destroy_window( LIST_ENTRY( list_head(&win->children), struct window, entry ));
-    while (!list_empty(&win->unlinked))
-        destroy_window( LIST_ENTRY( list_head(&win->unlinked), struct window, entry ));
+    LIST_FOR_EACH_ENTRY_SAFE( child, next, &win->children, struct window, entry )
+    {
+        if (!child->handle) continue;
+        if (!win->thread || !child->thread || win->thread == child->thread)
+            free_window_handle( child );
+        else
+            send_notify_message( child->handle, WM_WINE_DESTROYWINDOW, 0, 0 );
+    }
+    LIST_FOR_EACH_ENTRY_SAFE( child, next, &win->children, struct window, entry )
+    {
+        if (!child->handle) continue;
+        if (!win->thread || !child->thread || win->thread == child->thread)
+            free_window_handle( child );
+        else
+            send_notify_message( child->handle, WM_WINE_DESTROYWINDOW, 0, 0 );
+    }
 
     /* reset global window pointers, if the corresponding window is destroyed */
     if (win == shell_window) shell_window = NULL;
@@ -1958,9 +2052,7 @@ void destroy_window( struct window *win )
     if (win == taskman_window) taskman_window = NULL;
     free_hotkeys( win->desktop, win->handle );
     cleanup_clipboard_window( win->desktop, win->handle );
-    free_user_handle( win->handle );
     destroy_properties( win );
-    list_remove( &win->entry );
     if (is_desktop_window(win))
     {
         struct desktop *desktop = win->desktop;
@@ -1974,12 +2066,11 @@ void destroy_window( struct window *win )
     }
 
     detach_window_thread( win );
-    if (win->win_region) free_region( win->win_region );
-    if (win->update_region) free_region( win->update_region );
-    if (win->class) release_class( win->class );
-    free( win->text );
-    memset( win, 0x55, sizeof(*win) + win->nb_extra_bytes - 1 );
-    free( win );
+
+    if (win->parent) set_parent_window( win, NULL );
+    free_user_handle( win->handle );
+    win->handle = 0;
+    release_object( win );
 }
 
 
@@ -2004,11 +2095,7 @@ static void shm_surface_destroy( struct object *obj )
     struct shm_surface *surface = (struct shm_surface *)obj;
     assert( obj->ops == &shm_surface_ops );
     if (surface->mapping) release_object( surface->mapping );
-    if (surface->process)
-    {
-        if (surface->mapping_handle) close_handle( surface->process, surface->mapping_handle );
-        list_remove( &surface->entry );
-    }
+    if (surface->process) list_remove( &surface->entry );
 }
 
 
@@ -2020,8 +2107,8 @@ struct shm_surface *find_pending_surface( struct process *process, user_handle_t
     {
         if (surface->lock_cnt || is_rect_empty( &surface->bounds )) continue;
 
+        *lparam = alloc_handle( process, surface->mapping, SECTION_MAP_READ, 0 );
         *win    = surface->window;
-        *lparam = surface->mapping_handle;
         *bounds = surface->bounds;
 
         surface->bounds = empty_rect;
@@ -2068,21 +2155,12 @@ static struct shm_surface *create_shm_surface( data_size_t mapping_size, struct 
     surface->lock_cnt       = 0;
     surface->lock_tid       = 0;
     surface->bounds         = empty_rect;
-    surface->mapping_handle = 0;
     surface->process        = process;
-    surface->mapping_handle = 0;
     list_add_head( &process->surfaces, &surface->entry );
 
     surface->mapping = create_mapping( NULL, NULL, 0, mapping_size, SEC_RESERVE, 0,
                                        SECTION_MAP_READ | SECTION_MAP_WRITE, NULL );
     if (!surface->mapping)
-    {
-        release_object( surface );
-        return NULL;
-    }
-
-    surface->mapping_handle = alloc_handle( process, surface->mapping, SECTION_MAP_READ, 0 );
-    if (!surface->mapping_handle)
     {
         release_object( surface );
         return NULL;
@@ -2100,7 +2178,15 @@ DECL_HANDLER(create_window)
     atom_t atom;
 
     reply->handle = 0;
-    if (req->parent && !(parent = get_window( req->parent ))) return;
+    if (req->parent)
+    {
+        if (!(parent = get_window( req->parent ))) return;
+        if (is_orphan_window( parent ))
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return;
+        }
+    }
 
     if (req->owner)
     {
@@ -2131,6 +2217,8 @@ DECL_HANDLER(create_window)
         win->dpi_awareness = req->awareness;
         win->dpi = req->dpi;
     }
+    win->style = req->style;
+    win->ex_style = req->ex_style;
 
     reply->handle    = win->handle;
     reply->parent    = win->parent ? win->parent->handle : 0;
@@ -2150,7 +2238,7 @@ DECL_HANDLER(set_parent)
     if (!(win = get_window( req->handle ))) return;
     if (req->parent && !(parent = get_window( req->parent ))) return;
 
-    if (is_desktop_window(win))
+    if (is_desktop_window(win) || is_orphan_window( win ) || (parent && is_orphan_window( parent )))
     {
         set_error( STATUS_INVALID_PARAMETER );
         return;
@@ -2166,10 +2254,15 @@ DECL_HANDLER(set_parent)
 /* destroy a window */
 DECL_HANDLER(destroy_window)
 {
-    struct window *win = get_window( req->handle );
-    if (win)
+    struct window *win;
+
+    if (!req->handle)
     {
-        if (!is_desktop_window(win)) destroy_window( win );
+        destroy_thread_windows( current );
+    }
+    else if ((win = get_window( req->handle )))
+    {
+        if (!is_desktop_window(win)) free_window_handle( win );
         else if (win->thread == current) detach_window_thread( win );
         else set_error( STATUS_ACCESS_DENIED );
     }
@@ -2305,7 +2398,7 @@ DECL_HANDLER(set_window_info)
         else win->ex_style = (req->ex_style & ~WS_EX_TOPMOST) | (win->ex_style & WS_EX_TOPMOST);
         if (!(win->ex_style & WS_EX_LAYERED)) win->is_layered = 0;
     }
-    if (req->flags & SET_WIN_ID) win->id = req->id;
+    if (req->flags & SET_WIN_ID) win->id = req->extra_value;
     if (req->flags & SET_WIN_INSTANCE) win->instance = req->instance;
     if (req->flags & SET_WIN_UNICODE) win->is_unicode = req->is_unicode;
     if (req->flags & SET_WIN_USERDATA) win->user_data = req->user_data;

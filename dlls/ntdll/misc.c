@@ -20,7 +20,6 @@
  */
 
 #include <time.h>
-#include <math.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -37,158 +36,6 @@ LPCSTR debugstr_us( const UNICODE_STRING *us )
     if (!us) return "<null>";
     return debugstr_wn(us->Buffer, us->Length / sizeof(WCHAR));
 }
-
-/*********************************************************************
- *                  abs   (NTDLL.@)
- */
-int CDECL abs( int i )
-{
-    return i >= 0 ? i : -i;
-}
-
-/*********************************************************************
- *                  atan   (NTDLL.@)
- */
-double CDECL atan( double d )
-{
-    return unix_funcs->atan( d );
-}
-
-/*********************************************************************
- *                  ceil   (NTDLL.@)
- */
-double CDECL ceil( double d )
-{
-    return unix_funcs->ceil( d );
-}
-
-/*********************************************************************
- *                  cos   (NTDLL.@)
- */
-double CDECL cos( double d )
-{
-    return unix_funcs->cos( d );
-}
-
-/*********************************************************************
- *                  fabs   (NTDLL.@)
- */
-double CDECL fabs( double d )
-{
-    return unix_funcs->fabs( d );
-}
-
-/*********************************************************************
- *                  floor   (NTDLL.@)
- */
-double CDECL floor( double d )
-{
-    return unix_funcs->floor( d );
-}
-
-/*********************************************************************
- *                  log   (NTDLL.@)
- */
-double CDECL log( double d )
-{
-    return unix_funcs->log( d );
-}
-
-/*********************************************************************
- *                  pow   (NTDLL.@)
- */
-double CDECL pow( double x, double y )
-{
-    return unix_funcs->pow( x, y );
-}
-
-/*********************************************************************
- *                  sin   (NTDLL.@)
- */
-double CDECL sin( double d )
-{
-    return unix_funcs->sin( d );
-}
-
-/*********************************************************************
- *                  sqrt   (NTDLL.@)
- */
-double CDECL sqrt( double d )
-{
-    return unix_funcs->sqrt( d );
-}
-
-/*********************************************************************
- *                  tan   (NTDLL.@)
- */
-double CDECL tan( double d )
-{
-    return unix_funcs->tan( d );
-}
-
-#if (defined(__GNUC__) || defined(__clang__)) && defined(__i386__)
-
-#define FPU_DOUBLE(var) double var; \
-    __asm__ __volatile__( "fstpl %0;fwait" : "=m" (var) : )
-#define FPU_DOUBLES(var1,var2) double var1,var2; \
-    __asm__ __volatile__( "fstpl %0;fwait" : "=m" (var2) : ); \
-    __asm__ __volatile__( "fstpl %0;fwait" : "=m" (var1) : )
-
-/*********************************************************************
- *		_CIcos (NTDLL.@)
- */
-double CDECL _CIcos(void)
-{
-    FPU_DOUBLE(x);
-    return cos(x);
-}
-
-/*********************************************************************
- *		_CIlog (NTDLL.@)
- */
-double CDECL _CIlog(void)
-{
-    FPU_DOUBLE(x);
-    return log(x);
-}
-
-/*********************************************************************
- *		_CIpow (NTDLL.@)
- */
-double CDECL _CIpow(void)
-{
-    FPU_DOUBLES(x,y);
-    return pow(x,y);
-}
-
-/*********************************************************************
- *		_CIsin (NTDLL.@)
- */
-double CDECL _CIsin(void)
-{
-    FPU_DOUBLE(x);
-    return sin(x);
-}
-
-/*********************************************************************
- *		_CIsqrt (NTDLL.@)
- */
-double CDECL _CIsqrt(void)
-{
-    FPU_DOUBLE(x);
-    return sqrt(x);
-}
-
-/*********************************************************************
- *                  _ftol   (NTDLL.@)
- */
-LONGLONG CDECL _ftol(void)
-{
-    FPU_DOUBLE(x);
-    return (LONGLONG)x;
-}
-
-#endif /* (defined(__GNUC__) || defined(__clang__)) && defined(__i386__) */
 
 static void
 NTDLL_mergesort( void *arr, void *barr, size_t elemsize, int(__cdecl *compar)(const void *, const void *),
@@ -330,7 +177,7 @@ ULONG WINAPI EtwEventActivityIdControl(ULONG code, GUID *guid)
  */
 BOOLEAN WINAPI EtwEventProviderEnabled( REGHANDLE handle, UCHAR level, ULONGLONG keyword )
 {
-    FIXME("%s, %u, %s: stub\n", wine_dbgstr_longlong(handle), level, wine_dbgstr_longlong(keyword));
+    WARN("%s, %u, %s: stub\n", wine_dbgstr_longlong(handle), level, wine_dbgstr_longlong(keyword));
     return FALSE;
 }
 
@@ -340,7 +187,7 @@ BOOLEAN WINAPI EtwEventProviderEnabled( REGHANDLE handle, UCHAR level, ULONGLONG
 ULONG WINAPI EtwEventRegister( LPCGUID provider, PENABLECALLBACK callback, PVOID context,
                 PREGHANDLE handle )
 {
-    FIXME("(%s, %p, %p, %p) stub.\n", debugstr_guid(provider), callback, context, handle);
+    WARN("(%s, %p, %p, %p) stub.\n", debugstr_guid(provider), callback, context, handle);
 
     if (!handle) return ERROR_INVALID_PARAMETER;
 
@@ -353,7 +200,7 @@ ULONG WINAPI EtwEventRegister( LPCGUID provider, PENABLECALLBACK callback, PVOID
  */
 ULONG WINAPI EtwEventUnregister( REGHANDLE handle )
 {
-    FIXME("(%s) stub.\n", wine_dbgstr_longlong(handle));
+    WARN("(%s) stub.\n", wine_dbgstr_longlong(handle));
     return ERROR_SUCCESS;
 }
 
@@ -413,7 +260,7 @@ ULONG WINAPI EtwRegisterTraceGuidsW( WMIDPREQUEST RequestAddress,
                 TRACE_GUID_REGISTRATION *TraceGuidReg, const WCHAR *MofImagePath,
                 const WCHAR *MofResourceName, TRACEHANDLE *RegistrationHandle )
 {
-    FIXME("(%p, %p, %s, %u, %p, %s, %s, %p): stub\n", RequestAddress, RequestContext,
+    WARN("(%p, %p, %s, %u, %p, %s, %s, %p): stub\n", RequestAddress, RequestContext,
           debugstr_guid(ControlGuid), GuidCount, TraceGuidReg, debugstr_w(MofImagePath),
           debugstr_w(MofResourceName), RegistrationHandle);
 
@@ -438,7 +285,7 @@ ULONG WINAPI EtwRegisterTraceGuidsA( WMIDPREQUEST RequestAddress,
                 TRACE_GUID_REGISTRATION *TraceGuidReg, const char *MofImagePath,
                 const char *MofResourceName, TRACEHANDLE *RegistrationHandle )
 {
-    FIXME("(%p, %p, %s, %u, %p, %s, %s, %p): stub\n", RequestAddress, RequestContext,
+    WARN("(%p, %p, %s, %u, %p, %s, %s, %p): stub\n", RequestAddress, RequestContext,
           debugstr_guid(ControlGuid), GuidCount, TraceGuidReg, debugstr_a(MofImagePath),
           debugstr_a(MofResourceName), RegistrationHandle);
     return ERROR_SUCCESS;
@@ -452,7 +299,7 @@ ULONG WINAPI EtwUnregisterTraceGuids( TRACEHANDLE RegistrationHandle )
     if (!RegistrationHandle)
          return ERROR_INVALID_PARAMETER;
 
-    FIXME("%s: stub\n", wine_dbgstr_longlong(RegistrationHandle));
+    WARN("%s: stub\n", wine_dbgstr_longlong(RegistrationHandle));
     return ERROR_SUCCESS;
 }
 
@@ -461,7 +308,7 @@ ULONG WINAPI EtwUnregisterTraceGuids( TRACEHANDLE RegistrationHandle )
  */
 BOOLEAN WINAPI EtwEventEnabled( REGHANDLE handle, const EVENT_DESCRIPTOR *descriptor )
 {
-    FIXME("(%s, %p): stub\n", wine_dbgstr_longlong(handle), descriptor);
+    WARN("(%s, %p): stub\n", wine_dbgstr_longlong(handle), descriptor);
     return FALSE;
 }
 
@@ -515,7 +362,7 @@ ULONG WINAPI EtwLogTraceEvent( TRACEHANDLE SessionHandle, PEVENT_TRACE_HEADER Ev
  *                  EtwTraceMessageVa (NTDLL.@)
  */
 ULONG WINAPI EtwTraceMessageVa( TRACEHANDLE handle, ULONG flags, LPGUID guid, USHORT number,
-                                __ms_va_list args )
+                                va_list args )
 {
     FIXME("(%s %x %s %d) : stub\n", wine_dbgstr_longlong(handle), flags, debugstr_guid(guid), number);
     return ERROR_SUCCESS;
@@ -526,23 +373,11 @@ ULONG WINAPI EtwTraceMessageVa( TRACEHANDLE handle, ULONG flags, LPGUID guid, US
  */
 ULONG WINAPIV EtwTraceMessage( TRACEHANDLE handle, ULONG flags, LPGUID guid, /*USHORT*/ ULONG number, ... )
 {
-    __ms_va_list valist;
+    va_list valist;
     ULONG ret;
 
-    __ms_va_start( valist, number );
+    va_start( valist, number );
     ret = EtwTraceMessageVa( handle, flags, guid, number, valist );
-    __ms_va_end( valist );
+    va_end( valist );
     return ret;
-}
-
-/*********************************************************************
- *                  ApiSetQueryApiSetPresence   (NTDLL.@)
- */
-BOOL WINAPI ApiSetQueryApiSetPresence(const UNICODE_STRING *namespace, BOOLEAN *present)
-{
-    FIXME("(%s, %p) stub!\n", debugstr_us(namespace), present);
-
-    if(present)
-        *present = TRUE;
-    return TRUE;
 }

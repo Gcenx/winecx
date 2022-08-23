@@ -20,6 +20,8 @@
 #ifndef __WINE_SETJMP_H
 #define __WINE_SETJMP_H
 
+#include "wine/winheader_enter.h"
+
 #include <corecrt.h>
 
 #include <pshpack8.h>
@@ -45,10 +47,6 @@ typedef struct __JUMP_BUFFER
 #define _JBLEN 16
 #define _JBTYPE int
 
-#elif defined(__i386_on_x86_64__)
-
-#error "Can't use this header for 32-on-64-bit mode"
-
 #elif defined(__x86_64__)
 
 typedef DECLSPEC_ALIGN(16) struct _SETJMP_FLOAT128
@@ -69,7 +67,9 @@ typedef DECLSPEC_ALIGN(16) struct _JUMP_BUFFER
     unsigned __int64 R14;
     unsigned __int64 R15;
     unsigned __int64 Rip;
-    unsigned __int64 Spare;
+    unsigned long MxCsr;
+    unsigned short FpCsr;
+    unsigned short Spare;
     SETJMP_FLOAT128  Xmm6;
     SETJMP_FLOAT128  Xmm7;
     SETJMP_FLOAT128  Xmm8;
@@ -178,5 +178,7 @@ _ACRTIMP int __cdecl _setjmp(jmp_buf);
 #endif
 
 #include <poppack.h>
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_SETJMP_H */

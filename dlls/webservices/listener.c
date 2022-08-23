@@ -24,7 +24,6 @@
 #include "webservices.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wine/list.h"
 #include "webservices_private.h"
 #include "sock.h"
@@ -128,18 +127,18 @@ static struct listener *alloc_listener(void)
     struct listener *ret;
     ULONG size = sizeof(*ret) + prop_size( listener_props, count );
 
-    if (!(ret = heap_alloc_zero( size ))) return NULL;
+    if (!(ret = calloc( 1, size ))) return NULL;
 
     ret->magic = LISTENER_MAGIC;
     if (!(ret->wait = CreateEventW( NULL, FALSE, FALSE, NULL )))
     {
-        heap_free( ret );
+        free( ret );
         return NULL;
     }
     if (!(ret->cancel = CreateEventW( NULL, FALSE, FALSE, NULL )))
     {
         CloseHandle( ret->wait );
-        heap_free( ret );
+        free( ret );
         return NULL;
     }
     InitializeCriticalSection( &ret->cs );
@@ -181,7 +180,7 @@ static void free_listener( struct listener *listener )
 
     listener->cs.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection( &listener->cs );
-    heap_free( listener );
+    free( listener );
 }
 
 static HRESULT create_listener( WS_CHANNEL_TYPE type, WS_CHANNEL_BINDING binding,
@@ -235,7 +234,7 @@ HRESULT WINAPI WsCreateListener( WS_CHANNEL_TYPE type, WS_CHANNEL_BINDING bindin
     struct listener *listener;
     HRESULT hr;
 
-    TRACE( "%u %u %p %u %p %p %p\n", type, binding, properties, count, desc, handle, error );
+    TRACE( "%u %u %p %lu %p %p %p\n", type, binding, properties, count, desc, handle, error );
     if (error) FIXME( "ignoring error parameter\n" );
     if (desc) FIXME( "ignoring security description\n" );
 
@@ -327,7 +326,7 @@ HRESULT parse_url( const WS_STRING *str, WS_URL_SCHEME_TYPE *scheme, WCHAR **hos
     if (url->host.length == 1 && (url->host.chars[0] == '+' || url->host.chars[0] == '*')) *host = NULL;
     else
     {
-        if (!(*host = heap_alloc( (url->host.length + 1) * sizeof(WCHAR) )))
+        if (!(*host = malloc( (url->host.length + 1) * sizeof(WCHAR) )))
         {
             WsFreeHeap( heap );
             return E_OUTOFMEMORY;
@@ -355,14 +354,14 @@ static HRESULT open_listener_tcp( struct listener *listener, const WS_STRING *ur
     if ((hr = parse_url( url, &scheme, &host, &port )) != S_OK) return hr;
     if (scheme != WS_URL_NETTCP_SCHEME_TYPE)
     {
-        heap_free( host );
+        free( host );
         return WS_E_INVALID_ENDPOINT_URL;
     }
 
     winsock_init();
 
     hr = resolve_hostname( host, port, addr, &addr_len, AI_PASSIVE );
-    heap_free( host );
+    free( host );
     if (hr != S_OK) return hr;
 
     if ((listener->u.tcp.socket = socket( addr->sa_family, SOCK_STREAM, 0 )) == -1)
@@ -406,14 +405,14 @@ static HRESULT open_listener_udp( struct listener *listener, const WS_STRING *ur
     if ((hr = parse_url( url, &scheme, &host, &port )) != S_OK) return hr;
     if (scheme != WS_URL_SOAPUDP_SCHEME_TYPE)
     {
-        heap_free( host );
+        free( host );
         return WS_E_INVALID_ENDPOINT_URL;
     }
 
     winsock_init();
 
     hr = resolve_hostname( host, port, addr, &addr_len, AI_PASSIVE );
-    heap_free( host );
+    free( host );
     if (hr != S_OK) return hr;
 
     if ((listener->u.udp.socket = socket( addr->sa_family, SOCK_DGRAM, 0 )) == -1)
@@ -472,7 +471,7 @@ HRESULT WINAPI WsOpenListener( WS_LISTENER *handle, WS_STRING *url, const WS_ASY
     else hr = open_listener( listener, url );
 
     LeaveCriticalSection( &listener->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -507,7 +506,7 @@ HRESULT WINAPI WsCloseListener( WS_LISTENER *handle, const WS_ASYNC_CONTEXT *ctx
     close_listener( listener );
 
     LeaveCriticalSection( &listener->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -538,7 +537,7 @@ HRESULT WINAPI WsResetListener( WS_LISTENER *handle, WS_ERROR *error )
         reset_listener( listener );
 
     LeaveCriticalSection( &listener->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -551,7 +550,7 @@ HRESULT WINAPI WsGetListenerProperty( WS_LISTENER *handle, WS_LISTENER_PROPERTY_
     struct listener *listener = (struct listener *)handle;
     HRESULT hr = S_OK;
 
-    TRACE( "%p %u %p %u %p\n", handle, id, buf, size, error );
+    TRACE( "%p %u %p %lu %p\n", handle, id, buf, size, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!listener) return E_INVALIDARG;
@@ -586,7 +585,7 @@ HRESULT WINAPI WsGetListenerProperty( WS_LISTENER *handle, WS_LISTENER_PROPERTY_
     }
 
     LeaveCriticalSection( &listener->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -599,7 +598,7 @@ HRESULT WINAPI WsSetListenerProperty( WS_LISTENER *handle, WS_LISTENER_PROPERTY_
     struct listener *listener = (struct listener *)handle;
     HRESULT hr;
 
-    TRACE( "%p %u %p %u\n", handle, id, value, size );
+    TRACE( "%p %u %p %lu %p\n", handle, id, value, size, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!listener) return E_INVALIDARG;
@@ -615,7 +614,7 @@ HRESULT WINAPI WsSetListenerProperty( WS_LISTENER *handle, WS_LISTENER_PROPERTY_
     hr = prop_set( listener->prop, listener->prop_count, id, value, size );
 
     LeaveCriticalSection( &listener->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -661,7 +660,7 @@ HRESULT WINAPI WsAcceptChannel( WS_LISTENER *handle, WS_CHANNEL *channel_handle,
 
             LeaveCriticalSection( &listener->cs );
             hr = channel_accept_tcp( socket, wait, cancel, channel_handle );
-            TRACE( "returning %08x\n", hr );
+            TRACE( "returning %#lx\n", hr );
             return hr;
         }
         case WS_UDP_CHANNEL_BINDING:
@@ -670,7 +669,7 @@ HRESULT WINAPI WsAcceptChannel( WS_LISTENER *handle, WS_CHANNEL *channel_handle,
 
             LeaveCriticalSection( &listener->cs );
             hr = channel_accept_udp( socket, wait, cancel, channel_handle );
-            TRACE( "returning %08x\n", hr );
+            TRACE( "returning %#lx\n", hr );
             return hr;
         }
         default:
@@ -680,6 +679,6 @@ HRESULT WINAPI WsAcceptChannel( WS_LISTENER *handle, WS_CHANNEL *channel_handle,
     }
 
     LeaveCriticalSection( &listener->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }

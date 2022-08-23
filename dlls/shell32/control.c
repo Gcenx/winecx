@@ -31,7 +31,6 @@
 #include "winreg.h"
 #include "wine/debug.h"
 #include "cpl.h"
-#include "wine/unicode.h"
 #include "commctrl.h"
 
 #define NO_SHLWAPI_REG
@@ -54,6 +53,9 @@ void Control_UnloadApplet(CPlApplet* applet)
 
     if (applet->proc) applet->proc(applet->hWnd, CPL_EXIT, 0L, 0L);
     FreeLibrary(applet->hModule);
+    if (applet->context_activated)
+        DeactivateActCtx(0, applet->cookie);
+    ReleaseActCtx(applet->context);
     list_remove( &applet->entry );
     heap_free(applet->cmd);
     heap_free(applet);
@@ -61,14 +63,18 @@ void Control_UnloadApplet(CPlApplet* applet)
 
 CPlApplet*	Control_LoadApplet(HWND hWnd, LPCWSTR cmd, CPanel* panel)
 {
+    WCHAR path[MAX_PATH];
     CPlApplet*	applet;
     DWORD len;
     unsigned 	i;
     CPLINFO	info;
     NEWCPLINFOW newinfo;
+    ACTCTXW ctx;
 
     if (!(applet = heap_alloc_zero(sizeof(*applet))))
        return applet;
+
+    applet->context = INVALID_HANDLE_VALUE;
 
     len = ExpandEnvironmentStringsW(cmd, NULL, 0);
     if (len > 0)
@@ -87,6 +93,21 @@ CPlApplet*	Control_LoadApplet(HWND hWnd, LPCWSTR cmd, CPanel* panel)
     }
 
     applet->hWnd = hWnd;
+
+    /* Activate context before DllMain() is called */
+    if (SearchPathW(NULL, applet->cmd, NULL, ARRAY_SIZE(path), path, NULL))
+    {
+        memset(&ctx, 0, sizeof(ctx));
+        ctx.cbSize = sizeof(ctx);
+        ctx.lpSource = path;
+        ctx.lpResourceName = MAKEINTRESOURCEW(123);
+        ctx.dwFlags = ACTCTX_FLAG_RESOURCE_NAME_VALID;
+        applet->context = CreateActCtxW(&ctx);
+        if (applet->context != INVALID_HANDLE_VALUE)
+            applet->context_activated = ActivateActCtx(applet->context, &applet->cookie);
+        else
+            TRACE("No manifest at ID 123 in %s\n", wine_dbgstr_w(path));
+    }
 
     if (!(applet->hModule = LoadLibraryW(applet->cmd))) {
         WARN("Cannot load control panel applet %s\n", debugstr_w(applet->cmd));
@@ -178,6 +199,9 @@ CPlApplet*	Control_LoadApplet(HWND hWnd, LPCWSTR cmd, CPanel* panel)
 
  theError:
     FreeLibrary(applet->hModule);
+    if (applet->context_activated)
+        DeactivateActCtx(0, applet->cookie);
+    ReleaseActCtx(applet->context);
     heap_free(applet->cmd);
     heap_free(applet);
     return NULL;
@@ -428,15 +452,13 @@ static CPlItem* Control_GetCPlItem_From_ListView(CPanel *panel)
 
 static void Control_StartApplet(HWND hWnd, CPlItem *item)
 {
-    static const WCHAR verbOpen[] = {'c','p','l','o','p','e','n',0};
-    static const WCHAR format[] = {'@','%','d',0};
-    WCHAR param[MAX_PATH];
+    WCHAR param[12];
 
     /* execute the applet if item is valid */
     if (item)
     {
-        wsprintfW(param, format, item->id);
-        ShellExecuteW(hWnd, verbOpen, item->applet->cmd, param, NULL, SW_SHOW);
+        swprintf(param, ARRAY_SIZE(param), L"@%d", item->id);
+        ShellExecuteW(hWnd, L"cplopen", item->applet->cmd, param, NULL, SW_SHOW);
     }
 }
 
@@ -606,8 +628,6 @@ static LRESULT WINAPI	Control_WndProc(HWND hWnd, UINT wMsg,
 
 static void    Control_DoInterface(CPanel* panel, HWND hWnd, HINSTANCE hInst)
 {
-    static const WCHAR className[] = {'S','h','e','l','l','_','C','o','n','t','r','o',
-        'l','_','W','n','d','C','l','a','s','s',0};
     WNDCLASSEXW wc;
     MSG		msg;
     WCHAR appName[MAX_STRING_LEN];
@@ -624,7 +644,7 @@ static void    Control_DoInterface(CPanel* panel, HWND hWnd, HINSTANCE hInst)
     wc.hCursor = LoadCursorW( 0, (LPWSTR)IDC_ARROW );
     wc.hbrBackground = GetStockObject(WHITE_BRUSH);
     wc.lpszMenuName = NULL;
-    wc.lpszClassName = className;
+    wc.lpszClassName = L"Shell_Control_WndClass";
     wc.hIconSm = LoadImageW( shell32_hInstance, MAKEINTRESOURCEW(IDI_SHELL_CONTROL_PANEL), IMAGE_ICON,
                              GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED);
 
@@ -672,17 +692,13 @@ static	void	Control_DoWindow(CPanel* panel, HWND hWnd, HINSTANCE hInst)
     HANDLE		h;
     WIN32_FIND_DATAW	fd;
     WCHAR		buffer[MAX_PATH];
-    static const WCHAR wszAllCpl[] = {'*','.','c','p','l',0};
-    static const WCHAR wszRegPath[] = {'S','O','F','T','W','A','R','E','\\','M','i','c','r','o','s','o','f','t',
-            '\\','W','i','n','d','o','w','s','\\','C','u','r','r','e','n','t','V','e','r','s','i','o','n',
-            '\\','C','o','n','t','r','o','l',' ','P','a','n','e','l','\\','C','p','l','s',0};
     WCHAR *p;
 
     /* first add .cpl files in the system directory */
     GetSystemDirectoryW( buffer, MAX_PATH );
-    p = buffer + strlenW(buffer);
+    p = buffer + lstrlenW(buffer);
     *p++ = '\\';
-    lstrcpyW(p, wszAllCpl);
+    lstrcpyW(p, L"*.cpl");
 
     if ((h = FindFirstFileW(buffer, &fd)) != INVALID_HANDLE_VALUE) {
         do {
@@ -693,8 +709,8 @@ static	void	Control_DoWindow(CPanel* panel, HWND hWnd, HINSTANCE hInst)
     }
 
     /* now check for cpls in the registry */
-    Control_RegisterRegistryApplets(hWnd, panel, HKEY_LOCAL_MACHINE, wszRegPath);
-    Control_RegisterRegistryApplets(hWnd, panel, HKEY_CURRENT_USER, wszRegPath);
+    Control_RegisterRegistryApplets(hWnd, panel, HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Control Panel\\Cpls");
+    Control_RegisterRegistryApplets(hWnd, panel, HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Control Panel\\Cpls");
 
     Control_DoInterface(panel, hWnd, hInst);
 }
@@ -732,7 +748,7 @@ static	void	Control_DoLaunch(CPanel* panel, HWND hWnd, LPCWSTR wszCmd)
             *end = '\0';
             if (beg) {
                 if (*beg == '@') {
-                    sp = atoiW(beg + 1);
+                    sp = wcstol(beg + 1, NULL, 10);
                 } else if (*beg == '\0') {
                     sp = -1;
                 } else {
@@ -780,7 +796,7 @@ static	void	Control_DoLaunch(CPanel* panel, HWND hWnd, LPCWSTR wszCmd)
 
     /* Now check if there had been a numerical value in the extra params */
     if ((extraPmts) && (*extraPmts == '@') && (sp == -1)) {
-        sp = atoiW(extraPmts + 1);
+        sp = wcstol(extraPmts + 1, NULL, 10);
     }
 
     TRACE("cmd %s, extra %s, sp %d\n", debugstr_w(buffer), debugstr_w(extraPmts), sp);
@@ -820,7 +836,7 @@ void WINAPI Control_RunDLLW(HWND hWnd, HINSTANCE hInst, LPCWSTR cmd, DWORD nCmdS
 {
     CPanel	panel;
 
-    TRACE("(%p, %p, %s, 0x%08x)\n",
+    TRACE("(%p, %p, %s, 0x%08lx)\n",
 	  hWnd, hInst, debugstr_w(cmd), nCmdShow);
 
     memset(&panel, 0, sizeof(panel));
@@ -854,7 +870,7 @@ void WINAPI Control_RunDLLA(HWND hWnd, HINSTANCE hInst, LPCSTR cmd, DWORD nCmdSh
  */
 HRESULT WINAPI Control_FillCache_RunDLLW(HWND hWnd, HANDLE hModule, DWORD w, DWORD x)
 {
-    FIXME("%p %p 0x%08x 0x%08x stub\n", hWnd, hModule, w, x);
+    FIXME("%p %p 0x%08lx 0x%08lx stub\n", hWnd, hModule, w, x);
     return S_OK;
 }
 
@@ -876,7 +892,7 @@ HRESULT WINAPI Control_FillCache_RunDLLA(HWND hWnd, HANDLE hModule, DWORD w, DWO
  */
 DWORD WINAPI CallCPLEntry16(HMODULE hMod, FARPROC pFunc, DWORD dw3, DWORD dw4, DWORD dw5, DWORD dw6)
 {
-    FIXME("(%p, %p, %08x, %08x, %08x, %08x): stub.\n", hMod, pFunc, dw3, dw4, dw5, dw6);
+    FIXME("(%p, %p, %08lx, %08lx, %08lx, %08lx): stub.\n", hMod, pFunc, dw3, dw4, dw5, dw6);
     return 0x0deadbee;
 }
 

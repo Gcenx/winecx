@@ -39,8 +39,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msctf);
 
-static HINSTANCE MSCTF_hinstance;
-
 typedef struct
 {
     DWORD id;
@@ -298,7 +296,7 @@ HRESULT advise_sink(struct list *sink_list, REFIID riid, DWORD cookie_magic, IUn
 
     list_add_head(sink_list, &sink->entry);
     *cookie = generate_Cookie(cookie_magic, sink);
-    TRACE("cookie %x\n", *cookie);
+    TRACE("cookie %lx\n", *cookie);
     return S_OK;
 }
 
@@ -553,13 +551,10 @@ HRESULT set_textservice_sink(TfClientId tid, REFCLSID iid, IUnknown* sink)
  */
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD fdwReason, LPVOID fImpLoad)
 {
-    TRACE("%p 0x%x %p\n", hinst, fdwReason, fImpLoad);
+    TRACE("%p 0x%lx %p\n", hinst, fdwReason, fImpLoad);
     switch (fdwReason)
     {
-        case DLL_WINE_PREATTACH:
-            return FALSE;   /* prefer native version */
         case DLL_PROCESS_ATTACH:
-            MSCTF_hinstance = hinst;
             tlsIndex = TlsAlloc();
             break;
         case DLL_PROCESS_DETACH:
@@ -568,14 +563,6 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD fdwReason, LPVOID fImpLoad)
             break;
     }
     return TRUE;
-}
-
-/*************************************************************************
- *              DllCanUnloadNow (MSCTF.@)
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
 }
 
 /***********************************************************************
@@ -595,22 +582,6 @@ HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, LPVOID *ppvOut)
         }
     FIXME("CLSID %s not supported\n", debugstr_guid(clsid));
     return CLASS_E_CLASSNOTAVAILABLE;
-}
-
-/***********************************************************************
- *		DllRegisterServer (MSCTF.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( MSCTF_hinstance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (MSCTF.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( MSCTF_hinstance );
 }
 
 /***********************************************************************

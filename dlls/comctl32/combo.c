@@ -789,6 +789,8 @@ static LRESULT COMBO_ThemedPaint(HTHEME theme, HEADCOMBO *lphc, HDC hdc)
 
     if ((lphc->dwStyle & CBS_DROPDOWNLIST) == CBS_DROPDOWNLIST)
         CBPaintText(lphc, hdc);
+    else
+        InvalidateRect(lphc->hWndEdit, NULL, TRUE);
 
     return 0;
 }
@@ -1001,8 +1003,7 @@ static void CBDropDown( LPHEADCOMBO lphc )
 
 
    if( !(lphc->wState & CBF_NOREDRAW) )
-     RedrawWindow( lphc->self, NULL, 0, RDW_INVALIDATE |
-			   RDW_ERASE | RDW_UPDATENOW | RDW_NOCHILDREN );
+     RedrawWindow( lphc->self, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW );
 
    EnableWindow( lphc->hWndLBox, TRUE );
    if (GetCapture() != lphc->self)
@@ -1410,7 +1411,7 @@ static void COMBO_Size( HEADCOMBO *lphc )
      */
     if( curComboHeight > newComboHeight )
     {
-      TRACE("oldComboHeight=%d, newComboHeight=%d, oldDropBottom=%d, oldDropTop=%d\n",
+      TRACE("oldComboHeight=%d, newComboHeight=%d, oldDropBottom=%ld, oldDropTop=%ld\n",
             curComboHeight, newComboHeight, lphc->droppedRect.bottom,
             lphc->droppedRect.top);
       lphc->droppedRect.bottom = lphc->droppedRect.top + curComboHeight - newComboHeight;
@@ -1632,6 +1633,13 @@ static void COMBO_MouseMove( LPHEADCOMBO lphc, WPARAM wParam, LPARAM lParam )
    }
 }
 
+static LRESULT COMBO_MouseLeave(LPHEADCOMBO lphc)
+{
+    lphc->wState &= ~CBF_HOT;
+    RedrawWindow(lphc->self, &lphc->buttonRect, 0, RDW_INVALIDATE | RDW_UPDATENOW);
+    return 0;
+}
+
 static LRESULT COMBO_GetComboBoxInfo(const HEADCOMBO *lphc, COMBOBOXINFO *pcbi)
 {
     if (!pcbi || (pcbi->cbSize < sizeof(COMBOBOXINFO)))
@@ -1671,7 +1679,7 @@ static LRESULT CALLBACK COMBO_WindowProc( HWND hwnd, UINT message, WPARAM wParam
     HEADCOMBO *lphc = (HEADCOMBO *)GetWindowLongPtrW( hwnd, 0 );
     HTHEME theme;
 
-    TRACE("[%p]: msg %#x wp %08lx lp %08lx\n", hwnd, message, wParam, lParam );
+    TRACE("[%p]: msg %#x, wp %Ix, lp %Ix\n", hwnd, message, wParam, lParam );
 
     if (!IsWindow(hwnd)) return 0;
 
@@ -1707,6 +1715,7 @@ static LRESULT CALLBACK COMBO_WindowProc( HWND hwnd, UINT message, WPARAM wParam
         theme = GetWindowTheme( hwnd );
         CloseThemeData( theme );
         OpenThemeData( hwnd, WC_COMBOBOXW );
+        InvalidateRect( hwnd, NULL, TRUE );
         break;
 
     case WM_PRINTCLIENT:
@@ -1887,6 +1896,7 @@ static LRESULT CALLBACK COMBO_WindowProc( HWND hwnd, UINT message, WPARAM wParam
     case WM_MOUSEMOVE:
         if (!IsRectEmpty(&lphc->buttonRect))
         {
+            TRACKMOUSEEVENT event;
             POINT pt;
 
             pt.x = (short)LOWORD(lParam);
@@ -1898,6 +1908,15 @@ static LRESULT CALLBACK COMBO_WindowProc( HWND hwnd, UINT message, WPARAM wParam
                 {
                     lphc->wState |= CBF_HOT;
                     RedrawWindow(hwnd, &lphc->buttonRect, 0, RDW_INVALIDATE | RDW_UPDATENOW);
+
+                    event.cbSize = sizeof(TRACKMOUSEEVENT);
+                    event.dwFlags = TME_QUERY;
+                    if (!TrackMouseEvent(&event) || event.hwndTrack != hwnd || !(event.dwFlags & TME_LEAVE))
+                    {
+                        event.hwndTrack = hwnd;
+                        event.dwFlags = TME_LEAVE;
+                        TrackMouseEvent(&event);
+                    }
                 }
             }
             else if (lphc->wState & CBF_HOT)
@@ -1910,6 +1929,9 @@ static LRESULT CALLBACK COMBO_WindowProc( HWND hwnd, UINT message, WPARAM wParam
         if ( lphc->wState & CBF_CAPTURE )
             COMBO_MouseMove( lphc, wParam, lParam );
         return  TRUE;
+
+    case WM_MOUSELEAVE:
+        return COMBO_MouseLeave(lphc);
 
     case WM_MOUSEWHEEL:
         if (wParam & (MK_SHIFT | MK_CONTROL))
@@ -2102,7 +2124,7 @@ static LRESULT CALLBACK COMBO_WindowProc( HWND hwnd, UINT message, WPARAM wParam
 
     default:
         if (message >= WM_USER)
-            WARN("unknown msg WM_USER+%04x wp=%04lx lp=%08lx\n", message - WM_USER, wParam, lParam );
+            WARN("unknown msg WM_USER+%04x, wp %Ix, lp %Ix\n", message - WM_USER, wParam, lParam );
         break;
     }
 

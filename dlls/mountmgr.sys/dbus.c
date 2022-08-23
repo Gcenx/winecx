@@ -18,33 +18,29 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
+#if 0
+#pragma makedep unix
+#endif
 
-#include <assert.h>
+#include "config.h"
+
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <dlfcn.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #ifdef SONAME_LIBDBUS_1
 # include <dbus/dbus.h>
 #endif
-#ifdef SONAME_LIBHAL
-# include <hal/libhal.h>
-#endif
 
 #include "mountmgr.h"
-#include "winnls.h"
-#include "excpt.h"
 #define USE_WS_PREFIX
 #include "winsock2.h"
-#include "ws2ipdef.h"
-#include "nldef.h"
-#include "netioapi.h"
-#include "inaddr.h"
-#include "ip2string.h"
 #include "dhcpcsdk.h"
+#include "unixlib.h"
 
-#include "wine/exception.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mountmgr);
@@ -88,66 +84,6 @@ DBUS_FUNCS;
 static int udisks_timeout = -1;
 static DBusConnection *connection;
 
-#ifdef SONAME_LIBHAL
-
-#define HAL_FUNCS \
-    DO_FUNC(libhal_ctx_free); \
-    DO_FUNC(libhal_ctx_init); \
-    DO_FUNC(libhal_ctx_new); \
-    DO_FUNC(libhal_ctx_set_dbus_connection); \
-    DO_FUNC(libhal_ctx_set_device_added); \
-    DO_FUNC(libhal_ctx_set_device_property_modified); \
-    DO_FUNC(libhal_ctx_set_device_removed); \
-    DO_FUNC(libhal_ctx_shutdown); \
-    DO_FUNC(libhal_device_get_property_bool); \
-    DO_FUNC(libhal_device_get_property_int); \
-    DO_FUNC(libhal_device_get_property_string); \
-    DO_FUNC(libhal_device_add_property_watch); \
-    DO_FUNC(libhal_device_remove_property_watch); \
-    DO_FUNC(libhal_free_string); \
-    DO_FUNC(libhal_free_string_array); \
-    DO_FUNC(libhal_get_all_devices)
-
-#define DO_FUNC(f) static typeof(f) * p_##f
-HAL_FUNCS;
-#undef DO_FUNC
-
-static BOOL load_hal_functions(void)
-{
-    void *hal_handle;
-
-    /* Load libhal with RTLD_GLOBAL so that the dbus symbols are available.
-     * We can't load libdbus directly since libhal may have been built against a
-     * different version but with the same soname. Binary compatibility is for wimps. */
-
-    if (!(hal_handle = dlopen( SONAME_LIBHAL, RTLD_NOW | RTLD_GLOBAL )))
-        goto failed;
-
-#define DO_FUNC(f) if (!(p_##f = dlsym( RTLD_DEFAULT, #f ))) goto failed
-    DBUS_FUNCS;
-#undef DO_FUNC
-
-#define DO_FUNC(f) if (!(p_##f = dlsym( hal_handle, #f ))) goto failed
-    HAL_FUNCS;
-#undef DO_FUNC
-
-    udisks_timeout = 3000;  /* don't try for too long if we can fall back to HAL */
-    return TRUE;
-
-failed:
-    WARN( "failed to load HAL support: %s\n", dlerror() );
-    return FALSE;
-}
-
-#endif /* SONAME_LIBHAL */
-
-static LONG WINAPI assert_fault(EXCEPTION_POINTERS *eptr)
-{
-    if (eptr->ExceptionRecord->ExceptionCode == EXCEPTION_WINE_ASSERTION)
-        return EXCEPTION_EXECUTE_HANDLER;
-    return EXCEPTION_CONTINUE_SEARCH;
-}
-
 static inline int starts_with( const char *str, const char *prefix )
 {
     return !strncmp( str, prefix, strlen(prefix) );
@@ -156,19 +92,32 @@ static inline int starts_with( const char *str, const char *prefix )
 static GUID *parse_uuid( GUID *guid, const char *str )
 {
     /* standard uuid format */
-    if (strlen(str) == 36)
+    if (strlen(str) == 36 && str[8] == '-' && str[13] == '-' && str[18] == '-' && str[23] == '-')
     {
-        UNICODE_STRING strW;
-        WCHAR buffer[39];
+        int i;
+        unsigned char *out = guid->Data4;
 
-        if (MultiByteToWideChar( CP_UNIXCP, 0, str, 36, buffer + 1, 36 ))
+        if (sscanf( str, "%x-%hx-%hx-", (int *)&guid->Data1, &guid->Data2, &guid->Data3 ) != 3) return NULL;
+        for (i = 19; i < 36; i++)
         {
-            buffer[0] = '{';
-            buffer[37] = '}';
-            buffer[38] = 0;
-            RtlInitUnicodeString( &strW, buffer );
-            if (!RtlGUIDFromString( &strW, guid )) return guid;
+            unsigned char val;
+
+            if (i == 23) continue;
+
+            if      (str[i] >= '0' && str[i] <= '9') val = str[i] - '0';
+            else if (str[i] >= 'a' && str[i] <= 'f') val = str[i] - 'a' + 10;
+            else if (str[i] >= 'A' && str[i] <= 'F') val = str[i] - 'A' + 10;
+            else return NULL;
+            val <<= 4;
+            i++;
+
+            if      (str[i] >= '0' && str[i] <= '9') val += str[i] - '0';
+            else if (str[i] >= 'a' && str[i] <= 'f') val += str[i] - 'a' + 10;
+            else if (str[i] >= 'A' && str[i] <= 'F') val += str[i] - 'A' + 10;
+            else return NULL;
+            *out++ = val;
         }
+        return guid;
     }
 
     /* check for xxxx-xxxx format (FAT serial number) */
@@ -316,8 +265,8 @@ static void udisks_new_device( const char *udi )
 
     if (device)
     {
-        if (removable) add_dos_device( -1, udi, device, mount_point, drive_type, guid_ptr, NULL );
-        else if (guid_ptr) add_volume( udi, device, mount_point, DEVICE_HARDDISK_VOL, guid_ptr, NULL );
+        if (removable) queue_device_op( ADD_DOS_DEVICE, udi, device, mount_point, drive_type, guid_ptr, NULL, NULL );
+        else if (guid_ptr) queue_device_op( ADD_VOLUME, udi, device, mount_point, DEVICE_HARDDISK_VOL, guid_ptr, NULL, NULL );
     }
 
     p_dbus_message_unref( reply );
@@ -327,8 +276,7 @@ static void udisks_new_device( const char *udi )
 static void udisks_removed_device( const char *udi )
 {
     TRACE( "removed %s\n", wine_dbgstr_a(udi) );
-
-    if (!remove_dos_device( -1, udi )) remove_volume( udi );
+    queue_device_op( REMOVE_DEVICE, udi, NULL, NULL, 0, NULL, NULL, NULL );
 }
 
 /* UDisks callback for changed device */
@@ -485,8 +433,8 @@ static void udisks2_add_device( const char *udi, DBusMessageIter *dict, DBusMess
     }
     if (device)
     {
-        if (removable) add_dos_device( -1, udi, device, mount_point, drive_type, guid_ptr, NULL );
-        else if (guid_ptr) add_volume( udi, device, mount_point, DEVICE_HARDDISK_VOL, guid_ptr, id );
+        if (removable) queue_device_op( ADD_DOS_DEVICE, udi, device, mount_point, drive_type, guid_ptr, id, NULL );
+        else if (guid_ptr) queue_device_op( ADD_VOLUME, udi, device, mount_point, DEVICE_HARDDISK_VOL, guid_ptr, id, NULL );
     }
 }
 
@@ -581,300 +529,7 @@ static DBusHandlerResult udisks_filter( DBusConnection *ctx, DBusMessage *msg, v
     return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 }
 
-#ifdef SONAME_LIBHAL
-
-static BOOL hal_get_ide_parameters( LibHalContext *ctx, const char *udi, SCSI_ADDRESS *scsi_addr, UCHAR *devtype, char *ident, size_t ident_size )
-{
-    DBusError error;
-    char *parent = NULL;
-    char *type = NULL;
-    char *model = NULL;
-    int host, chan;
-    BOOL ret = FALSE;
-
-    p_dbus_error_init( &error );
-
-    if (!(parent = p_libhal_device_get_property_string( ctx, udi, "info.parent", &error )))
-        goto done;
-    if ((host = p_libhal_device_get_property_int( ctx, parent, "ide.host", &error )) < 0)
-        goto done;
-    if ((chan = p_libhal_device_get_property_int( ctx, parent, "ide.channel", &error )) < 0)
-        goto done;
-
-    ret = TRUE;
-
-    if (devtype)
-    {
-        if (!(type = p_libhal_device_get_property_string( ctx, udi, "storage.drive_type", &error )))
-            *devtype = SCSI_UNKNOWN_PERIPHERAL;
-        else if (!strcmp( type, "disk" ) || !strcmp( type, "floppy" ))
-            *devtype = SCSI_DISK_PERIPHERAL;
-        else if (!strcmp( type, "tape" ))
-            *devtype = SCSI_TAPE_PERIPHERAL;
-        else if (!strcmp( type, "cdrom" ))
-            *devtype = SCSI_CDROM_PERIPHERAL;
-        else if (!strcmp( type, "raid" ))
-            *devtype = SCSI_ARRAY_PERIPHERAL;
-        else
-            *devtype = SCSI_UNKNOWN_PERIPHERAL;
-    }
-
-    if (ident)
-    {
-        if (!(model = p_libhal_device_get_property_string( ctx, udi, "storage.model", &error )))
-            p_dbus_error_free( &error );  /* ignore error */
-        else
-            lstrcpynA( ident, model, ident_size );
-    }
-
-    scsi_addr->PortNumber = host;
-    scsi_addr->PathId = 0;
-    scsi_addr->TargetId = chan;
-    scsi_addr->Lun = 0;
-
-done:
-    if (model) p_libhal_free_string( model );
-    if (type) p_libhal_free_string( type );
-    if (parent) p_libhal_free_string( parent );
-    p_dbus_error_free( &error );
-    return ret;
-}
-
-static BOOL hal_get_scsi_parameters( LibHalContext *ctx, const char *udi, SCSI_ADDRESS *scsi_addr, UCHAR *devtype, char *ident, size_t ident_size )
-{
-    DBusError error;
-    char *type = NULL;
-    char *vendor = NULL;
-    char *model = NULL;
-    int host, bus, target, lun;
-    BOOL ret = FALSE;
-
-    p_dbus_error_init( &error );
-
-    if ((host = p_libhal_device_get_property_int( ctx, udi, "scsi.host", &error )) < 0)
-        goto done;
-    if ((bus = p_libhal_device_get_property_int( ctx, udi, "scsi.bus", &error )) < 0)
-        goto done;
-    if ((target = p_libhal_device_get_property_int( ctx, udi, "scsi.target", &error )) < 0)
-        goto done;
-    if ((lun = p_libhal_device_get_property_int( ctx, udi, "scsi.lun", &error )) < 0)
-        goto done;
-
-    ret = TRUE;
-    scsi_addr->PortNumber = host;
-    scsi_addr->PathId = bus;
-    scsi_addr->TargetId = target;
-    scsi_addr->Lun = lun;
-
-    if (ident)
-    {
-        if (!(vendor = p_libhal_device_get_property_string( ctx, udi, "scsi.vendor", &error )))
-            p_dbus_error_free( &error );  /* ignore error */
-        if (!(model = p_libhal_device_get_property_string( ctx, udi, "scsi.model", &error )))
-            p_dbus_error_free( &error );  /* ignore error */
-        snprintf( ident, ident_size, "%-8s%-16s", vendor ? vendor : "WINE", model ? model : "SCSI" );
-    }
-
-    if (devtype)
-    {
-        if (!(type = p_libhal_device_get_property_string( ctx, udi, "scsi.type", &error )))
-        {
-            *devtype = SCSI_UNKNOWN_PERIPHERAL;
-            goto done;
-        }
-        if (!strcmp( type, "disk" ))
-            *devtype = SCSI_DISK_PERIPHERAL;
-        else if (!strcmp( type, "tape" ))
-            *devtype = SCSI_TAPE_PERIPHERAL;
-        else if (!strcmp( type, "printer" ))
-            *devtype = SCSI_PRINTER_PERIPHERAL;
-        else if (!strcmp( type, "processor" ))
-            *devtype = SCSI_PROCESSOR_PERIPHERAL;
-        else if (!strcmp( type, "cdrom" ))
-            *devtype = SCSI_CDROM_PERIPHERAL;
-        else if (!strcmp( type, "scanner" ))
-            *devtype = SCSI_SCANNER_PERIPHERAL;
-        else if (!strcmp( type, "medium_changer" ))
-            *devtype = SCSI_MEDIUM_CHANGER_PERIPHERAL;
-        else if (!strcmp( type, "comm" ))
-            *devtype = SCSI_COMMS_PERIPHERAL;
-        else if (!strcmp( type, "raid" ))
-            *devtype = SCSI_ARRAY_PERIPHERAL;
-        else
-            *devtype = SCSI_UNKNOWN_PERIPHERAL;
-    }
-
-done:
-    if (type) p_libhal_free_string( type );
-    if (vendor) p_libhal_free_string( vendor );
-    if (model) p_libhal_free_string( model );
-    p_dbus_error_free( &error );
-    return ret;
-}
-
-static void hal_new_ide_device( LibHalContext *ctx, const char *udi )
-{
-    SCSI_ADDRESS scsi_addr;
-    UCHAR devtype;
-    char ident[40];
-
-    if (!hal_get_ide_parameters( ctx, udi, &scsi_addr, &devtype, ident, sizeof(ident) )) return;
-    create_scsi_entry( &scsi_addr, 255, devtype == SCSI_CDROM_PERIPHERAL ? "atapi" : "WINE SCSI", devtype, ident, NULL );
-}
-
-static void hal_set_device_name( LibHalContext *ctx, const char *udi, const UNICODE_STRING *devname )
-{
-    DBusError error;
-    SCSI_ADDRESS scsi_addr;
-    char *parent = NULL;
-
-    p_dbus_error_init( &error );
-
-    if (!hal_get_ide_parameters( ctx, udi, &scsi_addr, NULL, NULL, 0 ))
-    {
-        if (!(parent = p_libhal_device_get_property_string( ctx, udi, "info.parent", &error )))
-            goto done;
-        if (!hal_get_scsi_parameters( ctx, parent, &scsi_addr, NULL, NULL, 0 ))
-            goto done;
-    }
-    set_scsi_device_name( &scsi_addr, devname );
-
-done:
-    if (parent) p_libhal_free_string( parent );
-    p_dbus_error_free( &error );
-}
-
-static void hal_new_scsi_device( LibHalContext *ctx, const char *udi )
-{
-    SCSI_ADDRESS scsi_addr;
-    UCHAR devtype;
-    char ident[40];
-
-    if (!hal_get_scsi_parameters( ctx, udi, &scsi_addr, &devtype, ident, sizeof(ident) )) return;
-    /* FIXME: get real controller Id for SCSI */
-    create_scsi_entry( &scsi_addr, 255, "WINE SCSI", devtype, ident, NULL );
-}
-
-/* HAL callback for new device */
-static void hal_new_device( LibHalContext *ctx, const char *udi )
-{
-    DBusError error;
-    char *parent = NULL;
-    char *mount_point = NULL;
-    char *device = NULL;
-    char *type = NULL;
-    char *uuid_str = NULL;
-    GUID guid, *guid_ptr = NULL;
-    enum device_type drive_type;
-
-    p_dbus_error_init( &error );
-
-    hal_new_scsi_device( ctx, udi );
-    hal_new_ide_device( ctx, udi );
-
-    if (!(device = p_libhal_device_get_property_string( ctx, udi, "block.device", &error )))
-        goto done;
-
-    if (!(mount_point = p_libhal_device_get_property_string( ctx, udi, "volume.mount_point", &error )))
-        goto done;
-
-    if (!(parent = p_libhal_device_get_property_string( ctx, udi, "info.parent", &error )))
-        goto done;
-
-    if (!(uuid_str = p_libhal_device_get_property_string( ctx, udi, "volume.uuid", &error )))
-        p_dbus_error_free( &error );  /* ignore error */
-    else
-        guid_ptr = parse_uuid( &guid, uuid_str );
-
-    if (!(type = p_libhal_device_get_property_string( ctx, parent, "storage.drive_type", &error )))
-        p_dbus_error_free( &error );  /* ignore error */
-
-    if (type && !strcmp( type, "cdrom" )) drive_type = DEVICE_CDROM;
-    else if (type && !strcmp( type, "floppy" )) drive_type = DEVICE_FLOPPY;
-    else drive_type = DEVICE_UNKNOWN;
-
-    if (p_libhal_device_get_property_bool( ctx, parent, "storage.removable", &error ))
-    {
-        UNICODE_STRING devname;
-
-        add_dos_device( -1, udi, device, mount_point, drive_type, guid_ptr, &devname );
-        hal_set_device_name( ctx, parent, &devname );
-        /* add property watch for mount point */
-        p_libhal_device_add_property_watch( ctx, udi, &error );
-    }
-    else if (guid_ptr) add_volume( udi, device, mount_point, DEVICE_HARDDISK_VOL, guid_ptr, NULL );
-
-done:
-    if (type) p_libhal_free_string( type );
-    if (parent) p_libhal_free_string( parent );
-    if (device) p_libhal_free_string( device );
-    if (uuid_str) p_libhal_free_string( uuid_str );
-    if (mount_point) p_libhal_free_string( mount_point );
-    p_dbus_error_free( &error );
-}
-
-/* HAL callback for removed device */
-static void hal_removed_device( LibHalContext *ctx, const char *udi )
-{
-    DBusError error;
-
-    TRACE( "removed %s\n", wine_dbgstr_a(udi) );
-
-    if (!remove_dos_device( -1, udi ))
-    {
-        p_dbus_error_init( &error );
-        p_libhal_device_remove_property_watch( ctx, udi, &error );
-        p_dbus_error_free( &error );
-    }
-    else remove_volume( udi );
-}
-
-/* HAL callback for property changes */
-static void hal_property_modified (LibHalContext *ctx, const char *udi,
-                                   const char *key, dbus_bool_t is_removed, dbus_bool_t is_added)
-{
-    TRACE( "udi %s key %s %s\n", wine_dbgstr_a(udi), wine_dbgstr_a(key),
-           is_added ? "added" : is_removed ? "removed" : "modified" );
-
-    if (!strcmp( key, "volume.mount_point" )) hal_new_device( ctx, udi );
-}
-
-static BOOL hal_enumerate_devices(void)
-{
-    LibHalContext *ctx;
-    DBusError error;
-    int i, num;
-    char **list;
-
-    if (!p_libhal_ctx_new) return FALSE;
-    if (!(ctx = p_libhal_ctx_new())) return FALSE;
-
-    p_libhal_ctx_set_dbus_connection( ctx, connection );
-    p_libhal_ctx_set_device_added( ctx, hal_new_device );
-    p_libhal_ctx_set_device_removed( ctx, hal_removed_device );
-    p_libhal_ctx_set_device_property_modified( ctx, hal_property_modified );
-
-    p_dbus_error_init( &error );
-    if (!p_libhal_ctx_init( ctx, &error ))
-    {
-        WARN( "HAL context init failed: %s\n", error.message );
-        p_dbus_error_free( &error );
-        return FALSE;
-    }
-
-    /* retrieve all existing devices */
-    if (!(list = p_libhal_get_all_devices( ctx, &num, &error ))) p_dbus_error_free( &error );
-    else
-    {
-        for (i = 0; i < num; i++) hal_new_device( ctx, list[i] );
-        p_libhal_free_string_array( list );
-    }
-    return TRUE;
-}
-
-#endif /* SONAME_LIBHAL */
-
-static DWORD WINAPI dbus_thread( void *arg )
+void run_dbus_loop(void)
 {
     static const char udisks_match[] = "type='signal',"
                                        "interface='org.freedesktop.UDisks',"
@@ -888,12 +543,14 @@ static DWORD WINAPI dbus_thread( void *arg )
 
     DBusError error;
 
+    if (!load_dbus_functions()) return;
+
     p_dbus_error_init( &error );
     if (!(connection = p_dbus_bus_get( DBUS_BUS_SYSTEM, &error )))
     {
         WARN( "failed to get system dbus connection: %s\n", error.message );
         p_dbus_error_free( &error );
-        return 1;
+        return;
     }
 
     /* first try UDisks2 */
@@ -912,41 +569,8 @@ static DWORD WINAPI dbus_thread( void *arg )
     p_dbus_bus_remove_match( connection, udisks_match, &error );
     p_dbus_connection_remove_filter( connection, udisks_filter, NULL );
 
-    /* then finally HAL */
-
-#ifdef SONAME_LIBHAL
-    if (!hal_enumerate_devices())
-    {
-        p_dbus_error_free( &error );
-        return 1;
-    }
-#endif
-
 found:
-    __TRY
-    {
-        while (p_dbus_connection_read_write_dispatch( connection, -1 )) /* nothing */ ;
-    }
-    __EXCEPT( assert_fault )
-    {
-        WARN( "dbus assertion failure, disabling support\n" );
-        return 1;
-    }
-    __ENDTRY;
-
-    return 0;
-}
-
-void initialize_dbus(void)
-{
-    HANDLE handle;
-
-#ifdef SONAME_LIBHAL
-    if (!load_hal_functions())
-#endif
-        if (!load_dbus_functions()) return;
-    if (!(handle = CreateThread( NULL, 0, dbus_thread, NULL, 0, NULL ))) return;
-    CloseHandle( handle );
+    while (p_dbus_connection_read_write_dispatch( connection, -1 )) /* nothing */ ;
 }
 
 #if !defined(HAVE_SYSTEMCONFIGURATION_SCDYNAMICSTORECOPYDHCPINFO_H) || !defined(HAVE_SYSTEMCONFIGURATION_SCNETWORKCONFIGURATION_H)
@@ -998,45 +622,28 @@ static DBusMessage *device_by_iface_request( const char *iface )
     return reply;
 }
 
-#define IF_NAMESIZE 16
-static BOOL map_adapter_name( const WCHAR *name, char *unix_name, DWORD len )
-{
-    WCHAR unix_nameW[IF_NAMESIZE];
-    UNICODE_STRING str;
-    GUID guid;
-
-    RtlInitUnicodeString( &str, name );
-    if (!RtlGUIDFromString( &str, &guid ))
-    {
-        NET_LUID luid;
-        if (ConvertInterfaceGuidToLuid( &guid, &luid ) ||
-            ConvertInterfaceLuidToNameW( &luid, unix_nameW, ARRAY_SIZE(unix_nameW) )) return FALSE;
-
-        name = unix_nameW;
-    }
-    return WideCharToMultiByte( CP_UNIXCP, 0, name, -1, unix_name, len, NULL, NULL ) != 0;
-}
-
-static DBusMessage *dhcp4_config_request( const WCHAR *adapter )
+static DBusMessage *dhcp4_config_request( const char *iface )
 {
     static const char *device = "org.freedesktop.NetworkManager.Device";
     static const char *dhcp4_config = "Dhcp4Config";
-    char iface[IF_NAMESIZE];
     DBusMessage *request, *reply;
     DBusMessageIter iter;
     DBusError error;
     const char *path = NULL;
 
-    if (!map_adapter_name( adapter, iface, sizeof(iface) )) return NULL;
     if (!(reply = device_by_iface_request( iface ))) return NULL;
 
     p_dbus_message_iter_init( reply, &iter );
     if (p_dbus_message_iter_get_arg_type( &iter ) == DBUS_TYPE_OBJECT_PATH) p_dbus_message_iter_get_basic( &iter, &path );
-    p_dbus_message_unref( reply );
-    if (!path) return NULL;
+    if (!path)
+    {
+        p_dbus_message_unref( reply );
+        return NULL;
+    }
 
     request = p_dbus_message_new_method_call( "org.freedesktop.NetworkManager", path,
                                               "org.freedesktop.DBus.Properties", "Get" );
+    p_dbus_message_unref( reply );
     if (!request) return NULL;
 
     p_dbus_message_iter_init_append( request, &iter );
@@ -1057,7 +664,7 @@ static DBusMessage *dhcp4_config_request( const WCHAR *adapter )
     return reply;
 }
 
-static DBusMessage *dhcp4_config_options_request( const WCHAR *adapter )
+static DBusMessage *dhcp4_config_options_request( const char *unix_name )
 {
     static const char *dhcp4_config = "org.freedesktop.NetworkManager.DHCP4Config";
     static const char *options = "Options";
@@ -1066,7 +673,7 @@ static DBusMessage *dhcp4_config_options_request( const WCHAR *adapter )
     DBusError error;
     const char *path = NULL;
 
-    if (!(reply = dhcp4_config_request( adapter ))) return NULL;
+    if (!(reply = dhcp4_config_request( unix_name ))) return NULL;
 
     p_dbus_message_iter_init( reply, &iter );
     if (p_dbus_message_iter_get_arg_type( &iter ) == DBUS_TYPE_VARIANT)
@@ -1116,13 +723,13 @@ static const char *dhcp4_config_option_next_dict_entry( DBusMessageIter *iter, D
     return name;
 }
 
-static DBusMessage *dhcp4_config_option_request( const WCHAR *adapter, const char *option, const char **value )
+static DBusMessage *dhcp4_config_option_request( const char *unix_name, const char *option, const char **value )
 {
     DBusMessage *reply;
     DBusMessageIter iter, variant;
     const char *name;
 
-    if (!(reply = dhcp4_config_options_request( adapter ))) return NULL;
+    if (!(reply = dhcp4_config_options_request( unix_name ))) return NULL;
 
     *value = NULL;
     p_dbus_message_iter_init( reply, &iter );
@@ -1146,7 +753,7 @@ static DBusMessage *dhcp4_config_option_request( const WCHAR *adapter, const cha
     return reply;
 }
 
-static const char *map_option( ULONG option )
+static const char *map_option( unsigned option )
 {
     switch (option)
     {
@@ -1162,29 +769,31 @@ static const char *map_option( ULONG option )
     }
 }
 
-ULONG get_dhcp_request_param( const WCHAR *adapter, struct mountmgr_dhcp_request_param *param, char *buf, ULONG offset,
-                              ULONG size )
+NTSTATUS dhcp_request( void *args )
 {
+    const struct dhcp_request_params *params = args;
     DBusMessage *reply;
     const char *value;
     ULONG ret = 0;
 
-    param->offset = param->size = 0;
+    params->req->offset = params->req->size = 0;
+    *params->ret_size = 0;
 
-    if (!(reply = dhcp4_config_option_request( adapter, map_option(param->id), &value ))) return 0;
+    if (!(reply = dhcp4_config_option_request( params->unix_name, map_option(params->req->id), &value ))) return STATUS_SUCCESS;
 
-    switch (param->id)
+    switch (params->req->id)
     {
     case OPTION_SUBNET_MASK:
     case OPTION_ROUTER_ADDRESS:
     case OPTION_BROADCAST_ADDRESS:
     {
-        IN_ADDR *ptr = (IN_ADDR *)(buf + offset);
-        if (value && size >= sizeof(IN_ADDR) && !RtlIpv4StringToAddressA( value, TRUE, NULL, ptr ))
+        IN_ADDR *ptr = (IN_ADDR *)(params->buffer + params->offset);
+        if (value && params->size >= sizeof(IN_ADDR))
         {
-            param->offset = offset;
-            param->size   = sizeof(*ptr);
-            TRACE( "returning %08x\n", *(DWORD *)ptr );
+            ptr->S_un.S_addr = inet_addr( value );
+            params->req->offset = params->offset;
+            params->req->size   = sizeof(*ptr);
+            TRACE( "returning %08x\n", *(unsigned int*)ptr );
         }
         ret = sizeof(*ptr);
         break;
@@ -1193,31 +802,32 @@ ULONG get_dhcp_request_param( const WCHAR *adapter, struct mountmgr_dhcp_request
     case OPTION_DOMAIN_NAME:
     case OPTION_MSFT_IE_PROXY:
     {
-        char *ptr = buf + offset;
+        char *ptr = params->buffer + params->offset;
         int len = value ? strlen( value ) : 0;
-        if (len && size >= len)
+        if (len && params->size >= len)
         {
             memcpy( ptr, value, len );
-            param->offset = offset;
-            param->size   = len;
+            params->req->offset = params->offset;
+            params->req->size   = len;
             TRACE( "returning %s\n", debugstr_an(ptr, len) );
         }
         ret = len;
         break;
     }
     default:
-        FIXME( "option %u not supported\n", param->id );
+        FIXME( "option %u not supported\n", (unsigned int)params->req->id );
         break;
     }
 
     p_dbus_message_unref( reply );
-    return ret;
+    *params->ret_size = ret;
+    return STATUS_SUCCESS;
 }
 #endif
 
 #else  /* SONAME_LIBDBUS_1 */
 
-void initialize_dbus(void)
+void run_dbus_loop(void)
 {
     TRACE( "Skipping, DBUS support not compiled in\n" );
 }

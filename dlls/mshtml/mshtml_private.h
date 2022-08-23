@@ -40,6 +40,10 @@
 
 #include "nsiface.h"
 
+#include "mshtml_private_iface.h"
+
+#include <assert.h>
+
 #define NS_ERROR_GENERATE_FAILURE(module,code) \
     ((nsresult) (((UINT32)(1u<<31)) | ((UINT32)(module+0x45)<<16) | ((UINT32)(code))))
 #define NS_ERROR_GENERATE_SUCCESS(module,code) \
@@ -83,6 +87,7 @@ typedef struct EventTarget EventTarget;
     XDIID(DispDOMCustomEvent) \
     XDIID(DispDOMEvent) \
     XDIID(DispDOMKeyboardEvent) \
+    XDIID(DispDOMMessageEvent) \
     XDIID(DispDOMMouseEvent) \
     XDIID(DispDOMUIEvent) \
     XDIID(DispHTMLAnchorElement) \
@@ -143,6 +148,7 @@ typedef struct EventTarget EventTarget;
     XIID(IDOMCustomEvent) \
     XIID(IDOMEvent) \
     XIID(IDOMKeyboardEvent) \
+    XIID(IDOMMessageEvent) \
     XIID(IDOMMouseEvent) \
     XIID(IDOMUIEvent) \
     XIID(IDocumentEvent) \
@@ -268,10 +274,19 @@ typedef struct EventTarget EventTarget;
     XIID(ISVGTSpanElement) \
     XIID(ISVGTextContentElement)
 
+#define PRIVATE_TID_LIST \
+    XIID(IWineDOMTokenList) \
+    XIID(IWineHTMLElementPrivate) \
+    XIID(IWineHTMLWindowPrivate) \
+    XIID(IWineHTMLWindowCompatPrivate) \
+    XIID(IWineMSHTMLConsole)
+
 typedef enum {
 #define XIID(iface) iface ## _tid,
 #define XDIID(iface) iface ## _tid,
 TID_LIST
+    LAST_public_tid,
+PRIVATE_TID_LIST
 #undef XIID
 #undef XDIID
     LAST_tid
@@ -315,6 +330,7 @@ typedef struct {
 } dispex_static_data_vtbl_t;
 
 typedef struct {
+    const WCHAR *name;
     const dispex_static_data_vtbl_t *vtbl;
     const tid_t disp_tid;
     const tid_t* const iface_tids;
@@ -323,7 +339,7 @@ typedef struct {
     dispex_data_t *delayed_init_info;
 } dispex_static_data_t;
 
-typedef HRESULT (*dispex_hook_invoke_t)(DispatchEx*,LCID,WORD,DISPPARAMS*,VARIANT*,
+typedef HRESULT (*dispex_hook_invoke_t)(DispatchEx*,WORD,DISPPARAMS*,VARIANT*,
                                         EXCEPINFO*,IServiceProvider*);
 
 typedef struct {
@@ -370,6 +386,7 @@ extern void (__cdecl *note_cc_edge)(nsISupports*,const char*,nsCycleCollectionTr
 void init_dispatch(DispatchEx*,IUnknown*,dispex_static_data_t*,compat_mode_t) DECLSPEC_HIDDEN;
 void release_dispex(DispatchEx*) DECLSPEC_HIDDEN;
 BOOL dispex_query_interface(DispatchEx*,REFIID,void**) DECLSPEC_HIDDEN;
+HRESULT change_type(VARIANT*,VARIANT*,VARTYPE,IServiceProvider*) DECLSPEC_HIDDEN;
 HRESULT dispex_get_dprop_ref(DispatchEx*,const WCHAR*,BOOL,VARIANT**) DECLSPEC_HIDDEN;
 HRESULT get_dispids(tid_t,DWORD*,DISPID**) DECLSPEC_HIDDEN;
 HRESULT remove_attribute(DispatchEx*,DISPID,VARIANT_BOOL*) DECLSPEC_HIDDEN;
@@ -381,6 +398,9 @@ HRESULT get_class_typeinfo(const CLSID*,ITypeInfo**) DECLSPEC_HIDDEN;
 const void *dispex_get_vtbl(DispatchEx*) DECLSPEC_HIDDEN;
 void dispex_info_add_interface(dispex_data_t*,tid_t,const dispex_hook_t*) DECLSPEC_HIDDEN;
 compat_mode_t dispex_compat_mode(DispatchEx*) DECLSPEC_HIDDEN;
+HRESULT dispex_to_string(DispatchEx*,BSTR*) DECLSPEC_HIDDEN;
+HRESULT dispex_call_builtin(DispatchEx *dispex, DISPID id, DISPPARAMS *dp,
+                            VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller) DECLSPEC_HIDDEN;
 
 typedef enum {
     DISPEXPROP_CUSTOM,
@@ -481,6 +501,10 @@ struct HTMLWindow {
     ITravelLogClient   ITravelLogClient_iface;
     IObjectIdentity    IObjectIdentity_iface;
     IProvideMultipleClassInfo IProvideMultipleClassInfo_iface;
+    IWineHTMLWindowPrivate IWineHTMLWindowPrivate_iface;
+    IWineHTMLWindowCompatPrivate IWineHTMLWindowCompatPrivate_iface;
+
+    IWineMSHTMLConsole *console;
 
     LONG ref;
 
@@ -815,6 +839,7 @@ typedef struct {
     IElementSelector IElementSelector_iface;
     IElementTraversal IElementTraversal_iface;
     IProvideMultipleClassInfo IProvideMultipleClassInfo_iface;
+    IWineHTMLElementPrivate IWineHTMLElementPrivate_iface;
 
     nsIDOMElement *dom_element;       /* NULL for legacy comments represented as HTML elements */
     nsIDOMHTMLElement *html_element;  /* NULL for non-HTML elements (like SVG elements) */
@@ -1073,7 +1098,7 @@ typedef struct {
 
 HTMLDOMAttribute *unsafe_impl_from_IHTMLDOMAttribute(IHTMLDOMAttribute*) DECLSPEC_HIDDEN;
 
-HRESULT HTMLDOMAttribute_Create(const WCHAR*,HTMLElement*,DISPID,HTMLDOMAttribute**) DECLSPEC_HIDDEN;
+HRESULT HTMLDOMAttribute_Create(const WCHAR*,HTMLElement*,DISPID,compat_mode_t,HTMLDOMAttribute**) DECLSPEC_HIDDEN;
 
 HRESULT HTMLElement_Create(HTMLDocumentNode*,nsIDOMNode*,BOOL,HTMLElement**) DECLSPEC_HIDDEN;
 HRESULT HTMLCommentElement_Create(HTMLDocumentNode*,nsIDOMNode*,HTMLElement**) DECLSPEC_HIDDEN;
@@ -1398,3 +1423,4 @@ void set_statustext(HTMLDocumentObj*,INT,LPCWSTR) DECLSPEC_HIDDEN;
 IInternetSecurityManager *get_security_manager(void) DECLSPEC_HIDDEN;
 
 extern HINSTANCE hInst DECLSPEC_HIDDEN;
+void create_console(compat_mode_t compat_mode, IWineMSHTMLConsole **ret) DECLSPEC_HIDDEN;

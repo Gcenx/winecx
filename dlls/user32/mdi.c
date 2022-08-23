@@ -357,7 +357,7 @@ static LRESULT MDISetMenu( HWND hwnd, HMENU hmenuFrame,
 
     if (hmenuFrame)
     {
-        SetMenu(hwndFrame, hmenuFrame);
+        NtUserSetMenu(hwndFrame, hmenuFrame);
         if( hmenuFrame != ci->hFrameMenu )
         {
             HMENU oldFrameMenu = ci->hFrameMenu;
@@ -452,12 +452,12 @@ static LRESULT MDI_RefreshMenu(MDICLIENTINFO *ci)
             buf[0] = '&';
             buf[1] = '0' + visible;
             buf[2] = ' ';
-            InternalGetWindowText(ci->child[i], buf + 3, ARRAY_SIZE(buf) - 3);
+            NtUserInternalGetWindowText(ci->child[i], buf + 3, ARRAY_SIZE(buf) - 3);
             TRACE("Adding %p, id %u %s\n", ci->child[i], id, debugstr_w(buf));
             AppendMenuW(ci->hWindowMenu, MF_STRING, id, buf);
 
             if (ci->child[i] == ci->hwndActiveChild)
-                CheckMenuItem(ci->hWindowMenu, id, MF_CHECKED);
+                NtUserCheckMenuItem(ci->hWindowMenu, id, MF_CHECKED);
         }
         else
             TRACE("MDI child %p is not visible, skipping\n", ci->child[i]);
@@ -514,16 +514,17 @@ static void MDI_SwitchActiveChild( MDICLIENTINFO *ci, HWND hwndTo, BOOL activate
         {
             /* restore old MDI child */
             SendMessageW( hwndPrev, WM_SETREDRAW, FALSE, 0 );
-            ShowWindow( hwndPrev, SW_RESTORE );
+            NtUserShowWindow( hwndPrev, SW_RESTORE );
             SendMessageW( hwndPrev, WM_SETREDRAW, TRUE, 0 );
 
             /* activate new MDI child */
-            SetWindowPos( hwndTo, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE );
+            NtUserSetWindowPos( hwndTo, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE );
             /* maximize new MDI child */
-            ShowWindow( hwndTo, SW_MAXIMIZE );
+            NtUserShowWindow( hwndTo, SW_MAXIMIZE );
         }
         /* activate new MDI child */
-        SetWindowPos( hwndTo, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | (activate ? 0 : SWP_NOACTIVATE) );
+        NtUserSetWindowPos( hwndTo, HWND_TOP, 0, 0, 0, 0,
+                            SWP_NOMOVE | SWP_NOSIZE | (activate ? 0 : SWP_NOACTIVATE) );
     }
 }
 
@@ -546,7 +547,7 @@ static LRESULT MDIDestroyChild( HWND client, MDICLIENTINFO *ci,
             MDI_SwitchActiveChild(ci, next, TRUE);
         else
         {
-            ShowWindow(child, SW_HIDE);
+            NtUserShowWindow( child, SW_HIDE );
             if (child == ci->hwndChildMaximized)
             {
                 HWND frame = GetParent(client);
@@ -579,7 +580,7 @@ static LRESULT MDIDestroyChild( HWND client, MDICLIENTINFO *ci,
     {
         SendMessageW(client, WM_MDIREFRESHMENU, 0, 0);
         MDI_PostUpdate(GetParent(child), ci, SB_BOTH+1);
-        DestroyWindow(child);
+        NtUserDestroyWindow(child);
     }
 
     TRACE("child destroyed - %p\n", child);
@@ -629,7 +630,7 @@ static LONG MDI_ChildActivate( HWND client, HWND child )
          * SetFocus won't work. It appears that Windows sends WM_SETFOCUS
          * manually in this case.
          */
-        if (SetFocus(client) == client)
+        if (NtUserSetFocus(client) == client)
             SendMessageW( client, WM_SETFOCUS, (WPARAM)client, 0 );
     }
 
@@ -721,8 +722,7 @@ static LONG MDICascade( HWND client, MDICLIENTINFO *ci )
             style = GetWindowLongW(win_array[i], GWL_STYLE);
 
             if (!(style & WS_SIZEBOX)) posOptions |= SWP_NOSIZE;
-            SetWindowPos( win_array[i], 0, pos[0].x, pos[0].y, pos[1].x, pos[1].y,
-                           posOptions);
+            NtUserSetWindowPos( win_array[i], 0, pos[0].x, pos[0].y, pos[1].x, pos[1].y, posOptions );
         }
     }
     HeapFree( GetProcessHeap(), 0, win_array );
@@ -806,7 +806,7 @@ static void MDITile( HWND client, MDICLIENTINFO *ci, WPARAM wParam )
                 LONG style = GetWindowLongW(win_array[i], GWL_STYLE);
                 if (!(style & WS_SIZEBOX)) posOptions |= SWP_NOSIZE;
 
-                SetWindowPos(*pWnd, 0, x, y, xsize, ysize, posOptions);
+                NtUserSetWindowPos( *pWnd, 0, x, y, xsize, ysize, posOptions );
                 y += ysize;
                 pWnd++;
             }
@@ -875,10 +875,10 @@ static BOOL MDI_AugmentFrameMenu( HWND frame, HWND hChild )
         hBitmap = CreateCompatibleBitmap(hdc, cx, cy);
         hOldBitmap = SelectObject(hMemDC, hBitmap);
         SetMapMode(hMemDC, MM_TEXT);
-        DrawIconEx(hMemDC, 0, 0, hIcon, cx, cy, 0, GetSysColorBrush(COLOR_MENU), DI_NORMAL);
+        NtUserDrawIconEx(hMemDC, 0, 0, hIcon, cx, cy, 0, GetSysColorBrush(COLOR_MENU), DI_NORMAL);
         SelectObject (hMemDC, hOldBitmap);
         DeleteDC(hMemDC);
-        ReleaseDC(hChild, hdc);
+        NtUserReleaseDC( hChild, hdc );
         hSysMenuBitmap = hBitmap;
       }
     }
@@ -887,14 +887,14 @@ static BOOL MDI_AugmentFrameMenu( HWND frame, HWND hChild )
                      (UINT_PTR)hSysPopup, (LPSTR)hSysMenuBitmap))
     {
         TRACE("not inserted\n");
-	DestroyMenu(hSysPopup);
+        NtUserDestroyMenu( hSysPopup );
         return FALSE;
     }
 
-    EnableMenuItem(hSysPopup, SC_SIZE, MF_BYCOMMAND | MF_GRAYED);
-    EnableMenuItem(hSysPopup, SC_MOVE, MF_BYCOMMAND | MF_GRAYED);
-    EnableMenuItem(hSysPopup, SC_MAXIMIZE, MF_BYCOMMAND | MF_GRAYED);
-    SetMenuDefaultItem(hSysPopup, SC_CLOSE, FALSE);
+    NtUserEnableMenuItem(hSysPopup, SC_SIZE, MF_BYCOMMAND | MF_GRAYED);
+    NtUserEnableMenuItem(hSysPopup, SC_MOVE, MF_BYCOMMAND | MF_GRAYED);
+    NtUserEnableMenuItem(hSysPopup, SC_MAXIMIZE, MF_BYCOMMAND | MF_GRAYED);
+    NtUserSetMenuDefaultItem(hSysPopup, SC_CLOSE, FALSE);
 
     /* redraw menu */
     DrawMenuBar(frame);
@@ -1017,8 +1017,8 @@ static void MDI_UpdateFrameText( HWND frame, HWND hClient, BOOL repaint, LPCWSTR
     DefWindowProcW( frame, WM_SETTEXT, 0, (LPARAM)lpBuffer );
 
     if (repaint)
-        SetWindowPos( frame, 0,0,0,0,0, SWP_FRAMECHANGED |
-                      SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER );
+        NtUserSetWindowPos( frame, 0,0,0,0,0, SWP_FRAMECHANGED |
+                            SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER );
 }
 
 
@@ -1084,7 +1084,7 @@ LRESULT MDIClientWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM 
       case WM_MDIACTIVATE:
       {
         if( ci->hwndActiveChild != (HWND)wParam )
-	    SetWindowPos((HWND)wParam, 0,0,0,0,0, SWP_NOSIZE | SWP_NOMOVE);
+	    NtUserSetWindowPos( (HWND)wParam, 0,0,0,0,0, SWP_NOSIZE | SWP_NOMOVE );
         return 0;
       }
 
@@ -1133,7 +1133,7 @@ LRESULT MDIClientWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM 
         return 0;
 
       case WM_MDIMAXIMIZE:
-	ShowWindow( (HWND)wParam, SW_MAXIMIZE );
+	NtUserShowWindow( (HWND)wParam, SW_MAXIMIZE );
         return 0;
 
       case WM_MDINEXT: /* lParam != 0 means previous window */
@@ -1141,13 +1141,13 @@ LRESULT MDIClientWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM 
         HWND hwnd = wParam ? WIN_GetFullHandle((HWND)wParam) : ci->hwndActiveChild;
         HWND next = MDI_GetWindow( ci, hwnd, !lParam, 0 );
         MDI_SwitchActiveChild( ci, next, TRUE );
-        if(!lParam)
-            SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
+        if (!lParam)
+            NtUserSetWindowPos( hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE );
 	break;
       }
 
       case WM_MDIRESTORE:
-        ShowWindow( (HWND)wParam, SW_SHOWNORMAL );
+        NtUserShowWindow( (HWND)wParam, SW_SHOWNORMAL );
         return 0;
 
       case WM_MDISETMENU:
@@ -1172,7 +1172,7 @@ LRESULT MDIClientWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM 
 
       case WM_SETFOCUS:
           if (ci->hwndActiveChild && !IsIconic( ci->hwndActiveChild ))
-              SetFocus( ci->hwndActiveChild );
+              NtUserSetFocus( ci->hwndActiveChild );
           return 0;
 
       case WM_NCACTIVATE:
@@ -1211,8 +1211,8 @@ LRESULT MDIClientWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM 
 
             TRACE("notification from %p (%i,%i)\n",child,pt.x,pt.y);
 
-            if( child && child != hwnd && child != ci->hwndActiveChild )
-                SetWindowPos(child, 0,0,0,0,0, SWP_NOSIZE | SWP_NOMOVE );
+            if (child && child != hwnd && child != ci->hwndActiveChild)
+                NtUserSetWindowPos( child, 0,0,0,0,0, SWP_NOSIZE | SWP_NOMOVE );
             break;
             }
 
@@ -1229,8 +1229,8 @@ LRESULT MDIClientWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM 
             SetRect(&rect, 0, 0, LOWORD(lParam), HIWORD(lParam));
 	    AdjustWindowRectEx(&rect, GetWindowLongA(ci->hwndActiveChild, GWL_STYLE),
                                0, GetWindowLongA(ci->hwndActiveChild, GWL_EXSTYLE) );
-	    MoveWindow(ci->hwndActiveChild, rect.left, rect.top,
-			 rect.right - rect.left, rect.bottom - rect.top, 1);
+	    NtUserMoveWindow( ci->hwndActiveChild, rect.left, rect.top,
+                              rect.right - rect.left, rect.bottom - rect.top, 1 );
 	}
 	else
             MDI_PostUpdate(hwnd, ci, SB_BOTH+1);
@@ -1344,11 +1344,11 @@ LRESULT WINAPI DefFrameProcW( HWND hwnd, HWND hwndMDIClient,
 	    return 1; /* success. FIXME: check text length */
 
         case WM_SETFOCUS:
-	    SetFocus(hwndMDIClient);
+	    NtUserSetFocus( hwndMDIClient );
 	    break;
 
         case WM_SIZE:
-            MoveWindow(hwndMDIClient, 0, 0, LOWORD(lParam), HIWORD(lParam), TRUE);
+            NtUserMoveWindow( hwndMDIClient, 0, 0, LOWORD(lParam), HIWORD(lParam), TRUE );
             break;
 
         case WM_NEXTMENU:
@@ -1518,7 +1518,7 @@ LRESULT WINAPI DefMDIChildProcW( HWND hwnd, UINT message,
                 SendMessageW( hMaxChild, WM_SETREDRAW, FALSE, 0 );
 
                 MDI_RestoreFrameMenu( GetParent(client), hMaxChild );
-                ShowWindow( hMaxChild, SW_SHOWNOACTIVATE );
+                NtUserShowWindow( hMaxChild, SW_SHOWNOACTIVATE );
 
                 SendMessageW( hMaxChild, WM_SETREDRAW, TRUE, 0 );
             }
@@ -1649,13 +1649,13 @@ BOOL WINAPI TranslateMDISysAccel( HWND hwndClient, LPMSG msg )
 
         /* translate if the Ctrl key is down and Alt not. */
 
-        if( (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000))
+        if( (NtUserGetKeyState(VK_CONTROL) & 0x8000) && !(NtUserGetKeyState(VK_MENU) & 0x8000))
         {
             switch( msg->wParam )
             {
             case VK_F6:
             case VK_TAB:
-                wParam = ( GetKeyState(VK_SHIFT) & 0x8000 ) ? SC_NEXTWINDOW : SC_PREVWINDOW;
+                wParam = ( NtUserGetKeyState(VK_SHIFT) & 0x8000 ) ? SC_NEXTWINDOW : SC_PREVWINDOW;
                 break;
             case VK_F4:
             case VK_RBUTTON:
@@ -1911,7 +1911,7 @@ static INT_PTR WINAPI MDI_MoreWindowsDlgProc (HWND hDlg, UINT iMsg, WPARAM wPara
            {
                WCHAR buffer[MDI_MAXTITLELENGTH];
 
-               if (!InternalGetWindowText(ci->child[i], buffer, ARRAY_SIZE(buffer)))
+               if (!NtUserInternalGetWindowText(ci->child[i], buffer, ARRAY_SIZE(buffer)))
                    continue;
                SendMessageW(hListBox, LB_ADDSTRING, 0, (LPARAM)buffer );
                SendMessageW(hListBox, LB_SETITEMDATA, i, (LPARAM)ci->child[i] );

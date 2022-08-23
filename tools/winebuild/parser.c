@@ -23,7 +23,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -359,7 +358,7 @@ static int parse_spec_export( ORDDEF *odp, DLLSPEC *spec )
     if (odp->type == TYPE_VARARGS)
         odp->flags |= FLAG_NORELAY;  /* no relay debug possible for varags entry point */
 
-    if (target_cpu != CPU_x86 && target_cpu != CPU_x86_32on64)
+    if (target.cpu != CPU_i386 && target.cpu != CPU_x86_32on64)
         odp->flags &= ~(FLAG_THISCALL | FLAG_FASTCALL);
 
     if (!(token = GetToken(1)))
@@ -430,11 +429,6 @@ static int parse_spec_stub( ORDDEF *odp, DLLSPEC *spec )
 {
     odp->u.func.nb_args = -1;
     odp->link_name = xstrdup("");
-    /* don't bother generating stubs for Winelib */
-    if (odp->flags & FLAG_CPU_MASK)
-        odp->flags &= FLAG_CPU(CPU_x86) | FLAG_CPU(CPU_x86_32on64) | FLAG_CPU(CPU_x86_64) | FLAG_CPU(CPU_ARM) | FLAG_CPU(CPU_ARM64);
-    else
-        odp->flags |= FLAG_CPU(CPU_x86) | FLAG_CPU(CPU_x86_32on64) | FLAG_CPU(CPU_x86_64) | FLAG_CPU(CPU_ARM) | FLAG_CPU(CPU_ARM64);
 
     return parse_spec_arguments( odp, spec, 1 );
 }
@@ -477,14 +471,13 @@ static int parse_spec_extern( ORDDEF *odp, DLLSPEC *spec )
  *
  * Parse the optional flags for an entry point in a .spec file.
  */
-static const char *parse_spec_flags( DLLSPEC *spec, ORDDEF *odp )
+static const char *parse_spec_flags( DLLSPEC *spec, ORDDEF *odp, const char *token )
 {
     unsigned int i, cpu_mask = 0;
-    const char *token;
 
     do
     {
-        if (!(token = GetToken(0))) break;
+        token++;
         if (!strncmp( token, "arch=", 5))
         {
             char *args = xstrdup( token + 5 );
@@ -511,13 +504,13 @@ static const char *parse_spec_flags( DLLSPEC *spec, ORDDEF *odp )
                     if (cpu_name[0] == '!')
                     {
                         cpu_mask |= FLAG_CPU( cpu );
-                        if (cpu == CPU_x86)
+                        if (cpu == CPU_i386)
                             cpu_mask |= FLAG_CPU( CPU_x86_32on64 );
                     }
                     else
                     {
                         odp->flags |= FLAG_CPU( cpu );
-                        if (cpu == CPU_x86)
+                        if (cpu == CPU_i386)
                             odp->flags |= FLAG_CPU( CPU_x86_32on64 );
                     }
                 }
@@ -527,7 +520,7 @@ static const char *parse_spec_flags( DLLSPEC *spec, ORDDEF *odp )
         }
         else if (!strcmp( token, "i386" ))  /* backwards compatibility */
         {
-            odp->flags |= FLAG_CPU(CPU_x86)| FLAG_CPU(CPU_x86_32on64);
+            odp->flags |= FLAG_CPU(CPU_i386)| FLAG_CPU(CPU_x86_32on64);
         }
         else
         {
@@ -594,7 +587,7 @@ static int parse_spec_ordinal( int ordinal, DLLSPEC *spec )
     }
 
     if (!(token = GetToken(0))) goto error;
-    if (*token == '-' && !(token = parse_spec_flags( spec, odp ))) goto error;
+    if (*token == '-' && !(token = parse_spec_flags( spec, odp, token ))) goto error;
 
     if (ordinal == -1 && spec->type != SPEC_WIN32 && !(odp->flags & FLAG_EXPORT32))
     {
@@ -637,11 +630,17 @@ static int parse_spec_ordinal( int ordinal, DLLSPEC *spec )
         assert( 0 );
     }
 
-    if ((odp->flags & FLAG_CPU_MASK) && !(odp->flags & FLAG_CPU(target_cpu)))
+    if ((odp->flags & FLAG_CPU_MASK) && !(odp->flags & FLAG_CPU(target.cpu)))
     {
         /* ignore this entry point */
         spec->nb_entry_points--;
         return 1;
+    }
+
+    if (data_only && !(odp->flags & FLAG_FORWARD))
+    {
+        error( "Only forwarded entry points are allowed in data-only mode\n" );
+        goto error;
     }
 
     if (ordinal != -1)
@@ -710,6 +709,132 @@ error:
     spec->nb_entry_points--;
     free( odp->name );
     return 0;
+}
+
+
+static unsigned int apiset_hash_len( const char *str )
+{
+    return strrchr( str, '-' ) - str;
+}
+
+static unsigned int apiset_hash( const char *str )
+{
+    unsigned int ret = 0, len = apiset_hash_len( str );
+    while (len--) ret = ret * apiset_hash_factor + *str++;
+    return ret;
+}
+
+static unsigned int apiset_add_str( struct apiset *apiset, const char *str, unsigned int len )
+{
+    char *ret;
+
+    if (!apiset->strings || !(ret = strstr( apiset->strings, str )))
+    {
+        if (apiset->str_pos + len >= apiset->str_size)
+        {
+            apiset->str_size = max( apiset->str_size * 2, 1024 );
+            apiset->strings = xrealloc( apiset->strings, apiset->str_size );
+        }
+        ret = apiset->strings + apiset->str_pos;
+        memcpy( ret, str, len );
+        ret[len] = 0;
+        apiset->str_pos += len;
+    }
+    return ret - apiset->strings;
+}
+
+static void add_apiset( struct apiset *apiset, const char *api )
+{
+    struct apiset_entry *entry;
+
+    if (apiset->count == apiset->size)
+    {
+        apiset->size = max( apiset->size * 2, 64 );
+        apiset->entries = xrealloc( apiset->entries, apiset->size * sizeof(*apiset->entries) );
+    }
+    entry = &apiset->entries[apiset->count++];
+    entry->name_len = strlen( api );
+    entry->name_off = apiset_add_str( apiset, api, entry->name_len );
+    entry->hash = apiset_hash( api );
+    entry->hash_len = apiset_hash_len( api );
+    entry->val_count = 0;
+}
+
+static void add_apiset_value( struct apiset *apiset, const char *value )
+{
+    struct apiset_entry *entry = &apiset->entries[apiset->count - 1];
+
+    if (entry->val_count < ARRAY_SIZE(entry->values) - 1)
+    {
+        struct apiset_value *val = &entry->values[entry->val_count++];
+        char *sep = strchr( value, ':' );
+
+        if (sep)
+        {
+            val->name_len = sep - value;
+            val->name_off = apiset_add_str( apiset, value, val->name_len );
+            val->val_len = strlen( sep + 1 );
+            val->val_off = apiset_add_str( apiset, sep + 1, val->val_len );
+        }
+        else
+        {
+            val->name_len = val->name_off = 0;
+            val->val_len = strlen( value );
+            val->val_off = apiset_add_str( apiset, value, val->val_len );
+        }
+    }
+    else error( "Too many values for api '%.*s'\n", entry->name_len, apiset->strings + entry->name_off );
+}
+
+/*******************************************************************
+ *         parse_spec_apiset
+ */
+static int parse_spec_apiset( DLLSPEC *spec )
+{
+    struct apiset_entry *entry;
+    const char *token;
+    unsigned int i, hash;
+
+    if (!data_only)
+    {
+        error( "Apiset definitions are only allowed in data-only mode\n" );
+        return 0;
+    }
+
+    if (!(token = GetToken(0))) return 0;
+
+    if (!strncmp( token, "api-", 4 ) && !strncmp( token, "ext-", 4 ))
+    {
+        error( "Unrecognized API set name '%s'\n", token );
+        return 0;
+    }
+
+    hash = apiset_hash( token );
+    for (i = 0, entry = spec->apiset.entries; i < spec->apiset.count; i++, entry++)
+    {
+        if (entry->name_len == strlen( token ) &&
+            !strncmp( spec->apiset.strings + entry->name_off, token, entry->name_len ))
+        {
+            error( "Duplicate API set '%s'\n", token );
+            return 0;
+        }
+        if (entry->hash == hash)
+        {
+            error( "Duplicate hash code '%.*s' and '%s'\n",
+                   entry->name_len, spec->apiset.strings + entry->name_off, token );
+            return 0;
+        }
+    }
+    add_apiset( &spec->apiset, token );
+
+    if (!(token = GetToken(0)) || strcmp( token, "=" ))
+    {
+        error( "Syntax error near '%s'\n", token );
+        return 0;
+    }
+
+    while ((token = GetToken(1))) add_apiset_value( &spec->apiset, token );
+    return 1;
 }
 
 
@@ -908,7 +1033,7 @@ int parse_spec_file( FILE *file, DLLSPEC *spec )
     current_line = 0;
 
     comment_chars = "#;";
-    separator_chars = "()-";
+    separator_chars = "()";
 
     while (get_next_line())
     {
@@ -920,6 +1045,10 @@ int parse_spec_file( FILE *file, DLLSPEC *spec )
         else if (IsNumberString(token))
         {
             if (!parse_spec_ordinal( atoi(token), spec )) continue;
+        }
+        else if (strcmp(token, "apiset") == 0)
+        {
+            if (!parse_spec_apiset( spec )) continue;
         }
         else
         {

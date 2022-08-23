@@ -246,7 +246,7 @@ my %error_map = qw(
     STATUS_INVALID_CID                                  ERROR_INVALID_PARAMETER
     STATUS_TIMER_NOT_CANCELED                           ERROR_TIMER_NOT_CANCELED
     STATUS_INVALID_PARAMETER                            ERROR_INVALID_PARAMETER
-    STATUS_NO_SUCH_DEVICE                               ERROR_FILE_NOT_FOUND
+    STATUS_NO_SUCH_DEVICE                               ERROR_NO_SUCH_DEVICE
     STATUS_NO_SUCH_FILE                                 ERROR_FILE_NOT_FOUND
     STATUS_INVALID_DEVICE_REQUEST                       ERROR_INVALID_FUNCTION
     STATUS_END_OF_FILE                                  ERROR_HANDLE_EOF
@@ -1314,6 +1314,13 @@ my %error_map = qw(
     STATUS_CTX_SECURITY_LAYER_ERROR                     ERROR_CTX_SECURITY_LAYER_ERROR
     STATUS_TS_INCOMPATIBLE_SESSIONS                     ERROR_TS_INCOMPATIBLE_SESSIONS
     STATUS_TS_VIDEO_SUBSYSTEM_ERROR                     ERROR_TS_VIDEO_SUBSYSTEM_ERROR
+    STATUS_MUI_FILE_NOT_FOUND                           ERROR_MUI_FILE_NOT_FOUND
+    STATUS_MUI_INVALID_FILE                             ERROR_MUI_INVALID_FILE
+    STATUS_MUI_INVALID_RC_CONFIG                        ERROR_MUI_INVALID_RC_CONFIG
+    STATUS_MUI_INVALID_LOCALE_NAME                      ERROR_MUI_INVALID_LOCALE_NAME
+    STATUS_MUI_INVALID_ULTIMATEFALLBACK_NAME            ERROR_MUI_INVALID_ULTIMATEFALLBACK_NAME
+    STATUS_MUI_FILE_NOT_LOADED                          ERROR_MUI_FILE_NOT_LOADED
+    STATUS_RESOURCE_ENUM_USER_STOP                      ERROR_RESOURCE_ENUM_USER_STOP
     STATUS_CLUSTER_INVALID_NODE                         ERROR_CLUSTER_INVALID_NODE
     STATUS_CLUSTER_NODE_EXISTS                          ERROR_CLUSTER_NODE_EXISTS
     STATUS_CLUSTER_JOIN_IN_PROGRESS                     ERROR_CLUSTER_JOIN_IN_PROGRESS
@@ -1670,7 +1677,7 @@ if ($ARGV[0] && $ARGV[0] eq "-l")
     print_map( %map );
 }
 
-my $file = "dlls/ntdll/error.c";
+my $file = "dlls/ntdll/error.h";
 
 open INPUT, "<$file" or die "cannot open $file";
 open OUTPUT, ">$file.new" or die "cannot create $file.new";

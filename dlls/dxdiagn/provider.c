@@ -84,7 +84,7 @@ static ULONG WINAPI IDxDiagProviderImpl_AddRef(IDxDiagProvider *iface)
     IDxDiagProviderImpl *This = impl_from_IDxDiagProvider(iface);
     ULONG refCount = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->(ref before=%u)\n", This, refCount - 1);
+    TRACE("(%p)->(ref before=%lu)\n", This, refCount - 1);
 
     DXDIAGN_LockModule();
 
@@ -96,7 +96,7 @@ static ULONG WINAPI IDxDiagProviderImpl_Release(IDxDiagProvider *iface)
     IDxDiagProviderImpl *This = impl_from_IDxDiagProvider(iface);
     ULONG refCount = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(ref before=%u)\n", This, refCount + 1);
+    TRACE("(%p)->(ref before=%lu)\n", This, refCount + 1);
 
     if (!refCount) {
         free_information_tree(This->info_root);
@@ -685,7 +685,7 @@ static HRESULT build_systeminfo_tree(IDxDiagContainerImpl_Container *node)
         return hr;
 
     /* FIXME: Roundoff should not be done with truncated division. */
-    swprintf(print_buf, ARRAY_SIZE(print_buf), L"%uMB RAM", (DWORD)(msex.ullTotalPhys / (1024 * 1024)));
+    swprintf(print_buf, ARRAY_SIZE(print_buf), L"%I64uMB RAM", msex.ullTotalPhys / (1024 * 1024));
     hr = add_bstr_property(node, L"szPhysicalMemoryEnglish", print_buf);
     if (FAILED(hr))
         return hr;
@@ -825,7 +825,7 @@ static const WCHAR *vendor_id_to_manufacturer_string(DWORD vendor_id)
             return vendors[i].name;
     }
 
-    FIXME("Unknown PCI vendor ID 0x%04x.\n", vendor_id);
+    FIXME("Unknown PCI vendor ID 0x%04lx.\n", vendor_id);
 
     return L"Unknown";
 }
@@ -1548,16 +1548,16 @@ static HRESULT fill_filter_data_information(IDxDiagContainerImpl_Container *subc
 
     if (pRF->dwVersion == 1)
     {
-        for (j = 0; j < pRF->u.s1.cPins; j++)
-            if (pRF->u.s1.rgPins[j].bOutput)
+        for (j = 0; j < pRF->cPins; j++)
+            if (pRF->rgPins[j].bOutput)
                 dwNOutputs++;
             else
                 dwNInputs++;
     }
     else if (pRF->dwVersion == 2)
     {
-        for (j = 0; j < pRF->u.s2.cPins2; j++)
-            if (pRF->u.s2.rgPins2[j].dwFlags & REG_PINFLAG_B_OUTPUT)
+        for (j = 0; j < pRF->cPins2; j++)
+            if (pRF->rgPins2[j].dwFlags & REG_PINFLAG_B_OUTPUT)
                 dwNOutputs++;
             else
                 dwNInputs++;

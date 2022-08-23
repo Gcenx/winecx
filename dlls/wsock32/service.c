@@ -36,7 +36,7 @@ INT WINAPI GetAddressByNameA(DWORD dwNameSpace, LPGUID lpServiceType, LPSTR lpSe
     LPVOID lpCsaddrBuffer, LPDWORD lpdwBufferLength, LPSTR lpAliasBuffer,
     LPDWORD lpdwAliasBufferLength)
 {
-    FIXME("(0x%08x, %s, %s, %p, 0x%08x, %p, %p, %p, %p, %p) stub\n", dwNameSpace,
+    FIXME("(0x%08lx, %s, %s, %p, 0x%08lx, %p, %p, %p, %p, %p) stub\n", dwNameSpace,
           debugstr_guid(lpServiceType), debugstr_a(lpServiceName), lpiProtocols,
           dwResolution, lpServiceAsyncInfo, lpCsaddrBuffer, lpdwBufferLength,
           lpAliasBuffer, lpdwAliasBufferLength);
@@ -50,7 +50,7 @@ INT WINAPI GetAddressByNameW(DWORD dwNameSpace, LPGUID lpServiceType, LPWSTR lpS
     LPVOID lpCsaddrBuffer, LPDWORD lpdwBufferLength, LPWSTR lpAliasBuffer,
     LPDWORD lpdwAliasBufferLength)
 {
-    FIXME("(0x%08x, %s, %s, %p, 0x%08x, %p, %p, %p, %p, %p) stub\n", dwNameSpace,
+    FIXME("(0x%08lx, %s, %s, %p, 0x%08lx, %p, %p, %p, %p, %p) stub\n", dwNameSpace,
           debugstr_guid(lpServiceType), debugstr_w(lpServiceName), lpiProtocols,
           dwResolution, lpServiceAsyncInfo, lpCsaddrBuffer, lpdwBufferLength,
           lpAliasBuffer, lpdwAliasBufferLength);
@@ -65,7 +65,7 @@ INT WINAPI GetAddressByNameW(DWORD dwNameSpace, LPGUID lpServiceType, LPWSTR lpS
  * Retrieve a service type GUID for a network service specified by name.
  *
  * PARAMETERS
- *      lpServiceName [I] NUL-terminated ASCII string that uniquely represents the name of the service
+ *      lpServiceName [I] NUL-terminated ANSI string that uniquely represents the name of the service
  *      lpServiceType [O] Destination for the service type GUID
  *
  * RETURNS
@@ -114,7 +114,7 @@ INT WINAPI GetTypeByNameW(LPWSTR lpServiceName, LPGUID lpServiceType)
  *      dwNameSpace        [I] Name space or set of name spaces within which the function will operate
  *      dwOperation        [I] Operation to perform
  *      dwFlags            [I] Flags to modify the function's operation
- *      lpServiceInfo      [I] Pointer to a ASCII SERVICE_INFO structure
+ *      lpServiceInfo      [I] Pointer to an ANSI SERVICE_INFO structure
  *      lpServiceAsyncInfo [I] Reserved for future use.  Must be NULL.
  *      lpdwStatusFlags    [O] Destination for function status information
  *
@@ -133,7 +133,7 @@ INT WINAPI SetServiceA(DWORD dwNameSpace, DWORD dwOperation, DWORD dwFlags, LPSE
                        LPSERVICE_ASYNC_INFO lpServiceAsyncInfo, LPDWORD lpdwStatusFlags)
 {
    /* tell the user they've got a substandard implementation */
-   FIXME("wsock32: SetServiceA(%u, %u, %u, %p, %p, %p): stub\n", dwNameSpace, dwOperation, dwFlags,
+   FIXME("wsock32: SetServiceA(%lu, %lu, %lu, %p, %p, %p): stub\n", dwNameSpace, dwOperation, dwFlags,
            lpServiceInfo, lpServiceAsyncInfo, lpdwStatusFlags);
     
    /* some programs may be able to compensate if they know what happened */
@@ -150,7 +150,7 @@ INT WINAPI SetServiceW(DWORD dwNameSpace, DWORD dwOperation, DWORD dwFlags, LPSE
                        LPSERVICE_ASYNC_INFO lpServiceAsyncInfo, LPDWORD lpdwStatusFlags)
 {
    /* tell the user they've got a substandard implementation */
-   FIXME("wsock32: SetServiceW(%u, %u, %u, %p, %p, %p): stub\n", dwNameSpace, dwOperation, dwFlags,
+   FIXME("wsock32: SetServiceW(%lu, %lu, %lu, %p, %p, %p): stub\n", dwNameSpace, dwOperation, dwFlags,
            lpServiceInfo, lpServiceAsyncInfo, lpdwStatusFlags);
     
    /* some programs may be able to compensate if they know what happened */
@@ -167,7 +167,7 @@ INT WINAPI SetServiceW(DWORD dwNameSpace, DWORD dwOperation, DWORD dwFlags, LPSE
  *      dwNameSpace        [I] Name space or set of name spaces within which the function 
  *                             will operate.
  *      lpGuid             [I] Pointer to GUID of network service type.
- *      lpServiceName      [I] NUL-terminated ASCII string that uniquely represents the name 
+ *      lpServiceName      [I] NUL-terminated ANSI string that uniquely represents the name
  *                             of the service.
  *      dwProperties       [I] Flags specifying which information to return in lpBuffer.
  *      lpBuffer           [O] Pointer to buffer where the function returns an array
@@ -192,7 +192,7 @@ INT WINAPI GetServiceA(DWORD dwNameSpace, LPGUID lpGuid, LPSTR lpServiceName,
                        DWORD dwProperties, LPVOID lpBuffer, LPDWORD lpdwBufferSize,
                        LPSERVICE_ASYNC_INFO lpServiceAsyncInfo)
 {
-   FIXME("(%u, %p, %s, %u, %p, %p, %p): stub\n", dwNameSpace,
+   FIXME("(%lu, %p, %s, %lu, %p, %p, %p): stub\n", dwNameSpace,
          lpGuid, lpServiceName, dwProperties, lpBuffer, lpdwBufferSize, lpServiceAsyncInfo);
 
    /* some programs may be able to compensate if they know what happened */
@@ -209,7 +209,7 @@ INT WINAPI GetServiceW(DWORD dwNameSpace, LPGUID lpGuid, LPSTR lpServiceName,
                        DWORD dwProperties, LPVOID lpBuffer, LPDWORD lpdwBufferSize,
                        LPSERVICE_ASYNC_INFO lpServiceAsyncInfo)
 {
-   FIXME("(%u, %p, %s, %u, %p, %p, %p): stub\n", dwNameSpace,
+   FIXME("(%lu, %p, %s, %lu, %p, %p, %p): stub\n", dwNameSpace,
          lpGuid, lpServiceName, dwProperties, lpBuffer, lpdwBufferSize, lpServiceAsyncInfo);
 
    /* some programs may be able to compensate if they know what happened */

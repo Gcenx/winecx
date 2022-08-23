@@ -107,6 +107,7 @@ Call ok(getVT(&hffFFffFF&) = "VT_I2", "getVT(&hffFFffFF&) is not VT_I2")
 Call ok(getVT(&hffFFffFE&) = "VT_I2", "getVT(&hffFFffFE &) is not VT_I2")
 Call ok(getVT(&hffF&) = "VT_I2", "getVT(&hffFF&) is not VT_I2")
 Call ok(getVT(&hffFF&) = "VT_I4", "getVT(&hffFF&) is not VT_I4")
+Call ok(getVT(# 1/1/2011 #) = "VT_DATE", "getVT(# 1/1/2011 #) is not VT_DATE")
 Call ok(getVT(1e2) = "VT_R8", "getVT(1e2) is not VT_R8")
 Call ok(getVT(1e0) = "VT_R8", "getVT(1e0) is not VT_R8")
 Call ok(getVT(0.1e2) = "VT_R8", "getVT(0.1e2) is not VT_R8")
@@ -355,6 +356,22 @@ end if
 while empty
    ok false, "while empty executed"
 wend
+
+x = 0
+if "0" then
+   ok false, "if ""0"" executed"
+else
+   x = 1
+end if
+Call ok(x = 1, "if ""0"" else not executed")
+
+x = 0
+if "-1" then
+   x = 1
+else
+   ok false, "if ""-1"" else executed"
+end if
+Call ok(x = 1, "if ""-1"" not executed")
 
 x = 0
 WHILE x < 3 : x = x + 1 : Wend
@@ -1880,6 +1897,30 @@ ok x.prop = 1, "x.prop = " & x.prop
 set arr(0) = new TestPropSyntax
 arr(0).prop = 1
 ok arr(0).prop = 1, "arr(0) = " & arr(0).prop
+
+function recursingfunction(x)
+    if (x) then exit function
+    recursingfunction = 2
+    dim y
+    y = recursingfunction
+    call ok(y = 2, "y = " & y)
+    recursingfunction = 1
+    call recursingfunction(True)
+end function
+call ok(recursingfunction(False) = 1, "unexpected return value " & recursingfunction(False))
+
+x = false
+function recursingfunction2
+    if (x) then exit function
+    recursingfunction2 = 2
+    dim y
+    y = recursingfunction2
+    call ok(y = 2, "y = " & y)
+    recursingfunction2 = 1
+    x = true
+    recursingfunction2()
+end function
+call ok(recursingfunction2() = 1, "unexpected return value " & recursingfunction2())
 
 function f2(x,y)
 end function

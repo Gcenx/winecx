@@ -110,6 +110,18 @@ extern "C" {
 #define DNS_QUERY_DNSSEC_CHECKING_DISABLED  0x02000000
 #define DNS_QUERY_RESERVED                  0xff000000
 
+#define INLINE_WORD_FLIP(out, in) { WORD _in = (in); (out) = (_in << 8) | (_in >> 8); }
+#define INLINE_HTONS(out, in) INLINE_WORD_FLIP(out, in)
+#define INLINE_NTOHS(out, in) INLINE_WORD_FLIP(out, in)
+
+#define DNS_BYTE_FLIP_HEADER_COUNTS(header) { \
+        DNS_HEADER *_head = (header); \
+        INLINE_HTONS( _head->Xid, _head->Xid ); \
+        INLINE_HTONS( _head->QuestionCount, _head->QuestionCount ); \
+        INLINE_HTONS( _head->AnswerCount, _head->AnswerCount ); \
+        INLINE_HTONS( _head->NameServerCount, _head->NameServerCount ); \
+        INLINE_HTONS( _head->AdditionalCount, _head->AdditionalCount ); }
+
 typedef enum _DNS_NAME_FORMAT
 {
     DnsNameDomain,
@@ -154,7 +166,12 @@ typedef enum _DNS_CONFIG_TYPE
     DnsConfigHostName_UTF8,
     DnsConfigFullHostName_W,
     DnsConfigFullHostName_A,
-    DnsConfigFullHostName_UTF8
+    DnsConfigFullHostName_UTF8,
+
+    /* These are undocumented and return a DNS_ADDR_ARRAY */
+    DnsConfigDnsServersUnspec = 4144,
+    DnsConfigDnsServersIpv4,
+    DnsConfigDnsServersIpv6
 } DNS_CONFIG_TYPE;
 
 typedef enum _DnsSection
@@ -179,13 +196,47 @@ typedef struct
 #define DNS_ADDRESS_STRING_LENGTH           IP6_ADDRESS_STRING_LENGTH
 #define IP4_ADDRESS_STRING_BUFFER_LENGTH    IP4_ADDRESS_STRING_LENGTH
 #define IP6_ADDRESS_STRING_BUFFER_LENGTH    IP6_ADDRESS_STRING_LENGTH
-#define DNS_MAX_NAME_BUFFER_LENGTH          256
+
+#define DNS_MAX_NAME_LENGTH                 255
+#define DNS_MAX_LABEL_LENGTH                63
+#define DNS_MAX_NAME_BUFFER_LENGTH          (DNS_MAX_NAME_LENGTH + 1)
+#define DNS_MAX_LABEL_BUFFER_LENGTH         (DNS_MAX_LABEL_LENGTH + 1)
 
 typedef struct _IP4_ARRAY
 {
     DWORD AddrCount;
     IP4_ADDRESS AddrArray[1];
 } IP4_ARRAY, *PIP4_ARRAY;
+
+#define DNS_OPCODE_QUERY          0
+#define DNS_OPCODE_IQUERY         1
+#define DNS_OPCODE_SERVER_STATUS  2
+#define DNS_OPCODE_UNKNOWN        3
+#define DNS_OPCODE_NOTIFY         4
+#define DNS_OPCODE_UPDATE         5
+
+#define DNS_RCODE_NOERROR    0
+#define DNS_RCODE_FORMERR    1
+#define DNS_RCODE_SERVFAIL   2
+#define DNS_RCODE_NXDOMAIN   3
+#define DNS_RCODE_NOTIMPL    4
+#define DNS_RCODE_REFUSED    5
+#define DNS_RCODE_YXDOMAIN   6
+#define DNS_RCODE_YXRRSET    7
+#define DNS_RCODE_NXRRSET    8
+#define DNS_RCODE_NOTAUTH    9
+#define DNS_RCODE_NOTZONE    10
+#define DNS_RCODE_MAX        15
+#define DNS_RCODE_BADVERS    16
+#define DNS_RCODE_BADSIG     16
+#define DNS_RCODE_BADKEY     17
+#define DNS_RCODE_BADTIME    18
+
+#define DNS_RCODE_NO_ERROR         DNS_RCODE_NOERROR
+#define DNS_RCODE_FORMAT_ERROR     DNS_RCODE_FORMERR
+#define DNS_RCODE_SERVER_FAILURE   DNS_RCODE_SERVFAIL
+#define DNS_RCODE_NAME_ERROR       DNS_RCODE_NXDOMAIN
+#define DNS_RCODE_NOT_IMPLEMENTED  DNS_RCODE_NOTIMPL
 
 #include <pshpack1.h>
 typedef struct _DNS_HEADER
@@ -336,6 +387,8 @@ typedef struct
     WORD wFlags;
     BYTE chProtocol;
     BYTE chAlgorithm;
+    WORD wKeyLength;
+    WORD wPad;
     BYTE Key[1];
 } DNS_KEY_DATA, *PDNS_KEY_DATA;
 
@@ -352,7 +405,6 @@ typedef struct
 
 typedef struct
 {
-    PSTR pNameSigner;
     WORD wTypeCovered;
     BYTE chAlgorithm;
     BYTE chLabelCount;
@@ -360,13 +412,13 @@ typedef struct
     DWORD dwExpiration;
     DWORD dwTimeSigned;
     WORD wKeyTag;
-    WORD Pad;
+    WORD wSignatureLength;
+    PSTR pNameSigner;
     BYTE Signature[1];
 } DNS_SIG_DATAA, *PDNS_SIG_DATAA;
 
 typedef struct
 {
-    PWSTR pNameSigner;
     WORD wTypeCovered;
     BYTE chAlgorithm;
     BYTE chLabelCount;
@@ -374,7 +426,8 @@ typedef struct
     DWORD dwExpiration;
     DWORD dwTimeSigned;
     WORD wKeyTag;
-    WORD Pad;
+    WORD wSignatureLength;
+    PWSTR pNameSigner;
     BYTE Signature[1];
 } DNS_SIG_DATAW, *PDNS_SIG_DATAW;
 

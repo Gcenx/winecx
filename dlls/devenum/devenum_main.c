@@ -25,25 +25,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(devenum);
 
-DECLSPEC_HIDDEN LONG dll_refs;
-static HINSTANCE devenum_instance;
-
-/***********************************************************************
- *		DllEntryPoint
- */
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID fImpLoad)
-{
-    TRACE("%p 0x%x %p\n", hinstDLL, fdwReason, fImpLoad);
-
-    switch(fdwReason) {
-    case DLL_PROCESS_ATTACH:
-        devenum_instance = hinstDLL;
-        DisableThreadLibraryCalls(hinstDLL);
-	break;
-    }
-    return TRUE;
-}
-
 struct class_factory
 {
     IClassFactory IClassFactory_iface;
@@ -73,13 +54,11 @@ static HRESULT WINAPI ClassFactory_QueryInterface(IClassFactory *iface, REFIID i
 
 static ULONG WINAPI ClassFactory_AddRef(IClassFactory *iface)
 {
-    DEVENUM_LockModule();
     return 2;
 }
 
 static ULONG WINAPI ClassFactory_Release(IClassFactory *iface)
 {
-    DEVENUM_UnlockModule();
     return 1;
 }
 
@@ -99,10 +78,7 @@ static HRESULT WINAPI ClassFactory_CreateInstance(IClassFactory *iface,
 
 static HRESULT WINAPI ClassFactory_LockServer(IClassFactory *iface, BOOL lock)
 {
-    if (lock)
-        DEVENUM_LockModule();
-    else
-        DEVENUM_UnlockModule();
+    TRACE("iface %p, lock %d.\n", iface, lock);
     return S_OK;
 }
 
@@ -136,14 +112,6 @@ HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **obj)
 }
 
 /***********************************************************************
- *		DllCanUnloadNow (DEVENUM.@)
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return dll_refs != 0 ? S_FALSE : S_OK;
-}
-
-/***********************************************************************
  *		DllRegisterServer (DEVENUM.@)
  */
 HRESULT WINAPI DllRegisterServer(void)
@@ -154,7 +122,7 @@ HRESULT WINAPI DllRegisterServer(void)
 
     TRACE("\n");
 
-    res = __wine_register_resources( devenum_instance );
+    res = __wine_register_resources();
     if (FAILED(res))
         return res;
 
@@ -186,5 +154,5 @@ HRESULT WINAPI DllRegisterServer(void)
 HRESULT WINAPI DllUnregisterServer(void)
 {
     FIXME("stub!\n");
-    return __wine_unregister_resources( devenum_instance );
+    return __wine_unregister_resources();
 }

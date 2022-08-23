@@ -20,7 +20,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -72,8 +71,8 @@ static void clipboard_destroy( struct object *obj );
 static const struct object_ops clipboard_ops =
 {
     sizeof(struct clipboard),     /* size */
+    &no_type,                     /* type */
     clipboard_dump,               /* dump */
-    no_get_type,                  /* get_type */
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
@@ -81,7 +80,7 @@ static const struct object_ops clipboard_ops =
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
-    no_map_access,                /* map_access */
+    default_map_access,           /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     no_get_full_name,             /* get_full_name */
@@ -304,7 +303,11 @@ static user_handle_t release_clipboard( struct clipboard *clipboard )
     /* free the delayed-rendered formats, since we no longer have an owner to render them */
     LIST_FOR_EACH_ENTRY_SAFE( format, next, &clipboard->formats, struct clip_format, entry )
     {
-        if (format->data || format->from) continue;
+        if (format->data) continue;
+        /* format->from is earlier in the list and thus has already been
+         * removed if not available anymore (it is also < CF_MAX)
+         */
+        if (format->from && HAS_FORMAT( clipboard->format_map, format->from )) continue;
         list_remove( &format->entry );
         if (format->id < CF_MAX) clipboard->format_map &= ~(1 << format->id);
         clipboard->format_count--;

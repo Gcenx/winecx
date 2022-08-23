@@ -62,10 +62,10 @@ static void set_entry_point( HMODULE module, const char *name, DWORD rva )
                 WORD ordinal = ordinals[pos];
                 DWORD oldprot;
 
-                TRACE( "setting %s at %p to %08x\n", name, &functions[ordinal], rva );
+                TRACE( "setting %s at %p to %08lx\n", name, &functions[ordinal], rva );
                 VirtualProtect( functions + ordinal, sizeof(*functions), PAGE_READWRITE, &oldprot );
                 functions[ordinal] = rva;
-                VirtualProtect( functions + ordinal, sizeof(*functions), oldprot, NULL );
+                VirtualProtect( functions + ordinal, sizeof(*functions), oldprot, &oldprot );
                 return;
             }
             if (res > 0) max = pos - 1;
@@ -123,6 +123,7 @@ static BOOL process_attach( HMODULE module )
     RtlSetUnhandledExceptionFilter( UnhandledExceptionFilter );
 
     NtQuerySystemInformation( SystemBasicInformation, &system_info, sizeof(system_info), NULL );
+    kernelbase_global_data = KernelBaseGetGlobalData();
 
     copy_startup_info();
 
@@ -138,8 +139,6 @@ static BOOL process_attach( HMODULE module )
 
         if (LdrFindEntryForAddress( GetModuleHandleW( 0 ), &ldr ) || !(ldr->Flags & LDR_WINE_INTERNAL))
             LoadLibraryA( "krnl386.exe16" );
-        /* Codeweavers hack: native crypt32 installed by IE6 is buggy (bug 5259) */
-        set_entry_point( module, "RegisterWaitForSingleObjectEx", 0 );
     }
 #endif
     return TRUE;

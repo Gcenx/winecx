@@ -2,10 +2,11 @@ MODULE    = comsvcs.dll
 IMPORTLIB = comsvcs
 IMPORTS   = ole32 uuid
 
-EXTRADLLFLAGS = -mno-cygwin
+EXTRADLLFLAGS = -Wb,--prefer-native
 
 C_SRCS = \
-	main.c
+	main.c \
+	property.c
 
 IDL_SRCS = \
 	comsvcs_classes.idl \

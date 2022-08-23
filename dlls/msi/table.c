@@ -66,7 +66,7 @@ struct tagMSITABLE
     MSICOLUMNINFO *colinfo;
     UINT col_count;
     MSICONDITION persistent;
-    INT ref_count;
+    LONG ref_count;
     WCHAR name[1];
 };
 
@@ -221,8 +221,7 @@ void enum_stream_names( IStorage *stg )
         if( FAILED( r ) || !count )
             break;
         decode_streamname( stat.pwcsName, name );
-        TRACE("stream %2d -> %s %s\n", n,
-              debugstr_w(stat.pwcsName), debugstr_w(name) );
+        TRACE( "stream %2lu -> %s %s\n", n, debugstr_w(stat.pwcsName), debugstr_w(name) );
         CoTaskMemFree( stat.pwcsName );
         n++;
     }
@@ -250,14 +249,14 @@ UINT read_stream_data( IStorage *stg, LPCWSTR stname, BOOL table,
     msi_free( encname );
     if( FAILED( r ) )
     {
-        WARN("open stream failed r = %08x - empty table?\n", r);
+        WARN( "open stream failed r = %#lx - empty table?\n", r );
         return ret;
     }
 
     r = IStream_Stat(stm, &stat, STATFLAG_NONAME );
     if( FAILED( r ) )
     {
-        WARN("open stream failed r = %08x!\n", r);
+        WARN( "open stream failed r = %#lx!\n", r );
         goto end;
     }
 
@@ -271,7 +270,7 @@ UINT read_stream_data( IStorage *stg, LPCWSTR stname, BOOL table,
     data = msi_alloc( sz );
     if( !data )
     {
-        WARN("couldn't allocate memory r=%08x!\n", r);
+        WARN( "couldn't allocate memory r = %#lx!\n", r );
         ret = ERROR_NOT_ENOUGH_MEMORY;
         goto end;
     }
@@ -280,7 +279,7 @@ UINT read_stream_data( IStorage *stg, LPCWSTR stname, BOOL table,
     if( FAILED( r ) || ( count != sz ) )
     {
         msi_free( data );
-        WARN("read stream failed r = %08x!\n", r);
+        WARN("read stream failed r = %#lx!\n", r);
         goto end;
     }
 
@@ -316,7 +315,7 @@ UINT write_stream_data( IStorage *stg, LPCWSTR stname,
     msi_free( encname );
     if( FAILED( r ) )
     {
-        WARN("open stream failed r = %08x\n", r);
+        WARN( "open stream failed r = %#lx\n", r );
         return ret;
     }
 
@@ -1929,7 +1928,7 @@ static UINT TABLE_add_ref(struct tagMSIVIEW *view)
 {
     MSITABLEVIEW *tv = (MSITABLEVIEW*)view;
 
-    TRACE("%p %d\n", view, tv->table->ref_count);
+    TRACE( "%p, %ld\n", view, tv->table->ref_count );
     return InterlockedIncrement(&tv->table->ref_count);
 }
 
@@ -2261,9 +2260,10 @@ static WCHAR* create_key_string(MSITABLEVIEW *tv, MSIRECORD *rec)
     return key;
 }
 
-static UINT msi_record_stream_name( const MSITABLEVIEW *tv, MSIRECORD *rec, LPWSTR name, UINT *len )
+static UINT msi_record_stream_name( const MSITABLEVIEW *tv, MSIRECORD *rec, LPWSTR name, DWORD *len )
 {
-    UINT p = 0, l, i, r;
+    UINT p = 0, i, r;
+    DWORD l;
 
     l = wcslen( tv->name );
     if (name && *len > l)
@@ -2327,7 +2327,8 @@ static UINT TransformView_set_row( MSIVIEW *view, UINT row, MSIRECORD *rec, UINT
     MSIRECORD *old_rec;
     MSIQUERY *q;
     WCHAR *key;
-    UINT i, p, r, len, qlen;
+    UINT i, p, r, qlen;
+    DWORD len;
 
     if (!wcscmp( tv->name, L"_Columns" ))
     {
@@ -2503,7 +2504,8 @@ static UINT TransformView_add_column( MSITABLEVIEW *tv, MSIRECORD *rec )
         L"INSERT INTO `_TransformView` (`new`, `Table`, `Current`, `Column`, `Data`) VALUES (1, '";
 
     WCHAR buf[256], *query = buf;
-    UINT i, p, len, r, qlen;
+    UINT i, p, r, qlen;
+    DWORD len;
     MSIQUERY *q;
 
     qlen = p = wcslen( query_pfx );
@@ -2911,7 +2913,7 @@ UINT MSI_CommitTables( MSIDATABASE *db )
     hr = IStorage_Commit( db->storage, 0 );
     if (FAILED( hr ))
     {
-        WARN("failed to commit changes 0x%08x\n", hr);
+        WARN( "failed to commit changes %#lx\n", hr );
         r = ERROR_FUNCTION_FAILED;
     }
     return r;
@@ -2946,7 +2948,8 @@ static UINT read_raw_int(const BYTE *data, UINT col, UINT bytes)
 
 static UINT msi_record_encoded_stream_name( const MSITABLEVIEW *tv, MSIRECORD *rec, LPWSTR *pstname )
 {
-    UINT r, len;
+    UINT r;
+    DWORD len;
     WCHAR *name;
 
     TRACE("%p %p\n", tv, rec);

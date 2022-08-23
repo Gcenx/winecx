@@ -21,22 +21,24 @@
 
 #include "wine/winheader_enter.h"
 
-
 #define _Always_(exp)
 
-#define _At_
+#define _Analysis_noreturn_
+
+#define _At_(a, b)
 #define _At_buffer_(a, b, c, d)
 
 #define _Check_return_
-#define _Check_return_opt_
 
 #define _COM_Outptr_
 #define _COM_Outptr_result_maybenull_
 
+#define _Deref_in_range_(cnt)
 #define _Deref_out_
 #define _Deref_out_z_
 #define _Deref_out_opt_
 #define _Deref_out_opt_z_
+#define _Deref_out_range_(x, y)
 #define _Deref_post_maybenull_
 #define _Deref_post_opt_cap_(count)
 #define _Deref_post_opt_valid_
@@ -50,8 +52,6 @@
 
 #define _Field_range_(min, max)
 
-#define __in
-#define __in_opt
 #define _In_
 #define _In_bytecount_(count)
 #define _In_bytecount_c_(count)
@@ -88,7 +88,6 @@
 #define _In_z_count_(count)
 #define _In_z_count_c_(count)
 
-#define __inout
 #define _Inout_
 #define _Inout_bytecap_x_(count)
 #define _Inout_cap_(count)
@@ -108,10 +107,11 @@
 #define _Inout_z_cap_(count)
 #define _Inout_z_cap_c_(count)
 
+#define _Must_inspect_result_
+
+#define _Null_
 #define _Null_terminated_
 
-#define __out
-#define __out_opt
 #define _Out_
 #define _Outptr_
 #define _Out_bytecap_(count)
@@ -170,14 +170,16 @@
 #define _Out_z_cap_post_count_(count1, count2)
 
 #define _Outptr_opt_
+#define _Outptr_opt_result_buffer_(count)
+#define _Outptr_opt_result_maybenull_
+#define _Outptr_opt_result_z_
 #define _Outptr_result_buffer_(count)
+#define _Outptr_result_buffer_all_maybenull_(ptr)
 #define _Outptr_result_buffer_maybenull_(count)
 #define _Outptr_result_maybenull_
 #define _Outptr_result_maybenull_z_
 #define _Outptr_result_nullonfailure_
 #define _Outptr_result_z_
-
-#define _Param_(p)
 
 #define _Post_count_(count)
 #define _Post_count_c_(count)
@@ -187,7 +189,6 @@
 #define _Post_ptr_invalid_
 #define _Post_readable_byte_size_(count)
 #define _Post_readable_size_(count)
-#define _Post_same_lock_(exp, exp1)
 #define _Post_satisfies_(exp)
 #define _Post_writable_byte_size_(count)
 #define _Post_writable_size_(count)
@@ -232,6 +233,201 @@
 #define _Success_(exp)
 
 #define _When_(exp1, exp2)
+
+#define __bcount(size)
+#define __bcount_opt(size)
+
+#define __deref_bcount(size)
+#define __deref_bcount_opt(size)
+#define __deref_ecount(size)
+#define __deref_ecount_opt(size)
+#define __deref_inout
+#define __deref_inout_bcount(size)
+#define __deref_inout_bcount_full(size)
+#define __deref_inout_bcount_full_opt(size)
+#define __deref_inout_bcount_nz(size)
+#define __deref_inout_bcount_nz_opt(size)
+#define __deref_inout_bcount_opt(size)
+#define __deref_inout_bcount_part(size,length)
+#define __deref_inout_bcount_part_opt(size,length)
+#define __deref_inout_bcount_z(size)
+#define __deref_inout_bcount_z_opt(size)
+#define __deref_inout_ecount(size)
+#define __deref_inout_ecount_full(size)
+#define __deref_inout_ecount_full_opt(size)
+#define __deref_inout_ecount_nz(size)
+#define __deref_inout_ecount_nz_opt(size)
+#define __deref_inout_ecount_opt(size)
+#define __deref_inout_ecount_part(size,length)
+#define __deref_inout_ecount_part_opt(size,length)
+#define __deref_inout_ecount_z(size)
+#define __deref_inout_ecount_z_opt(size)
+#define __deref_inout_nz
+#define __deref_inout_nz_opt
+#define __deref_inout_opt
+#define __deref_inout_z
+#define __deref_inout_z_opt
+#define __deref_opt_bcount(size)
+#define __deref_opt_bcount_opt(size)
+#define __deref_opt_ecount(size)
+#define __deref_opt_ecount_opt(size)
+#define __deref_opt_inout
+#define __deref_opt_inout_bcount(size)
+#define __deref_opt_inout_bcount_full(size)
+#define __deref_opt_inout_bcount_full_opt(size)
+#define __deref_opt_inout_bcount_nz(size)
+#define __deref_opt_inout_bcount_nz_opt(size)
+#define __deref_opt_inout_bcount_opt(size)
+#define __deref_opt_inout_bcount_part(size,length)
+#define __deref_opt_inout_bcount_part_opt(size,length)
+#define __deref_opt_inout_bcount_z(size)
+#define __deref_opt_inout_bcount_z_opt(size)
+#define __deref_opt_inout_ecount(size)
+#define __deref_opt_inout_ecount_full(size)
+#define __deref_opt_inout_ecount_full_opt(size)
+#define __deref_opt_inout_ecount_nz(size)
+#define __deref_opt_inout_ecount_nz_opt(size)
+#define __deref_opt_inout_ecount_opt(size)
+#define __deref_opt_inout_ecount_part(size,length)
+#define __deref_opt_inout_ecount_part_opt(size,length)
+#define __deref_opt_inout_ecount_z(size)
+#define __deref_opt_inout_ecount_z_opt(size)
+#define __deref_opt_inout_nz
+#define __deref_opt_inout_nz_opt
+#define __deref_opt_inout_opt
+#define __deref_opt_inout_z
+#define __deref_opt_inout_z_opt
+#define __deref_opt_out
+#define __deref_opt_out_bcount(size)
+#define __deref_opt_out_bcount_full(size)
+#define __deref_opt_out_bcount_full_opt(size)
+#define __deref_opt_out_bcount_nz_opt(size)
+#define __deref_opt_out_bcount_opt(size)
+#define __deref_opt_out_bcount_part(size,length)
+#define __deref_opt_out_bcount_part_opt(size,length)
+#define __deref_opt_out_bcount_z_opt(size)
+#define __deref_opt_out_ecount(size)
+#define __deref_opt_out_ecount_full(size)
+#define __deref_opt_out_ecount_full_opt(size)
+#define __deref_opt_out_ecount_nz_opt(size)
+#define __deref_opt_out_ecount_opt(size)
+#define __deref_opt_out_ecount_part(size,length)
+#define __deref_opt_out_ecount_part_opt(size,length)
+#define __deref_opt_out_ecount_z_opt(size)
+#define __deref_opt_out_nz_opt
+#define __deref_opt_out_opt
+#define __deref_opt_out_z
+#define __deref_opt_out_z_opt
+#define __deref_out
+#define __deref_out_bcount(size)
+#define __deref_out_bcount_full(size)
+#define __deref_out_bcount_full_opt(size)
+#define __deref_out_bcount_nz(size)
+#define __deref_out_bcount_nz_opt(size)
+#define __deref_out_bcount_opt(size)
+#define __deref_out_bcount_part(size,length)
+#define __deref_out_bcount_part_opt(size,length)
+#define __deref_out_bcount_z(size)
+#define __deref_out_bcount_z_opt(size)
+#define __deref_out_ecount(size)
+#define __deref_out_ecount_full(size)
+#define __deref_out_ecount_full_opt(size)
+#define __deref_out_ecount_nz(size)
+#define __deref_out_ecount_nz_opt(size)
+#define __deref_out_ecount_opt(size)
+#define __deref_out_ecount_part(size,length)
+#define __deref_out_ecount_part_opt(size,length)
+#define __deref_out_ecount_z(size)
+#define __deref_out_ecount_z_opt(size)
+#define __deref_out_nz
+#define __deref_out_nz_opt
+#define __deref_out_opt
+#define __deref_out_z
+#define __deref_out_z_opt
+
+#define __ecount(size)
+#define __ecount_opt(size)
+
+/* #define __in */ /* conflicts with system headers */
+#define __in_bcount(size)
+#define __in_bcount_nz(size)
+#define __in_bcount_nz_opt(size)
+#define __in_bcount_opt(size)
+#define __in_bcount_z(size)
+#define __in_bcount_z_opt(size)
+#define __in_ecount(size)
+#define __in_ecount_nz(size)
+#define __in_ecount_nz_opt(size)
+#define __in_ecount_opt(size)
+#define __in_ecount_z(size)
+#define __in_ecount_z_opt(size)
+#define __in_nz
+#define __in_nz_opt
+#define __in_opt
+#define __in_z
+#define __in_z_opt
+#define __inout
+#define __inout_bcount(size)
+#define __inout_bcount_full(size)
+#define __inout_bcount_full_opt(size)
+#define __inout_bcount_nz(size)
+#define __inout_bcount_nz_opt(size)
+#define __inout_bcount_opt(size)
+#define __inout_bcount_part(size,length)
+#define __inout_bcount_part_opt(size,length)
+#define __inout_bcount_z(size)
+#define __inout_bcount_z_opt(size)
+#define __inout_ecount(size)
+#define __inout_ecount_full(size)
+#define __inout_ecount_full_opt(size)
+#define __inout_ecount_nz(size)
+#define __inout_ecount_nz_opt(size)
+#define __inout_ecount_opt(size)
+#define __inout_ecount_part(size,length)
+#define __inout_ecount_part_opt(size,length)
+#define __inout_ecount_z(size)
+#define __inout_ecount_z_opt(size)
+#define __inout_ecount_z_opt(size)
+#define __inout_nz
+#define __inout_nz_opt
+#define __inout_opt
+#define __inout_z
+#define __inout_z_opt
+
+/* #define __out */ /* conflicts with system headers */
+#define __out_bcount(size)
+#define __out_bcount_full(size)
+#define __out_bcount_full_opt(size)
+#define __out_bcount_full_z(size)
+#define __out_bcount_full_z_opt(size)
+#define __out_bcount_nz(size)
+#define __out_bcount_nz_opt(size)
+#define __out_bcount_opt(size)
+#define __out_bcount_part(size,length)
+#define __out_bcount_part_opt(size,length)
+#define __out_bcount_part_z(size,length)
+#define __out_bcount_part_z_opt(size,length)
+#define __out_bcount_z(size)
+#define __out_bcount_z_opt(size)
+#define __out_ecount(size)
+#define __out_ecount_full(size)
+#define __out_ecount_full_opt(size)
+#define __out_ecount_full_z(size)
+#define __out_ecount_full_z_opt(size)
+#define __out_ecount_nz(size)
+#define __out_ecount_nz_opt(size)
+#define __out_ecount_opt(size)
+#define __out_ecount_part(size,length)
+#define __out_ecount_part_opt(size,length)
+#define __out_ecount_part_z(size,length)
+#define __out_ecount_part_z_opt(size,length)
+#define __out_ecount_z(size)
+#define __out_ecount_z_opt(size)
+#define __out_nz
+#define __out_nz_opt
+#define __out_opt
+#define __out_z
+#define __out_z_opt
 
 #include "wine/winheader_exit.h"
 

@@ -25,27 +25,35 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wmvcore);
 
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
+HRESULT WINAPI winegstreamer_create_wm_async_reader(IWMReader **reader);
+HRESULT WINAPI winegstreamer_create_wm_sync_reader(IWMSyncReader **reader);
+
+HRESULT WINAPI WMCreateReader(IUnknown *reserved, DWORD rights, IWMReader **reader)
 {
-    TRACE("(0x%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
+    TRACE("reserved %p, rights %#lx, reader %p.\n", reserved, rights, reader);
 
-    switch (fdwReason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(hinstDLL);
-            break;
-    }
-
-    return TRUE;
+    return winegstreamer_create_wm_async_reader(reader);
 }
 
-HRESULT WINAPI DllRegisterServer(void)
+HRESULT WINAPI WMCreateReaderPriv(IWMReader **reader)
 {
-    FIXME("(): stub\n");
+    TRACE("reader %p.\n", reader);
 
-    return S_OK;
+    return winegstreamer_create_wm_async_reader(reader);
+}
+
+HRESULT WINAPI WMCreateSyncReader(IUnknown *reserved, DWORD rights, IWMSyncReader **reader)
+{
+    TRACE("reserved %p, rights %#lx, reader %p.\n", reserved, rights, reader);
+
+    return winegstreamer_create_wm_sync_reader(reader);
+}
+
+HRESULT WINAPI WMCreateSyncReaderPriv(IWMSyncReader **reader)
+{
+    TRACE("reader %p.\n", reader);
+
+    return winegstreamer_create_wm_sync_reader(reader);
 }
 
 HRESULT WINAPI WMCheckURLExtension(const WCHAR *url)
@@ -136,7 +144,7 @@ static ULONG WINAPI WMProfileManager_AddRef(IWMProfileManager2 *iface)
     WMProfileManager *This = impl_from_IWMProfileManager2(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -146,7 +154,7 @@ static ULONG WINAPI WMProfileManager_Release(IWMProfileManager2 *iface)
     WMProfileManager *This = impl_from_IWMProfileManager2(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref)
         heap_free(This);
@@ -192,7 +200,7 @@ static HRESULT WINAPI WMProfileManager_GetSystemProfileCount(IWMProfileManager2 
 static HRESULT WINAPI WMProfileManager_LoadSystemProfile(IWMProfileManager2 *iface, DWORD index, IWMProfile **ret)
 {
     WMProfileManager *This = impl_from_IWMProfileManager2(iface);
-    FIXME("(%p)->(%d %p)\n", This, index, ret);
+    FIXME("(%p)->(%ld %p)\n", This, index, ret);
     return E_NOTIMPL;
 }
 

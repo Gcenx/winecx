@@ -18,43 +18,343 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "gst_private.h"
-#include "rpcproxy.h"
-#include "wine/debug.h"
-#include "wine/unicode.h"
+#define WINE_NO_NAMELESS_EXTENSION
 
+#define EXTERN_GUID DEFINE_GUID
 #include "initguid.h"
+#include "gst_private.h"
+#include "winternl.h"
+#include "rpcproxy.h"
+#include "dmoreg.h"
 #include "gst_guids.h"
+#include "wmcodecdsp.h"
 
-static HINSTANCE winegstreamer_instance;
-LONG object_locks;
+static unixlib_handle_t unix_handle;
 
-WINE_DEFAULT_DEBUG_CHANNEL(gstreamer);
+WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
-static const WCHAR wGstreamer_Splitter[] =
-{'G','S','t','r','e','a','m','e','r',' ','s','p','l','i','t','t','e','r',' ','f','i','l','t','e','r',0};
-static const WCHAR wave_parserW[] =
-{'W','a','v','e',' ','P','a','r','s','e','r',0};
-static const WCHAR avi_splitterW[] =
-{'A','V','I',' ','S','p','l','i','t','t','e','r',0};
-static const WCHAR mpeg_splitterW[] =
-{'M','P','E','G','-','I',' ','S','t','r','e','a','m',' ','S','p','l','i','t','t','e','r',0};
+DEFINE_GUID(GUID_NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+
+bool array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
+{
+    unsigned int new_capacity, max_capacity;
+    void *new_elements;
+
+    if (count <= *capacity)
+        return TRUE;
+
+    max_capacity = ~(SIZE_T)0 / size;
+    if (count > max_capacity)
+        return FALSE;
+
+    new_capacity = max(4, *capacity);
+    while (new_capacity < count && new_capacity <= max_capacity / 2)
+        new_capacity *= 2;
+    if (new_capacity < count)
+        new_capacity = max_capacity;
+
+    if (!(new_elements = realloc(*elements, new_capacity * size)))
+        return FALSE;
+
+    *elements = new_elements;
+    *capacity = new_capacity;
+
+    return TRUE;
+}
+
+struct wg_parser *wg_parser_create(enum wg_parser_type type, bool unlimited_buffering)
+{
+    struct wg_parser_create_params params =
+    {
+        .type = type,
+        .unlimited_buffering = unlimited_buffering,
+    };
+
+    TRACE("type %#x, unlimited_buffering %d.\n", type, unlimited_buffering);
+
+    if (__wine_unix_call(unix_handle, unix_wg_parser_create, &params))
+        return NULL;
+
+    TRACE("Returning parser %p.\n", params.parser);
+
+    return params.parser;
+}
+
+void wg_parser_destroy(struct wg_parser *parser)
+{
+    TRACE("parser %p.\n", parser);
+
+    __wine_unix_call(unix_handle, unix_wg_parser_destroy, parser);
+}
+
+HRESULT wg_parser_connect(struct wg_parser *parser, uint64_t file_size)
+{
+    struct wg_parser_connect_params params =
+    {
+        .parser = parser,
+        .file_size = file_size,
+    };
+
+    TRACE("parser %p, file_size %I64u.\n", parser, file_size);
+
+    return __wine_unix_call(unix_handle, unix_wg_parser_connect, &params);
+}
+
+void wg_parser_disconnect(struct wg_parser *parser)
+{
+    TRACE("parser %p.\n", parser);
+
+    __wine_unix_call(unix_handle, unix_wg_parser_disconnect, parser);
+}
+
+bool wg_parser_get_next_read_offset(struct wg_parser *parser, uint64_t *offset, uint32_t *size)
+{
+    struct wg_parser_get_next_read_offset_params params =
+    {
+        .parser = parser,
+    };
+
+    TRACE("parser %p, offset %p, size %p.\n", parser, offset, size);
+
+    if (__wine_unix_call(unix_handle, unix_wg_parser_get_next_read_offset, &params))
+        return false;
+    *offset = params.offset;
+    *size = params.size;
+    return true;
+}
+
+void wg_parser_push_data(struct wg_parser *parser, const void *data, uint32_t size)
+{
+    struct wg_parser_push_data_params params =
+    {
+        .parser = parser,
+        .data = data,
+        .size = size,
+    };
+
+    TRACE("parser %p, data %p, size %u.\n", parser, data, size);
+
+    __wine_unix_call(unix_handle, unix_wg_parser_push_data, &params);
+}
+
+uint32_t wg_parser_get_stream_count(struct wg_parser *parser)
+{
+    struct wg_parser_get_stream_count_params params =
+    {
+        .parser = parser,
+    };
+
+    TRACE("parser %p.\n", parser);
+
+    __wine_unix_call(unix_handle, unix_wg_parser_get_stream_count, &params);
+    return params.count;
+}
+
+struct wg_parser_stream *wg_parser_get_stream(struct wg_parser *parser, uint32_t index)
+{
+    struct wg_parser_get_stream_params params =
+    {
+        .parser = parser,
+        .index = index,
+    };
+
+    TRACE("parser %p, index %u.\n", parser, index);
+
+    __wine_unix_call(unix_handle, unix_wg_parser_get_stream, &params);
+
+    TRACE("Returning stream %p.\n", params.stream);
+    return params.stream;
+}
+
+void wg_parser_stream_get_preferred_format(struct wg_parser_stream *stream, struct wg_format *format)
+{
+    struct wg_parser_stream_get_preferred_format_params params =
+    {
+        .stream = stream,
+        .format = format,
+    };
+
+    TRACE("stream %p, format %p.\n", stream, format);
+
+    __wine_unix_call(unix_handle, unix_wg_parser_stream_get_preferred_format, &params);
+}
+
+void wg_parser_stream_enable(struct wg_parser_stream *stream, const struct wg_format *format)
+{
+    struct wg_parser_stream_enable_params params =
+    {
+        .stream = stream,
+        .format = format,
+    };
+
+    TRACE("stream %p, format %p.\n", stream, format);
+
+    __wine_unix_call(unix_handle, unix_wg_parser_stream_enable, &params);
+}
+
+void wg_parser_stream_disable(struct wg_parser_stream *stream)
+{
+    TRACE("stream %p.\n", stream);
+
+    __wine_unix_call(unix_handle, unix_wg_parser_stream_disable, stream);
+}
+
+bool wg_parser_stream_get_buffer(struct wg_parser_stream *stream, struct wg_parser_buffer *buffer)
+{
+    struct wg_parser_stream_get_buffer_params params =
+    {
+        .stream = stream,
+        .buffer = buffer,
+    };
+
+    TRACE("stream %p, buffer %p.\n", stream, buffer);
+
+    return !__wine_unix_call(unix_handle, unix_wg_parser_stream_get_buffer, &params);
+}
+
+bool wg_parser_stream_copy_buffer(struct wg_parser_stream *stream,
+        void *data, uint32_t offset, uint32_t size)
+{
+    struct wg_parser_stream_copy_buffer_params params =
+    {
+        .stream = stream,
+        .data = data,
+        .offset = offset,
+        .size = size,
+    };
+
+    TRACE("stream %p, data %p, offset %u, size %u.\n", stream, data, offset, size);
+
+    return !__wine_unix_call(unix_handle, unix_wg_parser_stream_copy_buffer, &params);
+}
+
+void wg_parser_stream_release_buffer(struct wg_parser_stream *stream)
+{
+    TRACE("stream %p.\n", stream);
+
+    __wine_unix_call(unix_handle, unix_wg_parser_stream_release_buffer, stream);
+}
+
+void wg_parser_stream_notify_qos(struct wg_parser_stream *stream,
+        bool underflow, double proportion, int64_t diff, uint64_t timestamp)
+{
+    struct wg_parser_stream_notify_qos_params params =
+    {
+        .stream = stream,
+        .underflow = underflow,
+        .proportion = proportion,
+        .diff = diff,
+        .timestamp = timestamp,
+    };
+
+    TRACE("stream %p, underflow %d, proportion %.16e, diff %I64d, timestamp %I64u.\n",
+            stream, underflow, proportion, diff, timestamp);
+
+    __wine_unix_call(unix_handle, unix_wg_parser_stream_notify_qos, &params);
+}
+
+uint64_t wg_parser_stream_get_duration(struct wg_parser_stream *stream)
+{
+    struct wg_parser_stream_get_duration_params params =
+    {
+        .stream = stream,
+    };
+
+    TRACE("stream %p.\n", stream);
+
+    __wine_unix_call(unix_handle, unix_wg_parser_stream_get_duration, &params);
+
+    TRACE("Returning duration %I64u.\n", params.duration);
+    return params.duration;
+}
+
+void wg_parser_stream_seek(struct wg_parser_stream *stream, double rate,
+        uint64_t start_pos, uint64_t stop_pos, DWORD start_flags, DWORD stop_flags)
+{
+    struct wg_parser_stream_seek_params params =
+    {
+        .stream = stream,
+        .rate = rate,
+        .start_pos = start_pos,
+        .stop_pos = stop_pos,
+        .start_flags = start_flags,
+        .stop_flags = stop_flags,
+    };
+
+    TRACE("stream %p, rate %.16e, start_pos %I64u, stop_pos %I64u, start_flags %#lx, stop_flags %#lx.\n",
+            stream, rate, start_pos, stop_pos, start_flags, stop_flags);
+
+    __wine_unix_call(unix_handle, unix_wg_parser_stream_seek, &params);
+}
+
+struct wg_transform *wg_transform_create(const struct wg_format *input_format,
+        const struct wg_format *output_format)
+{
+    struct wg_transform_create_params params =
+    {
+        .input_format = input_format,
+        .output_format = output_format,
+    };
+
+    TRACE("input_format %p, output_format %p.\n", input_format, output_format);
+
+    if (__wine_unix_call(unix_handle, unix_wg_transform_create, &params))
+        return NULL;
+
+    TRACE("Returning transform %p.\n", params.transform);
+    return params.transform;
+}
+
+void wg_transform_destroy(struct wg_transform *transform)
+{
+    TRACE("transform %p.\n", transform);
+
+    __wine_unix_call(unix_handle, unix_wg_transform_destroy, transform);
+}
+
+HRESULT wg_transform_push_data(struct wg_transform *transform, struct wg_sample *sample)
+{
+    struct wg_transform_push_data_params params =
+    {
+        .transform = transform,
+        .sample = sample,
+    };
+    NTSTATUS status;
+
+    TRACE("transform %p, sample %p.\n", transform, sample);
+
+    if ((status = __wine_unix_call(unix_handle, unix_wg_transform_push_data, &params)))
+        return HRESULT_FROM_NT(status);
+
+    return params.result;
+}
+
+HRESULT wg_transform_read_data(struct wg_transform *transform, struct wg_sample *sample)
+{
+    struct wg_transform_read_data_params params =
+    {
+        .transform = transform,
+        .sample = sample,
+    };
+    NTSTATUS status;
+
+    TRACE("transform %p, sample %p.\n", transform, sample);
+
+    if ((status = __wine_unix_call(unix_handle, unix_wg_transform_read_data, &params)))
+        return HRESULT_FROM_NT(status);
+
+    return params.result;
+}
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
 {
     if (reason == DLL_PROCESS_ATTACH)
     {
-        winegstreamer_instance = instance;
         DisableThreadLibraryCalls(instance);
+        NtQueryVirtualMemory(GetCurrentProcess(), instance, MemoryWineUnixFuncs,
+                &unix_handle, sizeof(unix_handle), NULL);
     }
     return TRUE;
-}
-
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    TRACE(".\n");
-
-    return object_locks ? S_FALSE : S_OK;
 }
 
 struct class_factory
@@ -117,11 +417,6 @@ static HRESULT WINAPI class_factory_CreateInstance(IClassFactory *iface, IUnknow
 static HRESULT WINAPI class_factory_LockServer(IClassFactory *iface, BOOL lock)
 {
     TRACE("iface %p, lock %d.\n", iface, lock);
-
-    if (lock)
-        InterlockedIncrement(&object_locks);
-    else
-        InterlockedDecrement(&object_locks);
     return S_OK;
 }
 
@@ -135,9 +430,10 @@ static const IClassFactoryVtbl class_factory_vtbl =
 };
 
 static struct class_factory avi_splitter_cf = {{&class_factory_vtbl}, avi_splitter_create};
-static struct class_factory gstdemux_cf = {{&class_factory_vtbl}, gstdemux_create};
+static struct class_factory decodebin_parser_cf = {{&class_factory_vtbl}, decodebin_parser_create};
 static struct class_factory mpeg_splitter_cf = {{&class_factory_vtbl}, mpeg_splitter_create};
 static struct class_factory wave_parser_cf = {{&class_factory_vtbl}, wave_parser_create};
+static struct class_factory wma_decoder_cf = {{&class_factory_vtbl}, wma_decoder_create};
 
 HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
 {
@@ -154,12 +450,14 @@ HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
 
     if (IsEqualGUID(clsid, &CLSID_AviSplitter))
         factory = &avi_splitter_cf;
-    else if (IsEqualGUID(clsid, &CLSID_Gstreamer_Splitter))
-        factory = &gstdemux_cf;
+    else if (IsEqualGUID(clsid, &CLSID_decodebin_parser))
+        factory = &decodebin_parser_cf;
     else if (IsEqualGUID(clsid, &CLSID_MPEG1Splitter))
         factory = &mpeg_splitter_cf;
     else if (IsEqualGUID(clsid, &CLSID_WAVEParser))
         factory = &wave_parser_cf;
+    else if (IsEqualGUID(clsid, &CLSID_WMADecMediaObject))
+        factory = &wma_decoder_cf;
     else
     {
         FIXME("%s not implemented, returning CLASS_E_CLASSNOTAVAILABLE.\n", debugstr_guid(clsid));
@@ -171,41 +469,14 @@ HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
 
 static BOOL CALLBACK init_gstreamer_proc(INIT_ONCE *once, void *param, void **ctx)
 {
-    BOOL *status = param;
-    char argv0[] = "wine";
-    char argv1[] = "--gst-disable-registry-fork";
-    char *args[3];
-    char **argv = args;
-    int argc = 2;
-    GError *err = NULL;
+    HINSTANCE handle;
 
-    TRACE("Initializing...\n");
-
-    argv[0] = argv0;
-    argv[1] = argv1;
-    argv[2] = NULL;
-    *status = gst_init_check(&argc, &argv, &err);
-    if (*status)
-    {
-        HINSTANCE handle;
-
-        TRACE("Initialized, version %s. Built with %d.%d.%d.\n", gst_version_string(),
-                GST_VERSION_MAJOR, GST_VERSION_MINOR, GST_VERSION_MICRO);
-
-        /* Unloading glib is a bad idea.. it installs atexit handlers,
-         * so never unload the dll after loading */
-        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
-                (LPCWSTR)winegstreamer_instance, &handle);
-        if (!handle)
-            ERR("Failed to pin module %p.\n", winegstreamer_instance);
-
-        start_dispatch_thread();
-    }
-    else if (err)
-    {
-        ERR("Failed to initialize gstreamer: %s\n", debugstr_a(err->message));
-        g_error_free(err);
-    }
+    /* Unloading glib is a bad idea.. it installs atexit handlers,
+     * so never unload the dll after loading */
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+            (LPCWSTR)init_gstreamer_proc, &handle);
+    if (!handle)
+        ERR("Failed to pin module.\n");
 
     return TRUE;
 }
@@ -213,11 +484,10 @@ static BOOL CALLBACK init_gstreamer_proc(INIT_ONCE *once, void *param, void **ct
 BOOL init_gstreamer(void)
 {
     static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
-    static BOOL status;
 
-    InitOnceExecuteOnce(&once, init_gstreamer_proc, &status, NULL);
+    InitOnceExecuteOnce(&once, init_gstreamer_proc, NULL, NULL);
 
-    return status;
+    return TRUE;
 }
 
 static const REGPINTYPES reg_audio_mt = {&MEDIATYPE_Audio, &GUID_NULL};
@@ -321,7 +591,7 @@ static const REGFILTER2 reg_wave_parser =
     .u.s2.rgPins2 = reg_wave_parser_pins,
 };
 
-static const REGFILTERPINS2 reg_gstdemux_pins[3] =
+static const REGFILTERPINS2 reg_decodebin_parser_pins[3] =
 {
     {
         .nMediaTypes = 1,
@@ -339,35 +609,53 @@ static const REGFILTERPINS2 reg_gstdemux_pins[3] =
     },
 };
 
-static const REGFILTER2 reg_gstdemux =
+static const REGFILTER2 reg_decodebin_parser =
 {
     .dwVersion = 2,
     .dwMerit = MERIT_PREFERRED,
     .u.s2.cPins2 = 3,
-    .u.s2.rgPins2 = reg_gstdemux_pins,
+    .u.s2.rgPins2 = reg_decodebin_parser_pins,
 };
 
 HRESULT WINAPI DllRegisterServer(void)
 {
+    DMO_PARTIAL_MEDIATYPE wma_decoder_output[2] =
+    {
+        {.type = MEDIATYPE_Audio, .subtype = MEDIASUBTYPE_PCM},
+        {.type = MEDIATYPE_Audio, .subtype = MEDIASUBTYPE_IEEE_FLOAT},
+    };
+    DMO_PARTIAL_MEDIATYPE wma_decoder_input[4] =
+    {
+        {.type = MEDIATYPE_Audio, .subtype = MEDIASUBTYPE_MSAUDIO1},
+        {.type = MEDIATYPE_Audio, .subtype = MEDIASUBTYPE_WMAUDIO2},
+        {.type = MEDIATYPE_Audio, .subtype = MEDIASUBTYPE_WMAUDIO3},
+        {.type = MEDIATYPE_Audio, .subtype = MEDIASUBTYPE_WMAUDIO_LOSSLESS},
+    };
+
     IFilterMapper2 *mapper;
     HRESULT hr;
 
     TRACE(".\n");
 
-    if (FAILED(hr = __wine_register_resources(winegstreamer_instance)))
+    if (FAILED(hr = __wine_register_resources()))
         return hr;
 
     if (FAILED(hr = CoCreateInstance(&CLSID_FilterMapper2, NULL, CLSCTX_INPROC_SERVER,
             &IID_IFilterMapper2, (void **)&mapper)))
         return hr;
 
-    IFilterMapper2_RegisterFilter(mapper, &CLSID_AviSplitter, avi_splitterW, NULL, NULL, NULL, &reg_avi_splitter);
-    IFilterMapper2_RegisterFilter(mapper, &CLSID_Gstreamer_Splitter,
-            wGstreamer_Splitter, NULL, NULL, NULL, &reg_gstdemux);
-    IFilterMapper2_RegisterFilter(mapper, &CLSID_MPEG1Splitter, mpeg_splitterW, NULL, NULL, NULL, &reg_mpeg_splitter);
-    IFilterMapper2_RegisterFilter(mapper, &CLSID_WAVEParser, wave_parserW, NULL, NULL, NULL, &reg_wave_parser);
+    IFilterMapper2_RegisterFilter(mapper, &CLSID_AviSplitter, L"AVI Splitter", NULL, NULL, NULL, &reg_avi_splitter);
+    IFilterMapper2_RegisterFilter(mapper, &CLSID_decodebin_parser,
+            L"GStreamer splitter filter", NULL, NULL, NULL, &reg_decodebin_parser);
+    IFilterMapper2_RegisterFilter(mapper, &CLSID_MPEG1Splitter,
+            L"MPEG-I Stream Splitter", NULL, NULL, NULL, &reg_mpeg_splitter);
+    IFilterMapper2_RegisterFilter(mapper, &CLSID_WAVEParser, L"Wave Parser", NULL, NULL, NULL, &reg_wave_parser);
 
     IFilterMapper2_Release(mapper);
+
+    if (FAILED(hr = DMORegister(L"WMA Decoder DMO", &CLSID_WMADecMediaObject, &DMOCATEGORY_AUDIO_DECODER,
+            0, ARRAY_SIZE(wma_decoder_input), wma_decoder_input, ARRAY_SIZE(wma_decoder_output), wma_decoder_output)))
+        return hr;
 
     return mfplat_DllRegisterServer();
 }
@@ -379,7 +667,7 @@ HRESULT WINAPI DllUnregisterServer(void)
 
     TRACE(".\n");
 
-    if (FAILED(hr = __wine_unregister_resources(winegstreamer_instance)))
+    if (FAILED(hr = __wine_unregister_resources()))
         return hr;
 
     if (FAILED(hr = CoCreateInstance(&CLSID_FilterMapper2, NULL, CLSCTX_INPROC_SERVER,
@@ -387,10 +675,14 @@ HRESULT WINAPI DllUnregisterServer(void)
         return hr;
 
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_AviSplitter);
-    IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_Gstreamer_Splitter);
+    IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_decodebin_parser);
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_MPEG1Splitter);
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_WAVEParser);
 
     IFilterMapper2_Release(mapper);
+
+    if (FAILED(hr = DMOUnregister(&CLSID_WMADecMediaObject, &DMOCATEGORY_AUDIO_DECODER)))
+        return hr;
+
     return S_OK;
 }

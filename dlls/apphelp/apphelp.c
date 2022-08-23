@@ -39,21 +39,6 @@ typedef DWORD TAGID;
 /* FIXME: don't know where to place that define */
 #define TAGID_NULL 0x0
 
-BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
-{
-    TRACE("%p, %u, %p\n", hinst, reason, reserved);
-
-    switch (reason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls( hinst );
-            break;
-    }
-    return TRUE;
-}
-
 BOOL WINAPI ApphelpCheckInstallShieldPackage( void* ptr, LPCWSTR path )
 {
     FIXME("stub: %p %s\n", ptr, debugstr_w(path));
@@ -89,7 +74,7 @@ BOOL WINAPI ShimFlushCache( HWND hwnd, HINSTANCE instance, LPCSTR cmdline, int c
 
 HSDB WINAPI SdbInitDatabase(DWORD flags, LPCWSTR path)
 {
-    FIXME("stub: %08x %s\n", flags, debugstr_w(path));
+    FIXME("stub: %08lx %s\n", flags, debugstr_w(path));
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return NULL;
 }
@@ -103,7 +88,7 @@ PDB WINAPI SdbOpenDatabase(LPCWSTR path, PATH_TYPE type)
 
 TAGID WINAPI SdbGetFirstChild(PDB pdb, TAGID parent)
 {
-    FIXME("stub: %p %d\n", pdb, parent);
+    FIXME("stub: %p %ld\n", pdb, parent);
     return TAGID_NULL;
 }
 
@@ -114,6 +99,6 @@ void WINAPI SdbCloseDatabase(PDB pdb)
 
 void WINAPI SdbGetAppPatchDir(HSDB hsdb, WCHAR *path, DWORD size)
 {
-    FIXME("stub: %p %p %d\n", hsdb, path, size);
+    FIXME("stub: %p %p %ld\n", hsdb, path, size);
     if (size && path) *path = 0;
 }

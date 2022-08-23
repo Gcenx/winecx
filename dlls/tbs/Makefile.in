@@ -1,0 +1,4 @@
+MODULE    = tbs.dll
+
+C_SRCS = \
+	tbs.c

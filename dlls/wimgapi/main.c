@@ -28,22 +28,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wimgapi);
 
-BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
-{
-    TRACE("(0x%p, %d, %p)\n", instance, reason, reserved);
-
-    switch (reason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(instance);
-            break;
-    }
-
-    return TRUE;
-}
-
 DWORD WINAPI WIMRegisterMessageCallback(HANDLE wim, FARPROC callback, PVOID data)
 {
     FIXME("(%p %p %p) stub\n", wim, callback, data);
@@ -59,7 +43,7 @@ BOOL WINAPI WIMGetMountedImages(PWIM_MOUNT_LIST list, DWORD *length)
 
 HANDLE WINAPI WIMCreateFile(WCHAR *path, DWORD access, DWORD creation, DWORD flags, DWORD compression, DWORD *result)
 {
-    FIXME("(%s %d %d %d %d %p) stub\n", debugstr_w(path), access, creation, flags, compression, result);
+    FIXME("(%s %ld %ld %ld %ld %p) stub\n", debugstr_w(path), access, creation, flags, compression, result);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return NULL;
 }

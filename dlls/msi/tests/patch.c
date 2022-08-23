@@ -321,7 +321,7 @@ static void create_database( const char *filename, const struct msi_table *table
     int len;
 
     len = MultiByteToWideChar( CP_ACP, 0, filename, -1, NULL, 0 );
-    if (!(filenameW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) return;
+    if (!(filenameW = malloc( len * sizeof(WCHAR) ))) return;
     MultiByteToWideChar( CP_ACP, 0, filename, -1, filenameW, len );
 
     r = MsiOpenDatabaseW( filenameW, MSIDBOPEN_CREATE, &hdb );
@@ -345,7 +345,7 @@ static void create_database( const char *filename, const struct msi_table *table
 
     MsiCloseHandle( hdb );
     set_suminfo( filenameW );
-    HeapFree( GetProcessHeap(), 0, filenameW );
+    free( filenameW );
 }
 
 /* data for generating a patch */
@@ -681,7 +681,7 @@ static void write_tables( IStorage *stg, const struct table_data *tables, UINT n
         r = IStorage_CreateStream( stg, tables[i].name, STGM_WRITE|STGM_SHARE_EXCLUSIVE, 0, 0, &stm );
         if (FAILED( r ))
         {
-            ok( 0, "failed to create stream 0x%08x\n", r );
+            ok( 0, "failed to create stream %#lx\n", r );
             continue;
         }
 
@@ -704,34 +704,34 @@ static void create_patch( const char *filename )
     const CLSID CLSID_MsiTransform = {0xc1082, 0, 0, {0xc0, 0, 0, 0, 0, 0, 0, 0x46}};
 
     len = MultiByteToWideChar( CP_ACP, 0, filename, -1, NULL, 0 );
-    filenameW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+    filenameW = malloc( len * sizeof(WCHAR) );
     MultiByteToWideChar( CP_ACP, 0, filename, -1, filenameW, len );
 
     r = StgCreateDocfile( filenameW, mode, 0, &stg );
-    HeapFree( GetProcessHeap(), 0, filenameW );
-    ok( r == S_OK, "failed to create storage 0x%08x\n", r );
+    free( filenameW );
+    ok( r == S_OK, "failed to create storage %#lx\n", r );
     if (!stg)
         return;
 
     r = IStorage_SetClass( stg, &CLSID_MsiPatch );
-    ok( r == S_OK, "failed to set storage type 0x%08x\n", r );
+    ok( r == S_OK, "failed to set storage type %#lx\n", r );
 
     write_tables( stg, table_patch_data, ARRAY_SIZE( table_patch_data ));
 
     r = IStorage_CreateStorage( stg, p_name7, mode, 0, 0, &stg1 );
-    ok( r == S_OK, "failed to create substorage 0x%08x\n", r );
+    ok( r == S_OK, "failed to create substorage %#lx\n", r );
 
     r = IStorage_SetClass( stg1, &CLSID_MsiTransform );
-    ok( r == S_OK, "failed to set storage type 0x%08x\n", r );
+    ok( r == S_OK, "failed to set storage type %#lx\n", r );
 
     write_tables( stg1, table_transform1_data, ARRAY_SIZE( table_transform1_data ));
     IStorage_Release( stg1 );
 
     r = IStorage_CreateStorage( stg, p_name8, mode, 0, 0, &stg2 );
-    ok( r == S_OK, "failed to create substorage 0x%08x\n", r );
+    ok( r == S_OK, "failed to create substorage %#lx\n", r );
 
     r = IStorage_SetClass( stg2, &CLSID_MsiTransform );
-    ok( r == S_OK, "failed to set storage type 0x%08x\n", r );
+    ok( r == S_OK, "failed to set storage type %#lx\n", r );
 
     write_tables( stg2, table_transform2_data, ARRAY_SIZE( table_transform2_data ));
     IStorage_Release( stg2 );
@@ -774,7 +774,7 @@ static void test_simple_patch( void )
     }
 
     size = get_pf_file_size( "msitest\\patch.txt" );
-    ok( size == 1000, "expected 1000, got %u\n", size );
+    ok( size == 1000, "expected 1000, got %lu\n", size );
 
     size = sizeof(install_source);
     r = MsiGetProductInfoA( "{913B8D18-FBB6-4CAC-A239-C74C11E3FA74}",
@@ -840,9 +840,9 @@ static void test_simple_patch( void )
     }
 
     size = get_pf_file_size( "msitest\\patch.txt" );
-    ok( size == 1002, "expected 1002, got %u\n", size );
+    ok( size == 1002, "expected 1002, got %lu\n", size );
     size = get_pf_file_size( "msitest\\file.txt" );
-    ok( size == 1000, "expected 1000, got %u\n", size );
+    ok( size == 1000, "expected 1000, got %lu\n", size );
 
     /* show that MsiOpenPackage applies registered patches */
     r = MsiOpenPackageA( path, &hpackage );
@@ -1064,7 +1064,7 @@ static char *get_string( MSIHANDLE hdb, UINT field, const char *query)
     ok( r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r );
     if (r == ERROR_SUCCESS)
     {
-        UINT size = MAX_PATH;
+        DWORD size = MAX_PATH;
         r = MsiRecordGetStringA( hrec, field, ret, &size );
         ok( r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);
         MsiCloseHandle( hrec );
@@ -1272,7 +1272,8 @@ cleanup:
 
 static void test_patch_registration( void )
 {
-    UINT r, size;
+    UINT r;
+    DWORD size;
     char buffer[MAX_PATH], patch_code[39];
 
     if (!pMsiApplyPatchA || !pMsiGetPatchInfoExA || !pMsiEnumPatchesExA)

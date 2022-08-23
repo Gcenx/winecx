@@ -19,80 +19,261 @@
  */
 
 #include <stdarg.h>
+#include <stdlib.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "ncrypt.h"
+#include "bcrypt.h"
+#include "ncrypt_internal.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ncrypt);
 
-BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
+static SECURITY_STATUS map_ntstatus(NTSTATUS status)
 {
-    TRACE("(%p, %u, %p)\n", instance, reason, reserved);
-
-    switch (reason)
+    switch (status)
     {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(instance);
-            break;
+    case STATUS_INVALID_HANDLE:    return NTE_INVALID_HANDLE;
+    case STATUS_INVALID_SIGNATURE: return NTE_BAD_SIGNATURE;
+    case STATUS_SUCCESS:           return ERROR_SUCCESS;
+    case STATUS_INVALID_PARAMETER: return NTE_INVALID_PARAMETER;
+    case STATUS_NO_MEMORY:         return NTE_NO_MEMORY;
+    case STATUS_NOT_SUPPORTED:     return NTE_NOT_SUPPORTED;
+    case NTE_BAD_DATA:             return NTE_BAD_DATA;
+    default:
+        FIXME("unhandled status %#lx\n", status);
+        return NTE_INTERNAL_ERROR;
+    }
+}
+
+static struct object *allocate_object(enum object_type type)
+{
+    struct object *ret;
+    if (!(ret = calloc(1, sizeof(*ret)))) return NULL;
+    ret->type = type;
+    return ret;
+}
+
+static struct object_property *get_object_property(struct object *object, const WCHAR *name)
+{
+    unsigned int i;
+    for (i = 0; i < object->num_properties; i++)
+    {
+        struct object_property *property = &object->properties[i];
+        if (!lstrcmpW(property->key, name)) return property;
+    }
+    return NULL;
+}
+
+struct object_property *add_object_property(struct object *object, const WCHAR *name)
+{
+    struct object_property *property;
+
+    if (!object->num_properties)
+    {
+        if (!(object->properties = malloc(sizeof(*property))))
+        {
+            ERR("Error allocating memory.\n");
+            return NULL;
+        }
+        property = &object->properties[object->num_properties++];
+    }
+    else
+    {
+        struct object_property *tmp;
+        if (!(tmp = realloc(object->properties, sizeof(*property) * (object->num_properties + 1))))
+        {
+            ERR("Error allocating memory.\n");
+            return NULL;
+        }
+        object->properties = tmp;
+        property = &object->properties[object->num_properties++];
     }
 
-    return TRUE;
+    memset(property, 0, sizeof(*property));
+    if (!(property->key = malloc((lstrlenW(name) + 1) * sizeof(WCHAR))))
+    {
+        ERR("Error allocating memory.\n");
+        return NULL;
+    }
+
+    lstrcpyW(property->key, name);
+    return property;
+}
+
+static SECURITY_STATUS set_object_property(struct object *object, const WCHAR *name, BYTE *value, DWORD value_size)
+{
+    struct object_property *property = get_object_property(object, name);
+    void *tmp;
+
+    if (!property && !(property = add_object_property(object, name))) return NTE_NO_MEMORY;
+
+    property->value_size = value_size;
+    if (!(tmp = realloc(property->value, value_size)))
+    {
+        ERR("Error allocating memory.\n");
+        free(property->key);
+        property->key = NULL;
+        return NTE_NO_MEMORY;
+    }
+
+    property->value = tmp;
+    memcpy(property->value, value, value_size);
+
+    return ERROR_SUCCESS;
+}
+
+static struct object *create_key_object(enum algid algid, NCRYPT_PROV_HANDLE provider)
+{
+    struct object *object;
+    NTSTATUS status;
+
+    if (!(object = allocate_object(KEY)))
+    {
+        ERR("Error allocating memory\n");
+        return NULL;
+    }
+
+    switch (algid)
+    {
+    case RSA:
+    {
+        status = BCryptOpenAlgorithmProvider(&object->key.bcrypt_alg, BCRYPT_RSA_ALGORITHM, NULL, 0);
+        if (status != STATUS_SUCCESS)
+        {
+            ERR("Error opening algorithm provider %#lx\n", status);
+            free(object);
+            return NULL;
+        }
+
+        object->key.algid = RSA;
+        set_object_property(object, NCRYPT_ALGORITHM_GROUP_PROPERTY, (BYTE *)BCRYPT_RSA_ALGORITHM,
+                            sizeof(BCRYPT_RSA_ALGORITHM));
+        break;
+    }
+    default:
+    {
+        ERR("Invalid algid %#x\n", algid);
+        free(object);
+        return NULL;
+    }
+    }
+
+    set_object_property(object, NCRYPT_PROVIDER_HANDLE_PROPERTY, (BYTE *)&provider, sizeof(provider));
+    return object;
 }
 
 SECURITY_STATUS WINAPI NCryptCreatePersistedKey(NCRYPT_PROV_HANDLE provider, NCRYPT_KEY_HANDLE *key,
-                                                const WCHAR *algid, const WCHAR *name, DWORD keyspec,
-                                                DWORD flags)
+                                                const WCHAR *algid, const WCHAR *name, DWORD keyspec, DWORD flags)
 {
-    FIXME("(0x%lx, %p, %s, %s, 0x%08x, 0x%08x): stub\n", provider, key, wine_dbgstr_w(algid),
-                                                         wine_dbgstr_w(name), keyspec, flags);
-    return NTE_NOT_SUPPORTED;
+    struct object *object;
+
+    TRACE("(%#Ix, %p, %s, %s, %#lx, %#lx)\n", provider, key, wine_dbgstr_w(algid),
+          wine_dbgstr_w(name), keyspec, flags);
+
+    if (!provider) return NTE_INVALID_HANDLE;
+    if (!algid) return HRESULT_FROM_WIN32(RPC_X_NULL_REF_POINTER);
+    if (name) FIXME("Persistent keys are not supported\n");
+
+    if (!lstrcmpiW(algid, BCRYPT_RSA_ALGORITHM))
+    {
+        NTSTATUS status;
+        DWORD default_bitlen = 1024;
+
+        if (!(object = create_key_object(RSA, provider)))
+        {
+            ERR("Error allocating memory\n");
+            return NTE_NO_MEMORY;
+        }
+
+        status = BCryptGenerateKeyPair(object->key.bcrypt_alg, &object->key.bcrypt_key, default_bitlen, 0);
+        if (status != STATUS_SUCCESS)
+        {
+            ERR("Error generating key pair %#lx\n", status);
+            BCryptCloseAlgorithmProvider(object->key.bcrypt_alg, 0);
+            free(object);
+            return map_ntstatus(status);
+        }
+
+        set_object_property(object, NCRYPT_LENGTH_PROPERTY, (BYTE *)&default_bitlen, sizeof(default_bitlen));
+    }
+    else
+    {
+        FIXME("Algorithm not handled %s\n", wine_dbgstr_w(algid));
+        return NTE_NOT_SUPPORTED;
+    }
+
+    *key = (NCRYPT_KEY_HANDLE)object;
+    return ERROR_SUCCESS;
 }
 
 SECURITY_STATUS WINAPI NCryptDecrypt(NCRYPT_KEY_HANDLE key, BYTE *input, DWORD insize, void *padding,
                                      BYTE *output, DWORD outsize, DWORD *result, DWORD flags)
 {
-    FIXME("(0x%lx, %p, %u, %p, %p, %u, %p, 0x%08x): stub\n", key, input, insize, padding,
-                                                             output, outsize, result, flags);
+    FIXME("(%#Ix, %p, %lu, %p, %p, %lu, %p, %#lx): stub\n", key, input, insize, padding,
+          output, outsize, result, flags);
     return NTE_NOT_SUPPORTED;
 }
 
 SECURITY_STATUS WINAPI NCryptDeleteKey(NCRYPT_KEY_HANDLE key, DWORD flags)
 {
-    FIXME("(0x%lx, 0x%08x): stub\n", key, flags);
+    FIXME("(%#Ix, %#lx): stub\n", key, flags);
     return NTE_NOT_SUPPORTED;
 }
 
 SECURITY_STATUS WINAPI NCryptEncrypt(NCRYPT_KEY_HANDLE key, BYTE *input, DWORD insize, void *padding,
                                      BYTE *output, DWORD outsize, DWORD *result, DWORD flags)
 {
-    FIXME("(0x%lx, %p, %u, %p, %p, %u, %p, 0x%08x): stub\n", key, input, insize, padding,
-                                                             output, outsize, result, flags);
+    FIXME("(%#Ix, %p, %lu, %p, %p, %lu, %p, %#lx): stub\n", key, input, insize, padding,
+          output, outsize, result, flags);
     return NTE_NOT_SUPPORTED;
 }
 
 SECURITY_STATUS WINAPI NCryptEnumAlgorithms(NCRYPT_PROV_HANDLE provider, DWORD alg_ops,
-                                            DWORD *alg_count, NCryptAlgorithmName **alg_list,
-                                            DWORD flags)
+                                            DWORD *alg_count, NCryptAlgorithmName **alg_list, DWORD flags)
 {
-    FIXME("(0x%lx, 0x%08x, %p, %p, 0x%08x): stub\n", provider, alg_ops, alg_count, alg_list, flags);
+    FIXME("(%#Ix, %#lx, %p, %p, %#lx): stub\n", provider, alg_ops, alg_count, alg_list, flags);
     return NTE_NOT_SUPPORTED;
 }
 
 SECURITY_STATUS WINAPI NCryptEnumKeys(NCRYPT_PROV_HANDLE provider, const WCHAR *scope,
                                       NCryptKeyName **key_name, PVOID *enum_state, DWORD flags)
 {
-    FIXME("(0x%lx, %p, %p, %p, 0x%08x): stub\n", provider, scope, key_name, enum_state, flags);
+    FIXME("(%#Ix, %p, %p, %p, %#lx): stub\n", provider, scope, key_name, enum_state, flags);
     return NTE_NOT_SUPPORTED;
 }
 
-SECURITY_STATUS WINAPI NCryptFinalizeKey(NCRYPT_KEY_HANDLE key, DWORD flags)
+SECURITY_STATUS WINAPI NCryptFinalizeKey(NCRYPT_KEY_HANDLE handle, DWORD flags)
 {
-    FIXME("(0x%lx, 0x%08x): stub\n", key, flags);
-    return NTE_NOT_SUPPORTED;
+    struct object *object = (struct object *)handle;
+    DWORD key_length;
+    struct object_property *prop;
+    NTSTATUS status;
+
+    TRACE("(%#Ix, %#lx)\n", handle, flags);
+
+    if (!object || object->type != KEY) return NTE_INVALID_HANDLE;
+
+    if (!(prop = get_object_property(object, NCRYPT_LENGTH_PROPERTY))) return NTE_INVALID_HANDLE;
+    key_length = *(DWORD *)prop->value;
+    status = BCryptSetProperty(object->key.bcrypt_key, BCRYPT_KEY_LENGTH, (UCHAR *)&key_length, sizeof(key_length), 0);
+    if (status != STATUS_SUCCESS)
+    {
+        ERR("Error setting key length property\n");
+        return map_ntstatus(status);
+    }
+
+    status = BCryptFinalizeKeyPair(object->key.bcrypt_key, 0);
+    if (status != STATUS_SUCCESS)
+    {
+        ERR("Error finalizing key pair\n");
+        return map_ntstatus(status);
+    }
+
+    return ERROR_SUCCESS;
 }
 
 SECURITY_STATUS WINAPI NCryptFreeBuffer(PVOID buf)
@@ -101,60 +282,242 @@ SECURITY_STATUS WINAPI NCryptFreeBuffer(PVOID buf)
     return NTE_NOT_SUPPORTED;
 }
 
-SECURITY_STATUS WINAPI NCryptFreeObject(NCRYPT_HANDLE object)
+static SECURITY_STATUS free_key_object(struct key *key)
 {
-    FIXME("(0x%lx): stub\n", object);
-    return NTE_NOT_SUPPORTED;
+    NTSTATUS status, status2;
+    status = BCryptDestroyKey(key->bcrypt_key);
+    if ((status2 = BCryptCloseAlgorithmProvider(key->bcrypt_alg, 0))) return map_ntstatus(status2);
+    return status ? map_ntstatus(status) : ERROR_SUCCESS;
 }
 
-SECURITY_STATUS WINAPI NCryptGetProperty(NCRYPT_HANDLE object, const WCHAR *property, PBYTE output,
+SECURITY_STATUS WINAPI NCryptFreeObject(NCRYPT_HANDLE handle)
+{
+    struct object *object = (struct object *)handle;
+    SECURITY_STATUS ret = STATUS_SUCCESS;
+    unsigned int i;
+
+    TRACE("(%#Ix)\n", handle);
+
+    if (!object)
+    {
+        WARN("invalid handle %#Ix\n", handle);
+        return NTE_INVALID_HANDLE;
+    }
+
+    switch (object->type)
+    {
+    case KEY:
+    {
+        if ((ret = free_key_object(&object->key))) return ret;
+        break;
+    }
+    case STORAGE_PROVIDER:
+        break;
+
+    default:
+        WARN("invalid handle %#Ix\n", handle);
+        return NTE_INVALID_HANDLE;
+    }
+
+    for (i = 0; i < object->num_properties; i++)
+    {
+        free(object->properties[i].key);
+        free(object->properties[i].value);
+    }
+    free(object->properties);
+    free(object);
+    return ret;
+}
+
+SECURITY_STATUS WINAPI NCryptGetProperty(NCRYPT_HANDLE handle, const WCHAR *name, BYTE *output,
                                          DWORD outsize, DWORD *result, DWORD flags)
 {
-    FIXME("(0x%lx, %s, %p, %u, %p, 0x%08x): stub\n", object, wine_dbgstr_w(property), output, outsize,
-                                                         result, flags);
-    return NTE_NOT_SUPPORTED;
+    struct object *object = (struct object *)handle;
+    const struct object_property *property;
+
+    TRACE("(%#Ix, %s, %p, %lu, %p, %#lx)\n", handle, wine_dbgstr_w(name), output, outsize, result, flags);
+    if (flags) FIXME("flags %#lx not supported\n", flags);
+
+    if (!object) return NTE_INVALID_HANDLE;
+    if (!(property = get_object_property(object, name))) return NTE_INVALID_PARAMETER;
+
+    *result = property->value_size;
+    if (!output) return ERROR_SUCCESS;
+    if (outsize < property->value_size) return NTE_BUFFER_TOO_SMALL;
+
+    memcpy(output, property->value, property->value_size);
+    return ERROR_SUCCESS;
 }
 
 SECURITY_STATUS WINAPI NCryptImportKey(NCRYPT_PROV_HANDLE provider, NCRYPT_KEY_HANDLE decrypt_key,
-                                       const WCHAR *type, NCryptBufferDesc *params, NCRYPT_KEY_HANDLE *key,
-                                       PBYTE data, DWORD datasize, DWORD flags)
+                                       const WCHAR *type, NCryptBufferDesc *params, NCRYPT_KEY_HANDLE *handle,
+                                       BYTE *data, DWORD datasize, DWORD flags)
 {
-    FIXME("(0x%lx, 0x%lx, %s, %p, %p, %p, %u, 0x%08x): stub\n", provider, decrypt_key,
-                                                                wine_dbgstr_w(type), params,
-                                                                key, data, datasize, flags);
-    return NTE_NOT_SUPPORTED;
+    BCRYPT_KEY_BLOB *header = (BCRYPT_KEY_BLOB *)data;
+    struct object *object;
+
+    TRACE("(%#Ix, %#Ix, %s, %p, %p, %p, %lu, %#lx)\n", provider, decrypt_key, wine_dbgstr_w(type),
+          params, handle, data, datasize, flags);
+
+    if (decrypt_key)
+    {
+        FIXME("Key blob decryption not implemented\n");
+        return NTE_NOT_SUPPORTED;
+    }
+    if (params)
+    {
+        FIXME("Parameter information not implemented\n");
+        return NTE_NOT_SUPPORTED;
+    }
+    if (flags == NCRYPT_SILENT_FLAG)
+    {
+        FIXME("Silent flag not implemented\n");
+    }
+    else if (flags)
+    {
+        WARN("Invalid flags %#lx\n", flags);
+        return NTE_BAD_FLAGS;
+    }
+
+    switch(header->Magic)
+    {
+    case BCRYPT_RSAFULLPRIVATE_MAGIC:
+    case BCRYPT_RSAPRIVATE_MAGIC:
+    case BCRYPT_RSAPUBLIC_MAGIC:
+    {
+        NTSTATUS status;
+        BCRYPT_RSAKEY_BLOB *rsablob = (BCRYPT_RSAKEY_BLOB *)data;
+
+        if (!(object = create_key_object(RSA, provider)))
+        {
+            ERR("Error allocating memory\n");
+            return NTE_NO_MEMORY;
+        }
+
+        status = BCryptImportKeyPair(object->key.bcrypt_alg, NULL, type, &object->key.bcrypt_key, data, datasize, 0);
+        if (status != STATUS_SUCCESS)
+        {
+            WARN("Error importing key pair %#lx\n", status);
+            BCryptCloseAlgorithmProvider(object->key.bcrypt_alg, 0);
+            free(object);
+            return map_ntstatus(status);
+        }
+
+        set_object_property(object, NCRYPT_LENGTH_PROPERTY, (BYTE *)&rsablob->BitLength, sizeof(rsablob->BitLength));
+        break;
+    }
+    default:
+        FIXME("Unhandled key magic %#lx\n", header->Magic);
+        return NTE_INVALID_PARAMETER;
+    }
+
+    *handle = (NCRYPT_KEY_HANDLE)object;
+    return ERROR_SUCCESS;
 }
 
-SECURITY_STATUS WINAPI NCryptIsAlgSupported(NCRYPT_PROV_HANDLE provider, const WCHAR *algid,
-                                            DWORD flags)
+SECURITY_STATUS WINAPI NCryptIsAlgSupported(NCRYPT_PROV_HANDLE provider, const WCHAR *algid, DWORD flags)
 {
-    FIXME("(0x%lx, %s, 0x%08x): stub\n", provider, wine_dbgstr_w(algid), flags);
-    return NTE_NOT_SUPPORTED;
+    static const ULONG supported = BCRYPT_CIPHER_OPERATION |\
+                                   BCRYPT_ASYMMETRIC_ENCRYPTION_OPERATION |\
+                                   BCRYPT_SIGNATURE_OPERATION |\
+                                   BCRYPT_SECRET_AGREEMENT_OPERATION;
+    BCRYPT_ALGORITHM_IDENTIFIER *list;
+    ULONG i, count;
+    NTSTATUS status;
+
+    TRACE("(%#Ix, %s, %#lx)\n", provider, wine_dbgstr_w(algid), flags);
+
+    if (!provider) return NTE_INVALID_HANDLE;
+    if (!algid) return HRESULT_FROM_WIN32(RPC_X_NULL_REF_POINTER);
+    if (flags == NCRYPT_SILENT_FLAG)
+    {
+        FIXME("Silent flag not implemented\n");
+    }
+    else if (flags)
+    {
+        WARN("Invalid flags %#lx\n", flags);
+        return NTE_BAD_FLAGS;
+    }
+    if (!lstrcmpiW(BCRYPT_RSA_SIGN_ALGORITHM, algid)) return NTE_NOT_SUPPORTED;
+
+    status = BCryptEnumAlgorithms(supported, &count, &list, 0);
+    if (status != STATUS_SUCCESS)
+    {
+        ERR("Error retrieving algorithm list %#lx\n", status);
+        return map_ntstatus(status);
+    }
+
+    status = STATUS_NOT_SUPPORTED;
+    for (i = 0; i < count; i++)
+    {
+        if (!lstrcmpiW(list[i].pszName, algid))
+        {
+            status = STATUS_SUCCESS;
+            break;
+        }
+    }
+
+    BCryptFreeBuffer(list);
+    return map_ntstatus(status);
 }
 
 BOOL WINAPI NCryptIsKeyHandle(NCRYPT_KEY_HANDLE hKey)
 {
-    FIXME("(0x%lx): stub\n", hKey);
+    FIXME("(%#Ix): stub\n", hKey);
     return FALSE;
 }
 
 SECURITY_STATUS WINAPI NCryptOpenKey(NCRYPT_PROV_HANDLE provider, NCRYPT_KEY_HANDLE *key,
                                      const WCHAR *name, DWORD keyspec, DWORD flags)
 {
-    FIXME("(0x%lx, %p, %s, 0x%08x, 0x%08x): stub\n", provider, key, wine_dbgstr_w(name), keyspec, flags);
+    FIXME("(%#Ix, %p, %s, %#lx, %#lx): stub\n", provider, key, wine_dbgstr_w(name), keyspec, flags);
     return NTE_NOT_SUPPORTED;
 }
 
 SECURITY_STATUS WINAPI NCryptOpenStorageProvider(NCRYPT_PROV_HANDLE *provider, const WCHAR *name, DWORD flags)
 {
-    FIXME("(%p, %s, %u): stub\n", provider, wine_dbgstr_w(name), flags);
-    return NTE_NOT_SUPPORTED;
+    struct object *object;
+
+    FIXME("(%p, %s, %#lx): stub\n", provider, wine_dbgstr_w(name), flags);
+
+    if (!(object = allocate_object(STORAGE_PROVIDER)))
+    {
+        ERR("Error allocating memory.\n");
+        return NTE_NO_MEMORY;
+    }
+    *provider = (NCRYPT_PROV_HANDLE)object;
+    return ERROR_SUCCESS;
 }
 
-SECURITY_STATUS WINAPI NCryptSetProperty(NCRYPT_HANDLE object, const WCHAR *property,
-                                         PBYTE input, DWORD insize, DWORD flags)
+SECURITY_STATUS WINAPI NCryptSetProperty(NCRYPT_HANDLE handle, const WCHAR *name, BYTE *input, DWORD insize, DWORD flags)
 {
-    FIXME("(%lx, %s, %p, %u, 0x%08x): stub\n", object, wine_dbgstr_w(property), input, insize,
-                                               flags);
-    return NTE_NOT_SUPPORTED;
+    struct object *object = (struct object *)handle;
+
+    TRACE("(%#Ix, %s, %p, %lu, %#lx)\n", handle, wine_dbgstr_w(name), input, insize, flags);
+    if (flags) FIXME("flags %#lx not supported\n", flags);
+
+    if (!object) return NTE_INVALID_HANDLE;
+    return set_object_property(object, name, input, insize);
+}
+
+SECURITY_STATUS WINAPI NCryptVerifySignature(NCRYPT_KEY_HANDLE handle, void *padding, BYTE *hash, DWORD hash_size,
+                                             BYTE *signature, DWORD signature_size, DWORD flags)
+{
+    struct object *key_object = (struct object *)handle;
+
+    TRACE("(%#Ix, %p, %p, %lu, %p, %lu, %#lx)\n", handle, padding, hash, hash_size, signature,
+          signature_size, flags);
+
+    if (!hash_size || !signature_size) return NTE_INVALID_PARAMETER;
+    if (!hash || !signature) return HRESULT_FROM_WIN32(RPC_X_NULL_REF_POINTER);
+    if (!handle || key_object->type != KEY) return NTE_INVALID_HANDLE;
+
+    if (key_object->key.algid < RSA)
+    {
+        FIXME("Symmetric keys not supported.\n");
+        return NTE_NOT_SUPPORTED;
+    }
+
+    return map_ntstatus(BCryptVerifySignature(key_object->key.bcrypt_key, padding, hash, hash_size, signature,
+                                              signature_size, flags));
 }

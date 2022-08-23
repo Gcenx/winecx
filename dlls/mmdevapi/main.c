@@ -37,13 +37,12 @@
 #include "audiopolicy.h"
 #include "devpkey.h"
 #include "winreg.h"
+#include "spatialaudioclient.h"
 
 #include "mmdevapi.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mmdevapi);
-
-static HINSTANCE instance;
 
 DriverFuncs drvs;
 
@@ -76,7 +75,7 @@ static BOOL load_driver(const WCHAR *name, DriverFuncs *driver)
 
     driver->module = LoadLibraryW(driver_module);
     if(!driver->module){
-        TRACE("Unable to load %s: %u\n", wine_dbgstr_w(driver_module),
+        TRACE("Unable to load %s: %lu\n", wine_dbgstr_w(driver_module),
                 GetLastError());
         return FALSE;
     }
@@ -149,17 +148,22 @@ static BOOL WINAPI init_driver(INIT_ONCE *once, void *param, void **context)
             *next = ',';
     }
 
+    if (drvs.module != 0){
+        load_devices_from_reg();
+        load_driver_devices(eRender);
+        load_driver_devices(eCapture);
+    }
+
     return drvs.module != 0;
 }
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-    TRACE("(0x%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
+    TRACE("(0x%p, %ld, %p)\n", hinstDLL, fdwReason, lpvReserved);
 
     switch (fdwReason)
     {
         case DLL_PROCESS_ATTACH:
-            instance = hinstDLL;
             DisableThreadLibraryCalls(hinstDLL);
             break;
         case DLL_PROCESS_DETACH:
@@ -170,11 +174,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     }
 
     return TRUE;
-}
-
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
 }
 
 typedef HRESULT (*FnCreateInstance)(REFIID riid, LPVOID *ppobj);
@@ -296,22 +295,6 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
     return CLASS_E_CLASSNOTAVAILABLE;
 }
 
-/***********************************************************************
- *		DllRegisterServer (MMDEVAPI.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( instance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (MMDEVAPI.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( instance );
-}
-
 struct activate_async_op {
     IActivateAudioInterfaceAsyncOperation IActivateAudioInterfaceAsyncOperation_iface;
     LONG ref;
@@ -352,7 +335,7 @@ static ULONG WINAPI activate_async_op_AddRef(IActivateAudioInterfaceAsyncOperati
 {
     struct activate_async_op *This = impl_from_IActivateAudioInterfaceAsyncOperation(iface);
     LONG ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p) refcount now %i\n", This, ref);
+    TRACE("(%p) refcount now %li\n", This, ref);
     return ref;
 }
 
@@ -360,7 +343,7 @@ static ULONG WINAPI activate_async_op_Release(IActivateAudioInterfaceAsyncOperat
 {
     struct activate_async_op *This = impl_from_IActivateAudioInterfaceAsyncOperation(iface);
     LONG ref = InterlockedDecrement(&This->ref);
-    TRACE("(%p) refcount now %i\n", This, ref);
+    TRACE("(%p) refcount now %li\n", This, ref);
     if (!ref) {
         if(This->result_iface)
             IUnknown_Release(This->result_iface);
@@ -412,10 +395,11 @@ static HRESULT get_mmdevice_by_activatepath(const WCHAR *path, IMMDevice **mmdev
 
     static const WCHAR DEVINTERFACE_AUDIO_RENDER_WSTR[] = L"{E6327CAD-DCEC-4949-AE8A-991E976A79D2}";
     static const WCHAR DEVINTERFACE_AUDIO_CAPTURE_WSTR[] = L"{2EEF81BE-33FA-4800-9670-1CD474972C3F}";
+    static const WCHAR MMDEV_PATH_PREFIX[] = L"\\\\?\\SWD#MMDEVAPI#";
 
     hr = MMDevEnum_Create(&IID_IMMDeviceEnumerator, (void**)&devenum);
     if (FAILED(hr)) {
-        WARN("Failed to create MMDeviceEnumerator: %08x\n", hr);
+        WARN("Failed to create MMDeviceEnumerator: %08lx\n", hr);
         return hr;
     }
 
@@ -423,13 +407,19 @@ static HRESULT get_mmdevice_by_activatepath(const WCHAR *path, IMMDevice **mmdev
         hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(devenum, eRender, eMultimedia, mmdev);
     } else if (!lstrcmpiW(path, DEVINTERFACE_AUDIO_CAPTURE_WSTR)){
         hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(devenum, eCapture, eMultimedia, mmdev);
+    } else if (!memcmp(path, MMDEV_PATH_PREFIX, sizeof(MMDEV_PATH_PREFIX) - sizeof(WCHAR))) {
+        WCHAR device_id[56]; /* == strlen("{0.0.1.00000000}.{fd47d9cc-4218-4135-9ce2-0c195c87405b}") + 1 */
+
+        lstrcpynW(device_id, path + (ARRAY_SIZE(MMDEV_PATH_PREFIX) - 1), ARRAY_SIZE(device_id));
+
+        hr = IMMDeviceEnumerator_GetDevice(devenum, device_id, mmdev);
     } else {
-        FIXME("How to map path to device id? %s\n", debugstr_w(path));
+        FIXME("Unrecognized device id format: %s\n", debugstr_w(path));
         hr = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
     }
 
     if (FAILED(hr)) {
-        WARN("Failed to get requested device (%s): %08x\n", debugstr_w(path), hr);
+        WARN("Failed to get requested device (%s): %08lx\n", debugstr_w(path), hr);
         *mmdev = NULL;
         hr = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
     }

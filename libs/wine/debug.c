@@ -19,7 +19,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 #include "wine/asm.h"
 
 #ifdef __ASM_OBSOLETE
@@ -29,9 +28,9 @@
 #include <stdarg.h>
 #include <string.h>
 #include <ctype.h>
-#ifdef HAVE_SYS_STAT_H
-# include <sys/stat.h>
-#endif
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "wine/debug.h"
 
@@ -66,7 +65,7 @@ static int cmp_name( const void *p1, const void *p2 )
 }
 
 /* get the flags to use for a given channel, possibly setting them too in case of lazy init */
-unsigned char __wine_dbg_get_channel_flags_obsolete( struct __wine_debug_channel * WIN32PTR channel )
+unsigned char __wine_dbg_get_channel_flags_obsolete( struct __wine_debug_channel *channel )
 {
     if (nb_debug_options == -1) debug_init();
 
@@ -253,7 +252,7 @@ const char *wine_dbg_sprintf_obsolete( const char *format, ... )
 
 
 /* varargs wrapper for funcs.dbg_vlog */
-int wine_dbg_log_obsolete( enum __wine_debug_class cls, struct __wine_debug_channel * WIN32PTR channel,
+int wine_dbg_log_obsolete( enum __wine_debug_class cls, struct __wine_debug_channel *channel,
                            const char *func, const char *format, ... )
 {
     int ret;
@@ -297,7 +296,7 @@ static const char *default_dbgstr_an( const char *str, int n )
     char *dst, *res;
     size_t size;
 
-    if (!((ULONG_HOSTPTR)str >> 16))
+    if (!((ULONG_PTR)str >> 16))
     {
         if (!str) return "(null)";
         res = funcs.get_temp_buffer( 6 );
@@ -350,7 +349,7 @@ static const char *default_dbgstr_wn( const WCHAR *str, int n )
     char *dst, *res;
     size_t size;
 
-    if (!((ULONG_HOSTPTR)str >> 16))
+    if (!((ULONG_PTR)str >> 16))
     {
         if (!str) return "(null)";
         res = funcs.get_temp_buffer( 6 );

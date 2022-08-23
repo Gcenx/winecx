@@ -322,7 +322,6 @@ struct macdrv_monitor
     CGRect rc_work;
     /* StateFlags in DISPLAY_DEVICE struct */
     uint32_t state_flags;
-    unsigned int serial_no;
 };
 
 extern int macdrv_get_displays(struct macdrv_display** displays, int* count) DECLSPEC_HIDDEN;
@@ -672,6 +671,10 @@ extern void macdrv_force_popup_order_front(macdrv_window w) DECLSPEC_HIDDEN;
 
 /* CrossOver Hack #15388 */
 extern int quicken_signin_hack;
+
+/* CrossOver Hack #20512 */
+extern int is_apple_silicon(void) DECLSPEC_HIDDEN;
+extern int is_skyrim_se_launcher(void) DECLSPEC_HIDDEN;
 
 #include "wine/hostptraddrspace_exit.h"
 

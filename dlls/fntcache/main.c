@@ -25,29 +25,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(fontcache);
 
-static HINSTANCE hInst;
 static SERVICE_STATUS_HANDLE service_handle;
 static HANDLE stop_event;
-
-/***********************************************************************
- *		DllMain (fntcache.@)
- */
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
-{
-    TRACE("(%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
-
-    switch (fdwReason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;  /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(hinstDLL);
-            hInst = hinstDLL;
-            break;
-    }
-
-    return TRUE;
-}
 
 static DWORD WINAPI service_handler( DWORD ctrl, DWORD event_type, void *event_data, void *context )
 {
@@ -71,7 +50,7 @@ static DWORD WINAPI service_handler( DWORD ctrl, DWORD event_type, void *event_d
         SetEvent( stop_event );
         return NO_ERROR;
     default:
-        FIXME( "got service ctrl %x\n", ctrl );
+        FIXME( "got service ctrl %lx\n", ctrl );
         status.dwCurrentState = SERVICE_RUNNING;
         SetServiceStatus( service_handle, &status );
         return NO_ERROR;

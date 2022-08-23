@@ -657,7 +657,7 @@ static int CALLBACK enum_font_proc(const LOGFONTW *lpelfe, const TEXTMETRICW *lp
     return 1;
 }
 
-static int fonts_desc_compare(const void *a, const void *b)
+static int __cdecl fonts_desc_compare(const void *a, const void *b)
 {
     const struct font_desc *left = a, *right = b;
     return lstrcmpiW(left->name, right->name);
@@ -1881,7 +1881,7 @@ static LRESULT OnCreate( HWND hWnd )
     HFONT font;
     HDC hdc;
     SIZE name_sz, size_sz;
-    int height;
+    int height, dpi;
     static const WCHAR wszRichEditDll[] = {'R','I','C','H','E','D','2','0','.','D','L','L','\0'};
     static const WCHAR wszRichEditText[] = {'R','i','c','h','E','d','i','t',' ','t','e','x','t','\0'};
     static const WCHAR font_text[] = {'T','i','m','e','s',' ','N','e','w',' ','R','o','m','a','n',0}; /* a long font name */
@@ -1905,8 +1905,12 @@ static LRESULT OnCreate( HWND hWnd )
       NULL, 0,
       24, 24, 16, 16, sizeof(TBBUTTON));
 
+    hdc = GetDC(hWnd);
+    dpi = GetDeviceCaps(hdc, LOGPIXELSY);
+    ReleaseDC(hWnd, hdc);
+
     ab.hInst = HINST_COMMCTRL;
-    ab.nID = IDB_STD_SMALL_COLOR;
+    ab.nID = dpi >= 120 ? IDB_STD_LARGE_COLOR : IDB_STD_SMALL_COLOR;
     nStdBitmaps = SendMessageW(hToolBarWnd, TB_ADDBITMAP, 0, (LPARAM)&ab);
 
     AddButton(hToolBarWnd, nStdBitmaps+STD_FILENEW, ID_FILE_NEW);
@@ -2019,7 +2023,7 @@ static LRESULT OnCreate( HWND hWnd )
 
     if (!hEditorWnd)
     {
-        fprintf(stderr, "Error code %u\n", GetLastError());
+        fprintf(stderr, "Error code %lu\n", GetLastError());
         return -1;
     }
     assert(hEditorWnd);
@@ -2160,7 +2164,7 @@ static LRESULT OnNotify( HWND hWnd, LPARAM lParam)
 
             update_font_list();
 
-            sprintf( buf,"selection = %d..%d, line count=%ld",
+            sprintf( buf,"selection = %ld..%ld, line count=%Id",
                      pSC->chrg.cpMin, pSC->chrg.cpMax,
                      SendMessageW(hwndEditor, EM_GETLINECOUNT, 0, 0));
             SetWindowTextA(GetDlgItem(hWnd, IDC_STATUSBAR), buf);
@@ -2447,7 +2451,7 @@ static LRESULT OnCommand( HWND hWnd, WPARAM wParam, LPARAM lParam)
         SendMessageW(hwndEditor, EM_EXGETSEL, 0, (LPARAM)&range);
         data = HeapAlloc(GetProcessHeap(), 0, sizeof(*data) * (range.cpMax-range.cpMin+1));
         SendMessageW(hwndEditor, EM_GETSELTEXT, 0, (LPARAM)data);
-        sprintf(buf, "Start = %d, End = %d", range.cpMin, range.cpMax);
+        sprintf(buf, "Start = %ld, End = %ld", range.cpMin, range.cpMax);
         MessageBoxA(hWnd, buf, "Editor", MB_OK);
         MessageBoxW(hWnd, data, wszAppTitle, MB_OK);
         HeapFree( GetProcessHeap(), 0, data);

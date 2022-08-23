@@ -66,9 +66,9 @@
 @ stub -arch=arm ??0_TaskCollection@details@Concurrency@@QAA@XZ
 @ stub -arch=i386 ??0_TaskCollection@details@Concurrency@@QAE@XZ
 @ stub -arch=win64 ??0_TaskCollection@details@Concurrency@@QEAA@XZ
-@ stub -arch=arm ??0_Timer@details@Concurrency@@IAA@I_N@Z
-@ stub -arch=i386 ??0_Timer@details@Concurrency@@IAE@I_N@Z
-@ stub -arch=win64 ??0_Timer@details@Concurrency@@IEAA@I_N@Z
+@ cdecl -arch=arm ??0_Timer@details@Concurrency@@IAA@I_N@Z(ptr long long) msvcr120.??0_Timer@details@Concurrency@@IAA@I_N@Z
+@ thiscall -arch=i386 ??0_Timer@details@Concurrency@@IAE@I_N@Z(ptr long long) msvcr120.??0_Timer@details@Concurrency@@IAE@I_N@Z
+@ cdecl -arch=win64 ??0_Timer@details@Concurrency@@IEAA@I_N@Z(ptr long long) msvcr120.??0_Timer@details@Concurrency@@IEAA@I_N@Z
 @ cdecl -arch=arm ??0__non_rtti_object@std@@QAA@ABV01@@Z(ptr ptr) msvcr120.??0__non_rtti_object@std@@QAA@ABV01@@Z
 @ thiscall -arch=i386 ??0__non_rtti_object@std@@QAE@ABV01@@Z(ptr ptr) msvcr120.??0__non_rtti_object@std@@QAE@ABV01@@Z
 @ cdecl -arch=win64 ??0__non_rtti_object@std@@QEAA@AEBV01@@Z(ptr ptr) msvcr120.??0__non_rtti_object@std@@QEAA@AEBV01@@Z
@@ -118,7 +118,7 @@
 @ stub -arch=i386 ??0default_scheduler_exists@Concurrency@@QAE@XZ
 @ stub -arch=win64 ??0default_scheduler_exists@Concurrency@@QEAA@XZ
 @ cdecl -arch=arm ??0event@Concurrency@@QAA@XZ(ptr) msvcr120.??0event@Concurrency@@QAA@XZ
-@ thiscall -arch=win32 ??0event@Concurrency@@QAE@XZ(ptr) msvcr120.??0event@Concurrency@@QAE@XZ
+@ thiscall -arch=i386 ??0event@Concurrency@@QAE@XZ(ptr) msvcr120.??0event@Concurrency@@QAE@XZ
 @ cdecl -arch=win64 ??0event@Concurrency@@QEAA@XZ(ptr) msvcr120.??0event@Concurrency@@QEAA@XZ
 @ cdecl -arch=arm ??0exception@std@@QAA@ABQBD@Z(ptr ptr) msvcr120.??0exception@std@@QAA@ABQBD@Z
 @ thiscall -arch=i386 ??0exception@std@@QAE@ABQBD@Z(ptr ptr) msvcr120.??0exception@std@@QAE@ABQBD@Z
@@ -223,7 +223,7 @@
 @ stub -arch=i386 ??0operation_timed_out@Concurrency@@QAE@XZ
 @ stub -arch=win64 ??0operation_timed_out@Concurrency@@QEAA@XZ
 @ cdecl -arch=arm ??0reader_writer_lock@Concurrency@@QAA@XZ(ptr) msvcr120.??0reader_writer_lock@Concurrency@@QAA@XZ
-@ thiscall -arch=win32 ??0reader_writer_lock@Concurrency@@QAE@XZ(ptr) msvcr120.??0reader_writer_lock@Concurrency@@QAE@XZ
+@ thiscall -arch=i386 ??0reader_writer_lock@Concurrency@@QAE@XZ(ptr) msvcr120.??0reader_writer_lock@Concurrency@@QAE@XZ
 @ cdecl -arch=win64 ??0reader_writer_lock@Concurrency@@QEAA@XZ(ptr) msvcr120.??0reader_writer_lock@Concurrency@@QEAA@XZ
 @ stub -arch=arm ??0scheduler_not_attached@Concurrency@@QAA@PBD@Z
 @ stub -arch=i386 ??0scheduler_not_attached@Concurrency@@QAE@PBD@Z
@@ -292,9 +292,9 @@
 @ stub -arch=arm ??1_TaskCollection@details@Concurrency@@QAA@XZ
 @ stub -arch=i386 ??1_TaskCollection@details@Concurrency@@QAE@XZ
 @ stub -arch=win64 ??1_TaskCollection@details@Concurrency@@QEAA@XZ
-@ stub -arch=arm ??1_Timer@details@Concurrency@@MAA@XZ
-@ stub -arch=i386 ??1_Timer@details@Concurrency@@MAE@XZ
-@ stub -arch=win64 ??1_Timer@details@Concurrency@@MEAA@XZ
+@ cdecl -arch=arm ??1_Timer@details@Concurrency@@MAA@XZ(ptr) msvcr120.??1_Timer@details@Concurrency@@MAA@XZ
+@ thiscall -arch=i386 ??1_Timer@details@Concurrency@@MAE@XZ(ptr) msvcr120.??1_Timer@details@Concurrency@@MAE@XZ
+@ cdecl -arch=win64 ??1_Timer@details@Concurrency@@MEAA@XZ(ptr) msvcr120.??1_Timer@details@Concurrency@@MEAA@XZ
 @ cdecl -arch=arm ??1__non_rtti_object@std@@UAA@XZ(ptr) msvcr120.??1__non_rtti_object@std@@UAA@XZ
 @ thiscall -arch=i386 ??1__non_rtti_object@std@@UAE@XZ(ptr) msvcr120.??1__non_rtti_object@std@@UAE@XZ
 @ cdecl -arch=win64 ??1__non_rtti_object@std@@UEAA@XZ(ptr) msvcr120.??1__non_rtti_object@std@@UEAA@XZ
@@ -308,13 +308,13 @@
 @ thiscall -arch=i386 ??1critical_section@Concurrency@@QAE@XZ(ptr) msvcr120.??1critical_section@Concurrency@@QAE@XZ
 @ cdecl -arch=win64 ??1critical_section@Concurrency@@QEAA@XZ(ptr) msvcr120.??1critical_section@Concurrency@@QEAA@XZ
 @ cdecl -arch=arm ??1event@Concurrency@@QAA@XZ(ptr) msvcr120.??1event@Concurrency@@QAA@XZ
-@ thiscall -arch=win32 ??1event@Concurrency@@QAE@XZ(ptr) msvcr120.??1event@Concurrency@@QAE@XZ
+@ thiscall -arch=i386 ??1event@Concurrency@@QAE@XZ(ptr) msvcr120.??1event@Concurrency@@QAE@XZ
 @ cdecl -arch=win64 ??1event@Concurrency@@QEAA@XZ(ptr) msvcr120.??1event@Concurrency@@QEAA@XZ
 @ cdecl -arch=arm ??1exception@std@@UAA@XZ(ptr) msvcr120.??1exception@std@@UAA@XZ
 @ thiscall -arch=i386 ??1exception@std@@UAE@XZ(ptr) msvcr120.??1exception@std@@UAE@XZ
 @ cdecl -arch=win64 ??1exception@std@@UEAA@XZ(ptr) msvcr120.??1exception@std@@UEAA@XZ
 @ cdecl -arch=arm ??1reader_writer_lock@Concurrency@@QAA@XZ(ptr) msvcr120.??1reader_writer_lock@Concurrency@@QAA@XZ
-@ thiscall -arch=win32 ??1reader_writer_lock@Concurrency@@QAE@XZ(ptr) msvcr120.??1reader_writer_lock@Concurrency@@QAE@XZ
+@ thiscall -arch=i386 ??1reader_writer_lock@Concurrency@@QAE@XZ(ptr) msvcr120.??1reader_writer_lock@Concurrency@@QAE@XZ
 @ cdecl -arch=win64 ??1reader_writer_lock@Concurrency@@QEAA@XZ(ptr) msvcr120.??1reader_writer_lock@Concurrency@@QEAA@XZ
 @ cdecl -arch=arm ??1scoped_lock@critical_section@Concurrency@@QAA@XZ(ptr) msvcr120.??1scoped_lock@critical_section@Concurrency@@QAA@XZ
 @ thiscall -arch=i386 ??1scoped_lock@critical_section@Concurrency@@QAE@XZ(ptr) msvcr120.??1scoped_lock@critical_section@Concurrency@@QAE@XZ
@@ -626,12 +626,12 @@
 @ thiscall -arch=i386 ?_SpinOnce@?$_SpinWait@$0A@@details@Concurrency@@QAE_NXZ(ptr) msvcr120.?_SpinOnce@?$_SpinWait@$0A@@details@Concurrency@@QAE_NXZ
 @ cdecl -arch=win64 ?_SpinOnce@?$_SpinWait@$0A@@details@Concurrency@@QEAA_NXZ(ptr) msvcr120.?_SpinOnce@?$_SpinWait@$0A@@details@Concurrency@@QEAA_NXZ
 @ cdecl ?_SpinYield@Context@Concurrency@@SAXXZ() msvcr120.?_SpinYield@Context@Concurrency@@SAXXZ
-@ stub -arch=arm ?_Start@_Timer@details@Concurrency@@IAAXXZ
-@ stub -arch=i386 ?_Start@_Timer@details@Concurrency@@IAEXXZ
-@ stub -arch=win64 ?_Start@_Timer@details@Concurrency@@IEAAXXZ
-@ stub -arch=arm ?_Stop@_Timer@details@Concurrency@@IAAXXZ
-@ stub -arch=i386 ?_Stop@_Timer@details@Concurrency@@IAEXXZ
-@ stub -arch=win64 ?_Stop@_Timer@details@Concurrency@@IEAAXXZ
+@ cdecl -arch=arm ?_Start@_Timer@details@Concurrency@@IAAXXZ(ptr) msvcr120.?_Start@_Timer@details@Concurrency@@IAAXXZ
+@ thiscall -arch=i386 ?_Start@_Timer@details@Concurrency@@IAEXXZ(ptr) msvcr120.?_Start@_Timer@details@Concurrency@@IAEXXZ
+@ cdecl -arch=win64 ?_Start@_Timer@details@Concurrency@@IEAAXXZ(ptr) msvcr120.?_Start@_Timer@details@Concurrency@@IEAAXXZ
+@ cdecl -arch=arm ?_Stop@_Timer@details@Concurrency@@IAAXXZ(ptr) msvcr120.?_Stop@_Timer@details@Concurrency@@IAAXXZ
+@ thiscall -arch=i386 ?_Stop@_Timer@details@Concurrency@@IAEXXZ(ptr) msvcr120.?_Stop@_Timer@details@Concurrency@@IAEXXZ
+@ cdecl -arch=win64 ?_Stop@_Timer@details@Concurrency@@IEAAXXZ(ptr) msvcr120.?_Stop@_Timer@details@Concurrency@@IEAAXXZ
 @ stub -arch=arm ?_Tidy@exception@std@@AAAXXZ
 @ stub -arch=i386 ?_Tidy@exception@std@@AAEXXZ
 @ stub -arch=win64 ?_Tidy@exception@std@@AEAAXXZ
@@ -728,10 +728,10 @@
 @ thiscall -arch=i386 ?lock@critical_section@Concurrency@@QAEXXZ(ptr) msvcr120.?lock@critical_section@Concurrency@@QAEXXZ
 @ cdecl -arch=win64 ?lock@critical_section@Concurrency@@QEAAXXZ(ptr) msvcr120.?lock@critical_section@Concurrency@@QEAAXXZ
 @ cdecl -arch=arm ?lock@reader_writer_lock@Concurrency@@QAAXXZ(ptr) msvcr120.?lock@reader_writer_lock@Concurrency@@QAAXXZ
-@ thiscall -arch=win32 ?lock@reader_writer_lock@Concurrency@@QAEXXZ(ptr) msvcr120.?lock@reader_writer_lock@Concurrency@@QAEXXZ
+@ thiscall -arch=i386 ?lock@reader_writer_lock@Concurrency@@QAEXXZ(ptr) msvcr120.?lock@reader_writer_lock@Concurrency@@QAEXXZ
 @ cdecl -arch=win64 ?lock@reader_writer_lock@Concurrency@@QEAAXXZ(ptr) msvcr120.?lock@reader_writer_lock@Concurrency@@QEAAXXZ
 @ cdecl -arch=arm ?lock_read@reader_writer_lock@Concurrency@@QAAXXZ(ptr) msvcr120.?lock_read@reader_writer_lock@Concurrency@@QAAXXZ
-@ thiscall -arch=win32 ?lock_read@reader_writer_lock@Concurrency@@QAEXXZ(ptr) msvcr120.?lock_read@reader_writer_lock@Concurrency@@QAEXXZ
+@ thiscall -arch=i386 ?lock_read@reader_writer_lock@Concurrency@@QAEXXZ(ptr) msvcr120.?lock_read@reader_writer_lock@Concurrency@@QAEXXZ
 @ cdecl -arch=win64 ?lock_read@reader_writer_lock@Concurrency@@QEAAXXZ(ptr) msvcr120.?lock_read@reader_writer_lock@Concurrency@@QEAAXXZ
 @ cdecl -arch=arm ?name@type_info@@QBAPBDPAU__type_info_node@@@Z(ptr ptr) msvcr120.?name@type_info@@QBAPBDPAU__type_info_node@@@Z
 @ thiscall -arch=i386 ?name@type_info@@QBEPBDPAU__type_info_node@@@Z(ptr ptr) msvcr120.?name@type_info@@QBEPBDPAU__type_info_node@@@Z
@@ -749,10 +749,10 @@
 @ thiscall -arch=i386 ?raw_name@type_info@@QBEPBDXZ(ptr) msvcr120.?raw_name@type_info@@QBEPBDXZ
 @ cdecl -arch=win64 ?raw_name@type_info@@QEBAPEBDXZ(ptr) msvcr120.?raw_name@type_info@@QEBAPEBDXZ
 @ cdecl -arch=arm ?reset@event@Concurrency@@QAAXXZ(ptr) msvcr120.?reset@event@Concurrency@@QAAXXZ
-@ thiscall -arch=win32 ?reset@event@Concurrency@@QAEXXZ(ptr) msvcr120.?reset@event@Concurrency@@QAEXXZ
+@ thiscall -arch=i386 ?reset@event@Concurrency@@QAEXXZ(ptr) msvcr120.?reset@event@Concurrency@@QAEXXZ
 @ cdecl -arch=win64 ?reset@event@Concurrency@@QEAAXXZ(ptr) msvcr120.?reset@event@Concurrency@@QEAAXXZ
 @ cdecl -arch=arm ?set@event@Concurrency@@QAAXXZ(ptr) msvcr120.?set@event@Concurrency@@QAAXXZ
-@ thiscall -arch=win32 ?set@event@Concurrency@@QAEXXZ(ptr) msvcr120.?set@event@Concurrency@@QAEXXZ
+@ thiscall -arch=i386 ?set@event@Concurrency@@QAEXXZ(ptr) msvcr120.?set@event@Concurrency@@QAEXXZ
 @ cdecl -arch=win64 ?set@event@Concurrency@@QEAAXXZ(ptr) msvcr120.?set@event@Concurrency@@QEAAXXZ
 @ cdecl ?set_new_handler@@YAP6AXXZP6AXXZ@Z(ptr) msvcr120.?set_new_handler@@YAP6AXXZP6AXXZ@Z
 @ stub -arch=win32 ?set_task_execution_resources@Concurrency@@YAXGPAU_GROUP_AFFINITY@@@Z
@@ -770,20 +770,20 @@
 @ thiscall -arch=i386 ?try_lock@critical_section@Concurrency@@QAE_NXZ(ptr) msvcr120.?try_lock@critical_section@Concurrency@@QAE_NXZ
 @ cdecl -arch=win64 ?try_lock@critical_section@Concurrency@@QEAA_NXZ(ptr) msvcr120.?try_lock@critical_section@Concurrency@@QEAA_NXZ
 @ cdecl -arch=arm ?try_lock@reader_writer_lock@Concurrency@@QAA_NXZ(ptr) msvcr120.?try_lock@reader_writer_lock@Concurrency@@QAA_NXZ
-@ thiscall -arch=win32 ?try_lock@reader_writer_lock@Concurrency@@QAE_NXZ(ptr) msvcr120.?try_lock@reader_writer_lock@Concurrency@@QAE_NXZ
+@ thiscall -arch=i386 ?try_lock@reader_writer_lock@Concurrency@@QAE_NXZ(ptr) msvcr120.?try_lock@reader_writer_lock@Concurrency@@QAE_NXZ
 @ cdecl -arch=win64 ?try_lock@reader_writer_lock@Concurrency@@QEAA_NXZ(ptr) msvcr120.?try_lock@reader_writer_lock@Concurrency@@QEAA_NXZ
 @ cdecl -arch=arm ?try_lock_for@critical_section@Concurrency@@QAA_NI@Z(ptr long) msvcr120.?try_lock_for@critical_section@Concurrency@@QAA_NI@Z
 @ thiscall -arch=i386 ?try_lock_for@critical_section@Concurrency@@QAE_NI@Z(ptr long) msvcr120.?try_lock_for@critical_section@Concurrency@@QAE_NI@Z
 @ cdecl -arch=win64 ?try_lock_for@critical_section@Concurrency@@QEAA_NI@Z(ptr long) msvcr120.?try_lock_for@critical_section@Concurrency@@QEAA_NI@Z
 @ cdecl -arch=arm ?try_lock_read@reader_writer_lock@Concurrency@@QAA_NXZ(ptr) msvcr120.?try_lock_read@reader_writer_lock@Concurrency@@QAA_NXZ
-@ thiscall -arch=win32 ?try_lock_read@reader_writer_lock@Concurrency@@QAE_NXZ(ptr) msvcr120.?try_lock_read@reader_writer_lock@Concurrency@@QAE_NXZ
+@ thiscall -arch=i386 ?try_lock_read@reader_writer_lock@Concurrency@@QAE_NXZ(ptr) msvcr120.?try_lock_read@reader_writer_lock@Concurrency@@QAE_NXZ
 @ cdecl -arch=win64 ?try_lock_read@reader_writer_lock@Concurrency@@QEAA_NXZ(ptr) msvcr120.?try_lock_read@reader_writer_lock@Concurrency@@QEAA_NXZ
 @ cdecl ?unexpected@@YAXXZ() msvcr120.?unexpected@@YAXXZ
 @ cdecl -arch=arm ?unlock@critical_section@Concurrency@@QAAXXZ(ptr) msvcr120.?unlock@critical_section@Concurrency@@QAAXXZ
 @ thiscall -arch=i386 ?unlock@critical_section@Concurrency@@QAEXXZ(ptr) msvcr120.?unlock@critical_section@Concurrency@@QAEXXZ
 @ cdecl -arch=win64 ?unlock@critical_section@Concurrency@@QEAAXXZ(ptr) msvcr120.?unlock@critical_section@Concurrency@@QEAAXXZ
 @ cdecl -arch=arm ?unlock@reader_writer_lock@Concurrency@@QAAXXZ(ptr) msvcr120.?unlock@reader_writer_lock@Concurrency@@QAAXXZ
-@ thiscall -arch=win32 ?unlock@reader_writer_lock@Concurrency@@QAEXXZ(ptr) msvcr120.?unlock@reader_writer_lock@Concurrency@@QAEXXZ
+@ thiscall -arch=i386 ?unlock@reader_writer_lock@Concurrency@@QAEXXZ(ptr) msvcr120.?unlock@reader_writer_lock@Concurrency@@QAEXXZ
 @ cdecl -arch=win64 ?unlock@reader_writer_lock@Concurrency@@QEAAXXZ(ptr) msvcr120.?unlock@reader_writer_lock@Concurrency@@QEAAXXZ
 @ cdecl ?vswprintf@@YAHPA_WIPB_WPAD@Z(ptr long wstr ptr) msvcr120.?vswprintf@@YAHPA_WIPB_WPAD@Z
 @ cdecl ?wait@Concurrency@@YAXI@Z(long) msvcr120.?wait@Concurrency@@YAXI@Z
@@ -791,7 +791,7 @@
 @ thiscall -arch=i386 ?wait@_Condition_variable@details@Concurrency@@QAEXAAVcritical_section@3@@Z(ptr ptr) msvcr120.?wait@_Condition_variable@details@Concurrency@@QAEXAAVcritical_section@3@@Z
 @ cdecl -arch=win64 ?wait@_Condition_variable@details@Concurrency@@QEAAXAEAVcritical_section@3@@Z(ptr ptr) msvcr120.?wait@_Condition_variable@details@Concurrency@@QEAAXAEAVcritical_section@3@@Z
 @ cdecl -arch=arm ?wait@event@Concurrency@@QAAII@Z(ptr long) msvcr120.?wait@event@Concurrency@@QAAII@Z
-@ thiscall -arch=win32 ?wait@event@Concurrency@@QAEII@Z(ptr long) msvcr120.?wait@event@Concurrency@@QAEII@Z
+@ thiscall -arch=i386 ?wait@event@Concurrency@@QAEII@Z(ptr long) msvcr120.?wait@event@Concurrency@@QAEII@Z
 @ cdecl -arch=win64 ?wait@event@Concurrency@@QEAA_KI@Z(ptr long) msvcr120.?wait@event@Concurrency@@QEAA_KI@Z
 @ cdecl -arch=arm ?wait_for@_Condition_variable@details@Concurrency@@QAA_NAAVcritical_section@3@I@Z(ptr ptr long) msvcr120.?wait_for@_Condition_variable@details@Concurrency@@QAA_NAAVcritical_section@3@I@Z
 @ thiscall -arch=i386 ?wait_for@_Condition_variable@details@Concurrency@@QAE_NAAVcritical_section@3@I@Z(ptr ptr long) msvcr120.?wait_for@_Condition_variable@details@Concurrency@@QAE_NAAVcritical_section@3@I@Z
@@ -960,7 +960,7 @@
 @ cdecl __p__wpgmptr() msvcr120.__p__wpgmptr
 @ cdecl __pctype_func() msvcr120.__pctype_func
 @ extern __pioinfo msvcr120.__pioinfo
-@ stub __pwctype_func
+@ cdecl __pwctype_func() msvcr120.__pwctype_func
 @ cdecl __pxcptinfoptrs() msvcr120.__pxcptinfoptrs
 @ stub __report_gsfailure
 @ extern __setlc_active msvcr120.__setlc_active
@@ -1145,7 +1145,7 @@
 @ varargs _fwscanf_l(ptr wstr ptr) msvcr120._fwscanf_l
 @ varargs _fwscanf_s_l(ptr wstr ptr) msvcr120._fwscanf_s_l
 @ cdecl _gcvt(double long str) msvcr120._gcvt
-@ cdecl _gcvt_s(ptr long  double long) msvcr120._gcvt_s
+@ cdecl _gcvt_s(ptr long double long) msvcr120._gcvt_s
 @ cdecl _get_current_locale() msvcr120._get_current_locale
 @ cdecl _get_daylight(ptr) msvcr120._get_daylight
 @ cdecl _get_doserrno(ptr) msvcr120._get_doserrno
@@ -1804,24 +1804,24 @@
 @ cdecl expm1f(float) msvcr120.expm1f
 @ cdecl expm1l(double) msvcr120.expm1l
 @ cdecl fabs(double) msvcr120.fabs
-@ cdecl -arch=!i386 fabsf(float) msvcr120.fabsf
+@ cdecl -arch=arm,arm64 fabsf(float) msvcr120.fabsf
 @ cdecl fclose(ptr) msvcr120.fclose
 @ cdecl fdim(double double) msvcr120.fdim
 @ cdecl fdimf(float float) msvcr120.fdimf
 @ cdecl fdiml(double double) msvcr120.fdiml
-@ stub feclearexcept
+@ cdecl feclearexcept(long) msvcr120.feclearexcept
 @ cdecl fegetenv(ptr) msvcr120.fegetenv
-@ stub fegetexceptflag
+@ cdecl fegetexceptflag(ptr long) msvcr120.fegetexceptflag
 @ cdecl fegetround() msvcr120.fegetround
 @ stub feholdexcept
 @ cdecl feof(ptr) msvcr120.feof
-@ stub feraiseexcept
+@ cdecl feraiseexcept(long) msvcr120.feraiseexcept
 @ cdecl ferror(ptr) msvcr120.ferror
 @ cdecl fesetenv(ptr) msvcr120.fesetenv
-@ stub fesetexceptflag
+@ cdecl fesetexceptflag(ptr long) msvcr120.fesetexceptflag
 @ cdecl fesetround(long) msvcr120.fesetround
-@ stub fetestexcept
-@ stub feupdateenv
+@ cdecl fetestexcept(long) msvcr120.fetestexcept
+@ cdecl feupdateenv(ptr) msvcr120.feupdateenv
 @ cdecl fflush(ptr) msvcr120.fflush
 @ cdecl fgetc(ptr) msvcr120.fgetc
 @ cdecl fgetpos(ptr ptr) msvcr120.fgetpos
@@ -1910,7 +1910,7 @@
 @ cdecl lgammaf(float) msvcr120.lgammaf
 @ cdecl lgammal(double) msvcr120.lgammal
 @ cdecl -ret64 llabs(int64) msvcr120.llabs
-@ cdecl lldiv(int64 int64) msvcr120.lldiv
+@ cdecl -norelay lldiv(int64 int64) msvcr120.lldiv
 @ cdecl -ret64 llrint(double) msvcr120.llrint
 @ cdecl -ret64 llrintf(float) msvcr120.llrintf
 @ cdecl -ret64 llrintl(double) msvcr120.llrintl

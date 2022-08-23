@@ -38,6 +38,7 @@
     BOOL pendingOrderOut;
     BOOL savedVisibleState;
     BOOL drawnSinceShown;
+    BOOL closing;
     WineWindow* latentParentWindow;
     NSMutableArray* latentChildWindows;
 

@@ -19,7 +19,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 #include "wine/asm.h"
 
 #ifdef __ASM_OBSOLETE
@@ -86,7 +85,7 @@ __ASM_GLOBAL_FUNC( wine_call_on_stack_obsolete,
                    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
                    __ASM_CFI(".cfi_same_value %ebp\n\t")
                    "ret" )
-#elif (defined(__x86_64__) || defined(__i386_on_x86_64__)) && defined(__GNUC__)
+#elif defined(__x86_64__) && defined(__GNUC__)
 __ASM_GLOBAL_FUNC( wine_call_on_stack_obsolete,
                    "pushq %rbp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t")
@@ -104,29 +103,6 @@ __ASM_GLOBAL_FUNC( wine_call_on_stack_obsolete,
                    __ASM_CFI(".cfi_adjust_cfa_offset -8\n\t")
                    __ASM_CFI(".cfi_same_value %rbp\n\t")
                    "ret")
-#elif defined(__arm__) && defined(__GNUC__)
-__ASM_GLOBAL_FUNC( wine_call_on_stack_obsolete,
-                   "push {r4,LR}\n\t"   /* save return address on stack */
-                   "mov r4, sp\n\t"     /* store old sp in local var */
-                   "mov sp, r2\n\t"     /* stack */
-                   "mov r2, r0\n\t"     /* func -> scratch register */
-                   "mov r0, r1\n\t"     /* arg */
-                   "blx r2\n\t"         /* call func */
-                   "mov sp, r4\n\t"     /* restore old sp from local var */
-                   "pop {r4,PC}")       /* fetch return address into pc */
-#elif defined(__aarch64__) && defined(__GNUC__)
-__ASM_GLOBAL_FUNC( wine_call_on_stack_obsolete,
-                   "stp x29, x30, [sp,#-32]!\n\t"    /* save return address on stack */
-                   "str x19, [sp,#16]\n\t"           /* save register on stack */
-                   "mov x19, sp\n\t"                 /* store old sp in local var */
-                   "mov sp, x2\n\t"                  /* stack */
-                   "mov x2, x0\n\t"                  /* func -> scratch register */
-                   "mov x0, x1\n\t"                  /* arg */
-                   "blr x2\n\t"                      /* call func */
-                   "mov sp, x19\n\t"                 /* restore old sp from local var */
-                   "ldr x19, [sp,#16]\n\t"           /* restore register from stack */
-                   "ldp x29, x30, [sp],#32\n\t"      /* restore return address */
-                   "ret")                            /* return */
 #endif
 
 /***********************************************************************
@@ -134,9 +110,9 @@ __ASM_GLOBAL_FUNC( wine_call_on_stack_obsolete,
  *
  * Switch to the specified stack and call the function.
  */
-void DECLSPEC_NORETURN wine_switch_to_stack_obsolete( void (*func)(void * WIN32PTR), void * WIN32PTR arg, void * WIN32PTR stack )
+void DECLSPEC_NORETURN wine_switch_to_stack_obsolete( void (*func)(void *), void *arg, void *stack )
 {
-    wine_call_on_stack_obsolete( (int (*)(void * WIN32PTR))func, arg, stack );
+    wine_call_on_stack_obsolete( (int (*)(void *))func, arg, stack );
     abort();
 }
 

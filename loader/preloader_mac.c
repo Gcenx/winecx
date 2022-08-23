@@ -25,28 +25,23 @@
 #ifdef __APPLE__
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
-#ifdef HAVE_SYS_STAT_H
-# include <sys/stat.h>
-#endif
+#include <sys/stat.h>
 #include <fcntl.h>
-#ifdef HAVE_SYS_MMAN_H
-# include <sys/mman.h>
-#endif
+#include <sys/mman.h>
 #ifdef HAVE_SYS_SYSCALL_H
 # include <sys/syscall.h>
 #endif
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+#include <unistd.h>
+#include <dlfcn.h>
 #ifdef HAVE_MACH_O_LOADER_H
 #include <mach/thread_status.h>
+#include <mach/vm_statistics.h>
 #include <mach-o/loader.h>
 #include <mach-o/ldsyms.h>
 #endif
@@ -80,7 +75,7 @@ static struct wine_preload_info preload_info[] =
 {
     /* On macOS, we allocate the low 64k area in two steps because PAGEZERO
      * might not always be available. */
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
     { (void *)0x00000000, 0x00001000 },  /* first page */
     { (void *)0x00001000, 0x0000f000 },  /* low 64k */
     { (void *)0x00010000, 0x00100000 },  /* DOS area */
@@ -90,6 +85,7 @@ static struct wine_preload_info preload_info[] =
     { (void *)0x000000010000, 0x00100000 },  /* DOS area */
     { (void *)0x000000110000, 0x67ef0000 },  /* low memory area */
     { (void *)0x00007ff00000, 0x000f0000 },  /* shared user data */
+    { (void *)0x000080000000, 0x7fffffff },  /* 2-4GB large-address-aware area */
     { (void *)0x000100000000, 0x14000000 },  /* WINE_4GB_RESERVE section */
     { (void *)0x7ffd00000000, 0x01ff0000 },  /* top-down allocations + virtual heap */
 #endif /* __i386__ */
@@ -195,7 +191,7 @@ __ASM_GLOBAL_FUNC( start,
                    "\tmovl $0,%ebp\n"
                    "\tjmpl *%eax\n" )
 
-#elif defined(__x86_64__) || defined(__i386_on_x86_64__)
+#elif defined(__x86_64__)
 
 static const size_t page_size = 0x1000;
 static const size_t page_mask = 0xfff;
@@ -308,7 +304,7 @@ extern int _dyld_func_lookup( const char *dyld_func_name, void **address );
 
 /* replacement for libc functions */
 
-#if defined(__i386__) || defined(__i386_on_x86_64__) /* CrossOver Hack #16371 */
+#ifdef __i386__ /* CrossOver Hack #16371 */
 static inline size_t wld_strlen( const char *str )
 {
     size_t len;
@@ -598,7 +594,7 @@ static int map_region( struct wine_preload_info *info )
 
     for (;;)
     {
-        ret = wld_mmap( info->addr, info->size, PROT_NONE, flags, -1, 0 );
+        ret = wld_mmap( info->addr, info->size, PROT_NONE, flags, VM_MAKE_TAG(240), 0 );
         if (ret == info->addr) return 1;
         if (ret != (void *)-1) wld_munmap( ret, info->size );
         if (flags & MAP_FIXED) break;
@@ -655,7 +651,7 @@ void *wld_start( void *stack, int *is_unix_thread )
     LOAD_POSIX_DYLD_FUNC( dladdr );
     LOAD_MACHO_DYLD_FUNC( _dyld_get_image_slide );
 
-#if defined(__i386__) || defined(__i386_on_x86_64__) /* CrossOver Hack #16371 */
+#ifdef __i386__ /* CrossOver Hack #16371 */
     {
         const char *qw;
         if (*pargc >= 3 && (qw = wld_strcasestr(argv[2], "qw")) && wld_strcasestr(qw + 2, "patch.exe"))

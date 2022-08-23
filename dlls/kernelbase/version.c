@@ -39,6 +39,7 @@
 #include "winnls.h"
 #include "winternl.h"
 #include "winerror.h"
+#include "appmodel.h"
 
 #include "kernelbase.h"
 #include "wine/debug.h"
@@ -126,9 +127,16 @@ typedef struct
 
 
 /***********************************************************************
- * Win8 info, reported if app doesn't provide compat GUID in manifest.
+ * Win8 info, reported if the app doesn't provide compat GUID in the manifest and
+ * doesn't have higher OS version in PE header.
  */
-static const struct version_info windows8_version_info = { 6, 2, 0x23f0 };
+static const struct version_info windows8_version_info = { 6, 2, 9200 };
+
+/***********************************************************************
+ * Win8.1 info, reported if the app doesn't provide compat GUID in the manifest and
+ * OS version in PE header is 8.1 or higher but below 10.
+ */
+static const struct version_info windows8_1_version_info = { 6, 3, 9600 };
 
 
 /***********************************************************************
@@ -143,12 +151,12 @@ static const struct
 {
     /* Windows 8.1 */
     {
-        { 6, 3, 0x2580 },
+        { 6, 3, 9600 },
         {0x1f676c76,0x80e1,0x4239,{0x95,0xbb,0x83,0xd0,0xf6,0xd0,0xda,0x78}}
     },
     /* Windows 10 */
     {
-        { 10, 0, 0x42ee },
+        { 10, 0, 18362 },
         {0x8e0f7a12,0xbfb3,0x4fe8,{0xb9,0xa5,0x48,0xfd,0x50,0xa1,0x5a,0x9a}}
     }
 };
@@ -160,15 +168,22 @@ static const struct
  * Initialize the current_version variable.
  *
  * For compatibility, Windows 8.1 and later report Win8 version unless the app
- * has a manifest that confirms its compatibility with newer versions of Windows.
+ * has a manifest or higher OS version in the PE optional header
+ * that confirms its compatibility with newer versions of Windows.
  *
  */
 static RTL_OSVERSIONINFOEXW current_version;
 
 static BOOL CALLBACK init_current_version(PINIT_ONCE init_once, PVOID parameter, PVOID *context)
 {
-    /*ACTIVATION_CONTEXT_COMPATIBILITY_INFORMATION*/DWORD *acci;
+    struct acci
+    {
+        DWORD ElementCount;
+        COMPATIBILITY_CONTEXT_ELEMENT Elements[1];
+    } *acci;
+    BOOL have_os_compat_elements = FALSE;
     const struct version_info *ver;
+    IMAGE_NT_HEADERS *nt;
     SIZE_T req;
     int idx;
 
@@ -200,13 +215,16 @@ static BOOL CALLBACK init_current_version(PINIT_ONCE init_once, PVOID parameter,
     {
         do
         {
-            COMPATIBILITY_CONTEXT_ELEMENT *elements = (COMPATIBILITY_CONTEXT_ELEMENT*)(acci + 1);
-            DWORD i, count = *acci;
+            DWORD i;
 
-            for (i = 0; i < count; i++)
+            for (i = 0; i < acci->ElementCount; i++)
             {
-                if (elements[i].Type == ACTCTX_COMPATIBILITY_ELEMENT_TYPE_OS &&
-                    IsEqualGUID(&elements[i].Id, &version_data[idx].guid))
+                if (acci->Elements[i].Type != ACTCTX_COMPATIBILITY_ELEMENT_TYPE_OS)
+                    continue;
+
+                have_os_compat_elements = TRUE;
+
+                if (IsEqualGUID(&acci->Elements[i].Id, &version_data[idx].guid))
                 {
                     ver = &version_data[idx].info;
 
@@ -223,6 +241,18 @@ static BOOL CALLBACK init_current_version(PINIT_ONCE init_once, PVOID parameter,
     HeapFree(GetProcessHeap(), 0, acci);
 
 done:
+    if (!have_os_compat_elements && current_version.dwMajorVersion >= 10
+            && (nt = RtlImageNtHeader(NtCurrentTeb()->Peb->ImageBaseAddress))
+            && (nt->OptionalHeader.MajorOperatingSystemVersion > 6
+            || (nt->OptionalHeader.MajorOperatingSystemVersion == 6
+            && nt->OptionalHeader.MinorOperatingSystemVersion >= 3)))
+    {
+        if (current_version.dwMajorVersion > 10)
+            FIXME("Unsupported current_version.dwMajorVersion %lu.\n", current_version.dwMajorVersion);
+
+        ver = nt->OptionalHeader.MajorOperatingSystemVersion >= 10 ? NULL : &windows8_1_version_info;
+    }
+
     if (ver)
     {
         current_version.dwMajorVersion = ver->major;
@@ -598,7 +628,7 @@ static void print_vffi_debug(const VS_FIXEDFILEINFO *vffi)
     {
         WORD mode = LOWORD(vffi->dwFileVersionMS);
         WORD ver_rev = HIWORD(vffi->dwFileVersionLS);
-        TRACE("fileversion=%u.%u.%u.%u (%s.major.minor.release), ",
+        TRACE("fileversion=%lu.%u.%u.%u (%s.major.minor.release), ",
             (vffi->dwFileVersionMS),
             HIBYTE(ver_rev), LOBYTE(ver_rev), LOWORD(vffi->dwFileVersionLS),
             (mode == 3) ? "Usermode" : ((mode <= 2) ? "Kernelmode" : "?") );
@@ -613,7 +643,7 @@ static void print_vffi_debug(const VS_FIXEDFILEINFO *vffi)
           HIWORD(vffi->dwProductVersionMS),LOWORD(vffi->dwProductVersionMS),
           HIWORD(vffi->dwProductVersionLS),LOWORD(vffi->dwProductVersionLS));
 
-    TRACE("flagmask=0x%x, flags=0x%x %s%s%s%s%s%s\n",
+    TRACE("flagmask=0x%lx, flags=0x%lx %s%s%s%s%s%s\n",
           vffi->dwFileFlagsMask, vffi->dwFileFlags,
           (vffi->dwFileFlags & VS_FF_DEBUG) ? "DEBUG," : "",
           (vffi->dwFileFlags & VS_FF_PRERELEASE) ? "PRERELEASE," : "",
@@ -634,7 +664,7 @@ static void print_vffi_debug(const VS_FIXEDFILEINFO *vffi)
     case VOS_NT:TRACE("NT,");break;
     case VOS_UNKNOWN:
     default:
-        TRACE("UNKNOWN(0x%x),",vffi->dwFileOS&0xFFFF0000);break;
+        TRACE("UNKNOWN(0x%lx),",vffi->dwFileOS&0xFFFF0000);break;
     }
 
     switch (LOWORD(vffi->dwFileOS))
@@ -659,7 +689,7 @@ static void print_vffi_debug(const VS_FIXEDFILEINFO *vffi)
         {
             if(versioned_printer) /* NT3.x/NT4.0 or old w2k Driver  */
                 TRACE(",PRINTER");
-            TRACE(" (subtype=0x%x)", vffi->dwFileSubtype);
+            TRACE(" (subtype=0x%lx)", vffi->dwFileSubtype);
         }
         break;
     case VFT_DRV:
@@ -680,7 +710,7 @@ static void print_vffi_debug(const VS_FIXEDFILEINFO *vffi)
         case VFT2_DRV_VERSIONED_PRINTER:TRACE("VERSIONED_PRINTER");break;
         case VFT2_UNKNOWN:
         default:
-            TRACE("UNKNOWN(0x%x)",vffi->dwFileSubtype);break;
+            TRACE("UNKNOWN(0x%lx)",vffi->dwFileSubtype);break;
         }
         break;
     case VFT_FONT:
@@ -690,18 +720,18 @@ static void print_vffi_debug(const VS_FIXEDFILEINFO *vffi)
         case VFT2_FONT_RASTER:TRACE("RASTER");break;
         case VFT2_FONT_VECTOR:TRACE("VECTOR");break;
         case VFT2_FONT_TRUETYPE:TRACE("TRUETYPE");break;
-        default:TRACE("UNKNOWN(0x%x)",vffi->dwFileSubtype);break;
+        default:TRACE("UNKNOWN(0x%lx)",vffi->dwFileSubtype);break;
         }
         break;
     case VFT_VXD:TRACE("filetype=VXD");break;
     case VFT_STATIC_LIB:TRACE("filetype=STATIC_LIB");break;
     case VFT_UNKNOWN:
     default:
-        TRACE("filetype=Unknown(0x%x)",vffi->dwFileType);break;
+        TRACE("filetype=Unknown(0x%lx)",vffi->dwFileType);break;
     }
 
     TRACE("\n");
-    TRACE("filedate=0x%x.0x%x\n",vffi->dwFileDateMS,vffi->dwFileDateLS);
+    TRACE("filedate=0x%lx.0x%lx\n",vffi->dwFileDateMS,vffi->dwFileDateLS);
 }
 
 /***********************************************************************
@@ -728,7 +758,7 @@ DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD r
     DWORD len, offset, magic = 1;
     HMODULE hModule;
 
-    TRACE("(0x%x,%s,%p)\n", flags, debugstr_w(filename), ret_handle );
+    TRACE("(0x%lx,%s,%p)\n", flags, debugstr_w(filename), ret_handle );
 
     if (ret_handle) *ret_handle = 0;
 
@@ -743,7 +773,7 @@ DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD r
         return 0;
     }
     if (flags & ~FILE_VER_GET_LOCALISED)
-        FIXME("flags 0x%x ignored\n", flags & ~FILE_VER_GET_LOCALISED);
+        FIXME("flags 0x%lx ignored\n", flags & ~FILE_VER_GET_LOCALISED);
 
     if ((hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_DATAFILE )))
     {
@@ -751,8 +781,8 @@ DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD r
         if (!(flags & FILE_VER_GET_LOCALISED))
         {
             LANGID english = MAKELANGID( LANG_ENGLISH, SUBLANG_DEFAULT );
-            hRsrc = FindResourceExW( hModule, MAKEINTRESOURCEW(VS_VERSION_INFO),
-                                     (LPWSTR)VS_FILE_INFO, english );
+            hRsrc = FindResourceExW( hModule, (LPWSTR)VS_FILE_INFO,
+                                     MAKEINTRESOURCEW(VS_VERSION_INFO), english );
         }
         if (!hRsrc)
             hRsrc = FindResourceW( hModule, MAKEINTRESOURCEW(VS_VERSION_INFO),
@@ -816,7 +846,7 @@ DWORD WINAPI GetFileVersionInfoSizeExA( DWORD flags, LPCSTR filename, LPDWORD ha
     UNICODE_STRING filenameW;
     DWORD retval;
 
-    TRACE("(0x%x,%s,%p)\n", flags, debugstr_a(filename), handle );
+    TRACE("(0x%lx,%s,%p)\n", flags, debugstr_a(filename), handle );
 
     if(filename)
         RtlCreateUnicodeStringFromAsciiz(&filenameW, filename);
@@ -840,7 +870,7 @@ BOOL WINAPI GetFileVersionInfoExW( DWORD flags, LPCWSTR filename, DWORD ignored,
     HMODULE hModule;
     VS_VERSION_INFO_STRUCT32* vvis = data;
 
-    TRACE("(0x%x,%s,%d,size=%d,data=%p)\n",
+    TRACE("(0x%lx,%s,%ld,size=%ld,data=%p)\n",
           flags, debugstr_w(filename), ignored, datasize, data );
 
     if (!data)
@@ -849,7 +879,7 @@ BOOL WINAPI GetFileVersionInfoExW( DWORD flags, LPCWSTR filename, DWORD ignored,
         return FALSE;
     }
     if (flags & ~FILE_VER_GET_LOCALISED)
-        FIXME("flags 0x%x ignored\n", flags & ~FILE_VER_GET_LOCALISED);
+        FIXME("flags 0x%lx ignored\n", flags & ~FILE_VER_GET_LOCALISED);
 
     if ((hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_DATAFILE )))
     {
@@ -857,8 +887,8 @@ BOOL WINAPI GetFileVersionInfoExW( DWORD flags, LPCWSTR filename, DWORD ignored,
         if (!(flags & FILE_VER_GET_LOCALISED))
         {
             LANGID english = MAKELANGID( LANG_ENGLISH, SUBLANG_DEFAULT );
-            hRsrc = FindResourceExW( hModule, MAKEINTRESOURCEW(VS_VERSION_INFO),
-                                     (LPWSTR)VS_FILE_INFO, english );
+            hRsrc = FindResourceExW( hModule, (LPWSTR)VS_FILE_INFO,
+                                     MAKEINTRESOURCEW(VS_VERSION_INFO), english );
         }
         if (!hRsrc)
             hRsrc = FindResourceW( hModule, MAKEINTRESOURCEW(VS_VERSION_INFO),
@@ -920,7 +950,7 @@ BOOL WINAPI GetFileVersionInfoExA( DWORD flags, LPCSTR filename, DWORD handle, D
     UNICODE_STRING filenameW;
     BOOL retval;
 
-    TRACE("(0x%x,%s,%d,size=%d,data=%p)\n",
+    TRACE("(0x%lx,%s,%ld,size=%ld,data=%p)\n",
           flags, debugstr_a(filename), handle, datasize, data );
 
     if(filename)
@@ -1260,7 +1290,7 @@ DWORD WINAPI VerFindFileA( DWORD flags, LPCSTR filename, LPCSTR win_dir, LPCSTR 
     const char *destDir;
     char winDir[MAX_PATH], systemDir[MAX_PATH];
 
-    TRACE("flags = %x filename=%s windir=%s appdir=%s curdirlen=%p(%u) destdirlen=%p(%u)\n",
+    TRACE("flags = %lx filename=%s windir=%s appdir=%s curdirlen=%p(%u) destdirlen=%p(%u)\n",
           flags, debugstr_a(filename), debugstr_a(win_dir), debugstr_a(app_dir),
           curdir_len, curdir_len ? *curdir_len : 0, dest_len, dest_len ? *dest_len : 0 );
 
@@ -1328,7 +1358,7 @@ DWORD WINAPI VerFindFileA( DWORD flags, LPCSTR filename, LPCSTR win_dir, LPCSTR 
         *curdir_len = len;
     }
 
-    TRACE("ret = %u (%s%s%s) curdir=%s destdir=%s\n", retval,
+    TRACE("ret = %lu (%s%s%s) curdir=%s destdir=%s\n", retval,
           (retval & VFF_CURNEDEST) ? "VFF_CURNEDEST " : "",
           (retval & VFF_FILEINUSE) ? "VFF_FILEINUSE " : "",
           (retval & VFF_BUFFTOOSMALL) ? "VFF_BUFFTOOSMALL " : "",
@@ -1347,7 +1377,7 @@ DWORD WINAPI VerFindFileW( DWORD flags, LPCWSTR filename, LPCWSTR win_dir, LPCWS
     const WCHAR *curDir;
     const WCHAR *destDir;
 
-    TRACE("flags = %x filename=%s windir=%s appdir=%s curdirlen=%p(%u) destdirlen=%p(%u)\n",
+    TRACE("flags = %lx filename=%s windir=%s appdir=%s curdirlen=%p(%u) destdirlen=%p(%u)\n",
           flags, debugstr_w(filename), debugstr_w(win_dir), debugstr_w(app_dir),
           curdir_len, curdir_len ? *curdir_len : 0, dest_len, dest_len ? *dest_len : 0 );
 
@@ -1407,7 +1437,7 @@ DWORD WINAPI VerFindFileW( DWORD flags, LPCWSTR filename, LPCWSTR win_dir, LPCWS
         *curdir_len = len;
     }
 
-    TRACE("ret = %u (%s%s%s) curdir=%s destdir=%s\n", retval,
+    TRACE("ret = %lu (%s%s%s) curdir=%s destdir=%s\n", retval,
           (retval & VFF_CURNEDEST) ? "VFF_CURNEDEST " : "",
           (retval & VFF_FILEINUSE) ? "VFF_FILEINUSE " : "",
           (retval & VFF_BUFFTOOSMALL) ? "VFF_BUFFTOOSMALL " : "",
@@ -1456,7 +1486,7 @@ BOOL WINAPI GetVersionExA( OSVERSIONINFOA *info )
     if (info->dwOSVersionInfoSize != sizeof(OSVERSIONINFOA) &&
         info->dwOSVersionInfoSize != sizeof(OSVERSIONINFOEXA))
     {
-        WARN( "wrong OSVERSIONINFO size from app (got: %d)\n", info->dwOSVersionInfoSize );
+        WARN( "wrong OSVERSIONINFO size from app (got: %ld)\n", info->dwOSVersionInfoSize );
         SetLastError( ERROR_INSUFFICIENT_BUFFER );
         return FALSE;
     }
@@ -1493,7 +1523,7 @@ BOOL WINAPI GetVersionExW( OSVERSIONINFOW *info )
     if (info->dwOSVersionInfoSize != sizeof(OSVERSIONINFOW) &&
         info->dwOSVersionInfoSize != sizeof(OSVERSIONINFOEXW))
     {
-        WARN( "wrong OSVERSIONINFO size from app (got: %d)\n", info->dwOSVersionInfoSize );
+        WARN( "wrong OSVERSIONINFO size from app (got: %ld)\n", info->dwOSVersionInfoSize );
         return FALSE;
     }
 
@@ -1548,6 +1578,16 @@ LONG WINAPI /* DECLSPEC_HOTPATCH */ GetCurrentPackageId( UINT32 *len, BYTE *buff
 
 
 /***********************************************************************
+ *         GetCurrentPackagePath   (kernelbase.@)
+ */
+LONG WINAPI /* DECLSPEC_HOTPATCH */ GetCurrentPackagePath( UINT32 *length, WCHAR *path )
+{
+    FIXME( "(%p %p): stub\n", length, path );
+    return APPMODEL_ERROR_NO_PACKAGE;
+}
+
+
+/***********************************************************************
  *         GetPackageFullName   (kernelbase.@)
  */
 LONG WINAPI /* DECLSPEC_HOTPATCH */ GetPackageFullName( HANDLE process, UINT32 *length, WCHAR *name )
@@ -1564,4 +1604,119 @@ LONG WINAPI /* DECLSPEC_HOTPATCH */ GetPackageFamilyName( HANDLE process, UINT32
 {
     FIXME( "(%p %p %p): stub\n", process, length, name );
     return APPMODEL_ERROR_NO_PACKAGE;
+}
+
+
+static const struct
+{
+    UINT32 code;
+    const WCHAR *name;
+}
+arch_names[] =
+{
+    {PROCESSOR_ARCHITECTURE_INTEL,         L"x86"},
+    {PROCESSOR_ARCHITECTURE_ARM,           L"arm"},
+    {PROCESSOR_ARCHITECTURE_AMD64,         L"x64"},
+    {PROCESSOR_ARCHITECTURE_NEUTRAL,       L"neutral"},
+    {PROCESSOR_ARCHITECTURE_ARM64,         L"arm64"},
+    {PROCESSOR_ARCHITECTURE_UNKNOWN,       L"unknown"},
+};
+
+static UINT32 processor_arch_from_string(const WCHAR *str, unsigned int len)
+{
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(arch_names); ++i)
+        if (lstrlenW(arch_names[i].name) == len && !wcsnicmp(str, arch_names[i].name, len))
+            return arch_names[i].code;
+    return ~0u;
+}
+
+/***********************************************************************
+ *         PackageIdFromFullName   (kernelbase.@)
+ */
+LONG WINAPI PackageIdFromFullName(const WCHAR *full_name, UINT32 flags, UINT32 *buffer_length, BYTE *buffer)
+{
+    const WCHAR *name, *version_str, *arch_str, *resource_id, *publisher_id, *s;
+    PACKAGE_ID *id = (PACKAGE_ID *)buffer;
+    UINT32 size, buffer_size, len;
+
+    TRACE("full_name %s, flags %#x, buffer_length %p, buffer %p.\n",
+            debugstr_w(full_name), flags, buffer_length, buffer);
+
+    if (flags)
+        FIXME("Flags %#x are not supported.\n", flags);
+
+    if (!full_name || !buffer_length)
+        return ERROR_INVALID_PARAMETER;
+
+    if (!buffer && *buffer_length)
+        return ERROR_INVALID_PARAMETER;
+
+    name = full_name;
+    if (!(version_str = wcschr(name, L'_')))
+        return ERROR_INVALID_PARAMETER;
+    ++version_str;
+
+    if (!(arch_str = wcschr(version_str, L'_')))
+        return ERROR_INVALID_PARAMETER;
+    ++arch_str;
+
+    if (!(resource_id = wcschr(arch_str, L'_')))
+        return ERROR_INVALID_PARAMETER;
+    ++resource_id;
+
+    if (!(publisher_id = wcschr(resource_id, L'_')))
+        return ERROR_INVALID_PARAMETER;
+    ++publisher_id;
+
+    /* Publisher id length should be 13. */
+    size = sizeof(*id) + sizeof(WCHAR) * ((version_str - name) + (publisher_id - resource_id) + 13 + 1);
+    buffer_size = *buffer_length;
+    *buffer_length = size;
+    if (buffer_size < size)
+        return ERROR_INSUFFICIENT_BUFFER;
+
+    memset(id, 0, sizeof(*id));
+    if ((id->processorArchitecture = processor_arch_from_string(arch_str, resource_id - arch_str - 1)) == ~0u)
+    {
+        FIXME("Unrecognized arch %s.\n", debugstr_w(arch_str));
+        return ERROR_INVALID_PARAMETER;
+    }
+    buffer += sizeof(*id);
+
+    id->version.u.s.Major = wcstol(version_str, NULL, 10);
+    if (!(s = wcschr(version_str, L'.')))
+        return ERROR_INVALID_PARAMETER;
+    ++s;
+    id->version.u.s.Minor = wcstol(s, NULL, 10);
+    if (!(s = wcschr(s, L'.')))
+        return ERROR_INVALID_PARAMETER;
+    ++s;
+    id->version.u.s.Build = wcstol(s, NULL, 10);
+    if (!(s = wcschr(s, L'.')))
+        return ERROR_INVALID_PARAMETER;
+    ++s;
+    id->version.u.s.Revision = wcstol(s, NULL, 10);
+
+    id->name = (WCHAR *)buffer;
+    len = version_str - name - 1;
+    memcpy(id->name, name, sizeof(*id->name) * len);
+    id->name[len] = 0;
+    buffer += sizeof(*id->name) * (len + 1);
+
+    id->resourceId = (WCHAR *)buffer;
+    len = publisher_id - resource_id - 1;
+    memcpy(id->resourceId, resource_id, sizeof(*id->resourceId) * len);
+    id->resourceId[len] = 0;
+    buffer += sizeof(*id->resourceId) * (len + 1);
+
+    id->publisherId = (WCHAR *)buffer;
+    len = lstrlenW(publisher_id);
+    if (len != 13)
+        return ERROR_INVALID_PARAMETER;
+    memcpy(id->publisherId, publisher_id, sizeof(*id->publisherId) * len);
+    id->publisherId[len] = 0;
+
+    return ERROR_SUCCESS;
 }

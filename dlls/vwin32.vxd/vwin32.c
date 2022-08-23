@@ -55,7 +55,7 @@ typedef struct tagMID {
 } MID, *PMID;
 #include <poppack.h>
 
-extern void __wine_call_int_handler( CONTEXT *context, BYTE intnum );
+extern void WINAPI __wine_call_int_handler16( BYTE intnum, CONTEXT *context );
 
 /* Pop a DWORD from the 32-bit stack */
 static inline DWORD stack32_pop( CONTEXT *context )
@@ -123,8 +123,8 @@ BOOL WINAPI VWIN32_DeviceIoControl(DWORD dwIoControlCode,
             BYTE intnum = 0;
 
             TRACE( "Control '%s': "
-                   "eax=0x%08x, ebx=0x%08x, ecx=0x%08x, "
-                   "edx=0x%08x, esi=0x%08x, edi=0x%08x\n",
+                   "eax=0x%08lx, ebx=0x%08lx, ecx=0x%08lx, "
+                   "edx=0x%08lx, esi=0x%08lx, edi=0x%08lx\n",
                    (dwIoControlCode == VWIN32_DIOC_DOS_IOCTL)? "VWIN32_DIOC_DOS_IOCTL" :
                    (dwIoControlCode == VWIN32_DIOC_DOS_INT25)? "VWIN32_DIOC_DOS_INT25" :
                    (dwIoControlCode == VWIN32_DIOC_DOS_INT26)? "VWIN32_DIOC_DOS_INT26" :
@@ -155,7 +155,7 @@ BOOL WINAPI VWIN32_DeviceIoControl(DWORD dwIoControlCode,
                 break;
             }
 
-            __wine_call_int_handler( &cxt, intnum );
+            __wine_call_int_handler16( intnum, &cxt );
             CONTEXT_2_DIOCRegs( &cxt, pOut );
         }
         return TRUE;
@@ -165,7 +165,7 @@ BOOL WINAPI VWIN32_DeviceIoControl(DWORD dwIoControlCode,
         return FALSE;
 
     default:
-        FIXME( "Unknown Control %d\n", dwIoControlCode);
+        FIXME( "Unknown Control %ld\n", dwIoControlCode);
         return FALSE;
     }
 }
@@ -191,7 +191,7 @@ DWORD WINAPI VWIN32_VxDCall( DWORD service, CONTEXT *context )
         {
             DWORD parm = stack32_pop(context);
 
-            FIXME("Get VMCPD Version(%08x): partial stub!\n", parm);
+            FIXME("Get VMCPD Version(%08lx): partial stub!\n", parm);
 
             /* FIXME: This is what Win98 returns, it may
              *        not be correct in all situations.
@@ -204,11 +204,11 @@ DWORD WINAPI VWIN32_VxDCall( DWORD service, CONTEXT *context )
             DWORD callnum = stack32_pop(context);
             DWORD parm    = stack32_pop(context);
 
-            TRACE("Int31/DPMI dispatch(%08x)\n", callnum);
+            TRACE("Int31/DPMI dispatch(%08lx)\n", callnum);
 
             context->Eax = callnum;
             context->Ecx = parm;
-            __wine_call_int_handler( context, 0x31 );
+            __wine_call_int_handler16( 0x31, context );
             return LOWORD(context->Eax);
         }
     case 0x002a: /* Int41 dispatch - parm = int41 service number */
@@ -217,7 +217,7 @@ DWORD WINAPI VWIN32_VxDCall( DWORD service, CONTEXT *context )
             return callnum; /* FIXME: should really call INT_Int41Handler() */
         }
     default:
-        FIXME("Unknown service %08x\n", service);
+        FIXME("Unknown service %08lx\n", service);
         return 0xffffffff;
     }
 }

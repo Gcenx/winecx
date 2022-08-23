@@ -182,11 +182,16 @@ static int (CDECL *p_fegetenv)(fenv_t*);
 static int (CDECL *p_fesetenv)(const fenv_t*);
 static int (CDECL *p_fegetround)(void);
 static int (CDECL *p_fesetround)(int);
+static int (CDECL *p_fegetexceptflag)(fexcept_t*,int);
+static int (CDECL *p_fesetexceptflag)(const fexcept_t*,int);
+static int (CDECL *p_fetestexcept)(int);
+static int (CDECL *p_feclearexcept)(int);
+static int (CDECL *p_feupdateenv)(fenv_t*);
 static int (CDECL *p__clearfp)(void);
 static _locale_t (__cdecl *p_wcreate_locale)(int, const wchar_t *);
 static void (__cdecl *p_free_locale)(_locale_t);
 static unsigned short (__cdecl *p_wctype)(const char*);
-static int (__cdecl *p_vsscanf)(const char*, const char *, __ms_va_list valist);
+static int (__cdecl *p_vsscanf)(const char*, const char *, va_list valist);
 static _Dcomplex* (__cdecl *p__Cbuild)(_Dcomplex*, double, double);
 static double (__cdecl *p_creal)(_Dcomplex);
 static double (__cdecl *p_nexttoward)(double, double);
@@ -257,6 +262,11 @@ static BOOL init(void)
     SET(p_fesetenv, "fesetenv");
     SET(p_fegetround, "fegetround");
     SET(p_fesetround, "fesetround");
+    SET(p_fegetexceptflag, "fegetexceptflag");
+    SET(p_fesetexceptflag, "fesetexceptflag");
+    SET(p_fetestexcept, "fetestexcept");
+    SET(p_feclearexcept, "feclearexcept");
+    SET(p_feupdateenv, "feupdateenv");
 
     SET(p__clearfp, "_clearfp");
     SET(p_vsscanf, "vsscanf");
@@ -530,7 +540,7 @@ static void test__GetConcurrency(void)
 
     GetSystemInfo(&si);
     c = (*p__GetConcurrency)();
-    ok(c == si.dwNumberOfProcessors, "expected %u, got %u\n", si.dwNumberOfProcessors, c);
+    ok(c == si.dwNumberOfProcessors, "expected %lu, got %u\n", si.dwNumberOfProcessors, c);
 }
 
 static void test_gettnames(void* (CDECL *p_gettnames)(void))
@@ -575,8 +585,9 @@ static void test_gettnames(void* (CDECL *p_gettnames)(void))
                 i, wine_dbgstr_w(ret->wstr[i]), wine_dbgstr_w(buf));
     }
 
-    ok(ret->str[42] + strlen(ret->str[42])+1 == (char*)ret->wstr[0],
-            "ret->str[42] = %p len = %d, ret->wstr[0] = %p\n",
+    ok(ret->str[42] + strlen(ret->str[42]) + 1 == (char*)ret->wstr[0] ||
+            ret->str[42] + strlen(ret->str[42]) + 2 == (char*)ret->wstr[0],
+            "ret->str[42] = %p len = %Id, ret->wstr[0] = %p\n",
             ret->str[42], strlen(ret->str[42]), ret->wstr[0]);
     p_free(ret);
 
@@ -590,6 +601,7 @@ static void test__strtof(void)
     const char float3[] = "-3.402823466e+38";
     const char float4[] = "1.7976931348623158e+308";  /* DBL_MAX */
 
+    BOOL is_arabic;
     char *end;
     float f;
 
@@ -627,8 +639,12 @@ static void test__strtof(void)
     f = p_wcstof(L"12.0", NULL);
     ok(f == 12.0, "f = %lf\n", f);
 
-    f = p_wcstof(L"\x0662\x0663", NULL);
-    ok(f == 0, "f = %lf\n", f);
+    f = p_wcstof(L"\x0662\x0663", NULL); /* 23 in Arabic numerals */
+    is_arabic = (PRIMARYLANGID(GetSystemDefaultLangID()) == LANG_ARABIC);
+    todo_wine_if(is_arabic) ok(f == (is_arabic ? 23.0 : 0.0), "f = %lf\n", f);
+
+    f = p_wcstof(L"\x0662\x34\x0663", NULL); /* Arabic + Roman numerals mix */
+    todo_wine_if(is_arabic) ok(f == (is_arabic ? 243.0 : 0.0), "f = %lf\n", f);
 
     if(!p_setlocale(LC_ALL, "Arabic")) {
         win_skip("Arabic locale not available\n");
@@ -638,8 +654,8 @@ static void test__strtof(void)
     f = p_wcstof(L"12.0", NULL);
     ok(f == 12.0, "f = %lf\n", f);
 
-    f = p_wcstof(L"\x0662\x0663", NULL);
-    ok(f == 0, "f = %lf\n", f);
+    f = p_wcstof(L"\x0662\x0663", NULL); /* 23 in Arabic numerals */
+    todo_wine_if(is_arabic) ok(f == (is_arabic ? 23.0 : 0.0), "f = %lf\n", f);
 
     p_setlocale(LC_ALL, "C");
 }
@@ -733,11 +749,11 @@ static void test_critical_section(void)
     thread = (HANDLE)_beginthreadex(NULL, 0, test_critical_section_lock, NULL, 0, NULL);
     ok(thread != INVALID_HANDLE_VALUE, "_beginthread failed (%d)\n", errno);
     ret = WaitForSingleObject(thread, 100);
-    ok(ret == WAIT_TIMEOUT, "WaitForSingleObject returned  %d\n", ret);
+    ok(ret == WAIT_TIMEOUT, "WaitForSingleObject returned  %ld\n", ret);
     enter_flag = 1;
     call_func1(p_critical_section_unlock, &cs);
     ret = WaitForSingleObject(thread, INFINITE);
-    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %d\n", ret);
+    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %ld\n", ret);
     ret = CloseHandle(thread);
     ok(ret, "CloseHandle failed\n");
 
@@ -746,7 +762,7 @@ static void test_critical_section(void)
     thread = (HANDLE)_beginthreadex(NULL, 0, test_critical_section_try_lock, NULL, 0, NULL);
     ok(thread != INVALID_HANDLE_VALUE, "_beginthread failed (%d)\n", errno);
     ret = WaitForSingleObject(thread, INFINITE);
-    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %d\n", ret);
+    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %ld\n", ret);
     ret = CloseHandle(thread);
     ok(ret, "CloseHandle failed\n");
     call_func1(p_critical_section_unlock, &cs);
@@ -757,7 +773,7 @@ static void test_critical_section(void)
     thread = (HANDLE)_beginthreadex(NULL, 0, test_critical_section_try_lock, NULL, 0, NULL);
     ok(thread != INVALID_HANDLE_VALUE, "_beginthread failed (%d)\n", errno);
     ret = WaitForSingleObject(thread, INFINITE);
-    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %d\n", ret);
+    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %ld\n", ret);
     ret = CloseHandle(thread);
     ok(ret, "CloseHandle failed\n");
     thread = (HANDLE)_beginthreadex(NULL, 0, test_critical_section_try_lock_for, NULL, 0, NULL);
@@ -766,7 +782,7 @@ static void test_critical_section(void)
     Sleep(10);
     call_func1(p_critical_section_unlock, &cs);
     ret = WaitForSingleObject(thread, INFINITE);
-    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %d\n", ret);
+    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %ld\n", ret);
     ret = CloseHandle(thread);
     ok(ret, "CloseHandle failed\n");
 
@@ -775,11 +791,11 @@ static void test_critical_section(void)
     thread = (HANDLE)_beginthreadex(NULL, 0, test_critical_section_scoped_lock, NULL, 0, NULL);
     ok(thread != INVALID_HANDLE_VALUE, "_beginthread failed (%d)\n", errno);
     ret = WaitForSingleObject(thread, 100);
-    ok(ret == WAIT_TIMEOUT, "WaitForSingleObject returned  %d\n", ret);
+    ok(ret == WAIT_TIMEOUT, "WaitForSingleObject returned  %ld\n", ret);
     enter_flag = 1;
     call_func1(p_critical_section_unlock, &cs);
     ret = WaitForSingleObject(thread, INFINITE);
-    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %d\n", ret);
+    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %ld\n", ret);
     ret = CloseHandle(thread);
     ok(ret, "CloseHandle failed\n");
     call_func1(p_critical_section_dtor, &cs);
@@ -787,8 +803,41 @@ static void test_critical_section(void)
 
 static void test_feenv(void)
 {
+    static const int tests[] = {
+        0,
+        FE_INEXACT,
+        FE_UNDERFLOW,
+        FE_OVERFLOW,
+        FE_DIVBYZERO,
+        FE_INVALID,
+        FE_ALL_EXCEPT,
+    };
+    static const struct {
+        fexcept_t except;
+        unsigned int flag;
+        unsigned int get;
+        fexcept_t expect;
+    } tests2[] = {
+        /* except                   flag                     get             expect */
+        { 0,                        0,                       0,              0 },
+        { FE_ALL_EXCEPT,            FE_INEXACT,              0,              0 },
+        { FE_ALL_EXCEPT,            FE_INEXACT,              FE_ALL_EXCEPT,  FE_INEXACT },
+        { FE_ALL_EXCEPT,            FE_INEXACT,              FE_INEXACT,     FE_INEXACT },
+        { FE_ALL_EXCEPT,            FE_INEXACT,              FE_OVERFLOW,    0 },
+        { FE_ALL_EXCEPT,            FE_ALL_EXCEPT,           FE_ALL_EXCEPT,  FE_ALL_EXCEPT },
+        { FE_ALL_EXCEPT,            FE_ALL_EXCEPT,           FE_INEXACT,     FE_INEXACT },
+        { FE_ALL_EXCEPT,            FE_ALL_EXCEPT,           0,              0 },
+        { FE_ALL_EXCEPT,            FE_ALL_EXCEPT,           ~0,             FE_ALL_EXCEPT },
+        { FE_ALL_EXCEPT,            FE_ALL_EXCEPT,           ~FE_ALL_EXCEPT, 0 },
+        { FE_INEXACT,               FE_ALL_EXCEPT,           FE_ALL_EXCEPT,  FE_INEXACT },
+        { FE_INEXACT,               FE_UNDERFLOW,            FE_ALL_EXCEPT,  0 },
+        { FE_UNDERFLOW,             FE_INEXACT,              FE_ALL_EXCEPT,  0 },
+        { FE_INEXACT|FE_UNDERFLOW,  FE_UNDERFLOW,            FE_ALL_EXCEPT,  FE_UNDERFLOW },
+        { FE_UNDERFLOW,             FE_INEXACT|FE_UNDERFLOW, FE_ALL_EXCEPT,  FE_UNDERFLOW },
+    };
     fenv_t env, env2;
-    int ret;
+    fexcept_t except;
+    int i, ret, flags;
 
     p__clearfp();
 
@@ -806,6 +855,119 @@ static void test_feenv(void)
     ok(!ret, "fesetenv returned %x\n", ret);
     ret = p_fegetround();
     ok(ret == FE_TONEAREST, "Got unexpected round mode %#x.\n", ret);
+
+    if(0) { /* crash on windows */
+        p_fesetexceptflag(NULL, FE_ALL_EXCEPT);
+        p_fegetexceptflag(NULL, 0);
+    }
+    except = FE_ALL_EXCEPT;
+    ret = p_fesetexceptflag(&except, FE_INEXACT|FE_UNDERFLOW);
+    ok(!ret, "fesetexceptflag returned %x\n", ret);
+    except = p_fetestexcept(FE_ALL_EXCEPT);
+    ok(except == (FE_INEXACT|FE_UNDERFLOW), "expected %x, got %lx\n", FE_INEXACT|FE_UNDERFLOW, except);
+
+    ret = p_feclearexcept(~FE_ALL_EXCEPT);
+    ok(!ret, "feclearexceptflag returned %x\n", ret);
+    except = p_fetestexcept(FE_ALL_EXCEPT);
+    ok(except == (FE_INEXACT|FE_UNDERFLOW), "expected %x, got %lx\n", FE_INEXACT|FE_UNDERFLOW, except);
+
+    /* no crash, but no-op */
+    ret = p_fesetexceptflag(NULL, 0);
+    ok(!ret, "fesetexceptflag returned %x\n", ret);
+    except = p_fetestexcept(FE_ALL_EXCEPT);
+    ok(except == (FE_INEXACT|FE_UNDERFLOW), "expected %x, got %lx\n", FE_INEXACT|FE_UNDERFLOW, except);
+
+    /* zero clears all */
+    except = 0;
+    ret = p_fesetexceptflag(&except, FE_ALL_EXCEPT);
+    ok(!ret, "fesetexceptflag returned %x\n", ret);
+    except = p_fetestexcept(FE_ALL_EXCEPT);
+    ok(!except, "expected 0, got %lx\n", except);
+
+    ret = p_fetestexcept(FE_ALL_EXCEPT);
+    ok(!ret, "fetestexcept returned %x\n", ret);
+
+    flags = 0;
+    /* adding bits with flags */
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
+        except = FE_ALL_EXCEPT;
+        ret = p_fesetexceptflag(&except, tests[i]);
+        ok(!ret, "Test %d: fesetexceptflag returned %x\n", i, ret);
+
+        ret = p_fetestexcept(tests[i]);
+        ok(ret == tests[i], "Test %d: expected %x, got %x\n", i, tests[i], ret);
+
+        flags |= tests[i];
+        ret = p_fetestexcept(FE_ALL_EXCEPT);
+        ok(ret == flags, "Test %d: expected %x, got %x\n", i, flags, ret);
+
+        except = ~0;
+        ret = p_fegetexceptflag(&except, ~0);
+        ok(!ret, "Test %d: fegetexceptflag returned %x.\n", i, ret);
+        ok(except == flags, "Test %d: expected %x, got %lx\n", i, flags, except);
+
+        except = ~0;
+        ret = p_fegetexceptflag(&except, tests[i]);
+        ok(!ret, "Test %d: fegetexceptflag returned %x.\n", i, ret);
+        ok(except == tests[i], "Test %d: expected %x, got %lx\n", i, tests[i], except);
+    }
+
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
+        ret = p_feclearexcept(tests[i]);
+        ok(!ret, "Test %d: feclearexceptflag returned %x\n", i, ret);
+
+        flags &= ~tests[i];
+        except = p_fetestexcept(tests[i]);
+        ok(!except, "Test %d: expected %x, got %lx\n", i, flags, except);
+    }
+
+    except = p_fetestexcept(FE_ALL_EXCEPT);
+    ok(!except, "expected 0, got %lx\n", except);
+
+    /* setting bits with except */
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
+        except = tests[i];
+        ret = p_fesetexceptflag(&except, FE_ALL_EXCEPT);
+        ok(!ret, "Test %d: fesetexceptflag returned %x\n", i, ret);
+
+        ret = p_fetestexcept(tests[i]);
+        ok(ret == tests[i], "Test %d: expected %x, got %x\n", i, tests[i], ret);
+
+        ret = p_fetestexcept(FE_ALL_EXCEPT);
+        ok(ret == tests[i], "Test %d: expected %x, got %x\n", i, tests[i], ret);
+    }
+
+    for(i=0; i<ARRAY_SIZE(tests2); i++) {
+        p__clearfp();
+
+        except = tests2[i].except;
+        ret = p_fesetexceptflag(&except, tests2[i].flag);
+        ok(!ret, "Test %d: fesetexceptflag returned %x\n", i, ret);
+
+        ret = p_fetestexcept(tests2[i].get);
+        ok(ret == tests2[i].expect, "Test %d: expected %lx, got %x\n", i, tests2[i].expect, ret);
+    }
+
+    ret = p_feclearexcept(FE_ALL_EXCEPT);
+    ok(!ret, "feclearexceptflag returned %x\n", ret);
+    except = p_fetestexcept(FE_ALL_EXCEPT);
+    ok(!except, "expected 0, got %lx\n", except);
+
+    p__clearfp();
+    except = FE_DIVBYZERO;
+    ret = p_fesetexceptflag(&except, FE_DIVBYZERO);
+    ok(!ret, "fesetexceptflag returned %x\n", ret);
+    ret = p_fegetenv(&env);
+    ok(!ret, "fegetenv returned %x\n", ret);
+    p__clearfp();
+    except = FE_INVALID;
+    ret = p_fesetexceptflag(&except, FE_INVALID);
+    ok(!ret, "fesetexceptflag returned %x\n", ret);
+    ret = p_feupdateenv(&env);
+    ok(!ret, "feupdateenv returned %x\n", ret);
+    ret = _statusfp();
+    ok(ret == (_EM_ZERODIVIDE | _EM_INVALID), "_statusfp returned %x\n", ret);
+    p__clearfp();
 }
 
 static void test__wcreate_locale(void)
@@ -901,10 +1063,10 @@ static void test__Condition_variable(void)
 
     call_func1(p__Condition_variable_notify_one, &cv);
     ret = WaitForSingleObject(threads[1], 500);
-    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %d\n", ret);
+    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %ld\n", ret);
     call_func1(p__Condition_variable_notify_one, &cv);
     ret = WaitForSingleObject(threads[0], 500);
-    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %d\n", ret);
+    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %ld\n", ret);
 
     CloseHandle(threads[0]);
     CloseHandle(threads[1]);
@@ -952,10 +1114,10 @@ static void test_wctype(void)
 static int WINAPIV _vsscanf_wrapper(const char *buffer, const char *format, ...)
 {
     int ret;
-    __ms_va_list valist;
-    __ms_va_start(valist, format);
+    va_list valist;
+    va_start(valist, format);
     ret = p_vsscanf(buffer, format, valist);
-    __ms_va_end(valist);
+    va_end(valist);
     return ret;
 }
 
@@ -1111,7 +1273,6 @@ static void test_CurrentContext(void)
 START_TEST(msvcr120)
 {
     if (!init()) return;
-    test__strtof();
     test_lconv();
     test__dsign();
     test__dpcomp();

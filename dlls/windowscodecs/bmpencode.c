@@ -110,7 +110,7 @@ static ULONG WINAPI BmpFrameEncode_AddRef(IWICBitmapFrameEncode *iface)
     BmpFrameEncode *This = impl_from_IWICBitmapFrameEncode(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     return ref;
 }
@@ -120,7 +120,7 @@ static ULONG WINAPI BmpFrameEncode_Release(IWICBitmapFrameEncode *iface)
     BmpFrameEncode *This = impl_from_IWICBitmapFrameEncode(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     if (ref == 0)
     {
@@ -397,10 +397,16 @@ static HRESULT WINAPI BmpFrameEncode_Commit(IWICBitmapFrameEncode *iface)
 }
 
 static HRESULT WINAPI BmpFrameEncode_GetMetadataQueryWriter(IWICBitmapFrameEncode *iface,
-    IWICMetadataQueryWriter **ppIMetadataQueryWriter)
+        IWICMetadataQueryWriter **query_writer)
 {
-    FIXME("(%p, %p): stub\n", iface, ppIMetadataQueryWriter);
-    return E_NOTIMPL;
+    BmpFrameEncode *encoder = impl_from_IWICBitmapFrameEncode(iface);
+
+    TRACE("iface %p, query_writer %p.\n", iface, query_writer);
+
+    if (!encoder->initialized)
+        return WINCODEC_ERR_NOTINITIALIZED;
+
+    return WINCODEC_ERR_UNSUPPORTEDOPERATION;
 }
 
 static const IWICBitmapFrameEncodeVtbl BmpFrameEncode_Vtbl = {
@@ -460,7 +466,7 @@ static ULONG WINAPI BmpEncoder_AddRef(IWICBitmapEncoder *iface)
     BmpEncoder *This = impl_from_IWICBitmapEncoder(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     return ref;
 }
@@ -470,7 +476,7 @@ static ULONG WINAPI BmpEncoder_Release(IWICBitmapEncoder *iface)
     BmpEncoder *This = impl_from_IWICBitmapEncoder(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     if (ref == 0)
     {

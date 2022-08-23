@@ -28,7 +28,6 @@
 #endif
 #include <windef.h>
 #include <winbase.h>
-#include <wine/winheader_enter.h>
 
 /* Standard data types */
 
@@ -166,7 +165,5 @@ typedef INT16   (CALLBACK *PROC16)(void);
 typedef LRESULT (CALLBACK *FARPROC16)();
 typedef INT16   (CALLBACK *PROC16)();
 #endif
-
-#include <wine/winheader_exit.h>
 
 #endif /* __WINE_WINDEF16_H */

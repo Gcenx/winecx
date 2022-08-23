@@ -20,12 +20,12 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <dlfcn.h>
 
 #define NONAMELESSSTRUCT
 #define NONAMELESSUNION
@@ -43,7 +43,6 @@
 #include "wingdi.h"
 #include "wine/debug.h"
 #include "wine/heap.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xvidmode);
 

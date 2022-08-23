@@ -230,7 +230,7 @@ static char* str_array_get_ref(struct array* cref, unsigned idx)
  * Helper for printf type of command (only %s and %c are implemented) 
  * while dynamically allocating the buffer
  */
-static char* str_printf(struct parsed_symbol* sym, const char* format, ...)
+static char* WINAPIV str_printf(struct parsed_symbol* sym, const char* format, ...)
 {
     va_list      args;
     unsigned int len = 1, i, sz;
@@ -450,6 +450,7 @@ static BOOL get_modified_type(struct datatype_t *ct, struct parsed_symbol* sym,
     case 'R': str_modif = str_printf(sym, " *%s volatile", ptr_modif); break;
     case 'S': str_modif = str_printf(sym, " *%s const volatile", ptr_modif); break;
     case '?': str_modif = ""; break;
+    case '$': str_modif = str_printf(sym, " &&%s", ptr_modif); break;
     default: return FALSE;
     }
 
@@ -772,6 +773,9 @@ static const char* get_extended_type(char c)
     case 'L': type_string = "__int128"; break;
     case 'M': type_string = "unsigned __int128"; break;
     case 'N': type_string = "bool"; break;
+    case 'Q': type_string = "char8_t"; break;
+    case 'S': type_string = "char16_t"; break;
+    case 'U': type_string = "char32_t"; break;
     case 'W': type_string = "wchar_t"; break;
     default:  type_string = NULL; break;
     }
@@ -1027,6 +1031,11 @@ static BOOL demangle_datatype(struct parsed_symbol* sym, struct datatype_t* ct,
                 if (!get_modifier(sym, &ptr, &ptr_modif)) goto done;
                 if (!demangle_datatype(sym, ct, pmt_ref, in_args)) goto done;
                 ct->left = str_printf(sym, "%s %s", ct->left, ptr);
+            }
+            else if (*sym->current == 'Q')
+            {
+                sym->current++;
+                if (!get_modified_type(ct, sym, pmt_ref, '$', in_args)) goto done;
             }
             break;
         }

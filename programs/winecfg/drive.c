@@ -21,9 +21,6 @@
  *
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -88,11 +85,11 @@ ULONG drive_available_mask(char letter)
   result = ~result;
   if (letter) result |= DRIVE_MASK_BIT(letter);
 
-  WINE_TRACE("finished drive letter loop with %x\n", result);
+  WINE_TRACE("finished drive letter loop with %lx\n", result);
   return result;
 }
 
-BOOL add_drive(char letter, const char * HOSTPTR targetpath, const char *device, const WCHAR *label,
+BOOL add_drive(char letter, const char *targetpath, const char *device, const WCHAR *label,
                DWORD serial, DWORD type)
 {
     int driveIndex = letter_to_index(letter);
@@ -100,7 +97,7 @@ BOOL add_drive(char letter, const char * HOSTPTR targetpath, const char *device,
     if(drives[driveIndex].in_use)
         return FALSE;
 
-    WINE_TRACE("letter == '%c', unixpath == %s, device == %s, label == %s, serial == %08x, type == %d\n",
+    WINE_TRACE("letter == '%c', unixpath == %s, device == %s, label == %s, serial == %08lx, type == %ld\n",
                letter, wine_dbgstr_a(targetpath), wine_dbgstr_a(device),
                wine_dbgstr_w(label), serial, type);
 
@@ -133,25 +130,25 @@ void delete_drive(struct drive *d)
 static DWORD get_drive_type( char letter )
 {
     HKEY hKey;
-    char driveValue[4];
+    WCHAR driveValue[4];
     DWORD ret = DRIVE_UNKNOWN;
 
-    sprintf(driveValue, "%c:", letter);
+    swprintf(driveValue, 4, L"%c:", letter);
 
-    if (RegOpenKeyA(HKEY_LOCAL_MACHINE, "Software\\Wine\\Drives", &hKey) != ERROR_SUCCESS)
+    if (RegOpenKeyW(HKEY_LOCAL_MACHINE, L"Software\\Wine\\Drives", &hKey) != ERROR_SUCCESS)
         WINE_TRACE("  Unable to open Software\\Wine\\Drives\n" );
     else
     {
-        char buffer[80];
+        WCHAR buffer[80];
         DWORD size = sizeof(buffer);
 
-        if (!RegQueryValueExA( hKey, driveValue, NULL, NULL, (LPBYTE)buffer, &size ))
+        if (!RegQueryValueExW( hKey, driveValue, NULL, NULL, (LPBYTE)buffer, &size ))
         {
-            WINE_TRACE("Got type '%s' for %s\n", buffer, driveValue );
-            if (!lstrcmpiA( buffer, "hd" )) ret = DRIVE_FIXED;
-            else if (!lstrcmpiA( buffer, "network" )) ret = DRIVE_REMOTE;
-            else if (!lstrcmpiA( buffer, "floppy" )) ret = DRIVE_REMOVABLE;
-            else if (!lstrcmpiA( buffer, "cdrom" )) ret = DRIVE_CDROM;
+            WINE_TRACE("Got type %s for %s\n", debugstr_w(buffer), debugstr_w(driveValue) );
+            if (!wcsicmp( buffer, L"hd" )) ret = DRIVE_FIXED;
+            else if (!wcsicmp( buffer, L"network" )) ret = DRIVE_REMOTE;
+            else if (!wcsicmp( buffer, L"floppy" )) ret = DRIVE_REMOVABLE;
+            else if (!wcsicmp( buffer, L"cdrom" )) ret = DRIVE_CDROM;
         }
         RegCloseKey(hKey);
     }
@@ -162,7 +159,7 @@ static DWORD get_drive_type( char letter )
 static void set_drive_label( char letter, const WCHAR *label )
 {
     static const WCHAR emptyW[1];
-    WCHAR device[] = {'a',':','\\',0};  /* SetVolumeLabel() requires a trailing slash */
+    WCHAR device[] = L"a:\\";  /* SetVolumeLabel() requires a trailing slash */
     device[0] = letter;
 
     if (!label) label = emptyW;
@@ -182,11 +179,11 @@ static void set_drive_label( char letter, const WCHAR *label )
 /* set the drive serial number via a .windows-serial file */
 static void set_drive_serial( WCHAR letter, DWORD serial )
 {
-    WCHAR filename[] = {'a',':','\\','.','w','i','n','d','o','w','s','-','s','e','r','i','a','l',0};
+    WCHAR filename[] = L"a:\\.windows-serial";
     HANDLE hFile;
 
     filename[0] = letter;
-    WINE_TRACE("Putting serial number of %08X into file %s\n", serial, wine_dbgstr_w(filename));
+    WINE_TRACE("Putting serial number of %08lX into file %s\n", serial, wine_dbgstr_w(filename));
     hFile = CreateFileW(filename, GENERIC_WRITE, FILE_SHARE_READ, NULL,
                         CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile != INVALID_HANDLE_VALUE)
@@ -194,54 +191,11 @@ static void set_drive_serial( WCHAR letter, DWORD serial )
         DWORD w;
         char buffer[16];
 
-        sprintf( buffer, "%X\n", serial );
+        sprintf( buffer, "%lX\n", serial );
         WriteFile(hFile, buffer, strlen(buffer), &w, NULL);
         CloseHandle(hFile);
     }
 }
-
-#if 0
-
-/* currently unused, but if users have this burning desire to be able to rename drives,
-   we can put it back in.
- */
-
-BOOL copyDrive(struct drive *pSrc, struct drive *pDst)
-{
-    if(pDst->in_use)
-    {
-        WINE_TRACE("pDst already in use\n");
-        return FALSE;
-    }
-
-    if(!pSrc->unixpath) WINE_TRACE("!pSrc->unixpath\n");
-    if(!pSrc->label) WINE_TRACE("!pSrc->label\n");
-    if(!pSrc->serial) WINE_TRACE("!pSrc->serial\n");
-
-    pDst->unixpath = strdupA(pSrc->unixpath);
-    pDst->label = strdupA(pSrc->label);
-    pDst->serial = strdupA(pSrc->serial);
-    pDst->type = pSrc->type;
-    pDst->in_use = TRUE;
-
-    return TRUE;
-}
-
-BOOL moveDrive(struct drive *pSrc, struct drive *pDst)
-{
-    WINE_TRACE("pSrc->letter == %c, pDst->letter == %c\n", pSrc->letter, pDst->letter);
-
-    if(!copyDrive(pSrc, pDst))
-    {
-        WINE_TRACE("copyDrive failed\n");
-        return FALSE;
-    }
-
-    delete_drive(pSrc);
-    return TRUE;
-}
-
-#endif
 
 static HANDLE open_mountmgr(void)
 {
@@ -250,7 +204,7 @@ static HANDLE open_mountmgr(void)
     if ((ret = CreateFileW( MOUNTMGR_DOS_DEVICE_NAME, GENERIC_READ|GENERIC_WRITE,
                             FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
                             0, 0 )) == INVALID_HANDLE_VALUE)
-        WINE_ERR( "failed to open mount manager err %u\n", GetLastError() );
+        WINE_ERR( "failed to open mount manager err %lu\n", GetLastError() );
     return ret;
 }
 
@@ -259,7 +213,7 @@ BOOL load_drives(void)
 {
     DWORD i, size = 1024;
     HANDLE mgr;
-    WCHAR root[] = {'A',':','\\',0};
+    WCHAR root[] = L"A:\\";
 
     if ((mgr = open_mountmgr()) == INVALID_HANDLE_VALUE) return FALSE;
 
@@ -361,12 +315,65 @@ void apply_drive_changes(void)
         {
             set_drive_label( drives[i].letter, drives[i].label );
             if (drives[i].in_use) set_drive_serial( drives[i].letter, drives[i].serial );
-            WINE_TRACE( "set drive %c: to %s type %u\n", 'a' + i,
+            WINE_TRACE( "set drive %c: to %s type %lu\n", 'a' + i,
                         wine_dbgstr_a(drives[i].unixpath), drives[i].type );
         }
-        else WINE_WARN( "failed to set drive %c: to %s type %u err %u\n", 'a' + i,
+        else WINE_WARN( "failed to set drive %c: to %s type %lu err %lu\n", 'a' + i,
                        wine_dbgstr_a(drives[i].unixpath), drives[i].type, GetLastError() );
         HeapFree( GetProcessHeap(), 0, ioctl );
     }
     CloseHandle( mgr );
+}
+
+
+void query_shell_folder( const WCHAR *path, char *dest, unsigned int len )
+{
+    UNICODE_STRING nt_name;
+    HANDLE mgr;
+
+    if ((mgr = open_mountmgr()) == INVALID_HANDLE_VALUE) return;
+
+    if (!RtlDosPathNameToNtPathName_U( path, &nt_name, NULL, NULL ))
+    {
+        CloseHandle( mgr );
+        return;
+    }
+    DeviceIoControl( mgr, IOCTL_MOUNTMGR_QUERY_SHELL_FOLDER, nt_name.Buffer, nt_name.Length,
+                     dest, len, NULL, NULL );
+    RtlFreeUnicodeString( &nt_name );
+}
+
+void set_shell_folder( const WCHAR *path, const char *dest )
+{
+    struct mountmgr_shell_folder *ioctl;
+    UNICODE_STRING nt_name;
+    HANDLE mgr;
+    DWORD len;
+
+    if ((mgr = open_mountmgr()) == INVALID_HANDLE_VALUE) return;
+
+    if (!RtlDosPathNameToNtPathName_U( path, &nt_name, NULL, NULL ))
+    {
+        CloseHandle( mgr );
+        return;
+    }
+
+    len = sizeof(*ioctl) + nt_name.Length;
+    if (dest) len += strlen(dest) + 1;
+
+    if (!(ioctl = HeapAlloc( GetProcessHeap(), 0, len ))) return;
+    ioctl->create_backup = TRUE;
+    ioctl->folder_offset = sizeof(*ioctl);
+    ioctl->folder_size = nt_name.Length;
+    memcpy( (char *)ioctl + ioctl->folder_offset, nt_name.Buffer, nt_name.Length );
+    if (dest)
+    {
+        ioctl->symlink_offset = ioctl->folder_offset + ioctl->folder_size;
+        strcpy( (char *)ioctl + ioctl->symlink_offset, dest );
+    }
+    else ioctl->symlink_offset = 0;
+
+    DeviceIoControl( mgr, IOCTL_MOUNTMGR_DEFINE_SHELL_FOLDER, ioctl, len, NULL, 0, NULL, NULL );
+    HeapFree( GetProcessHeap(), 0, ioctl );
+    RtlFreeUnicodeString( &nt_name );
 }

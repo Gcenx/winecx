@@ -25,6 +25,7 @@
 
 #include "ole2.h"
 #include "rpcproxy.h"
+#include "d3d9.h"
 
 #include "evr_private.h"
 
@@ -32,34 +33,31 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(evr);
 
-static HINSTANCE instance_evr;
-
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
-    if (reason == DLL_WINE_PREATTACH)
-        return FALSE; /* prefer native version */
-    else if (reason == DLL_PROCESS_ATTACH)
+    switch (reason)
     {
-        instance_evr = instance;
+    case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(instance);
-    }
-    else if (reason == DLL_PROCESS_DETACH && !reserved)
-    {
+        break;
+    case DLL_PROCESS_DETACH:
+        if (reserved) break;
         strmbase_release_typelibs();
+        break;
     }
     return TRUE;
 }
 
-typedef struct {
-    IClassFactory IClassFactory_iface;
-
-    LONG ref;
-    HRESULT (*pfnCreateInstance)(IUnknown *unk_outer, void **ppobj);
-} IClassFactoryImpl;
-
-static inline IClassFactoryImpl *impl_from_IClassFactory(IClassFactory *iface)
+struct class_factory
 {
-    return CONTAINING_RECORD(iface, IClassFactoryImpl, IClassFactory_iface);
+    IClassFactory IClassFactory_iface;
+    LONG refcount;
+    HRESULT (*pfnCreateInstance)(IUnknown *unk_outer, void **ppobj);
+};
+
+static inline struct class_factory *impl_from_IClassFactory(IClassFactory *iface)
+{
+    return CONTAINING_RECORD(iface, struct class_factory, IClassFactory_iface);
 }
 
 struct object_creation_info
@@ -75,65 +73,65 @@ static const struct object_creation_info object_creation[] =
     { &CLSID_MFVideoPresenter9, evr_presenter_create },
 };
 
-static HRESULT WINAPI classfactory_QueryInterface(IClassFactory *iface, REFIID riid, void **ppobj)
+static HRESULT WINAPI classfactory_QueryInterface(IClassFactory *iface, REFIID riid, void **out)
 {
-    IClassFactoryImpl *This = impl_from_IClassFactory(iface);
+    struct class_factory *factory = impl_from_IClassFactory(iface);
 
     if (IsEqualGUID(riid, &IID_IUnknown)
         || IsEqualGUID(riid, &IID_IClassFactory))
     {
         IClassFactory_AddRef(iface);
-        *ppobj = &This->IClassFactory_iface;
+        *out = &factory->IClassFactory_iface;
         return S_OK;
     }
 
-    WARN("(%p)->(%s,%p),not found\n", This, debugstr_guid(riid), ppobj);
+    WARN("Unimplemented interface %s.\n", debugstr_guid(riid));
     return E_NOINTERFACE;
 }
 
 static ULONG WINAPI classfactory_AddRef(IClassFactory *iface)
 {
-    IClassFactoryImpl *This = impl_from_IClassFactory(iface);
-    return InterlockedIncrement(&This->ref);
+    struct class_factory *factory = impl_from_IClassFactory(iface);
+    return InterlockedIncrement(&factory->refcount);
 }
 
 static ULONG WINAPI classfactory_Release(IClassFactory *iface)
 {
-    IClassFactoryImpl *This = impl_from_IClassFactory(iface);
-    ULONG ref = InterlockedDecrement(&This->ref);
+    struct class_factory *factory = impl_from_IClassFactory(iface);
+    ULONG refcount = InterlockedDecrement(&factory->refcount);
 
-    if (ref == 0)
-        HeapFree(GetProcessHeap(), 0, This);
+    if (!refcount)
+        free(factory);
 
-    return ref;
+    return refcount;
 }
 
 static HRESULT WINAPI classfactory_CreateInstance(IClassFactory *iface, IUnknown *outer_unk, REFIID riid, void **ppobj)
 {
-    IClassFactoryImpl *This = impl_from_IClassFactory(iface);
-    HRESULT hres;
+    struct class_factory *factory = impl_from_IClassFactory(iface);
     IUnknown *unk;
+    HRESULT hr;
 
-    TRACE("(%p)->(%p,%s,%p)\n", This, outer_unk, debugstr_guid(riid), ppobj);
+    TRACE("%p, %p, %s, %p.\n", iface, outer_unk, debugstr_guid(riid), ppobj);
 
     *ppobj = NULL;
 
     if (outer_unk && !IsEqualGUID(riid, &IID_IUnknown))
         return E_NOINTERFACE;
 
-    hres = This->pfnCreateInstance(outer_unk, (void **) &unk);
-    if (SUCCEEDED(hres))
+    hr = factory->pfnCreateInstance(outer_unk, (void **) &unk);
+    if (SUCCEEDED(hr))
     {
-        hres = IUnknown_QueryInterface(unk, riid, ppobj);
+        hr = IUnknown_QueryInterface(unk, riid, ppobj);
         IUnknown_Release(unk);
     }
-    return hres;
+    return hr;
 }
 
 static HRESULT WINAPI classfactory_LockServer(IClassFactory *iface, BOOL dolock)
 {
-    IClassFactoryImpl *This = impl_from_IClassFactory(iface);
-    FIXME("(%p)->(%d), stub!\n", This, dolock);
+    FIXME("%p, %d stub!\n", iface, dolock);
+
     return S_OK;
 }
 
@@ -146,12 +144,12 @@ static const IClassFactoryVtbl classfactory_Vtbl =
     classfactory_LockServer
 };
 
-HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **ppv)
+HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **out)
 {
+    struct class_factory *factory;
     unsigned int i;
-    IClassFactoryImpl *factory;
 
-    TRACE("(%s,%s,%p)\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
+    TRACE("%s, %s, %p.\n", debugstr_guid(rclsid), debugstr_guid(riid), out);
 
     if (!IsEqualGUID(&IID_IClassFactory, riid)
          && !IsEqualGUID( &IID_IUnknown, riid))
@@ -169,32 +167,17 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **ppv)
         return CLASS_E_CLASSNOTAVAILABLE;
     }
 
-    factory = HeapAlloc(GetProcessHeap(), 0, sizeof(*factory));
-    if (factory == NULL)
+    if (!(factory = malloc(sizeof(*factory))))
         return E_OUTOFMEMORY;
 
     factory->IClassFactory_iface.lpVtbl = &classfactory_Vtbl;
-    factory->ref = 1;
+    factory->refcount = 1;
 
     factory->pfnCreateInstance = object_creation[i].pfnCreateInstance;
 
-    *ppv = &(factory->IClassFactory_iface);
+    *out = &factory->IClassFactory_iface;
+
     return S_OK;
-}
-
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
-}
-
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources(instance_evr);
-}
-
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources(instance_evr);
 }
 
 HRESULT WINAPI MFCreateVideoMixerAndPresenter(IUnknown *mixer_outer, IUnknown *presenter_outer,
@@ -223,4 +206,29 @@ HRESULT WINAPI MFCreateVideoMixerAndPresenter(IUnknown *mixer_outer, IUnknown *p
     }
 
     return hr;
+}
+
+/***********************************************************************
+ *      MFIsFormatYUV (evr.@)
+ */
+BOOL WINAPI MFIsFormatYUV(DWORD format)
+{
+    TRACE("%s.\n", debugstr_an((char *)&format, 4));
+
+    switch (format)
+    {
+        case D3DFMT_UYVY:
+        case D3DFMT_YUY2:
+        case MAKEFOURCC('A','Y','U','V'):
+        case MAKEFOURCC('I','M','C','1'):
+        case MAKEFOURCC('I','M','C','2'):
+        case MAKEFOURCC('Y','V','1','2'):
+        case MAKEFOURCC('N','V','1','1'):
+        case MAKEFOURCC('N','V','1','2'):
+        case MAKEFOURCC('Y','2','1','0'):
+        case MAKEFOURCC('Y','2','1','6'):
+            return TRUE;
+        default:
+            return FALSE;
+    }
 }

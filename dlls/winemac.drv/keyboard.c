@@ -397,8 +397,6 @@ static const struct {
     { VK_VOLUME_UP | 0x100,     "Volume Up" },
 };
 
-HKL CDECL macdrv_GetKeyboardLayout(DWORD);
-
 static BOOL char_matches_string(WCHAR wchar, UniChar *string, BOOL ignore_diacritics)
 {
     BOOL ret;
@@ -931,7 +929,7 @@ static void macdrv_send_keyboard_input(HWND hwnd, WORD vkey, WORD scan, DWORD fl
     input.ki.time           = time;
     input.ki.dwExtraInfo    = 0;
 
-    __wine_send_input(hwnd, &input);
+    __wine_send_input(hwnd, &input, NULL);
 }
 
 
@@ -944,7 +942,7 @@ static BOOL get_async_key_state(BYTE state[256])
 
     SERVER_START_REQ(get_key_state)
     {
-        req->tid = 0;
+        req->async = 1;
         req->key = -1;
         wine_server_set_reply(req, state, 256);
         ret = !wine_server_call(req);
@@ -1055,6 +1053,8 @@ void macdrv_keyboard_changed(const macdrv_event *event)
     thread_data->dead_key_state = 0;
 
     macdrv_compute_keyboard_layout(thread_data);
+
+    ActivateKeyboardLayout(thread_data->active_keyboard_layout, 0);
 
     SendMessageW(GetActiveWindow(), WM_CANCELMODE, 0, 0);
 }
@@ -1288,7 +1288,7 @@ void macdrv_hotkey_press(const macdrv_event *event)
 /***********************************************************************
  *              macdrv_process_text_input
  */
-void macdrv_process_text_input(UINT vkey, UINT scan, UINT repeat, const BYTE *key_state, void * WIN32PTR himc, int* done)
+void macdrv_process_text_input(UINT vkey, UINT scan, UINT repeat, const BYTE *key_state, void *himc, int* done)
 {
     struct macdrv_thread_data *thread_data = macdrv_thread_data();
     unsigned int flags;
@@ -1333,22 +1333,16 @@ void macdrv_process_text_input(UINT vkey, UINT scan, UINT repeat, const BYTE *ke
 /***********************************************************************
  *              ActivateKeyboardLayout (MACDRV.@)
  */
-HKL CDECL macdrv_ActivateKeyboardLayout(HKL hkl, UINT flags)
+BOOL macdrv_ActivateKeyboardLayout(HKL hkl, UINT flags)
 {
-    HKL oldHkl = 0;
+    BOOL ret = FALSE;
     struct macdrv_thread_data *thread_data = macdrv_init_thread_data();
     struct layout *layout;
 
     TRACE("hkl %p flags %04x\n", hkl, flags);
 
-    if (flags) FIXME("flags %x not supported\n",flags);
-
-    if (hkl == (HKL)HKL_NEXT || hkl == (HKL)HKL_PREV)
-    {
-        SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-        FIXME("HKL_NEXT and HKL_PREV not supported\n");
-        return 0;
-    }
+    if (hkl == thread_data->active_keyboard_layout)
+        return TRUE;
 
     EnterCriticalSection(&layout_list_section);
     update_layout_list();
@@ -1359,7 +1353,7 @@ HKL CDECL macdrv_ActivateKeyboardLayout(HKL hkl, UINT flags)
         {
             if (macdrv_select_input_source(layout->input_source))
             {
-                oldHkl = thread_data->active_keyboard_layout;
+                ret = TRUE;
                 if (thread_data->keyboard_layout_uchr)
                     CFRelease(thread_data->keyboard_layout_uchr);
 
@@ -1375,14 +1369,14 @@ HKL CDECL macdrv_ActivateKeyboardLayout(HKL hkl, UINT flags)
     }
     LeaveCriticalSection(&layout_list_section);
 
-    return oldHkl;
+    return ret;
 }
 
 
 /***********************************************************************
  *              Beep (MACDRV.@)
  */
-void CDECL macdrv_Beep(void)
+void macdrv_Beep(void)
 {
     macdrv_beep();
 }
@@ -1391,7 +1385,7 @@ void CDECL macdrv_Beep(void)
 /***********************************************************************
  *              GetKeyNameText (MACDRV.@)
  */
-INT CDECL macdrv_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size)
+INT macdrv_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size)
 {
     struct macdrv_thread_data *thread_data = macdrv_init_thread_data();
     int scan, keyc;
@@ -1475,21 +1469,9 @@ INT CDECL macdrv_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size)
 
 
 /***********************************************************************
- *              GetKeyboardLayout (MACDRV.@)
- */
-HKL CDECL macdrv_GetKeyboardLayout(DWORD thread_id)
-{
-    if (thread_id && thread_id != GetCurrentThreadId())
-        FIXME("couldn't return keyboard layout for thread %04x\n", thread_id);
-
-    return macdrv_init_thread_data()->active_keyboard_layout;
-}
-
-
-/***********************************************************************
  *     GetKeyboardLayoutList (MACDRV.@)
  */
-UINT CDECL macdrv_GetKeyboardLayoutList(INT size, HKL *list)
+UINT macdrv_GetKeyboardLayoutList(INT size, HKL *list)
 {
     int count = 0;
     struct layout *layout;
@@ -1517,26 +1499,11 @@ UINT CDECL macdrv_GetKeyboardLayoutList(INT size, HKL *list)
     return count;
 }
 
-/***********************************************************************
- *              GetKeyboardLayoutName (MACDRV.@)
- */
-BOOL CDECL macdrv_GetKeyboardLayoutName(LPWSTR name)
-{
-    static const WCHAR formatW[] = {'%','0','8','x',0};
-    DWORD layout;
-
-    layout = HandleToUlong(macdrv_GetKeyboardLayout(0));
-    if (HIWORD(layout) == LOWORD(layout)) layout = LOWORD(layout);
-    sprintfW(name, formatW, layout);
-    TRACE("returning %s\n", debugstr_w(name));
-    return TRUE;
-}
-
 
 /***********************************************************************
  *              MapVirtualKeyEx (MACDRV.@)
  */
-UINT CDECL macdrv_MapVirtualKeyEx(UINT wCode, UINT wMapType, HKL hkl)
+UINT macdrv_MapVirtualKeyEx(UINT wCode, UINT wMapType, HKL hkl)
 {
     struct macdrv_thread_data *thread_data = macdrv_init_thread_data();
     UINT ret = 0;
@@ -1665,7 +1632,7 @@ UINT CDECL macdrv_MapVirtualKeyEx(UINT wCode, UINT wMapType, HKL hkl)
 /***********************************************************************
  *              RegisterHotKey (MACDRV.@)
  */
-BOOL CDECL macdrv_RegisterHotKey(HWND hwnd, UINT mod_flags, UINT vkey)
+BOOL macdrv_RegisterHotKey(HWND hwnd, UINT mod_flags, UINT vkey)
 {
     struct macdrv_thread_data *thread_data = macdrv_init_thread_data();
     unsigned int keyc, modifiers = 0;
@@ -1724,8 +1691,8 @@ BOOL CDECL macdrv_RegisterHotKey(HWND hwnd, UINT mod_flags, UINT vkey)
  *              virtual key to form a single character.
  *
  */
-INT CDECL macdrv_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState,
-                             LPWSTR bufW, int bufW_size, UINT flags, HKL hkl)
+INT macdrv_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState,
+                       LPWSTR bufW, int bufW_size, UINT flags, HKL hkl)
 {
     struct macdrv_thread_data *thread_data = macdrv_init_thread_data();
     INT ret = 0;
@@ -1909,7 +1876,7 @@ done:
 /***********************************************************************
  *              UnregisterHotKey (MACDRV.@)
  */
-void CDECL macdrv_UnregisterHotKey(HWND hwnd, UINT modifiers, UINT vkey)
+void macdrv_UnregisterHotKey(HWND hwnd, UINT modifiers, UINT vkey)
 {
     struct macdrv_thread_data *thread_data = macdrv_thread_data();
 
@@ -1925,7 +1892,7 @@ void CDECL macdrv_UnregisterHotKey(HWND hwnd, UINT modifiers, UINT vkey)
  *
  * Note: Windows ignores HKL parameter and uses current active layout instead
  */
-SHORT CDECL macdrv_VkKeyScanEx(WCHAR wChar, HKL hkl)
+SHORT macdrv_VkKeyScanEx(WCHAR wChar, HKL hkl)
 {
     struct macdrv_thread_data *thread_data = macdrv_init_thread_data();
     SHORT ret = -1;

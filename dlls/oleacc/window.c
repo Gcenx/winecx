@@ -19,6 +19,7 @@
 #define COBJMACROS
 
 #include "oleacc_private.h"
+#include "commctrl.h"
 
 #include "wine/debug.h"
 #include "wine/heap.h"
@@ -31,6 +32,8 @@ typedef struct {
     IEnumVARIANT IEnumVARIANT_iface;
 
     LONG ref;
+
+    HWND hwnd;
 } Window;
 
 static inline Window* impl_from_Window(IAccessible *iface)
@@ -67,7 +70,7 @@ static ULONG WINAPI Window_AddRef(IAccessible *iface)
     Window *This = impl_from_Window(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref = %u\n", This, ref);
+    TRACE("(%p) ref = %lu\n", This, ref);
     return ref;
 }
 
@@ -76,7 +79,7 @@ static ULONG WINAPI Window_Release(IAccessible *iface)
     Window *This = impl_from_Window(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref = %u\n", This, ref);
+    TRACE("(%p) ref = %lu\n", This, ref);
 
     if(!ref)
         heap_free(This);
@@ -94,7 +97,7 @@ static HRESULT WINAPI Window_GetTypeInfo(IAccessible *iface,
         UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
     Window *This = impl_from_Window(iface);
-    FIXME("(%p)->(%u %x %p)\n", This, iTInfo, lcid, ppTInfo);
+    FIXME("(%p)->(%u %lx %p)\n", This, iTInfo, lcid, ppTInfo);
     return E_NOTIMPL;
 }
 
@@ -102,7 +105,7 @@ static HRESULT WINAPI Window_GetIDsOfNames(IAccessible *iface, REFIID riid,
         LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
 {
     Window *This = impl_from_Window(iface);
-    FIXME("(%p)->(%s %p %u %x %p)\n", This, debugstr_guid(riid),
+    FIXME("(%p)->(%s %p %u %lx %p)\n", This, debugstr_guid(riid),
             rgszNames, cNames, lcid, rgDispId);
     return E_NOTIMPL;
 }
@@ -112,7 +115,7 @@ static HRESULT WINAPI Window_Invoke(IAccessible *iface, DISPID dispIdMember,
         VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
     Window *This = impl_from_Window(iface);
-    FIXME("(%p)->(%x %s %x %x %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+    FIXME("(%p)->(%lx %s %lx %x %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
             lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
     return E_NOTIMPL;
 }
@@ -223,7 +226,7 @@ static HRESULT WINAPI Window_get_accDefaultAction(IAccessible *iface,
 static HRESULT WINAPI Window_accSelect(IAccessible *iface, LONG flagsSelect, VARIANT varID)
 {
     Window *This = impl_from_Window(iface);
-    FIXME("(%p)->(%x %s)\n", This, flagsSelect, debugstr_variant(&varID));
+    FIXME("(%p)->(%lx %s)\n", This, flagsSelect, debugstr_variant(&varID));
     return E_NOTIMPL;
 }
 
@@ -240,15 +243,42 @@ static HRESULT WINAPI Window_accNavigate(IAccessible *iface,
         LONG navDir, VARIANT varStart, VARIANT *pvarEnd)
 {
     Window *This = impl_from_Window(iface);
-    FIXME("(%p)->(%d %s %p)\n", This, navDir, debugstr_variant(&varStart), pvarEnd);
+    FIXME("(%p)->(%ld %s %p)\n", This, navDir, debugstr_variant(&varStart), pvarEnd);
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI Window_accHitTest(IAccessible *iface,
-        LONG xLeft, LONG yTop, VARIANT *pvarID)
+static HRESULT WINAPI Window_accHitTest(IAccessible *iface, LONG x, LONG y, VARIANT *v)
 {
     Window *This = impl_from_Window(iface);
-    FIXME("(%p)->(%d %d %p)\n", This, xLeft, yTop, pvarID);
+    IDispatch *disp;
+    POINT pt;
+    HRESULT hr;
+    RECT rect;
+
+    TRACE("(%p)->(%ld %ld %p)\n", This, x, y, v);
+
+    V_VT(v) = VT_EMPTY;
+    if (!GetClientRect(This->hwnd, &rect))
+        return E_FAIL;
+    if (!ClientToScreen(This->hwnd, (POINT*)&rect) ||
+            !ClientToScreen(This->hwnd, &((POINT*)&rect)[1]))
+        return E_FAIL;
+    pt.x = x;
+    pt.y = y;
+    if (PtInRect(&rect, pt))
+    {
+        hr = AccessibleObjectFromWindow(This->hwnd, OBJID_CLIENT, &IID_IDispatch, (void**)&disp);
+        if (FAILED(hr))
+            return hr;
+        if (!disp)
+            return E_FAIL;
+
+        V_VT(v) = VT_DISPATCH;
+        V_DISPATCH(v) = disp;
+        return S_OK;
+    }
+
+    FIXME("non-client area not handled yet\n");
     return E_NOTIMPL;
 }
 
@@ -327,11 +357,14 @@ static ULONG WINAPI Window_OleWindow_Release(IOleWindow *iface)
     return IAccessible_Release(&This->IAccessible_iface);
 }
 
-static HRESULT WINAPI Window_OleWindow_GetWindow(IOleWindow *iface, HWND *phwnd)
+static HRESULT WINAPI Window_OleWindow_GetWindow(IOleWindow *iface, HWND *hwnd)
 {
     Window *This = impl_from_Window_OleWindow(iface);
-    FIXME("(%p)->(%p)\n", This, phwnd);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, hwnd);
+
+    *hwnd = This->hwnd;
+    return S_OK;
 }
 
 static HRESULT WINAPI Window_OleWindow_ContextSensitiveHelp(IOleWindow *iface, BOOL fEnterMode)
@@ -376,14 +409,14 @@ static HRESULT WINAPI Window_EnumVARIANT_Next(IEnumVARIANT *iface,
         ULONG celt, VARIANT *rgVar, ULONG *pCeltFetched)
 {
     Window *This = impl_from_Window_EnumVARIANT(iface);
-    FIXME("(%p)->(%u %p %p)\n", This, celt, rgVar, pCeltFetched);
+    FIXME("(%p)->(%lu %p %p)\n", This, celt, rgVar, pCeltFetched);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI Window_EnumVARIANT_Skip(IEnumVARIANT *iface, ULONG celt)
 {
     Window *This = impl_from_Window_EnumVARIANT(iface);
-    FIXME("(%p)->(%u)\n", This, celt);
+    FIXME("(%p)->(%lu)\n", This, celt);
     return E_NOTIMPL;
 }
 
@@ -411,6 +444,12 @@ static const IEnumVARIANTVtbl WindowEnumVARIANTVtbl = {
     Window_EnumVARIANT_Clone
 };
 
+static const struct win_class_data classes[] = {
+    {WC_LISTBOXW,           0x10000, TRUE},
+    {L"#32768",             0x10001, TRUE}, /* menu */
+    {NULL}
+};
+
 HRESULT create_window_object(HWND hwnd, const IID *iid, void **obj)
 {
     Window *window;
@@ -423,10 +462,13 @@ HRESULT create_window_object(HWND hwnd, const IID *iid, void **obj)
     if(!window)
         return E_OUTOFMEMORY;
 
+    find_class_data(hwnd, classes);
+
     window->IAccessible_iface.lpVtbl = &WindowVtbl;
     window->IOleWindow_iface.lpVtbl = &WindowOleWindowVtbl;
     window->IEnumVARIANT_iface.lpVtbl = &WindowEnumVARIANTVtbl;
     window->ref = 1;
+    window->hwnd = hwnd;
 
     hres = IAccessible_QueryInterface(&window->IAccessible_iface, iid, obj);
     IAccessible_Release(&window->IAccessible_iface);

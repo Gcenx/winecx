@@ -137,6 +137,10 @@ extern "C" {
 #define FORM_BUILTIN 1
 #define FORM_PRINTER 2
 
+#define STRING_NONE     1
+#define STRING_MUIDLL   2
+#define STRING_LANGPAIR 4
+
 #define PORT_TYPE_WRITE        1
 #define PORT_TYPE_READ         2
 #define PORT_TYPE_REDIRECTED   4
@@ -1765,6 +1769,8 @@ BOOL WINAPI XcvDataW(HANDLE hXcv, LPCWSTR pszDataName, PBYTE pInputData,
 
 BOOL WINAPI IsValidDevmodeA(PDEVMODEA pDevMode, SIZE_T size);
 BOOL WINAPI IsValidDevmodeW(PDEVMODEW pDevMode, SIZE_T size);
+
+HANDLE WINAPI GetSpoolFileHandle(HANDLE printer);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -19,7 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -72,8 +71,7 @@ static BOOL fill_sym_lvalue(const SYMBOL_INFO* sym, ULONG_PTR base,
 
         if (!memory_get_register(sym->Register, &pval, buffer, sz))
             return FALSE;
-        lvalue->cookie = DLV_HOST;
-        lvalue->addr.Offset = (DWORD_PTR)pval;
+        init_lvalue(lvalue, FALSE, pval);
     }
     else if (sym->Flags & SYMFLAG_REGREL)
     {
@@ -86,12 +84,11 @@ static BOOL fill_sym_lvalue(const SYMBOL_INFO* sym, ULONG_PTR base,
         l = strlen(buffer);
         sz -= l;
         buffer += l;
-        lvalue->cookie = DLV_TARGET;
-        lvalue->addr.Offset = (ULONG64)*pval + sym->Address;
-        if ((LONG_PTR)sym->Address >= 0)
-            snprintf(buffer, sz, "+%ld]", (ULONG_PTR)sym->Address);
+        init_lvalue(lvalue, TRUE, (void*)(DWORD_PTR)(*pval + sym->Address));
+        if ((LONG64)sym->Address >= 0)
+            snprintf(buffer, sz, "+%I64d]", sym->Address);
         else
-            snprintf(buffer, sz, "-%ld]", -(LONG_PTR)sym->Address);
+            snprintf(buffer, sz, "-%I64d]", -(LONG64)sym->Address);
     }
     else if (sym->Flags & SYMFLAG_VALUEPRESENT)
     {
@@ -106,7 +103,7 @@ static BOOL fill_sym_lvalue(const SYMBOL_INFO* sym, ULONG_PTR base,
             if (buffer) snprintf(buffer, sz, "Couldn't get full value information for %s", sym->Name);
             return FALSE;
         }
-        else if (v.n1.n2.vt & VT_BYREF)
+        else if (V_ISBYREF(&v))
         {
             /* FIXME: this won't work for pointers or arrays, as we don't always
              * know, if the value to be dereferenced lies in debuggee or
@@ -120,21 +117,18 @@ static BOOL fill_sym_lvalue(const SYMBOL_INFO* sym, ULONG_PTR base,
             /* this is likely Wine's dbghelp which passes const values by reference
              * (object is managed by dbghelp, hence in debugger address space)
              */
-            lvalue->cookie = DLV_HOST;
-            lvalue->addr.Offset = (DWORD_PTR)sym->Value;
+            init_lvalue(lvalue, FALSE, (void*)(DWORD_PTR)sym->Value);
         }
         else
         {
             DWORD* pdw = (DWORD*)lexeme_alloc_size(sizeof(*pdw));
-            lvalue->cookie = DLV_HOST;
-            lvalue->addr.Offset = (DWORD_PTR)pdw;
+            init_lvalue(lvalue, FALSE, pdw);
             *pdw = sym->Value;
         }
     }
     else if (sym->Flags & SYMFLAG_LOCAL)
     {
-        lvalue->cookie = DLV_TARGET;
-        lvalue->addr.Offset = base + sym->Address;
+        init_lvalue(lvalue, TRUE, (void*)(DWORD_PTR)(base + sym->Address));
     }
     else if (sym->Flags & SYMFLAG_TLSREL)
     {
@@ -177,13 +171,11 @@ static BOOL fill_sym_lvalue(const SYMBOL_INFO* sym, ULONG_PTR base,
 
         addr += tlsindex * sizeof(DWORD_PTR);
         if (!dbg_read_memory((void*)addr, &addr, sizeof(addr))) goto tls_error;
-        lvalue->cookie = DLV_TARGET;
-        lvalue->addr.Offset = addr + sym->Address;
+        init_lvalue(lvalue, TRUE, (void*)(DWORD_PTR)(addr + sym->Address));
     }
     else
     {
-        lvalue->cookie = DLV_TARGET;
-        lvalue->addr.Offset = sym->Address;
+        init_lvalue(lvalue, TRUE, (void*)(DWORD_PTR)sym->Address);
     }
     lvalue->addr.Mode = AddrModeFlat;
     lvalue->type.module = sym->ModBase;
@@ -367,7 +359,7 @@ enum sym_get_lval symbol_get_lvalue(const char* name, const int lineno,
     int		                i;
     char                        buffer[512];
     BOOL                        opt;
-    IMAGEHLP_STACK_FRAME        ihsf;
+    struct dbg_frame*           frm;
 
     if (strlen(name) + 4 > sizeof(buffer))
     {
@@ -422,9 +414,9 @@ enum sym_get_lval symbol_get_lvalue(const char* name, const int lineno,
     SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, opt);
 
     /* now grab local symbols */
-    if (stack_get_current_frame(&ihsf) && sgv.num < NUMDBGV)
+    if ((frm = stack_get_curr_frame()) && sgv.num < NUMDBGV && !strchr(name, '!'))
     {
-        sgv.frame_offset = ihsf.FrameOffset;
+        sgv.frame_offset = frm->linear_frame;
         SymEnumSymbols(dbg_curr_process->handle, 0, name, sgv_cb, (void*)&sgv);
     }
 
@@ -492,16 +484,16 @@ enum sym_get_lval symbol_get_lvalue(const char* name, const int lineno,
 BOOL symbol_is_local(const char* name)
 {
     struct sgv_data             sgv;
-    IMAGEHLP_STACK_FRAME        ihsf;
+    struct dbg_frame*           frm;
 
     sgv.num        = 0;
     sgv.num_thunks = 0;
     sgv.name       = name;
     sgv.do_thunks  = FALSE;
 
-    if (stack_get_current_frame(&ihsf))
+    if ((frm = stack_get_curr_frame()))
     {
-        sgv.frame_offset = ihsf.FrameOffset;
+        sgv.frame_offset = frm->linear_frame;
         SymEnumSymbols(dbg_curr_process->handle, 0, name, sgv_cb, (void*)&sgv);
     }
     return sgv.num > 0;
@@ -512,7 +504,7 @@ BOOL symbol_is_local(const char* name)
  *
  * Read a symbol file into the hash table.
  */
-void symbol_read_symtable(const char* filename, unsigned long offset)
+void symbol_read_symtable(const char* filename, ULONG_PTR offset)
 {
     dbg_printf("No longer supported\n");
 
@@ -605,7 +597,7 @@ enum dbg_line_status symbol_get_function_line_status(const ADDRESS64* addr)
     case SymTagFunction:
     case SymTagPublicSymbol: break;
     default:
-        WINE_FIXME("Unexpected sym-tag 0x%08x\n", sym->Tag);
+        WINE_FIXME("Unexpected sym-tag 0x%08lx\n", sym->Tag);
     case SymTagData:
         return dbg_no_line_info;
     }
@@ -749,18 +741,18 @@ static BOOL CALLBACK info_locals_cb(PSYMBOL_INFO sym, ULONG size, PVOID ctx)
 
 BOOL symbol_info_locals(void)
 {
-    IMAGEHLP_STACK_FRAME        ihsf;
     ADDRESS64                   addr;
+    struct dbg_frame*           frm;
 
-    stack_get_current_frame(&ihsf);
+    if (!(frm = stack_get_curr_frame())) return FALSE;
+
     addr.Mode = AddrModeFlat;
-    addr.Offset = ihsf.InstructionOffset;
+    addr.Offset = frm->linear_pc;
     print_address(&addr, FALSE);
-    dbg_printf(": (%08lx)\n", (DWORD_PTR)ihsf.FrameOffset);
-    SymEnumSymbols(dbg_curr_process->handle, 0, NULL, info_locals_cb, (void*)(DWORD_PTR)ihsf.FrameOffset);
+    dbg_printf(": (%0*Ix)\n", ADDRWIDTH, frm->linear_frame);
+    SymEnumSymbols(dbg_curr_process->handle, 0, NULL, info_locals_cb, (void*)frm->linear_frame);
 
     return TRUE;
-
 }
 
 static BOOL CALLBACK symbols_info_cb(PSYMBOL_INFO sym, ULONG size, PVOID ctx)
@@ -779,7 +771,7 @@ static BOOL CALLBACK symbols_info_cb(PSYMBOL_INFO sym, ULONG size, PVOID ctx)
             mi.ModuleName[len - 5] = '\0';
     }
 
-    dbg_printf("%08lx: %s!%s", (ULONG_PTR)sym->Address, mi.ModuleName, sym->Name);
+    dbg_printf("%0*I64x: %s!%s", ADDRWIDTH, sym->Address, mi.ModuleName, sym->Name);
     type.id = sym->TypeIndex;
     type.module = sym->ModBase;
 

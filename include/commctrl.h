@@ -478,8 +478,8 @@ typedef struct
 struct _IMAGELIST;
 typedef struct _IMAGELIST *HIMAGELIST;
 
-#define CLR_NONE         0xFFFFFFFF
-#define CLR_DEFAULT      0xFF000000
+#define CLR_NONE         __MSABI_LONG(0xFFFFFFFF)
+#define CLR_DEFAULT      __MSABI_LONG(0xFF000000)
 #define CLR_HILIGHT      CLR_DEFAULT
 
 #define ILC_MASK             0x00000001
@@ -603,7 +603,12 @@ BOOL     WINAPI ImageList_SetOverlayImage(HIMAGELIST,INT,INT);
 
 #ifdef __IStream_INTERFACE_DEFINED__
 HIMAGELIST WINAPI ImageList_Read(LPSTREAM);
-BOOL     WINAPI ImageList_Write(HIMAGELIST, LPSTREAM);
+BOOL     WINAPI ImageList_Write(HIMAGELIST,IStream*);
+
+#define ILP_NORMAL    0
+#define ILP_DOWNLEVEL 1
+
+HRESULT  WINAPI ImageList_WriteEx(HIMAGELIST,DWORD,IStream*);
 #endif
 
 #define ImageList_AddIcon(himl,hicon) ImageList_ReplaceIcon(himl,-1,hicon)
@@ -1377,7 +1382,7 @@ typedef struct _NMTBCUSTOMDRAW
 #define TBCDRF_NOETCHEDEFFECT 0x00100000  /* No etched effect for          */
                                           /* disabled items                */
 #define TBCDRF_BLENDICON      0x00200000  /* ILD_BLEND50 on the icon image */
-#define TBCDRF_NOBACKGROUND   0x00400000  /* ILD_BLEND50 on the icon image */
+#define TBCDRF_NOBACKGROUND   0x00400000  /* Don't draw button background  */
 #define TBCDRF_USECDCOLORS    0x00800000
 
 
@@ -3155,11 +3160,18 @@ static const WCHAR WC_LISTVIEWW[] = { 'S','y','s',
 #define LVNI_SELECTED		0x0002
 #define LVNI_CUT		0x0004
 #define LVNI_DROPHILITED	0x0008
+#define LVNI_STATEMASK          (LVNI_FOCUSED | LVNI_SELECTED | LVNI_CUT | LVNI_DROPHILITED)
+
+#define LVNI_VISIBLEORDER       0x0010
+#define LVNI_PREVIOUS           0x0020
+#define LVNI_VISIBLEONLY        0x0040
+#define LVNI_SAMEGROUPONLY      0x0080
 
 #define LVNI_ABOVE		0x0100
 #define LVNI_BELOW		0x0200
 #define LVNI_TOLEFT		0x0400
 #define LVNI_TORIGHT		0x0800
+#define LVNI_DIRECTIONMASK      (LVNI_ABOVE | LVNI_BELOW | LVNI_TOLEFT | LVNI_TORIGHT)
 
 #define LVHT_NOWHERE		0x0001
 #define LVHT_ONITEMICON		0x0002
@@ -3198,6 +3210,12 @@ static const WCHAR WC_LISTVIEWW[] = { 'S','y','s',
 #define LVGS_NORMAL             0x00000000
 #define LVGS_COLLAPSED          0x00000001
 #define LVGS_HIDDEN             0x00000002
+#define LVGS_NOHEADER           0x00000004
+#define LVGS_COLLAPSIBLE        0x00000008
+#define LVGS_FOCUSED            0x00000010
+#define LVGS_SELECTED           0x00000020
+#define LVGS_SUBSETED           0x00000040
+#define LVGS_SUBSETLINKFOCUSED  0x00000080
 
 #define LVGA_HEADER_LEFT        0x00000001
 #define LVGA_HEADER_CENTER      0x00000002
@@ -4419,14 +4437,6 @@ static const WCHAR WC_COMBOBOXEXW[] = { 'C','o','m','b','o',
 #endif
 #define WC_COMBOBOXEX           WINELIB_NAME_AW(WC_COMBOBOXEX)
 
-#define CBEIF_TEXT              0x00000001
-#define CBEIF_IMAGE             0x00000002
-#define CBEIF_SELECTEDIMAGE     0x00000004
-#define CBEIF_OVERLAY           0x00000008
-#define CBEIF_INDENT            0x00000010
-#define CBEIF_LPARAM            0x00000020
-#define CBEIF_DI_SETITEM        0x10000000
-
 #define CBEM_INSERTITEMA        (WM_USER+1)
 #define CBEM_INSERTITEMW        (WM_USER+11)
 #define CBEM_INSERTITEM         WINELIB_NAME_AW(CBEM_INSERTITEM)
@@ -5167,12 +5177,13 @@ typedef PVOID (CALLBACK *PFNDPAMERGE)(UINT,PVOID,PVOID,LPARAM);
 #define DPAM_UNION      0x00000004
 #define DPAM_INTERSECT  0x00000008
 
+HDPA   WINAPI DPA_Clone(const HDPA, HDPA);
 HDPA   WINAPI DPA_Create(INT);
 BOOL   WINAPI DPA_Destroy(HDPA);
 LPVOID WINAPI DPA_DeletePtr(HDPA, INT);
 BOOL   WINAPI DPA_DeleteAllPtrs(HDPA);
 BOOL   WINAPI DPA_SetPtr(HDPA, INT, LPVOID);
-LPVOID WINAPI DPA_GetPtr(HDPA, INT);
+LPVOID WINAPI DPA_GetPtr(HDPA, INT_PTR);
 INT    WINAPI DPA_GetPtrIndex(HDPA, LPCVOID);
 ULONGLONG WINAPI DPA_GetSize(HDPA);
 BOOL   WINAPI DPA_Grow(HDPA, INT);

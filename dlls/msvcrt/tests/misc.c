@@ -20,6 +20,8 @@
 
 #include "wine/test.h"
 #include <errno.h>
+#include <fcntl.h>
+#include <io.h>
 #include <stdio.h>
 #include <math.h>
 #include <process.h>
@@ -330,21 +332,42 @@ static void test__set_errno(void)
     ok(errno == 0xdeadbeef, "Expected errno to be 0xdeadbeef, got %d\n", errno);
 }
 
-static void test__popen_child(void)
+static void test__popen_child(int fd)
 {
     /* don't execute any tests here */
     /* ExitProcess is used to set return code of _pclose */
     printf("child output\n");
+    if ((HANDLE)_get_osfhandle(fd) != INVALID_HANDLE_VALUE)
+        ExitProcess(1);
     ExitProcess(0x37);
+}
+
+static void test__popen_read_child(void)
+{
+    char buf[1024], *rets;
+
+    rets = fgets(buf, sizeof(buf), stdin);
+    if (strcmp(buf, "child-to-parent\n") != 0)
+        ExitProcess(1);
+
+    rets = fgets(buf, sizeof(buf), stdin);
+    if (rets)
+        ExitProcess(2);
+    ExitProcess(3);
 }
 
 static void test__popen(const char *name)
 {
     FILE *pipe;
-    char buf[1024];
-    int ret;
+    char *tempf, buf[1024];
+    int ret, fd;
 
-    sprintf(buf, "\"%s\" misc popen", name);
+    tempf = _tempnam(".", "wne");
+    ok(tempf != NULL, "_tempnam failed\n");
+    fd = _open(tempf, _O_CREAT | _O_WRONLY);
+    ok(fd != -1, "open failed\n");
+
+    sprintf(buf, "\"%s\" misc popen %d", name, fd);
     pipe = _popen(buf, "r");
     ok(pipe != NULL, "_popen failed with error: %d\n", errno);
 
@@ -353,12 +376,25 @@ static void test__popen(const char *name)
 
     ret = _pclose(pipe);
     ok(ret == 0x37, "_pclose returned %x, expected 0x37\n", ret);
+    _close(fd);
+    _unlink(tempf);
+    free(tempf);
 
     errno = 0xdeadbeef;
     ret = _pclose((FILE*)0xdeadbeef);
     ok(ret == -1, "_pclose returned %x, expected -1\n", ret);
     if(p_set_errno)
         ok(errno == EBADF, "errno = %d\n", errno);
+
+    sprintf(buf, "\"%s\" misc popen_read", name);
+    pipe = _popen(buf, "w");
+    ok(pipe != NULL, "_popen failed with error: %d\n", errno);
+
+    ret = fputs("child-to-parent\n", pipe);
+    ok(ret != EOF, "fputs returned %x\n", ret);
+
+    ret = _pclose(pipe);
+    ok(ret == 0x3, "_pclose returned %x, expected 0x3\n", ret);
 }
 
 static void test__invalid_parameter(void)
@@ -491,8 +527,35 @@ static void test_qsort_s(void)
         ok(tab[i] == i, "data sorted incorrectly on position %d: %d\n", i, tab[i]);
 }
 
+static int eq_nan(UINT64 ai, double b)
+{
+    UINT64 bi = *(UINT64*)&b;
+    UINT64 mask;
+
+#if defined(__i386__)
+    mask = 0xFFFFFFFF00000000ULL;
+#else
+    mask = ~0;
+#endif
+
+    ok((ai & mask) == (bi & mask), "comparing %s and %s\n",
+            wine_dbgstr_longlong(ai), wine_dbgstr_longlong(bi));
+    return (ai & mask) == (bi & mask);
+}
+
+static int eq_nanf(DWORD ai, float b)
+{
+    DWORD bi = *(DWORD*)&b;
+    ok(ai == bi, "comparing %08lx and %08lx\n", ai, bi);
+    return ai == bi;
+}
+
 static void test_math_functions(void)
 {
+    static const UINT64 test_nan_i = 0xFFF0000123456780ULL;
+    static const DWORD test_nanf_i = 0xFF801234;
+    double test_nan = *(double*)&test_nan_i;
+    float test_nanf = *(float*)&test_nanf_i;
     double ret;
 
     errno = 0xdeadbeef;
@@ -525,6 +588,13 @@ static void test_math_functions(void)
     errno = 0xdeadbeef;
     p_exp(INFINITY);
     ok(errno == 0xdeadbeef, "errno = %d\n", errno);
+
+    ok(eq_nan(test_nan_i | (1ULL << 51), cosh(test_nan)), "cosh not preserving nan\n");
+    ok(eq_nan(test_nan_i | (1ULL << 51), sinh(test_nan)), "sinh not preserving nan\n");
+    ok(eq_nan(test_nan_i | (1ULL << 51), tanh(test_nan)), "tanh not preserving nan\n");
+    ok(eq_nanf(test_nanf_i | (1 << 22), coshf(test_nanf)), "coshf not preserving nan\n");
+    ok(eq_nanf(test_nanf_i | (1 << 22), sinhf(test_nanf)), "sinhf not preserving nan\n");
+    ok(eq_nanf(test_nanf_i | (1 << 22), tanhf(test_nanf)), "tanhf not preserving nan\n");
 }
 
 static void __cdecl test_thread_func(void *end_thread_type)
@@ -553,38 +623,51 @@ static void test_thread_handle_close(void)
     ok(hThread != INVALID_HANDLE_VALUE, "_beginthread failed (%d)\n", errno);
     WaitForSingleObject(hThread, INFINITE);
     ret = CloseHandle(hThread);
-    ok(!ret, "ret = %d\n", ret);
+    ok(!ret, "ret = %ld\n", ret);
 
     hThread = (HANDLE)_beginthread(test_thread_func, 0, (void*)1);
     ok(hThread != INVALID_HANDLE_VALUE, "_beginthread failed (%d)\n", errno);
     WaitForSingleObject(hThread, INFINITE);
     ret = CloseHandle(hThread);
-    ok(!ret, "ret = %d\n", ret);
+    ok(!ret, "ret = %ld\n", ret);
 
     hThread = (HANDLE)_beginthread(test_thread_func, 0, (void*)2);
     ok(hThread != INVALID_HANDLE_VALUE, "_beginthread failed (%d)\n", errno);
     Sleep(150);
     ret = WaitForSingleObject(hThread, INFINITE);
-    ok(ret == WAIT_OBJECT_0, "ret = %d\n", ret);
+    ok(ret == WAIT_OBJECT_0, "ret = %ld\n", ret);
     ret = CloseHandle(hThread);
-    ok(ret, "ret = %d\n", ret);
+    ok(ret, "ret = %ld\n", ret);
 
     hThread = (HANDLE)_beginthread(test_thread_func, 0, (void*)3);
     ok(hThread != INVALID_HANDLE_VALUE, "_beginthread failed (%d)\n", errno);
     Sleep(150);
     ret = WaitForSingleObject(hThread, INFINITE);
-    ok(ret == WAIT_OBJECT_0, "ret = %d\n", ret);
+    ok(ret == WAIT_OBJECT_0, "ret = %ld\n", ret);
     ret = CloseHandle(hThread);
-    ok(ret, "ret = %d\n", ret);
+    ok(ret, "ret = %ld\n", ret);
 
     /* _beginthreadex: handle is not closed on _endthread */
     hThread = (HANDLE)_beginthreadex(NULL,0, test_thread_func_ex, NULL, 0, NULL);
     ok(hThread != NULL, "_beginthreadex failed (%d)\n", errno);
     Sleep(150);
     ret = WaitForSingleObject(hThread, INFINITE);
-    ok(ret == WAIT_OBJECT_0, "ret = %d\n", ret);
+    ok(ret == WAIT_OBJECT_0, "ret = %ld\n", ret);
     ret = CloseHandle(hThread);
-    ok(ret, "ret = %d\n", ret);
+    ok(ret, "ret = %ld\n", ret);
+}
+
+static void test_thread_suspended(void)
+{
+    HANDLE hThread;
+    DWORD ret;
+
+    hThread = (HANDLE)_beginthreadex(NULL, 0, test_thread_func_ex, NULL, CREATE_SUSPENDED, NULL);
+    ok(hThread != NULL, "_beginthreadex failed (%d)\n", errno);
+    ret = ResumeThread(hThread);
+    ok(ret == 1, "suspend count = %ld\n", ret);
+    ret = WaitForSingleObject(hThread, 200);
+    ok(ret == WAIT_OBJECT_0, "ret = %ld\n", ret);
 }
 
 static int __cdecl _lfind_s_comp(void *ctx, const void *l, const void *r)
@@ -664,8 +747,10 @@ START_TEST(misc)
 
     arg_c = winetest_get_mainargs(&arg_v);
     if(arg_c >= 3) {
-        if(!strcmp(arg_v[2], "popen"))
-            test__popen_child();
+        if (!strcmp(arg_v[2], "popen_read"))
+            test__popen_read_child();
+        else if(arg_c == 4 && !strcmp(arg_v[2], "popen"))
+            test__popen_child(atoi(arg_v[3]));
         else
             ok(0, "invalid argument '%s'\n", arg_v[2]);
 
@@ -684,5 +769,6 @@ START_TEST(misc)
     test_qsort_s();
     test_math_functions();
     test_thread_handle_close();
+    test_thread_suspended();
     test__lfind_s();
 }

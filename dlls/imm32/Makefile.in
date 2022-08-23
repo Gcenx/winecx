@@ -3,8 +3,6 @@ IMPORTLIB = imm32
 IMPORTS   = user32 gdi32 advapi32
 DELAYIMPORTS = ole32
 
-EXTRADLLFLAGS = -mno-cygwin
-
 C_SRCS = \
 	imm.c
 

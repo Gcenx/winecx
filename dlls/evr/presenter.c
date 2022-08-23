@@ -28,13 +28,19 @@
 #include "evr_private.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(evr);
 
+/*
+   Initial state represents just created object, presenter never returns to this state.
+   Shutdown state is entered on ReleaseServicePointers(), terminal state.
+   Started/stopped/paused states are controlled by clock state changes.
+*/
+
 enum presenter_state
 {
-    PRESENTER_STATE_SHUT_DOWN = 0,
+    PRESENTER_STATE_INITIAL = 0,
+    PRESENTER_STATE_SHUT_DOWN,
     PRESENTER_STATE_STARTED,
     PRESENTER_STATE_STOPPED,
     PRESENTER_STATE_PAUSED,
@@ -59,6 +65,7 @@ struct sample_queue
     unsigned int used;
     unsigned int front;
     unsigned int back;
+    IMFSample *last_presented;
 };
 
 struct streaming_thread
@@ -80,6 +87,7 @@ struct video_presenter
     IMFVideoPositionMapper IMFVideoPositionMapper_iface;
     IQualProp IQualProp_iface;
     IMFQualityAdvise IMFQualityAdvise_iface;
+    IMFQualityAdviseLimits IMFQualityAdviseLimits_iface;
     IDirect3DDeviceManager9 IDirect3DDeviceManager9_iface;
     IMFVideoSampleAllocatorNotify allocator_cb;
     IUnknown IUnknown_inner;
@@ -109,6 +117,13 @@ struct video_presenter
     unsigned int ar_mode;
     unsigned int state;
     unsigned int flags;
+
+    struct
+    {
+        int presented;
+        LONGLONG sampletime;
+    } frame_stats;
+
     CRITICAL_SECTION cs;
 };
 
@@ -165,6 +180,11 @@ static struct video_presenter *impl_from_IQualProp(IQualProp *iface)
 static struct video_presenter *impl_from_IMFQualityAdvise(IMFQualityAdvise *iface)
 {
     return CONTAINING_RECORD(iface, struct video_presenter, IMFQualityAdvise_iface);
+}
+
+static struct video_presenter *impl_from_IMFQualityAdviseLimits(IMFQualityAdviseLimits *iface)
+{
+    return CONTAINING_RECORD(iface, struct video_presenter, IMFQualityAdviseLimits_iface);
 }
 
 static struct video_presenter *impl_from_IDirect3DDeviceManager9(IDirect3DDeviceManager9 *iface)
@@ -255,13 +275,16 @@ static void video_presenter_reset_media_type(struct video_presenter *presenter)
         IMFMediaType_Release(presenter->media_type);
     presenter->media_type = NULL;
 
-    IMFVideoSampleAllocator_UninitializeSampleAllocator(presenter->allocator);
-    video_presenter_set_allocator_callback(presenter, NULL);
+    if (presenter->allocator)
+    {
+        IMFVideoSampleAllocator_UninitializeSampleAllocator(presenter->allocator);
+        video_presenter_set_allocator_callback(presenter, NULL);
+    }
 }
 
 static HRESULT video_presenter_set_media_type(struct video_presenter *presenter, IMFMediaType *media_type)
 {
-    unsigned int flags;
+    DWORD flags;
     HRESULT hr;
 
     if (!media_type)
@@ -299,7 +322,38 @@ static HRESULT video_presenter_set_media_type(struct video_presenter *presenter,
         presenter->frame_time_threshold = frametime / 4;
     }
     else
-        WARN("Failed to initialize sample allocator, hr %#x.\n", hr);
+        WARN("Failed to initialize sample allocator, hr %#lx.\n", hr);
+
+    return hr;
+}
+
+static HRESULT video_presenter_configure_output_type(struct video_presenter *presenter, const MFVideoArea *aperture,
+        IMFMediaType *media_type)
+{
+    GUID subtype;
+    LONG stride;
+    DWORD size;
+    HRESULT hr;
+
+    hr = IMFMediaType_SetUINT64(media_type, &MF_MT_FRAME_SIZE, (UINT64)aperture->Area.cx << 32 | aperture->Area.cy);
+    if (SUCCEEDED(hr))
+        hr = IMFMediaType_SetBlob(media_type, &MF_MT_GEOMETRIC_APERTURE, (UINT8 *)aperture, sizeof(*aperture));
+    if (SUCCEEDED(hr))
+        hr = IMFMediaType_SetBlob(media_type, &MF_MT_MINIMUM_DISPLAY_APERTURE, (UINT8 *)aperture, sizeof(*aperture));
+
+    if (SUCCEEDED(hr))
+        hr = IMFMediaType_GetGUID(media_type, &MF_MT_SUBTYPE, &subtype);
+
+    if (SUCCEEDED(hr))
+    {
+        hr = MFGetStrideForBitmapInfoHeader(subtype.Data1, aperture->Area.cx, &stride);
+        if (SUCCEEDED(hr))
+            hr = MFGetPlaneSize(subtype.Data1, aperture->Area.cx, aperture->Area.cy, &size);
+        if (SUCCEEDED(hr))
+            hr = IMFMediaType_SetUINT32(media_type, &MF_MT_DEFAULT_STRIDE, abs(stride));
+        if (SUCCEEDED(hr))
+            hr = IMFMediaType_SetUINT32(media_type, &MF_MT_SAMPLE_SIZE, size);
+    }
 
     return hr;
 }
@@ -307,11 +361,13 @@ static HRESULT video_presenter_set_media_type(struct video_presenter *presenter,
 static HRESULT video_presenter_invalidate_media_type(struct video_presenter *presenter)
 {
     IMFMediaType *media_type, *candidate_type;
+    MFVideoArea aperture = {{ 0 }};
     unsigned int idx = 0;
-    UINT64 frame_size;
-    MFVideoArea aperture;
     RECT rect;
     HRESULT hr;
+
+    if (!presenter->mixer)
+        return MF_E_TRANSFORM_TYPE_NOT_SET;
 
     if (FAILED(hr = MFCreateMediaType(&media_type)))
         return hr;
@@ -327,24 +383,19 @@ static HRESULT video_presenter_invalidate_media_type(struct video_presenter *pre
 
     aperture.Area.cx = rect.right - rect.left;
     aperture.Area.cy = rect.bottom - rect.top;
-    aperture.OffsetX.value = 0;
-    aperture.OffsetX.fract = 0;
-    aperture.OffsetY.value = 0;
-    aperture.OffsetY.fract = 0;
-    frame_size = (UINT64)aperture.Area.cx << 32 | aperture.Area.cy;
 
     while (SUCCEEDED(hr = IMFTransform_GetOutputAvailableType(presenter->mixer, 0, idx++, &candidate_type)))
     {
         /* FIXME: check that d3d device supports this format */
 
         if (FAILED(hr = IMFMediaType_CopyAllItems(candidate_type, (IMFAttributes *)media_type)))
-            WARN("Failed to clone a media type, hr %#x.\n", hr);
+            WARN("Failed to clone a media type, hr %#lx.\n", hr);
         IMFMediaType_Release(candidate_type);
 
-        IMFMediaType_SetUINT64(media_type, &MF_MT_FRAME_SIZE, frame_size);
-        IMFMediaType_SetBlob(media_type, &MF_MT_GEOMETRIC_APERTURE, (UINT8 *)&aperture, sizeof(aperture));
+        hr = video_presenter_configure_output_type(presenter, &aperture, media_type);
 
-        hr = IMFTransform_SetOutputType(presenter->mixer, 0, media_type, MFT_SET_TYPE_TEST_ONLY);
+        if (SUCCEEDED(hr))
+            hr = IMFTransform_SetOutputType(presenter->mixer, 0, media_type, MFT_SET_TYPE_TEST_ONLY);
 
         if (SUCCEEDED(hr))
             hr = video_presenter_set_media_type(presenter, media_type);
@@ -361,28 +412,37 @@ static HRESULT video_presenter_invalidate_media_type(struct video_presenter *pre
     return hr;
 }
 
-static void video_presenter_sample_queue_init(struct video_presenter *presenter)
+static HRESULT video_presenter_sample_queue_init(struct video_presenter *presenter)
 {
     struct sample_queue *queue = &presenter->thread.queue;
 
     if (queue->size)
-        return;
+        return S_OK;
 
     memset(queue, 0, sizeof(*queue));
-    queue->samples = heap_calloc(presenter->allocator_capacity, sizeof(*queue->samples));
+    if (!(queue->samples = calloc(presenter->allocator_capacity, sizeof(*queue->samples))))
+        return E_OUTOFMEMORY;
+
     queue->size = presenter->allocator_capacity;
     queue->back = queue->size - 1;
+
+    return S_OK;
 }
 
-static void video_presenter_sample_queue_push(struct video_presenter *presenter, IMFSample *sample)
+static void video_presenter_sample_queue_push(struct video_presenter *presenter, IMFSample *sample,
+        BOOL at_front)
 {
     struct sample_queue *queue = &presenter->thread.queue;
+    unsigned int idx;
 
     EnterCriticalSection(&presenter->cs);
     if (queue->used != queue->size)
     {
-        queue->back = (queue->back + 1) % queue->size;
-        queue->samples[queue->back] = sample;
+        if (at_front)
+            idx = queue->front = (queue->size + queue->front - 1) % queue->size;
+        else
+            idx = queue->back = (queue->back + 1) % queue->size;
+        queue->samples[idx] = sample;
         queue->used++;
         IMFSample_AddRef(sample);
     }
@@ -426,83 +486,42 @@ static HRESULT video_presenter_get_sample_surface(IMFSample *sample, IDirect3DSu
     return hr;
 }
 
-static void scale_rect(RECT *rect, unsigned int width, unsigned int height, const MFVideoNormalizedRect *scale)
-{
-    if (rect->left == 0.0f && rect->top == 0.0f && rect->right == 1.0f && rect->bottom == 1.0f)
-    {
-        SetRect(rect, 0, 0, width, height);
-    }
-    else
-    {
-        rect->left = width * scale->left;
-        rect->right = width * scale->right;
-        rect->top = height * scale->top;
-        rect->bottom = height * scale->bottom;
-    }
-}
-
 static void video_presenter_sample_present(struct video_presenter *presenter, IMFSample *sample)
 {
     IDirect3DSurface9 *surface, *backbuffer;
     IDirect3DDevice9 *device;
-    D3DSURFACE_DESC desc;
-    RECT dst, src;
     HRESULT hr;
-
-    if (!presenter->swapchain)
-        return;
 
     if (FAILED(hr = video_presenter_get_sample_surface(sample, &surface)))
     {
-        WARN("Failed to get sample surface, hr %#x.\n", hr);
+        WARN("Failed to get sample surface, hr %#lx.\n", hr);
         return;
     }
 
-    if (FAILED(hr = IDirect3DSwapChain9_GetBackBuffer(presenter->swapchain, 0, D3DBACKBUFFER_TYPE_MONO, &backbuffer)))
+    if (presenter->swapchain)
     {
-        WARN("Failed to get a backbuffer, hr %#x.\n", hr);
-        IDirect3DSurface9_Release(surface);
-        return;
+        if (SUCCEEDED(hr = IDirect3DSwapChain9_GetBackBuffer(presenter->swapchain, 0, D3DBACKBUFFER_TYPE_MONO, &backbuffer)))
+        {
+            IDirect3DSwapChain9_GetDevice(presenter->swapchain, &device);
+            IDirect3DDevice9_StretchRect(device, surface, NULL, backbuffer, NULL, D3DTEXF_POINT);
+
+            IDirect3DSwapChain9_Present(presenter->swapchain, NULL, NULL, NULL, NULL, 0);
+            presenter->frame_stats.presented++;
+
+            IDirect3DDevice9_Release(device);
+            IDirect3DSurface9_Release(backbuffer);
+        }
+        else
+            WARN("Failed to get a backbuffer, hr %#lx.\n", hr);
     }
 
-    IDirect3DSwapChain9_GetDevice(presenter->swapchain, &device);
-    IDirect3DDevice9_StretchRect(device, surface, NULL, backbuffer, NULL, D3DTEXF_POINT);
+    EnterCriticalSection(&presenter->cs);
+    if (presenter->thread.queue.last_presented)
+        IMFSample_Release(presenter->thread.queue.last_presented);
+    presenter->thread.queue.last_presented = sample;
+    IMFSample_AddRef(presenter->thread.queue.last_presented);
+    LeaveCriticalSection(&presenter->cs);
 
-    IDirect3DSurface9_GetDesc(surface, &desc);
-    scale_rect(&src, desc.Width, desc.Height, &presenter->src_rect);
-
-    IDirect3DSurface9_GetDesc(backbuffer, &desc);
-    SetRect(&dst, 0, 0, desc.Width, desc.Height);
-
-    if (presenter->ar_mode & MFVideoARMode_PreservePicture)
-    {
-        unsigned int src_width = src.right - src.left, src_height = src.bottom - src.top;
-        unsigned int dst_width = dst.right - dst.left, dst_height = dst.bottom - dst.top;
-
-        if (src_width * dst_height > dst_width * src_height)
-        {
-            /* src is "wider" than dst. */
-            unsigned int dst_center = (dst.top + dst.bottom) / 2;
-            unsigned int scaled_height = src_height * dst_width / src_width;
-
-            dst.top = dst_center - scaled_height / 2;
-            dst.bottom = dst.top + scaled_height;
-        }
-        else if (src_width * dst_height < dst_width * src_height)
-        {
-            /* src is "taller" than dst. */
-            unsigned int dst_center = (dst.left + dst.right) / 2;
-            unsigned int scaled_width = src_width * dst_height / src_height;
-
-            dst.left = dst_center - scaled_width / 2;
-            dst.right = dst.left + scaled_width;
-        }
-    }
-
-    IDirect3DSwapChain9_Present(presenter->swapchain, &src, &dst, NULL, NULL, 0);
-
-    IDirect3DDevice9_Release(device);
-    IDirect3DSurface9_Release(backbuffer);
     IDirect3DSurface9_Release(surface);
 }
 
@@ -511,13 +530,14 @@ static void video_presenter_check_queue(struct video_presenter *presenter,
 {
     LONGLONG pts, clocktime, delta;
     unsigned int wait = 0;
-    BOOL present = TRUE;
     IMFSample *sample;
     MFTIME systime;
+    BOOL present;
     HRESULT hr;
 
     while (video_presenter_sample_queue_pop(presenter, &sample))
     {
+        present = TRUE;
         wait = 0;
 
         if (presenter->clock)
@@ -532,7 +552,7 @@ static void video_presenter_check_queue(struct video_presenter *presenter,
             if (delta > 3 * presenter->frame_time_threshold)
             {
                 /* Convert 100ns -> msec */
-                wait = (delta - 3 * presenter->frame_time_threshold) / 100000;
+                wait = (delta - 3 * presenter->frame_time_threshold) / 10000;
                 present = FALSE;
             }
         }
@@ -540,7 +560,7 @@ static void video_presenter_check_queue(struct video_presenter *presenter,
         if (present)
             video_presenter_sample_present(presenter, sample);
         else
-            video_presenter_sample_queue_push(presenter, sample);
+            video_presenter_sample_queue_push(presenter, sample, TRUE);
 
         IMFSample_Release(sample);
 
@@ -564,7 +584,7 @@ static void video_presenter_schedule_sample(struct video_presenter *presenter, I
 
     if (presenter->clock)
     {
-        video_presenter_sample_queue_push(presenter, sample);
+        video_presenter_sample_queue_push(presenter, sample, FALSE);
         PostThreadMessageW(presenter->thread.tid, EVRM_PRESENT, 0, 0);
     }
     else
@@ -580,6 +600,9 @@ static HRESULT video_presenter_process_input(struct video_presenter *presenter)
     IMFSample *sample;
     DWORD status;
 
+    if (presenter->state == PRESENTER_STATE_SHUT_DOWN)
+        return MF_E_SHUTDOWN;
+
     if (!presenter->media_type)
         return S_OK;
 
@@ -593,7 +616,7 @@ static HRESULT video_presenter_process_input(struct video_presenter *presenter)
 
         if (FAILED(hr = IMFVideoSampleAllocator_AllocateSample(presenter->allocator, &sample)))
         {
-            WARN("Failed to allocate a sample, hr %#x.\n", hr);
+            WARN("Failed to allocate a sample, hr %#lx.\n", hr);
             break;
         }
 
@@ -683,10 +706,16 @@ static DWORD CALLBACK video_presenter_streaming_thread(void *arg)
 
 static HRESULT video_presenter_start_streaming(struct video_presenter *presenter)
 {
+    HRESULT hr;
+
+    if (presenter->state == PRESENTER_STATE_SHUT_DOWN)
+        return MF_E_SHUTDOWN;
+
     if (presenter->thread.hthread)
         return S_OK;
 
-    video_presenter_sample_queue_init(presenter);
+    if (FAILED(hr = video_presenter_sample_queue_init(presenter)))
+        return hr;
 
     if (!(presenter->thread.ready_event = CreateEventW(NULL, FALSE, FALSE, NULL)))
         return HRESULT_FROM_WIN32(GetLastError());
@@ -706,7 +735,7 @@ static HRESULT video_presenter_start_streaming(struct video_presenter *presenter
     CloseHandle(presenter->thread.ready_event);
     presenter->thread.ready_event = NULL;
 
-    TRACE("Started streaming thread, tid %#x.\n", presenter->thread.tid);
+    TRACE("Started streaming thread, tid %#lx.\n", presenter->thread.tid);
 
     return S_OK;
 }
@@ -721,8 +750,10 @@ static HRESULT video_presenter_end_streaming(struct video_presenter *presenter)
     WaitForSingleObject(presenter->thread.hthread, INFINITE);
     CloseHandle(presenter->thread.hthread);
 
-    TRACE("Terminated streaming thread tid %#x.\n", presenter->thread.tid);
+    TRACE("Terminated streaming thread tid %#lx.\n", presenter->thread.tid);
 
+    if (presenter->thread.queue.last_presented)
+        IMFSample_Release(presenter->thread.queue.last_presented);
     memset(&presenter->thread, 0, sizeof(presenter->thread));
     video_presenter_set_allocator_callback(presenter, NULL);
 
@@ -776,6 +807,10 @@ static HRESULT WINAPI video_presenter_inner_QueryInterface(IUnknown *iface, REFI
     {
         *obj = &presenter->IMFQualityAdvise_iface;
     }
+    else if (IsEqualIID(riid, &IID_IMFQualityAdviseLimits))
+    {
+        *obj = &presenter->IMFQualityAdviseLimits_iface;
+    }
     else if (IsEqualIID(riid, &IID_IDirect3DDeviceManager9))
     {
         *obj = &presenter->IDirect3DDeviceManager9_iface;
@@ -796,7 +831,7 @@ static ULONG WINAPI video_presenter_inner_AddRef(IUnknown *iface)
     struct video_presenter *presenter = impl_from_IUnknown(iface);
     ULONG refcount = InterlockedIncrement(&presenter->refcount);
 
-    TRACE("%p, refcount %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -819,7 +854,7 @@ static ULONG WINAPI video_presenter_inner_Release(IUnknown *iface)
     struct video_presenter *presenter = impl_from_IUnknown(iface);
     ULONG refcount = InterlockedDecrement(&presenter->refcount);
 
-    TRACE("%p, refcount %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -836,7 +871,7 @@ static ULONG WINAPI video_presenter_inner_Release(IUnknown *iface)
         }
         if (presenter->allocator)
             IMFVideoSampleAllocator_Release(presenter->allocator);
-        heap_free(presenter);
+        free(presenter);
     }
 
     return refcount;
@@ -888,6 +923,7 @@ static HRESULT WINAPI video_presenter_OnClockStop(IMFVideoPresenter *iface, MFTI
 
     EnterCriticalSection(&presenter->cs);
     presenter->state = PRESENTER_STATE_STOPPED;
+    presenter->frame_stats.presented = 0;
     LeaveCriticalSection(&presenter->cs);
 
     return S_OK;
@@ -931,14 +967,19 @@ static HRESULT WINAPI video_presenter_ProcessMessage(IMFVideoPresenter *iface, M
     struct video_presenter *presenter = impl_from_IMFVideoPresenter(iface);
     HRESULT hr;
 
-    TRACE("%p, %d, %lu.\n", iface, message, param);
+    TRACE("%p, %d, %Iu.\n", iface, message, param);
 
     EnterCriticalSection(&presenter->cs);
 
     switch (message)
     {
         case MFVP_MESSAGE_INVALIDATEMEDIATYPE:
-            hr = video_presenter_invalidate_media_type(presenter);
+            if (presenter->state == PRESENTER_STATE_SHUT_DOWN)
+                hr = MF_E_SHUTDOWN;
+            else if (!presenter->mixer)
+                hr = MF_E_INVALIDREQUEST;
+            else
+                hr = video_presenter_invalidate_media_type(presenter);
             break;
         case MFVP_MESSAGE_BEGINSTREAMING:
             hr = video_presenter_start_streaming(presenter);
@@ -1069,7 +1110,7 @@ static void video_presenter_set_mixer_rect(struct video_presenter *presenter)
         if (FAILED(hr = IMFAttributes_SetBlob(attributes, &VIDEO_ZOOM_RECT, (const UINT8 *)&presenter->src_rect,
                 sizeof(presenter->src_rect))))
         {
-            WARN("Failed to set zoom rectangle attribute, hr %#x.\n", hr);
+            WARN("Failed to set zoom rectangle attribute, hr %#lx.\n", hr);
         }
         IMFAttributes_Release(attributes);
     }
@@ -1078,15 +1119,15 @@ static void video_presenter_set_mixer_rect(struct video_presenter *presenter)
 static HRESULT video_presenter_attach_mixer(struct video_presenter *presenter, IMFTopologyServiceLookup *service_lookup)
 {
     IMFVideoDeviceID *device_id;
-    unsigned int count;
     GUID id = { 0 };
+    DWORD count;
     HRESULT hr;
 
     count = 1;
     if (FAILED(hr = IMFTopologyServiceLookup_LookupService(service_lookup, MF_SERVICE_LOOKUP_GLOBAL, 0,
             &MR_VIDEO_MIXER_SERVICE, &IID_IMFTransform, (void **)&presenter->mixer, &count)))
     {
-        WARN("Failed to get mixer interface, hr %#x.\n", hr);
+        WARN("Failed to get mixer interface, hr %#lx.\n", hr);
         return hr;
     }
 
@@ -1117,8 +1158,8 @@ static HRESULT WINAPI video_presenter_service_client_InitServicePointers(IMFTopo
         IMFTopologyServiceLookup *service_lookup)
 {
     struct video_presenter *presenter = impl_from_IMFTopologyServiceLookupClient(iface);
-    unsigned int count;
     HRESULT hr = S_OK;
+    DWORD count;
 
     TRACE("%p, %p.\n", iface, service_lookup);
 
@@ -1148,7 +1189,7 @@ static HRESULT WINAPI video_presenter_service_client_InitServicePointers(IMFTopo
             if (FAILED(hr = IMFTopologyServiceLookup_LookupService(service_lookup, MF_SERVICE_LOOKUP_GLOBAL, 0,
                     &MR_VIDEO_RENDER_SERVICE, &IID_IMediaEventSink, (void **)&presenter->event_sink, &count)))
             {
-                WARN("Failed to get renderer event sink, hr %#x.\n", hr);
+                WARN("Failed to get renderer event sink, hr %#lx.\n", hr);
             }
         }
 
@@ -1208,6 +1249,7 @@ static HRESULT WINAPI video_presenter_control_GetNativeVideoSize(IMFVideoDisplay
         SIZE *aspect_ratio)
 {
     struct video_presenter *presenter = impl_from_IMFVideoDisplayControl(iface);
+    HRESULT hr = S_OK;
 
     TRACE("%p, %p, %p.\n", iface, video_size, aspect_ratio);
 
@@ -1215,21 +1257,40 @@ static HRESULT WINAPI video_presenter_control_GetNativeVideoSize(IMFVideoDisplay
         return E_POINTER;
 
     EnterCriticalSection(&presenter->cs);
-    if (video_size)
-        *video_size = presenter->native_size;
-    if (aspect_ratio)
-        *aspect_ratio = presenter->native_ratio;
+
+    if (presenter->state == PRESENTER_STATE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else
+    {
+        if (video_size)
+            *video_size = presenter->native_size;
+        if (aspect_ratio)
+            *aspect_ratio = presenter->native_ratio;
+    }
+
     LeaveCriticalSection(&presenter->cs);
 
-    return S_OK;
+    return hr;
 }
 
 static HRESULT WINAPI video_presenter_control_GetIdealVideoSize(IMFVideoDisplayControl *iface, SIZE *min_size,
         SIZE *max_size)
 {
+    struct video_presenter *presenter = impl_from_IMFVideoDisplayControl(iface);
+    HRESULT hr;
+
     FIXME("%p, %p, %p.\n", iface, min_size, max_size);
 
-    return E_NOTIMPL;
+    EnterCriticalSection(&presenter->cs);
+
+    if (presenter->state == PRESENTER_STATE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else
+        hr = E_NOTIMPL;
+
+    LeaveCriticalSection(&presenter->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI video_presenter_control_SetVideoPosition(IMFVideoDisplayControl *iface,
@@ -1238,7 +1299,7 @@ static HRESULT WINAPI video_presenter_control_SetVideoPosition(IMFVideoDisplayCo
     struct video_presenter *presenter = impl_from_IMFVideoDisplayControl(iface);
     HRESULT hr = S_OK;
 
-    TRACE("%p, %p, %s.\n", iface, src_rect, wine_dbgstr_rect(dst_rect));
+    TRACE("%p, %s, %s.\n", iface, debugstr_normalized_rect(src_rect), wine_dbgstr_rect(dst_rect));
 
     if (!src_rect && !dst_rect)
         return E_POINTER;
@@ -1268,8 +1329,14 @@ static HRESULT WINAPI video_presenter_control_SetVideoPosition(IMFVideoDisplayCo
                 video_presenter_set_mixer_rect(presenter);
             }
         }
-        if (dst_rect)
+        if (dst_rect && !EqualRect(dst_rect, &presenter->dst_rect))
+        {
             presenter->dst_rect = *dst_rect;
+            hr = video_presenter_invalidate_media_type(presenter);
+            /* Mixer's input type hasn't been configured yet, this is not an error. */
+            if (hr == MF_E_TRANSFORM_TYPE_NOT_SET) hr = S_OK;
+            /* FIXME: trigger repaint */
+        }
     }
     LeaveCriticalSection(&presenter->cs);
 
@@ -1298,7 +1365,7 @@ static HRESULT WINAPI video_presenter_control_SetAspectRatioMode(IMFVideoDisplay
 {
     struct video_presenter *presenter = impl_from_IMFVideoDisplayControl(iface);
 
-    TRACE("%p, %#x.\n", iface, mode);
+    TRACE("%p, %#lx.\n", iface, mode);
 
     if (mode & ~MFVideoARMode_Mask)
         return E_INVALIDARG;
@@ -1389,22 +1456,113 @@ static HRESULT WINAPI video_presenter_control_GetVideoWindow(IMFVideoDisplayCont
 
 static HRESULT WINAPI video_presenter_control_RepaintVideo(IMFVideoDisplayControl *iface)
 {
+    struct video_presenter *presenter = impl_from_IMFVideoDisplayControl(iface);
+    HRESULT hr;
+
     FIXME("%p.\n", iface);
 
-    return E_NOTIMPL;
+    EnterCriticalSection(&presenter->cs);
+
+    if (presenter->state == PRESENTER_STATE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else
+        hr = E_NOTIMPL;
+
+    LeaveCriticalSection(&presenter->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI video_presenter_control_GetCurrentImage(IMFVideoDisplayControl *iface, BITMAPINFOHEADER *header,
         BYTE **dib, DWORD *dib_size, LONGLONG *timestamp)
 {
-    FIXME("%p, %p, %p, %p, %p.\n", iface, header, dib, dib_size, timestamp);
+    struct video_presenter *presenter = impl_from_IMFVideoDisplayControl(iface);
+    IDirect3DSurface9 *readback = NULL, *surface;
+    D3DSURFACE_DESC surface_desc;
+    D3DLOCKED_RECT mapped_rect;
+    IDirect3DDevice9 *device;
+    IMFSample *sample;
+    LONG stride;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("%p, %p, %p, %p, %p.\n", iface, header, dib, dib_size, timestamp);
+
+    EnterCriticalSection(&presenter->cs);
+
+    sample = presenter->thread.queue.last_presented;
+    presenter->thread.queue.last_presented = NULL;
+
+    if (!sample)
+    {
+        hr = MF_E_INVALIDREQUEST;
+    }
+    else if (SUCCEEDED(hr = video_presenter_get_sample_surface(sample, &surface)))
+    {
+        IDirect3DSurface9_GetDevice(surface, &device);
+        IDirect3DSurface9_GetDesc(surface, &surface_desc);
+
+        if (surface_desc.Format != D3DFMT_X8R8G8B8)
+        {
+            FIXME("Unexpected surface format %d.\n", surface_desc.Format);
+            hr = E_FAIL;
+        }
+
+        if (SUCCEEDED(hr))
+        {
+            if (FAILED(hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, surface_desc.Width,
+                    surface_desc.Height, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &readback, NULL)))
+            {
+                WARN("Failed to create readback surface, hr %#lx.\n", hr);
+            }
+        }
+
+        if (SUCCEEDED(hr))
+            hr = IDirect3DDevice9_GetRenderTargetData(device, surface, readback);
+
+        if (SUCCEEDED(hr))
+        {
+            MFGetStrideForBitmapInfoHeader(D3DFMT_X8R8G8B8, surface_desc.Width, &stride);
+            *dib_size = abs(stride) * surface_desc.Height;
+            if (!(*dib = CoTaskMemAlloc(*dib_size)))
+                hr = E_OUTOFMEMORY;
+        }
+
+        if (SUCCEEDED(hr))
+        {
+            if (SUCCEEDED(hr = IDirect3DSurface9_LockRect(readback, &mapped_rect, NULL, D3DLOCK_READONLY)))
+            {
+                memcpy(*dib, mapped_rect.pBits, *dib_size);
+                IDirect3DSurface9_UnlockRect(readback);
+            }
+        }
+
+        memset(header, 0, sizeof(*header));
+        header->biSize = sizeof(*header);
+        header->biWidth = surface_desc.Width;
+        header->biHeight = surface_desc.Height;
+        header->biPlanes = 1;
+        header->biBitCount = 32;
+        header->biSizeImage = *dib_size;
+        IMFSample_GetSampleTime(sample, timestamp);
+
+        if (readback)
+            IDirect3DSurface9_Release(readback);
+        IDirect3DSurface9_Release(surface);
+
+        IDirect3DDevice9_Release(device);
+    }
+
+    if (sample)
+        IMFSample_Release(sample);
+
+    LeaveCriticalSection(&presenter->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI video_presenter_control_SetBorderColor(IMFVideoDisplayControl *iface, COLORREF color)
 {
-    FIXME("%p, %#x.\n", iface, color);
+    FIXME("%p, %#lx.\n", iface, color);
 
     return E_NOTIMPL;
 }
@@ -1418,7 +1576,7 @@ static HRESULT WINAPI video_presenter_control_GetBorderColor(IMFVideoDisplayCont
 
 static HRESULT WINAPI video_presenter_control_SetRenderingPrefs(IMFVideoDisplayControl *iface, DWORD flags)
 {
-    FIXME("%p, %#x.\n", iface, flags);
+    FIXME("%p, %#lx.\n", iface, flags);
 
     return E_NOTIMPL;
 }
@@ -1590,7 +1748,7 @@ static ULONG WINAPI video_presenter_position_mapper_Release(IMFVideoPositionMapp
 static HRESULT WINAPI video_presenter_position_mapper_MapOutputCoordinateToInputStream(IMFVideoPositionMapper *iface,
         float x_out, float y_out, DWORD output_stream, DWORD input_stream, float *x_in, float *y_in)
 {
-    FIXME("%p, %f, %f, %u, %u, %p, %p.\n", iface, x_out, y_out, output_stream, input_stream, x_in, y_in);
+    FIXME("%p, %f, %f, %lu, %lu, %p, %p.\n", iface, x_out, y_out, output_stream, input_stream, x_in, y_in);
 
     return E_NOTIMPL;
 }
@@ -1677,9 +1835,27 @@ static HRESULT WINAPI video_presenter_qualprop_get_FramesDroppedInRenderer(IQual
 
 static HRESULT WINAPI video_presenter_qualprop_get_FramesDrawn(IQualProp *iface, int *frames)
 {
-    FIXME("%p, %p stub.\n", iface, frames);
+    struct video_presenter *presenter = impl_from_IQualProp(iface);
+    HRESULT hr = S_OK;
 
-    return E_NOTIMPL;
+    TRACE("%p, %p.\n", iface, frames);
+
+    EnterCriticalSection(&presenter->cs);
+
+    switch (presenter->state)
+    {
+        case PRESENTER_STATE_STARTED:
+        case PRESENTER_STATE_PAUSED:
+            if (frames) *frames = presenter->frame_stats.presented;
+            else hr = E_POINTER;
+            break;
+        default:
+            hr = E_NOTIMPL;
+    }
+
+    LeaveCriticalSection(&presenter->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI video_presenter_qualprop_get_AvgFrameRate(IQualProp *iface, int *avg_frame_rate)
@@ -1871,6 +2047,47 @@ static const IDirect3DDeviceManager9Vtbl video_presenter_device_manager_vtbl =
     video_presenter_device_manager_GetVideoService,
 };
 
+static HRESULT WINAPI video_presenter_qa_limits_QueryInterface(IMFQualityAdviseLimits *iface, REFIID riid, void **obj)
+{
+    struct video_presenter *presenter = impl_from_IMFQualityAdviseLimits(iface);
+    return IMFVideoPresenter_QueryInterface(&presenter->IMFVideoPresenter_iface, riid, obj);
+}
+
+static ULONG WINAPI video_presenter_qa_limits_AddRef(IMFQualityAdviseLimits *iface)
+{
+    struct video_presenter *presenter = impl_from_IMFQualityAdviseLimits(iface);
+    return IMFVideoPresenter_AddRef(&presenter->IMFVideoPresenter_iface);
+}
+
+static ULONG WINAPI video_presenter_qa_limits_Release(IMFQualityAdviseLimits *iface)
+{
+    struct video_presenter *presenter = impl_from_IMFQualityAdviseLimits(iface);
+    return IMFVideoPresenter_Release(&presenter->IMFVideoPresenter_iface);
+}
+
+static HRESULT WINAPI video_presenter_qa_limits_GetMaximumDropMode(IMFQualityAdviseLimits *iface, MF_QUALITY_DROP_MODE *mode)
+{
+    FIXME("%p, %p.\n", iface, mode);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI video_presenter_qa_limits_GetMinimumQualityLevel(IMFQualityAdviseLimits *iface, MF_QUALITY_LEVEL *level)
+{
+    FIXME("%p, %p.\n", iface, level);
+
+    return E_NOTIMPL;
+}
+
+static const IMFQualityAdviseLimitsVtbl video_presenter_qa_limits_vtbl =
+{
+    video_presenter_qa_limits_QueryInterface,
+    video_presenter_qa_limits_AddRef,
+    video_presenter_qa_limits_Release,
+    video_presenter_qa_limits_GetMaximumDropMode,
+    video_presenter_qa_limits_GetMinimumQualityLevel,
+};
+
 HRESULT WINAPI MFCreateVideoPresenter(IUnknown *owner, REFIID riid_device, REFIID riid, void **obj)
 {
     TRACE("%p, %s, %s, %p.\n", owner, debugstr_guid(riid_device), debugstr_guid(riid), obj);
@@ -1899,20 +2116,20 @@ static HRESULT video_presenter_init_d3d(struct video_presenter *presenter)
     present_params.Flags = D3DPRESENTFLAG_VIDEO;
     present_params.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
     hr = IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, GetDesktopWindow(),
-            0, &present_params, &device);
+            D3DCREATE_HARDWARE_VERTEXPROCESSING, &present_params, &device);
 
     IDirect3D9_Release(d3d);
 
     if (FAILED(hr))
     {
-        WARN("Failed to create d3d device, hr %#x.\n", hr);
+        WARN("Failed to create d3d device, hr %#lx.\n", hr);
         return hr;
     }
 
     hr = IDirect3DDeviceManager9_ResetDevice(presenter->device_manager, device, presenter->reset_token);
     IDirect3DDevice9_Release(device);
     if (FAILED(hr))
-        WARN("Failed to set new device for the manager, hr %#x.\n", hr);
+        WARN("Failed to set new device for the manager, hr %#lx.\n", hr);
 
     if (SUCCEEDED(hr = MFCreateVideoSampleAllocator(&IID_IMFVideoSampleAllocator, (void **)&presenter->allocator)))
     {
@@ -1929,7 +2146,7 @@ HRESULT evr_presenter_create(IUnknown *outer, void **out)
 
     *out = NULL;
 
-    if (!(object = heap_alloc_zero(sizeof(*object))))
+    if (!(object = calloc(1, sizeof(*object))))
         return E_OUTOFMEMORY;
 
     object->IMFVideoPresenter_iface.lpVtbl = &video_presenter_vtbl;
@@ -1941,6 +2158,7 @@ HRESULT evr_presenter_create(IUnknown *outer, void **out)
     object->IMFVideoPositionMapper_iface.lpVtbl = &video_presenter_position_mapper_vtbl;
     object->IQualProp_iface.lpVtbl = &video_presenter_qualprop_vtbl;
     object->IMFQualityAdvise_iface.lpVtbl = &video_presenter_quality_advise_vtbl;
+    object->IMFQualityAdviseLimits_iface.lpVtbl = &video_presenter_qa_limits_vtbl;
     object->allocator_cb.lpVtbl = &video_presenter_allocator_cb_vtbl;
     object->IUnknown_inner.lpVtbl = &video_presenter_inner_vtbl;
     object->IDirect3DDeviceManager9_iface.lpVtbl = &video_presenter_device_manager_vtbl;
@@ -1955,7 +2173,10 @@ HRESULT evr_presenter_create(IUnknown *outer, void **out)
         goto failed;
 
     if (FAILED(hr = video_presenter_init_d3d(object)))
+    {
+        WARN("Failed to initialize d3d device, hr %#lx.\n", hr);
         goto failed;
+    }
 
     *out = &object->IUnknown_inner;
 

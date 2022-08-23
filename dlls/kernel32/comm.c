@@ -24,12 +24,11 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "winternl.h"
 #include "winnls.h"
 #include "winerror.h"
 #include "winioctl.h"
 #include "ddk/ntddser.h"
-
-#include "wine/server.h"
 
 #include "wine/debug.h"
 
@@ -399,7 +398,7 @@ static BOOL COMM_BuildNewCommDCB(LPCWSTR device, LPDCB lpdcb, LPCOMMTIMEOUTS lpt
  *         BuildCommDCBA		(KERNEL32.@)
  *
  *  Updates a device control block data structure with values from an
- *  ascii device control string.  The device control string has two forms
+ *  ANSI device control string.  The device control string has two forms
  *  normal and extended, it must be exclusively in one or the other form.
  *
  * RETURNS
@@ -407,7 +406,7 @@ static BOOL COMM_BuildNewCommDCB(LPCWSTR device, LPDCB lpdcb, LPCOMMTIMEOUTS lpt
  *  True on success, false on a malformed control string.
  */
 BOOL WINAPI BuildCommDCBA(
-    LPCSTR device, /* [in] The ascii device control string used to update the DCB. */
+    LPCSTR device, /* [in] The ANSI device control string used to update the DCB. */
     LPDCB  lpdcb)  /* [out] The device control block to be updated. */
 {
 	return BuildCommDCBAndTimeoutsA(device,lpdcb,NULL);
@@ -417,7 +416,7 @@ BOOL WINAPI BuildCommDCBA(
  *         BuildCommDCBAndTimeoutsA		(KERNEL32.@)
  *
  *  Updates a device control block data structure with values from an
- *  ascii device control string.  Taking timeout values from a timeouts
+ *  ANSI device control string.  Taking timeout values from a timeouts
  *  struct if desired by the control string.
  *
  * RETURNS
@@ -425,7 +424,7 @@ BOOL WINAPI BuildCommDCBA(
  *  True on success, false bad handles etc.
  */
 BOOL WINAPI BuildCommDCBAndTimeoutsA(
-    LPCSTR         device,     /* [in] The ascii device control string. */
+    LPCSTR         device,     /* [in] The ANSI device control string. */
     LPDCB          lpdcb,      /* [out] The device control block to be updated. */
     LPCOMMTIMEOUTS lptimeouts) /* [in] The COMMTIMEOUTS structure to be updated. */
 {
@@ -623,7 +622,7 @@ BOOL WINAPI SetDefaultCommConfigW(LPCWSTR lpszDevice, LPCOMMCONFIG lpCommConfig,
     HMODULE hConfigModule;
     BOOL r = FALSE;
 
-    TRACE("(%s, %p, %u)\n", debugstr_w(lpszDevice), lpCommConfig, dwSize);
+    TRACE("(%s, %p, %lu)\n", debugstr_w(lpszDevice), lpCommConfig, dwSize);
 
     hConfigModule = LoadLibraryW(lpszSerialUI);
     if(!hConfigModule)
@@ -653,7 +652,7 @@ BOOL WINAPI SetDefaultCommConfigA(LPCSTR lpszDevice, LPCOMMCONFIG lpCommConfig, 
     LPWSTR lpDeviceW = NULL;
     DWORD len;
 
-    TRACE("(%s, %p, %u)\n", debugstr_a(lpszDevice), lpCommConfig, dwSize);
+    TRACE("(%s, %p, %lu)\n", debugstr_a(lpszDevice), lpCommConfig, dwSize);
 
     if (lpszDevice)
     {
@@ -688,7 +687,7 @@ BOOL WINAPI GetDefaultCommConfigW(
     HMODULE hConfigModule;
     DWORD   res = ERROR_INVALID_PARAMETER;
 
-    TRACE("(%s, %p, %p)  *lpdwSize: %u\n", debugstr_w(lpszName), lpCC, lpdwSize, lpdwSize ? *lpdwSize : 0 );
+    TRACE("(%s, %p, %p)  *lpdwSize: %lu\n", debugstr_w(lpszName), lpCC, lpdwSize, lpdwSize ? *lpdwSize : 0 );
     hConfigModule = LoadLibraryW(lpszSerialUI);
 
     if (hConfigModule) {
@@ -706,7 +705,7 @@ BOOL WINAPI GetDefaultCommConfigW(
 /**************************************************************************
  *         GetDefaultCommConfigA		(KERNEL32.@)
  *
- *   Acquires the default configuration of the specified communication device. (ascii)
+ *   Acquires the default configuration of the specified communication device.
  *
  *  RETURNS
  *
@@ -714,7 +713,7 @@ BOOL WINAPI GetDefaultCommConfigW(
  *   if the device is not found or the buffer is too small.
  */
 BOOL WINAPI GetDefaultCommConfigA(
-    LPCSTR       lpszName, /* [in] The ascii name of the device targeted for configuration. */
+    LPCSTR       lpszName, /* [in] The ANSI name of the device targeted for configuration. */
     LPCOMMCONFIG lpCC,     /* [out] The default configuration for the device. */
     LPDWORD      lpdwSize) /* [in/out] Initially the size of the default configuration buffer,
 			      afterwards the number of bytes copied to the buffer or
@@ -723,7 +722,7 @@ BOOL WINAPI GetDefaultCommConfigA(
 	BOOL ret = FALSE;
 	UNICODE_STRING lpszNameW;
 
-	TRACE("(%s, %p, %p)  *lpdwSize: %u\n", debugstr_a(lpszName), lpCC, lpdwSize, lpdwSize ? *lpdwSize : 0 );
+	TRACE("(%s, %p, %p)  *lpdwSize: %lu\n", debugstr_a(lpszName), lpCC, lpdwSize, lpdwSize ? *lpdwSize : 0 );
 	if(lpszName) RtlCreateUnicodeStringFromAsciiz(&lpszNameW,lpszName);
 	else lpszNameW.Buffer = NULL;
 

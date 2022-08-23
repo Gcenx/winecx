@@ -673,7 +673,7 @@ static LRESULT WINAPI ie_window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM 
         ShowWindow(hwnd, SW_HIDE);
         return 0;
     case WM_SHOWWINDOW:
-        TRACE("WM_SHOWWINDOW %lx\n", wparam);
+        TRACE("WM_SHOWWINDOW %Ix\n", wparam);
         if(wparam) {
             IWebBrowser2_AddRef(&This->IWebBrowser2_iface);
             InterlockedIncrement(&This->extern_ref);
@@ -875,7 +875,7 @@ static ULONG WINAPI InternetExplorerManager_AddRef(IInternetExplorerManager *ifa
     InternetExplorerManager *This = impl_from_IInternetExplorerManager(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) increasing refcount to %u\n", iface, ref);
+    TRACE("(%p) increasing refcount to %lu\n", iface, ref);
 
     return ref;
 }
@@ -885,7 +885,7 @@ static ULONG WINAPI InternetExplorerManager_Release(IInternetExplorerManager *if
     InternetExplorerManager *This = impl_from_IInternetExplorerManager(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) decreasing refcount to %u\n", iface, ref);
+    TRACE("(%p) decreasing refcount to %lu\n", iface, ref);
 
     if (ref == 0)
     {
@@ -898,7 +898,7 @@ static ULONG WINAPI InternetExplorerManager_Release(IInternetExplorerManager *if
 
 static HRESULT WINAPI InternetExplorerManager_CreateObject(IInternetExplorerManager *iface, DWORD config, LPCWSTR url, REFIID riid, void **ppv)
 {
-    FIXME("(%p)->(0x%x, %s, %s, %p) stub!\n", iface, config, debugstr_w(url), debugstr_guid(riid), ppv);
+    FIXME("(%p)->(0x%lx, %s, %s, %p) stub!\n", iface, config, debugstr_w(url), debugstr_guid(riid), ppv);
 
     return E_NOTIMPL;
 }
@@ -1126,10 +1126,13 @@ static void release_dde(void)
  */
 DWORD WINAPI IEWinMain(const WCHAR *cmdline, int nShowWindow)
 {
+    BOOL embedding = FALSE, nohome = FALSE, manager = FALSE, activated = FALSE;
     MSG msg;
     HRESULT hres;
-    BOOL embedding = FALSE, nohome = FALSE, manager = FALSE;
-    DWORD reg_cookie;
+    HANDLE context = INVALID_HANDLE_VALUE;
+    DWORD reg_cookie, ret = 1;
+    ULONG_PTR context_cookie;
+    ACTCTXW actctx;
 
     static const WCHAR embeddingW[] = {'-','e','m','b','e','d','d','i','n','g',0};
     static const WCHAR nohomeW[] = {'-','n','o','h','o','m','e',0};
@@ -1138,6 +1141,15 @@ DWORD WINAPI IEWinMain(const WCHAR *cmdline, int nShowWindow)
     TRACE("%s %d\n", debugstr_w(cmdline), nShowWindow);
 
     CoInitialize(NULL);
+
+    memset(&actctx, 0, sizeof(actctx));
+    actctx.cbSize = sizeof(actctx);
+    actctx.hModule = ieframe_instance;
+    actctx.lpResourceName = MAKEINTRESOURCEW(123);
+    actctx.dwFlags = ACTCTX_FLAG_HMODULE_VALID | ACTCTX_FLAG_RESOURCE_NAME_VALID;
+    context = CreateActCtxW(&actctx);
+    if (context != INVALID_HANDLE_VALUE)
+        activated = ActivateActCtx(context, &context_cookie);
 
     init_dde();
 
@@ -1173,18 +1185,14 @@ DWORD WINAPI IEWinMain(const WCHAR *cmdline, int nShowWindow)
 
     if (FAILED(hres))
     {
-        ERR("failed to register CLSID_InternetExplorer%s: %08x\n", manager ? "Manager" : "", hres);
-        CoUninitialize();
-        ExitProcess(1);
+        ERR("failed to register CLSID_InternetExplorer%s: %08lx\n", manager ? "Manager" : "", hres);
+        goto done;
     }
 
     if (!embedding)
     {
         if(!create_ie_window(nohome, cmdline))
-        {
-            CoUninitialize();
-            ExitProcess(1);
-        }
+            goto done;
     }
 
     /* run the message loop for this thread */
@@ -1197,8 +1205,11 @@ DWORD WINAPI IEWinMain(const WCHAR *cmdline, int nShowWindow)
     CoRevokeClassObject(reg_cookie);
     release_dde();
 
+    ret = 0;
+done:
     CoUninitialize();
-
-    ExitProcess(0);
-    return 0;
+    if (activated)
+        DeactivateActCtx(0, context_cookie);
+    ReleaseActCtx(context);
+    ExitProcess(ret);
 }

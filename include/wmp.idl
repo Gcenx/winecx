@@ -362,6 +362,34 @@ library WMPLib {
 
     [
         odl,
+        uuid(6f030d25-0890-480f-9775-1f7e40ab5b8e),
+        dual,
+        oleautomation
+    ]
+    interface IWMPControls2 : IWMPControls
+    {
+        [id(0x0040)]
+        HRESULT step([in] long lStep);
+    }
+
+    [
+        odl,
+        uuid(cbb92747-741f-44fe-ab5b-f1a48f3b2a59),
+        oleautomation
+    ]
+    interface IWMPRemoteMediaServices : IUnknown
+    {
+        HRESULT GetServiceType([out, retval] BSTR *type);
+
+        HRESULT GetApplicationName([out, retval] BSTR *name);
+
+        HRESULT GetScriptableObject([out, retval] BSTR *name, [out, retval] IDispatch **out);
+
+        HRESULT GetCustomUIMode([out, retval] BSTR *file);
+    }
+
+    [
+        odl,
         uuid(9104d1ab-80c9-4fed-abf0-2e6417a6df14),
         dual,
         oleautomation
@@ -813,6 +841,33 @@ library WMPLib {
 
         [id(0x0389), propget]
         HRESULT customUrl([out, retval] BSTR *pbstrCustomUrl);
+    }
+
+    [
+        odl,
+        uuid(ab7c88bb-143e-4ea4-acc3-e4350b2106c3),
+        dual,
+        oleautomation
+    ]
+    interface IWMPMedia2 : IWMPMedia
+    {
+        [id(0x0300), propget]
+        HRESULT error([out, retval] IWMPErrorItem **out);
+    }
+
+    [
+        odl,
+        uuid(f118efc7-f03a-4fb4-99c9-1c02a5c1065b),
+        dual,
+        oleautomation
+    ]
+    interface IWMPMedia3 : IWMPMedia2
+    {
+        [id(0x0301)]
+        HRESULT getAttributeCountByType([in] BSTR type, [in] BSTR language, [out, retval] long *out);
+
+        [id(0x0302)]
+        HRESULT getItemInfoByType([in] BSTR type, [in] BSTR language, [in] long index, [out, retval] VARIANT *out);
     }
 
     [
@@ -1444,9 +1499,9 @@ library WMPLib {
         /* interface IWMPErrorItem2; */
         interface IWMPClosedCaption;
         interface IWMPDVD;
-        /* interface IWMPControls2; */
-        /* interface IWMPMedia2; */
-        /* interface IWMPMedia3; */
+        interface IWMPControls2;
+        interface IWMPMedia2;
+        interface IWMPMedia3;
         /* interface IWMPMetadataPicture; */
         /* interface IWMPMetadataText; */
         /* interface IWMPSettings2; */

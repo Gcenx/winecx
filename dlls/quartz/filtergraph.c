@@ -42,105 +42,12 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
-typedef struct {
-    HWND     hWnd;      /* Target window */
-    UINT     msg;       /* User window message */
-    LONG_PTR instance;  /* User data */
-    int      disabled;  /* Disabled messages posting */
-} WndNotify;
-
-typedef struct {
-    LONG lEventCode;   /* Event code */
-    LONG_PTR lParam1;  /* Param1 */
-    LONG_PTR lParam2;  /* Param2 */
-} Event;
-
-/* messages ring implementation for queuing events (taken from winmm) */
-#define EVENTS_RING_BUFFER_INCREMENT      64
-typedef struct {
-    Event* messages;
-    int ring_buffer_size;
-    int msg_tosave;
-    int msg_toget;
-    CRITICAL_SECTION msg_crst;
-    HANDLE msg_event; /* Signaled for no empty queue */
-} EventsQueue;
-
-static int EventsQueue_Init(EventsQueue* omr)
+struct media_event
 {
-    omr->msg_toget = 0;
-    omr->msg_tosave = 0;
-    omr->msg_event = CreateEventW(NULL, TRUE, FALSE, NULL);
-    omr->ring_buffer_size = EVENTS_RING_BUFFER_INCREMENT;
-    omr->messages = CoTaskMemAlloc(omr->ring_buffer_size * sizeof(Event));
-    ZeroMemory(omr->messages, omr->ring_buffer_size * sizeof(Event));
-
-    InitializeCriticalSection(&omr->msg_crst);
-    omr->msg_crst.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": EventsQueue.msg_crst");
-    return TRUE;
-}
-
-static int EventsQueue_Destroy(EventsQueue* omr)
-{
-    CloseHandle(omr->msg_event);
-    CoTaskMemFree(omr->messages);
-    omr->msg_crst.DebugInfo->Spare[0] = 0;
-    DeleteCriticalSection(&omr->msg_crst);
-    return TRUE;
-}
-
-static BOOL EventsQueue_PutEvent(EventsQueue* omr, const Event* evt)
-{
-    EnterCriticalSection(&omr->msg_crst);
-    if (omr->msg_toget == ((omr->msg_tosave + 1) % omr->ring_buffer_size))
-    {
-	int old_ring_buffer_size = omr->ring_buffer_size;
-	omr->ring_buffer_size += EVENTS_RING_BUFFER_INCREMENT;
-	TRACE("omr->ring_buffer_size=%d\n",omr->ring_buffer_size);
-	omr->messages = CoTaskMemRealloc(omr->messages, omr->ring_buffer_size * sizeof(Event));
-	/* Now we need to rearrange the ring buffer so that the new
-	   buffers just allocated are in between omr->msg_tosave and
-	   omr->msg_toget.
-	*/
-	if (omr->msg_tosave < omr->msg_toget)
-	{
-	    memmove(&(omr->messages[omr->msg_toget + EVENTS_RING_BUFFER_INCREMENT]),
-		    &(omr->messages[omr->msg_toget]),
-		    sizeof(Event)*(old_ring_buffer_size - omr->msg_toget)
-		    );
-	    omr->msg_toget += EVENTS_RING_BUFFER_INCREMENT;
-	}
-    }
-    omr->messages[omr->msg_tosave] = *evt;
-    SetEvent(omr->msg_event);
-    omr->msg_tosave = (omr->msg_tosave + 1) % omr->ring_buffer_size;
-    LeaveCriticalSection(&omr->msg_crst);
-    return TRUE;
-}
-
-static BOOL EventsQueue_GetEvent(EventsQueue* omr, Event* evt, LONG msTimeOut)
-{
-    if (WaitForSingleObject(omr->msg_event, msTimeOut) != WAIT_OBJECT_0)
-	return FALSE;
-	
-    EnterCriticalSection(&omr->msg_crst);
-
-    if (omr->msg_toget == omr->msg_tosave) /* buffer empty ? */
-    {
-        LeaveCriticalSection(&omr->msg_crst);
-	return FALSE;
-    }
-
-    *evt = omr->messages[omr->msg_toget];
-    omr->msg_toget = (omr->msg_toget + 1) % omr->ring_buffer_size;
-
-    /* Mark the buffer as empty if needed */
-    if (omr->msg_toget == omr->msg_tosave) /* buffer empty ? */
-	ResetEvent(omr->msg_event);
-
-    LeaveCriticalSection(&omr->msg_crst);
-    return TRUE;
-}
+    struct list entry;
+    LONG code;
+    LONG_PTR param1, param2;
+};
 
 #define MAX_ITF_CACHE_ENTRIES 3
 typedef struct _ITF_CACHE_ENTRY {
@@ -191,20 +98,32 @@ struct filter_graph
     struct list filters;
     unsigned int name_index;
 
-    OAFilterState state;
+    FILTER_STATE state;
     TP_WORK *async_run_work;
 
     IReferenceClock *refClock;
     IBaseFilter *refClockProvider;
-    EventsQueue evqueue;
+
+    /* We may indirectly wait for streaming threads while holding graph->cs in
+     * IMediaFilter::Stop() or IMediaSeeking::SetPositions(). Since streaming
+     * threads call IMediaEventSink::Notify() to queue EC_COMPLETE, we must
+     * use a separate lock to avoid them deadlocking on graph->cs. */
+    CRITICAL_SECTION event_cs;
+    struct list media_events;
+    HANDLE media_event_handle;
+    HWND media_event_window;
+    UINT media_event_message;
+    LPARAM media_event_lparam;
     HANDLE hEventCompletion;
     int CompletionStatus;
-    WndNotify notif;
     int nRenderers;
     int EcCompleteCount;
     int HandleEcComplete;
     int HandleEcRepaint;
     int HandleEcClockChanged;
+    unsigned int got_ec_complete : 1;
+    unsigned int media_events_disabled : 1;
+
     CRITICAL_SECTION cs;
     ITF_CACHE_ENTRY ItfCacheEntries[MAX_ITF_CACHE_ENTRIES];
     int nItfCacheEntries;
@@ -223,7 +142,6 @@ struct filter_graph
     LONGLONG current_pos;
 
     unsigned int needs_async_run : 1;
-    unsigned int got_ec_complete : 1;
 };
 
 struct enum_filters
@@ -263,7 +181,7 @@ static ULONG WINAPI EnumFilters_AddRef(IEnumFilters *iface)
     struct enum_filters *enum_filters = impl_from_IEnumFilters(iface);
     ULONG ref = InterlockedIncrement(&enum_filters->ref);
 
-    TRACE("%p increasing refcount to %u.\n", enum_filters, ref);
+    TRACE("%p increasing refcount to %lu.\n", enum_filters, ref);
 
     return ref;
 }
@@ -273,7 +191,7 @@ static ULONG WINAPI EnumFilters_Release(IEnumFilters *iface)
     struct enum_filters *enum_filters = impl_from_IEnumFilters(iface);
     ULONG ref = InterlockedDecrement(&enum_filters->ref);
 
-    TRACE("%p decreasing refcount to %u.\n", enum_filters, ref);
+    TRACE("%p decreasing refcount to %lu.\n", enum_filters, ref);
 
     if (!ref)
     {
@@ -290,7 +208,7 @@ static HRESULT WINAPI EnumFilters_Next(IEnumFilters *iface, ULONG count,
     struct enum_filters *enum_filters = impl_from_IEnumFilters(iface);
     unsigned int i = 0;
 
-    TRACE("enum_filters %p, count %u, filters %p, fetched %p.\n",
+    TRACE("enum_filters %p, count %lu, filters %p, fetched %p.\n",
             enum_filters, count, filters, fetched);
 
     if (enum_filters->version != enum_filters->graph->version)
@@ -320,7 +238,7 @@ static HRESULT WINAPI EnumFilters_Skip(IEnumFilters *iface, ULONG count)
 {
     struct enum_filters *enum_filters = impl_from_IEnumFilters(iface);
 
-    TRACE("enum_filters %p, count %u.\n", enum_filters, count);
+    TRACE("enum_filters %p, count %lu.\n", enum_filters, count);
 
     if (enum_filters->version != enum_filters->graph->version)
         return VFW_E_ENUM_OUT_OF_SYNC;
@@ -384,6 +302,39 @@ static HRESULT create_enum_filters(struct filter_graph *graph, struct list *curs
 
     *out = &enum_filters->IEnumFilters_iface;
     return S_OK;
+}
+
+static BOOL queue_media_event(struct filter_graph *graph, LONG code,
+        LONG_PTR param1, LONG_PTR param2)
+{
+    struct media_event *event;
+
+    if (!(event = malloc(sizeof(*event))))
+        return FALSE;
+
+    event->code = code;
+    event->param1 = param1;
+    event->param2 = param2;
+    list_add_tail(&graph->media_events, &event->entry);
+
+    SetEvent(graph->media_event_handle);
+    if (graph->media_event_window)
+        PostMessageW(graph->media_event_window, graph->media_event_message, 0, graph->media_event_lparam);
+
+    return TRUE;
+}
+
+static void flush_media_events(struct filter_graph *graph)
+{
+    struct list *cursor;
+
+    while ((cursor = list_head(&graph->media_events)))
+    {
+        struct media_event *event = LIST_ENTRY(cursor, struct media_event, entry);
+
+        list_remove(&event->entry);
+        free(event);
+    }
 }
 
 static struct filter_graph *impl_from_IUnknown(IUnknown *iface)
@@ -467,31 +418,34 @@ static HRESULT WINAPI FilterGraphInner_QueryInterface(IUnknown *iface, REFIID ri
 
 static ULONG WINAPI FilterGraphInner_AddRef(IUnknown *iface)
 {
-    struct filter_graph *This = impl_from_IUnknown(iface);
-    ULONG ref = InterlockedIncrement(&This->ref);
+    struct filter_graph *graph = impl_from_IUnknown(iface);
+    ULONG refcount = InterlockedIncrement(&graph->ref);
 
-    TRACE("(%p)->(): new ref = %d\n", This, ref);
+    TRACE("%p increasing refcount to %lu.\n", graph, refcount);
 
-    return ref;
+    return refcount;
 }
 
 static ULONG WINAPI FilterGraphInner_Release(IUnknown *iface)
 {
     struct filter_graph *This = impl_from_IUnknown(iface);
-    ULONG ref = InterlockedDecrement(&This->ref);
-    struct filter *filter, *next;
+    ULONG refcount = InterlockedDecrement(&This->ref);
+    struct list *cursor;
 
-    TRACE("(%p)->(): new ref = %d\n", This, ref);
+    TRACE("%p decreasing refcount to %lu.\n", This, refcount);
 
-    if (ref == 0) {
+    if (!refcount)
+    {
         int i;
 
         This->ref = 1; /* guard against reentrancy (aggregation). */
 
         IMediaControl_Stop(&This->IMediaControl_iface);
 
-        LIST_FOR_EACH_ENTRY_SAFE(filter, next, &This->filters, struct filter, entry)
+        while ((cursor = list_head(&This->filters)))
         {
+            struct filter *filter = LIST_ENTRY(cursor, struct filter, entry);
+
             IFilterGraph2_RemoveFilter(&This->IFilterGraph2_iface, filter->filter);
         }
 
@@ -508,8 +462,9 @@ static ULONG WINAPI FilterGraphInner_Release(IUnknown *iface)
 
         if (This->pSite) IUnknown_Release(This->pSite);
 
-	CloseHandle(This->hEventCompletion);
-	EventsQueue_Destroy(&This->evqueue);
+        flush_media_events(This);
+        CloseHandle(This->media_event_handle);
+
         This->cs.DebugInfo->Spare[0] = 0;
         if (This->message_thread)
         {
@@ -518,12 +473,11 @@ static ULONG WINAPI FilterGraphInner_Release(IUnknown *iface)
             CloseHandle(This->message_thread);
             CloseHandle(This->message_thread_ret);
         }
+        DeleteCriticalSection(&This->event_cs);
 	DeleteCriticalSection(&This->cs);
         free(This);
-
-        InterlockedDecrement(&object_locks);
     }
-    return ref;
+    return refcount;
 }
 
 static struct filter_graph *impl_from_IFilterGraph2(IFilterGraph2 *iface)
@@ -610,6 +564,7 @@ static void update_seeking(struct filter *filter)
 
 static BOOL is_renderer(struct filter *filter)
 {
+    IMediaPosition *media_position;
     IAMFilterMiscFlags *flags;
     BOOL ret = FALSE;
 
@@ -618,6 +573,12 @@ static BOOL is_renderer(struct filter *filter)
         if (IAMFilterMiscFlags_GetMiscFlags(flags) & AM_FILTER_MISC_FLAGS_IS_RENDERER)
             ret = TRUE;
         IAMFilterMiscFlags_Release(flags);
+    }
+    else if (SUCCEEDED(IBaseFilter_QueryInterface(filter->filter, &IID_IMediaPosition, (void **)&media_position)))
+    {
+        if (!has_output_pins(filter->filter))
+            ret = TRUE;
+        IMediaPosition_Release(media_position);
     }
     else
     {
@@ -734,7 +695,7 @@ static HRESULT WINAPI FilterGraph2_RemoveFilter(IFilterGraph2 *iface, IBaseFilte
                     {
                         if (FAILED(hr = IPin_Disconnect(peer)))
                         {
-                            WARN("Failed to disconnect peer %p, hr %#x.\n", peer, hr);
+                            WARN("Failed to disconnect peer %p, hr %#lx.\n", peer, hr);
                             IPin_Release(peer);
                             IPin_Release(ppin);
                             IEnumPins_Release(penumpins);
@@ -744,7 +705,7 @@ static HRESULT WINAPI FilterGraph2_RemoveFilter(IFilterGraph2 *iface, IBaseFilte
 
                         if (FAILED(hr = IPin_Disconnect(ppin)))
                         {
-                            WARN("Failed to disconnect pin %p, hr %#x.\n", ppin, hr);
+                            WARN("Failed to disconnect pin %p, hr %#lx.\n", ppin, hr);
                             IPin_Release(ppin);
                             IEnumPins_Release(penumpins);
                             return hr;
@@ -811,80 +772,66 @@ static HRESULT WINAPI FilterGraph2_FindFilterByName(IFilterGraph2 *iface,
     return VFW_E_NOT_FOUND;
 }
 
-/* Don't allow a circular connection to form, return VFW_E_CIRCULAR_GRAPH if this would be the case.
- * A circular connection will be formed if from the filter of the output pin, the input pin can be reached
- */
-static HRESULT CheckCircularConnection(struct filter_graph *This, IPin *out, IPin *in)
+static HRESULT check_cyclic_connection(IPin *source, IPin *sink)
 {
-#if 1
+    IPin *upstream_source, *upstream_sink;
+    PIN_INFO source_info, sink_info;
+    IEnumPins *enumpins;
     HRESULT hr;
-    PIN_INFO info_out, info_in;
 
-    hr = IPin_QueryPinInfo(out, &info_out);
+    hr = IPin_QueryPinInfo(sink, &sink_info);
     if (FAILED(hr))
+    {
+        ERR("Failed to query pin, hr %#lx.\n", hr);
         return hr;
-    if (info_out.dir != PINDIR_OUTPUT)
-    {
-        IBaseFilter_Release(info_out.pFilter);
-        return VFW_E_CANNOT_CONNECT;
     }
+    IBaseFilter_Release(sink_info.pFilter);
 
-    hr = IPin_QueryPinInfo(in, &info_in);
-    if (SUCCEEDED(hr))
-        IBaseFilter_Release(info_in.pFilter);
+    hr = IPin_QueryPinInfo(source, &source_info);
     if (FAILED(hr))
-        goto out;
-    if (info_in.dir != PINDIR_INPUT)
     {
-        hr = VFW_E_CANNOT_CONNECT;
-        goto out;
+        ERR("Failed to query pin, hr %#lx.\n", hr);
+        return hr;
     }
 
-    if (info_out.pFilter == info_in.pFilter)
-        hr = VFW_E_CIRCULAR_GRAPH;
-    else
+    if (sink_info.pFilter == source_info.pFilter)
     {
-        IEnumPins *enumpins;
-        IPin *test;
+        WARN("Cyclic connection detected; returning VFW_E_CIRCULAR_GRAPH.\n");
+        IBaseFilter_Release(source_info.pFilter);
+        return VFW_E_CIRCULAR_GRAPH;
+    }
 
-        hr = IBaseFilter_EnumPins(info_out.pFilter, &enumpins);
-        if (FAILED(hr))
-            goto out;
+    hr = IBaseFilter_EnumPins(source_info.pFilter, &enumpins);
+    if (FAILED(hr))
+    {
+        ERR("Failed to enumerate pins, hr %#lx.\n", hr);
+        IBaseFilter_Release(source_info.pFilter);
+        return hr;
+    }
 
-        IEnumPins_Reset(enumpins);
-        while ((hr = IEnumPins_Next(enumpins, 1, &test, NULL)) == S_OK)
+    while ((hr = IEnumPins_Next(enumpins, 1, &upstream_sink, NULL)) == S_OK)
+    {
+        PIN_DIRECTION dir = PINDIR_OUTPUT;
+
+        IPin_QueryDirection(upstream_sink, &dir);
+        if (dir == PINDIR_INPUT && IPin_ConnectedTo(upstream_sink, &upstream_source) == S_OK)
         {
-            PIN_DIRECTION dir = PINDIR_OUTPUT;
-            IPin_QueryDirection(test, &dir);
-            if (dir == PINDIR_INPUT)
+            hr = check_cyclic_connection(upstream_source, sink);
+            IPin_Release(upstream_source);
+            if (FAILED(hr))
             {
-                IPin *victim = NULL;
-                IPin_ConnectedTo(test, &victim);
-                if (victim)
-                {
-                    hr = CheckCircularConnection(This, victim, in);
-                    IPin_Release(victim);
-                    if (FAILED(hr))
-                    {
-                        IPin_Release(test);
-                        break;
-                    }
-                }
+                IPin_Release(upstream_sink);
+                IEnumPins_Release(enumpins);
+                IBaseFilter_Release(source_info.pFilter);
+                return hr;
             }
-            IPin_Release(test);
         }
-        IEnumPins_Release(enumpins);
+        IPin_Release(upstream_sink);
     }
+    IEnumPins_Release(enumpins);
 
-out:
-    IBaseFilter_Release(info_out.pFilter);
-    if (FAILED(hr))
-        ERR("Checking filtergraph returned %08x, something's not right!\n", hr);
-    return hr;
-#else
-    /* Debugging filtergraphs not enabled */
+    IBaseFilter_Release(source_info.pFilter);
     return S_OK;
-#endif
 }
 
 static struct filter *find_sorted_filter(struct filter_graph *graph, IBaseFilter *iface)
@@ -910,7 +857,7 @@ static void sort_filter_recurse(struct filter_graph *graph, struct filter *filte
 
     TRACE("Sorting filter %p.\n", filter->filter);
 
-    /* Cyclic connections should be caught by CheckCircularConnection(). */
+    /* Cyclic connections should be caught by check_cyclic_connection(). */
     assert(!filter->sorting);
 
     filter->sorting = TRUE;
@@ -990,13 +937,13 @@ static HRESULT WINAPI FilterGraph2_ConnectDirect(IFilterGraph2 *iface, IPin *ppi
     {
         if (dir == PINDIR_INPUT)
         {
-            hr = CheckCircularConnection(This, ppinOut, ppinIn);
+            hr = check_cyclic_connection(ppinOut, ppinIn);
             if (SUCCEEDED(hr))
                 hr = IPin_Connect(ppinOut, ppinIn, pmt);
         }
         else
         {
-            hr = CheckCircularConnection(This, ppinIn, ppinOut);
+            hr = check_cyclic_connection(ppinIn, ppinOut);
             if (SUCCEEDED(hr))
                 hr = IPin_Connect(ppinIn, ppinOut, pmt);
         }
@@ -1318,7 +1265,7 @@ static HRESULT autoplug(struct filter_graph *graph, IPin *source, IPin *sink,
 
             if (callback && FAILED(hr = IAMGraphBuilderCallback_SelectedFilter(callback, moniker)))
             {
-                TRACE("Filter rejected by IAMGraphBuilderCallback::SelectedFilter(), hr %#x.\n", hr);
+                TRACE("Filter rejected by IAMGraphBuilderCallback::SelectedFilter(), hr %#lx.\n", hr);
                 IMoniker_Release(moniker);
                 continue;
             }
@@ -1327,14 +1274,14 @@ static HRESULT autoplug(struct filter_graph *graph, IPin *source, IPin *sink,
             IMoniker_Release(moniker);
             if (FAILED(hr))
             {
-                ERR("Failed to create filter for %s, hr %#x.\n", debugstr_w(V_BSTR(&var)), hr);
+                ERR("Failed to create filter for %s, hr %#lx.\n", debugstr_w(V_BSTR(&var)), hr);
                 VariantClear(&var);
                 continue;
             }
 
             if (callback && FAILED(hr = IAMGraphBuilderCallback_CreatedFilter(callback, filter)))
             {
-                TRACE("Filter rejected by IAMGraphBuilderCallback::CreatedFilter(), hr %#x.\n", hr);
+                TRACE("Filter rejected by IAMGraphBuilderCallback::CreatedFilter(), hr %#lx.\n", hr);
                 IBaseFilter_Release(filter);
                 continue;
             }
@@ -1343,7 +1290,7 @@ static HRESULT autoplug(struct filter_graph *graph, IPin *source, IPin *sink,
             VariantClear(&var);
             if (FAILED(hr))
             {
-                ERR("Failed to add filter, hr %#x.\n", hr);
+                ERR("Failed to add filter, hr %#lx.\n", hr);
                 IBaseFilter_Release(filter);
                 continue;
             }
@@ -1401,7 +1348,7 @@ static HRESULT WINAPI FilterGraph2_Connect(IFilterGraph2 *iface, IPin *source, I
 
     LeaveCriticalSection(&graph->cs);
 
-    TRACE("Returning %#x.\n", hr);
+    TRACE("Returning %#lx.\n", hr);
     return hr;
 }
 
@@ -1501,7 +1448,7 @@ static HRESULT WINAPI FilterGraph2_Render(IFilterGraph2 *iface, IPin *source)
     if (FAILED(hr) && needs_mp3_hack() && is_fallout3_mp3_source(source))
         hr = S_OK;
 
-    TRACE("Returning %#x.\n", hr);
+    TRACE("Returning %#lx.\n", hr);
     return hr;
 }
 
@@ -1551,7 +1498,11 @@ static HRESULT WINAPI FilterGraph2_RenderFile(IFilterGraph2 *iface, LPCWSTR lpcw
         }
         IEnumPins_Release(penumpins);
 
-        if (!any) {
+        if (!any)
+        {
+            if (FAILED(hr = IFilterGraph2_RemoveFilter(iface, preader)))
+                ERR("Failed to remove source filter, hr %#lx.\n", hr);
+
             /* CW HACK 19248 */
             if (needs_mp3_hack() && is_mp3_file(lpcwstrFile))
                 hr = S_OK;
@@ -1559,13 +1510,17 @@ static HRESULT WINAPI FilterGraph2_RenderFile(IFilterGraph2 *iface, LPCWSTR lpcw
                 hr = VFW_E_CANNOT_RENDER;
         }
         else if (partial)
+        {
             hr = VFW_S_PARTIAL_RENDER;
+        }
         else
+        {
             hr = S_OK;
+        }
     }
     IBaseFilter_Release(preader);
 
-    TRACE("--> %08x\n", hr);
+    TRACE("Returning %#lx.\n", hr);
     return hr;
 }
 
@@ -1588,13 +1543,13 @@ static HRESULT WINAPI FilterGraph2_AddSourceFilter(IFilterGraph2 *iface,
     if (FAILED(hr = CoCreateInstance(&clsid, NULL, CLSCTX_INPROC_SERVER,
             &IID_IBaseFilter, (void **)&filter)))
     {
-        WARN("Failed to create filter, hr %#x.\n", hr);
+        WARN("Failed to create filter, hr %#lx.\n", hr);
         return hr;
     }
 
     if (FAILED(hr = IBaseFilter_QueryInterface(filter, &IID_IFileSourceFilter, (void **)&filesource)))
     {
-        WARN("Failed to get IFileSourceFilter, hr %#x.\n", hr);
+        WARN("Failed to get IFileSourceFilter, hr %#lx.\n", hr);
         IBaseFilter_Release(filter);
         return hr;
     }
@@ -1603,7 +1558,7 @@ static HRESULT WINAPI FilterGraph2_AddSourceFilter(IFilterGraph2 *iface,
     IFileSourceFilter_Release(filesource);
     if (FAILED(hr))
     {
-        WARN("Failed to load file, hr %#x.\n", hr);
+        WARN("Failed to load file, hr %#lx.\n", hr);
         return hr;
     }
 
@@ -1618,11 +1573,11 @@ static HRESULT WINAPI FilterGraph2_AddSourceFilter(IFilterGraph2 *iface,
     return S_OK;
 }
 
-static HRESULT WINAPI FilterGraph2_SetLogFile(IFilterGraph2 *iface, DWORD_PTR hFile)
+static HRESULT WINAPI FilterGraph2_SetLogFile(IFilterGraph2 *iface, DWORD_PTR file)
 {
-    struct filter_graph *This = impl_from_IFilterGraph2(iface);
+    struct filter_graph *graph = impl_from_IFilterGraph2(iface);
 
-    TRACE("(%p/%p)->(%08x): stub !!!\n", This, iface, (DWORD) hFile);
+    TRACE("graph %p, file %#Ix.\n", graph, file);
 
     return S_OK;
 }
@@ -1657,13 +1612,13 @@ static HRESULT WINAPI FilterGraph2_AddSourceFilterForMoniker(IFilterGraph2 *ifac
 
     hr = IMoniker_BindToObject(pMoniker, pCtx, NULL, &IID_IBaseFilter, (void**)&pfilter);
     if(FAILED(hr)) {
-        WARN("Unable to bind moniker to filter object (%x)\n", hr);
+        WARN("Failed to bind moniker, hr %#lx.\n", hr);
         return hr;
     }
 
     hr = IFilterGraph2_AddFilter(iface, pfilter, lpcwstrFilterName);
     if (FAILED(hr)) {
-        WARN("Unable to add filter (%x)\n", hr);
+        WARN("Failed to add filter, hr %#lx.\n", hr);
         IBaseFilter_Release(pfilter);
         return hr;
     }
@@ -1705,10 +1660,10 @@ static HRESULT WINAPI FilterGraph2_RenderEx(IFilterGraph2 *iface, IPin *source, 
     struct filter_graph *graph = impl_from_IFilterGraph2(iface);
     HRESULT hr;
 
-    TRACE("graph %p, source %p, flags %#x, context %p.\n", graph, source, flags, context);
+    TRACE("graph %p, source %p, flags %#lx, context %p.\n", graph, source, flags, context);
 
     if (flags & ~AM_RENDEREX_RENDERTOEXISTINGRENDERERS)
-        FIXME("Unknown flags %#x.\n", flags);
+        FIXME("Unknown flags %#lx.\n", flags);
 
     EnterCriticalSection(&graph->cs);
     hr = autoplug(graph, source, NULL, !!(flags & AM_RENDEREX_RENDERTOEXISTINGRENDERERS), 0);
@@ -1716,7 +1671,7 @@ static HRESULT WINAPI FilterGraph2_RenderEx(IFilterGraph2 *iface, IPin *source, 
     if (hr == VFW_E_CANNOT_CONNECT)
         hr = VFW_E_CANNOT_RENDER;
 
-    TRACE("Returning %#x.\n", hr);
+    TRACE("Returning %#lx.\n", hr);
     return hr;
 }
 
@@ -1770,47 +1725,52 @@ static ULONG WINAPI MediaControl_Release(IMediaControl *iface)
 
 }
 
-/*** IDispatch methods ***/
-static HRESULT WINAPI MediaControl_GetTypeInfoCount(IMediaControl *iface, UINT *pctinfo)
+static HRESULT WINAPI MediaControl_GetTypeInfoCount(IMediaControl *iface, UINT *count)
 {
-    struct filter_graph *This = impl_from_IMediaControl(iface);
-
-    TRACE("(%p/%p)->(%p): stub !!!\n", This, iface, pctinfo);
-
+    TRACE("iface %p, count %p.\n", iface, count);
+    *count = 1;
     return S_OK;
 }
 
-static HRESULT WINAPI MediaControl_GetTypeInfo(IMediaControl *iface, UINT iTInfo, LCID lcid,
-        ITypeInfo **ppTInfo)
+static HRESULT WINAPI MediaControl_GetTypeInfo(IMediaControl *iface, UINT index,
+        LCID lcid, ITypeInfo **typeinfo)
 {
-    struct filter_graph *This = impl_from_IMediaControl(iface);
-
-    TRACE("(%p/%p)->(%d, %d, %p): stub !!!\n", This, iface, iTInfo, lcid, ppTInfo);
-
-    return S_OK;
+    TRACE("iface %p, index %u, lcid %#lx, typeinfo %p.\n", iface, index, lcid, typeinfo);
+    return strmbase_get_typeinfo(IMediaControl_tid, typeinfo);
 }
 
-static HRESULT WINAPI MediaControl_GetIDsOfNames(IMediaControl *iface, REFIID riid,
-        LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
+static HRESULT WINAPI MediaControl_GetIDsOfNames(IMediaControl *iface, REFIID iid,
+        LPOLESTR *names, UINT count, LCID lcid, DISPID *ids)
 {
-    struct filter_graph *This = impl_from_IMediaControl(iface);
+    ITypeInfo *typeinfo;
+    HRESULT hr;
 
-    TRACE("(%p/%p)->(%s, %p, %d, %d, %p): stub !!!\n", This, iface, debugstr_guid(riid), rgszNames,
-            cNames, lcid, rgDispId);
+    TRACE("iface %p, iid %s, names %p, count %u, lcid %#lx, ids %p.\n",
+            iface, debugstr_guid(iid), names, count, lcid, ids);
 
-    return S_OK;
+    if (SUCCEEDED(hr = strmbase_get_typeinfo(IMediaControl_tid, &typeinfo)))
+    {
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, names, count, ids);
+        ITypeInfo_Release(typeinfo);
+    }
+    return hr;
 }
 
-static HRESULT WINAPI MediaControl_Invoke(IMediaControl *iface, DISPID dispIdMember, REFIID riid,
-        LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExepInfo,
-        UINT *puArgErr)
+static HRESULT WINAPI MediaControl_Invoke(IMediaControl *iface, DISPID id, REFIID iid, LCID lcid,
+        WORD flags, DISPPARAMS *params, VARIANT *result, EXCEPINFO *excepinfo, UINT *error_arg)
 {
-    struct filter_graph *This = impl_from_IMediaControl(iface);
+    ITypeInfo *typeinfo;
+    HRESULT hr;
 
-    TRACE("(%p/%p)->(%d, %s, %d, %04x, %p, %p, %p, %p): stub !!!\n", This, iface, dispIdMember,
-            debugstr_guid(riid), lcid, wFlags, pDispParams, pVarResult, pExepInfo, puArgErr);
+    TRACE("iface %p, id %ld, iid %s, lcid %#lx, flags %#x, params %p, result %p, excepinfo %p, error_arg %p.\n",
+            iface, id, debugstr_guid(iid), lcid, flags, params, result, excepinfo, error_arg);
 
-    return S_OK;
+    if (SUCCEEDED(hr = strmbase_get_typeinfo(IMediaControl_tid, &typeinfo)))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, iface, id, flags, params, result, excepinfo, error_arg);
+        ITypeInfo_Release(typeinfo);
+    }
+    return hr;
 }
 
 static void update_render_count(struct filter_graph *graph)
@@ -1829,12 +1789,26 @@ static void update_render_count(struct filter_graph *graph)
 /* Perform the paused -> running transition. The caller must hold graph->cs. */
 static HRESULT graph_start(struct filter_graph *graph, REFERENCE_TIME stream_start)
 {
+    struct media_event *event, *next;
     REFERENCE_TIME stream_stop;
     struct filter *filter;
     HRESULT hr = S_OK;
 
+    EnterCriticalSection(&graph->event_cs);
     graph->EcCompleteCount = 0;
     update_render_count(graph);
+    LeaveCriticalSection(&graph->event_cs);
+
+    LIST_FOR_EACH_ENTRY_SAFE(event, next, &graph->media_events, struct media_event, entry)
+    {
+        if (event->code == EC_COMPLETE)
+        {
+            list_remove(&event->entry);
+            free(event);
+        }
+    }
+    if (list_empty(&graph->media_events))
+        ResetEvent(graph->media_event_handle);
 
     if (graph->defaultclock && !graph->refClock)
         IFilterGraph2_SetDefaultSyncSource(&graph->IFilterGraph2_iface);
@@ -1856,11 +1830,11 @@ static HRESULT graph_start(struct filter_graph *graph, REFERENCE_TIME stream_sta
         HRESULT filter_hr = IBaseFilter_Run(filter->filter, stream_start);
         if (hr == S_OK)
             hr = filter_hr;
-        TRACE("Filter %p returned %#x.\n", filter->filter, filter_hr);
+        TRACE("Filter %p returned %#lx.\n", filter->filter, filter_hr);
     }
 
     if (FAILED(hr))
-        WARN("Failed to start stream, hr %#x.\n", hr);
+        WARN("Failed to start stream, hr %#lx.\n", hr);
 
     return hr;
 }
@@ -1940,7 +1914,10 @@ static HRESULT WINAPI MediaControl_Run(IMediaControl *iface)
     }
 
     sort_filters(graph);
+
+    EnterCriticalSection(&graph->event_cs);
     update_render_count(graph);
+    LeaveCriticalSection(&graph->event_cs);
 
     if (graph->state == State_Stopped)
     {
@@ -1952,7 +1929,7 @@ static HRESULT WINAPI MediaControl_Run(IMediaControl *iface)
             HRESULT filter_hr = IBaseFilter_Pause(filter->filter);
             if (hr == S_OK)
                 hr = filter_hr;
-            TRACE("Filter %p returned %#x.\n", filter->filter, filter_hr);
+            TRACE("Filter %p returned %#lx.\n", filter->filter, filter_hr);
 
             /* If a filter returns VFW_S_CANT_CUE, we shouldn't wait for a
              * paused state. */
@@ -1964,7 +1941,7 @@ static HRESULT WINAPI MediaControl_Run(IMediaControl *iface)
         if (FAILED(hr))
         {
             LeaveCriticalSection(&graph->cs);
-            WARN("Failed to pause, hr %#x.\n", hr);
+            WARN("Failed to pause, hr %#lx.\n", hr);
             return hr;
         }
     }
@@ -2012,7 +1989,7 @@ static HRESULT WINAPI MediaControl_GetState(IMediaControl *iface, LONG timeout, 
 {
     struct filter_graph *graph = impl_from_IMediaControl(iface);
 
-    TRACE("graph %p, timeout %u, state %p.\n", graph, timeout, state);
+    TRACE("graph %p, timeout %ld, state %p.\n", graph, timeout, state);
 
     if (timeout < 0) timeout = INFINITE;
 
@@ -2063,13 +2040,13 @@ static void CALLBACK wait_pause_cb(TP_CALLBACK_INSTANCE *instance, void *context
     HRESULT hr;
 
     if ((hr = IMediaControl_GetState(control, INFINITE, &state)) != S_OK)
-        ERR("Failed to get paused state, hr %#x.\n", hr);
+        ERR("Failed to get paused state, hr %#lx.\n", hr);
 
     if (FAILED(hr = IMediaControl_Stop(control)))
-        ERR("Failed to stop, hr %#x.\n", hr);
+        ERR("Failed to stop, hr %#lx.\n", hr);
 
     if ((hr = IMediaControl_GetState(control, INFINITE, &state)) != S_OK)
-        ERR("Failed to get paused state, hr %#x.\n", hr);
+        ERR("Failed to get paused state, hr %#lx.\n", hr);
 
     IMediaControl_Release(control);
 }
@@ -2081,7 +2058,7 @@ static void CALLBACK wait_stop_cb(TP_CALLBACK_INSTANCE *instance, void *context)
     HRESULT hr;
 
     if ((hr = IMediaControl_GetState(control, INFINITE, &state)) != S_OK)
-        ERR("Failed to get state, hr %#x.\n", hr);
+        ERR("Failed to get state, hr %#lx.\n", hr);
 
     IMediaControl_Release(control);
 }
@@ -2167,9 +2144,6 @@ static HRESULT all_renderers_seek(struct filter_graph *This, fnFoundSeek FoundSe
     BOOL allnotimpl = TRUE;
     HRESULT hr, hr_return = S_OK;
     struct filter *filter;
-
-    TRACE("(%p)->(%p %08lx)\n", This, FoundSeek, arg);
-    /* Send a message to all renderers, they are responsible for broadcasting it further */
 
     LIST_FOR_EACH_ENTRY(filter, &This->filters, struct filter, entry)
     {
@@ -2316,9 +2290,6 @@ static HRESULT WINAPI MediaSeeking_SetTimeFormat(IMediaSeeking *iface, const GUI
 
     TRACE("(%p/%p)->(%s)\n", This, iface, debugstr_guid(pFormat));
 
-    if (This->state != State_Stopped)
-        return VFW_E_WRONG_STATE;
-
     if (!IsEqualGUID(&TIME_FORMAT_MEDIA_TIME, pFormat))
     {
         FIXME("Unhandled time format %s\n", debugstr_guid(pFormat));
@@ -2365,7 +2336,7 @@ static HRESULT WINAPI MediaSeeking_GetDuration(IMediaSeeking *iface, LONGLONG *d
 
     LeaveCriticalSection(&graph->cs);
 
-    TRACE("Returning hr %#x, duration %s (%s seconds).\n", hr,
+    TRACE("Returning hr %#lx, duration %s (%s seconds).\n", hr,
             wine_dbgstr_longlong(*duration), debugstr_time(*duration));
     return hr;
 }
@@ -2473,7 +2444,7 @@ static HRESULT WINAPI MediaSeeking_SetPositions(IMediaSeeking *iface, LONGLONG *
     struct filter *filter;
     FILTER_STATE state;
 
-    TRACE("graph %p, current %s, current_flags %#x, stop %s, stop_flags %#x.\n", graph,
+    TRACE("graph %p, current %s, current_flags %#lx, stop %s, stop_flags %#lx.\n", graph,
             current_ptr ? wine_dbgstr_longlong(*current_ptr) : "<null>", current_flags,
             stop_ptr ? wine_dbgstr_longlong(*stop_ptr): "<null>", stop_flags);
     if (current_ptr)
@@ -2485,11 +2456,11 @@ static HRESULT WINAPI MediaSeeking_SetPositions(IMediaSeeking *iface, LONGLONG *
 
     if ((current_flags & 0x7) != AM_SEEKING_AbsolutePositioning
             && (current_flags & 0x7) != AM_SEEKING_NoPositioning)
-        FIXME("Unhandled current_flags %#x.\n", current_flags & 0x7);
+        FIXME("Unhandled current_flags %#lx.\n", current_flags & 0x7);
 
     if ((stop_flags & 0x7) != AM_SEEKING_NoPositioning
             && (stop_flags & 0x7) != AM_SEEKING_AbsolutePositioning)
-        FIXME("Unhandled stop_flags %#x.\n", stop_flags & 0x7);
+        FIXME("Unhandled stop_flags %#lx.\n", stop_flags & 0x7);
 
     EnterCriticalSection(&graph->cs);
 
@@ -2644,29 +2615,52 @@ static ULONG WINAPI MediaPosition_Release(IMediaPosition *iface)
     return IUnknown_Release(graph->outer_unk);
 }
 
-/*** IDispatch methods ***/
-static HRESULT WINAPI MediaPosition_GetTypeInfoCount(IMediaPosition *iface, UINT* pctinfo)
+static HRESULT WINAPI MediaPosition_GetTypeInfoCount(IMediaPosition *iface, UINT *count)
 {
-    FIXME("(%p) stub!\n", iface);
-    return E_NOTIMPL;
+    TRACE("iface %p, count %p.\n", iface, count);
+    *count = 1;
+    return S_OK;
 }
 
-static HRESULT WINAPI MediaPosition_GetTypeInfo(IMediaPosition *iface, UINT iTInfo, LCID lcid, ITypeInfo** ppTInfo)
+static HRESULT WINAPI MediaPosition_GetTypeInfo(IMediaPosition *iface, UINT index,
+        LCID lcid, ITypeInfo **typeinfo)
 {
-    FIXME("(%p) stub!\n", iface);
-    return E_NOTIMPL;
+    TRACE("iface %p, index %u, lcid %#lx, typeinfo %p.\n", iface, index, lcid, typeinfo);
+    return strmbase_get_typeinfo(IMediaPosition_tid, typeinfo);
 }
 
-static HRESULT WINAPI MediaPosition_GetIDsOfNames(IMediaPosition* iface, REFIID riid, LPOLESTR* rgszNames, UINT cNames, LCID lcid, DISPID* rgDispId)
+static HRESULT WINAPI MediaPosition_GetIDsOfNames(IMediaPosition *iface, REFIID iid,
+        LPOLESTR *names, UINT count, LCID lcid, DISPID *ids)
 {
-    FIXME("(%p) stub!\n", iface);
-    return E_NOTIMPL;
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("iface %p, iid %s, names %p, count %u, lcid %#lx, ids %p.\n",
+            iface, debugstr_guid(iid), names, count, lcid, ids);
+
+    if (SUCCEEDED(hr = strmbase_get_typeinfo(IMediaPosition_tid, &typeinfo)))
+    {
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, names, count, ids);
+        ITypeInfo_Release(typeinfo);
+    }
+    return hr;
 }
 
-static HRESULT WINAPI MediaPosition_Invoke(IMediaPosition* iface, DISPID dispIdMember, REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS* pDispParams, VARIANT* pVarResult, EXCEPINFO* pExcepInfo, UINT* puArgErr)
+static HRESULT WINAPI MediaPosition_Invoke(IMediaPosition *iface, DISPID id, REFIID iid, LCID lcid,
+        WORD flags, DISPPARAMS *params, VARIANT *result, EXCEPINFO *excepinfo, UINT *error_arg)
 {
-    FIXME("(%p) stub!\n", iface);
-    return E_NOTIMPL;
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("iface %p, id %ld, iid %s, lcid %#lx, flags %#x, params %p, result %p, excepinfo %p, error_arg %p.\n",
+            iface, id, debugstr_guid(iid), lcid, flags, params, result, excepinfo, error_arg);
+
+    if (SUCCEEDED(hr = strmbase_get_typeinfo(IMediaPosition_tid, &typeinfo)))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, iface, id, flags, params, result, excepinfo, error_arg);
+        ITypeInfo_Release(typeinfo);
+    }
+    return hr;
 }
 
 static HRESULT ConvertFromREFTIME(IMediaSeeking *seek, REFTIME time_in, LONGLONG *time_out)
@@ -2960,7 +2954,7 @@ static HRESULT WINAPI BasicAudio_GetTypeInfoCount(IBasicAudio *iface, UINT *coun
 static HRESULT WINAPI BasicAudio_GetTypeInfo(IBasicAudio *iface, UINT index,
         LCID lcid, ITypeInfo **typeinfo)
 {
-    TRACE("iface %p, index %u, lcid %#x, typeinfo %p.\n", iface, index, lcid, typeinfo);
+    TRACE("iface %p, index %u, lcid %#lx, typeinfo %p.\n", iface, index, lcid, typeinfo);
     return strmbase_get_typeinfo(IBasicAudio_tid, typeinfo);
 }
 
@@ -2970,7 +2964,7 @@ static HRESULT WINAPI BasicAudio_GetIDsOfNames(IBasicAudio *iface, REFIID iid,
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("iface %p, iid %s, names %p, count %u, lcid %#x, ids %p.\n",
+    TRACE("iface %p, iid %s, names %p, count %u, lcid %#lx, ids %p.\n",
             iface, debugstr_guid(iid), names, count, lcid, ids);
 
     if (SUCCEEDED(hr = strmbase_get_typeinfo(IBasicAudio_tid, &typeinfo)))
@@ -2987,7 +2981,7 @@ static HRESULT WINAPI BasicAudio_Invoke(IBasicAudio *iface, DISPID id, REFIID ii
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("iface %p, id %d, iid %s, lcid %#x, flags %#x, params %p, result %p, excepinfo %p, error_arg %p.\n",
+    TRACE("iface %p, id %ld, iid %s, lcid %#lx, flags %#x, params %p, result %p, excepinfo %p, error_arg %p.\n",
             iface, id, debugstr_guid(iid), lcid, flags, params, result, excepinfo, error_arg);
 
     if (SUCCEEDED(hr = strmbase_get_typeinfo(IBasicAudio_tid, &typeinfo)))
@@ -3005,7 +2999,7 @@ static HRESULT WINAPI BasicAudio_put_Volume(IBasicAudio *iface, LONG lVolume)
     IBasicAudio* pBasicAudio;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, lVolume);
+    TRACE("graph %p, volume %ld.\n", This, lVolume);
 
     EnterCriticalSection(&This->cs);
 
@@ -3045,7 +3039,7 @@ static HRESULT WINAPI BasicAudio_put_Balance(IBasicAudio *iface, LONG lBalance)
     IBasicAudio* pBasicAudio;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, lBalance);
+    TRACE("graph %p, balance %ld.\n", This, lBalance);
 
     EnterCriticalSection(&This->cs);
 
@@ -3127,7 +3121,7 @@ static HRESULT WINAPI BasicVideo_GetTypeInfoCount(IBasicVideo2 *iface, UINT *cou
 static HRESULT WINAPI BasicVideo_GetTypeInfo(IBasicVideo2 *iface, UINT index,
         LCID lcid, ITypeInfo **typeinfo)
 {
-    TRACE("iface %p, index %u, lcid %#x, typeinfo %p.\n", iface, index, lcid, typeinfo);
+    TRACE("iface %p, index %u, lcid %#lx, typeinfo %p.\n", iface, index, lcid, typeinfo);
     return strmbase_get_typeinfo(IBasicVideo_tid, typeinfo);
 }
 
@@ -3137,7 +3131,7 @@ static HRESULT WINAPI BasicVideo_GetIDsOfNames(IBasicVideo2 *iface, REFIID iid,
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("iface %p, iid %s, names %p, count %u, lcid %#x, ids %p.\n",
+    TRACE("iface %p, iid %s, names %p, count %u, lcid %#lx, ids %p.\n",
             iface, debugstr_guid(iid), names, count, lcid, ids);
 
     if (SUCCEEDED(hr = strmbase_get_typeinfo(IBasicVideo_tid, &typeinfo)))
@@ -3154,7 +3148,7 @@ static HRESULT WINAPI BasicVideo_Invoke(IBasicVideo2 *iface, DISPID id, REFIID i
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("iface %p, id %d, iid %s, lcid %#x, flags %#x, params %p, result %p, excepinfo %p, error_arg %p.\n",
+    TRACE("iface %p, id %ld, iid %s, lcid %#lx, flags %#x, params %p, result %p, excepinfo %p, error_arg %p.\n",
             iface, id, debugstr_guid(iid), lcid, flags, params, result, excepinfo, error_arg);
 
     if (SUCCEEDED(hr = strmbase_get_typeinfo(IBasicVideo_tid, &typeinfo)))
@@ -3272,7 +3266,7 @@ static HRESULT WINAPI BasicVideo_put_SourceLeft(IBasicVideo2 *iface, LONG Source
     IBasicVideo *pBasicVideo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, SourceLeft);
+    TRACE("graph %p, left %ld.\n", This, SourceLeft);
 
     EnterCriticalSection(&This->cs);
 
@@ -3312,7 +3306,7 @@ static HRESULT WINAPI BasicVideo_put_SourceWidth(IBasicVideo2 *iface, LONG Sourc
     IBasicVideo *pBasicVideo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, SourceWidth);
+    TRACE("graph %p, width %ld.\n", This, SourceWidth);
 
     EnterCriticalSection(&This->cs);
 
@@ -3352,7 +3346,7 @@ static HRESULT WINAPI BasicVideo_put_SourceTop(IBasicVideo2 *iface, LONG SourceT
     IBasicVideo *pBasicVideo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, SourceTop);
+    TRACE("graph %p, top %ld.\n", This, SourceTop);
 
     EnterCriticalSection(&This->cs);
 
@@ -3392,7 +3386,7 @@ static HRESULT WINAPI BasicVideo_put_SourceHeight(IBasicVideo2 *iface, LONG Sour
     IBasicVideo *pBasicVideo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, SourceHeight);
+    TRACE("graph %p, height %ld.\n", This, SourceHeight);
 
     EnterCriticalSection(&This->cs);
 
@@ -3432,7 +3426,7 @@ static HRESULT WINAPI BasicVideo_put_DestinationLeft(IBasicVideo2 *iface, LONG D
     IBasicVideo *pBasicVideo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, DestinationLeft);
+    TRACE("graph %p, left %ld.\n", This, DestinationLeft);
 
     EnterCriticalSection(&This->cs);
 
@@ -3472,7 +3466,7 @@ static HRESULT WINAPI BasicVideo_put_DestinationWidth(IBasicVideo2 *iface, LONG 
     IBasicVideo *pBasicVideo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, DestinationWidth);
+    TRACE("graph %p, width %ld.\n", This, DestinationWidth);
 
     EnterCriticalSection(&This->cs);
 
@@ -3512,7 +3506,7 @@ static HRESULT WINAPI BasicVideo_put_DestinationTop(IBasicVideo2 *iface, LONG De
     IBasicVideo *pBasicVideo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, DestinationTop);
+    TRACE("graph %p, top %ld.\n", This, DestinationTop);
 
     EnterCriticalSection(&This->cs);
 
@@ -3552,7 +3546,7 @@ static HRESULT WINAPI BasicVideo_put_DestinationHeight(IBasicVideo2 *iface, LONG
     IBasicVideo *pBasicVideo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, DestinationHeight);
+    TRACE("graph %p, height %ld.\n", This, DestinationHeight);
 
     EnterCriticalSection(&This->cs);
 
@@ -3594,7 +3588,7 @@ static HRESULT WINAPI BasicVideo_SetSourcePosition(IBasicVideo2 *iface, LONG Lef
     IBasicVideo *pBasicVideo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d, %d, %d, %d)\n", This, iface, Left, Top, Width, Height);
+    TRACE("graph %p, left %ld, top %ld, width %ld, height %ld.\n", This, Left, Top, Width, Height);
 
     EnterCriticalSection(&This->cs);
 
@@ -3656,7 +3650,7 @@ static HRESULT WINAPI BasicVideo_SetDestinationPosition(IBasicVideo2 *iface, LON
     IBasicVideo *pBasicVideo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d, %d, %d, %d)\n", This, iface, Left, Top, Width, Height);
+    TRACE("graph %p, left %ld, top %ld, width %ld, height %ld.\n", This, Left, Top, Width, Height);
 
     EnterCriticalSection(&This->cs);
 
@@ -3738,7 +3732,8 @@ static HRESULT WINAPI BasicVideo_GetVideoPaletteEntries(IBasicVideo2 *iface, LON
     IBasicVideo *pBasicVideo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d, %d, %p, %p)\n", This, iface, StartIndex, Entries, pRetrieved, pPalette);
+    TRACE("graph %p, start_index %ld, count %ld, ret_count %p, entries %p.\n",
+            This, StartIndex, Entries, pRetrieved, pPalette);
 
     EnterCriticalSection(&This->cs);
 
@@ -3911,7 +3906,7 @@ HRESULT WINAPI VideoWindow_GetTypeInfoCount(IVideoWindow *iface, UINT *count)
 HRESULT WINAPI VideoWindow_GetTypeInfo(IVideoWindow *iface, UINT index,
         LCID lcid, ITypeInfo **typeinfo)
 {
-    TRACE("iface %p, index %u, lcid %#x, typeinfo %p.\n", iface, index, lcid, typeinfo);
+    TRACE("iface %p, index %u, lcid %#lx, typeinfo %p.\n", iface, index, lcid, typeinfo);
     return strmbase_get_typeinfo(IVideoWindow_tid, typeinfo);
 }
 
@@ -3921,7 +3916,7 @@ HRESULT WINAPI VideoWindow_GetIDsOfNames(IVideoWindow *iface, REFIID iid,
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("iface %p, iid %s, names %p, count %u, lcid %#x, ids %p.\n",
+    TRACE("iface %p, iid %s, names %p, count %u, lcid %#lx, ids %p.\n",
             iface, debugstr_guid(iid), names, count, lcid, ids);
 
     if (SUCCEEDED(hr = strmbase_get_typeinfo(IVideoWindow_tid, &typeinfo)))
@@ -3938,7 +3933,7 @@ static HRESULT WINAPI VideoWindow_Invoke(IVideoWindow *iface, DISPID id, REFIID 
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("iface %p, id %d, iid %s, lcid %#x, flags %#x, params %p, result %p, excepinfo %p, error_arg %p.\n",
+    TRACE("iface %p, id %ld, iid %s, lcid %#lx, flags %#x, params %p, result %p, excepinfo %p, error_arg %p.\n",
             iface, id, debugstr_guid(iid), lcid, flags, params, result, excepinfo, error_arg);
 
     if (SUCCEEDED(hr = strmbase_get_typeinfo(IVideoWindow_tid, &typeinfo)))
@@ -3996,7 +3991,7 @@ static HRESULT WINAPI VideoWindow_put_WindowStyle(IVideoWindow *iface, LONG Wind
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, WindowStyle);
+    TRACE("graph %p, style %#lx.\n", This, WindowStyle);
 
     EnterCriticalSection(&This->cs);
 
@@ -4036,7 +4031,7 @@ static HRESULT WINAPI VideoWindow_put_WindowStyleEx(IVideoWindow *iface, LONG Wi
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, WindowStyleEx);
+    TRACE("graph %p, style %#lx.\n", This, WindowStyleEx);
 
     EnterCriticalSection(&This->cs);
 
@@ -4076,7 +4071,7 @@ static HRESULT WINAPI VideoWindow_put_AutoShow(IVideoWindow *iface, LONG AutoSho
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, AutoShow);
+    TRACE("graph %p, show %#lx.\n", This, AutoShow);
 
     EnterCriticalSection(&This->cs);
 
@@ -4116,7 +4111,7 @@ static HRESULT WINAPI VideoWindow_put_WindowState(IVideoWindow *iface, LONG Wind
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, WindowState);
+    TRACE("graph %p, state %ld.\n", This, WindowState);
 
     EnterCriticalSection(&This->cs);
 
@@ -4156,7 +4151,7 @@ static HRESULT WINAPI VideoWindow_put_BackgroundPalette(IVideoWindow *iface, LON
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, BackgroundPalette);
+    TRACE("graph %p, palette %ld.\n", This, BackgroundPalette);
 
     EnterCriticalSection(&This->cs);
 
@@ -4197,7 +4192,7 @@ static HRESULT WINAPI VideoWindow_put_Visible(IVideoWindow *iface, LONG Visible)
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, Visible);
+    TRACE("graph %p, visible %ld.\n", This, Visible);
 
     EnterCriticalSection(&This->cs);
 
@@ -4237,7 +4232,7 @@ static HRESULT WINAPI VideoWindow_put_Left(IVideoWindow *iface, LONG Left)
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, Left);
+    TRACE("graph %p, left %ld.\n", This, Left);
 
     EnterCriticalSection(&This->cs);
 
@@ -4277,7 +4272,7 @@ static HRESULT WINAPI VideoWindow_put_Width(IVideoWindow *iface, LONG Width)
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, Width);
+    TRACE("graph %p, width %ld.\n", This, Width);
 
     EnterCriticalSection(&This->cs);
 
@@ -4317,7 +4312,7 @@ static HRESULT WINAPI VideoWindow_put_Top(IVideoWindow *iface, LONG Top)
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, Top);
+    TRACE("graph %p, top %ld.\n", This, Top);
 
     EnterCriticalSection(&This->cs);
 
@@ -4357,7 +4352,7 @@ static HRESULT WINAPI VideoWindow_put_Height(IVideoWindow *iface, LONG Height)
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, Height);
+    TRACE("graph %p, height %ld.\n", This, Height);
 
     EnterCriticalSection(&This->cs);
 
@@ -4397,7 +4392,7 @@ static HRESULT WINAPI VideoWindow_put_Owner(IVideoWindow *iface, OAHWND Owner)
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%08x)\n", This, iface, (DWORD) Owner);
+    TRACE("graph %p, owner %#Ix.\n", This, Owner);
 
     EnterCriticalSection(&This->cs);
 
@@ -4437,7 +4432,7 @@ static HRESULT WINAPI VideoWindow_put_MessageDrain(IVideoWindow *iface, OAHWND D
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%08x)\n", This, iface, (DWORD) Drain);
+    TRACE("graph %p, drain %#Ix.\n", This, Drain);
 
     EnterCriticalSection(&This->cs);
 
@@ -4497,7 +4492,7 @@ static HRESULT WINAPI VideoWindow_put_BorderColor(IVideoWindow *iface, LONG Colo
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, Color);
+    TRACE("graph %p, colour %#lx.\n", This, Color);
 
     EnterCriticalSection(&This->cs);
 
@@ -4537,7 +4532,7 @@ static HRESULT WINAPI VideoWindow_put_FullScreenMode(IVideoWindow *iface, LONG F
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, FullScreenMode);
+    TRACE("graph %p, fullscreen %ld.\n", This, FullScreenMode);
 
     EnterCriticalSection(&This->cs);
 
@@ -4557,7 +4552,7 @@ static HRESULT WINAPI VideoWindow_SetWindowForeground(IVideoWindow *iface, LONG 
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, Focus);
+    TRACE("graph %p, focus %ld.\n", This, Focus);
 
     EnterCriticalSection(&This->cs);
 
@@ -4578,7 +4573,7 @@ static HRESULT WINAPI VideoWindow_NotifyOwnerMessage(IVideoWindow *iface, OAHWND
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%08lx, %d, %08lx, %08lx)\n", This, iface, hwnd, uMsg, wParam, lParam);
+    TRACE("graph %p, hwnd %#Ix, message %#lx, wparam %#Ix, lparam %#Ix.\n", This, hwnd, uMsg, wParam, lParam);
 
     EnterCriticalSection(&This->cs);
 
@@ -4599,7 +4594,7 @@ static HRESULT WINAPI VideoWindow_SetWindowPosition(IVideoWindow *iface, LONG Le
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d, %d, %d, %d)\n", This, iface, Left, Top, Width, Height);
+    TRACE("graph %p, left %ld, top %ld, width %ld, height %ld.\n", This, Left, Top, Width, Height);
 
     EnterCriticalSection(&This->cs);
 
@@ -4703,7 +4698,7 @@ static HRESULT WINAPI VideoWindow_HideCursor(IVideoWindow *iface, LONG HideCurso
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, HideCursor);
+    TRACE("graph %p, hide %ld.\n", This, HideCursor);
 
     EnterCriticalSection(&This->cs);
 
@@ -4811,79 +4806,95 @@ static ULONG WINAPI MediaEvent_Release(IMediaEventEx *iface)
     return IUnknown_Release(graph->outer_unk);
 }
 
-/*** IDispatch methods ***/
-static HRESULT WINAPI MediaEvent_GetTypeInfoCount(IMediaEventEx *iface, UINT *pctinfo)
+static HRESULT WINAPI MediaEvent_GetTypeInfoCount(IMediaEventEx *iface, UINT *count)
 {
-    struct filter_graph *This = impl_from_IMediaEventEx(iface);
-
-    TRACE("(%p/%p)->(%p): stub !!!\n", This, iface, pctinfo);
-
+    TRACE("iface %p, count %p.\n", iface, count);
+    *count = 1;
     return S_OK;
 }
 
-static HRESULT WINAPI MediaEvent_GetTypeInfo(IMediaEventEx *iface, UINT iTInfo, LCID lcid,
-        ITypeInfo **ppTInfo)
+static HRESULT WINAPI MediaEvent_GetTypeInfo(IMediaEventEx *iface, UINT index,
+        LCID lcid, ITypeInfo **typeinfo)
 {
-    struct filter_graph *This = impl_from_IMediaEventEx(iface);
-
-    TRACE("(%p/%p)->(%d, %d, %p): stub !!!\n", This, iface, iTInfo, lcid, ppTInfo);
-
-    return S_OK;
+    TRACE("iface %p, index %u, lcid %#lx, typeinfo %p.\n", iface, index, lcid, typeinfo);
+    return strmbase_get_typeinfo(IMediaEvent_tid, typeinfo);
 }
 
-static HRESULT WINAPI MediaEvent_GetIDsOfNames(IMediaEventEx *iface, REFIID riid,
-        LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
+static HRESULT WINAPI MediaEvent_GetIDsOfNames(IMediaEventEx *iface, REFIID iid,
+        LPOLESTR *names, UINT count, LCID lcid, DISPID *ids)
 {
-    struct filter_graph *This = impl_from_IMediaEventEx(iface);
+    ITypeInfo *typeinfo;
+    HRESULT hr;
 
-    TRACE("(%p/%p)->(%s, %p, %d, %d, %p): stub !!!\n", This, iface, debugstr_guid(riid), rgszNames,
-            cNames, lcid, rgDispId);
+    TRACE("iface %p, iid %s, names %p, count %u, lcid %#lx, ids %p.\n",
+            iface, debugstr_guid(iid), names, count, lcid, ids);
 
-    return S_OK;
-}
-
-static HRESULT WINAPI MediaEvent_Invoke(IMediaEventEx *iface, DISPID dispIdMember, REFIID riid,
-        LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExepInfo,
-        UINT *puArgErr)
-{
-    struct filter_graph *This = impl_from_IMediaEventEx(iface);
-
-    TRACE("(%p/%p)->(%d, %s, %d, %04x, %p, %p, %p, %p): stub !!!\n", This, iface, dispIdMember,
-            debugstr_guid(riid), lcid, wFlags, pDispParams, pVarResult, pExepInfo, puArgErr);
-
-    return S_OK;
-}
-
-/*** IMediaEvent methods ***/
-static HRESULT WINAPI MediaEvent_GetEventHandle(IMediaEventEx *iface, OAEVENT *hEvent)
-{
-    struct filter_graph *This = impl_from_IMediaEventEx(iface);
-
-    TRACE("(%p/%p)->(%p)\n", This, iface, hEvent);
-
-    *hEvent = (OAEVENT)This->evqueue.msg_event;
-
-    return S_OK;
-}
-
-static HRESULT WINAPI MediaEvent_GetEvent(IMediaEventEx *iface, LONG *lEventCode, LONG_PTR *lParam1,
-        LONG_PTR *lParam2, LONG msTimeout)
-{
-    struct filter_graph *This = impl_from_IMediaEventEx(iface);
-    Event evt;
-
-    TRACE("(%p/%p)->(%p, %p, %p, %d)\n", This, iface, lEventCode, lParam1, lParam2, msTimeout);
-
-    if (EventsQueue_GetEvent(&This->evqueue, &evt, msTimeout))
+    if (SUCCEEDED(hr = strmbase_get_typeinfo(IMediaEvent_tid, &typeinfo)))
     {
-	*lEventCode = evt.lEventCode;
-	*lParam1 = evt.lParam1;
-	*lParam2 = evt.lParam2;
-	return S_OK;
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, names, count, ids);
+        ITypeInfo_Release(typeinfo);
     }
+    return hr;
+}
 
-    *lEventCode = 0;
-    return E_ABORT;
+static HRESULT WINAPI MediaEvent_Invoke(IMediaEventEx *iface, DISPID id, REFIID iid, LCID lcid,
+        WORD flags, DISPPARAMS *params, VARIANT *result, EXCEPINFO *excepinfo, UINT *error_arg)
+{
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("iface %p, id %ld, iid %s, lcid %#lx, flags %#x, params %p, result %p, excepinfo %p, error_arg %p.\n",
+            iface, id, debugstr_guid(iid), lcid, flags, params, result, excepinfo, error_arg);
+
+    if (SUCCEEDED(hr = strmbase_get_typeinfo(IMediaEvent_tid, &typeinfo)))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, iface, id, flags, params, result, excepinfo, error_arg);
+        ITypeInfo_Release(typeinfo);
+    }
+    return hr;
+}
+
+static HRESULT WINAPI MediaEvent_GetEventHandle(IMediaEventEx *iface, OAEVENT *event)
+{
+    struct filter_graph *graph = impl_from_IMediaEventEx(iface);
+
+    TRACE("graph %p, event %p.\n", graph, event);
+
+    *event = (OAEVENT)graph->media_event_handle;
+    return S_OK;
+}
+
+static HRESULT WINAPI MediaEvent_GetEvent(IMediaEventEx *iface, LONG *code,
+        LONG_PTR *param1, LONG_PTR *param2, LONG timeout)
+{
+    struct filter_graph *graph = impl_from_IMediaEventEx(iface);
+    struct media_event *event;
+    struct list *entry;
+
+    TRACE("graph %p, code %p, param1 %p, param2 %p, timeout %ld.\n", graph, code, param1, param2, timeout);
+
+    *code = 0;
+
+    if (WaitForSingleObject(graph->media_event_handle, timeout))
+        return E_ABORT;
+
+    EnterCriticalSection(&graph->event_cs);
+
+    if (!(entry = list_head(&graph->media_events)))
+    {
+        ResetEvent(graph->media_event_handle);
+        LeaveCriticalSection(&graph->event_cs);
+        return E_ABORT;
+    }
+    event = LIST_ENTRY(entry, struct media_event, entry);
+    list_remove(&event->entry);
+    *code = event->code;
+    *param1 = event->param1;
+    *param2 = event->param2;
+    free(event);
+
+    LeaveCriticalSection(&graph->event_cs);
+    return S_OK;
 }
 
 static HRESULT WINAPI MediaEvent_WaitForCompletion(IMediaEventEx *iface, LONG msTimeout,
@@ -4891,7 +4902,7 @@ static HRESULT WINAPI MediaEvent_WaitForCompletion(IMediaEventEx *iface, LONG ms
 {
     struct filter_graph *This = impl_from_IMediaEventEx(iface);
 
-    TRACE("(%p/%p)->(%d, %p)\n", This, iface, msTimeout, pEvCode);
+    TRACE("graph %p, timeout %ld, code %p.\n", This, msTimeout, pEvCode);
 
     if (This->state != State_Running)
         return VFW_E_WRONG_STATE;
@@ -4910,7 +4921,7 @@ static HRESULT WINAPI MediaEvent_CancelDefaultHandling(IMediaEventEx *iface, LON
 {
     struct filter_graph *This = impl_from_IMediaEventEx(iface);
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, lEvCode);
+    TRACE("graph %p, code %#lx.\n", This, lEvCode);
 
     if (lEvCode == EC_COMPLETE)
 	This->HandleEcComplete = FALSE;
@@ -4928,7 +4939,7 @@ static HRESULT WINAPI MediaEvent_RestoreDefaultHandling(IMediaEventEx *iface, LO
 {
     struct filter_graph *This = impl_from_IMediaEventEx(iface);
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, lEvCode);
+    TRACE("graph %p, code %#lx.\n", This, lEvCode);
 
     if (lEvCode == EC_COMPLETE)
 	This->HandleEcComplete = TRUE;
@@ -4942,55 +4953,64 @@ static HRESULT WINAPI MediaEvent_RestoreDefaultHandling(IMediaEventEx *iface, LO
     return S_OK;
 }
 
-static HRESULT WINAPI MediaEvent_FreeEventParams(IMediaEventEx *iface, LONG lEvCode,
-        LONG_PTR lParam1, LONG_PTR lParam2)
+static HRESULT WINAPI MediaEvent_FreeEventParams(IMediaEventEx *iface, LONG code,
+        LONG_PTR param1, LONG_PTR param2)
 {
-    struct filter_graph *This = impl_from_IMediaEventEx(iface);
+    struct filter_graph *graph = impl_from_IMediaEventEx(iface);
 
-    TRACE("(%p/%p)->(%d, %08lx, %08lx): stub !!!\n", This, iface, lEvCode, lParam1, lParam2);
+    WARN("graph %p, code %#lx, param1 %Id, param2 %Id, stub!\n", graph, code, param1, param2);
 
     return S_OK;
 }
 
 /*** IMediaEventEx methods ***/
-static HRESULT WINAPI MediaEvent_SetNotifyWindow(IMediaEventEx *iface, OAHWND hwnd, LONG lMsg,
-        LONG_PTR lInstanceData)
+static HRESULT WINAPI MediaEvent_SetNotifyWindow(IMediaEventEx *iface,
+        OAHWND window, LONG message, LONG_PTR lparam)
 {
-    struct filter_graph *This = impl_from_IMediaEventEx(iface);
+    struct filter_graph *graph = impl_from_IMediaEventEx(iface);
 
-    TRACE("(%p/%p)->(%08lx, %d, %08lx)\n", This, iface, hwnd, lMsg, lInstanceData);
+    TRACE("graph %p, window %#Ix, message %#lx, lparam %#Ix.\n", graph, window, message, lparam);
 
-    This->notif.hWnd = (HWND)hwnd;
-    This->notif.msg = lMsg;
-    This->notif.instance = lInstanceData;
+    graph->media_event_window = (HWND)window;
+    graph->media_event_message = message;
+    graph->media_event_lparam = lparam;
 
     return S_OK;
 }
 
-static HRESULT WINAPI MediaEvent_SetNotifyFlags(IMediaEventEx *iface, LONG lNoNotifyFlags)
+static HRESULT WINAPI MediaEvent_SetNotifyFlags(IMediaEventEx *iface, LONG flags)
 {
-    struct filter_graph *This = impl_from_IMediaEventEx(iface);
+    struct filter_graph *graph = impl_from_IMediaEventEx(iface);
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, lNoNotifyFlags);
+    TRACE("graph %p, flags %#lx.\n", graph, flags);
 
-    if ((lNoNotifyFlags != 0) && (lNoNotifyFlags != 1))
-	return E_INVALIDARG;
+    if (flags & ~AM_MEDIAEVENT_NONOTIFY)
+    {
+        WARN("Invalid flags %#lx, returning E_INVALIDARG.\n", flags);
+        return E_INVALIDARG;
+    }
 
-    This->notif.disabled = lNoNotifyFlags;
+    graph->media_events_disabled = flags;
+
+    if (flags)
+    {
+        flush_media_events(graph);
+        ResetEvent(graph->media_event_handle);
+    }
 
     return S_OK;
 }
 
-static HRESULT WINAPI MediaEvent_GetNotifyFlags(IMediaEventEx *iface, LONG *lplNoNotifyFlags)
+static HRESULT WINAPI MediaEvent_GetNotifyFlags(IMediaEventEx *iface, LONG *flags)
 {
-    struct filter_graph *This = impl_from_IMediaEventEx(iface);
+    struct filter_graph *graph = impl_from_IMediaEventEx(iface);
 
-    TRACE("(%p/%p)->(%p)\n", This, iface, lplNoNotifyFlags);
+    TRACE("graph %p, flags %p.\n", graph, flags);
 
-    if (!lplNoNotifyFlags)
-	return E_POINTER;
+    if (!flags)
+        return E_POINTER;
 
-    *lplNoNotifyFlags = This->notif.disabled;
+    *flags = graph->media_events_disabled;
 
     return S_OK;
 }
@@ -5121,12 +5141,15 @@ static HRESULT WINAPI MediaFilter_Pause(IMediaFilter *iface)
     }
 
     sort_filters(graph);
+
+    EnterCriticalSection(&graph->event_cs);
     update_render_count(graph);
+    LeaveCriticalSection(&graph->event_cs);
 
     if (graph->defaultclock && !graph->refClock)
         IFilterGraph2_SetDefaultSyncSource(&graph->IFilterGraph2_iface);
 
-    if (graph->state == State_Running && graph->refClock)
+    if (graph->state == State_Running && !graph->needs_async_run && graph->refClock)
     {
         REFERENCE_TIME time;
         IReferenceClock_GetTime(graph->refClock, &time);
@@ -5183,10 +5206,9 @@ static HRESULT WINAPI MediaFilter_GetState(IMediaFilter *iface, DWORD timeout, F
 {
     struct filter_graph *graph = impl_from_IMediaFilter(iface);
     DWORD end = GetTickCount() + timeout;
-    FILTER_STATE expect_state;
     HRESULT hr;
 
-    TRACE("graph %p, timeout %u, state %p.\n", graph, timeout, state);
+    TRACE("graph %p, timeout %lu, state %p.\n", graph, timeout, state);
 
     if (!state)
         return E_POINTER;
@@ -5199,7 +5221,6 @@ static HRESULT WINAPI MediaFilter_GetState(IMediaFilter *iface, DWORD timeout, F
 
     EnterCriticalSection(&graph->cs);
     *state = graph->state;
-    expect_state = graph->needs_async_run ? State_Paused : graph->state;
 
     for (;;)
     {
@@ -5213,7 +5234,7 @@ static HRESULT WINAPI MediaFilter_GetState(IMediaFilter *iface, DWORD timeout, F
         {
             HRESULT filter_hr = IBaseFilter_GetState(filter->filter, 0, &filter_state);
 
-            TRACE("Filter %p returned hr %#x, state %u.\n", filter->filter, filter_hr, filter_state);
+            TRACE("Filter %p returned hr %#lx, state %u.\n", filter->filter, filter_hr, filter_state);
 
             if (filter_hr == VFW_S_STATE_INTERMEDIATE)
                 async_filter = filter->filter;
@@ -5231,9 +5252,18 @@ static HRESULT WINAPI MediaFilter_GetState(IMediaFilter *iface, DWORD timeout, F
             else if (filter_state != graph->state && filter_state != State_Paused)
                 hr = E_FAIL;
 
-            if (filter_state != expect_state)
-                ERR("Filter %p reported incorrect state %u (expected %u).\n",
-                        filter->filter, filter_state, expect_state);
+            if (graph->needs_async_run)
+            {
+                if (filter_state != State_Paused && filter_state != State_Running)
+                    ERR("Filter %p reported incorrect state %u (expected %u or %u).\n",
+                            filter->filter, filter_state, State_Paused, State_Running);
+            }
+            else
+            {
+                if (filter_state != graph->state)
+                    ERR("Filter %p reported incorrect state %u (expected %u).\n",
+                            filter->filter, filter_state, graph->state);
+            }
         }
 
         LeaveCriticalSection(&graph->cs);
@@ -5246,7 +5276,7 @@ static HRESULT WINAPI MediaFilter_GetState(IMediaFilter *iface, DWORD timeout, F
         EnterCriticalSection(&graph->cs);
     }
 
-    TRACE("Returning %#x, state %u.\n", hr, *state);
+    TRACE("Returning %#lx, state %u.\n", hr, *state);
     return hr;
 }
 
@@ -5360,52 +5390,38 @@ static ULONG WINAPI MediaEventSink_Release(IMediaEventSink *iface)
     return IUnknown_Release(graph->outer_unk);
 }
 
-static HRESULT WINAPI MediaEventSink_Notify(IMediaEventSink *iface, LONG EventCode,
-        LONG_PTR EventParam1, LONG_PTR EventParam2)
+static HRESULT WINAPI MediaEventSink_Notify(IMediaEventSink *iface, LONG code,
+        LONG_PTR param1, LONG_PTR param2)
 {
-    struct filter_graph *This = impl_from_IMediaEventSink(iface);
-    Event evt;
+    struct filter_graph *graph = impl_from_IMediaEventSink(iface);
 
-    TRACE("(%p/%p)->(%d, %ld, %ld)\n", This, iface, EventCode, EventParam1, EventParam2);
+    TRACE("graph %p, code %#lx, param1 %#Ix, param2 %#Ix.\n", graph, code, param1, param2);
 
-    /* We need thread safety here, let's use the events queue's one */
-    EnterCriticalSection(&This->evqueue.msg_crst);
+    EnterCriticalSection(&graph->event_cs);
 
-    if ((EventCode == EC_COMPLETE) && This->HandleEcComplete)
+    if (code == EC_COMPLETE && graph->HandleEcComplete)
     {
-        TRACE("Process EC_COMPLETE notification\n");
-        if (++This->EcCompleteCount == This->nRenderers)
+        if (++graph->EcCompleteCount == graph->nRenderers)
         {
-            evt.lEventCode = EC_COMPLETE;
-            evt.lParam1 = S_OK;
-            evt.lParam2 = 0;
-            TRACE("Send EC_COMPLETE to app\n");
-            EventsQueue_PutEvent(&This->evqueue, &evt);
-            if (!This->notif.disabled && This->notif.hWnd)
-	    {
-                TRACE("Send Window message\n");
-                PostMessageW(This->notif.hWnd, This->notif.msg, 0, This->notif.instance);
-            }
-            This->CompletionStatus = EC_COMPLETE;
-            This->got_ec_complete = 1;
-            SetEvent(This->hEventCompletion);
+            if (graph->media_events_disabled)
+                SetEvent(graph->media_event_handle);
+            else
+                queue_media_event(graph, EC_COMPLETE, S_OK, 0);
+            graph->CompletionStatus = EC_COMPLETE;
+            graph->got_ec_complete = 1;
+            SetEvent(graph->hEventCompletion);
         }
     }
-    else if ((EventCode == EC_REPAINT) && This->HandleEcRepaint)
+    else if ((code == EC_REPAINT) && graph->HandleEcRepaint)
     {
-        /* FIXME: Not handled yet */
+        FIXME("EC_REPAINT is not handled.\n");
     }
-    else
+    else if (!graph->media_events_disabled)
     {
-        evt.lEventCode = EventCode;
-        evt.lParam1 = EventParam1;
-        evt.lParam2 = EventParam2;
-        EventsQueue_PutEvent(&This->evqueue, &evt);
-        if (!This->notif.disabled && This->notif.hWnd)
-            PostMessageW(This->notif.hWnd, This->notif.msg, 0, This->notif.instance);
+        queue_media_event(graph, code, param1, param2);
     }
 
-    LeaveCriticalSection(&This->evqueue.msg_crst);
+    LeaveCriticalSection(&graph->event_cs);
     return S_OK;
 }
 
@@ -5443,34 +5459,35 @@ static ULONG WINAPI GraphConfig_Release(IGraphConfig *iface)
     return IUnknown_Release(graph->outer_unk);
 }
 
-static HRESULT WINAPI GraphConfig_Reconnect(IGraphConfig *iface, IPin *pOutputPin, IPin *pInputPin,
-        const AM_MEDIA_TYPE *pmtFirstConnection, IBaseFilter *pUsingFilter, HANDLE hAbortEvent,
-        DWORD dwFlags)
+static HRESULT WINAPI GraphConfig_Reconnect(IGraphConfig *iface, IPin *source, IPin *sink,
+        const AM_MEDIA_TYPE *mt, IBaseFilter *filter, HANDLE abort_event, DWORD flags)
 {
-    struct filter_graph *This = impl_from_IGraphConfig(iface);
+    struct filter_graph *graph = impl_from_IGraphConfig(iface);
 
-    FIXME("(%p)->(%p, %p, %p, %p, %p, %x): stub!\n", This, pOutputPin, pInputPin, pmtFirstConnection, pUsingFilter, hAbortEvent, dwFlags);
-    strmbase_dump_media_type(pmtFirstConnection);
-    
+    FIXME("graph %p, source %p, sink %p, mt %p, filter %p, abort_event %p, flags %#lx, stub!\n",
+            graph, source, sink, mt, filter, abort_event, flags);
+    strmbase_dump_media_type(mt);
+
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI GraphConfig_Reconfigure(IGraphConfig *iface, IGraphConfigCallback *pCallback,
-        void *pvContext, DWORD dwFlags, HANDLE hAbortEvent)
+static HRESULT WINAPI GraphConfig_Reconfigure(IGraphConfig *iface,
+        IGraphConfigCallback *callback, void *context, DWORD flags, HANDLE abort_event)
 {
-    struct filter_graph *This = impl_from_IGraphConfig(iface);
+    struct filter_graph *graph = impl_from_IGraphConfig(iface);
     HRESULT hr;
 
-    WARN("(%p)->(%p, %p, %x, %p): partial stub!\n", This, pCallback, pvContext, dwFlags, hAbortEvent);
+    TRACE("graph %p, callback %p, context %p, flags %#lx, abort_event %p.\n",
+            graph, callback, context, flags, abort_event);
 
-    if (hAbortEvent)
+    if (abort_event)
         FIXME("The parameter hAbortEvent is not handled!\n");
 
-    EnterCriticalSection(&This->cs);
+    EnterCriticalSection(&graph->cs);
 
-    hr = IGraphConfigCallback_Reconfigure(pCallback, pvContext, dwFlags);
+    hr = IGraphConfigCallback_Reconfigure(callback, context, flags);
 
-    LeaveCriticalSection(&This->cs);
+    LeaveCriticalSection(&graph->cs);
 
     return hr;
 }
@@ -5521,12 +5538,11 @@ static HRESULT WINAPI GraphConfig_PushThroughData(IGraphConfig *iface, IPin *pOu
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI GraphConfig_SetFilterFlags(IGraphConfig *iface, IBaseFilter *pFilter,
-        DWORD dwFlags)
+static HRESULT WINAPI GraphConfig_SetFilterFlags(IGraphConfig *iface, IBaseFilter *filter, DWORD flags)
 {
-    struct filter_graph *This = impl_from_IGraphConfig(iface);
+    struct filter_graph *graph = impl_from_IGraphConfig(iface);
 
-    FIXME("(%p)->(%p, %x): stub!\n", This, pFilter, dwFlags);
+    FIXME("graph %p, filter %p, flags %#lx, stub!\n", graph, filter, flags);
 
     return E_NOTIMPL;
 }
@@ -5541,12 +5557,11 @@ static HRESULT WINAPI GraphConfig_GetFilterFlags(IGraphConfig *iface, IBaseFilte
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI GraphConfig_RemoveFilterEx(IGraphConfig *iface, IBaseFilter *pFilter,
-        DWORD dwFlags)
+static HRESULT WINAPI GraphConfig_RemoveFilterEx(IGraphConfig *iface, IBaseFilter *filter, DWORD flags)
 {
-    struct filter_graph *This = impl_from_IGraphConfig(iface);
+    struct filter_graph *graph = impl_from_IGraphConfig(iface);
 
-    FIXME("(%p)->(%p, %x): stub!\n", This, pFilter, dwFlags);
+    FIXME("graph %p, filter %p, flags %#lx, stub!\n", graph, filter, flags);
 
     return E_NOTIMPL;
 }
@@ -5594,16 +5609,16 @@ static ULONG WINAPI GraphVersion_Release(IGraphVersion *iface)
     return IUnknown_Release(graph->outer_unk);
 }
 
-static HRESULT WINAPI GraphVersion_QueryVersion(IGraphVersion *iface, LONG *pVersion)
+static HRESULT WINAPI GraphVersion_QueryVersion(IGraphVersion *iface, LONG *version)
 {
-    struct filter_graph *This = impl_from_IGraphVersion(iface);
+    struct filter_graph *graph = impl_from_IGraphVersion(iface);
 
-    if(!pVersion)
+    TRACE("graph %p, version %p, returning %ld.\n", graph, version, graph->version);
+
+    if (!version)
         return E_POINTER;
 
-    TRACE("(%p)->(%p): current version %i\n", This, pVersion, This->version);
-
-    *pVersion = This->version;
+    *version = graph->version;
     return S_OK;
 }
 
@@ -5640,13 +5655,13 @@ static ULONG WINAPI VideoFrameStep_Release(IVideoFrameStep *iface)
 
 static HRESULT WINAPI VideoFrameStep_Step(IVideoFrameStep *iface, DWORD frame_count, IUnknown *filter)
 {
-    FIXME("iface %p, frame_count %u, filter %p, stub!\n", iface, frame_count, filter);
+    FIXME("iface %p, frame_count %lu, filter %p, stub!\n", iface, frame_count, filter);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI VideoFrameStep_CanStep(IVideoFrameStep *iface, LONG multiple, IUnknown *filter)
 {
-    FIXME("iface %p, multiple %d, filter %p, stub!\n", iface, multiple, filter);
+    FIXME("iface %p, multiple %ld, filter %p, stub!\n", iface, multiple, filter);
     return E_NOTIMPL;
 }
 
@@ -5704,21 +5719,26 @@ static HRESULT filter_graph_common_create(IUnknown *outer, IUnknown **out, BOOL 
     if (FAILED(hr = CoCreateInstance(&CLSID_FilterMapper2, object->outer_unk,
             CLSCTX_INPROC_SERVER, &IID_IUnknown, (void **)&object->punkFilterMapper2)))
     {
-        ERR("Failed to create filter mapper, hr %#x.\n", hr);
+        ERR("Failed to create filter mapper, hr %#lx.\n", hr);
         free(object);
         return hr;
     }
 
     InitializeCriticalSection(&object->cs);
     object->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": filter_graph.cs");
+    InitializeCriticalSection(&object->event_cs);
+    object->event_cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": filter_graph.event_cs");
 
     object->defaultclock = TRUE;
-    EventsQueue_Init(&object->evqueue);
+
+    object->media_event_handle = CreateEventW(NULL, TRUE, FALSE, NULL);
+    list_init(&object->media_events);
     list_init(&object->filters);
     object->HandleEcClockChanged = TRUE;
     object->HandleEcComplete = TRUE;
     object->HandleEcRepaint = TRUE;
     object->hEventCompletion = CreateEventW(0, TRUE, FALSE, 0);
+
     object->name_index = 1;
     object->timeformatseek = TIME_FORMAT_MEDIA_TIME;
 

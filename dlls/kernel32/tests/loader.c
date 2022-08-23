@@ -211,16 +211,16 @@ static DWORD create_test_dll( const IMAGE_DOS_HEADER *dos_header, UINT dos_size,
     GetTempFileNameA(temp_path, "ldr", 0, dll_name);
 
     hfile = CreateFileA(dll_name, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, 0);
-    ok( hfile != INVALID_HANDLE_VALUE, "failed to create %s err %u\n", dll_name, GetLastError() );
+    ok( hfile != INVALID_HANDLE_VALUE, "failed to create %s err %lu\n", dll_name, GetLastError() );
     if (hfile == INVALID_HANDLE_VALUE) return 0;
 
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, dos_header, dos_size, &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, nt_header, sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     if (nt_header->FileHeader.SizeOfOptionalHeader)
     {
@@ -228,14 +228,14 @@ static DWORD create_test_dll( const IMAGE_DOS_HEADER *dos_header, UINT dos_size,
         ret = WriteFile(hfile, &nt_header->OptionalHeader,
                         sizeof(IMAGE_OPTIONAL_HEADER),
                         &dummy, NULL);
-        ok(ret, "WriteFile error %d\n", GetLastError());
+        ok(ret, "WriteFile error %ld\n", GetLastError());
         if (nt_header->FileHeader.SizeOfOptionalHeader > sizeof(IMAGE_OPTIONAL_HEADER))
         {
             file_align = nt_header->FileHeader.SizeOfOptionalHeader - sizeof(IMAGE_OPTIONAL_HEADER);
             assert(file_align < sizeof(filler));
             SetLastError(0xdeadbeef);
             ret = WriteFile(hfile, filler, file_align, &dummy, NULL);
-            ok(ret, "WriteFile error %d\n", GetLastError());
+            ok(ret, "WriteFile error %ld\n", GetLastError());
         }
     }
 
@@ -261,12 +261,12 @@ static DWORD create_test_dll( const IMAGE_DOS_HEADER *dos_header, UINT dos_size,
 
         SetLastError(0xdeadbeef);
         ret = WriteFile(hfile, &section, sizeof(section), &dummy, NULL);
-        ok(ret, "WriteFile error %d\n", GetLastError());
+        ok(ret, "WriteFile error %ld\n", GetLastError());
 
         /* section data */
         SetLastError(0xdeadbeef);
         ret = WriteFile(hfile, section_data, sizeof(section_data), &dummy, NULL);
-        ok(ret, "WriteFile error %d\n", GetLastError());
+        ok(ret, "WriteFile error %ld\n", GetLastError());
     }
 
     /* Minimal PE image that Windows7+ is able to load: 268 bytes */
@@ -276,7 +276,7 @@ static DWORD create_test_dll( const IMAGE_DOS_HEADER *dos_header, UINT dos_size,
         file_align = 268 - size;
         SetLastError(0xdeadbeef);
         ret = WriteFile(hfile, filler, file_align, &dummy, NULL);
-        ok(ret, "WriteFile error %d\n", GetLastError());
+        ok(ret, "WriteFile error %ld\n", GetLastError());
     }
 
     size = GetFileSize(hfile, NULL);
@@ -297,28 +297,28 @@ static DWORD create_test_dll_sections( const IMAGE_DOS_HEADER *dos_header, const
     GetTempFileNameA(temp_path, "ldr", 0, dll_name);
 
     hfile = CreateFileA(dll_name, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, 0);
-    ok( hfile != INVALID_HANDLE_VALUE, "failed to create %s err %u\n", dll_name, GetLastError() );
+    ok( hfile != INVALID_HANDLE_VALUE, "failed to create %s err %lu\n", dll_name, GetLastError() );
     if (hfile == INVALID_HANDLE_VALUE) return 0;
 
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, dos_header, sizeof(*dos_header), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, nt_header, offsetof(IMAGE_NT_HEADERS, OptionalHeader) + nt_header->FileHeader.SizeOfOptionalHeader, &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, sections, sizeof(*sections) * nt_header->FileHeader.NumberOfSections,
                     &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     for (i = 0; i < nt_header->FileHeader.NumberOfSections; i++)
     {
         SetFilePointer(hfile, sections[i].PointerToRawData, NULL, FILE_BEGIN);
         SetLastError(0xdeadbeef);
         ret = WriteFile(hfile, section_data, sections[i].SizeOfRawData, &dummy, NULL);
-        ok(ret, "WriteFile error %d\n", GetLastError());
+        ok(ret, "WriteFile error %ld\n", GetLastError());
     }
     size = GetFileSize(hfile, NULL);
     CloseHandle(hfile);
@@ -345,20 +345,20 @@ static BOOL query_image_section( int id, const char *dll_name, const IMAGE_NT_HE
 
     file = CreateFileA( dll_name, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
                         NULL, OPEN_EXISTING, 0, 0 );
-    ok( file != INVALID_HANDLE_VALUE, "%u: CreateFile error %d\n", id, GetLastError() );
+    ok( file != INVALID_HANDLE_VALUE, "%u: CreateFile error %ld\n", id, GetLastError() );
     file_size = GetFileSize( file, NULL );
 
     status = pNtCreateSection( &mapping, STANDARD_RIGHTS_REQUIRED | SECTION_MAP_READ | SECTION_QUERY,
                                NULL, NULL, PAGE_READONLY, SEC_IMAGE, file );
-    ok( !status, "%u: NtCreateSection failed err %x\n", id, status );
+    ok( !status, "%u: NtCreateSection failed err %lx\n", id, status );
     if (status)
     {
         CloseHandle( file );
         return FALSE;
     }
     status = pNtQuerySection( mapping, SectionImageInformation, &image, sizeof(image), &info_size );
-    ok( !status, "%u: NtQuerySection failed err %x\n", id, status );
-    ok( info_size == sizeof(image), "%u: NtQuerySection wrong size %lu\n", id, info_size );
+    ok( !status, "%u: NtQuerySection failed err %lx\n", id, status );
+    ok( info_size == sizeof(image), "%u: NtQuerySection wrong size %Iu\n", id, info_size );
     if (nt_header->OptionalHeader.Magic == (is_win64 ? IMAGE_NT_OPTIONAL_HDR64_MAGIC
                                                      : IMAGE_NT_OPTIONAL_HDR32_MAGIC))
     {
@@ -397,26 +397,33 @@ static BOOL query_image_section( int id, const char *dll_name, const IMAGE_NT_HE
     }
     ok( (char *)image.TransferAddress == (char *)entry_point ||
         (S(U(image)).ImageDynamicallyRelocated && LOWORD(image.TransferAddress) == LOWORD(entry_point)),
-        "%u: TransferAddress wrong %p / %p (%08x)\n", id,
+        "%u: TransferAddress wrong %p / %p (%08lx)\n", id,
         image.TransferAddress, entry_point, nt_header->OptionalHeader.AddressOfEntryPoint );
-    ok( image.ZeroBits == 0, "%u: ZeroBits wrong %08x\n", id, image.ZeroBits );
+    ok( image.ZeroBits == 0, "%u: ZeroBits wrong %08lx\n", id, image.ZeroBits );
     ok( image.MaximumStackSize == max_stack || broken(truncated),
-        "%u: MaximumStackSize wrong %lx / %lx\n", id, image.MaximumStackSize, max_stack );
+        "%u: MaximumStackSize wrong %Ix / %Ix\n", id, image.MaximumStackSize, max_stack );
     ok( image.CommittedStackSize == commit_stack || broken(truncated),
-        "%u: CommittedStackSize wrong %lx / %lx\n", id, image.CommittedStackSize, commit_stack );
+        "%u: CommittedStackSize wrong %Ix / %Ix\n", id, image.CommittedStackSize, commit_stack );
     if (truncated)
         ok( !image.SubSystemType || broken(truncated),
-            "%u: SubSystemType wrong %08x / 00000000\n", id, image.SubSystemType );
+            "%u: SubSystemType wrong %08lx / 00000000\n", id, image.SubSystemType );
     else
         ok( image.SubSystemType == nt_header->OptionalHeader.Subsystem,
-            "%u: SubSystemType wrong %08x / %08x\n", id,
+            "%u: SubSystemType wrong %08lx / %08x\n", id,
             image.SubSystemType, nt_header->OptionalHeader.Subsystem );
-    ok( image.SubsystemVersionLow == nt_header->OptionalHeader.MinorSubsystemVersion,
-        "%u: SubsystemVersionLow wrong %04x / %04x\n", id,
-        image.SubsystemVersionLow, nt_header->OptionalHeader.MinorSubsystemVersion );
-    ok( image.SubsystemVersionHigh == nt_header->OptionalHeader.MajorSubsystemVersion,
-        "%u: SubsystemVersionHigh wrong %04x / %04x\n", id,
-        image.SubsystemVersionHigh, nt_header->OptionalHeader.MajorSubsystemVersion );
+    ok( image.MinorSubsystemVersion == nt_header->OptionalHeader.MinorSubsystemVersion,
+        "%u: MinorSubsystemVersion wrong %04x / %04x\n", id,
+        image.MinorSubsystemVersion, nt_header->OptionalHeader.MinorSubsystemVersion );
+    ok( image.MajorSubsystemVersion == nt_header->OptionalHeader.MajorSubsystemVersion,
+        "%u: MajorSubsystemVersion wrong %04x / %04x\n", id,
+        image.MajorSubsystemVersion, nt_header->OptionalHeader.MajorSubsystemVersion );
+    ok( image.MajorOperatingSystemVersion == nt_header->OptionalHeader.MajorOperatingSystemVersion ||
+        broken( !image.MajorOperatingSystemVersion), /* before win10 */
+        "%u: MajorOperatingSystemVersion wrong %04x / %04x\n", id,
+        image.MajorOperatingSystemVersion, nt_header->OptionalHeader.MajorOperatingSystemVersion );
+    ok( image.MinorOperatingSystemVersion == nt_header->OptionalHeader.MinorOperatingSystemVersion,
+        "%u: MinorOperatingSystemVersion wrong %04x / %04x\n", id,
+        image.MinorOperatingSystemVersion, nt_header->OptionalHeader.MinorOperatingSystemVersion );
     ok( image.ImageCharacteristics == nt_header->FileHeader.Characteristics,
         "%u: ImageCharacteristics wrong %04x / %04x\n", id,
         image.ImageCharacteristics, nt_header->FileHeader.Characteristics );
@@ -425,11 +432,11 @@ static BOOL query_image_section( int id, const char *dll_name, const IMAGE_NT_HE
         image.DllCharacteristics, nt_header->OptionalHeader.DllCharacteristics );
     ok( image.Machine == nt_header->FileHeader.Machine, "%u: Machine wrong %04x / %04x\n", id,
         image.Machine, nt_header->FileHeader.Machine );
-    ok( image.LoaderFlags == (cor_header != NULL), "%u: LoaderFlags wrong %08x\n", id, image.LoaderFlags );
+    ok( image.LoaderFlags == (cor_header != NULL), "%u: LoaderFlags wrong %08lx\n", id, image.LoaderFlags );
     ok( image.ImageFileSize == file_size || broken(!image.ImageFileSize), /* winxpsp1 */
-        "%u: ImageFileSize wrong %08x / %08x\n", id, image.ImageFileSize, file_size );
+        "%u: ImageFileSize wrong %08lx / %08lx\n", id, image.ImageFileSize, file_size );
     ok( image.CheckSum == nt_header->OptionalHeader.CheckSum || broken(truncated),
-        "%u: CheckSum wrong %08x / %08x\n", id,
+        "%u: CheckSum wrong %08lx / %08lx\n", id,
         image.CheckSum, nt_header->OptionalHeader.CheckSum );
 
     if (nt_header->OptionalHeader.SizeOfCode || nt_header->OptionalHeader.AddressOfEntryPoint)
@@ -457,11 +464,19 @@ static BOOL query_image_section( int id, const char *dll_name, const IMAGE_NT_HE
         else
             ok( !S(U(image)).ComPlusNativeReady,
                 "%u: wrong ComPlusNativeReady flags %02x\n", id, U(image).ImageFlags );
+        if (nt_header->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC &&
+            (cor_header->Flags & COMIMAGE_FLAGS_32BITPREFERRED))
+            ok( S(U(image)).ComPlusPrefer32bit ||
+                broken( !image.MajorOperatingSystemVersion ), /* before win10 */
+                "%u: wrong ComPlusPrefer32bit flags %02x\n", id, U(image).ImageFlags );
+        else
+            ok( !S(U(image)).ComPlusPrefer32bit, "%u: wrong ComPlusPrefer32bit flags %02x\n", id, U(image).ImageFlags );
     }
     else
     {
         ok( !S(U(image)).ComPlusILOnly, "%u: wrong ComPlusILOnly flags %02x\n", id, U(image).ImageFlags );
         ok( !S(U(image)).ComPlusNativeReady, "%u: wrong ComPlusNativeReady flags %02x\n", id, U(image).ImageFlags );
+        ok( !S(U(image)).ComPlusPrefer32bit, "%u: wrong ComPlusPrefer32bit flags %02x\n", id, U(image).ImageFlags );
     }
     if (!(nt_header->OptionalHeader.SectionAlignment % page_size))
         ok( !S(U(image)).ImageMappedFlat, "%u: wrong ImageMappedFlat flags %02x\n", id, U(image).ImageFlags );
@@ -483,44 +498,41 @@ static BOOL query_image_section( int id, const char *dll_name, const IMAGE_NT_HE
             "%u: wrong ImageDynamicallyRelocated flags %02x\n", id, U(image).ImageFlags );
     ok( !S(U(image)).BaseBelow4gb, "%u: wrong BaseBelow4gb flags %02x\n", id, U(image).ImageFlags );
 
-    /* FIXME: needs more work: */
-    /* image.GpValue */
-
     map_size.QuadPart = (nt_header->OptionalHeader.SizeOfImage + page_size - 1) & ~(page_size - 1);
     status = pNtQuerySection( mapping, SectionBasicInformation, &info, sizeof(info), NULL );
-    ok( !status, "NtQuerySection failed err %x\n", status );
-    ok( info.Size.QuadPart == map_size.QuadPart, "NtQuerySection wrong size %x%08x / %x%08x\n",
+    ok( !status, "NtQuerySection failed err %lx\n", status );
+    ok( info.Size.QuadPart == map_size.QuadPart, "NtQuerySection wrong size %lx%08lx / %lx%08lx\n",
         info.Size.u.HighPart, info.Size.u.LowPart, map_size.u.HighPart, map_size.u.LowPart );
     CloseHandle( mapping );
 
     map_size.QuadPart = (nt_header->OptionalHeader.SizeOfImage + page_size - 1) & ~(page_size - 1);
     status = pNtCreateSection( &mapping, STANDARD_RIGHTS_REQUIRED | SECTION_MAP_READ | SECTION_QUERY,
                                NULL, &map_size, PAGE_READONLY, SEC_IMAGE, file );
-    ok( !status, "%u: NtCreateSection failed err %x\n", id, status );
+    ok( !status, "%u: NtCreateSection failed err %lx\n", id, status );
     status = pNtQuerySection( mapping, SectionBasicInformation, &info, sizeof(info), NULL );
-    ok( !status, "NtQuerySection failed err %x\n", status );
-    ok( info.Size.QuadPart == map_size.QuadPart, "NtQuerySection wrong size %x%08x / %x%08x\n",
+    ok( !status, "NtQuerySection failed err %lx\n", status );
+    ok( info.Size.QuadPart == map_size.QuadPart, "NtQuerySection wrong size %lx%08lx / %lx%08lx\n",
         info.Size.u.HighPart, info.Size.u.LowPart, map_size.u.HighPart, map_size.u.LowPart );
     CloseHandle( mapping );
 
     map_size.QuadPart++;
     status = pNtCreateSection( &mapping, STANDARD_RIGHTS_REQUIRED | SECTION_MAP_READ | SECTION_QUERY,
                                NULL, &map_size, PAGE_READONLY, SEC_IMAGE, file );
-    ok( status == STATUS_SECTION_TOO_BIG, "%u: NtCreateSection failed err %x\n", id, status );
+    ok( status == STATUS_SECTION_TOO_BIG, "%u: NtCreateSection failed err %lx\n", id, status );
 
     SetFilePointerEx( file, map_size, NULL, FILE_BEGIN );
     SetEndOfFile( file );
     status = pNtCreateSection( &mapping, STANDARD_RIGHTS_REQUIRED | SECTION_MAP_READ | SECTION_QUERY,
                                NULL, &map_size, PAGE_READONLY, SEC_IMAGE, file );
-    ok( status == STATUS_SECTION_TOO_BIG, "%u: NtCreateSection failed err %x\n", id, status );
+    ok( status == STATUS_SECTION_TOO_BIG, "%u: NtCreateSection failed err %lx\n", id, status );
 
     map_size.QuadPart = 1;
     status = pNtCreateSection( &mapping, STANDARD_RIGHTS_REQUIRED | SECTION_MAP_READ | SECTION_QUERY,
                                NULL, &map_size, PAGE_READONLY, SEC_IMAGE, file );
-    ok( !status, "%u: NtCreateSection failed err %x\n", id, status );
+    ok( !status, "%u: NtCreateSection failed err %lx\n", id, status );
     status = pNtQuerySection( mapping, SectionBasicInformation, &info, sizeof(info), NULL );
-    ok( !status, "NtQuerySection failed err %x\n", status );
-    ok( info.Size.QuadPart == map_size.QuadPart, "NtQuerySection wrong size %x%08x / %x%08x\n",
+    ok( !status, "NtQuerySection failed err %lx\n", status );
+    ok( info.Size.QuadPart == map_size.QuadPart, "NtQuerySection wrong size %lx%08lx / %lx%08lx\n",
         info.Size.u.HighPart, info.Size.u.LowPart, map_size.u.HighPart, map_size.u.LowPart );
     CloseHandle( mapping );
 
@@ -600,7 +612,7 @@ static NTSTATUS map_image_section( const IMAGE_NT_HEADERS *nt_header, const IMAG
     file_size = create_test_dll_sections( &dos_header, nt_header, sections, section_data, dll_name );
 
     file = CreateFileA(dll_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0);
-    ok(file != INVALID_HANDLE_VALUE, "CreateFile error %d\n", GetLastError());
+    ok(file != INVALID_HANDLE_VALUE, "CreateFile error %ld\n", GetLastError());
 
     size.QuadPart = file_size;
     status = pNtCreateSection(&map, STANDARD_RIGHTS_REQUIRED | SECTION_MAP_READ | SECTION_QUERY,
@@ -619,11 +631,11 @@ static NTSTATUS map_image_section( const IMAGE_NT_HEADERS *nt_header, const IMAG
         SECTION_BASIC_INFORMATION info;
         SIZE_T info_size = 0xdeadbeef;
         NTSTATUS ret = pNtQuerySection( map, SectionBasicInformation, &info, sizeof(info), &info_size );
-        ok( !ret, "NtQuerySection failed err %x\n", ret );
-        ok( info_size == sizeof(info), "NtQuerySection wrong size %lu\n", info_size );
-        ok( info.Attributes == (SEC_IMAGE | SEC_FILE), "NtQuerySection wrong attr %x\n", info.Attributes );
+        ok( !ret, "NtQuerySection failed err %lx\n", ret );
+        ok( info_size == sizeof(info), "NtQuerySection wrong size %Iu\n", info_size );
+        ok( info.Attributes == (SEC_IMAGE | SEC_FILE), "NtQuerySection wrong attr %lx\n", info.Attributes );
         ok( info.BaseAddress == NULL, "NtQuerySection wrong base %p\n", info.BaseAddress );
-        ok( info.Size.QuadPart == file_size, "NtQuerySection wrong size %x%08x / %08x\n",
+        ok( info.Size.QuadPart == file_size, "NtQuerySection wrong size %lx%08lx / %08lx\n",
             info.Size.u.HighPart, info.Size.u.LowPart, file_size );
         has_code = query_image_section( line, dll_name, nt_header, section_data );
 
@@ -643,12 +655,12 @@ static NTSTATUS map_image_section( const IMAGE_NT_HEADERS *nt_header, const IMAG
             if (!has_code && is_win64)
             {
                 ok_(__FILE__,line)( mod != NULL || want_32bit || broken(il_only), /* <= win7 */
-                    "loading failed err %u\n", GetLastError() );
+                    "loading failed err %lu\n", GetLastError() );
             }
             else
             {
                 ok_(__FILE__, line)( !mod, "loading succeeded\n" );
-                ok_(__FILE__, line)( GetLastError() == ERROR_BAD_EXE_FORMAT, "wrong error %u\n", GetLastError() );
+                ok_(__FILE__, line)( GetLastError() == ERROR_BAD_EXE_FORMAT, "wrong error %lu\n", GetLastError() );
             }
         }
         else
@@ -657,7 +669,7 @@ static NTSTATUS map_image_section( const IMAGE_NT_HEADERS *nt_header, const IMAG
 
             ok( mod != NULL || broken(il_only) || /* <= win7 */
                 broken( wrong_machine ), /* win8 */
-                "%u: loading failed err %u\n", line, GetLastError() );
+                "%u: loading failed err %lu\n", line, GetLastError() );
             if (!mod && wrong_machine) expect_status = STATUS_INVALID_IMAGE_FORMAT;
         }
         if (mod) FreeLibrary( mod );
@@ -678,7 +690,7 @@ static NTSTATUS map_image_section( const IMAGE_NT_HEADERS *nt_header, const IMAG
             if (!expect_status)
                 ok( !expect_fallback, "%u: got test dll but expected fallback\n", line );
             else
-                ok( !expect_fallback, "%u: got test dll but expected failure %x\n", line, expect_status );
+                ok( !expect_fallback, "%u: got test dll but expected failure %lx\n", line, expect_status );
         }
         else if (!lstrcmpiW( path, load_fallback_name ))
         {
@@ -691,7 +703,7 @@ static NTSTATUS map_image_section( const IMAGE_NT_HEADERS *nt_header, const IMAG
                     "%u: got fallback but expected test dll\n", line );
             else
                 ok( broken(expect_status == STATUS_INVALID_IMAGE_FORMAT), /* <= vista */
-                    "%u: got fallback but expected failure %x\n", line, expect_status );
+                    "%u: got fallback but expected failure %lx\n", line, expect_status );
         }
         else ok( 0, "%u: got unexpected path %s instead of %s\n", line, wine_dbgstr_w(path), wine_dbgstr_w(load_test_name));
         pLdrUnloadDll( ldr_mod );
@@ -706,10 +718,11 @@ static NTSTATUS map_image_section( const IMAGE_NT_HEADERS *nt_header, const IMAG
     else
     {
         ok( ldr_status == expect_status ||
-            broken(il_only && !expect_status && ldr_status == STATUS_INVALID_IMAGE_FORMAT),
-            "%u: wrong status %x/%x\n", line, ldr_status, expect_status );
+            broken(il_only && !expect_status && ldr_status == STATUS_INVALID_IMAGE_FORMAT) ||
+            broken(nt_header->Signature == IMAGE_OS2_SIGNATURE && ldr_status == STATUS_INVALID_IMAGE_NE_FORMAT),
+            "%u: wrong status %lx/%lx\n", line, ldr_status, expect_status );
         ok( !expect_fallback || broken(il_only) || broken(wrong_machine),
-            "%u: failed with %x expected fallback\n", line, ldr_status );
+            "%u: failed with %lx expected fallback\n", line, ldr_status );
     }
 
 done:
@@ -848,7 +861,10 @@ static void test_Loader(void)
           0,
           { ERROR_SUCCESS, ERROR_BAD_EXE_FORMAT } /* vista is more strict */
         },
-        /* Minimal PE image that Windows7 is able to load: 268 bytes */
+        /* Minimal PE image initially created for Windows 7 and accepted from
+         * Vista up to Windows 10 1709 with some unexplained exceptions:
+         * 268 bytes
+         */
         { 0x04,
           0, 0xf0, /* optional header size just forces 0xf0 bytes to be written,
                       0 or another number don't change the behaviour, what really
@@ -856,7 +872,7 @@ static void test_Loader(void)
           0x04 /* also serves as e_lfanew in the truncated MZ header */, 0x04,
           0x40, /* minimal image size that Windows7 accepts */
           0,
-          { ERROR_SUCCESS }
+          { ERROR_SUCCESS, ERROR_BAD_EXE_FORMAT } /* rejected by win10 1809+ */
         },
         /* the following data mimics the PE image which 8k demos have */
         { 0x04,
@@ -884,6 +900,7 @@ static void test_Loader(void)
 
     for (i = 0; i < ARRAY_SIZE(td); i++)
     {
+        winetest_push_context("%d", i);
         nt_header = nt_header_template;
         nt_header.FileHeader.NumberOfSections = td[i].number_of_sections;
         nt_header.FileHeader.SizeOfOptionalHeader = td[i].size_of_optional_header;
@@ -903,56 +920,55 @@ static void test_Loader(void)
             MEMORY_BASIC_INFORMATION info;
             void *ptr;
 
-            ok( td[i].errors[0] == ERROR_SUCCESS, "%d: should have failed\n", i );
+            ok( td[i].errors[0] == ERROR_SUCCESS, "should have failed\n" );
 
             SetLastError(0xdeadbeef);
             size = VirtualQuery(hlib, &info, sizeof(info));
             ok(size == sizeof(info),
-                "%d: VirtualQuery error %d\n", i, GetLastError());
-            ok(info.BaseAddress == hlib, "%d: %p != %p\n", i, info.BaseAddress, hlib);
-            ok(info.AllocationBase == hlib, "%d: %p != %p\n", i, info.AllocationBase, hlib);
-            ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%d: %x != PAGE_EXECUTE_WRITECOPY\n", i, info.AllocationProtect);
-            ok(info.RegionSize == ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, page_size), "%d: got %lx != expected %x\n",
-               i, info.RegionSize, ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, page_size));
-            ok(info.State == MEM_COMMIT, "%d: %x != MEM_COMMIT\n", i, info.State);
+                "%d: VirtualQuery error %ld\n", i, GetLastError());
+            ok(info.BaseAddress == hlib, "%p != %p\n", info.BaseAddress, hlib);
+            ok(info.AllocationBase == hlib, "%p != %p\n", info.AllocationBase, hlib);
+            ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%lx != PAGE_EXECUTE_WRITECOPY\n", info.AllocationProtect);
+            ok(info.RegionSize == ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, page_size), "got %Ix != expected %lx\n",
+               info.RegionSize, ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, page_size));
+            ok(info.State == MEM_COMMIT, "%lx != MEM_COMMIT\n", info.State);
             if (nt_header.OptionalHeader.SectionAlignment < page_size)
-                ok(info.Protect == PAGE_EXECUTE_WRITECOPY, "%d: %x != PAGE_EXECUTE_WRITECOPY\n", i, info.Protect);
+                ok(info.Protect == PAGE_EXECUTE_WRITECOPY, "%lx != PAGE_EXECUTE_WRITECOPY\n", info.Protect);
             else
-                ok(info.Protect == PAGE_READONLY, "%d: %x != PAGE_READONLY\n", i, info.Protect);
-            ok(info.Type == SEC_IMAGE, "%d: %x != SEC_IMAGE\n", i, info.Type);
+                ok(info.Protect == PAGE_READONLY, "%lx != PAGE_READONLY\n", info.Protect);
+            ok(info.Type == SEC_IMAGE, "%lx != SEC_IMAGE\n", info.Type);
 
             SetLastError(0xdeadbeef);
             ptr = VirtualAlloc(hlib, page_size, MEM_COMMIT, info.Protect);
-            ok(!ptr, "%d: VirtualAlloc should fail\n", i);
-            ok(GetLastError() == ERROR_ACCESS_DENIED, "%d: expected ERROR_ACCESS_DENIED, got %d\n", i, GetLastError());
+            ok(!ptr, "VirtualAlloc should fail\n");
+            ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %ld\n", GetLastError());
 
             SetLastError(0xdeadbeef);
             size = VirtualQuery((char *)hlib + info.RegionSize, &info, sizeof(info));
-            ok(size == sizeof(info),
-                "%d: VirtualQuery error %d\n", i, GetLastError());
+            ok(size == sizeof(info), "VirtualQuery error %ld\n", GetLastError());
             if (nt_header.OptionalHeader.SectionAlignment == page_size ||
                 nt_header.OptionalHeader.SectionAlignment == nt_header.OptionalHeader.FileAlignment)
             {
-                ok(info.BaseAddress == (char *)hlib + ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, page_size), "%d: got %p != expected %p\n",
-                   i, info.BaseAddress, (char *)hlib + ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, page_size));
-                ok(info.AllocationBase == 0, "%d: %p != 0\n", i, info.AllocationBase);
-                ok(info.AllocationProtect == 0, "%d: %x != 0\n", i, info.AllocationProtect);
+                ok(info.BaseAddress == (char *)hlib + ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, page_size), "got %p != expected %p\n",
+                   info.BaseAddress, (char *)hlib + ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, page_size));
+                ok(info.AllocationBase == 0, "%p != 0\n", info.AllocationBase);
+                ok(info.AllocationProtect == 0, "%lx != 0\n", info.AllocationProtect);
                 /*ok(info.RegionSize == not_practical_value, "%d: %lx != not_practical_value\n", i, info.RegionSize);*/
-                ok(info.State == MEM_FREE, "%d: %x != MEM_FREE\n", i, info.State);
-                ok(info.Type == 0, "%d: %x != 0\n", i, info.Type);
-                ok(info.Protect == PAGE_NOACCESS, "%d: %x != PAGE_NOACCESS\n", i, info.Protect);
+                ok(info.State == MEM_FREE, "%lx != MEM_FREE\n", info.State);
+                ok(info.Type == 0, "%lx != 0\n", info.Type);
+                ok(info.Protect == PAGE_NOACCESS, "%lx != PAGE_NOACCESS\n", info.Protect);
             }
             else
             {
-                ok(info.Protect == PAGE_EXECUTE_WRITECOPY, "%d: %x != PAGE_EXECUTE_WRITECOPY\n", i, info.Protect);
-                ok(info.BaseAddress == hlib, "%d: got %p != expected %p\n", i, info.BaseAddress, hlib);
-                ok(info.AllocationBase == hlib, "%d: %p != %p\n", i, info.AllocationBase, hlib);
-                ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%d: %x != PAGE_EXECUTE_WRITECOPY\n", i, info.AllocationProtect);
-                ok(info.RegionSize == ALIGN_SIZE(file_size, page_size), "%d: got %lx != expected %x\n",
-                   i, info.RegionSize, ALIGN_SIZE(file_size, page_size));
-                ok(info.State == MEM_COMMIT, "%d: %x != MEM_COMMIT\n", i, info.State);
-                ok(info.Protect == PAGE_READONLY, "%d: %x != PAGE_READONLY\n", i, info.Protect);
-                ok(info.Type == SEC_IMAGE, "%d: %x != SEC_IMAGE\n", i, info.Type);
+                ok(info.Protect == PAGE_EXECUTE_WRITECOPY, "%lx != PAGE_EXECUTE_WRITECOPY\n", info.Protect);
+                ok(info.BaseAddress == hlib, "got %p != expected %p\n", info.BaseAddress, hlib);
+                ok(info.AllocationBase == hlib, "%p != %p\n", info.AllocationBase, hlib);
+                ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%lx != PAGE_EXECUTE_WRITECOPY\n", info.AllocationProtect);
+                ok(info.RegionSize == ALIGN_SIZE(file_size, page_size), "got %Ix != expected %lx\n",
+                   info.RegionSize, ALIGN_SIZE(file_size, page_size));
+                ok(info.State == MEM_COMMIT, "%lx != MEM_COMMIT\n", info.State);
+                ok(info.Protect == PAGE_READONLY, "%lx != PAGE_READONLY\n", info.Protect);
+                ok(info.Type == SEC_IMAGE, "%lx != SEC_IMAGE\n", info.Type);
             }
 
             /* header: check the zeroing of alignment */
@@ -962,7 +978,7 @@ static void test_Loader(void)
 
                 start = (const char *)hlib + nt_header.OptionalHeader.SizeOfHeaders;
                 size = ALIGN_SIZE((ULONG_PTR)start, page_size) - (ULONG_PTR)start;
-                ok(!memcmp(start, filler, size), "%d: header alignment is not cleared\n", i);
+                ok(!memcmp(start, filler, size), "header alignment is not cleared\n");
             }
 
             if (nt_header.FileHeader.NumberOfSections)
@@ -970,25 +986,25 @@ static void test_Loader(void)
                 SetLastError(0xdeadbeef);
                 size = VirtualQuery((char *)hlib + section.VirtualAddress, &info, sizeof(info));
                 ok(size == sizeof(info),
-                    "%d: VirtualQuery error %d\n", i, GetLastError());
+                    "VirtualQuery error %ld\n", GetLastError());
                 if (nt_header.OptionalHeader.SectionAlignment < page_size)
                 {
-                    ok(info.BaseAddress == hlib, "%d: got %p != expected %p\n", i, info.BaseAddress, hlib);
-                    ok(info.RegionSize == ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, page_size), "%d: got %lx != expected %x\n",
-                       i, info.RegionSize, ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, page_size));
-                    ok(info.Protect == PAGE_EXECUTE_WRITECOPY, "%d: %x != PAGE_EXECUTE_WRITECOPY\n", i, info.Protect);
+                    ok(info.BaseAddress == hlib, "got %p != expected %p\n", info.BaseAddress, hlib);
+                    ok(info.RegionSize == ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, page_size), "got %Ix != expected %lx\n",
+                       info.RegionSize, ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, page_size));
+                    ok(info.Protect == PAGE_EXECUTE_WRITECOPY, "%lx != PAGE_EXECUTE_WRITECOPY\n", info.Protect);
                 }
                 else
                 {
-                    ok(info.BaseAddress == (char *)hlib + section.VirtualAddress, "%d: got %p != expected %p\n", i, info.BaseAddress, (char *)hlib + section.VirtualAddress);
-                    ok(info.RegionSize == ALIGN_SIZE(section.Misc.VirtualSize, page_size), "%d: got %lx != expected %x\n",
-                       i, info.RegionSize, ALIGN_SIZE(section.Misc.VirtualSize, page_size));
-                    ok(info.Protect == PAGE_READONLY, "%d: %x != PAGE_READONLY\n", i, info.Protect);
+                    ok(info.BaseAddress == (char *)hlib + section.VirtualAddress, "got %p != expected %p\n", info.BaseAddress, (char *)hlib + section.VirtualAddress);
+                    ok(info.RegionSize == ALIGN_SIZE(section.Misc.VirtualSize, page_size), "got %Ix != expected %lx\n",
+                       info.RegionSize, ALIGN_SIZE(section.Misc.VirtualSize, page_size));
+                    ok(info.Protect == PAGE_READONLY, "%lx != PAGE_READONLY\n", info.Protect);
                 }
-                ok(info.AllocationBase == hlib, "%d: %p != %p\n", i, info.AllocationBase, hlib);
-                ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%d: %x != PAGE_EXECUTE_WRITECOPY\n", i, info.AllocationProtect);
-                ok(info.State == MEM_COMMIT, "%d: %x != MEM_COMMIT\n", i, info.State);
-                ok(info.Type == SEC_IMAGE, "%d: %x != SEC_IMAGE\n", i, info.Type);
+                ok(info.AllocationBase == hlib, "%p != %p\n", info.AllocationBase, hlib);
+                ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%lx != PAGE_EXECUTE_WRITECOPY\n", info.AllocationProtect);
+                ok(info.State == MEM_COMMIT, "%lx != MEM_COMMIT\n", info.State);
+                ok(info.Type == SEC_IMAGE, "%lx != SEC_IMAGE\n", info.Type);
 
                 if (nt_header.OptionalHeader.SectionAlignment >= page_size)
                     ok(!memcmp((const char *)hlib + section.VirtualAddress + section.PointerToRawData, &nt_header, section.SizeOfRawData), "wrong section data\n");
@@ -1002,39 +1018,39 @@ static void test_Loader(void)
 
                     start = (const char *)hlib + section.VirtualAddress + section.PointerToRawData + section.SizeOfRawData;
                     size = ALIGN_SIZE((ULONG_PTR)start, page_size) - (ULONG_PTR)start;
-                    ok(memcmp(start, filler, size), "%d: alignment should not be cleared\n", i);
+                    ok(memcmp(start, filler, size), "alignment should not be cleared\n");
                 }
 
                 SetLastError(0xdeadbeef);
                 ptr = VirtualAlloc((char *)hlib + section.VirtualAddress, page_size, MEM_COMMIT, info.Protect);
-                ok(!ptr, "%d: VirtualAlloc should fail\n", i);
+                ok(!ptr, "VirtualAlloc should fail\n");
                 ok(GetLastError() == ERROR_ACCESS_DENIED || GetLastError() == ERROR_INVALID_ADDRESS,
-                   "%d: expected ERROR_ACCESS_DENIED, got %d\n", i, GetLastError());
+                   "expected ERROR_ACCESS_DENIED, got %ld\n", GetLastError());
             }
 
             SetLastError(0xdeadbeef);
             hlib_as_data_file = LoadLibraryExA(dll_name, 0, LOAD_LIBRARY_AS_DATAFILE);
-            ok(hlib_as_data_file != 0, "LoadLibraryEx error %u\n", GetLastError());
+            ok(hlib_as_data_file != 0, "LoadLibraryEx error %lu\n", GetLastError());
             ok(hlib_as_data_file == hlib, "hlib_as_file and hlib are different\n");
 
             SetLastError(0xdeadbeef);
             ret = FreeLibrary(hlib);
-            ok(ret, "FreeLibrary error %d\n", GetLastError());
+            ok(ret, "FreeLibrary error %ld\n", GetLastError());
 
             SetLastError(0xdeadbeef);
             hlib = GetModuleHandleA(dll_name);
-            ok(hlib != 0, "GetModuleHandle error %u\n", GetLastError());
+            ok(hlib != 0, "GetModuleHandle error %lu\n", GetLastError());
 
             SetLastError(0xdeadbeef);
             ret = FreeLibrary(hlib_as_data_file);
-            ok(ret, "FreeLibrary error %d\n", GetLastError());
+            ok(ret, "FreeLibrary error %ld\n", GetLastError());
 
             hlib = GetModuleHandleA(dll_name);
             ok(!hlib, "GetModuleHandle should fail\n");
 
             SetLastError(0xdeadbeef);
             hlib_as_data_file = LoadLibraryExA(dll_name, 0, LOAD_LIBRARY_AS_DATAFILE);
-            ok(hlib_as_data_file != 0, "LoadLibraryEx error %u\n", GetLastError());
+            ok(hlib_as_data_file != 0, "LoadLibraryEx error %lu\n", GetLastError());
             ok(((ULONG_PTR)hlib_as_data_file & 3) == 1, "hlib_as_data_file got %p\n", hlib_as_data_file);
 
             hlib = GetModuleHandleA(dll_name);
@@ -1042,12 +1058,12 @@ static void test_Loader(void)
 
             SetLastError(0xdeadbeef);
             h = CreateFileA( dll_name, GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0 );
-            ok( h != INVALID_HANDLE_VALUE, "open failed err %u\n", GetLastError() );
+            ok( h != INVALID_HANDLE_VALUE, "open failed err %lu\n", GetLastError() );
             CloseHandle( h );
 
             SetLastError(0xdeadbeef);
             ret = FreeLibrary(hlib_as_data_file);
-            ok(ret, "FreeLibrary error %d\n", GetLastError());
+            ok(ret, "FreeLibrary error %ld\n", GetLastError());
 
             SetLastError(0xdeadbeef);
             hlib_as_data_file = LoadLibraryExA(dll_name, 0, LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE);
@@ -1059,22 +1075,22 @@ static void test_Loader(void)
             }
             else
             {
-                ok(hlib_as_data_file != 0, "LoadLibraryEx error %u\n", GetLastError());
+                ok(hlib_as_data_file != 0, "LoadLibraryEx error %lu\n", GetLastError());
 
                 SetLastError(0xdeadbeef);
                 h = CreateFileA( dll_name, GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0 );
                 ok( h == INVALID_HANDLE_VALUE, "open succeeded\n" );
-                ok( GetLastError() == ERROR_SHARING_VIOLATION, "wrong error %u\n", GetLastError() );
+                ok( GetLastError() == ERROR_SHARING_VIOLATION, "wrong error %lu\n", GetLastError() );
                 CloseHandle( h );
 
                 SetLastError(0xdeadbeef);
                 h = CreateFileA( dll_name, GENERIC_READ | DELETE, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0 );
-                ok( h != INVALID_HANDLE_VALUE, "open failed err %u\n", GetLastError() );
+                ok( h != INVALID_HANDLE_VALUE, "open failed err %lu\n", GetLastError() );
                 CloseHandle( h );
 
                 SetLastError(0xdeadbeef);
                 ret = FreeLibrary(hlib_as_data_file);
-                ok(ret, "FreeLibrary error %d\n", GetLastError());
+                ok(ret, "FreeLibrary error %ld\n", GetLastError());
             }
 
             SetLastError(0xdeadbeef);
@@ -1087,7 +1103,7 @@ static void test_Loader(void)
             }
             else
             {
-                ok(hlib_as_data_file != 0, "LoadLibraryEx error %u\n", GetLastError());
+                ok(hlib_as_data_file != 0, "LoadLibraryEx error %lu\n", GetLastError());
                 ok(((ULONG_PTR)hlib_as_data_file & 3) == 2, "hlib_as_data_file got %p\n",
                    hlib_as_data_file);
 
@@ -1096,18 +1112,19 @@ static void test_Loader(void)
 
                 SetLastError(0xdeadbeef);
                 ret = FreeLibrary(hlib_as_data_file);
-                ok(ret, "FreeLibrary error %d\n", GetLastError());
+                ok(ret, "FreeLibrary error %ld\n", GetLastError());
             }
 
             SetLastError(0xdeadbeef);
             ret = DeleteFileA(dll_name);
-            ok(ret, "DeleteFile error %d\n", GetLastError());
+            ok(ret, "DeleteFile error %ld\n", GetLastError());
 
             nt_header.OptionalHeader.AddressOfEntryPoint = 0x12345678;
             file_size = create_test_dll( &dos_header, td[i].size_of_dos_header, &nt_header, dll_name );
             if (!file_size)
             {
                 ok(0, "could not create %s\n", dll_name);
+                winetest_pop_context();
                 break;
             }
 
@@ -1125,12 +1142,13 @@ static void test_Loader(void)
             {
                 error_match = td[i].errors[error_index] == GetLastError();
             }
-            ok(error_match, "%d: unexpected error %d\n", i, GetLastError());
+            ok(error_match, "unexpected error %ld\n", GetLastError());
         }
 
         SetLastError(0xdeadbeef);
         ret = DeleteFileA(dll_name);
-        ok(ret, "DeleteFile error %d\n", GetLastError());
+        ok(ret, "DeleteFile error %ld\n", GetLastError());
+        winetest_pop_context();
     }
 
     nt_header = nt_header_template;
@@ -1153,26 +1171,26 @@ static void test_Loader(void)
 
     nt_header.OptionalHeader.AddressOfEntryPoint = 0x1234;
     status = map_image_section( &nt_header, &section, section_data, __LINE__ );
-    ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+    ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
     nt_header.OptionalHeader.DllCharacteristics = IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE;
     status = map_image_section( &nt_header, &section, section_data, __LINE__ );
-    ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+    ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
     nt_header.OptionalHeader.SizeOfCode = 0x1000;
     status = map_image_section( &nt_header, &section, section_data, __LINE__ );
-    ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+    ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
     nt_header.OptionalHeader.SizeOfCode = 0;
     nt_header.OptionalHeader.DllCharacteristics = IMAGE_DLLCHARACTERISTICS_NX_COMPAT;
 
     dos_header.e_magic = 0;
     status = map_image_section( &nt_header, &section, section_data, __LINE__ );
-    ok( status == STATUS_INVALID_IMAGE_NOT_MZ, "NtCreateSection error %08x\n", status );
+    ok( status == STATUS_INVALID_IMAGE_NOT_MZ, "NtCreateSection error %08lx\n", status );
 
     dos_header.e_magic = IMAGE_DOS_SIGNATURE;
     nt_header.Signature = IMAGE_OS2_SIGNATURE;
     status = map_image_section( &nt_header, &section, section_data, __LINE__ );
-    ok( status == STATUS_INVALID_IMAGE_NE_FORMAT, "NtCreateSection error %08x\n", status );
+    ok( status == STATUS_INVALID_IMAGE_NE_FORMAT, "NtCreateSection error %08lx\n", status );
     for (i = 0; i < 16; i++)
     {
         ((IMAGE_OS2_HEADER *)&nt_header)->ne_exetyp = i;
@@ -1180,13 +1198,13 @@ static void test_Loader(void)
         switch (i)
         {
         case 2:
-            ok( status == STATUS_INVALID_IMAGE_WIN_16, "NtCreateSection %u error %08x\n", i, status );
+            ok( status == STATUS_INVALID_IMAGE_WIN_16, "NtCreateSection %u error %08lx\n", i, status );
             break;
         case 5:
-            ok( status == STATUS_INVALID_IMAGE_PROTECT, "NtCreateSection %u error %08x\n", i, status );
+            ok( status == STATUS_INVALID_IMAGE_PROTECT, "NtCreateSection %u error %08lx\n", i, status );
             break;
         default:
-            ok( status == STATUS_INVALID_IMAGE_NE_FORMAT, "NtCreateSection %u error %08x\n", i, status );
+            ok( status == STATUS_INVALID_IMAGE_NE_FORMAT, "NtCreateSection %u error %08lx\n", i, status );
             break;
         }
     }
@@ -1194,38 +1212,38 @@ static void test_Loader(void)
 
     dos_header.e_lfanew = 0x98760000;
     status = map_image_section( &nt_header, &section, section_data, __LINE__ );
-    ok( status == STATUS_INVALID_IMAGE_PROTECT, "NtCreateSection error %08x\n", status );
+    ok( status == STATUS_INVALID_IMAGE_PROTECT, "NtCreateSection error %08lx\n", status );
 
     dos_header.e_lfanew = sizeof(dos_header);
     nt_header.Signature = 0xdeadbeef;
     status = map_image_section( &nt_header, &section, section_data, __LINE__ );
-    ok( status == STATUS_INVALID_IMAGE_PROTECT, "NtCreateSection error %08x\n", status );
+    ok( status == STATUS_INVALID_IMAGE_PROTECT, "NtCreateSection error %08lx\n", status );
 
     nt_header.Signature = IMAGE_NT_SIGNATURE;
     nt_header.OptionalHeader.Magic = 0xdead;
     status = map_image_section( &nt_header, &section, section_data, __LINE__ );
-    ok( status == STATUS_INVALID_IMAGE_FORMAT, "NtCreateSection error %08x\n", status );
+    ok( status == STATUS_INVALID_IMAGE_FORMAT, "NtCreateSection error %08lx\n", status );
 
     nt_header.OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR_MAGIC;
     nt_header.FileHeader.Machine = 0xdead;
     status = map_image_section( &nt_header, &section, section_data, __LINE__ );
     ok( status == STATUS_INVALID_IMAGE_FORMAT || broken(status == STATUS_SUCCESS), /* win2k */
-        "NtCreateSection error %08x\n", status );
+        "NtCreateSection error %08lx\n", status );
 
     nt_header.FileHeader.Machine = IMAGE_FILE_MACHINE_UNKNOWN;
     status = map_image_section( &nt_header, &section, section_data, __LINE__ );
     ok( status == STATUS_INVALID_IMAGE_FORMAT || broken(status == STATUS_SUCCESS), /* win2k */
-        "NtCreateSection error %08x\n", status );
+        "NtCreateSection error %08lx\n", status );
 
     nt_header.FileHeader.Machine = get_alt_machine( orig_machine );
     status = map_image_section( &nt_header, &section, section_data, __LINE__ );
     ok( status == STATUS_INVALID_IMAGE_FORMAT || broken(status == STATUS_SUCCESS), /* win2k */
-        "NtCreateSection error %08x\n", status );
+        "NtCreateSection error %08lx\n", status );
 
     nt_header.FileHeader.Machine = get_alt_bitness_machine( orig_machine );
     status = map_image_section( &nt_header, &section, section_data, __LINE__ );
     ok( status == STATUS_INVALID_IMAGE_FORMAT || broken(status == STATUS_SUCCESS), /* win2k */
-                  "NtCreateSection error %08x\n", status );
+                  "NtCreateSection error %08lx\n", status );
 
     nt_header.FileHeader.Machine = orig_machine;
     nt_header.OptionalHeader.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
@@ -1240,33 +1258,33 @@ static void test_Loader(void)
     cor_header.Flags = COMIMAGE_FLAGS_ILONLY;
     U(cor_header).EntryPointToken = 0xbeef;
     status = map_image_section( &nt_header, &section, &cor_header, __LINE__ );
-    ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+    ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
     cor_header.MinorRuntimeVersion = 5;
     status = map_image_section( &nt_header, &section, &cor_header, __LINE__ );
-    ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+    ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
     cor_header.MajorRuntimeVersion = 3;
     cor_header.MinorRuntimeVersion = 0;
     status = map_image_section( &nt_header, &section, &cor_header, __LINE__ );
-    ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+    ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
     cor_header.Flags = COMIMAGE_FLAGS_ILONLY | COMIMAGE_FLAGS_32BITREQUIRED;
     status = map_image_section( &nt_header, &section, &cor_header, __LINE__ );
-    ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+    ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
     cor_header.Flags = COMIMAGE_FLAGS_ILONLY | COMIMAGE_FLAGS_32BITPREFERRED;
     status = map_image_section( &nt_header, &section, &cor_header, __LINE__ );
-    ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+    ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
     cor_header.Flags = 0;
     status = map_image_section( &nt_header, &section, &cor_header, __LINE__ );
-    ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+    ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
     nt_header.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].VirtualAddress = 1;
     nt_header.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].Size = 1;
     status = map_image_section( &nt_header, &section, &cor_header, __LINE__ );
-    ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+    ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
     if (nt_header.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
     {
@@ -1297,7 +1315,7 @@ static void test_Loader(void)
 
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt64, &section, section_data, __LINE__ );
         ok( status == (is_wow64 ? STATUS_INVALID_IMAGE_FORMAT : STATUS_INVALID_IMAGE_WIN_64),
-            "NtCreateSection error %08x\n", status );
+            "NtCreateSection error %08lx\n", status );
 
         switch (orig_machine)
         {
@@ -1306,26 +1324,26 @@ static void test_Loader(void)
         }
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt64, &section, section_data, __LINE__ );
         ok( status == (is_wow64 ? STATUS_INVALID_IMAGE_FORMAT : STATUS_INVALID_IMAGE_WIN_64),
-            "NtCreateSection error %08x\n", status );
+            "NtCreateSection error %08lx\n", status );
 
         nt64.FileHeader.Machine = get_alt_bitness_machine( orig_machine );
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt64, &section, section_data, __LINE__ );
         ok( status == (is_wow64 ? STATUS_SUCCESS : STATUS_INVALID_IMAGE_WIN_64),
-            "NtCreateSection error %08x\n", status );
+            "NtCreateSection error %08lx\n", status );
 
         nt64.OptionalHeader.SizeOfCode = 0;
         nt64.OptionalHeader.AddressOfEntryPoint = 0x1000;
         section.Characteristics = IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt64, &section, section_data, __LINE__ );
         ok( status == (is_wow64 ? STATUS_SUCCESS : STATUS_INVALID_IMAGE_WIN_64),
-            "NtCreateSection error %08x\n", status );
+            "NtCreateSection error %08lx\n", status );
 
         nt64.OptionalHeader.SizeOfCode = 0;
         nt64.OptionalHeader.AddressOfEntryPoint = 0;
         section.Characteristics = IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt64, &section, section_data, __LINE__ );
         ok( status == (is_wow64 ? STATUS_SUCCESS : STATUS_INVALID_IMAGE_WIN_64),
-            "NtCreateSection error %08x\n", status );
+            "NtCreateSection error %08lx\n", status );
 
         nt64.OptionalHeader.SizeOfCode = 0x1000;
         nt64.OptionalHeader.AddressOfEntryPoint = 0;
@@ -1333,14 +1351,14 @@ static void test_Loader(void)
         section.Characteristics = IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt64, &section, section_data, __LINE__ );
         ok( status == (is_wow64 ? STATUS_SUCCESS : STATUS_INVALID_IMAGE_WIN_64),
-            "NtCreateSection error %08x\n", status );
+            "NtCreateSection error %08lx\n", status );
 
         nt64.OptionalHeader.SizeOfCode = 0;
         nt64.OptionalHeader.AddressOfEntryPoint = 0;
         section.Characteristics = IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt64, &section, section_data, __LINE__ );
         ok( status == (is_wow64 ? STATUS_SUCCESS : STATUS_INVALID_IMAGE_WIN_64),
-            "NtCreateSection error %08x\n", status );
+            "NtCreateSection error %08lx\n", status );
 
         nt64.OptionalHeader.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
         nt64.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].VirtualAddress = page_size;
@@ -1350,38 +1368,38 @@ static void test_Loader(void)
         cor_header.Flags = COMIMAGE_FLAGS_ILONLY;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt64, &section, &cor_header, __LINE__ );
         ok( status == (is_wow64 ? STATUS_SUCCESS : STATUS_INVALID_IMAGE_WIN_64),
-            "NtCreateSection error %08x\n", status );
+            "NtCreateSection error %08lx\n", status );
 
         nt64.OptionalHeader.SizeOfCode = 0x1000;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt64, &section, &cor_header, __LINE__ );
         ok( status == (is_wow64 ? STATUS_SUCCESS : STATUS_INVALID_IMAGE_WIN_64),
-            "NtCreateSection error %08x\n", status );
+            "NtCreateSection error %08lx\n", status );
 
         cor_header.MinorRuntimeVersion = 5;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt64, &section, &cor_header, __LINE__ );
         ok( status == (is_wow64 ? STATUS_SUCCESS : STATUS_INVALID_IMAGE_WIN_64),
-            "NtCreateSection error %08x\n", status );
+            "NtCreateSection error %08lx\n", status );
 
         cor_header.Flags = COMIMAGE_FLAGS_ILONLY | COMIMAGE_FLAGS_32BITREQUIRED;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt64, &section, &cor_header, __LINE__ );
         ok( status == (is_wow64 ? STATUS_SUCCESS : STATUS_INVALID_IMAGE_WIN_64),
-            "NtCreateSection error %08x\n", status );
+            "NtCreateSection error %08lx\n", status );
 
         cor_header.Flags = COMIMAGE_FLAGS_ILONLY | COMIMAGE_FLAGS_32BITPREFERRED;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt64, &section, &cor_header, __LINE__ );
         ok( status == (is_wow64 ? STATUS_SUCCESS : STATUS_INVALID_IMAGE_WIN_64),
-            "NtCreateSection error %08x\n", status );
+            "NtCreateSection error %08lx\n", status );
 
         cor_header.Flags = 0;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt64, &section, &cor_header, __LINE__ );
         ok( status == (is_wow64 ? STATUS_SUCCESS : STATUS_INVALID_IMAGE_WIN_64),
-            "NtCreateSection error %08x\n", status );
+            "NtCreateSection error %08lx\n", status );
 
         nt_header.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].VirtualAddress = 1;
         nt_header.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].Size = 1;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt64, &section, &cor_header, __LINE__ );
         ok( status == (is_wow64 ? STATUS_SUCCESS : STATUS_INVALID_IMAGE_WIN_64),
-            "NtCreateSection error %08x\n", status );
+            "NtCreateSection error %08lx\n", status );
     }
     else
     {
@@ -1411,7 +1429,7 @@ static void test_Loader(void)
         section.Characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_EXECUTE;
 
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt32, &section, section_data, __LINE__ );
-        ok( status == STATUS_INVALID_IMAGE_FORMAT, "NtCreateSection error %08x\n", status );
+        ok( status == STATUS_INVALID_IMAGE_FORMAT, "NtCreateSection error %08lx\n", status );
 
         switch (orig_machine)
         {
@@ -1420,36 +1438,36 @@ static void test_Loader(void)
         }
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt32, &section, section_data, __LINE__ );
         ok( status == STATUS_INVALID_IMAGE_FORMAT || broken(!status) /* win8 */,
-            "NtCreateSection error %08x\n", status );
+            "NtCreateSection error %08lx\n", status );
 
         nt32.FileHeader.Machine = get_alt_bitness_machine( orig_machine );
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt32, &section, section_data, __LINE__ );
-        ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+        ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
         nt32.OptionalHeader.SizeOfCode = 0;
         nt32.OptionalHeader.AddressOfEntryPoint = 0x1000;
         section.Characteristics = IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt32, &section, section_data, __LINE__ );
-        ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+        ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
         nt32.OptionalHeader.SizeOfCode = 0;
         nt32.OptionalHeader.AddressOfEntryPoint = 0;
         section.Characteristics = IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt32, &section, section_data, __LINE__ );
-        ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+        ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
         nt32.OptionalHeader.SizeOfCode = 0x1000;
         nt32.OptionalHeader.AddressOfEntryPoint = 0;
         nt32.OptionalHeader.DllCharacteristics = IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE;
         section.Characteristics = IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt32, &section, section_data, __LINE__ );
-        ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+        ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
         nt32.OptionalHeader.SizeOfCode = 0;
         nt32.OptionalHeader.AddressOfEntryPoint = 0;
         section.Characteristics = IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_CODE;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt32, &section, section_data, __LINE__ );
-        ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+        ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
         nt32.OptionalHeader.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
         nt32.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].VirtualAddress = page_size;
@@ -1458,32 +1476,32 @@ static void test_Loader(void)
         cor_header.MinorRuntimeVersion = 4;
         cor_header.Flags = COMIMAGE_FLAGS_ILONLY;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt32, &section, &cor_header, __LINE__ );
-        ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+        ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
         nt32.OptionalHeader.SizeOfCode = 0x1000;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt32, &section, &cor_header, __LINE__ );
-        ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+        ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
         cor_header.MinorRuntimeVersion = 5;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt32, &section, &cor_header, __LINE__ );
-        ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+        ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
         cor_header.Flags = COMIMAGE_FLAGS_ILONLY | COMIMAGE_FLAGS_32BITREQUIRED;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt32, &section, &cor_header, __LINE__ );
-        ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+        ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
         cor_header.Flags = COMIMAGE_FLAGS_ILONLY | COMIMAGE_FLAGS_32BITPREFERRED;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt32, &section, &cor_header, __LINE__ );
-        ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+        ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
         cor_header.Flags = 0;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt32, &section, &cor_header, __LINE__ );
-        ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+        ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
 
         nt_header.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].VirtualAddress = 1;
         nt_header.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].Size = 1;
         status = map_image_section( (IMAGE_NT_HEADERS *)&nt32, &section, &cor_header, __LINE__ );
-        ok( status == STATUS_SUCCESS, "NtCreateSection error %08x\n", status );
+        ok( status == STATUS_SUCCESS, "NtCreateSection error %08lx\n", status );
     }
 
     section.Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ;
@@ -1510,11 +1528,11 @@ static void test_filenames(void)
     strcpy( long_path, dll_name );
     strcpy( strrchr( long_path, '\\' ), "\\this-is-a-long-name.dll" );
     ret = MoveFileA( dll_name, long_path );
-    ok( ret, "MoveFileA failed err %u\n", GetLastError() );
+    ok( ret, "MoveFileA failed err %lu\n", GetLastError() );
     GetShortPathNameA( long_path, short_path, MAX_PATH );
 
     mod = LoadLibraryA( short_path );
-    ok( mod != NULL, "loading failed err %u\n", GetLastError() );
+    ok( mod != NULL, "loading failed err %lu\n", GetLastError() );
     GetModuleFileNameA( mod, buffer, MAX_PATH );
     ok( !lstrcmpiA( buffer, short_path ), "got wrong path %s / %s\n", buffer, short_path );
     mod2 = GetModuleHandleA( short_path );
@@ -1522,7 +1540,7 @@ static void test_filenames(void)
     mod2 = GetModuleHandleA( long_path );
     ok( mod == mod2, "wrong module %p for %s\n", mod2, long_path );
     mod2 = LoadLibraryA( long_path );
-    ok( mod2 != NULL, "loading failed err %u\n", GetLastError() );
+    ok( mod2 != NULL, "loading failed err %lu\n", GetLastError() );
     ok( mod == mod2, "library loaded twice\n" );
     GetModuleFileNameA( mod2, buffer, MAX_PATH );
     ok( !lstrcmpiA( buffer, short_path ), "got wrong path %s / %s\n", buffer, short_path );
@@ -1530,7 +1548,7 @@ static void test_filenames(void)
     FreeLibrary( mod );
 
     mod = LoadLibraryA( long_path );
-    ok( mod != NULL, "loading failed err %u\n", GetLastError() );
+    ok( mod != NULL, "loading failed err %lu\n", GetLastError() );
     GetModuleFileNameA( mod, buffer, MAX_PATH );
     ok( !lstrcmpiA( buffer, long_path ), "got wrong path %s / %s\n", buffer, long_path );
     mod2 = GetModuleHandleA( short_path );
@@ -1538,7 +1556,7 @@ static void test_filenames(void)
     mod2 = GetModuleHandleA( long_path );
     ok( mod == mod2, "wrong module %p for %s\n", mod2, long_path );
     mod2 = LoadLibraryA( short_path );
-    ok( mod2 != NULL, "loading failed err %u\n", GetLastError() );
+    ok( mod2 != NULL, "loading failed err %lu\n", GetLastError() );
     ok( mod == mod2, "library loaded twice\n" );
     GetModuleFileNameA( mod2, buffer, MAX_PATH );
     ok( !lstrcmpiA( buffer, long_path ), "got wrong path %s / %s\n", buffer, long_path );
@@ -1548,17 +1566,17 @@ static void test_filenames(void)
     strcpy( dll_name, long_path );
     strcpy( strrchr( dll_name, '\\' ), "\\this-is-another-name.dll" );
     ret = CreateHardLinkA( dll_name, long_path, NULL );
-    ok( ret, "CreateHardLinkA failed err %u\n", GetLastError() );
+    ok( ret, "CreateHardLinkA failed err %lu\n", GetLastError() );
     if (ret)
     {
         mod = LoadLibraryA( dll_name );
-        ok( mod != NULL, "loading failed err %u\n", GetLastError() );
+        ok( mod != NULL, "loading failed err %lu\n", GetLastError() );
         GetModuleFileNameA( mod, buffer, MAX_PATH );
         ok( !lstrcmpiA( buffer, dll_name ), "got wrong path %s / %s\n", buffer, dll_name );
         mod2 = GetModuleHandleA( long_path );
         ok( mod == mod2, "wrong module %p for %s\n", mod2, long_path );
         mod2 = LoadLibraryA( long_path );
-        ok( mod2 != NULL, "loading failed err %u\n", GetLastError() );
+        ok( mod2 != NULL, "loading failed err %lu\n", GetLastError() );
         ok( mod == mod2, "library loaded twice\n" );
         GetModuleFileNameA( mod2, buffer, MAX_PATH );
         ok( !lstrcmpiA( buffer, dll_name ), "got wrong path %s / %s\n", buffer, short_path );
@@ -1637,11 +1655,11 @@ static void test_image_mapping(const char *dll_name, DWORD scn_page_access, BOOL
 
     SetLastError(0xdeadbeef);
     hfile = CreateFileA(dll_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0);
-    ok(hfile != INVALID_HANDLE_VALUE, "CreateFile error %d\n", GetLastError());
+    ok(hfile != INVALID_HANDLE_VALUE, "CreateFile error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     hmap = CreateFileMappingW(hfile, NULL, PAGE_READONLY | SEC_IMAGE, 0, 0, 0);
-    ok(hmap != 0, "CreateFileMapping error %d\n", GetLastError());
+    ok(hmap != 0, "CreateFileMapping error %ld\n", GetLastError());
 
     offset.u.LowPart  = 0;
     offset.u.HighPart = 0;
@@ -1650,41 +1668,41 @@ static void test_image_mapping(const char *dll_name, DWORD scn_page_access, BOOL
     size = 0;
     status = pNtMapViewOfSection(hmap, GetCurrentProcess(), &addr1, 0, 0, &offset,
                                  &size, 1 /* ViewShare */, 0, PAGE_READONLY);
-    ok(status == STATUS_SUCCESS, "NtMapViewOfSection error %x\n", status);
+    ok(status == STATUS_SUCCESS, "NtMapViewOfSection error %lx\n", status);
     ok(addr1 != 0, "mapped address should be valid\n");
 
     SetLastError(0xdeadbeef);
     size = VirtualQuery((char *)addr1 + section.VirtualAddress, &info, sizeof(info));
-    ok(size == sizeof(info), "VirtualQuery error %d\n", GetLastError());
+    ok(size == sizeof(info), "VirtualQuery error %ld\n", GetLastError());
     ok(info.BaseAddress == (char *)addr1 + section.VirtualAddress, "got %p != expected %p\n", info.BaseAddress, (char *)addr1 + section.VirtualAddress);
-    ok(info.RegionSize == page_size, "got %#lx != expected %#x\n", info.RegionSize, page_size);
-    ok(info.Protect == scn_page_access, "got %#x != expected %#x\n", info.Protect, scn_page_access);
+    ok(info.RegionSize == page_size, "got %#Ix != expected %#lx\n", info.RegionSize, page_size);
+    ok(info.Protect == scn_page_access, "got %#lx != expected %#lx\n", info.Protect, scn_page_access);
     ok(info.AllocationBase == addr1, "%p != %p\n", info.AllocationBase, addr1);
-    ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%#x != PAGE_EXECUTE_WRITECOPY\n", info.AllocationProtect);
-    ok(info.State == MEM_COMMIT, "%#x != MEM_COMMIT\n", info.State);
-    ok(info.Type == SEC_IMAGE, "%#x != SEC_IMAGE\n", info.Type);
+    ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%#lx != PAGE_EXECUTE_WRITECOPY\n", info.AllocationProtect);
+    ok(info.State == MEM_COMMIT, "%#lx != MEM_COMMIT\n", info.State);
+    ok(info.Type == SEC_IMAGE, "%#lx != SEC_IMAGE\n", info.Type);
 
     addr2 = NULL;
     size = 0;
     status = pNtMapViewOfSection(hmap, GetCurrentProcess(), &addr2, 0, 0, &offset,
                                  &size, 1 /* ViewShare */, 0, PAGE_READONLY);
-    ok(status == STATUS_IMAGE_NOT_AT_BASE, "expected STATUS_IMAGE_NOT_AT_BASE, got %x\n", status);
+    ok(status == STATUS_IMAGE_NOT_AT_BASE, "expected STATUS_IMAGE_NOT_AT_BASE, got %lx\n", status);
     ok(addr2 != 0, "mapped address should be valid\n");
     ok(addr2 != addr1, "mapped addresses should be different\n");
 
     SetLastError(0xdeadbeef);
     size = VirtualQuery((char *)addr2 + section.VirtualAddress, &info, sizeof(info));
-    ok(size == sizeof(info), "VirtualQuery error %d\n", GetLastError());
+    ok(size == sizeof(info), "VirtualQuery error %ld\n", GetLastError());
     ok(info.BaseAddress == (char *)addr2 + section.VirtualAddress, "got %p != expected %p\n", info.BaseAddress, (char *)addr2 + section.VirtualAddress);
-    ok(info.RegionSize == page_size, "got %#lx != expected %#x\n", info.RegionSize, page_size);
-    ok(info.Protect == scn_page_access, "got %#x != expected %#x\n", info.Protect, scn_page_access);
+    ok(info.RegionSize == page_size, "got %#Ix != expected %#lx\n", info.RegionSize, page_size);
+    ok(info.Protect == scn_page_access, "got %#lx != expected %#lx\n", info.Protect, scn_page_access);
     ok(info.AllocationBase == addr2, "%p != %p\n", info.AllocationBase, addr2);
-    ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%#x != PAGE_EXECUTE_WRITECOPY\n", info.AllocationProtect);
-    ok(info.State == MEM_COMMIT, "%#x != MEM_COMMIT\n", info.State);
-    ok(info.Type == SEC_IMAGE, "%#x != SEC_IMAGE\n", info.Type);
+    ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%#lx != PAGE_EXECUTE_WRITECOPY\n", info.AllocationProtect);
+    ok(info.State == MEM_COMMIT, "%#lx != MEM_COMMIT\n", info.State);
+    ok(info.Type == SEC_IMAGE, "%#lx != SEC_IMAGE\n", info.Type);
 
     status = pNtUnmapViewOfSection(GetCurrentProcess(), addr2);
-    ok(status == STATUS_SUCCESS, "NtUnmapViewOfSection error %x\n", status);
+    ok(status == STATUS_SUCCESS, "NtUnmapViewOfSection error %lx\n", status);
 
     addr2 = MapViewOfFile(hmap, 0, 0, 0, 0);
     ok(addr2 != 0, "mapped address should be valid\n");
@@ -1692,14 +1710,14 @@ static void test_image_mapping(const char *dll_name, DWORD scn_page_access, BOOL
 
     SetLastError(0xdeadbeef);
     size = VirtualQuery((char *)addr2 + section.VirtualAddress, &info, sizeof(info));
-    ok(size == sizeof(info), "VirtualQuery error %d\n", GetLastError());
+    ok(size == sizeof(info), "VirtualQuery error %ld\n", GetLastError());
     ok(info.BaseAddress == (char *)addr2 + section.VirtualAddress, "got %p != expected %p\n", info.BaseAddress, (char *)addr2 + section.VirtualAddress);
-    ok(info.RegionSize == page_size, "got %#lx != expected %#x\n", info.RegionSize, page_size);
-    ok(info.Protect == scn_page_access, "got %#x != expected %#x\n", info.Protect, scn_page_access);
+    ok(info.RegionSize == page_size, "got %#Ix != expected %#lx\n", info.RegionSize, page_size);
+    ok(info.Protect == scn_page_access, "got %#lx != expected %#lx\n", info.Protect, scn_page_access);
     ok(info.AllocationBase == addr2, "%p != %p\n", info.AllocationBase, addr2);
-    ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%#x != PAGE_EXECUTE_WRITECOPY\n", info.AllocationProtect);
-    ok(info.State == MEM_COMMIT, "%#x != MEM_COMMIT\n", info.State);
-    ok(info.Type == SEC_IMAGE, "%#x != SEC_IMAGE\n", info.Type);
+    ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%#lx != PAGE_EXECUTE_WRITECOPY\n", info.AllocationProtect);
+    ok(info.State == MEM_COMMIT, "%#lx != MEM_COMMIT\n", info.State);
+    ok(info.Type == SEC_IMAGE, "%#lx != SEC_IMAGE\n", info.Type);
 
     UnmapViewOfFile(addr2);
 
@@ -1708,21 +1726,21 @@ static void test_image_mapping(const char *dll_name, DWORD scn_page_access, BOOL
     if (is_dll)
     {
         ok(!addr2, "LoadLibrary should fail, is_dll %d\n", is_dll);
-        ok(GetLastError() == ERROR_INVALID_ADDRESS, "expected ERROR_INVALID_ADDRESS, got %d\n", GetLastError());
+        ok(GetLastError() == ERROR_INVALID_ADDRESS, "expected ERROR_INVALID_ADDRESS, got %ld\n", GetLastError());
     }
     else
     {
         BOOL ret;
-        ok(addr2 != 0, "LoadLibrary error %d, is_dll %d\n", GetLastError(), is_dll);
+        ok(addr2 != 0, "LoadLibrary error %ld, is_dll %d\n", GetLastError(), is_dll);
         ok(addr2 != addr1, "mapped addresses should be different\n");
 
         SetLastError(0xdeadbeef);
         ret = FreeLibrary(addr2);
-        ok(ret, "FreeLibrary error %d\n", GetLastError());
+        ok(ret, "FreeLibrary error %ld\n", GetLastError());
     }
 
     status = pNtUnmapViewOfSection(GetCurrentProcess(), addr1);
-    ok(status == STATUS_SUCCESS, "NtUnmapViewOfSection error %x\n", status);
+    ok(status == STATUS_SUCCESS, "NtUnmapViewOfSection error %lx\n", status);
 
     CloseHandle(hmap);
     CloseHandle(hfile);
@@ -1788,7 +1806,7 @@ static void test_VirtualProtect(void *base, void *section)
 
     SetLastError(0xdeadbeef);
     ret = VirtualProtect(section, page_size, PAGE_NOACCESS, &old_prot);
-    ok(ret, "VirtualProtect error %d\n", GetLastError());
+    ok(ret, "VirtualProtect error %ld\n", GetLastError());
 
     orig_prot = old_prot;
 
@@ -1796,48 +1814,48 @@ static void test_VirtualProtect(void *base, void *section)
     {
         SetLastError(0xdeadbeef);
         ret = VirtualQuery(section, &info, sizeof(info));
-        ok(ret, "VirtualQuery failed %d\n", GetLastError());
-        ok(info.BaseAddress == section, "%d: got %p != expected %p\n", i, info.BaseAddress, section);
-        ok(info.RegionSize == page_size, "%d: got %#lx != expected %#x\n", i, info.RegionSize, page_size);
-        ok(info.Protect == PAGE_NOACCESS, "%d: got %#x != expected PAGE_NOACCESS\n", i, info.Protect);
-        ok(info.AllocationBase == base, "%d: %p != %p\n", i, info.AllocationBase, base);
-        ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%d: %#x != PAGE_EXECUTE_WRITECOPY\n", i, info.AllocationProtect);
-        ok(info.State == MEM_COMMIT, "%d: %#x != MEM_COMMIT\n", i, info.State);
-        ok(info.Type == SEC_IMAGE, "%d: %#x != SEC_IMAGE\n", i, info.Type);
+        ok(ret, "VirtualQuery failed %ld\n", GetLastError());
+        ok(info.BaseAddress == section, "%ld: got %p != expected %p\n", i, info.BaseAddress, section);
+        ok(info.RegionSize == page_size, "%ld: got %#Ix != expected %#lx\n", i, info.RegionSize, page_size);
+        ok(info.Protect == PAGE_NOACCESS, "%ld: got %#lx != expected PAGE_NOACCESS\n", i, info.Protect);
+        ok(info.AllocationBase == base, "%ld: %p != %p\n", i, info.AllocationBase, base);
+        ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%ld: %#lx != PAGE_EXECUTE_WRITECOPY\n", i, info.AllocationProtect);
+        ok(info.State == MEM_COMMIT, "%ld: %#lx != MEM_COMMIT\n", i, info.State);
+        ok(info.Type == SEC_IMAGE, "%ld: %#lx != SEC_IMAGE\n", i, info.Type);
 
         old_prot = 0xdeadbeef;
         SetLastError(0xdeadbeef);
         ret = VirtualProtect(section, page_size, td[i].prot_set, &old_prot);
         if (td[i].prot_get)
         {
-            ok(ret, "%d: VirtualProtect error %d, requested prot %#x\n", i, GetLastError(), td[i].prot_set);
-            ok(old_prot == PAGE_NOACCESS, "%d: got %#x != expected PAGE_NOACCESS\n", i, old_prot);
+            ok(ret, "%ld: VirtualProtect error %ld, requested prot %#lx\n", i, GetLastError(), td[i].prot_set);
+            ok(old_prot == PAGE_NOACCESS, "%ld: got %#lx != expected PAGE_NOACCESS\n", i, old_prot);
 
             SetLastError(0xdeadbeef);
             ret = VirtualQuery(section, &info, sizeof(info));
-            ok(ret, "VirtualQuery failed %d\n", GetLastError());
-            ok(info.BaseAddress == section, "%d: got %p != expected %p\n", i, info.BaseAddress, section);
-            ok(info.RegionSize == page_size, "%d: got %#lx != expected %#x\n", i, info.RegionSize, page_size);
-            ok(info.Protect == td[i].prot_get, "%d: got %#x != expected %#x\n", i, info.Protect, td[i].prot_get);
-            ok(info.AllocationBase == base, "%d: %p != %p\n", i, info.AllocationBase, base);
-            ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%d: %#x != PAGE_EXECUTE_WRITECOPY\n", i, info.AllocationProtect);
-            ok(info.State == MEM_COMMIT, "%d: %#x != MEM_COMMIT\n", i, info.State);
-            ok(info.Type == SEC_IMAGE, "%d: %#x != SEC_IMAGE\n", i, info.Type);
+            ok(ret, "VirtualQuery failed %ld\n", GetLastError());
+            ok(info.BaseAddress == section, "%ld: got %p != expected %p\n", i, info.BaseAddress, section);
+            ok(info.RegionSize == page_size, "%ld: got %#Ix != expected %#lx\n", i, info.RegionSize, page_size);
+            ok(info.Protect == td[i].prot_get, "%ld: got %#lx != expected %#lx\n", i, info.Protect, td[i].prot_get);
+            ok(info.AllocationBase == base, "%ld: %p != %p\n", i, info.AllocationBase, base);
+            ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%ld: %#lx != PAGE_EXECUTE_WRITECOPY\n", i, info.AllocationProtect);
+            ok(info.State == MEM_COMMIT, "%ld: %#lx != MEM_COMMIT\n", i, info.State);
+            ok(info.Type == SEC_IMAGE, "%ld: %#lx != SEC_IMAGE\n", i, info.Type);
         }
         else
         {
-            ok(!ret, "%d: VirtualProtect should fail\n", i);
-            ok(GetLastError() == ERROR_INVALID_PARAMETER, "%d: expected ERROR_INVALID_PARAMETER, got %d\n", i, GetLastError());
+            ok(!ret, "%ld: VirtualProtect should fail\n", i);
+            ok(GetLastError() == ERROR_INVALID_PARAMETER, "%ld: expected ERROR_INVALID_PARAMETER, got %ld\n", i, GetLastError());
         }
 
         old_prot = 0xdeadbeef;
         SetLastError(0xdeadbeef);
         ret = VirtualProtect(section, page_size, PAGE_NOACCESS, &old_prot);
-        ok(ret, "%d: VirtualProtect error %d\n", i, GetLastError());
+        ok(ret, "%ld: VirtualProtect error %ld\n", i, GetLastError());
         if (td[i].prot_get)
-            ok(old_prot == td[i].prot_get, "%d: got %#x != expected %#x\n", i, old_prot, td[i].prot_get);
+            ok(old_prot == td[i].prot_get, "%ld: got %#lx != expected %#lx\n", i, old_prot, td[i].prot_get);
         else
-            ok(old_prot == PAGE_NOACCESS, "%d: got %#x != expected PAGE_NOACCESS\n", i, old_prot);
+            ok(old_prot == PAGE_NOACCESS, "%ld: got %#lx != expected PAGE_NOACCESS\n", i, old_prot);
     }
 
     exec_prot = 0;
@@ -1854,11 +1872,11 @@ static void test_VirtualProtect(void *base, void *section)
             ret = VirtualProtect(section, page_size, prot, &old_prot);
             if ((rw_prot && exec_prot) || (!rw_prot && !exec_prot))
             {
-                ok(!ret, "VirtualProtect(%02x) should fail\n", prot);
-                ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+                ok(!ret, "VirtualProtect(%02lx) should fail\n", prot);
+                ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %ld\n", GetLastError());
             }
             else
-                ok(ret, "VirtualProtect(%02x) error %d\n", prot, GetLastError());
+                ok(ret, "VirtualProtect(%02lx) error %ld\n", prot, GetLastError());
 
             rw_prot = 1 << j;
         }
@@ -1868,7 +1886,7 @@ static void test_VirtualProtect(void *base, void *section)
 
     SetLastError(0xdeadbeef);
     ret = VirtualProtect(section, page_size, orig_prot, &old_prot);
-    ok(ret, "VirtualProtect error %d\n", GetLastError());
+    ok(ret, "VirtualProtect error %ld\n", GetLastError());
 }
 
 static void test_section_access(void)
@@ -1913,9 +1931,11 @@ static void test_section_access(void)
     char temp_path[MAX_PATH];
     char dll_name[MAX_PATH];
     SIZE_T size;
+    SECTION_IMAGE_INFORMATION image_info;
     MEMORY_BASIC_INFORMATION info;
     STARTUPINFOA sti;
     PROCESS_INFORMATION pi;
+    NTSTATUS status;
     DWORD ret;
 
     /* prevent displaying of the "Unable to load this DLL" message box */
@@ -1939,7 +1959,7 @@ static void test_section_access(void)
 
         SetLastError(0xdeadbeef);
         ret = WriteFile(hfile, &dos_header, sizeof(dos_header), &dummy, NULL);
-        ok(ret, "WriteFile error %d\n", GetLastError());
+        ok(ret, "WriteFile error %ld\n", GetLastError());
 
         nt_header = nt_header_template;
         nt_header.FileHeader.NumberOfSections = 1;
@@ -1950,12 +1970,6 @@ static void test_section_access(void)
         nt_header.OptionalHeader.FileAlignment = 0x200;
         nt_header.OptionalHeader.SizeOfImage = sizeof(dos_header) + sizeof(nt_header) + sizeof(IMAGE_SECTION_HEADER) + page_size;
         nt_header.OptionalHeader.SizeOfHeaders = sizeof(dos_header) + sizeof(nt_header) + sizeof(IMAGE_SECTION_HEADER);
-        SetLastError(0xdeadbeef);
-        ret = WriteFile(hfile, &nt_header, sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER), &dummy, NULL);
-        ok(ret, "WriteFile error %d\n", GetLastError());
-        SetLastError(0xdeadbeef);
-        ret = WriteFile(hfile, &nt_header.OptionalHeader, sizeof(IMAGE_OPTIONAL_HEADER), &dummy, NULL);
-        ok(ret, "WriteFile error %d\n", GetLastError());
 
         section.SizeOfRawData = sizeof(section_data);
         section.PointerToRawData = nt_header.OptionalHeader.FileAlignment;
@@ -1963,37 +1977,47 @@ static void test_section_access(void)
         section.Misc.VirtualSize = section.SizeOfRawData;
         section.Characteristics = td[i].scn_file_access;
         SetLastError(0xdeadbeef);
+
+        nt_header.OptionalHeader.AddressOfEntryPoint = section.VirtualAddress;
+
+        SetLastError(0xdeadbeef);
+        ret = WriteFile(hfile, &nt_header, sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER), &dummy, NULL);
+        ok(ret, "WriteFile error %ld\n", GetLastError());
+        SetLastError(0xdeadbeef);
+        ret = WriteFile(hfile, &nt_header.OptionalHeader, sizeof(IMAGE_OPTIONAL_HEADER), &dummy, NULL);
+        ok(ret, "WriteFile error %ld\n", GetLastError());
+
         ret = WriteFile(hfile, &section, sizeof(section), &dummy, NULL);
-        ok(ret, "WriteFile error %d\n", GetLastError());
+        ok(ret, "WriteFile error %ld\n", GetLastError());
 
         file_align = nt_header.OptionalHeader.FileAlignment - nt_header.OptionalHeader.SizeOfHeaders;
         assert(file_align < sizeof(filler));
         SetLastError(0xdeadbeef);
         ret = WriteFile(hfile, filler, file_align, &dummy, NULL);
-        ok(ret, "WriteFile error %d\n", GetLastError());
+        ok(ret, "WriteFile error %ld\n", GetLastError());
 
         /* section data */
         SetLastError(0xdeadbeef);
         ret = WriteFile(hfile, section_data, sizeof(section_data), &dummy, NULL);
-        ok(ret, "WriteFile error %d\n", GetLastError());
+        ok(ret, "WriteFile error %ld\n", GetLastError());
 
         CloseHandle(hfile);
 
         SetLastError(0xdeadbeef);
-        hlib = LoadLibraryA(dll_name);
-        ok(hlib != 0, "LoadLibrary error %d\n", GetLastError());
+        hlib = LoadLibraryExA(dll_name, NULL, DONT_RESOLVE_DLL_REFERENCES);
+        ok(hlib != 0, "LoadLibrary error %ld\n", GetLastError());
 
         SetLastError(0xdeadbeef);
         size = VirtualQuery((char *)hlib + section.VirtualAddress, &info, sizeof(info));
         ok(size == sizeof(info),
-            "%d: VirtualQuery error %d\n", i, GetLastError());
+            "%d: VirtualQuery error %ld\n", i, GetLastError());
         ok(info.BaseAddress == (char *)hlib + section.VirtualAddress, "%d: got %p != expected %p\n", i, info.BaseAddress, (char *)hlib + section.VirtualAddress);
-        ok(info.RegionSize == page_size, "%d: got %#lx != expected %#x\n", i, info.RegionSize, page_size);
-        ok(info.Protect == td[i].scn_page_access, "%d: got %#x != expected %#x\n", i, info.Protect, td[i].scn_page_access);
+        ok(info.RegionSize == page_size, "%d: got %#Ix != expected %#lx\n", i, info.RegionSize, page_size);
+        ok(info.Protect == td[i].scn_page_access, "%d: got %#lx != expected %#lx\n", i, info.Protect, td[i].scn_page_access);
         ok(info.AllocationBase == hlib, "%d: %p != %p\n", i, info.AllocationBase, hlib);
-        ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%d: %#x != PAGE_EXECUTE_WRITECOPY\n", i, info.AllocationProtect);
-        ok(info.State == MEM_COMMIT, "%d: %#x != MEM_COMMIT\n", i, info.State);
-        ok(info.Type == SEC_IMAGE, "%d: %#x != SEC_IMAGE\n", i, info.Type);
+        ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%d: %#lx != PAGE_EXECUTE_WRITECOPY\n", i, info.AllocationProtect);
+        ok(info.State == MEM_COMMIT, "%d: %#lx != MEM_COMMIT\n", i, info.State);
+        ok(info.Type == SEC_IMAGE, "%d: %#lx != SEC_IMAGE\n", i, info.Type);
         if (info.Protect != PAGE_NOACCESS)
             ok(!memcmp((const char *)info.BaseAddress, section_data, section.SizeOfRawData), "wrong section data\n");
 
@@ -2006,15 +2030,15 @@ static void test_section_access(void)
             *p = 0xfe;
             SetLastError(0xdeadbeef);
             size = VirtualQuery((char *)hlib + section.VirtualAddress, &info, sizeof(info));
-            ok(size == sizeof(info), "%d: VirtualQuery error %d\n", i, GetLastError());
+            ok(size == sizeof(info), "%d: VirtualQuery error %ld\n", i, GetLastError());
             /* FIXME: remove the condition below once Wine is fixed */
             todo_wine_if (info.Protect == PAGE_WRITECOPY || info.Protect == PAGE_EXECUTE_WRITECOPY)
-                ok(info.Protect == td[i].scn_page_access_after_write, "%d: got %#x != expected %#x\n", i, info.Protect, td[i].scn_page_access_after_write);
+                ok(info.Protect == td[i].scn_page_access_after_write, "%d: got %#lx != expected %#lx\n", i, info.Protect, td[i].scn_page_access_after_write);
         }
 
         SetLastError(0xdeadbeef);
         ret = FreeLibrary(hlib);
-        ok(ret, "FreeLibrary error %d\n", GetLastError());
+        ok(ret, "FreeLibrary error %ld\n", GetLastError());
 
         test_image_mapping(dll_name, td[i].scn_page_access, TRUE);
 
@@ -2029,44 +2053,57 @@ static void test_section_access(void)
          * but leave a not deletable temporary file.
          */
         ok(hfile != INVALID_HANDLE_VALUE || broken(hfile == INVALID_HANDLE_VALUE) /* nt4 */,
-            "CreateFile error %d\n", GetLastError());
+            "CreateFile error %ld\n", GetLastError());
         if (hfile == INVALID_HANDLE_VALUE) goto nt4_is_broken;
         SetFilePointer(hfile, sizeof(dos_header), NULL, FILE_BEGIN);
         SetLastError(0xdeadbeef);
         ret = WriteFile(hfile, &nt_header, sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER), &dummy, NULL);
-        ok(ret, "WriteFile error %d\n", GetLastError());
+        ok(ret, "WriteFile error %ld\n", GetLastError());
         CloseHandle(hfile);
 
         memset(&sti, 0, sizeof(sti));
         sti.cb = sizeof(sti);
         SetLastError(0xdeadbeef);
         ret = CreateProcessA(dll_name, NULL, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &sti, &pi);
-        ok(ret, "CreateProcess() error %d\n", GetLastError());
+        ok(ret, "CreateProcess() error %ld\n", GetLastError());
 
         SetLastError(0xdeadbeef);
         size = VirtualQueryEx(pi.hProcess, (char *)hlib + section.VirtualAddress, &info, sizeof(info));
         ok(size == sizeof(info),
-            "%d: VirtualQuery error %d\n", i, GetLastError());
+            "%d: VirtualQuery error %ld\n", i, GetLastError());
         ok(info.BaseAddress == (char *)hlib + section.VirtualAddress, "%d: got %p != expected %p\n", i, info.BaseAddress, (char *)hlib + section.VirtualAddress);
-        ok(info.RegionSize == page_size, "%d: got %#lx != expected %#x\n", i, info.RegionSize, page_size);
-        ok(info.Protect == td[i].scn_page_access, "%d: got %#x != expected %#x\n", i, info.Protect, td[i].scn_page_access);
+        ok(info.RegionSize == page_size, "%d: got %#Ix != expected %#lx\n", i, info.RegionSize, page_size);
+        ok(info.Protect == td[i].scn_page_access, "%d: got %#lx != expected %#lx\n", i, info.Protect, td[i].scn_page_access);
         ok(info.AllocationBase == hlib, "%d: %p != %p\n", i, info.AllocationBase, hlib);
-        ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%d: %#x != PAGE_EXECUTE_WRITECOPY\n", i, info.AllocationProtect);
-        ok(info.State == MEM_COMMIT, "%d: %#x != MEM_COMMIT\n", i, info.State);
-        ok(info.Type == SEC_IMAGE, "%d: %#x != SEC_IMAGE\n", i, info.Type);
+        ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%d: %#lx != PAGE_EXECUTE_WRITECOPY\n", i, info.AllocationProtect);
+        ok(info.State == MEM_COMMIT, "%d: %#lx != MEM_COMMIT\n", i, info.State);
+        ok(info.Type == SEC_IMAGE, "%d: %#lx != SEC_IMAGE\n", i, info.Type);
         if (info.Protect != PAGE_NOACCESS)
         {
             SetLastError(0xdeadbeef);
             ret = ReadProcessMemory(pi.hProcess, info.BaseAddress, buf, section.SizeOfRawData, NULL);
-            ok(ret, "ReadProcessMemory() error %d\n", GetLastError());
+            ok(ret, "ReadProcessMemory() error %ld\n", GetLastError());
             ok(!memcmp(buf, section_data, section.SizeOfRawData), "wrong section data\n");
         }
 
+        status = NtQueryInformationProcess(pi.hProcess, ProcessImageInformation,
+                &image_info, sizeof(image_info), NULL );
+        ok(!status, "Got unexpected status %#lx.\n", status);
+        ok(!(image_info.ImageCharacteristics & IMAGE_FILE_DLL),
+                "Got unexpected characteristics %#x.\n", nt_header.FileHeader.Characteristics);
+        status = NtUnmapViewOfSection(pi.hProcess, info.BaseAddress);
+        ok(!status, "Got unexpected status %#lx.\n", status);
+        status = NtQueryInformationProcess(pi.hProcess, ProcessImageInformation,
+                &image_info, sizeof(image_info), NULL );
+        ok(!status, "Got unexpected status %#lx.\n", status);
+        ok(!(image_info.ImageCharacteristics & IMAGE_FILE_DLL),
+                "Got unexpected characteristics %#x.\n", nt_header.FileHeader.Characteristics);
+
         SetLastError(0xdeadbeef);
         ret = TerminateProcess(pi.hProcess, 0);
-        ok(ret, "TerminateProcess() error %d\n", GetLastError());
+        ok(ret, "TerminateProcess() error %ld\n", GetLastError());
         ret = WaitForSingleObject(pi.hProcess, 3000);
-        ok(ret == WAIT_OBJECT_0, "WaitForSingleObject failed: %x\n", ret);
+        ok(ret == WAIT_OBJECT_0, "WaitForSingleObject failed: %lx\n", ret);
 
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
@@ -2076,7 +2113,7 @@ static void test_section_access(void)
 nt4_is_broken:
         SetLastError(0xdeadbeef);
         ret = DeleteFileA(dll_name);
-        ok(ret || broken(!ret) /* nt4 */, "DeleteFile error %d\n", GetLastError());
+        ok(ret || broken(!ret) /* nt4 */, "DeleteFile error %ld\n", GetLastError());
     }
 }
 
@@ -2166,7 +2203,7 @@ static void test_import_resolution(void)
         {
         case 0:  /* normal load */
             mod = LoadLibraryA( dll_name );
-            ok( mod != NULL, "failed to load err %u\n", GetLastError() );
+            ok( mod != NULL, "failed to load err %lu\n", GetLastError() );
             if (!mod) break;
             ptr = (struct imports *)((char *)mod + page_size);
             expect = GetProcAddress( GetModuleHandleA( data.module ), data.function.name );
@@ -2183,7 +2220,7 @@ static void test_import_resolution(void)
             break;
         case 1:  /* load with DONT_RESOLVE_DLL_REFERENCES doesn't resolve imports */
             mod = LoadLibraryExA( dll_name, 0, DONT_RESOLVE_DLL_REFERENCES );
-            ok( mod != NULL, "failed to load err %u\n", GetLastError() );
+            ok( mod != NULL, "failed to load err %lu\n", GetLastError() );
             if (!mod) break;
             ptr = (struct imports *)((char *)mod + page_size);
             ok( ptr->thunks[0].u1.Function == 0xdeadbeef, "thunk resolved to %p for %s.%s\n",
@@ -2200,7 +2237,7 @@ static void test_import_resolution(void)
             break;
         case 2:  /* load without IMAGE_FILE_DLL doesn't resolve imports */
             mod = LoadLibraryA( dll_name );
-            ok( mod != NULL, "failed to load err %u\n", GetLastError() );
+            ok( mod != NULL, "failed to load err %lu\n", GetLastError() );
             if (!mod) break;
             ptr = (struct imports *)((char *)mod + page_size);
             ok( ptr->thunks[0].u1.Function == 0xdeadbeef, "thunk resolved to %p for %s.%s\n",
@@ -2229,7 +2266,7 @@ static DWORD WINAPI mutex_thread_proc(void *param)
     DWORD ret;
 
     ret = WaitForSingleObject(mutex, 0);
-    ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#x\n", ret);
+    ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#lx\n", ret);
 
     SetEvent(param);
 
@@ -2239,7 +2276,7 @@ static DWORD WINAPI mutex_thread_proc(void *param)
     wait_list[3] = heap_lock_event;
     wait_list[4] = cs_lock_event;
 
-    trace("%04x: mutex_thread_proc: starting\n", GetCurrentThreadId());
+    trace("%04lx: mutex_thread_proc: starting\n", GetCurrentThreadId());
     while (1)
     {
         ret = WaitForMultipleObjects(ARRAY_SIZE(wait_list), wait_list, FALSE, 50);
@@ -2247,36 +2284,36 @@ static DWORD WINAPI mutex_thread_proc(void *param)
         else if (ret == WAIT_OBJECT_0 + 1)
         {
             ULONG_PTR loader_lock_magic;
-            trace("%04x: mutex_thread_proc: Entering loader lock\n", GetCurrentThreadId());
+            trace("%04lx: mutex_thread_proc: Entering loader lock\n", GetCurrentThreadId());
             ret = pLdrLockLoaderLock(0, NULL, &loader_lock_magic);
-            ok(!ret, "LdrLockLoaderLock error %#x\n", ret);
+            ok(!ret, "LdrLockLoaderLock error %#lx\n", ret);
             inside_loader_lock++;
             SetEvent(ack_event);
         }
         else if (ret == WAIT_OBJECT_0 + 2)
         {
-            trace("%04x: mutex_thread_proc: Entering PEB lock\n", GetCurrentThreadId());
+            trace("%04lx: mutex_thread_proc: Entering PEB lock\n", GetCurrentThreadId());
             pRtlAcquirePebLock();
             inside_peb_lock++;
             SetEvent(ack_event);
         }
         else if (ret == WAIT_OBJECT_0 + 3)
         {
-            trace("%04x: mutex_thread_proc: Entering heap lock\n", GetCurrentThreadId());
+            trace("%04lx: mutex_thread_proc: Entering heap lock\n", GetCurrentThreadId());
             HeapLock(GetProcessHeap());
             inside_heap_lock++;
             SetEvent(ack_event);
         }
         else if (ret == WAIT_OBJECT_0 + 4)
         {
-            trace("%04x: mutex_thread_proc: Entering CS lock\n", GetCurrentThreadId());
+            trace("%04lx: mutex_thread_proc: Entering CS lock\n", GetCurrentThreadId());
             EnterCriticalSection(&cs_lock);
             inside_cs_lock++;
             SetEvent(ack_event);
         }
     }
 
-    trace("%04x: mutex_thread_proc: exiting\n", GetCurrentThreadId());
+    trace("%04lx: mutex_thread_proc: exiting\n", GetCurrentThreadId());
     return 196;
 }
 
@@ -2285,18 +2322,18 @@ static DWORD WINAPI semaphore_thread_proc(void *param)
     DWORD ret;
 
     ret = WaitForSingleObject(semaphore, 0);
-    ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#x\n", ret);
+    ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#lx\n", ret);
 
     SetEvent(param);
 
     while (1)
     {
         if (winetest_debug > 1)
-            trace("%04x: semaphore_thread_proc: still alive\n", GetCurrentThreadId());
+            trace("%04lx: semaphore_thread_proc: still alive\n", GetCurrentThreadId());
         if (WaitForSingleObject(stop_event, 50) != WAIT_TIMEOUT) break;
     }
 
-    trace("%04x: semaphore_thread_proc: exiting\n", GetCurrentThreadId());
+    trace("%04lx: semaphore_thread_proc: exiting\n", GetCurrentThreadId());
     return 196;
 }
 
@@ -2308,7 +2345,7 @@ static DWORD WINAPI noop_thread_proc(void *param)
         InterlockedIncrement(noop_thread_started);
     }
 
-    trace("%04x: noop_thread_proc: exiting\n", GetCurrentThreadId());
+    trace("%04lx: noop_thread_proc: exiting\n", GetCurrentThreadId());
     return 195;
 }
 
@@ -2357,7 +2394,7 @@ static BOOL WINAPI dll_entry_point(HINSTANCE hinst, DWORD reason, LPVOID param)
         trace("dll: %p, DLL_PROCESS_ATTACH, %p\n", hinst, param);
 
         ret = pRtlDllShutdownInProgress();
-        ok(!ret, "RtlDllShutdownInProgress returned %d\n", ret);
+        ok(!ret, "RtlDllShutdownInProgress returned %ld\n", ret);
 
         /* Set up the FLS slot, if FLS is available */
         if (pFlsGetValue)
@@ -2365,18 +2402,18 @@ static BOOL WINAPI dll_entry_point(HINSTANCE hinst, DWORD reason, LPVOID param)
             void* value;
             BOOL bret;
             ret = pFlsAlloc(&fls_callback);
-            ok(ret != FLS_OUT_OF_INDEXES, "FlsAlloc returned %d\n", ret);
+            ok(ret != FLS_OUT_OF_INDEXES, "FlsAlloc returned %ld\n", ret);
             fls_index = ret;
             SetLastError(0xdeadbeef);
             value = pFlsGetValue(fls_index);
             ok(!value, "FlsGetValue returned %p, expected NULL\n", value);
-            ok(GetLastError() == ERROR_SUCCESS, "FlsGetValue failed with error %u\n", GetLastError());
+            ok(GetLastError() == ERROR_SUCCESS, "FlsGetValue failed with error %lu\n", GetLastError());
             bret = pFlsSetValue(fls_index, (void*) 0x31415);
             ok(bret, "FlsSetValue failed\n");
             fls_count++;
 
             fls_index2 = pFlsAlloc(&fls_callback);
-            ok(fls_index2 != FLS_OUT_OF_INDEXES, "FlsAlloc returned %d\n", ret);
+            ok(fls_index2 != FLS_OUT_OF_INDEXES, "FlsAlloc returned %ld\n", ret);
         }
         ++thread_count;
         break;
@@ -2405,7 +2442,7 @@ static BOOL WINAPI dll_entry_point(HINSTANCE hinst, DWORD reason, LPVOID param)
              * doesn't call the DLL entry point on process detach either.
              */
             HeapLock(GetProcessHeap());
-todo_wine
+            todo_wine
             ok(0, "dll_entry_point: process should already deadlock\n");
             break;
         }
@@ -2427,7 +2464,7 @@ todo_wine
         if (test_dll_phase == 3)
         {
             ret = pRtlDllShutdownInProgress();
-            ok(ret, "RtlDllShutdownInProgress returned %d\n", ret);
+            ok(ret, "RtlDllShutdownInProgress returned %ld\n", ret);
         }
         else
         {
@@ -2435,7 +2472,7 @@ todo_wine
 
             /* FIXME: remove once Wine is fixed */
             todo_wine_if (!(expected_code == STILL_ACTIVE || expected_code == 196))
-                ok(!ret || broken(ret) /* before Vista */, "RtlDllShutdownInProgress returned %d\n", ret);
+                ok(!ret || broken(ret) /* before Vista */, "RtlDllShutdownInProgress returned %ld\n", ret);
         }
 
         /* In the case that the process is terminating, FLS slots should still be accessible, but
@@ -2450,20 +2487,20 @@ todo_wine
             value = pFlsGetValue(fls_index);
             ok(broken(value == (void*) 0x31415) || /* Win2k3 */
                 value == NULL, "FlsGetValue returned %p, expected NULL\n", value);
-            ok(GetLastError() == ERROR_SUCCESS, "FlsGetValue failed with error %u\n", GetLastError());
+            ok(GetLastError() == ERROR_SUCCESS, "FlsGetValue failed with error %lu\n", GetLastError());
             ok(broken(fls_callback_count == thread_detach_count) || /* Win2k3 */
                 fls_callback_count == thread_detach_count + 1,
-                "wrong FLS callback count %d, expected %d\n", fls_callback_count, thread_detach_count + 1);
+                "wrong FLS callback count %ld, expected %d\n", fls_callback_count, thread_detach_count + 1);
         }
         if (pFlsFree)
         {
             BOOL ret;
             /* Call FlsFree now and run the remaining callbacks from uncleanly terminated threads */
             ret = pFlsFree(fls_index);
-            ok(ret, "FlsFree failed with error %u\n", GetLastError());
+            ok(ret, "FlsFree failed with error %lu\n", GetLastError());
             fls_index = FLS_OUT_OF_INDEXES;
             ok(fls_callback_count == fls_count,
-                "wrong FLS callback count %d, expected %d\n", fls_callback_count, fls_count);
+                "wrong FLS callback count %ld, expected %d\n", fls_callback_count, fls_count);
         }
 
         ok(attached_thread_count >= 2, "attached thread count should be >= 2\n");
@@ -2476,40 +2513,40 @@ todo_wine
             if (expected_code != STILL_ACTIVE)
             {
                 ret = WaitForSingleObject(attached_thread[i], 1000);
-                ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#x\n", ret);
+                ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#lx\n", ret);
             }
             ret = GetExitCodeThread(attached_thread[i], &code);
-            trace("dll: GetExitCodeThread(%u) => %d,%u\n", i, ret, code);
-            ok(ret == 1, "GetExitCodeThread returned %d, expected 1\n", ret);
-            ok(code == expected_code, "expected thread exit code %u, got %u\n", expected_code, code);
+            trace("dll: GetExitCodeThread(%lu) => %ld,%lu\n", i, ret, code);
+            ok(ret == 1, "GetExitCodeThread returned %ld, expected 1\n", ret);
+            ok(code == expected_code, "expected thread exit code %lu, got %lu\n", expected_code, code);
         }
 
         ret = WaitForSingleObject(event, 0);
-        ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+        ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
 
         ret = WaitForSingleObject(mutex, 0);
         if (expected_code == STILL_ACTIVE)
-            ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+            ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
         else
-            ok(ret == WAIT_ABANDONED, "expected WAIT_ABANDONED, got %#x\n", ret);
+            ok(ret == WAIT_ABANDONED, "expected WAIT_ABANDONED, got %#lx\n", ret);
 
         /* semaphore is not abandoned on thread termination */
         ret = WaitForSingleObject(semaphore, 0);
-        ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+        ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
 
         if (expected_code == STILL_ACTIVE)
         {
             ret = WaitForSingleObject(attached_thread[0], 0);
-            ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+            ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
             ret = WaitForSingleObject(attached_thread[1], 0);
-            ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+            ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
         }
         else
         {
             ret = WaitForSingleObject(attached_thread[0], 0);
-            ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#x\n", ret);
+            ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#lx\n", ret);
             ret = WaitForSingleObject(attached_thread[1], 0);
-            ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#x\n", ret);
+            ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#lx\n", ret);
         }
 
         /* win7 doesn't allow creating a thread during process shutdown but
@@ -2522,26 +2559,26 @@ todo_wine
         {
             ok(!handle || broken(handle != 0) /* before win7 */, "CreateThread should fail\n");
             if (!handle)
-                ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+                ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %ld\n", GetLastError());
             else
             {
                 ret = WaitForSingleObject(handle, 1000);
-                ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+                ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
                 CloseHandle(handle);
             }
         }
         else
         {
-            ok(handle != 0, "CreateThread error %d\n", GetLastError());
+            ok(handle != 0, "CreateThread error %ld\n", GetLastError());
             ret = WaitForSingleObject(handle, 1000);
-            ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+            ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
             ok(!noop_thread_started || broken(noop_thread_started) /* XP64 */, "thread shouldn't start yet\n");
             CloseHandle(handle);
         }
 
         SetLastError(0xdeadbeef);
         process = OpenProcess(PROCESS_ALL_ACCESS_NT4, FALSE, GetCurrentProcessId());
-        ok(process != NULL, "OpenProcess error %d\n", GetLastError());
+        ok(process != NULL, "OpenProcess error %ld\n", GetLastError());
 
         noop_thread_started = 0;
         SetLastError(0xdeadbeef);
@@ -2550,26 +2587,26 @@ todo_wine
         {
             ok(!handle || broken(handle != 0) /* before win7 */, "CreateRemoteThread should fail\n");
             if (!handle)
-                ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+                ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %ld\n", GetLastError());
             else
             {
                 ret = WaitForSingleObject(handle, 1000);
-                ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+                ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
                 CloseHandle(handle);
             }
         }
         else
         {
-            ok(handle != 0, "CreateRemoteThread error %d\n", GetLastError());
+            ok(handle != 0, "CreateRemoteThread error %ld\n", GetLastError());
             ret = WaitForSingleObject(handle, 1000);
-            ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+            ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
             ok(!noop_thread_started || broken(noop_thread_started) /* XP64 */, "thread shouldn't start yet\n");
             CloseHandle(handle);
         }
 
         SetLastError(0xdeadbeef);
         handle = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 4096, NULL);
-        ok(handle != 0, "CreateFileMapping error %d\n", GetLastError());
+        ok(handle != 0, "CreateFileMapping error %ld\n", GetLastError());
 
         offset.u.LowPart = 0;
         offset.u.HighPart = 0;
@@ -2577,9 +2614,9 @@ todo_wine
         size = 0;
         ret = pNtMapViewOfSection(handle, process, &addr, 0, 0, &offset,
                                   &size, 1 /* ViewShare */, 0, PAGE_READONLY);
-        ok(ret == STATUS_SUCCESS, "NtMapViewOfSection error %#x\n", ret);
+        ok(ret == STATUS_SUCCESS, "NtMapViewOfSection error %#lx\n", ret);
         ret = pNtUnmapViewOfSection(process, addr);
-        ok(ret == STATUS_SUCCESS, "NtUnmapViewOfSection error %#x\n", ret);
+        ok(ret == STATUS_SUCCESS, "NtUnmapViewOfSection error %#lx\n", ret);
 
         CloseHandle(handle);
         CloseHandle(process);
@@ -2588,10 +2625,10 @@ todo_wine
         ok(!handle, "winver.exe shouldn't be loaded yet\n");
         SetLastError(0xdeadbeef);
         handle = LoadLibraryA("winver.exe");
-        ok(handle != 0, "LoadLibrary error %d\n", GetLastError());
+        ok(handle != 0, "LoadLibrary error %ld\n", GetLastError());
         SetLastError(0xdeadbeef);
         ret = FreeLibrary(handle);
-        ok(ret, "FreeLibrary error %d\n", GetLastError());
+        ok(ret, "FreeLibrary error %ld\n", GetLastError());
         handle = GetModuleHandleA("winver.exe");
         if (param)
             ok(handle != 0, "winver.exe should not be unloaded\n");
@@ -2602,18 +2639,17 @@ todo_wine
         SetLastError(0xdeadbeef);
         ret = WaitForDebugEvent(&de, 0);
         ok(!ret, "WaitForDebugEvent should fail\n");
-todo_wine
-        ok(GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
+        ok(GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE, got %ld\n", GetLastError());
 
         SetLastError(0xdeadbeef);
         ret = DebugActiveProcess(GetCurrentProcessId());
         ok(!ret, "DebugActiveProcess should fail\n");
-        ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+        ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %ld\n", GetLastError());
 
         SetLastError(0xdeadbeef);
         ret = WaitForDebugEvent(&de, 0);
         ok(!ret, "WaitForDebugEvent should fail\n");
-        ok(GetLastError() == ERROR_SEM_TIMEOUT, "expected ERROR_SEM_TIMEOUT, got %d\n", GetLastError());
+        ok(GetLastError() == ERROR_SEM_TIMEOUT, "expected ERROR_SEM_TIMEOUT, got %ld\n", GetLastError());
 
         if (test_dll_phase == 2)
         {
@@ -2630,7 +2666,7 @@ todo_wine
         ++thread_count;
 
         ret = pRtlDllShutdownInProgress();
-        ok(!ret, "RtlDllShutdownInProgress returned %d\n", ret);
+        ok(!ret, "RtlDllShutdownInProgress returned %ld\n", ret);
 
         if (attached_thread_count < MAX_COUNT)
         {
@@ -2647,7 +2683,7 @@ todo_wine
             SetLastError(0xdeadbeef);
             value = pFlsGetValue(fls_index);
             ok(!value, "FlsGetValue returned %p, expected NULL\n", value);
-            ok(GetLastError() == ERROR_SUCCESS, "FlsGetValue failed with error %u\n", GetLastError());
+            ok(GetLastError() == ERROR_SUCCESS, "FlsGetValue failed with error %lu\n", GetLastError());
             ret = pFlsSetValue(fls_index, (void*) 0x31415);
             ok(ret, "FlsSetValue failed\n");
             fls_count++;
@@ -2665,9 +2701,9 @@ todo_wine
          * sent on thread exit, but DLL_THREAD_ATTACH is never received.
          */
         if (noop_thread_started)
-            ok(ret, "RtlDllShutdownInProgress returned %d\n", ret);
+            ok(ret, "RtlDllShutdownInProgress returned %ld\n", ret);
         else
-            ok(!ret, "RtlDllShutdownInProgress returned %d\n", ret);
+            ok(!ret, "RtlDllShutdownInProgress returned %ld\n", ret);
 
         /* FLS data should already be destroyed, if FLS is available.
          * Note that this is broken for Win2k3, which runs the callbacks *after* the DLL entry
@@ -2683,7 +2719,7 @@ todo_wine
             value = pFlsGetValue(fls_index);
             ok(broken(value == (void*) 0x31415) || /* Win2k3 */
                 !value, "FlsGetValue returned %p, expected NULL\n", value);
-            ok(GetLastError() == ERROR_SUCCESS, "FlsGetValue failed with error %u\n", GetLastError());
+            ok(GetLastError() == ERROR_SUCCESS, "FlsGetValue failed with error %lu\n", GetLastError());
 
             bret = pFlsSetValue(fls_index2, (void*) 0x31415);
             ok(bret, "FlsSetValue failed\n");
@@ -2698,7 +2734,7 @@ todo_wine
 
         break;
     default:
-        trace("dll: %p, %d, %p\n", hinst, reason, param);
+        trace("dll: %p, %ld, %p\n", hinst, reason, param);
         break;
     }
 
@@ -2716,7 +2752,7 @@ static void child_process(const char *dll_name, DWORD target_offset)
     struct PROCESS_BASIC_INFORMATION_PRIVATE pbi;
     DWORD_PTR affinity;
 
-    trace("phase %d: writing %p at %#x\n", test_dll_phase, dll_entry_point, target_offset);
+    trace("phase %d: writing %p at %#lx\n", test_dll_phase, dll_entry_point, target_offset);
 
     if (pFlsAlloc)
     {
@@ -2726,36 +2762,36 @@ static void child_process(const char *dll_name, DWORD target_offset)
 
     SetLastError(0xdeadbeef);
     mutex = CreateMutexW(NULL, FALSE, NULL);
-    ok(mutex != 0, "CreateMutex error %d\n", GetLastError());
+    ok(mutex != 0, "CreateMutex error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     semaphore = CreateSemaphoreW(NULL, 1, 1, NULL);
-    ok(semaphore != 0, "CreateSemaphore error %d\n", GetLastError());
+    ok(semaphore != 0, "CreateSemaphore error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     event = CreateEventW(NULL, TRUE, FALSE, NULL);
-    ok(event != 0, "CreateEvent error %d\n", GetLastError());
+    ok(event != 0, "CreateEvent error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     loader_lock_event = CreateEventW(NULL, FALSE, FALSE, NULL);
-    ok(loader_lock_event != 0, "CreateEvent error %d\n", GetLastError());
+    ok(loader_lock_event != 0, "CreateEvent error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     peb_lock_event = CreateEventW(NULL, FALSE, FALSE, NULL);
-    ok(peb_lock_event != 0, "CreateEvent error %d\n", GetLastError());
+    ok(peb_lock_event != 0, "CreateEvent error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     heap_lock_event = CreateEventW(NULL, FALSE, FALSE, NULL);
-    ok(heap_lock_event != 0, "CreateEvent error %d\n", GetLastError());
+    ok(heap_lock_event != 0, "CreateEvent error %ld\n", GetLastError());
 
     InitializeCriticalSection(&cs_lock);
     SetLastError(0xdeadbeef);
     cs_lock_event = CreateEventW(NULL, FALSE, FALSE, NULL);
-    ok(cs_lock_event != 0, "CreateEvent error %d\n", GetLastError());
+    ok(cs_lock_event != 0, "CreateEvent error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ack_event = CreateEventW(NULL, FALSE, FALSE, NULL);
-    ok(ack_event != 0, "CreateEvent error %d\n", GetLastError());
+    ok(ack_event != 0, "CreateEvent error %ld\n", GetLastError());
 
     file = CreateFileA(dll_name, GENERIC_READ|GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0);
     if (file == INVALID_HANDLE_VALUE)
@@ -2767,20 +2803,20 @@ static void child_process(const char *dll_name, DWORD target_offset)
     SetLastError(0xdeadbeef);
     target = dll_entry_point;
     ret = WriteFile(file, &target, sizeof(target), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
     CloseHandle(file);
 
     SetLastError(0xdeadbeef);
     hmod = LoadLibraryA(dll_name);
-    ok(hmod != 0, "LoadLibrary error %d\n", GetLastError());
+    ok(hmod != 0, "LoadLibrary error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     stop_event = CreateEventW(NULL, TRUE, FALSE, NULL);
-    ok(stop_event != 0, "CreateEvent error %d\n", GetLastError());
+    ok(stop_event != 0, "CreateEvent error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     thread = CreateThread(NULL, 0, mutex_thread_proc, event, 0, &dummy);
-    ok(thread != 0, "CreateThread error %d\n", GetLastError());
+    ok(thread != 0, "CreateThread error %ld\n", GetLastError());
     WaitForSingleObject(event, 3000);
     CloseHandle(thread);
 
@@ -2788,7 +2824,7 @@ static void child_process(const char *dll_name, DWORD target_offset)
 
     SetLastError(0xdeadbeef);
     thread = CreateThread(NULL, 0, semaphore_thread_proc, event, 0, &dummy);
-    ok(thread != 0, "CreateThread error %d\n", GetLastError());
+    ok(thread != 0, "CreateThread error %ld\n", GetLastError());
     WaitForSingleObject(event, 3000);
     CloseHandle(thread);
 
@@ -2799,62 +2835,62 @@ static void child_process(const char *dll_name, DWORD target_offset)
     for (i = 0; i < attached_thread_count; i++)
     {
         ret = GetExitCodeThread(attached_thread[i], &code);
-        trace("child: GetExitCodeThread(%u) => %d,%u\n", i, ret, code);
-        ok(ret == 1, "GetExitCodeThread returned %d, expected 1\n", ret);
-        ok(code == STILL_ACTIVE, "expected thread exit code STILL_ACTIVE, got %u\n", code);
+        trace("child: GetExitCodeThread(%lu) => %ld,%lu\n", i, ret, code);
+        ok(ret == 1, "GetExitCodeThread returned %ld, expected 1\n", ret);
+        ok(code == STILL_ACTIVE, "expected thread exit code STILL_ACTIVE, got %lu\n", code);
     }
 
     ret = WaitForSingleObject(attached_thread[0], 0);
-    ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
     ret = WaitForSingleObject(attached_thread[1], 0);
-    ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
 
     ret = WaitForSingleObject(event, 0);
-    ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
     ret = WaitForSingleObject(mutex, 0);
-    ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
     ret = WaitForSingleObject(semaphore, 0);
-    ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
 
     ret = pRtlDllShutdownInProgress();
-    ok(!ret, "RtlDllShutdownInProgress returned %d\n", ret);
+    ok(!ret, "RtlDllShutdownInProgress returned %ld\n", ret);
 
     SetLastError(0xdeadbeef);
     process = OpenProcess(PROCESS_ALL_ACCESS_NT4, FALSE, GetCurrentProcessId());
-    ok(process != NULL, "OpenProcess error %d\n", GetLastError());
+    ok(process != NULL, "OpenProcess error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = TerminateProcess(0, 195);
     ok(!ret, "TerminateProcess(0) should fail\n");
-    ok(GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE, got %ld\n", GetLastError());
 
     Sleep(100);
 
     affinity = 1;
     ret = pNtSetInformationProcess(process, ProcessAffinityMask, &affinity, sizeof(affinity));
-    ok(!ret, "NtSetInformationProcess error %#x\n", ret);
+    ok(!ret, "NtSetInformationProcess error %#lx\n", ret);
 
     switch (test_dll_phase)
     {
     case 0:
         ret = pRtlDllShutdownInProgress();
-        ok(!ret, "RtlDllShutdownInProgress returned %d\n", ret);
+        ok(!ret, "RtlDllShutdownInProgress returned %ld\n", ret);
 
         trace("call NtTerminateProcess(0, 195)\n");
         ret = pNtTerminateProcess(0, 195);
-        ok(!ret, "NtTerminateProcess error %#x\n", ret);
+        ok(!ret, "NtTerminateProcess error %#lx\n", ret);
 
         memset(&pbi, 0, sizeof(pbi));
         ret = pNtQueryInformationProcess(process, ProcessBasicInformation, &pbi, sizeof(pbi), NULL);
-        ok(!ret, "NtQueryInformationProcess error %#x\n", ret);
+        ok(!ret, "NtQueryInformationProcess error %#lx\n", ret);
         ok(pbi.ExitStatus == STILL_ACTIVE || pbi.ExitStatus == 195,
-           "expected STILL_ACTIVE, got %lu\n", pbi.ExitStatus);
+           "expected STILL_ACTIVE, got %Iu\n", pbi.ExitStatus);
         affinity = 1;
         ret = pNtSetInformationProcess(process, ProcessAffinityMask, &affinity, sizeof(affinity));
-        ok(!ret, "NtSetInformationProcess error %#x\n", ret);
+        ok(!ret, "NtSetInformationProcess error %#lx\n", ret);
 
         ret = pRtlDllShutdownInProgress();
-        ok(!ret, "RtlDllShutdownInProgress returned %d\n", ret);
+        ok(!ret, "RtlDllShutdownInProgress returned %ld\n", ret);
 
         hmod = GetModuleHandleA(dll_name);
         ok(hmod != 0, "DLL should not be unloaded\n");
@@ -2863,11 +2899,11 @@ static void child_process(const char *dll_name, DWORD target_offset)
         thread = CreateThread(NULL, 0, noop_thread_proc, &dummy, 0, &ret);
         ok(!thread || broken(thread != 0) /* before win7 */, "CreateThread should fail\n");
         if (!thread)
-            ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+            ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %ld\n", GetLastError());
         else
         {
             ret = WaitForSingleObject(thread, 1000);
-            ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#x\n", ret);
+            ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#lx\n", ret);
             CloseHandle(thread);
         }
 
@@ -2875,34 +2911,34 @@ static void child_process(const char *dll_name, DWORD target_offset)
         pLdrShutdownProcess();
 
         ret = pRtlDllShutdownInProgress();
-        ok(ret, "RtlDllShutdownInProgress returned %d\n", ret);
+        ok(ret, "RtlDllShutdownInProgress returned %ld\n", ret);
 
         hmod = GetModuleHandleA(dll_name);
         ok(hmod != 0, "DLL should not be unloaded\n");
 
         memset(&pbi, 0, sizeof(pbi));
         ret = pNtQueryInformationProcess(process, ProcessBasicInformation, &pbi, sizeof(pbi), NULL);
-        ok(!ret, "NtQueryInformationProcess error %#x\n", ret);
+        ok(!ret, "NtQueryInformationProcess error %#lx\n", ret);
         ok(pbi.ExitStatus == STILL_ACTIVE || pbi.ExitStatus == 195,
-           "expected STILL_ACTIVE, got %lu\n", pbi.ExitStatus);
+           "expected STILL_ACTIVE, got %Iu\n", pbi.ExitStatus);
         affinity = 1;
         ret = pNtSetInformationProcess(process, ProcessAffinityMask, &affinity, sizeof(affinity));
-        ok(!ret, "NtSetInformationProcess error %#x\n", ret);
+        ok(!ret, "NtSetInformationProcess error %#lx\n", ret);
         break;
 
     case 1: /* normal ExitProcess */
         ret = pRtlDllShutdownInProgress();
-        ok(!ret, "RtlDllShutdownInProgress returned %d\n", ret);
+        ok(!ret, "RtlDllShutdownInProgress returned %ld\n", ret);
         break;
 
     case 2: /* ExitProcess will be called by the PROCESS_DETACH handler */
         ret = pRtlDllShutdownInProgress();
-        ok(!ret, "RtlDllShutdownInProgress returned %d\n", ret);
+        ok(!ret, "RtlDllShutdownInProgress returned %ld\n", ret);
 
         trace("call FreeLibrary(%p)\n", hmod);
         SetLastError(0xdeadbeef);
         ret = FreeLibrary(hmod);
-        ok(ret, "FreeLibrary error %d\n", GetLastError());
+        ok(ret, "FreeLibrary error %ld\n", GetLastError());
         hmod = GetModuleHandleA(dll_name);
         ok(!hmod, "DLL should be unloaded\n");
 
@@ -2910,7 +2946,7 @@ static void child_process(const char *dll_name, DWORD target_offset)
             ok(0, "FreeLibrary+ExitProcess should never return\n");
 
         ret = pRtlDllShutdownInProgress();
-        ok(!ret, "RtlDllShutdownInProgress returned %d\n", ret);
+        ok(!ret, "RtlDllShutdownInProgress returned %ld\n", ret);
 
         break;
 
@@ -2928,7 +2964,7 @@ static void child_process(const char *dll_name, DWORD target_offset)
         /* calling NtTerminateProcess should not cause a deadlock */
         trace("call NtTerminateProcess(0, 198)\n");
         ret = pNtTerminateProcess(0, 198);
-        ok(!ret, "NtTerminateProcess error %#x\n", ret);
+        ok(!ret, "NtTerminateProcess error %#lx\n", ret);
 
         *child_failures = winetest_get_failures();
 
@@ -2996,24 +3032,24 @@ static void child_process(const char *dll_name, DWORD target_offset)
     if (expected_code == STILL_ACTIVE)
     {
         ret = WaitForSingleObject(attached_thread[0], 100);
-        ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+        ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
         ret = WaitForSingleObject(attached_thread[1], 100);
-        ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
+        ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#lx\n", ret);
     }
     else
     {
         ret = WaitForSingleObject(attached_thread[0], 2000);
-        ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#x\n", ret);
+        ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#lx\n", ret);
         ret = WaitForSingleObject(attached_thread[1], 2000);
-        ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#x\n", ret);
+        ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#lx\n", ret);
     }
 
     for (i = 0; i < attached_thread_count; i++)
     {
         ret = GetExitCodeThread(attached_thread[i], &code);
-        trace("child: GetExitCodeThread(%u) => %d,%u\n", i, ret, code);
-        ok(ret == 1, "GetExitCodeThread returned %d, expected 1\n", ret);
-        ok(code == expected_code, "expected thread exit code %u, got %u\n", expected_code, code);
+        trace("child: GetExitCodeThread(%lu) => %ld,%lu\n", i, ret, code);
+        ok(ret == 1, "GetExitCodeThread returned %ld, expected 1\n", ret);
+        ok(code == expected_code, "expected thread exit code %lu, got %lu\n", expected_code, code);
     }
 
     *child_failures = winetest_get_failures();
@@ -3097,7 +3133,7 @@ static void test_ExitProcess(void)
 
     SetLastError(0xdeadbeef);
     ret = WriteFile(file, &dos_header, sizeof(dos_header), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     nt_header = nt_header_template;
     nt_header.FileHeader.NumberOfSections = 1;
@@ -3111,10 +3147,10 @@ static void test_ExitProcess(void)
     nt_header.OptionalHeader.SizeOfHeaders = sizeof(dos_header) + sizeof(nt_header) + sizeof(IMAGE_SECTION_HEADER);
     SetLastError(0xdeadbeef);
     ret = WriteFile(file, &nt_header, sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     ret = WriteFile(file, &nt_header.OptionalHeader, sizeof(IMAGE_OPTIONAL_HEADER), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     section.SizeOfRawData = sizeof(section_data);
     section.PointerToRawData = nt_header.OptionalHeader.FileAlignment;
@@ -3123,20 +3159,20 @@ static void test_ExitProcess(void)
     section.Characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_EXECUTE;
     SetLastError(0xdeadbeef);
     ret = WriteFile(file, &section, sizeof(section), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     file_align = nt_header.OptionalHeader.FileAlignment - nt_header.OptionalHeader.SizeOfHeaders;
     assert(file_align < sizeof(filler));
     SetLastError(0xdeadbeef);
     ret = WriteFile(file, filler, file_align, &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     target_offset = SetFilePointer(file, 0, NULL, FILE_CURRENT) + FIELD_OFFSET(struct section_data, target);
 
     /* section data */
     SetLastError(0xdeadbeef);
     ret = WriteFile(file, &section_data, sizeof(section_data), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     CloseHandle(file);
 
@@ -3144,17 +3180,17 @@ static void test_ExitProcess(void)
 
     /* phase 0 */
     *child_failures = -1;
-    sprintf(cmdline, "\"%s\" loader %s %u 0", argv[0], dll_name, target_offset);
+    sprintf(cmdline, "\"%s\" loader %s %lu 0", argv[0], dll_name, target_offset);
     ret = CreateProcessA(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-    ok(ret, "CreateProcess(%s) error %d\n", cmdline, GetLastError());
+    ok(ret, "CreateProcess(%s) error %ld\n", cmdline, GetLastError());
     ret = WaitForSingleObject(pi.hProcess, 10000);
     ok(ret == WAIT_OBJECT_0, "child process failed to terminate\n");
     if (ret != WAIT_OBJECT_0) TerminateProcess(pi.hProcess, 0);
     GetExitCodeProcess(pi.hProcess, &ret);
-    ok(ret == 195, "expected exit code 195, got %u\n", ret);
+    ok(ret == 195, "expected exit code 195, got %lu\n", ret);
     if (*child_failures)
     {
-        trace("%d failures in child process\n", *child_failures);
+        trace("%ld failures in child process\n", *child_failures);
         winetest_add_failures(*child_failures);
     }
     CloseHandle(pi.hThread);
@@ -3162,17 +3198,17 @@ static void test_ExitProcess(void)
 
     /* phase 1 */
     *child_failures = -1;
-    sprintf(cmdline, "\"%s\" loader %s %u 1", argv[0], dll_name, target_offset);
+    sprintf(cmdline, "\"%s\" loader %s %lu 1", argv[0], dll_name, target_offset);
     ret = CreateProcessA(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-    ok(ret, "CreateProcess(%s) error %d\n", cmdline, GetLastError());
+    ok(ret, "CreateProcess(%s) error %ld\n", cmdline, GetLastError());
     ret = WaitForSingleObject(pi.hProcess, 10000);
     ok(ret == WAIT_OBJECT_0, "child process failed to terminate\n");
     if (ret != WAIT_OBJECT_0) TerminateProcess(pi.hProcess, 0);
     GetExitCodeProcess(pi.hProcess, &ret);
-    ok(ret == 195, "expected exit code 195, got %u\n", ret);
+    ok(ret == 195, "expected exit code 195, got %lu\n", ret);
     if (*child_failures)
     {
-        trace("%d failures in child process\n", *child_failures);
+        trace("%ld failures in child process\n", *child_failures);
         winetest_add_failures(*child_failures);
     }
     CloseHandle(pi.hThread);
@@ -3180,17 +3216,17 @@ static void test_ExitProcess(void)
 
     /* phase 2 */
     *child_failures = -1;
-    sprintf(cmdline, "\"%s\" loader %s %u 2", argv[0], dll_name, target_offset);
+    sprintf(cmdline, "\"%s\" loader %s %lu 2", argv[0], dll_name, target_offset);
     ret = CreateProcessA(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-    ok(ret, "CreateProcess(%s) error %d\n", cmdline, GetLastError());
+    ok(ret, "CreateProcess(%s) error %ld\n", cmdline, GetLastError());
     ret = WaitForSingleObject(pi.hProcess, 10000);
     ok(ret == WAIT_OBJECT_0, "child process failed to terminate\n");
     if (ret != WAIT_OBJECT_0) TerminateProcess(pi.hProcess, 0);
     GetExitCodeProcess(pi.hProcess, &ret);
-    ok(ret == 197, "expected exit code 197, got %u\n", ret);
+    ok(ret == 197, "expected exit code 197, got %lu\n", ret);
     if (*child_failures)
     {
-        trace("%d failures in child process\n", *child_failures);
+        trace("%ld failures in child process\n", *child_failures);
         winetest_add_failures(*child_failures);
     }
     CloseHandle(pi.hThread);
@@ -3198,17 +3234,17 @@ static void test_ExitProcess(void)
 
     /* phase 3 */
     *child_failures = -1;
-    sprintf(cmdline, "\"%s\" loader %s %u 3", argv[0], dll_name, target_offset);
+    sprintf(cmdline, "\"%s\" loader %s %lu 3", argv[0], dll_name, target_offset);
     ret = CreateProcessA(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-    ok(ret, "CreateProcess(%s) error %d\n", cmdline, GetLastError());
+    ok(ret, "CreateProcess(%s) error %ld\n", cmdline, GetLastError());
     ret = WaitForSingleObject(pi.hProcess, 10000);
     ok(ret == WAIT_OBJECT_0, "child process failed to terminate\n");
     if (ret != WAIT_OBJECT_0) TerminateProcess(pi.hProcess, 0);
     GetExitCodeProcess(pi.hProcess, &ret);
-    ok(ret == 195, "expected exit code 195, got %u\n", ret);
+    ok(ret == 195, "expected exit code 195, got %lu\n", ret);
     if (*child_failures)
     {
-        trace("%d failures in child process\n", *child_failures);
+        trace("%ld failures in child process\n", *child_failures);
         winetest_add_failures(*child_failures);
     }
     CloseHandle(pi.hThread);
@@ -3218,17 +3254,17 @@ static void test_ExitProcess(void)
     if (pLdrLockLoaderLock && pLdrUnlockLoaderLock)
     {
         *child_failures = -1;
-        sprintf(cmdline, "\"%s\" loader %s %u 4", argv[0], dll_name, target_offset);
+        sprintf(cmdline, "\"%s\" loader %s %lu 4", argv[0], dll_name, target_offset);
         ret = CreateProcessA(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-        ok(ret, "CreateProcess(%s) error %d\n", cmdline, GetLastError());
+        ok(ret, "CreateProcess(%s) error %ld\n", cmdline, GetLastError());
         ret = WaitForSingleObject(pi.hProcess, 10000);
         ok(ret == WAIT_OBJECT_0, "child process failed to terminate\n");
         if (ret != WAIT_OBJECT_0) TerminateProcess(pi.hProcess, 0);
         GetExitCodeProcess(pi.hProcess, &ret);
-        ok(ret == 198, "expected exit code 198, got %u\n", ret);
+        ok(ret == 198, "expected exit code 198, got %lu\n", ret);
         if (*child_failures)
         {
-            trace("%d failures in child process\n", *child_failures);
+            trace("%ld failures in child process\n", *child_failures);
             winetest_add_failures(*child_failures);
         }
         CloseHandle(pi.hThread);
@@ -3241,9 +3277,9 @@ static void test_ExitProcess(void)
     if (pRtlAcquirePebLock && pRtlReleasePebLock)
     {
         *child_failures = -1;
-        sprintf(cmdline, "\"%s\" loader %s %u 5", argv[0], dll_name, target_offset);
+        sprintf(cmdline, "\"%s\" loader %s %lu 5", argv[0], dll_name, target_offset);
         ret = CreateProcessA(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-        ok(ret, "CreateProcess(%s) error %d\n", cmdline, GetLastError());
+        ok(ret, "CreateProcess(%s) error %ld\n", cmdline, GetLastError());
         ret = WaitForSingleObject(pi.hProcess, 5000);
         ok(ret == WAIT_TIMEOUT, "child process should fail to terminate\n");
         if (ret != WAIT_OBJECT_0)
@@ -3254,10 +3290,10 @@ static void test_ExitProcess(void)
         ret = WaitForSingleObject(pi.hProcess, 1000);
         ok(ret == WAIT_OBJECT_0, "child process failed to terminate\n");
         GetExitCodeProcess(pi.hProcess, &ret);
-        ok(ret == 199, "expected exit code 199, got %u\n", ret);
+        ok(ret == 199, "expected exit code 199, got %lu\n", ret);
         if (*child_failures)
         {
-            trace("%d failures in child process\n", *child_failures);
+            trace("%ld failures in child process\n", *child_failures);
             winetest_add_failures(*child_failures);
         }
         CloseHandle(pi.hThread);
@@ -3268,11 +3304,11 @@ static void test_ExitProcess(void)
 
     /* phase 6 */
     *child_failures = -1;
-    sprintf(cmdline, "\"%s\" loader %s %u 6", argv[0], dll_name, target_offset);
+    sprintf(cmdline, "\"%s\" loader %s %lu 6", argv[0], dll_name, target_offset);
     ret = CreateProcessA(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-    ok(ret, "CreateProcess(%s) error %d\n", cmdline, GetLastError());
+    ok(ret, "CreateProcess(%s) error %ld\n", cmdline, GetLastError());
     ret = WaitForSingleObject(pi.hProcess, 5000);
-todo_wine
+    todo_wine
     ok(ret == WAIT_TIMEOUT || broken(ret == WAIT_OBJECT_0) /* XP */, "child process should fail to terminate\n");
     if (ret != WAIT_OBJECT_0)
     {
@@ -3282,11 +3318,11 @@ todo_wine
     ret = WaitForSingleObject(pi.hProcess, 1000);
     ok(ret == WAIT_OBJECT_0, "child process failed to terminate\n");
     GetExitCodeProcess(pi.hProcess, &ret);
-todo_wine
-    ok(ret == 201 || broken(ret == 1) /* XP */, "expected exit code 201, got %u\n", ret);
+    todo_wine
+    ok(ret == 201 || broken(ret == 1) /* XP */, "expected exit code 201, got %lu\n", ret);
     if (*child_failures)
     {
-        trace("%d failures in child process\n", *child_failures);
+        trace("%ld failures in child process\n", *child_failures);
         winetest_add_failures(*child_failures);
     }
     CloseHandle(pi.hThread);
@@ -3294,9 +3330,9 @@ todo_wine
 
     /* phase 7 */
     *child_failures = -1;
-    sprintf(cmdline, "\"%s\" loader %s %u 7", argv[0], dll_name, target_offset);
+    sprintf(cmdline, "\"%s\" loader %s %lu 7", argv[0], dll_name, target_offset);
     ret = CreateProcessA(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-    ok(ret, "CreateProcess(%s) error %d\n", cmdline, GetLastError());
+    ok(ret, "CreateProcess(%s) error %ld\n", cmdline, GetLastError());
     ret = WaitForSingleObject(pi.hProcess, 5000);
     ok(ret == WAIT_OBJECT_0, "child process failed to terminate\n");
     if (ret != WAIT_OBJECT_0)
@@ -3307,10 +3343,10 @@ todo_wine
     ret = WaitForSingleObject(pi.hProcess, 1000);
     ok(ret == WAIT_OBJECT_0, "child process failed to terminate\n");
     GetExitCodeProcess(pi.hProcess, &ret);
-    ok(ret == 199, "expected exit code 199, got %u\n", ret);
+    ok(ret == 199, "expected exit code 199, got %lu\n", ret);
     if (*child_failures)
     {
-        trace("%d failures in child process\n", *child_failures);
+        trace("%ld failures in child process\n", *child_failures);
         winetest_add_failures(*child_failures);
     }
     CloseHandle(pi.hThread);
@@ -3319,32 +3355,32 @@ todo_wine
     /* test remote process termination */
     SetLastError(0xdeadbeef);
     ret = CreateProcessA(argv[0], NULL, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
-    ok(ret, "CreateProcess(%s) error %d\n", argv[0], GetLastError());
+    ok(ret, "CreateProcess(%s) error %ld\n", argv[0], GetLastError());
 
     SetLastError(0xdeadbeef);
     addr = VirtualAllocEx(pi.hProcess, NULL, 4096, MEM_COMMIT, PAGE_READWRITE);
-    ok(addr != NULL, "VirtualAllocEx error %d\n", GetLastError());
+    ok(addr != NULL, "VirtualAllocEx error %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     ret = VirtualProtectEx(pi.hProcess, addr, 4096, PAGE_READONLY, &old_prot);
-    ok(ret, "VirtualProtectEx error %d\n", GetLastError());
-    ok(old_prot == PAGE_READWRITE, "expected PAGE_READWRITE, got %#x\n", old_prot);
+    ok(ret, "VirtualProtectEx error %ld\n", GetLastError());
+    ok(old_prot == PAGE_READWRITE, "expected PAGE_READWRITE, got %#lx\n", old_prot);
     SetLastError(0xdeadbeef);
     size = VirtualQueryEx(pi.hProcess, NULL, &mbi, sizeof(mbi));
-    ok(size == sizeof(mbi), "VirtualQueryEx error %d\n", GetLastError());
+    ok(size == sizeof(mbi), "VirtualQueryEx error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = ReadProcessMemory(pi.hProcess, addr, buf, 4, &size);
-    ok(ret, "ReadProcessMemory error %d\n", GetLastError());
-    ok(size == 4, "expected 4, got %lu\n", size);
+    ok(ret, "ReadProcessMemory error %ld\n", GetLastError());
+    ok(size == 4, "expected 4, got %Iu\n", size);
 
     SetLastError(0xdeadbeef);
     hmap = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 4096, NULL);
-    ok(hmap != 0, "CreateFileMapping error %d\n", GetLastError());
+    ok(hmap != 0, "CreateFileMapping error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = DuplicateHandle(GetCurrentProcess(), hmap, pi.hProcess, &hmap_dup,
                           0, FALSE, DUPLICATE_SAME_ACCESS);
-    ok(ret, "DuplicateHandle error %d\n", GetLastError());
+    ok(ret, "DuplicateHandle error %ld\n", GetLastError());
 
     offset.u.LowPart = 0;
     offset.u.HighPart = 0;
@@ -3352,57 +3388,57 @@ todo_wine
     size = 0;
     ret = pNtMapViewOfSection(hmap, pi.hProcess, &addr, 0, 0, &offset,
                               &size, 1 /* ViewShare */, 0, PAGE_READONLY);
-    ok(!ret, "NtMapViewOfSection error %#x\n", ret);
+    ok(!ret, "NtMapViewOfSection error %#lx\n", ret);
     ret = pNtUnmapViewOfSection(pi.hProcess, addr);
-    ok(!ret, "NtUnmapViewOfSection error %#x\n", ret);
+    ok(!ret, "NtUnmapViewOfSection error %#lx\n", ret);
 
     SetLastError(0xdeadbeef);
     thread = CreateRemoteThread(pi.hProcess, NULL, 0, (void *)0xdeadbeef, NULL, CREATE_SUSPENDED, &ret);
-    ok(thread != 0, "CreateRemoteThread error %d\n", GetLastError());
+    ok(thread != 0, "CreateRemoteThread error %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     ctx.ContextFlags = CONTEXT_INTEGER;
     ret = GetThreadContext(thread, &ctx);
-    ok(ret, "GetThreadContext error %d\n", GetLastError());
+    ok(ret, "GetThreadContext error %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     ctx.ContextFlags = CONTEXT_INTEGER;
     ret = SetThreadContext(thread, &ctx);
-    ok(ret, "SetThreadContext error %d\n", GetLastError());
+    ok(ret, "SetThreadContext error %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     ret = SetThreadPriority(thread, 0);
-    ok(ret, "SetThreadPriority error %d\n", GetLastError());
+    ok(ret, "SetThreadPriority error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = TerminateThread(thread, 199);
-    ok(ret, "TerminateThread error %d\n", GetLastError());
+    ok(ret, "TerminateThread error %ld\n", GetLastError());
     /* Calling GetExitCodeThread() without waiting for thread termination
      * leads to different results due to a race condition.
      */
     ret = WaitForSingleObject(thread, 1000);
-    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject failed: %x\n", ret);
+    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject failed: %lx\n", ret);
     GetExitCodeThread(thread, &ret);
-    ok(ret == 199, "expected exit code 199, got %u\n", ret);
+    ok(ret == 199, "expected exit code 199, got %lu\n", ret);
 
     SetLastError(0xdeadbeef);
     ret = TerminateProcess(pi.hProcess, 198);
-    ok(ret, "TerminateProcess error %d\n", GetLastError());
+    ok(ret, "TerminateProcess error %ld\n", GetLastError());
     /* Checking process state without waiting for process termination
      * leads to different results due to a race condition.
      */
     ret = WaitForSingleObject(pi.hProcess, 1000);
-    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject failed: %x\n", ret);
+    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject failed: %lx\n", ret);
 
     SetLastError(0xdeadbeef);
     process = OpenProcess(PROCESS_ALL_ACCESS_NT4, FALSE, pi.dwProcessId);
-    ok(process != NULL, "OpenProcess error %d\n", GetLastError());
+    ok(process != NULL, "OpenProcess error %ld\n", GetLastError());
     CloseHandle(process);
 
     memset(&pbi, 0, sizeof(pbi));
     ret = pNtQueryInformationProcess(pi.hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), NULL);
-    ok(!ret, "NtQueryInformationProcess error %#x\n", ret);
-    ok(pbi.ExitStatus == 198, "expected 198, got %lu\n", pbi.ExitStatus);
+    ok(!ret, "NtQueryInformationProcess error %#lx\n", ret);
+    ok(pbi.ExitStatus == 198, "expected 198, got %Iu\n", pbi.ExitStatus);
     affinity = 1;
     ret = pNtSetInformationProcess(pi.hProcess, ProcessAffinityMask, &affinity, sizeof(affinity));
-    ok(ret == STATUS_PROCESS_IS_TERMINATING, "expected STATUS_PROCESS_IS_TERMINATING, got %#x\n", ret);
+    ok(ret == STATUS_PROCESS_IS_TERMINATING, "expected STATUS_PROCESS_IS_TERMINATING, got %#lx\n", ret);
 
     SetLastError(0xdeadbeef);
     ctx.ContextFlags = CONTEXT_INTEGER;
@@ -3413,7 +3449,7 @@ todo_wine
            GetLastError() == ERROR_GEN_FAILURE /* win7 64-bit */ ||
            GetLastError() == ERROR_INVALID_FUNCTION /* vista 64-bit */ ||
            GetLastError() == ERROR_ACCESS_DENIED /* Win10 32-bit */,
-           "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+           "expected ERROR_INVALID_PARAMETER, got %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     ctx.ContextFlags = CONTEXT_INTEGER;
     ret = SetThreadContext(thread, &ctx);
@@ -3422,10 +3458,10 @@ todo_wine
         ok(GetLastError() == ERROR_ACCESS_DENIED ||
            GetLastError() == ERROR_GEN_FAILURE /* win7 64-bit */ ||
            GetLastError() == ERROR_INVALID_FUNCTION /* vista 64-bit */,
-           "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+           "expected ERROR_ACCESS_DENIED, got %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     ret = SetThreadPriority(thread, 0);
-    ok(ret, "SetThreadPriority error %d\n", GetLastError());
+    ok(ret, "SetThreadPriority error %ld\n", GetLastError());
     CloseHandle(thread);
 
     SetLastError(0xdeadbeef);
@@ -3437,7 +3473,7 @@ todo_wine
            GetLastError() == ERROR_GEN_FAILURE /* win7 64-bit */ ||
            GetLastError() == ERROR_INVALID_FUNCTION /* vista 64-bit */ ||
            GetLastError() == ERROR_ACCESS_DENIED /* Win10 32-bit */,
-           "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+           "expected ERROR_INVALID_PARAMETER, got %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     ctx.ContextFlags = CONTEXT_INTEGER;
     ret = SetThreadContext(pi.hThread, &ctx);
@@ -3446,30 +3482,30 @@ todo_wine
         ok(GetLastError() == ERROR_ACCESS_DENIED ||
            GetLastError() == ERROR_GEN_FAILURE /* win7 64-bit */ ||
            GetLastError() == ERROR_INVALID_FUNCTION /* vista 64-bit */,
-           "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+           "expected ERROR_ACCESS_DENIED, got %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     ret = VirtualProtectEx(pi.hProcess, addr, 4096, PAGE_READWRITE, &old_prot);
     ok(!ret, "VirtualProtectEx should fail\n");
-    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     size = 0;
     ret = ReadProcessMemory(pi.hProcess, addr, buf, 4, &size);
     ok(!ret, "ReadProcessMemory should fail\n");
     ok(GetLastError() == ERROR_PARTIAL_COPY || GetLastError() == ERROR_ACCESS_DENIED,
-       "expected ERROR_PARTIAL_COPY, got %d\n", GetLastError());
-    ok(!size, "expected 0, got %lu\n", size);
+       "expected ERROR_PARTIAL_COPY, got %ld\n", GetLastError());
+    ok(!size, "expected 0, got %Iu\n", size);
     SetLastError(0xdeadbeef);
     ret = VirtualFreeEx(pi.hProcess, addr, 0, MEM_RELEASE);
     ok(!ret, "VirtualFreeEx should fail\n");
-    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     addr = VirtualAllocEx(pi.hProcess, NULL, 4096, MEM_COMMIT, PAGE_READWRITE);
     ok(!addr, "VirtualAllocEx should fail\n");
-    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     size = VirtualQueryEx(pi.hProcess, NULL, &mbi, sizeof(mbi));
     ok(!size, "VirtualQueryEx should fail\n");
-    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %ld\n", GetLastError());
 
     /* CloseHandle() call below leads to premature process termination
      * under some Windows versions.
@@ -3485,7 +3521,7 @@ if (0)
     ret = DuplicateHandle(GetCurrentProcess(), hmap, pi.hProcess, &hmap_dup,
                           0, FALSE, DUPLICATE_SAME_ACCESS);
     ok(!ret, "DuplicateHandle should fail\n");
-    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %ld\n", GetLastError());
 
     offset.u.LowPart = 0;
     offset.u.HighPart = 0;
@@ -3493,27 +3529,27 @@ if (0)
     size = 0;
     ret = pNtMapViewOfSection(hmap, pi.hProcess, &addr, 0, 0, &offset,
                               &size, 1 /* ViewShare */, 0, PAGE_READONLY);
-    ok(ret == STATUS_PROCESS_IS_TERMINATING, "expected STATUS_PROCESS_IS_TERMINATING, got %#x\n", ret);
+    ok(ret == STATUS_PROCESS_IS_TERMINATING, "expected STATUS_PROCESS_IS_TERMINATING, got %#lx\n", ret);
 
     SetLastError(0xdeadbeef);
     thread = CreateRemoteThread(pi.hProcess, NULL, 0, (void *)0xdeadbeef, NULL, CREATE_SUSPENDED, &ret);
     ok(!thread, "CreateRemoteThread should fail\n");
-    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = DebugActiveProcess(pi.dwProcessId);
     ok(!ret, "DebugActiveProcess should fail\n");
     ok(GetLastError() == ERROR_ACCESS_DENIED /* 64-bit */ || GetLastError() == ERROR_NOT_SUPPORTED /* 32-bit */,
-      "ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+      "ERROR_ACCESS_DENIED, got %ld\n", GetLastError());
 
     GetExitCodeProcess(pi.hProcess, &ret);
     ok(ret == 198 || broken(ret != 198) /* some 32-bit XP version in a VM returns random exit code */,
-       "expected exit code 198, got %u\n", ret);
+       "expected exit code 198, got %lu\n", ret);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
 
     ret = DeleteFileA(dll_name);
-    ok(ret, "DeleteFile error %d\n", GetLastError());
+    ok(ret, "DeleteFile error %ld\n", GetLastError());
 #else
     skip("x86 specific ExitProcess test\n");
 #endif
@@ -3521,32 +3557,32 @@ if (0)
 
 static PVOID WINAPI failuredllhook(ULONG ul, DELAYLOAD_INFO* pd)
 {
-    ok(ul == 4, "expected 4, got %u\n", ul);
+    ok(ul == 4, "expected 4, got %lu\n", ul);
     ok(!!pd, "no delayload info supplied\n");
     if (pd)
     {
-        ok(pd->Size == sizeof(*pd), "got %u\n", pd->Size);
+        ok(pd->Size == sizeof(*pd), "got %lu\n", pd->Size);
         ok(!!pd->DelayloadDescriptor, "no DelayloadDescriptor supplied\n");
         if (pd->DelayloadDescriptor)
         {
             ok(pd->DelayloadDescriptor->Attributes.AllAttributes == 1,
-               "expected 1, got %u\n", pd->DelayloadDescriptor->Attributes.AllAttributes);
+               "expected 1, got %lu\n", pd->DelayloadDescriptor->Attributes.AllAttributes);
             ok(pd->DelayloadDescriptor->DllNameRVA == 0x2000,
-               "expected 0x2000, got %x\n", pd->DelayloadDescriptor->DllNameRVA);
+               "expected 0x2000, got %lx\n", pd->DelayloadDescriptor->DllNameRVA);
             ok(pd->DelayloadDescriptor->ModuleHandleRVA == 0x201a,
-               "expected 0x201a, got %x\n", pd->DelayloadDescriptor->ModuleHandleRVA);
+               "expected 0x201a, got %lx\n", pd->DelayloadDescriptor->ModuleHandleRVA);
             ok(pd->DelayloadDescriptor->ImportAddressTableRVA > pd->DelayloadDescriptor->ModuleHandleRVA,
-               "expected %x > %x\n", pd->DelayloadDescriptor->ImportAddressTableRVA,
+               "expected %lx > %lx\n", pd->DelayloadDescriptor->ImportAddressTableRVA,
                pd->DelayloadDescriptor->ModuleHandleRVA);
             ok(pd->DelayloadDescriptor->ImportNameTableRVA > pd->DelayloadDescriptor->ImportAddressTableRVA,
-               "expected %x > %x\n", pd->DelayloadDescriptor->ImportNameTableRVA,
+               "expected %lx > %lx\n", pd->DelayloadDescriptor->ImportNameTableRVA,
                pd->DelayloadDescriptor->ImportAddressTableRVA);
             ok(pd->DelayloadDescriptor->BoundImportAddressTableRVA == 0,
-               "expected 0, got %x\n", pd->DelayloadDescriptor->BoundImportAddressTableRVA);
+               "expected 0, got %lx\n", pd->DelayloadDescriptor->BoundImportAddressTableRVA);
             ok(pd->DelayloadDescriptor->UnloadInformationTableRVA == 0,
-               "expected 0, got %x\n", pd->DelayloadDescriptor->UnloadInformationTableRVA);
+               "expected 0, got %lx\n", pd->DelayloadDescriptor->UnloadInformationTableRVA);
             ok(pd->DelayloadDescriptor->TimeDateStamp == 0,
-               "expected 0, got %x\n", pd->DelayloadDescriptor->TimeDateStamp);
+               "expected 0, got %lx\n", pd->DelayloadDescriptor->TimeDateStamp);
         }
 
         ok(!!pd->ThunkAddress, "no ThunkAddress supplied\n");
@@ -3559,10 +3595,10 @@ static PVOID WINAPI failuredllhook(ULONG ul, DELAYLOAD_INFO* pd)
                "expected \"secur32.dll\", got \"%s\"\n", pd->TargetDllName);
 
         ok(pd->TargetApiDescriptor.ImportDescribedByName == 0,
-           "expected 0, got %x\n", pd->TargetApiDescriptor.ImportDescribedByName);
+           "expected 0, got %lx\n", pd->TargetApiDescriptor.ImportDescribedByName);
         ok(pd->TargetApiDescriptor.Description.Ordinal == 0 ||
            pd->TargetApiDescriptor.Description.Ordinal == 999,
-           "expected 0, got %x\n", pd->TargetApiDescriptor.Description.Ordinal);
+           "expected 0, got %lx\n", pd->TargetApiDescriptor.Description.Ordinal);
 
         ok(!!pd->TargetModuleBase, "no TargetModuleBase supplied\n");
         ok(pd->Unused == NULL, "expected NULL, got %p\n", pd->Unused);
@@ -3630,13 +3666,13 @@ static void test_ResolveDelayLoadedAPI(void)
         SetLastError(0xdeadbeef);
         ok(!pResolveDelayLoadedAPI(NULL, NULL, NULL, NULL, NULL, 0),
            "ResolveDelayLoadedAPI succeeded\n");
-        ok(GetLastError() == 0xdeadbeef, "GetLastError changed to %x\n", GetLastError());
+        ok(GetLastError() == 0xdeadbeef, "GetLastError changed to %lx\n", GetLastError());
 
         cb_count = 0;
         SetLastError(0xdeadbeef);
         ok(!pResolveDelayLoadedAPI(NULL, NULL, failuredllhook, NULL, NULL, 0),
            "ResolveDelayLoadedAPI succeeded\n");
-        ok(GetLastError() == 0xdeadbeef, "GetLastError changed to %x\n", GetLastError());
+        ok(GetLastError() == 0xdeadbeef, "GetLastError changed to %lx\n", GetLastError());
         ok(cb_count == 1, "Wrong callback count: %d\n", cb_count);
     }
 
@@ -3652,7 +3688,7 @@ static void test_ResolveDelayLoadedAPI(void)
 
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, &dos_header, sizeof(dos_header), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     nt_header = nt_header_template;
     nt_header.FileHeader.NumberOfSections = 2;
@@ -3668,11 +3704,11 @@ static void test_ResolveDelayLoadedAPI(void)
 
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, &nt_header, sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, &nt_header.OptionalHeader, sizeof(IMAGE_OPTIONAL_HEADER), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     /* sections */
     section.PointerToRawData = nt_header.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT].VirtualAddress;
@@ -3682,7 +3718,7 @@ static void test_ResolveDelayLoadedAPI(void)
     section.Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ;
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, &section, sizeof(section), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     section.PointerToRawData = 0x2000;
     section.VirtualAddress = 0x2000;
@@ -3694,7 +3730,7 @@ static void test_ResolveDelayLoadedAPI(void)
     section.Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE;
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, &section, sizeof(section), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     /* fill up to delay data */
     SetFilePointer( hfile, nt_header.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT].VirtualAddress, NULL, SEEK_SET );
@@ -3711,11 +3747,11 @@ static void test_ResolveDelayLoadedAPI(void)
 
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, &idd, sizeof(idd), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, filler, sizeof(idd), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     /* fill up to extended delay data */
     SetFilePointer( hfile, idd.DllNameRVA, NULL, SEEK_SET );
@@ -3723,15 +3759,15 @@ static void test_ResolveDelayLoadedAPI(void)
     /* extended delay data */
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, test_dll, sizeof(test_dll), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, &hint, sizeof(hint), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, test_func, sizeof(test_func), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     SetFilePointer( hfile, idd.ImportAddressTableRVA, NULL, SEEK_SET );
 
@@ -3741,13 +3777,13 @@ static void test_ResolveDelayLoadedAPI(void)
         itd32.u1.Function = nt_header.OptionalHeader.ImageBase + 0x1a00 + i * 0x20;
         SetLastError(0xdeadbeef);
         ret = WriteFile(hfile, &itd32, sizeof(itd32), &dummy, NULL);
-        ok(ret, "WriteFile error %d\n", GetLastError());
+        ok(ret, "WriteFile error %ld\n", GetLastError());
     }
 
     itd32.u1.Function = 0;
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, &itd32, sizeof(itd32), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     for (i = 0; i < ARRAY_SIZE(td); i++)
     {
@@ -3757,13 +3793,13 @@ static void test_ResolveDelayLoadedAPI(void)
             itd32.u1.Ordinal = td[i].ordinal;
         SetLastError(0xdeadbeef);
         ret = WriteFile(hfile, &itd32, sizeof(itd32), &dummy, NULL);
-        ok(ret, "WriteFile error %d\n", GetLastError());
+        ok(ret, "WriteFile error %ld\n", GetLastError());
     }
 
     itd32.u1.Ordinal = 0;
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, &itd32, sizeof(itd32), &dummy, NULL);
-    ok(ret, "WriteFile error %d\n", GetLastError());
+    ok(ret, "WriteFile error %ld\n", GetLastError());
 
     /* fill up to eof */
     SetFilePointer( hfile, section.VirtualAddress + section.Misc.VirtualSize, NULL, SEEK_SET );
@@ -3772,7 +3808,7 @@ static void test_ResolveDelayLoadedAPI(void)
 
     SetLastError(0xdeadbeef);
     hlib = LoadLibraryA(dll_name);
-    ok(hlib != NULL, "LoadLibrary error %u\n", GetLastError());
+    ok(hlib != NULL, "LoadLibrary error %lu\n", GetLastError());
     if (!hlib)
     {
         skip("couldn't load %s.\n", dll_name);
@@ -3819,18 +3855,18 @@ static void test_ResolveDelayLoadedAPI(void)
             ret = pResolveDelayLoadedAPI(hlib, delaydir, NULL, failuresyshook, &itda[i], 0);
             if (td[i].succeeds)
             {
-                ok(ret != NULL, "Test %u: ResolveDelayLoadedAPI failed\n", i);
-                ok(ret == load, "Test %u: expected %p, got %p\n", i, load, ret);
-                ok(ret == (void*)itda[i].u1.AddressOfData, "Test %u: expected %p, got %p\n",
+                ok(ret != NULL, "Test %lu: ResolveDelayLoadedAPI failed\n", i);
+                ok(ret == load, "Test %lu: expected %p, got %p\n", i, load, ret);
+                ok(ret == (void*)itda[i].u1.AddressOfData, "Test %lu: expected %p, got %p\n",
                    i, ret, (void*)itda[i].u1.AddressOfData);
-                ok(!cb_count, "Test %u: Wrong callback count: %d\n", i, cb_count);
-                ok(!cb_count_sys, "Test %u: Wrong sys callback count: %d\n", i, cb_count_sys);
+                ok(!cb_count, "Test %lu: Wrong callback count: %d\n", i, cb_count);
+                ok(!cb_count_sys, "Test %lu: Wrong sys callback count: %d\n", i, cb_count_sys);
             }
             else
             {
-                ok(ret == (void*)0x12345678, "Test %u: ResolveDelayLoadedAPI succeeded with %p\n", i, ret);
-                ok(!cb_count, "Test %u: Wrong callback count: %d\n", i, cb_count);
-                ok(cb_count_sys == 1, "Test %u: Wrong sys callback count: %d\n", i, cb_count_sys);
+                ok(ret == (void*)0x12345678, "Test %lu: ResolveDelayLoadedAPI succeeded with %p\n", i, ret);
+                ok(!cb_count, "Test %lu: Wrong callback count: %d\n", i, cb_count);
+                ok(cb_count_sys == 1, "Test %lu: Wrong sys callback count: %d\n", i, cb_count_sys);
             }
 
             /* test with failure dll callback */
@@ -3838,28 +3874,28 @@ static void test_ResolveDelayLoadedAPI(void)
             ret = pResolveDelayLoadedAPI(hlib, delaydir, failuredllhook, failuresyshook, &itda[i], 0);
             if (td[i].succeeds)
             {
-                ok(ret != NULL, "Test %u: ResolveDelayLoadedAPI failed\n", i);
-                ok(ret == load, "Test %u: expected %p, got %p\n", i, load, ret);
-                ok(ret == (void*)itda[i].u1.AddressOfData, "Test %u: expected %p, got %p\n",
+                ok(ret != NULL, "Test %lu: ResolveDelayLoadedAPI failed\n", i);
+                ok(ret == load, "Test %lu: expected %p, got %p\n", i, load, ret);
+                ok(ret == (void*)itda[i].u1.AddressOfData, "Test %lu: expected %p, got %p\n",
                    i, ret, (void*)itda[i].u1.AddressOfData);
-                ok(!cb_count, "Test %u: Wrong callback count: %d\n", i, cb_count);
-                ok(!cb_count_sys, "Test %u: Wrong sys callback count: %d\n", i, cb_count_sys);
+                ok(!cb_count, "Test %lu: Wrong callback count: %d\n", i, cb_count);
+                ok(!cb_count_sys, "Test %lu: Wrong sys callback count: %d\n", i, cb_count_sys);
             }
             else
             {
                 if (ret == (void*)0x12345678)
                 {
                     /* Win10+ sometimes buffers the address of the stub function */
-                    ok(!cb_count, "Test %u: Wrong callback count: %d\n", i, cb_count);
-                    ok(!cb_count_sys, "Test %u: Wrong sys callback count: %d\n", i, cb_count_sys);
+                    ok(!cb_count, "Test %lu: Wrong callback count: %d\n", i, cb_count);
+                    ok(!cb_count_sys, "Test %lu: Wrong sys callback count: %d\n", i, cb_count_sys);
                 }
                 else if (ret == (void*)0xdeadbeef)
                 {
-                    ok(cb_count == 1, "Test %u: Wrong callback count: %d\n", i, cb_count);
-                    ok(!cb_count_sys, "Test %u: Wrong sys callback count: %d\n", i, cb_count_sys);
+                    ok(cb_count == 1, "Test %lu: Wrong callback count: %d\n", i, cb_count);
+                    ok(!cb_count_sys, "Test %lu: Wrong sys callback count: %d\n", i, cb_count_sys);
                 }
                 else
-                    ok(0, "Test %u: ResolveDelayLoadedAPI succeeded with %p\n", i, ret);
+                    ok(0, "Test %lu: ResolveDelayLoadedAPI succeeded with %p\n", i, ret);
             }
         }
         delaydir++;
@@ -3947,26 +3983,26 @@ static void test_dll_file( const char *name )
 
     GetModuleFileNameA( module, path, MAX_PATH );
     file = CreateFileA( path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0 );
-    ok( file != INVALID_HANDLE_VALUE, "can't open '%s': %u\n", path, GetLastError() );
+    ok( file != INVALID_HANDLE_VALUE, "can't open '%s': %lu\n", path, GetLastError() );
 
     mapping = CreateFileMappingA( file, NULL, PAGE_READONLY, 0, 0, NULL );
-    ok( mapping != NULL, "%s: CreateFileMappingW failed err %u\n", name, GetLastError() );
+    ok( mapping != NULL, "%s: CreateFileMappingW failed err %lu\n", name, GetLastError() );
     ptr = MapViewOfFile( mapping, FILE_MAP_READ, 0, 0, 0 );
-    ok( ptr != NULL, "%s: MapViewOfFile failed err %u\n", name, GetLastError() );
+    ok( ptr != NULL, "%s: MapViewOfFile failed err %lu\n", name, GetLastError() );
     CloseHandle( mapping );
     CloseHandle( file );
 
     nt = pRtlImageNtHeader( module );
     nt_file = pRtlImageNtHeader( ptr );
     ok( nt_file != NULL, "%s: invalid header\n", path );
-#define OK_FIELD(x) ok( nt->x == nt_file->x, "%s:%u: wrong " #x " %x / %x\n", name, i, nt->x, nt_file->x )
-    OK_FIELD( FileHeader.NumberOfSections );
-    OK_FIELD( OptionalHeader.AddressOfEntryPoint );
-    OK_FIELD( OptionalHeader.NumberOfRvaAndSizes );
+#define OK_FIELD(x, f) ok( nt->x == nt_file->x, "%s:%u: wrong " #x " " f " / " f "\n", name, i, nt->x, nt_file->x )
+    OK_FIELD( FileHeader.NumberOfSections, "%x" );
+    OK_FIELD( OptionalHeader.AddressOfEntryPoint, "%lx" );
+    OK_FIELD( OptionalHeader.NumberOfRvaAndSizes, "%lx" );
     for (i = 0; i < nt->OptionalHeader.NumberOfRvaAndSizes; i++)
     {
-        OK_FIELD( OptionalHeader.DataDirectory[i].VirtualAddress );
-        OK_FIELD( OptionalHeader.DataDirectory[i].Size );
+        OK_FIELD( OptionalHeader.DataDirectory[i].VirtualAddress, "%lx" );
+        OK_FIELD( OptionalHeader.DataDirectory[i].Size, "%lx" );
     }
     sec = (IMAGE_SECTION_HEADER *)((char *)&nt->OptionalHeader + nt->FileHeader.SizeOfOptionalHeader);
     sec_file = (IMAGE_SECTION_HEADER *)((char *)&nt_file->OptionalHeader + nt_file->FileHeader.SizeOfOptionalHeader);
@@ -3988,8 +4024,36 @@ static void test_LoadPackagedLibrary(void)
 
     SetLastError( 0xdeadbeef );
     h = pLoadPackagedLibrary(L"kernel32.dll", 0);
-    ok(!h && GetLastError() == APPMODEL_ERROR_NO_PACKAGE, "Got unexpected handle %p, GetLastError() %u.\n",
+    ok(!h && GetLastError() == APPMODEL_ERROR_NO_PACKAGE, "Got unexpected handle %p, GetLastError() %lu.\n",
             h, GetLastError());
+}
+
+static void test_Wow64Transition(void)
+{
+    char buffer[400];
+    MEMORY_SECTION_NAME *name = (MEMORY_SECTION_NAME *)buffer;
+    const WCHAR *filepart;
+    void **pWow64Transition;
+    NTSTATUS status;
+
+    if (!(pWow64Transition = (void *)GetProcAddress(GetModuleHandleA("ntdll"), "Wow64Transition")))
+    {
+        skip("Wow64Transition is not present\n");
+        return;
+    }
+    if (!is_wow64)
+    {
+        skip("Wow64Transition is not patched\n");
+        return;
+    }
+
+    status = NtQueryVirtualMemory(GetCurrentProcess(), *pWow64Transition,
+                                  MemoryMappedFilenameInformation, name, sizeof(buffer), NULL);
+    ok(!status, "got %#lx\n", status);
+    filepart = name->SectionFileName.Buffer + name->SectionFileName.Length / sizeof(WCHAR);
+    while (*filepart != '\\') --filepart;
+    ok(!wcsnicmp(filepart, L"\\wow64cpu.dll", wcslen(L"\\wow64cpu.dll")), "got file name %s\n",
+            debugstr_wn(name->SectionFileName.Buffer, name->SectionFileName.Length / sizeof(WCHAR)));
 }
 
 START_TEST(loader)
@@ -4068,6 +4132,7 @@ START_TEST(loader)
     test_dll_file( "kernel32.dll" );
     test_dll_file( "advapi32.dll" );
     test_dll_file( "user32.dll" );
+    test_Wow64Transition();
     /* loader test must be last, it can corrupt the internal loader state on Windows */
     test_Loader();
 }

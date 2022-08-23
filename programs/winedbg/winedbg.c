@@ -17,17 +17,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include "debugger.h"
 
 #include "winternl.h"
-#include "wine/exception.h"
-
 #include "wine/debug.h"
 
 /* TODO list:
@@ -49,11 +44,9 @@
  * - type management:
  *      + some bits of internal types are missing (like type casts and the address
  *        operator)
- *      + the type for an enum's value is always inferred as int (winedbg & dbghelp)
- *      + most of the code implies that sizeof(void*) = sizeof(int)
- *      + all computations should be made on long long
- *              o expr computations are in int:s
- *              o bitfield size is on a 4-bytes
+ *      + all computations should be made on 64bit
+ *              o bitfield spreading on more bytes than dbg_lgint_t isn't supported
+ *                (can happen on 128bit integers, of an ELF build...)
  * - execution:
  *      + set a better fix for gdb (proxy mode) than the step-mode hack
  *      + implement function call in debuggee
@@ -84,8 +77,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(winedbg);
 
 struct dbg_process*	dbg_curr_process = NULL;
 struct dbg_thread*	dbg_curr_thread = NULL;
-DWORD_PTR	        dbg_curr_tid = 0;
-DWORD_PTR	        dbg_curr_pid = 0;
+DWORD	                dbg_curr_tid = 0;
+DWORD	                dbg_curr_pid = 0;
 dbg_ctx_t               dbg_context;
 BOOL    	        dbg_interactiveP = FALSE;
 HANDLE                  dbg_houtput = 0;
@@ -120,39 +113,10 @@ static void dbg_outputA(const char* buffer, int len)
     }
 }
 
-const char* dbg_W2A(const WCHAR* buffer, unsigned len)
-{
-    static unsigned ansilen;
-    static char* ansi;
-    unsigned newlen;
-
-    newlen = WideCharToMultiByte(CP_ACP, 0, buffer, len, NULL, 0, NULL, NULL);
-    if (newlen > ansilen)
-    {
-        static char* newansi;
-        if (ansi)
-            newansi = HeapReAlloc(GetProcessHeap(), 0, ansi, newlen);
-        else
-            newansi = HeapAlloc(GetProcessHeap(), 0, newlen);
-        if (!newansi) return NULL;
-        ansilen = newlen;
-        ansi = newansi;
-    }
-    WideCharToMultiByte(CP_ACP, 0, buffer, len, ansi, newlen, NULL, NULL);
-    return ansi;
-}
-
-void	dbg_outputW(const WCHAR* buffer, int len)
-{
-    const char* ansi = dbg_W2A(buffer, len);
-    if (ansi) dbg_outputA(ansi, strlen(ansi));
-    /* FIXME: should CP_ACP be GetConsoleCP()? */
-}
-
-int	dbg_printf(const char* format, ...)
+int WINAPIV dbg_printf(const char* format, ...)
 {
     static    char	buf[4*1024];
-    va_list 	valist;
+    va_list valist;
     int		len;
 
     va_start(valist, format);
@@ -247,7 +211,7 @@ const struct dbg_internal_var* dbg_get_internal_var(const char* name)
             struct dbg_internal_var*    ret = (void*)lexeme_alloc_size(sizeof(*ret));
             /* relocate register's field against current context */
             *ret = *div;
-            ret->pval = (DWORD_PTR*)((char*)&dbg_context + (DWORD_PTR)div->pval);
+            ret->pval = (char*)&dbg_context + (DWORD_PTR)div->pval;
             return ret;
         }
     }
@@ -278,7 +242,7 @@ struct dbg_process*     dbg_get_process_h(HANDLE h)
     return NULL;
 }
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 extern struct backend_cpu be_i386;
 #elif defined(__x86_64__)
 extern struct backend_cpu be_i386;
@@ -325,7 +289,7 @@ struct dbg_process*	dbg_add_process(const struct be_process_io* pio, DWORD pid, 
 
     IsWow64Process(h, &wow64);
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
     p->be_cpu = &be_i386;
 #elif defined(__x86_64__)
     p->be_cpu = wow64 ? &be_i386 : &be_x86_64;
@@ -411,45 +375,6 @@ BOOL dbg_init(HANDLE hProc, const WCHAR* in, BOOL invade)
     return ret;
 }
 
-struct mod_loader_info
-{
-    HANDLE              handle;
-    IMAGEHLP_MODULE64*  imh_mod;
-};
-
-static BOOL CALLBACK mod_loader_cb(PCSTR mod_name, DWORD64 base, PVOID ctx)
-{
-    struct mod_loader_info*     mli = ctx;
-
-    if (!strcmp(mod_name, "<wine-loader>"))
-    {
-        if (SymGetModuleInfo64(mli->handle, base, mli->imh_mod))
-            return FALSE; /* stop enum */
-    }
-    return TRUE;
-}
-
-BOOL dbg_get_debuggee_info(HANDLE hProcess, IMAGEHLP_MODULE64* imh_mod)
-{
-    struct mod_loader_info  mli;
-    BOOL                    opt;
-
-    /* this will resynchronize builtin dbghelp's internal ELF module list */
-    SymLoadModule(hProcess, 0, 0, 0, 0, 0);
-    mli.handle  = hProcess;
-    mli.imh_mod = imh_mod;
-    imh_mod->SizeOfStruct = sizeof(*imh_mod);
-    imh_mod->BaseOfImage = 0;
-    /* this is a wine specific options to return also ELF modules in the
-     * enumeration
-     */
-    opt = SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, TRUE);
-    SymEnumerateModules64(hProcess, mod_loader_cb, &mli);
-    SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, opt);
-
-    return imh_mod->BaseOfImage != 0;
-}
-
 BOOL dbg_load_module(HANDLE hProc, HANDLE hFile, const WCHAR* name, DWORD_PTR base, DWORD size)
 {
     BOOL ret = SymLoadModuleExW(hProc, NULL, name, NULL, base, size, NULL, 0);
@@ -490,14 +415,13 @@ struct dbg_thread* dbg_add_thread(struct dbg_process* p, DWORD tid,
     t->step_over_bp.enabled = FALSE;
     t->step_over_bp.refcount = 0;
     t->stopped_xpoint = -1;
+    t->name[0] = '\0';
     t->in_exception = FALSE;
     t->frames = NULL;
     t->num_frames = 0;
     t->curr_frame = -1;
     t->addr_mode = AddrModeFlat;
     t->suspended = FALSE;
-
-    snprintf(t->name, sizeof(t->name), "%04x", tid);
 
     list_add_head(&p->threads, &t->entry);
 
@@ -608,7 +532,7 @@ static int dbg_winedbg_usage(BOOL advanced)
     return 0;
 }
 
-void dbg_start_interactive(HANDLE hFile)
+void dbg_start_interactive(const char* filename, HANDLE hFile)
 {
     struct dbg_process* p;
     struct dbg_process* p2;
@@ -620,7 +544,7 @@ void dbg_start_interactive(HANDLE hFile)
     }
 
     dbg_interactiveP = TRUE;
-    parser_handle(hFile);
+    parser_handle(filename, hFile);
 
     LIST_FOR_EACH_ENTRY_SAFE(p, p2, &dbg_process_list, struct dbg_process, entry)
         p->process_io->close_process(p, FALSE);
@@ -648,7 +572,8 @@ static void restart_if_wow64(void)
 
         memset( &si, 0, sizeof(si) );
         si.cb = sizeof(si);
-        GetModuleFileNameW( 0, filename, MAX_PATH );
+        GetSystemDirectoryW( filename, MAX_PATH );
+        lstrcatW( filename, L"\\winedbg.exe" );
 
         Wow64DisableWow64FsRedirection( &redir );
         if (CreateProcessW( filename, GetCommandLineW(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi ))
@@ -659,7 +584,7 @@ static void restart_if_wow64(void)
             GetExitCodeProcess( pi.hProcess, &exit_code );
             ExitProcess( exit_code );
         }
-        else WINE_ERR( "failed to restart 64-bit %s, err %d\n", wine_dbgstr_w(filename), GetLastError() );
+        else WINE_ERR( "failed to restart 64-bit %s, err %ld\n", wine_dbgstr_w(filename), GetLastError() );
         Wow64RevertWow64FsRedirection( redir );
     }
 }
@@ -669,6 +594,7 @@ int main(int argc, char** argv)
     int 	        retv = 0;
     HANDLE              hFile = INVALID_HANDLE_VALUE;
     enum dbg_start      ds;
+    const char*         filename = NULL;
 
     /* Initialize the output */
     dbg_houtput = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -694,7 +620,8 @@ int main(int argc, char** argv)
     dbg_init_console();
 
     SymSetOptions((SymGetOptions() & ~(SYMOPT_UNDNAME)) |
-                  SYMOPT_LOAD_LINES | SYMOPT_DEFERRED_LOADS | SYMOPT_AUTO_PUBLICS);
+                  SYMOPT_LOAD_LINES | SYMOPT_DEFERRED_LOADS | SYMOPT_AUTO_PUBLICS |
+                  SYMOPT_INCLUDE_32BIT_MODULES);
 
     if (argc && !strcmp(argv[0], "--auto"))
     {
@@ -717,26 +644,27 @@ int main(int argc, char** argv)
     /* parse options */
     while (argc > 0 && argv[0][0] == '-')
     {
-        if (!strcmp(argv[0], "--command"))
+        if (!strcmp(argv[0], "--command") && argc > 1)
         {
             argc--; argv++;
             hFile = parser_generate_command_file(argv[0], NULL);
             if (hFile == INVALID_HANDLE_VALUE)
             {
-                dbg_printf("Couldn't open temp file (%u)\n", GetLastError());
+                dbg_printf("Couldn't open temp file (%lu)\n", GetLastError());
                 return 1;
             }
             argc--; argv++;
             continue;
         }
-        if (!strcmp(argv[0], "--file"))
+        if (!strcmp(argv[0], "--file") && argc > 1)
         {
             argc--; argv++;
+            filename = argv[0];
             hFile = CreateFileA(argv[0], GENERIC_READ|DELETE, 0, 
                                 NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
             if (hFile == INVALID_HANDLE_VALUE)
             {
-                dbg_printf("Couldn't open file %s (%u)\n", argv[0], GetLastError());
+                dbg_printf("Couldn't open file %s (%lu)\n", argv[0], GetLastError());
                 return 1;
             }
             argc--; argv++;
@@ -762,7 +690,7 @@ int main(int argc, char** argv)
 
     restart_if_wow64();
 
-    dbg_start_interactive(hFile);
+    dbg_start_interactive(filename, hFile);
 
     return 0;
 }

@@ -136,7 +136,7 @@ static ME_Run *split_run_extents( ME_WrapContext *wc, ME_Run *run, int nVChar )
   assert( run->nCharOfs != -1 );
   ME_CheckCharOffsets(editor);
 
-  TRACE("Before split: %s(%d, %d)\n", debugstr_run( run ),
+  TRACE("Before split: %s(%ld, %ld)\n", debugstr_run( run ),
         run->pt.x, run->pt.y);
 
   run_split( editor, &cursor );
@@ -153,7 +153,7 @@ static ME_Run *split_run_extents( ME_WrapContext *wc, ME_Run *run, int nVChar )
 
   ME_CheckCharOffsets(editor);
 
-  TRACE("After split: %s(%d, %d), %s(%d, %d)\n",
+  TRACE("After split: %s(%ld, %ld), %s(%ld, %ld)\n",
         debugstr_run( run ), run->pt.x, run->pt.y,
         debugstr_run( run2 ), run2->pt.x, run2->pt.y);
 
@@ -274,7 +274,7 @@ static void layout_row( ME_Run *start, ME_Run *last )
     for (i = 0, run = start; i < num_runs; run = run_next( run ))
     {
         run->pt.x = pos[ log_to_vis[ i ] ];
-        TRACE( "%d: x = %d\n", i, run->pt.x );
+        TRACE( "%d: x = %ld\n", i, run->pt.x );
         i++;
     }
 
@@ -829,7 +829,7 @@ static void ME_WrapTextParagraph( ME_TextEditor *editor, ME_Context *c, ME_Parag
   para_num_init( c, para );
 
   /* For now treating all non-password text as complex for better testing */
-  if (!c->editor->cPasswordMask /* &&
+  if (!c->editor->password_char /* &&
       ScriptIsComplex( tp->member.para.text->szData, tp->member.para.text->nLen, SIC_COMPLEX ) == S_OK */)
   {
       if (SUCCEEDED( itemize_para( c, para ) ))
@@ -1020,7 +1020,7 @@ static void adjust_para_y( ME_Paragraph *para, ME_Context *c, struct repaint_ran
     }
 }
 
-BOOL ME_WrapMarkedParagraphs(ME_TextEditor *editor)
+BOOL wrap_marked_paras_dc( ME_TextEditor *editor, HDC hdc, BOOL invalidate )
 {
   ME_Paragraph *para, *next;
   struct wine_rb_entry *entry, *next_entry = NULL;
@@ -1030,9 +1030,9 @@ BOOL ME_WrapMarkedParagraphs(ME_TextEditor *editor)
 
   if (!editor->marked_paras.root) return FALSE;
 
-  ME_InitContext(&c, editor, ITextHost_TxGetDC(editor->texthost));
+  ME_InitContext( &c, editor, hdc );
 
-  entry = wine_rb_head( editor->marked_paras.root );
+  entry = rb_head( editor->marked_paras.root );
   while (entry)
   {
     para = WINE_RB_ENTRY_VALUE( entry, ME_Paragraph, marked_entry );
@@ -1045,7 +1045,7 @@ BOOL ME_WrapMarkedParagraphs(ME_TextEditor *editor)
         next_entry = entry;
     }
     else
-        next_entry = wine_rb_next( entry );
+        next_entry = rb_next( entry );
 
     c.pt = para->pt;
     prev_width = para->nWidth;
@@ -1076,7 +1076,7 @@ BOOL ME_WrapMarkedParagraphs(ME_TextEditor *editor)
     }
     entry = next_entry;
   }
-  wine_rb_clear( &editor->marked_paras, NULL, NULL );
+  wine_rb_destroy( &editor->marked_paras, NULL, NULL );
 
   editor->sizeWindow.cx = c.rcView.right-c.rcView.left;
   editor->sizeWindow.cy = c.rcView.bottom-c.rcView.top;
@@ -1086,9 +1086,17 @@ BOOL ME_WrapMarkedParagraphs(ME_TextEditor *editor)
 
   ME_DestroyContext(&c);
 
-  if (repaint.start || editor->nTotalLength < editor->nLastTotalLength)
+  if (invalidate && (repaint.start || editor->nTotalLength < editor->nLastTotalLength))
     para_range_invalidate( editor, repaint.start, repaint.end);
   return !!repaint.start;
+}
+
+BOOL ME_WrapMarkedParagraphs( ME_TextEditor *editor )
+{
+    HDC hdc = ITextHost_TxGetDC( editor->texthost );
+    BOOL ret = wrap_marked_paras_dc( editor, hdc, TRUE );
+    ITextHost_TxReleaseDC( editor->texthost, hdc );
+    return ret;
 }
 
 void para_range_invalidate( ME_TextEditor *editor, ME_Paragraph *start_para,

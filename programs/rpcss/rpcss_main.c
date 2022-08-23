@@ -52,11 +52,11 @@ struct registered_class
 static CRITICAL_SECTION registered_classes_cs = { NULL, -1, 0, 0, 0, 0 };
 static struct list registered_classes = LIST_INIT(registered_classes);
 
-HRESULT __cdecl irpcss_server_register(handle_t h, const GUID *clsid, DWORD flags,
+HRESULT __cdecl irpcss_server_register(handle_t h, const GUID *clsid, unsigned int flags,
         PMInterfacePointer object, unsigned int *cookie)
 {
     struct registered_class *entry;
-    static int next_cookie;
+    static LONG next_cookie;
 
     if (!(entry = heap_alloc_zero(sizeof(*entry))))
         return E_OUTOFMEMORY;
@@ -230,7 +230,7 @@ static DWORD WINAPI service_handler( DWORD ctrl, DWORD event_type, LPVOID event_
         SetEvent( exit_event );
         return NO_ERROR;
     default:
-        FIXME( "got service ctrl %x\n", ctrl );
+        FIXME( "got service ctrl %lx\n", ctrl );
         status.dwCurrentState = SERVICE_RUNNING;
         SetServiceStatus( service_handle, &status );
         return NO_ERROR;
@@ -246,7 +246,7 @@ static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
 
     if ((ret = RPCSS_Initialize()))
     {
-        WARN("Failed to initialize rpc interfaces, status %d.\n", ret);
+        WARN("Failed to initialize rpc interfaces, status %ld.\n", ret);
         return;
     }
 

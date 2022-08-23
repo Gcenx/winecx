@@ -490,7 +490,7 @@ unsigned short CDECL _byteswap_ushort(unsigned short s)
 /*********************************************************************
  * _byteswap_ulong (MSVCR80.@)
  */
-ULONG CDECL _byteswap_ulong(ULONG l)
+__msvcrt_ulong CDECL _byteswap_ulong(__msvcrt_ulong l)
 {
     return (l<<24) + ((l<<8)&0xFF0000) + ((l>>8)&0xFF00) + (l>>24);
 }
@@ -516,7 +516,7 @@ int CDECL __crtGetShowWindowMode(void)
     STARTUPINFOW si;
 
     GetStartupInfoW(&si);
-    TRACE("flags=%x window=%d\n", si.dwFlags, si.wShowWindow);
+    TRACE("flags=%lx window=%d\n", si.dwFlags, si.wShowWindow);
     return si.dwFlags & STARTF_USESHOWWINDOW ? si.wShowWindow : SW_SHOWDEFAULT;
 }
 
@@ -526,7 +526,7 @@ int CDECL __crtGetShowWindowMode(void)
 BOOL CDECL __crtInitializeCriticalSectionEx(
         CRITICAL_SECTION *cs, DWORD spin_count, DWORD flags)
 {
-    TRACE("(%p %x %x)\n", cs, spin_count, flags);
+    TRACE("(%p %lx %lx)\n", cs, spin_count, flags);
     return InitializeCriticalSectionEx(cs, spin_count, flags);
 }
 
@@ -536,9 +536,9 @@ BOOL CDECL __crtInitializeCriticalSectionEx(
 /*********************************************************************
  * _vacopy (MSVCR120.@)
  */
-void CDECL _vacopy(__ms_va_list *dest, __ms_va_list src)
+void CDECL _vacopy(va_list *dest, va_list src)
 {
-    __ms_va_copy(*dest, src);
+    va_copy(*dest, src);
 }
 #endif
 
@@ -562,12 +562,6 @@ LONG CDECL __crtUnhandledException(EXCEPTION_POINTERS *ep)
     SetUnhandledExceptionFilter(NULL);
     return UnhandledExceptionFilter(ep);
 }
-
-/* ?_Trace_agents@Concurrency@@YAXW4Agents_EventType@1@_JZZ */
-void WINAPIV _Trace_agents(/*enum Concurrency::Agents_EventType*/int type, __int64 id, ...)
-{
-    FIXME("(%d %s)\n", type, wine_dbgstr_longlong(id));
-}
 #endif
 
 #if _MSVCR_VER>=120
@@ -576,7 +570,7 @@ void WINAPIV _Trace_agents(/*enum Concurrency::Agents_EventType*/int type, __int
  */
 void CDECL __crtSleep(DWORD timeout)
 {
-  TRACE("(%u)\n", timeout);
+  TRACE("(%lu)\n", timeout);
   Sleep(timeout);
 }
 

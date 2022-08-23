@@ -45,7 +45,7 @@ static inline signed char ctox( CHAR x )
         return x - '0';
     if( ( x >= 'A' ) && ( x <= 'F' ) )
         return x - 'A' + 10;
-    if( ( x >= 'a' ) && ( x <= 'a' ) )
+    if( ( x >= 'a' ) && ( x <= 'f' ) )
         return x - 'a' + 10;
     return -1;
 }
@@ -249,7 +249,7 @@ UINT WINAPI WNetEnumCachedPasswords(
     PASSWORD_CACHE_ENTRY *entry;
     CHAR val[256], prefix[6];
 
-    WARN( "(%s, %d, %d, %p, 0x%08x) totally insecure\n",
+    WARN( "(%s, %d, %d, %p, 0x%08lx) totally insecure\n",
            debugstr_an(pbPrefix,cbPrefix), cbPrefix,
 	   nType, enumPasswordProc, param );
 

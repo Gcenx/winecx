@@ -30,6 +30,7 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
+#include "winternl.h"
 #include "unix_private.h"
 #include "wine/debug.h"
 
@@ -37,6 +38,35 @@ WINE_DEFAULT_DEBUG_CHANNEL(reg);
 
 /* maximum length of a value name in bytes (without terminating null) */
 #define MAX_VALUE_LENGTH (16383 * sizeof(WCHAR))
+
+
+NTSTATUS open_hkcu_key( const char *path, HANDLE *key )
+{
+    NTSTATUS status;
+    char buffer[256];
+    WCHAR bufferW[256];
+    DWORD_PTR sid_data[(sizeof(TOKEN_USER) + SECURITY_MAX_SID_SIZE) / sizeof(DWORD_PTR)];
+    DWORD i, len = sizeof(sid_data);
+    SID *sid;
+    UNICODE_STRING name;
+    OBJECT_ATTRIBUTES attr;
+
+    status = NtQueryInformationToken( GetCurrentThreadEffectiveToken(), TokenUser, sid_data, len, &len );
+    if (status) return status;
+
+    sid = ((TOKEN_USER *)sid_data)->User.Sid;
+    len = sprintf( buffer, "\\Registry\\User\\S-%u-%u", sid->Revision,
+                 MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5], sid->IdentifierAuthority.Value[4] ),
+                           MAKEWORD( sid->IdentifierAuthority.Value[3], sid->IdentifierAuthority.Value[2] )));
+    for (i = 0; i < sid->SubAuthorityCount; i++)
+        len += sprintf( buffer + len, "-%u", sid->SubAuthority[i] );
+    len += sprintf( buffer + len, "\\%s", path );
+
+    ascii_to_unicode( bufferW, buffer, len + 1 );
+    init_unicode_string( &name, bufferW );
+    InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE, 0, NULL );
+    return NtCreateKey( key, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL );
+}
 
 
 /******************************************************************************
@@ -47,15 +77,14 @@ NTSTATUS WINAPI NtCreateKey( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRI
 {
     NTSTATUS ret;
     data_size_t len;
-    struct object_attributes * HOSTPTR objattr;
+    struct object_attributes *objattr;
 
-    if (!key || !attr) return STATUS_ACCESS_VIOLATION;
-    if (attr->Length > sizeof(OBJECT_ATTRIBUTES)) return STATUS_INVALID_PARAMETER;
+    *key = 0;
+    if (attr->Length != sizeof(OBJECT_ATTRIBUTES)) return STATUS_INVALID_PARAMETER;
+    if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
 
     TRACE( "(%p,%s,%s,%x,%x,%p)\n", attr->RootDirectory, debugstr_us(attr->ObjectName),
            debugstr_us(class), options, access, key );
-
-    if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
 
     SERVER_START_REQ( create_key )
     {
@@ -95,7 +124,7 @@ NTSTATUS WINAPI NtOpenKeyEx( HANDLE *key, ACCESS_MASK access, const OBJECT_ATTRI
 {
     NTSTATUS ret;
 
-    if (!key || !attr || !attr->ObjectName) return STATUS_ACCESS_VIOLATION;
+    *key = 0;
     if (attr->Length != sizeof(*attr)) return STATUS_INVALID_PARAMETER;
     if (attr->ObjectName->Length & 1) return STATUS_OBJECT_NAME_INVALID;
 
@@ -631,14 +660,23 @@ NTSTATUS WINAPI NtLoadKey( const OBJECT_ATTRIBUTES *attr, OBJECT_ATTRIBUTES *fil
 {
     NTSTATUS ret;
     HANDLE key;
-    IO_STATUS_BLOCK io;
     data_size_t len;
-    struct object_attributes * HOSTPTR objattr;
+    struct object_attributes *objattr;
+    char *unix_name;
+    UNICODE_STRING nt_name;
+    OBJECT_ATTRIBUTES new_attr = *file;
 
     TRACE("(%p,%p)\n", attr, file);
 
-    ret = NtCreateFile( &key, GENERIC_READ | SYNCHRONIZE, file, &io, NULL, FILE_ATTRIBUTE_NORMAL, 0,
-                        FILE_OPEN, 0, NULL, 0);
+    get_redirect( &new_attr, &nt_name );
+    if (!(ret = nt_to_unix_file_name( &new_attr, &unix_name, FILE_OPEN )))
+    {
+        ret = open_unix_file( &key, unix_name, GENERIC_READ | SYNCHRONIZE,
+                              &new_attr, 0, 0, FILE_OPEN, 0, NULL, 0 );
+        free( unix_name );
+    }
+    free( nt_name.Buffer );
+
     if (ret) return ret;
 
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
@@ -676,9 +714,15 @@ NTSTATUS WINAPI NtUnloadKey( OBJECT_ATTRIBUTES *attr )
 
     TRACE( "(%p)\n", attr );
 
+    if (!attr || !attr->ObjectName) return STATUS_ACCESS_VIOLATION;
+    if (attr->Length != sizeof(*attr)) return STATUS_INVALID_PARAMETER;
+    if (attr->ObjectName->Length & 1) return STATUS_OBJECT_NAME_INVALID;
+
     SERVER_START_REQ( unload_registry )
     {
-        req->hkey = wine_server_obj_handle( attr->RootDirectory );
+        req->parent     = wine_server_obj_handle( attr->RootDirectory );
+        req->attributes = attr->Attributes;
+        wine_server_add_data( req, attr->ObjectName->Buffer, attr->ObjectName->Length );
         ret = wine_server_call(req);
     }
     SERVER_END_REQ;
@@ -736,7 +780,8 @@ NTSTATUS WINAPI NtReplaceKey( OBJECT_ATTRIBUTES *attr, HANDLE key, OBJECT_ATTRIB
 NTSTATUS WINAPI NtQueryLicenseValue( const UNICODE_STRING *name, ULONG *type,
                                      void *data, ULONG length, ULONG *retlen )
 {
-    static const WCHAR nameW[] = {'M','a','c','h','i','n','e','\\',
+    static const WCHAR nameW[] = {'\\','R','e','g','i','s','t','r','y','\\',
+                                  'M','a','c','h','i','n','e','\\',
                                   'S','o','f','t','w','a','r','e','\\',
                                   'W','i','n','e','\\','L','i','c','e','n','s','e',
                                   'I','n','f','o','r','m','a','t','i','o','n',0};
@@ -750,7 +795,7 @@ NTSTATUS WINAPI NtQueryLicenseValue( const UNICODE_STRING *name, ULONG *type,
     if (!name || !name->Buffer || !name->Length || !retlen) return STATUS_INVALID_PARAMETER;
 
     info_length = FIELD_OFFSET( KEY_VALUE_PARTIAL_INFORMATION, Data ) + length;
-    if (!(info = RtlAllocateHeap( GetProcessHeap(), 0, info_length ))) return STATUS_NO_MEMORY;
+    if (!(info = malloc( info_length ))) return STATUS_NO_MEMORY;
 
     InitializeObjectAttributes( &attr, &keyW, 0, 0, NULL );
 
@@ -773,6 +818,6 @@ NTSTATUS WINAPI NtQueryLicenseValue( const UNICODE_STRING *name, ULONG *type,
     if (status == STATUS_OBJECT_NAME_NOT_FOUND)
         FIXME( "License key %s not found\n", debugstr_w(name->Buffer) );
 
-    RtlFreeHeap( GetProcessHeap(), 0, info );
+    free( info );
     return status;
 }

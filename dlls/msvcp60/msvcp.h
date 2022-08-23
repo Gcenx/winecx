@@ -25,15 +25,13 @@
 
 typedef SSIZE_T streamoff;
 typedef SSIZE_T streamsize;
-#define STREAMOFF_BITS 32
-#define STREAMSIZE_BITS 32
 
 void __cdecl _invalid_parameter(const wchar_t*, const wchar_t*,
         const wchar_t*, unsigned int, uintptr_t);
 BOOL __cdecl __uncaught_exception(void);
 
-extern void* (__cdecl *MSVCRT_operator_new)(size_t);
-extern void (__cdecl *MSVCRT_operator_delete)(void*);
+void* __cdecl operator_new(size_t);
+void __cdecl operator_delete(void*);
 
 /* basic_string<char, char_traits<char>, allocator<char>> */
 typedef struct
@@ -266,7 +264,7 @@ typedef enum {
 typedef struct _iosarray {
     struct _iosarray *next;
     int index;
-    int long_val;
+    LONG long_val;
     void *ptr_val;
 } IOS_BASE_iosarray;
 
@@ -483,3 +481,9 @@ typedef struct {
     double real;
     double imag;
 } complex_double;
+
+void WINAPI DECLSPEC_NORETURN _CxxThrowException(void*,const cxx_exception_type*);
+void __cdecl DECLSPEC_NORETURN _Xlength_error(const char*);
+void __cdecl DECLSPEC_NORETURN _Xmem(void);
+void __cdecl DECLSPEC_NORETURN _Xout_of_range(const char*);
+void DECLSPEC_NORETURN throw_failure(const char*);

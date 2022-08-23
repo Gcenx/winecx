@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 _ACRTIMP unsigned char* __cdecl __p__mbctype(void);
 #define _mbctype                   (__p__mbctype())
 #else

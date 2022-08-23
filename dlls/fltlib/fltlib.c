@@ -25,25 +25,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(fltlib);
 
-/*****************************************************
- *      DllMain
- */
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
-{
-    TRACE("(0x%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
-
-    switch (fdwReason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* use native version */
-
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(hinstDLL);
-            break;
-    }
-    return TRUE;
-}
-
 /**********************************************************************
  *      FilterConnectCommunicationPort         (FLTLIB.@)
  */
@@ -52,7 +33,7 @@ HRESULT WINAPI FilterConnectCommunicationPort(LPCWSTR lpPortName, DWORD dwOption
                                               LPSECURITY_ATTRIBUTES lpSecurityAttributes,
                                               HANDLE *hPort)
 {
-    FIXME("(%s, %d, %p, %d, %p, %p) stub\n", debugstr_w(lpPortName), dwOptions,
+    FIXME("(%s, %ld, %p, %ld, %p, %p) stub\n", debugstr_w(lpPortName), dwOptions,
         lpContext, dwSizeOfContext, lpSecurityAttributes, hPort);
 
     *hPort = INVALID_HANDLE_VALUE;
@@ -65,7 +46,7 @@ HRESULT WINAPI FilterConnectCommunicationPort(LPCWSTR lpPortName, DWORD dwOption
 HRESULT WINAPI FilterFindFirst(DWORD class, LPVOID buffer, DWORD size, LPDWORD bytes_returned,
                                LPHANDLE handle)
 {
-    FIXME("(%u, %p, %u, %p, %p) stub\n", class, buffer, size, bytes_returned, handle);
+    FIXME("(%lu, %p, %lu, %p, %p) stub\n", class, buffer, size, bytes_returned, handle);
     return HRESULT_FROM_WIN32(ERROR_NO_MORE_ITEMS);
 }
 

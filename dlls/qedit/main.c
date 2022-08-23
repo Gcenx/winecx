@@ -17,19 +17,18 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define WINE_NO_NAMELESS_EXTENSION
+
 #include "qedit_private.h"
 #include "rpcproxy.h"
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(qedit);
-
-static HINSTANCE qedit_instance;
+WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
 {
     if (reason == DLL_PROCESS_ATTACH)
     {
-        qedit_instance = instance;
         DisableThreadLibraryCalls(instance);
     }
     else if (reason == DLL_PROCESS_DETACH && !reserved)
@@ -137,14 +136,6 @@ static const IClassFactoryVtbl DSCF_Vtbl =
 };
 
 
-/***********************************************************************
- *              DllCanUnloadNow (QEDIT.@)
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
-}
-
 /*******************************************************************************
  * DllGetClassObject [QEDIT.@]
  * Retrieves class object from a DLL object
@@ -246,7 +237,7 @@ HRESULT WINAPI DllRegisterServer(void)
     IFilterMapper2 *mapper;
     HRESULT hr;
 
-    if (FAILED(hr = __wine_register_resources(qedit_instance)))
+    if (FAILED(hr = __wine_register_resources()))
         return hr;
 
     if (FAILED(hr = CoCreateInstance(&CLSID_FilterMapper2, NULL, CLSCTX_INPROC_SERVER,
@@ -270,7 +261,7 @@ HRESULT WINAPI DllUnregisterServer(void)
     IFilterMapper2 *mapper;
     HRESULT hr;
 
-    if (FAILED(hr = __wine_unregister_resources(qedit_instance)))
+    if (FAILED(hr = __wine_unregister_resources()))
         return hr;
 
     if (FAILED(hr = CoCreateInstance(&CLSID_FilterMapper2, NULL, CLSCTX_INPROC_SERVER,

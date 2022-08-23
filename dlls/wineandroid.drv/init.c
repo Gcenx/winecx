@@ -21,10 +21,10 @@
 #define NONAMELESSSTRUCT
 #define NONAMELESSUNION
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdarg.h>
 #include <string.h>
+#include <dlfcn.h>
 #include <link.h>
 
 #include "windef.h"
@@ -40,25 +40,18 @@ unsigned int screen_width = 0;
 unsigned int screen_height = 0;
 RECT virtual_screen_rect = { 0, 0, 0, 0 };
 
-MONITORINFOEXW default_monitor =
-{
-    sizeof(default_monitor),    /* cbSize */
-    { 0, 0, 0, 0 },             /* rcMonitor */
-    { 0, 0, 0, 0 },             /* rcWork */
-    MONITORINFOF_PRIMARY,       /* dwFlags */
-    { '\\','\\','.','\\','D','I','S','P','L','A','Y','1',0 }   /* szDevice */
-};
-
 static const unsigned int screen_bpp = 32;  /* we don't support other modes */
 
+static RECT monitor_rc_work;
 static int device_init_done;
+static BOOL force_display_devices_refresh;
 
 typedef struct
 {
     struct gdi_physdev dev;
 } ANDROID_PDEVICE;
 
-static const struct gdi_dc_funcs android_drv_funcs;
+static const struct user_driver_funcs android_drv_funcs;
 
 
 /******************************************************************************
@@ -72,14 +65,22 @@ void init_monitors( int width, int height )
 
     virtual_screen_rect.right = width;
     virtual_screen_rect.bottom = height;
-    default_monitor.rcMonitor = default_monitor.rcWork = virtual_screen_rect;
+    monitor_rc_work = virtual_screen_rect;
 
     if (!hwnd || !IsWindowVisible( hwnd )) return;
     if (!GetWindowRect( hwnd, &rect )) return;
-    if (rect.top) default_monitor.rcWork.bottom = rect.top;
-    else default_monitor.rcWork.top = rect.bottom;
+    if (rect.top) monitor_rc_work.bottom = rect.top;
+    else monitor_rc_work.top = rect.bottom;
     TRACE( "found tray %p %s work area %s\n", hwnd,
-           wine_dbgstr_rect( &rect ), wine_dbgstr_rect( &default_monitor.rcWork ));
+           wine_dbgstr_rect( &rect ), wine_dbgstr_rect( &monitor_rc_work ));
+
+    if (*p_java_vm) /* if we're notified from Java thread, update registry */
+    {
+        UINT32 num_path, num_mode;
+        force_display_devices_refresh = TRUE;
+        /* trigger refresh in win32u */
+        NtUserGetDisplayConfigBufferSizes( QDC_ONLY_ACTIVE_PATHS, &num_path, &num_mode );
+    }
 }
 
 
@@ -97,81 +98,6 @@ void set_screen_dpi( DWORD dpi )
         RegSetValueExW( hkey, dpi_value_name, 0, REG_DWORD, (void *)&dpi, sizeof(DWORD) );
         RegCloseKey( hkey );
     }
-}
-
-void handle_run_cmdline( LPWSTR cmdline, LPWSTR* wineEnv )
-{
-    STARTUPINFOW si;
-    PROCESS_INFORMATION pi;
-    UNICODE_STRING var, val;
-    WCHAR *env = NULL;
-
-    ZeroMemory( &si, sizeof(STARTUPINFOW) );
-    TRACE( "Running windows cmd: : %s\n", debugstr_w( cmdline ) );
-
-    if (wineEnv && !RtlCreateEnvironment( TRUE, &env ))
-    {
-        while (*wineEnv)
-        {
-            RtlInitUnicodeString( &var, *wineEnv++ );
-            RtlInitUnicodeString( &val, *wineEnv++ );
-            RtlSetEnvironmentVariable( &env, &var, &val );
-        }
-    }
-
-    if (!CreateProcessW( NULL, cmdline, NULL, NULL, FALSE,
-                         DETACHED_PROCESS | CREATE_UNICODE_ENVIRONMENT, env, NULL, &si, &pi ))
-        ERR( "Failed to run cmd : Error %d\n", GetLastError() );
-
-    if (env) RtlDestroyEnvironment( env );
-}
-
-void handle_run_cmdarray( LPWSTR* cmdarray, LPWSTR* wineEnv )
-{
-    int len = 0;
-    int i;
-    WCHAR *ptr, *ptr2;
-    WCHAR *cmdline;
-
-    ptr = cmdarray[0];
-    i = 0;
-    while (ptr != NULL)
-    {
-        len += lstrlenW( ptr ) + 3;
-        i++;
-        ptr = cmdarray[i];
-    }
-
-    cmdline = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
-
-    ptr = cmdarray[0];
-    i = 0;
-    ptr2 = cmdline;
-    while (ptr != NULL)
-    {
-        if (ptr[0] != '"')
-        {
-            *ptr2 = '"';
-            ptr2++;
-        }
-        lstrcpyW(ptr2, ptr);
-        ptr2 += lstrlenW(ptr);
-        if (ptr[0] != '"')
-        {
-            *ptr2 = '"';
-            ptr2++;
-        }
-        i++;
-        ptr = cmdarray[i];
-        if (ptr != NULL)
-        {
-            *ptr2 = ' ';
-            ptr2++;
-        }
-    }
-    *ptr2 = 0;
-    handle_run_cmdline( cmdline, wineEnv );
-    HeapFree( GetProcessHeap(), 0, cmdline );
 }
 
 /**********************************************************************
@@ -226,14 +152,14 @@ static ANDROID_PDEVICE *create_android_physdev(void)
 /**********************************************************************
  *           ANDROID_CreateDC
  */
-static BOOL CDECL ANDROID_CreateDC( PHYSDEV *pdev, LPCWSTR driver, LPCWSTR device,
-                                    LPCWSTR output, const DEVMODEW* initData )
+static BOOL CDECL ANDROID_CreateDC( PHYSDEV *pdev, LPCWSTR device, LPCWSTR output,
+                                    const DEVMODEW *initData )
 {
     ANDROID_PDEVICE *physdev = create_android_physdev();
 
     if (!physdev) return FALSE;
 
-    push_dc_driver( pdev, &physdev->dev, &android_drv_funcs );
+    push_dc_driver( pdev, &physdev->dev, &android_drv_funcs.dc_funcs );
     return TRUE;
 }
 
@@ -247,7 +173,7 @@ static BOOL CDECL ANDROID_CreateCompatibleDC( PHYSDEV orig, PHYSDEV *pdev )
 
     if (!physdev) return FALSE;
 
-    push_dc_driver( pdev, &physdev->dev, &android_drv_funcs );
+    push_dc_driver( pdev, &physdev->dev, &android_drv_funcs.dc_funcs );
     return TRUE;
 }
 
@@ -265,8 +191,8 @@ static BOOL CDECL ANDROID_DeleteDC( PHYSDEV dev )
 /***********************************************************************
  *           ANDROID_ChangeDisplaySettingsEx
  */
-LONG CDECL ANDROID_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
-                                            HWND hwnd, DWORD flags, LPVOID lpvoid )
+LONG ANDROID_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
+                                      HWND hwnd, DWORD flags, LPVOID lpvoid )
 {
     FIXME( "(%s,%p,%p,0x%08x,%p)\n", debugstr_w( devname ), devmode, hwnd, flags, lpvoid );
     return DISP_CHANGE_SUCCESSFUL;
@@ -274,37 +200,29 @@ LONG CDECL ANDROID_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
 
 
 /***********************************************************************
- *           ANDROID_GetMonitorInfo
+ *           ANDROID_UpdateDisplayDevices
  */
-BOOL CDECL ANDROID_GetMonitorInfo( HMONITOR handle, LPMONITORINFO info )
+void ANDROID_UpdateDisplayDevices( const struct gdi_device_manager *device_manager,
+                                   BOOL force, void *param )
 {
-    if (handle != (HMONITOR)1)
+    if (force || force_display_devices_refresh)
     {
-        SetLastError( ERROR_INVALID_HANDLE );
-        return FALSE;
+        struct gdi_monitor gdi_monitor =
+        {
+            .rc_monitor = virtual_screen_rect,
+            .rc_work = monitor_rc_work,
+            .state_flags = DISPLAY_DEVICE_ACTIVE | DISPLAY_DEVICE_ATTACHED,
+        };
+        device_manager->add_monitor( &gdi_monitor, param );
+        force_display_devices_refresh = FALSE;
     }
-    info->rcMonitor = default_monitor.rcMonitor;
-    info->rcWork = default_monitor.rcWork;
-    info->dwFlags = default_monitor.dwFlags;
-    if (info->cbSize >= sizeof(MONITORINFOEXW))
-        lstrcpyW( ((MONITORINFOEXW *)info)->szDevice, default_monitor.szDevice );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *           ANDROID_EnumDisplayMonitors
- */
-BOOL CDECL ANDROID_EnumDisplayMonitors( HDC hdc, LPRECT rect, MONITORENUMPROC proc, LPARAM lp )
-{
-    return proc( (HMONITOR)1, 0, &default_monitor.rcMonitor, lp );
 }
 
 
 /***********************************************************************
  *           ANDROID_EnumDisplaySettingsEx
  */
-BOOL CDECL ANDROID_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmode, DWORD flags)
+BOOL ANDROID_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmode, DWORD flags )
 {
     static const WCHAR dev_name[CCHDEVICENAME] =
         { 'W','i','n','e',' ','A','n','d','r','o','i','d',' ','d','r','i','v','e','r',0 };
@@ -343,168 +261,41 @@ BOOL CDECL ANDROID_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devm
 /**********************************************************************
  *           ANDROID_wine_get_wgl_driver
  */
-static struct opengl_funcs * CDECL ANDROID_wine_get_wgl_driver( PHYSDEV dev, UINT version )
+static struct opengl_funcs *ANDROID_wine_get_wgl_driver( UINT version )
 {
-    struct opengl_funcs *ret;
-
-    if (!(ret = get_wgl_driver( version )))
-    {
-        dev = GET_NEXT_PHYSDEV( dev, wine_get_wgl_driver );
-        ret = dev->funcs->wine_get_wgl_driver( dev, version );
-    }
-    return ret;
+    return get_wgl_driver( version );
 }
 
 
-static const struct gdi_dc_funcs android_drv_funcs =
+static const struct user_driver_funcs android_drv_funcs =
 {
-    NULL,                               /* pAbortDoc */
-    NULL,                               /* pAbortPath */
-    NULL,                               /* pAlphaBlend */
-    NULL,                               /* pAngleArc */
-    NULL,                               /* pArc */
-    NULL,                               /* pArcTo */
-    NULL,                               /* pBeginPath */
-    NULL,                               /* pBlendImage */
-    NULL,                               /* pChord */
-    NULL,                               /* pCloseFigure */
-    ANDROID_CreateCompatibleDC,         /* pCreateCompatibleDC */
-    ANDROID_CreateDC,                   /* pCreateDC */
-    ANDROID_DeleteDC,                   /* pDeleteDC */
-    NULL,                               /* pDeleteObject */
-    NULL,                               /* pDeviceCapabilities */
-    NULL,                               /* pEllipse */
-    NULL,                               /* pEndDoc */
-    NULL,                               /* pEndPage */
-    NULL,                               /* pEndPath */
-    NULL,                               /* pEnumFonts */
-    NULL,                               /* pEnumICMProfiles */
-    NULL,                               /* pExcludeClipRect */
-    NULL,                               /* pExtDeviceMode */
-    NULL,                               /* pExtEscape */
-    NULL,                               /* pExtFloodFill */
-    NULL,                               /* pExtSelectClipRgn */
-    NULL,                               /* pExtTextOut */
-    NULL,                               /* pFillPath */
-    NULL,                               /* pFillRgn */
-    NULL,                               /* pFlattenPath */
-    NULL,                               /* pFontIsLinked */
-    NULL,                               /* pFrameRgn */
-    NULL,                               /* pGdiComment */
-    NULL,                               /* pGetBoundsRect */
-    NULL,                               /* pGetCharABCWidths */
-    NULL,                               /* pGetCharABCWidthsI */
-    NULL,                               /* pGetCharWidth */
-    NULL,                               /* pGetCharWidthInfo */
-    NULL,                               /* pGetDeviceCaps */
-    NULL,                               /* pGetDeviceGammaRamp */
-    NULL,                               /* pGetFontData */
-    NULL,                               /* pGetFontRealizationInfo */
-    NULL,                               /* pGetFontUnicodeRanges */
-    NULL,                               /* pGetGlyphIndices */
-    NULL,                               /* pGetGlyphOutline */
-    NULL,                               /* pGetICMProfile */
-    NULL,                               /* pGetImage */
-    NULL,                               /* pGetKerningPairs */
-    NULL,                               /* pGetNearestColor */
-    NULL,                               /* pGetOutlineTextMetrics */
-    NULL,                               /* pGetPixel */
-    NULL,                               /* pGetSystemPaletteEntries */
-    NULL,                               /* pGetTextCharsetInfo */
-    NULL,                               /* pGetTextExtentExPoint */
-    NULL,                               /* pGetTextExtentExPointI */
-    NULL,                               /* pGetTextFace */
-    NULL,                               /* pGetTextMetrics */
-    NULL,                               /* pGradientFill */
-    NULL,                               /* pIntersectClipRect */
-    NULL,                               /* pInvertRgn */
-    NULL,                               /* pLineTo */
-    NULL,                               /* pModifyWorldTransform */
-    NULL,                               /* pMoveTo */
-    NULL,                               /* pOffsetClipRgn */
-    NULL,                               /* pOffsetViewportOrg */
-    NULL,                               /* pOffsetWindowOrg */
-    NULL,                               /* pPaintRgn */
-    NULL,                               /* pPatBlt */
-    NULL,                               /* pPie */
-    NULL,                               /* pPolyBezier */
-    NULL,                               /* pPolyBezierTo */
-    NULL,                               /* pPolyDraw */
-    NULL,                               /* pPolyPolygon */
-    NULL,                               /* pPolyPolyline */
-    NULL,                               /* pPolygon */
-    NULL,                               /* pPolyline */
-    NULL,                               /* pPolylineTo */
-    NULL,                               /* pPutImage */
-    NULL,                               /* pRealizeDefaultPalette */
-    NULL,                               /* pRealizePalette */
-    NULL,                               /* pRectangle */
-    NULL,                               /* pResetDC */
-    NULL,                               /* pRestoreDC */
-    NULL,                               /* pRoundRect */
-    NULL,                               /* pSaveDC */
-    NULL,                               /* pScaleViewportExt */
-    NULL,                               /* pScaleWindowExt */
-    NULL,                               /* pSelectBitmap */
-    NULL,                               /* pSelectBrush */
-    NULL,                               /* pSelectClipPath */
-    NULL,                               /* pSelectFont */
-    NULL,                               /* pSelectPalette */
-    NULL,                               /* pSelectPen */
-    NULL,                               /* pSetArcDirection */
-    NULL,                               /* pSetBkColor */
-    NULL,                               /* pSetBkMode */
-    NULL,                               /* pSetBoundsRect */
-    NULL,                               /* pSetDCBrushColor */
-    NULL,                               /* pSetDCPenColor */
-    NULL,                               /* pSetDIBitsToDevice */
-    NULL,                               /* pSetDeviceClipping */
-    NULL,                               /* pSetDeviceGammaRamp */
-    NULL,                               /* pSetLayout */
-    NULL,                               /* pSetMapMode */
-    NULL,                               /* pSetMapperFlags */
-    NULL,                               /* pSetPixel */
-    NULL,                               /* pSetPolyFillMode */
-    NULL,                               /* pSetROP2 */
-    NULL,                               /* pSetRelAbs */
-    NULL,                               /* pSetStretchBltMode */
-    NULL,                               /* pSetTextAlign */
-    NULL,                               /* pSetTextCharacterExtra */
-    NULL,                               /* pSetTextColor */
-    NULL,                               /* pSetTextJustification */
-    NULL,                               /* pSetViewportExt */
-    NULL,                               /* pSetViewportOrg */
-    NULL,                               /* pSetWindowExt */
-    NULL,                               /* pSetWindowOrg */
-    NULL,                               /* pSetWorldTransform */
-    NULL,                               /* pStartDoc */
-    NULL,                               /* pStartPage */
-    NULL,                               /* pStretchBlt */
-    NULL,                               /* pStretchDIBits */
-    NULL,                               /* pStrokeAndFillPath */
-    NULL,                               /* pStrokePath */
-    NULL,                               /* pUnrealizePalette */
-    NULL,                               /* pWidenPath */
-    NULL,                               /* pD3DKMTCheckVidPnExclusiveOwnership */
-    NULL,                               /* pD3DKMTSetVidPnSourceOwner */
-    ANDROID_wine_get_wgl_driver,        /* wine_get_wgl_driver */
-    NULL,                               /* wine_get_vulkan_driver */
-    GDI_PRIORITY_GRAPHICS_DRV           /* priority */
+    .dc_funcs.pCreateCompatibleDC = ANDROID_CreateCompatibleDC,
+    .dc_funcs.pCreateDC = ANDROID_CreateDC,
+    .dc_funcs.pDeleteDC = ANDROID_DeleteDC,
+    .dc_funcs.priority = GDI_PRIORITY_GRAPHICS_DRV,
+
+    .pGetKeyNameText = ANDROID_GetKeyNameText,
+    .pMapVirtualKeyEx = ANDROID_MapVirtualKeyEx,
+    .pVkKeyScanEx = ANDROID_VkKeyScanEx,
+    .pSetCursor = ANDROID_SetCursor,
+    .pChangeDisplaySettingsEx = ANDROID_ChangeDisplaySettingsEx,
+    .pEnumDisplaySettingsEx = ANDROID_EnumDisplaySettingsEx,
+    .pUpdateDisplayDevices = ANDROID_UpdateDisplayDevices,
+    .pCreateWindow = ANDROID_CreateWindow,
+    .pDestroyWindow = ANDROID_DestroyWindow,
+    .pMsgWaitForMultipleObjectsEx = ANDROID_MsgWaitForMultipleObjectsEx,
+    .pSetCapture = ANDROID_SetCapture,
+    .pSetLayeredWindowAttributes = ANDROID_SetLayeredWindowAttributes,
+    .pSetParent = ANDROID_SetParent,
+    .pSetWindowRgn = ANDROID_SetWindowRgn,
+    .pSetWindowStyle = ANDROID_SetWindowStyle,
+    .pShowWindow = ANDROID_ShowWindow,
+    .pUpdateLayeredWindow = ANDROID_UpdateLayeredWindow,
+    .pWindowMessage = ANDROID_WindowMessage,
+    .pWindowPosChanging = ANDROID_WindowPosChanging,
+    .pWindowPosChanged = ANDROID_WindowPosChanged,
+    .pwine_get_wgl_driver = ANDROID_wine_get_wgl_driver,
 };
-
-
-/******************************************************************************
- *           ANDROID_get_gdi_driver
- */
-const struct gdi_dc_funcs * CDECL ANDROID_get_gdi_driver( unsigned int version )
-{
-    if (version != WINE_GDI_DRIVER_VERSION)
-    {
-        ERR( "version mismatch, gdi32 wants %u but wineandroid has %u\n", version, WINE_GDI_DRIVER_VERSION );
-        return NULL;
-    }
-    return &android_drv_funcs;
-}
 
 
 static const JNINativeMethod methods[] =
@@ -514,24 +305,6 @@ static const JNINativeMethod methods[] =
     { "wine_surface_changed", "(ILandroid/view/Surface;Z)V", surface_changed },
     { "wine_motion_event", "(IIIIII)Z", motion_event },
     { "wine_keyboard_event", "(IIII)Z", keyboard_event },
-    { "wine_clear_meta_key_states", "(I)V", clear_meta_key_states },
-    { "wine_set_focus", "(I)V", set_focus },
-    { "wine_send_syscommand", "(II)V", send_syscommand },
-    { "wine_ime_settext", "(Ljava/lang/String;II)V", ime_text},
-    { "wine_ime_finishtext", "()V", ime_finish},
-    { "wine_ime_canceltext", "()V", ime_cancel},
-    { "wine_ime_start", "()V", ime_start},
-
-    { "wine_send_gamepad_count", "(I)V", gamepad_count},
-    { "wine_send_gamepad_data", "(IILjava/lang/String;)V", gamepad_data},
-    { "wine_send_gamepad_axis", "(I[F)V", gamepad_sendaxis},
-    { "wine_send_gamepad_button", "(III)V", gamepad_sendbutton},
-
-    { "wine_clipdata_update", "(I[Ljava/lang/String;)V", clipdata_update },
-
-    { "wine_run_commandline", "(Ljava/lang/String;[Ljava/lang/String;)V", run_commandline },
-    { "wine_run_commandarray", "([Ljava/lang/String;[Ljava/lang/String;)V", run_commandarray },
-    { "wine_send_window_close", "(I)V", send_window_close}
 };
 
 #define DECL_FUNCPTR(f) typeof(f) * p##f = NULL
@@ -544,85 +317,6 @@ DECL_FUNCPTR( __android_log_print );
 DECL_FUNCPTR( ANativeWindow_fromSurface );
 DECL_FUNCPTR( ANativeWindow_release );
 DECL_FUNCPTR( hw_get_module );
-
-void run_commandline( JNIEnv *env, jobject obj, jobject _cmdline, jobjectArray _wineEnv )
-{
-    union event_data data;
-    const jchar* cmdline = (*env)->GetStringChars(env, _cmdline, 0);
-    jsize len = (*env)->GetStringLength( env, _cmdline );
-    int j;
-    
-    memset( &data, 0, sizeof(data) );
-    data.type = RUN_CMDLINE;
-    data.runcmd.cmdline = malloc( sizeof(WCHAR) * (len + 1) );
-    lstrcpynW( data.runcmd.cmdline, (WCHAR*)cmdline, len + 1 );
-    (*env)->ReleaseStringChars(env, _cmdline, cmdline);
-
-    if (_wineEnv)
-    {
-        int count = (*env)->GetArrayLength( env, _wineEnv );
-
-        data.runcmd.env = malloc( sizeof(LPWSTR*) * (count + 1) );
-        for (j = 0; j < count; j++)
-        {
-            jobject s = (*env)->GetObjectArrayElement( env, _wineEnv, j );
-            const jchar *key_val_str = (*env)->GetStringChars( env, s, NULL );
-            len = (*env)->GetStringLength( env, s );
-            data.runcmd.env[j] = malloc( sizeof(WCHAR) * (len + 1) );
-            lstrcpynW( data.runcmd.env[j], (WCHAR*)key_val_str, len + 1 );
-            (*env)->ReleaseStringChars( env, s, key_val_str );
-        }
-        data.runcmd.env[j] = 0;
-    }
-
-    send_event( &data );
-}
-
-void run_commandarray( JNIEnv *env, jobject obj, jobjectArray _cmdarray, jobjectArray _wineEnv )
-{
-    union event_data data;
-    int j;
-    jsize len;
-
-    memset( &data, 0, sizeof(data) );
-    data.type = RUN_CMDARRAY;
-
-    if (_cmdarray)
-    {
-        int count = (*env)->GetArrayLength( env, _cmdarray);
-
-        data.runcmdarr.cmdarray = malloc( sizeof(LPWSTR*) * (count + 1) );
-        for (j = 0; j < count; j++)
-        {
-            jobject s = (*env)->GetObjectArrayElement( env, _cmdarray, j );
-            const jchar *key_val_str = (*env)->GetStringChars( env, s, NULL );
-            len = (*env)->GetStringLength( env, s );
-            data.runcmdarr.cmdarray[j] = malloc( sizeof(WCHAR) * (len + 1) );
-            lstrcpynW( data.runcmdarr.cmdarray[j], (WCHAR*)key_val_str, len + 1 );
-            (*env)->ReleaseStringChars( env, s, key_val_str );
-        }
-        data.runcmdarr.cmdarray[j] = 0;
-    }
-
-    if (_wineEnv)
-    {
-        int count = (*env)->GetArrayLength( env, _wineEnv );
-
-        data.runcmdarr.env = malloc( sizeof(LPWSTR*) * (count + 1) );
-        for (j = 0; j < count; j++)
-        {
-            jobject s = (*env)->GetObjectArrayElement( env, _wineEnv, j );
-            const jchar *key_val_str = (*env)->GetStringChars( env, s, NULL );
-            len = (*env)->GetStringLength( env, s );
-            data.runcmdarr.env[j] = malloc( sizeof(WCHAR) * (len + 1) );
-            lstrcpynW( data.runcmdarr.env[j], (WCHAR*)key_val_str, len + 1 );
-            (*env)->ReleaseStringChars( env, s, key_val_str );
-        }
-        data.runcmdarr.env[j] = 0;
-    }
-
-    send_event( &data );
-}
 
 #ifndef DT_GNU_HASH
 #define DT_GNU_HASH 0x6ffffef5
@@ -830,6 +524,7 @@ static BOOL process_attach(void)
         __asm__( "mov %0,%%fs" :: "r" (old_fs) );
 #endif
     }
+    __wine_set_user_driver( &android_drv_funcs, WINE_GDI_DRIVER_VERSION );
     return TRUE;
 }
 

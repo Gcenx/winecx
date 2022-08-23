@@ -32,16 +32,16 @@ static IDirectDraw *createDDraw(void)
     HRESULT hr;
     IDirectDraw *dd;
 
-    hr = IDirectDrawFactory_CreateDirectDraw(factory, NULL, NULL, DDSCL_NORMAL, 0,
-                                             0, &dd);
-    ok(hr == DD_OK, "Failed to create an IDirectDraw interface, hr = 0x%08x\n", hr);
+    hr = IDirectDrawFactory_CreateDirectDraw(factory, NULL, NULL, DDSCL_NORMAL, 0, 0, &dd);
+    ok(hr == DD_OK, "Unexpected hr %#lx.\n", hr);
     return SUCCEEDED(hr) ? dd : NULL;
 }
 
-static ULONG get_ref(IUnknown *o)
+static ULONG get_refcount(void *iface)
 {
-    IUnknown_AddRef(o);
-    return IUnknown_Release(o);
+    IUnknown *unknown = iface;
+    IUnknown_AddRef(unknown);
+    return IUnknown_Release(unknown);
 }
 
 static void RefCountTest(void)
@@ -53,29 +53,29 @@ static void RefCountTest(void)
     HRESULT hr;
     ULONG ref;
 
-    ref = get_ref((IUnknown *) dd1);
-    ok(ref == 1, "A new ddraw object's refcount is %u, expected 1\n", ref);
+    ref = get_refcount(dd1);
+    ok(ref == 1, "Unexpected refcount %lu.\n", ref);
 
     IDirectDraw_AddRef(dd1);
-    ref = get_ref((IUnknown *) dd1);
+    ref = get_refcount(dd1);
     if (ref == 1)
     {
         win_skip("Refcounting is broken\n");
         IDirectDraw_Release(dd1);
         return;
     }
-    ok(ref == 2, "After AddRef the refcount is %u, expected 2\n", ref);
+    ok(ref == 2, "Unexpected refcount %lu.\n", ref);
     IDirectDraw_Release(dd1);
-    ref = get_ref((IUnknown *) dd1);
-    ok(ref == 1, "After Release the refcount is %u, expected 1\n", ref);
+    ref = get_refcount(dd1);
+    ok(ref == 1, "Unexpected refcount %lu.\n", ref);
 
     IDirectDraw_QueryInterface(dd1, &IID_IDirectDraw2, (void **) &dd2);
-    ref = get_ref((IUnknown *) dd2);
-    ok(ref == 2, "IDirectDraw2 refcount is %u, expected 2\n", ref);
+    ref = get_refcount(dd2);
+    ok(ref == 2, "Unexpected refcount %lu.\n", ref);
 
     IDirectDraw_QueryInterface(dd1, &IID_IDirectDraw3, (void **) &dd3);
-    ref = get_ref((IUnknown *) dd3);
-    ok(ref == 3, "IDirectDraw3 refcount is %u, expected 3\n", ref);
+    ref = get_refcount(dd3);
+    ok(ref == 3, "Unexpected refcount %lu.\n", ref);
 
     hr = IDirectDraw_QueryInterface(dd1, &IID_IDirectDraw4, (void **) &dd4);
     if (FAILED(hr))
@@ -86,15 +86,15 @@ static void RefCountTest(void)
         IDirectDraw3_Release(dd3);
         return;
     }
-    ref = get_ref((IUnknown *) dd4);
-    ok(ref == 4, "IDirectDraw4 refcount is %u, expected 4\n", ref);
+    ref = get_refcount(dd4);
+    ok(ref == 4, "Unexpected refcount %lu.\n", ref);
 
     IDirectDraw_Release(dd1);
     IDirectDraw2_Release(dd2);
     IDirectDraw3_Release(dd3);
 
-    ref = get_ref((IUnknown *) dd4);
-    ok(ref == 1, "IDirectDraw4 refcount is %u, expected 1\n", ref);
+    ref = get_refcount(dd4);
+    ok(ref == 1, "Unexpected refcount %lu.\n", ref);
 
     IDirectDraw4_Release(dd4);
 }
@@ -128,6 +128,6 @@ START_TEST(ddrawex)
     }
     if(classfactory) {
         ref = IClassFactory_Release(classfactory);
-        todo_wine ok(ref == 1, "IClassFactory refcount wrong, ref = %u\n", ref);
+        todo_wine ok(ref == 1, "Unexpected refcount %lu.\n", ref);
     }
 }

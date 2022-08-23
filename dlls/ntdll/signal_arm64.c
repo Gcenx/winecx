@@ -38,6 +38,7 @@
 #include "winnt.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
+WINE_DECLARE_DEBUG_CHANNEL(threadname);
 
 typedef struct _SCOPE_TABLE
 {
@@ -96,7 +97,7 @@ static inline BOOL is_valid_frame( ULONG_PTR frame )
 {
     if (frame & 7) return FALSE;
     return ((void *)frame >= NtCurrentTeb()->Tib.StackLimit &&
-            (void **)frame < (void **)NtCurrentTeb()->Tib.StackBase - 1);
+            (void *)frame <= NtCurrentTeb()->Tib.StackBase);
 }
 
 
@@ -112,7 +113,7 @@ __ASM_GLOBAL_FUNC( __chkstk, "ret")
  *		RtlCaptureContext (NTDLL.@)
  */
 __ASM_STDCALL_FUNC( RtlCaptureContext, 8,
-                    "str x0, [x0, #0x8]\n\t"         /* context->X0 */
+                    "str xzr, [x0, #0x8]\n\t"        /* context->X0 */
                     "stp x1, x2, [x0, #0x10]\n\t"    /* context->X1,X2 */
                     "stp x3, x4, [x0, #0x20]\n\t"    /* context->X3,X4 */
                     "stp x5, x6, [x0, #0x30]\n\t"    /* context->X5,X6 */
@@ -127,7 +128,7 @@ __ASM_STDCALL_FUNC( RtlCaptureContext, 8,
                     "stp x23, x24, [x0, #0xc0]\n\t"  /* context->X23,X24 */
                     "stp x25, x26, [x0, #0xd0]\n\t"  /* context->X25,X26 */
                     "stp x27, x28, [x0, #0xe0]\n\t"  /* context->X27,X28 */
-                    "stp x29, x30, [x0, #0xf0]\n\t"  /* context->Fp,Lr */
+                    "stp x29, xzr, [x0, #0xf0]\n\t"  /* context->Fp,Lr */
                     "mov x1, sp\n\t"
                     "stp x1, x30, [x0, #0x100]\n\t"  /* context->Sp,Pc */
                     "stp q0,  q1,  [x0, #0x110]\n\t" /* context->V[0-1] */
@@ -135,22 +136,26 @@ __ASM_STDCALL_FUNC( RtlCaptureContext, 8,
                     "stp q4,  q5,  [x0, #0x150]\n\t" /* context->V[4-5] */
                     "stp q6,  q7,  [x0, #0x170]\n\t" /* context->V[6-7] */
                     "stp q8,  q9,  [x0, #0x190]\n\t" /* context->V[8-9] */
-                    "stp q10, q11, [x0, #0x1a0]\n\t" /* context->V[10-11] */
-                    "stp q12, q13, [x0, #0x1c0]\n\t" /* context->V[12-13] */
-                    "stp q14, q15, [x0, #0x1e0]\n\t" /* context->V[14-15] */
+                    "stp q10, q11, [x0, #0x1b0]\n\t" /* context->V[10-11] */
+                    "stp q12, q13, [x0, #0x1d0]\n\t" /* context->V[12-13] */
+                    "stp q14, q15, [x0, #0x1f0]\n\t" /* context->V[14-15] */
                     "stp q16, q17, [x0, #0x210]\n\t" /* context->V[16-17] */
                     "stp q18, q19, [x0, #0x230]\n\t" /* context->V[18-19] */
                     "stp q20, q21, [x0, #0x250]\n\t" /* context->V[20-21] */
                     "stp q22, q23, [x0, #0x270]\n\t" /* context->V[22-23] */
                     "stp q24, q25, [x0, #0x290]\n\t" /* context->V[24-25] */
-                    "stp q26, q27, [x0, #0x2a0]\n\t" /* context->V[26-27] */
-                    "stp q28, q29, [x0, #0x2c0]\n\t" /* context->V[28-29] */
-                    "stp q30, q31, [x0, #0x2e0]\n\t" /* context->V[30-31] */
+                    "stp q26, q27, [x0, #0x2b0]\n\t" /* context->V[26-27] */
+                    "stp q28, q29, [x0, #0x2d0]\n\t" /* context->V[28-29] */
+                    "stp q30, q31, [x0, #0x2f0]\n\t" /* context->V[30-31] */
                     "mov w1, #0x400000\n\t"          /* CONTEXT_ARM64 */
                     "movk w1, #0x7\n\t"              /* CONTEXT_FULL */
                     "str w1, [x0]\n\t"               /* context->ContextFlags */
                     "mrs x1, NZCV\n\t"
                     "str w1, [x0, #0x4]\n\t"         /* context->Cpsr */
+                    "mrs x1, FPCR\n\t"
+                    "str w1, [x0, #0x310]\n\t"       /* context->Fpcr */
+                    "mrs x1, FPSR\n\t"
+                    "str w1, [x0, #0x314]\n\t"       /* context->Fpsr */
                     "ret" )
 
 
@@ -501,8 +506,29 @@ NTSTATUS WINAPI KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CONTEXT *conte
                      rec->ExceptionAddress,
                      (char*)rec->ExceptionInformation[0], rec->ExceptionInformation[1] );
     }
+    else if (rec->ExceptionCode == EXCEPTION_WINE_NAME_THREAD && rec->ExceptionInformation[0] == 0x1000)
+    {
+        if ((DWORD)rec->ExceptionInformation[2] == -1)
+            WARN_(threadname)( "Thread renamed to %s\n", debugstr_a((char *)rec->ExceptionInformation[1]) );
+        else
+            WARN_(threadname)( "Thread ID %04x renamed to %s\n", (DWORD)rec->ExceptionInformation[2],
+                               debugstr_a((char *)rec->ExceptionInformation[1]) );
+    }
+    else if (rec->ExceptionCode == DBG_PRINTEXCEPTION_C)
+    {
+        WARN( "%s\n", debugstr_an((char *)rec->ExceptionInformation[1], rec->ExceptionInformation[0] - 1) );
+    }
+    else if (rec->ExceptionCode == DBG_PRINTEXCEPTION_WIDE_C)
+    {
+        WARN( "%s\n", debugstr_wn((WCHAR *)rec->ExceptionInformation[1], rec->ExceptionInformation[0] - 1) );
+    }
     else
     {
+        if (rec->ExceptionCode == STATUS_ASSERTION_FAILURE)
+            ERR( "%s exception (code=%x) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
+        else
+            WARN( "%s exception (code=%x) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
+
         TRACE("  x0=%016lx  x1=%016lx  x2=%016lx  x3=%016lx\n",
               context->u.s.X0, context->u.s.X1, context->u.s.X2, context->u.s.X3 );
         TRACE("  x4=%016lx  x5=%016lx  x6=%016lx  x7=%016lx\n",
@@ -535,11 +561,23 @@ NTSTATUS WINAPI KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CONTEXT *conte
 /*******************************************************************
  *		KiUserApcDispatcher (NTDLL.@)
  */
-void WINAPI KiUserApcDispatcher( CONTEXT *context, ULONG_PTR ctx, ULONG_PTR arg1, ULONG_PTR arg2,
-                                 PNTAPCFUNC func )
+void WINAPI KiUserApcDispatcher( CONTEXT *context, ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3,
+                                 PNTAPCFUNC apc )
 {
-    func( ctx, arg1, arg2 );
+    void (CALLBACK *func)(ULONG_PTR,ULONG_PTR,ULONG_PTR,CONTEXT*) = (void *)apc;
+    func( arg1, arg2, arg3, context );
     NtContinue( context, TRUE );
+}
+
+
+/*******************************************************************
+ *		KiUserCallbackDispatcher (NTDLL.@)
+ */
+void WINAPI KiUserCallbackDispatcher( ULONG id, void *args, ULONG len )
+{
+    NTSTATUS (WINAPI *func)(void *, ULONG) = ((void **)NtCurrentTeb()->Peb->KernelCallbackTable)[id];
+
+    RtlRaiseStatus( NtCallbackReturn( NULL, 0, func( args, len )));
 }
 
 
@@ -1459,14 +1497,14 @@ __ASM_GLOBAL_FUNC( signal_start_thread,
 /**********************************************************************
  *              DbgBreakPoint   (NTDLL.@)
  */
-__ASM_STDCALL_FUNC( DbgBreakPoint, 0, "brk #0; ret"
+__ASM_STDCALL_FUNC( DbgBreakPoint, 0, "brk #0xf000; ret"
                     "\n\tnop; nop; nop; nop; nop; nop; nop; nop"
                     "\n\tnop; nop; nop; nop; nop; nop" );
 
 /**********************************************************************
  *              DbgUserBreakPoint   (NTDLL.@)
  */
-__ASM_STDCALL_FUNC( DbgUserBreakPoint, 0, "brk #0; ret"
+__ASM_STDCALL_FUNC( DbgUserBreakPoint, 0, "brk #0xf000; ret"
                     "\n\tnop; nop; nop; nop; nop; nop; nop; nop"
                     "\n\tnop; nop; nop; nop; nop; nop" );
 

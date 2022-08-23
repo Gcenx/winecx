@@ -33,35 +33,15 @@
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
+#include "winternl.h"
 #include "winnls.h"
 #include "winerror.h"
 #include "wincon.h"
 #include "wine/condrv.h"
-#include "wine/server.h"
-#include "wine/exception.h"
 #include "wine/debug.h"
-#include "excpt.h"
 #include "kernel_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(console);
-
-/******************************************************************************
- * GetConsoleWindow [KERNEL32.@] Get hwnd of the console window.
- *
- * RETURNS
- *   Success: hwnd of the console window.
- *   Failure: NULL
- */
-HWND WINAPI GetConsoleWindow(void)
-{
-    struct condrv_input_info info;
-    BOOL ret;
-
-    ret = DeviceIoControl( RtlGetCurrentPeb()->ProcessParameters->ConsoleHandle,
-                           IOCTL_CONDRV_GET_INPUT_INFO, NULL, 0, &info, sizeof(info), NULL, NULL );
-    return ret ? wine_server_ptr_handle(info.win) : NULL;
-}
-
 
 /******************************************************************
  *		OpenConsoleW            (KERNEL32.@)
@@ -74,7 +54,7 @@ HANDLE WINAPI OpenConsoleW(LPCWSTR name, DWORD access, BOOL inherit, DWORD creat
 {
     SECURITY_ATTRIBUTES sa;
 
-    TRACE("(%s, 0x%08x, %d, %u)\n", debugstr_w(name), access, inherit, creation);
+    TRACE("(%s, 0x%08lx, %d, %lu)\n", debugstr_w(name), access, inherit, creation);
 
     if (!name || (wcsicmp( L"CONIN$", name ) && wcsicmp( L"CONOUT$", name )) || creation != OPEN_EXISTING)
     {
@@ -137,23 +117,6 @@ HANDLE WINAPI GetConsoleInputWaitHandle(void)
 
 
 /***********************************************************************
- *            SetConsoleTitleA   (KERNEL32.@)
- */
-BOOL WINAPI SetConsoleTitleA( LPCSTR title )
-{
-    LPWSTR titleW;
-    BOOL ret;
-
-    DWORD len = MultiByteToWideChar( GetConsoleOutputCP(), 0, title, -1, NULL, 0 );
-    if (!(titleW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR)))) return FALSE;
-    MultiByteToWideChar( GetConsoleOutputCP(), 0, title, -1, titleW, len );
-    ret = SetConsoleTitleW(titleW);
-    HeapFree(GetProcessHeap(), 0, titleW);
-    return ret;
-}
-
-
-/***********************************************************************
  *            GetConsoleKeyboardLayoutNameA   (KERNEL32.@)
  */
 BOOL WINAPI GetConsoleKeyboardLayoutNameA(LPSTR layoutName)
@@ -173,185 +136,6 @@ BOOL WINAPI GetConsoleKeyboardLayoutNameW(LPWSTR layoutName)
     return TRUE;
 }
 
-/***********************************************************************
- *            GetConsoleTitleA   (KERNEL32.@)
- *
- * See GetConsoleTitleW.
- */
-DWORD WINAPI GetConsoleTitleA(LPSTR title, DWORD size)
-{
-    WCHAR *ptr = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR) * size);
-    DWORD ret;
-
-    if (!ptr) return 0;
-    ret = GetConsoleTitleW( ptr, size );
-    if (ret)
-    {
-        WideCharToMultiByte( GetConsoleOutputCP(), 0, ptr, ret + 1, title, size, NULL, NULL);
-        ret = strlen(title);
-    }
-    HeapFree(GetProcessHeap(), 0, ptr);
-    return ret;
-}
-
-
-/***********************************************************************
- *            GetNumberOfConsoleMouseButtons   (KERNEL32.@)
- */
-BOOL WINAPI GetNumberOfConsoleMouseButtons(LPDWORD nrofbuttons)
-{
-    FIXME("(%p): stub\n", nrofbuttons);
-    *nrofbuttons = 2;
-    return TRUE;
-}
-
-
-/******************************************************************
- *              GetConsoleDisplayMode  (KERNEL32.@)
- */
-BOOL WINAPI GetConsoleDisplayMode(LPDWORD lpModeFlags)
-{
-    TRACE("semi-stub: %p\n", lpModeFlags);
-    /* It is safe to successfully report windowed mode */
-    *lpModeFlags = 0;
-    return TRUE;
-}
-
-/******************************************************************
- *              SetConsoleDisplayMode  (KERNEL32.@)
- */
-BOOL WINAPI SetConsoleDisplayMode(HANDLE hConsoleOutput, DWORD dwFlags,
-                                  COORD *lpNewScreenBufferDimensions)
-{
-    TRACE("(%p, %x, (%d, %d))\n", hConsoleOutput, dwFlags,
-          lpNewScreenBufferDimensions->X, lpNewScreenBufferDimensions->Y);
-    if (dwFlags == 1)
-    {
-        /* We cannot switch to fullscreen */
-        return FALSE;
-    }
-    return TRUE;
-}
-
-/******************************************************************
- *              GetConsoleAliasW
- *
- *
- * RETURNS
- *    0 if an error occurred, non-zero for success
- *
- */
-DWORD WINAPI GetConsoleAliasW(LPWSTR lpSource, LPWSTR lpTargetBuffer,
-                              DWORD TargetBufferLength, LPWSTR lpExename)
-{
-    FIXME("(%s,%p,%d,%s): stub\n", debugstr_w(lpSource), lpTargetBuffer, TargetBufferLength, debugstr_w(lpExename));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
-}
-
-/******************************************************************
- *              GetConsoleProcessList  (KERNEL32.@)
- */
-DWORD WINAPI GetConsoleProcessList(LPDWORD processlist, DWORD processcount)
-{
-    FIXME("(%p,%d): stub\n", processlist, processcount);
-
-    if (!processlist || processcount < 1)
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return 0;
-    }
-
-    return 0;
-}
-
-/* Undocumented, called by native doskey.exe */
-DWORD WINAPI GetConsoleCommandHistoryA(DWORD unknown1, DWORD unknown2, DWORD unknown3)
-{
-    FIXME(": (0x%x, 0x%x, 0x%x) stub!\n", unknown1, unknown2, unknown3);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
-}
-
-/* Undocumented, called by native doskey.exe */
-DWORD WINAPI GetConsoleCommandHistoryW(DWORD unknown1, DWORD unknown2, DWORD unknown3)
-{
-    FIXME(": (0x%x, 0x%x, 0x%x) stub!\n", unknown1, unknown2, unknown3);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
-}
-
-/* Undocumented, called by native doskey.exe */
-DWORD WINAPI GetConsoleCommandHistoryLengthA(LPCSTR unknown)
-{
-    FIXME(": (%s) stub!\n", debugstr_a(unknown));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
-}
-
-/* Undocumented, called by native doskey.exe */
-DWORD WINAPI GetConsoleCommandHistoryLengthW(LPCWSTR unknown)
-{
-    FIXME(": (%s) stub!\n", debugstr_w(unknown));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
-}
-
-DWORD WINAPI GetConsoleAliasesLengthA(LPSTR unknown)
-{
-    FIXME(": (%s) stub!\n", debugstr_a(unknown));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
-}
-
-DWORD WINAPI GetConsoleAliasesLengthW(LPWSTR unknown)
-{
-    FIXME(": (%s) stub!\n", debugstr_w(unknown));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
-}
-
-DWORD WINAPI GetConsoleAliasExesLengthA(void)
-{
-    FIXME(": stub!\n");
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
-}
-
-DWORD WINAPI GetConsoleAliasExesLengthW(void)
-{
-    FIXME(": stub!\n");
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
-}
-
-VOID WINAPI ExpungeConsoleCommandHistoryA(LPCSTR unknown)
-{
-    FIXME(": (%s) stub!\n", debugstr_a(unknown));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-}
-
-VOID WINAPI ExpungeConsoleCommandHistoryW(LPCWSTR unknown)
-{
-    FIXME(": (%s) stub!\n", debugstr_w(unknown));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-}
-
-BOOL WINAPI AddConsoleAliasA(LPSTR source, LPSTR target, LPSTR exename)
-{
-    FIXME(": (%s, %s, %s) stub!\n", debugstr_a(source), debugstr_a(target), debugstr_a(exename));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-BOOL WINAPI AddConsoleAliasW(LPWSTR source, LPWSTR target, LPWSTR exename)
-{
-    FIXME(": (%s, %s, %s) stub!\n", debugstr_w(source), debugstr_w(target), debugstr_w(exename));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-
 BOOL WINAPI SetConsoleIcon(HICON icon)
 {
     FIXME(": (%p) stub!\n", icon);
@@ -366,126 +150,22 @@ DWORD WINAPI GetNumberOfConsoleFonts(void)
 
 BOOL WINAPI SetConsoleFont(HANDLE hConsole, DWORD index)
 {
-    FIXME("(%p, %u): stub!\n", hConsole, index);
+    FIXME("(%p, %lu): stub!\n", hConsole, index);
     SetLastError(LOWORD(E_NOTIMPL) /* win10 1709+ */);
     return FALSE;
 }
 
 BOOL WINAPI SetConsoleKeyShortcuts(BOOL set, BYTE keys, VOID *a, DWORD b)
 {
-    FIXME(": (%u %u %p %u) stub!\n", set, keys, a, b);
+    FIXME(": (%u %u %p %lu) stub!\n", set, keys, a, b);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
 
-
-BOOL WINAPI GetCurrentConsoleFontEx(HANDLE hConsole, BOOL maxwindow, CONSOLE_FONT_INFOEX *fontinfo)
-{
-    DWORD size;
-    struct
-    {
-        struct condrv_output_info info;
-        WCHAR face_name[LF_FACESIZE - 1];
-    } data;
-
-    if (fontinfo->cbSize != sizeof(CONSOLE_FONT_INFOEX))
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
-
-    if (!DeviceIoControl( hConsole, IOCTL_CONDRV_GET_OUTPUT_INFO, NULL, 0,
-                          &data, sizeof(data), &size, NULL ))
-    {
-        SetLastError( ERROR_INVALID_HANDLE );
-        return FALSE;
-    }
-
-    fontinfo->nFont = 0;
-    if (maxwindow)
-    {
-        fontinfo->dwFontSize.X = min( data.info.width, data.info.max_width );
-        fontinfo->dwFontSize.Y = min( data.info.height, data.info.max_height );
-    }
-    else
-    {
-        fontinfo->dwFontSize.X = data.info.win_right - data.info.win_left + 1;
-        fontinfo->dwFontSize.Y = data.info.win_bottom - data.info.win_top + 1;
-    }
-    size -= sizeof(data.info);
-    if (size) memcpy( fontinfo->FaceName, data.face_name, size );
-    fontinfo->FaceName[size / sizeof(WCHAR)] = 0;
-    fontinfo->FontFamily = data.info.font_pitch_family;
-    fontinfo->FontWeight = data.info.font_weight;
-    return TRUE;
-}
-
-BOOL WINAPI GetCurrentConsoleFont(HANDLE hConsole, BOOL maxwindow, CONSOLE_FONT_INFO *fontinfo)
-{
-    BOOL ret;
-    CONSOLE_FONT_INFOEX res;
-
-    res.cbSize = sizeof(CONSOLE_FONT_INFOEX);
-
-    ret = GetCurrentConsoleFontEx(hConsole, maxwindow, &res);
-    if(ret)
-    {
-        fontinfo->nFont = res.nFont;
-        fontinfo->dwFontSize.X = res.dwFontSize.X;
-        fontinfo->dwFontSize.Y = res.dwFontSize.Y;
-    }
-    return ret;
-}
-
-static COORD get_console_font_size(HANDLE hConsole, DWORD index)
-{
-    struct condrv_output_info info;
-    COORD c = {0,0};
-
-    if (index >= GetNumberOfConsoleFonts())
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return c;
-    }
-
-    if (DeviceIoControl( hConsole, IOCTL_CONDRV_GET_OUTPUT_INFO, NULL, 0, &info, sizeof(info), NULL, NULL ))
-    {
-        c.X = info.font_width;
-        c.Y = info.font_height;
-    }
-    else SetLastError( ERROR_INVALID_HANDLE );
-    return c;
-}
-
-#if defined(__i386__) && !defined(__MINGW32__) && !defined(_MSC_VER)
-#undef GetConsoleFontSize
-DWORD WINAPI GetConsoleFontSize(HANDLE hConsole, DWORD index)
-{
-    union {
-        COORD c;
-        DWORD w;
-    } x;
-
-    x.c = get_console_font_size(hConsole, index);
-    return x.w;
-}
-#else
-COORD WINAPI GetConsoleFontSize(HANDLE hConsole, DWORD index)
-{
-    return get_console_font_size(hConsole, index);
-}
-#endif /* !defined(__i386__) */
 
 BOOL WINAPI GetConsoleFontInfo(HANDLE hConsole, BOOL maximize, DWORD numfonts, CONSOLE_FONT_INFO *info)
 {
-    FIXME("(%p %d %u %p): stub!\n", hConsole, maximize, numfonts, info);
+    FIXME("(%p %d %lu %p): stub!\n", hConsole, maximize, numfonts, info);
     SetLastError(LOWORD(E_NOTIMPL) /* win10 1709+ */);
-    return FALSE;
-}
-
-BOOL WINAPI SetCurrentConsoleFontEx(HANDLE hConsole, BOOL maxwindow, CONSOLE_FONT_INFOEX *cfix)
-{
-    FIXME("(%p %d %p): stub!\n", hConsole, maxwindow, cfix);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }

@@ -38,6 +38,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcirt);
 #define RESERVE_SIZE 512
 #define STATEBUF_SIZE 8
 
+void* (__cdecl *operator_new)(SIZE_T);
+void (__cdecl *operator_delete)(void*);
+
 /* ?sh_none@filebuf@@2HB */
 const int filebuf_sh_none = 0x800;
 /* ?sh_read@filebuf@@2HB */
@@ -171,39 +174,39 @@ typedef struct {
 } iostream;
 
 /* ??_7streambuf@@6B@ */
-extern const vtable_ptr MSVCP_streambuf_vtable;
+extern const vtable_ptr streambuf_vtable;
 /* ??_7filebuf@@6B@ */
-extern const vtable_ptr MSVCP_filebuf_vtable;
+extern const vtable_ptr filebuf_vtable;
 /* ??_7strstreambuf@@6B@ */
-extern const vtable_ptr MSVCP_strstreambuf_vtable;
+extern const vtable_ptr strstreambuf_vtable;
 /* ??_7stdiobuf@@6B@ */
-extern const vtable_ptr MSVCP_stdiobuf_vtable;
+extern const vtable_ptr stdiobuf_vtable;
 /* ??_7ios@@6B@ */
-extern const vtable_ptr MSVCP_ios_vtable;
+extern const vtable_ptr ios_vtable;
 /* ??_7ostream@@6B@ */
-extern const vtable_ptr MSVCP_ostream_vtable;
+extern const vtable_ptr ostream_vtable;
 /* ??_7ostream_withassign@@6B@ */
-extern const vtable_ptr MSVCP_ostream_withassign_vtable;
+extern const vtable_ptr ostream_withassign_vtable;
 /* ??_7ostrstream@@6B@ */
-extern const vtable_ptr MSVCP_ostrstream_vtable;
+extern const vtable_ptr ostrstream_vtable;
 /* ??_7ofstream@@6B@ */
-extern const vtable_ptr MSVCP_ofstream_vtable;
+extern const vtable_ptr ofstream_vtable;
 /* ??_7istream@@6B@ */
-extern const vtable_ptr MSVCP_istream_vtable;
+extern const vtable_ptr istream_vtable;
 /* ??_7istream_withassign@@6B@ */
-extern const vtable_ptr MSVCP_istream_withassign_vtable;
+extern const vtable_ptr istream_withassign_vtable;
 /* ??_7istrstream@@6B@ */
-extern const vtable_ptr MSVCP_istrstream_vtable;
+extern const vtable_ptr istrstream_vtable;
 /* ??_7ifstream@@6B@ */
-extern const vtable_ptr MSVCP_ifstream_vtable;
+extern const vtable_ptr ifstream_vtable;
 /* ??_7iostream@@6B@ */
-extern const vtable_ptr MSVCP_iostream_vtable;
+extern const vtable_ptr iostream_vtable;
 /* ??_7strstream@@6B@ */
-extern const vtable_ptr MSVCP_strstream_vtable;
+extern const vtable_ptr strstream_vtable;
 /* ??_7stdiostream@@6B@ */
-extern const vtable_ptr MSVCP_stdiostream_vtable;
+extern const vtable_ptr stdiostream_vtable;
 /* ??_7fstream@@6B@ */
-extern const vtable_ptr MSVCP_fstream_vtable;
+extern const vtable_ptr fstream_vtable;
 
 __ASM_BLOCK_BEGIN(vtables)
     __ASM_VTABLE(streambuf,
@@ -357,7 +360,7 @@ DEFINE_THISCALL_WRAPPER(streambuf_reserve_ctor, 12)
 streambuf* __thiscall streambuf_reserve_ctor(streambuf *this, char *buffer, int length)
 {
     TRACE("(%p %p %d)\n", this, buffer, length);
-    this->vtable = &MSVCP_streambuf_vtable;
+    this->vtable = &streambuf_vtable;
     this->allocated = 0;
     this->stored_char = EOF;
     this->do_lock = -1;
@@ -386,7 +389,7 @@ streambuf* __thiscall streambuf_copy_ctor(streambuf *this, const streambuf *copy
 {
     TRACE("(%p %p)\n", this, copy);
     *this = *copy;
-    this->vtable = &MSVCP_streambuf_vtable;
+    this->vtable = &streambuf_vtable;
     return this;
 }
 
@@ -397,7 +400,7 @@ void __thiscall streambuf_dtor(streambuf *this)
 {
     TRACE("(%p)\n", this);
     if (this->allocated)
-        MSVCRT_operator_delete(this->base);
+        operator_delete(this->base);
     DeleteCriticalSection(&this->lock);
 }
 
@@ -423,11 +426,11 @@ streambuf* __thiscall streambuf_vector_dtor(streambuf *this, unsigned int flags)
 
         for (i = *ptr-1; i >= 0; i--)
             streambuf_dtor(this+i);
-        MSVCRT_operator_delete(ptr);
+        operator_delete(ptr);
     } else {
         streambuf_dtor(this);
         if (flags & 1)
-            MSVCRT_operator_delete(this);
+            operator_delete(this);
     }
     return this;
 }
@@ -438,7 +441,7 @@ streambuf* __thiscall streambuf_scalar_dtor(streambuf *this, unsigned int flags)
 {
     TRACE("(%p %x)\n", this, flags);
     streambuf_dtor(this);
-    if (flags & 1) MSVCRT_operator_delete(this);
+    if (flags & 1) operator_delete(this);
     return this;
 }
 
@@ -451,7 +454,7 @@ int __thiscall streambuf_doallocate(streambuf *this)
     char *reserve;
 
     TRACE("(%p)\n", this);
-    reserve = MSVCRT_operator_new(RESERVE_SIZE);
+    reserve = operator_new(RESERVE_SIZE);
     if (!reserve)
         return EOF;
 
@@ -631,7 +634,7 @@ DEFINE_THISCALL_WRAPPER(streambuf_seekoff, 16)
 #define call_streambuf_seekoff(this, off, dir, mode) CALL_VTBL_FUNC(this, 12, streampos, (streambuf*, streamoff, ios_seek_dir, int), (this, off, dir, mode))
 streampos __thiscall streambuf_seekoff(streambuf *this, streamoff offset, ios_seek_dir dir, int mode)
 {
-    TRACE("(%p %d %d %d)\n", this, offset, dir, mode);
+    TRACE("(%p %ld %d %d)\n", this, offset, dir, mode);
     return EOF;
 }
 
@@ -640,7 +643,7 @@ streampos __thiscall streambuf_seekoff(streambuf *this, streamoff offset, ios_se
 DEFINE_THISCALL_WRAPPER(streambuf_seekpos, 12)
 streampos __thiscall streambuf_seekpos(streambuf *this, streampos pos, int mode)
 {
-    TRACE("(%p %d %d)\n", this, pos, mode);
+    TRACE("(%p %ld %d)\n", this, pos, mode);
     return call_streambuf_seekoff(this, pos, SEEKDIR_beg, mode);
 }
 
@@ -670,7 +673,7 @@ void __thiscall streambuf_setb(streambuf *this, char *ba, char *eb, int delete)
 {
     TRACE("(%p %p %p %d)\n", this, ba, eb, delete);
     if (this->allocated)
-        MSVCRT_operator_delete(this->base);
+        operator_delete(this->base);
     this->allocated = delete;
     this->base = ba;
     this->ebuf = eb;
@@ -961,7 +964,7 @@ filebuf* __thiscall filebuf_copy_ctor(filebuf* this, const filebuf *copy)
 {
     TRACE("(%p %p)\n", this, copy);
     *this = *copy;
-    this->base.vtable = &MSVCP_filebuf_vtable;
+    this->base.vtable = &filebuf_vtable;
     return this;
 }
 
@@ -972,7 +975,7 @@ filebuf* __thiscall filebuf_fd_reserve_ctor(filebuf* this, filedesc fd, char *bu
 {
     TRACE("(%p %d %p %d)\n", this, fd, buffer, length);
     streambuf_reserve_ctor(&this->base, buffer, length);
-    this->base.vtable = &MSVCP_filebuf_vtable;
+    this->base.vtable = &filebuf_vtable;
     this->fd = fd;
     this->close = 0;
     return this;
@@ -1027,11 +1030,11 @@ filebuf* __thiscall filebuf_vector_dtor(filebuf *this, unsigned int flags)
 
         for (i = *ptr-1; i >= 0; i--)
             filebuf_dtor(this+i);
-        MSVCRT_operator_delete(ptr);
+        operator_delete(ptr);
     } else {
         filebuf_dtor(this);
         if (flags & 1)
-            MSVCRT_operator_delete(this);
+            operator_delete(this);
     }
     return this;
 }
@@ -1042,7 +1045,7 @@ filebuf* __thiscall filebuf_scalar_dtor(filebuf *this, unsigned int flags)
 {
     TRACE("(%p %x)\n", this, flags);
     filebuf_dtor(this);
-    if (flags & 1) MSVCRT_operator_delete(this);
+    if (flags & 1) operator_delete(this);
     return this;
 }
 
@@ -1178,7 +1181,7 @@ int __thiscall filebuf_overflow(filebuf *this, int c)
 DEFINE_THISCALL_WRAPPER(filebuf_seekoff, 16)
 streampos __thiscall filebuf_seekoff(filebuf *this, streamoff offset, ios_seek_dir dir, int mode)
 {
-    TRACE("(%p %d %d %d)\n", this, offset, dir, mode);
+    TRACE("(%p %ld %d %d)\n", this, offset, dir, mode);
     if (call_streambuf_sync(&this->base) == EOF)
         return EOF;
     return _lseek(this->fd, offset, dir);
@@ -1200,7 +1203,7 @@ streambuf* __thiscall filebuf_setbuf(filebuf *this, char *buffer, int length)
         this->base.unbuffered = 1;
     } else {
         if (this->base.allocated) {
-            MSVCRT_operator_delete(this->base.base);
+            operator_delete(this->base.base);
             this->base.allocated = 0;
         }
 
@@ -1305,7 +1308,7 @@ strstreambuf* __thiscall strstreambuf_copy_ctor(strstreambuf *this, const strstr
 {
     TRACE("(%p %p)\n", this, copy);
     *this = *copy;
-    this->base.vtable = &MSVCP_strstreambuf_vtable;
+    this->base.vtable = &strstreambuf_vtable;
     return this;
 }
 
@@ -1316,7 +1319,7 @@ strstreambuf* __thiscall strstreambuf_dynamic_ctor(strstreambuf* this, int lengt
 {
     TRACE("(%p %d)\n", this, length);
     streambuf_ctor(&this->base);
-    this->base.vtable = &MSVCP_strstreambuf_vtable;
+    this->base.vtable = &strstreambuf_vtable;
     this->dynamic = 1;
     this->increase = length;
     this->constant = 0;
@@ -1361,7 +1364,7 @@ strstreambuf* __thiscall strstreambuf_buffer_ctor(strstreambuf *this, char *buff
         streambuf_setg(&this->base, buffer, buffer, put);
         streambuf_setp(&this->base, put, end_buffer);
     }
-    this->base.vtable = &MSVCP_strstreambuf_vtable;
+    this->base.vtable = &strstreambuf_vtable;
     this->dynamic = 0;
     this->constant = 1;
     return this;
@@ -1395,7 +1398,7 @@ void __thiscall strstreambuf_dtor(strstreambuf *this)
         if (this->f_free)
             this->f_free(this->base.base);
         else
-            MSVCRT_operator_delete(this->base.base);
+            operator_delete(this->base.base);
     }
     streambuf_dtor(&this->base);
 }
@@ -1420,11 +1423,11 @@ strstreambuf* __thiscall strstreambuf_vector_dtor(strstreambuf *this, unsigned i
 
         for (i = *ptr-1; i >= 0; i--)
             strstreambuf_dtor(this+i);
-        MSVCRT_operator_delete(ptr);
+        operator_delete(ptr);
     } else {
         strstreambuf_dtor(this);
         if (flags & 1)
-            MSVCRT_operator_delete(this);
+            operator_delete(this);
     }
     return this;
 }
@@ -1435,7 +1438,7 @@ strstreambuf* __thiscall strstreambuf_scalar_dtor(strstreambuf *this, unsigned i
 {
     TRACE("(%p %x)\n", this, flags);
     strstreambuf_dtor(this);
-    if (flags & 1) MSVCRT_operator_delete(this);
+    if (flags & 1) operator_delete(this);
     return this;
 }
 
@@ -1455,7 +1458,7 @@ int __thiscall strstreambuf_doallocate(strstreambuf *this)
     if (this->f_alloc)
         new_buffer = this->f_alloc(new_size);
     else
-        new_buffer = MSVCRT_operator_new(new_size);
+        new_buffer = operator_new(new_size);
     if (!new_buffer)
         return EOF;
     if (this->base.ebuf) {
@@ -1475,7 +1478,7 @@ int __thiscall strstreambuf_doallocate(strstreambuf *this)
         if (this->f_free)
             this->f_free(this->base.base);
         else
-            MSVCRT_operator_delete(this->base.base);
+            operator_delete(this->base.base);
     }
     streambuf_setb(&this->base, new_buffer, new_buffer + new_size, 0);
     return 1;
@@ -1517,7 +1520,7 @@ streampos __thiscall strstreambuf_seekoff(strstreambuf *this, streamoff offset, 
 {
     char *base[3];
 
-    TRACE("(%p %d %d %d)\n", this, offset, dir, mode);
+    TRACE("(%p %ld %d %d)\n", this, offset, dir, mode);
 
     if ((unsigned int)dir > SEEKDIR_end || !(mode & (OPENMODE_in|OPENMODE_out)))
         return EOF;
@@ -1608,7 +1611,7 @@ stdiobuf* __thiscall stdiobuf_copy_ctor(stdiobuf *this, const stdiobuf *copy)
 {
     TRACE("(%p %p)\n", this, copy);
     *this = *copy;
-    this->base.vtable = &MSVCP_stdiobuf_vtable;
+    this->base.vtable = &stdiobuf_vtable;
     return this;
 }
 
@@ -1619,7 +1622,7 @@ stdiobuf* __thiscall stdiobuf_file_ctor(stdiobuf *this, FILE *file)
 {
     TRACE("(%p %p)\n", this, file);
     streambuf_reserve_ctor(&this->base, NULL, 0);
-    this->base.vtable = &MSVCP_stdiobuf_vtable;
+    this->base.vtable = &stdiobuf_vtable;
     this->file = file;
     return this;
 }
@@ -1654,11 +1657,11 @@ stdiobuf* __thiscall stdiobuf_vector_dtor(stdiobuf *this, unsigned int flags)
 
         for (i = *ptr-1; i >= 0; i--)
             stdiobuf_dtor(this+i);
-        MSVCRT_operator_delete(ptr);
+        operator_delete(ptr);
     } else {
         stdiobuf_dtor(this);
         if (flags & 1)
-            MSVCRT_operator_delete(this);
+            operator_delete(this);
     }
     return this;
 }
@@ -1669,7 +1672,7 @@ stdiobuf* __thiscall stdiobuf_scalar_dtor(stdiobuf *this, unsigned int flags)
 {
     TRACE("(%p %x)\n", this, flags);
     stdiobuf_dtor(this);
-    if (flags & 1) MSVCRT_operator_delete(this);
+    if (flags & 1) operator_delete(this);
     return this;
 }
 
@@ -1717,7 +1720,7 @@ int __thiscall stdiobuf_pbackfail(stdiobuf *this, int c)
 DEFINE_THISCALL_WRAPPER(stdiobuf_seekoff, 16)
 streampos __thiscall stdiobuf_seekoff(stdiobuf *this, streamoff offset, ios_seek_dir dir, int mode)
 {
-    TRACE("(%p %d %d %d)\n", this, offset, dir, mode);
+    TRACE("(%p %ld %d %d)\n", this, offset, dir, mode);
     call_streambuf_overflow(&this->base, EOF);
     if (fseek(this->file, offset, dir))
         return EOF;
@@ -1740,7 +1743,7 @@ int __thiscall stdiobuf_setrwbuf(stdiobuf *this, int read_size, int write_size)
         return 0;
     }
     /* get a new buffer */
-    reserve = MSVCRT_operator_new(buffer_size);
+    reserve = operator_new(buffer_size);
     if (!reserve)
         return 0;
     streambuf_setb(&this->base, reserve, reserve + buffer_size, 1);
@@ -1835,7 +1838,7 @@ ios* __thiscall ios_copy_ctor(ios *this, const ios *copy)
 {
     TRACE("(%p %p)\n", this, copy);
     ios_fLockcInit++;
-    this->vtable = &MSVCP_ios_vtable;
+    this->vtable = &ios_vtable;
     this->sb = NULL;
     this->delbuf = 0;
     this->do_lock = -1;
@@ -1850,7 +1853,7 @@ ios* __thiscall ios_sb_ctor(ios *this, streambuf *sb)
 {
     TRACE("(%p %p)\n", this, sb);
     ios_fLockcInit++;
-    this->vtable = &MSVCP_ios_vtable;
+    this->vtable = &ios_vtable;
     this->sb = sb;
     this->state = sb ? IOSTATE_goodbit : IOSTATE_badbit;
     this->special[0] = this->special[1] = 0;
@@ -1933,11 +1936,11 @@ ios* __thiscall ios_vector_dtor(ios *this, unsigned int flags)
 
         for (i = *ptr-1; i >= 0; i--)
             ios_dtor(this+i);
-        MSVCRT_operator_delete(ptr);
+        operator_delete(ptr);
     } else {
         ios_dtor(this);
         if (flags & 1)
-            MSVCRT_operator_delete(this);
+            operator_delete(this);
     }
     return this;
 }
@@ -1948,7 +1951,7 @@ ios* __thiscall ios_scalar_dtor(ios *this, unsigned int flags)
 {
     TRACE("(%p %x)\n", this, flags);
     ios_dtor(this);
-    if (flags & 1) MSVCRT_operator_delete(this);
+    if (flags & 1) operator_delete(this);
     return this;
 }
 
@@ -2067,7 +2070,7 @@ LONG __thiscall ios_flags_set(ios *this, LONG flags)
 {
     LONG prev = this->flags;
 
-    TRACE("(%p %x)\n", this, flags);
+    TRACE("(%p %lx)\n", this, flags);
 
     this->flags = flags;
     return prev;
@@ -2222,7 +2225,7 @@ LONG __thiscall ios_setf(ios *this, LONG flags)
 {
     LONG prev = this->flags;
 
-    TRACE("(%p %x)\n", this, flags);
+    TRACE("(%p %lx)\n", this, flags);
 
     ios_lock(this);
     this->flags |= flags;
@@ -2237,7 +2240,7 @@ LONG __thiscall ios_setf_mask(ios *this, LONG flags, LONG mask)
 {
     LONG prev = this->flags;
 
-    TRACE("(%p %x %x)\n", this, flags, mask);
+    TRACE("(%p %lx %lx)\n", this, flags, mask);
 
     ios_lock(this);
     this->flags = (this->flags & (~mask)) | (flags & mask);
@@ -2308,7 +2311,7 @@ LONG __thiscall ios_unsetf(ios *this, LONG flags)
 {
     LONG prev = this->flags;
 
-    TRACE("(%p %x)\n", this, flags);
+    TRACE("(%p %lx)\n", this, flags);
 
     ios_lock(this);
     this->flags &= ~flags;
@@ -2381,7 +2384,7 @@ ostream* __thiscall ostream_ctor(ostream *this, BOOL virt_init)
         ios_ctor(base);
     } else
         base = ostream_get_ios(this);
-    base->vtable = &MSVCP_ostream_vtable;
+    base->vtable = &ostream_vtable;
     this->unknown = 0;
     return this;
 }
@@ -2495,11 +2498,11 @@ ostream* __thiscall ostream_vector_dtor(ios *base, unsigned int flags)
 
         for (i = *ptr-1; i >= 0; i--)
             ostream_vbase_dtor(this+i);
-        MSVCRT_operator_delete(ptr);
+        operator_delete(ptr);
     } else {
         ostream_vbase_dtor(this);
         if (flags & 1)
-            MSVCRT_operator_delete(this);
+            operator_delete(this);
     }
     return this;
 }
@@ -2516,7 +2519,7 @@ ostream* __thiscall ostream_scalar_dtor(ios *base, unsigned int flags)
     TRACE("(%p %x)\n", this, flags);
 
     ostream_vbase_dtor(this);
-    if (flags & 1) MSVCRT_operator_delete(this);
+    if (flags & 1) operator_delete(this);
     return this;
 }
 
@@ -2604,7 +2607,7 @@ ostream* __thiscall ostream_seekp(ostream *this, streampos pos)
 {
     ios *base = ostream_get_ios(this);
 
-    TRACE("(%p %d)\n", this, pos);
+    TRACE("(%p %ld)\n", this, pos);
 
     ios_lockbuf(base);
     if (streambuf_seekpos(base->sb, pos, OPENMODE_out) == EOF)
@@ -2620,7 +2623,7 @@ ostream* __thiscall ostream_seekp_offset(ostream *this, streamoff off, ios_seek_
 {
     ios *base = ostream_get_ios(this);
 
-    TRACE("(%p %d %d)\n", this, off, dir);
+    TRACE("(%p %ld %d)\n", this, off, dir);
 
     ios_lockbuf(base);
     if (call_streambuf_seekoff(base->sb, off, dir, OPENMODE_out) == EOF)
@@ -2977,7 +2980,7 @@ ostream* __thiscall ostream_withassign_copy_ctor(ostream *this, const ostream *c
     } else
         base = ostream_get_ios(this);
     ios_init(base, base_copy->sb);
-    base->vtable = &MSVCP_ostream_withassign_vtable;
+    base->vtable = &ostream_withassign_vtable;
     this->unknown = 0;
     return this;
 }
@@ -2993,7 +2996,7 @@ ostream* __thiscall ostream_withassign_sb_ctor(ostream *this, streambuf *sb, BOO
 
     ostream_sb_ctor(this, sb, virt_init);
     base = ostream_get_ios(this);
-    base->vtable = &MSVCP_ostream_withassign_vtable;
+    base->vtable = &ostream_withassign_vtable;
     return this;
 }
 
@@ -3008,7 +3011,7 @@ ostream* __thiscall ostream_withassign_ctor(ostream *this, BOOL virt_init)
 
     ostream_ctor(this, virt_init);
     base = ostream_get_ios(this);
-    base->vtable = &MSVCP_ostream_withassign_vtable;
+    base->vtable = &ostream_withassign_vtable;
     return this;
 }
 
@@ -3021,7 +3024,7 @@ static ostream* ostrstream_internal_sb_ctor(ostream *this, strstreambuf *ssb, BO
     else
         ostream_ctor(this, virt_init);
     base = ostream_get_ios(this);
-    base->vtable = &MSVCP_ostrstream_vtable;
+    base->vtable = &ostrstream_vtable;
     base->delbuf = 1;
     return this;
 }
@@ -3033,7 +3036,7 @@ ostream* __thiscall ostrstream_copy_ctor(ostream *this, const ostream *copy, BOO
 {
     TRACE("(%p %p %d)\n", this, copy, virt_init);
     ostream_withassign_copy_ctor(this, copy, virt_init);
-    ostream_get_ios(this)->vtable = &MSVCP_ostrstream_vtable;
+    ostream_get_ios(this)->vtable = &ostrstream_vtable;
     return this;
 }
 
@@ -3042,7 +3045,7 @@ ostream* __thiscall ostrstream_copy_ctor(ostream *this, const ostream *copy, BOO
 DEFINE_THISCALL_WRAPPER(ostrstream_buffer_ctor, 20)
 ostream* __thiscall ostrstream_buffer_ctor(ostream *this, char *buffer, int length, int mode, BOOL virt_init)
 {
-    strstreambuf *ssb = MSVCRT_operator_new(sizeof(strstreambuf));
+    strstreambuf *ssb = operator_new(sizeof(strstreambuf));
 
     TRACE("(%p %p %d %d %d)\n", this, buffer, length, mode, virt_init);
 
@@ -3063,7 +3066,7 @@ ostream* __thiscall ostrstream_buffer_ctor(ostream *this, char *buffer, int leng
 DEFINE_THISCALL_WRAPPER(ostrstream_ctor, 8)
 ostream* __thiscall ostrstream_ctor(ostream *this, BOOL virt_init)
 {
-    strstreambuf *ssb = MSVCRT_operator_new(sizeof(strstreambuf));
+    strstreambuf *ssb = operator_new(sizeof(strstreambuf));
 
     TRACE("(%p %d)\n", this, virt_init);
 
@@ -3108,7 +3111,7 @@ ostream* __thiscall ofstream_copy_ctor(ostream *this, const ostream *copy, BOOL 
 {
     TRACE("(%p %p %d)\n", this, copy, virt_init);
     ostream_withassign_copy_ctor(this, copy, virt_init);
-    ostream_get_ios(this)->vtable = &MSVCP_ofstream_vtable;
+    ostream_get_ios(this)->vtable = &ofstream_vtable;
     return this;
 }
 
@@ -3118,7 +3121,7 @@ DEFINE_THISCALL_WRAPPER(ofstream_buffer_ctor, 20)
 ostream* __thiscall ofstream_buffer_ctor(ostream *this, filedesc fd, char *buffer, int length, BOOL virt_init)
 {
     ios *base;
-    filebuf *fb = MSVCRT_operator_new(sizeof(filebuf));
+    filebuf *fb = operator_new(sizeof(filebuf));
 
     TRACE("(%p %d %p %d %d)\n", this, fd, buffer, length, virt_init);
 
@@ -3131,7 +3134,7 @@ ostream* __thiscall ofstream_buffer_ctor(ostream *this, filedesc fd, char *buffe
     ostream_sb_ctor(this, &fb->base, virt_init);
 
     base = ostream_get_ios(this);
-    base->vtable = &MSVCP_ofstream_vtable;
+    base->vtable = &ofstream_vtable;
     base->delbuf = 1;
 
     return this;
@@ -3143,7 +3146,7 @@ DEFINE_THISCALL_WRAPPER(ofstream_fd_ctor, 12)
 ostream* __thiscall ofstream_fd_ctor(ostream *this, filedesc fd, BOOL virt_init)
 {
     ios *base;
-    filebuf *fb = MSVCRT_operator_new(sizeof(filebuf));
+    filebuf *fb = operator_new(sizeof(filebuf));
 
     TRACE("(%p %d %d)\n", this, fd, virt_init);
 
@@ -3156,7 +3159,7 @@ ostream* __thiscall ofstream_fd_ctor(ostream *this, filedesc fd, BOOL virt_init)
     ostream_sb_ctor(this, &fb->base, virt_init);
 
     base = ostream_get_ios(this);
-    base->vtable = &MSVCP_ofstream_vtable;
+    base->vtable = &ofstream_vtable;
     base->delbuf = 1;
 
     return this;
@@ -3168,7 +3171,7 @@ DEFINE_THISCALL_WRAPPER(ofstream_open_ctor, 20)
 ostream* __thiscall ofstream_open_ctor(ostream *this, const char *name, int mode, int protection, BOOL virt_init)
 {
     ios *base;
-    filebuf *fb = MSVCRT_operator_new(sizeof(filebuf));
+    filebuf *fb = operator_new(sizeof(filebuf));
 
     TRACE("(%p %s %d %d %d)\n", this, name, mode, protection, virt_init);
 
@@ -3181,7 +3184,7 @@ ostream* __thiscall ofstream_open_ctor(ostream *this, const char *name, int mode
     ostream_sb_ctor(this, &fb->base, virt_init);
 
     base = ostream_get_ios(this);
-    base->vtable = &MSVCP_ofstream_vtable;
+    base->vtable = &ofstream_vtable;
     base->delbuf = 1;
 
     if (filebuf_open(fb, name, mode|OPENMODE_out, protection) == NULL)
@@ -3316,7 +3319,7 @@ istream* __thiscall istream_ctor(istream *this, BOOL virt_init)
         ios_ctor(base);
     } else
         base = istream_get_ios(this);
-    base->vtable = &MSVCP_istream_vtable;
+    base->vtable = &istream_vtable;
     base->flags |= FLAGS_skipws;
     this->extract_delim = 0;
     this->count = 0;
@@ -3433,11 +3436,11 @@ istream* __thiscall istream_vector_dtor(ios *base, unsigned int flags)
 
         for (i = *ptr-1; i >= 0; i--)
             istream_vbase_dtor(this+i);
-        MSVCRT_operator_delete(ptr);
+        operator_delete(ptr);
     } else {
         istream_vbase_dtor(this);
         if (flags & 1)
-            MSVCRT_operator_delete(this);
+            operator_delete(this);
     }
     return this;
 }
@@ -3454,7 +3457,7 @@ istream* __thiscall istream_scalar_dtor(ios *base, unsigned int flags)
     TRACE("(%p %x)\n", this, flags);
 
     istream_vbase_dtor(this);
-    if (flags & 1) MSVCRT_operator_delete(this);
+    if (flags & 1) operator_delete(this);
     return this;
 }
 
@@ -3746,7 +3749,7 @@ istream* __thiscall istream_seekg(istream *this, streampos pos)
 {
     ios *base = istream_get_ios(this);
 
-    TRACE("(%p %d)\n", this, pos);
+    TRACE("(%p %ld)\n", this, pos);
 
     ios_lockbuf(base);
     if (streambuf_seekpos(base->sb, pos, OPENMODE_in) == EOF)
@@ -3762,7 +3765,7 @@ istream* __thiscall istream_seekg_offset(istream *this, streamoff off, ios_seek_
 {
     ios *base = istream_get_ios(this);
 
-    TRACE("(%p %d %d)\n", this, off, dir);
+    TRACE("(%p %ld %d)\n", this, off, dir);
 
     ios_lockbuf(base);
     if (call_streambuf_seekoff(base->sb, off, dir, OPENMODE_in) == EOF)
@@ -4007,7 +4010,7 @@ static LONG istream_internal_read_integer(istream *this, LONG min_value, LONG ma
     int num_base;
     LONG ret;
 
-    TRACE("(%p %d %d %d)\n", this, min_value, max_value, set_flag);
+    TRACE("(%p %ld %ld %d)\n", this, min_value, max_value, set_flag);
 
     num_base = istream_getint(this, buffer);
     errno = 0;
@@ -4032,7 +4035,7 @@ static ULONG istream_internal_read_unsigned_integer(istream *this, LONG min_valu
     int num_base;
     ULONG ret;
 
-    TRACE("(%p %d %u)\n", this, min_value, max_value);
+    TRACE("(%p %ld %lu)\n", this, min_value, max_value);
 
     num_base = istream_getint(this, buffer);
     errno = 0;
@@ -4239,7 +4242,7 @@ istream* __thiscall istream_withassign_copy_ctor(istream *this, const istream *c
     } else
         base = istream_get_ios(this);
     ios_init(base, base_copy->sb);
-    base->vtable = &MSVCP_istream_withassign_vtable;
+    base->vtable = &istream_withassign_vtable;
     base->flags |= FLAGS_skipws;
     this->extract_delim = 0;
     this->count = 0;
@@ -4257,7 +4260,7 @@ istream* __thiscall istream_withassign_sb_ctor(istream *this, streambuf *sb, BOO
 
     istream_sb_ctor(this, sb, virt_init);
     base = istream_get_ios(this);
-    base->vtable = &MSVCP_istream_withassign_vtable;
+    base->vtable = &istream_withassign_vtable;
     return this;
 }
 
@@ -4272,7 +4275,7 @@ istream* __thiscall istream_withassign_ctor(istream *this, BOOL virt_init)
 
     istream_ctor(this, virt_init);
     base = istream_get_ios(this);
-    base->vtable = &MSVCP_istream_withassign_vtable;
+    base->vtable = &istream_withassign_vtable;
     return this;
 }
 
@@ -4283,7 +4286,7 @@ istream* __thiscall istrstream_copy_ctor(istream *this, const istream *copy, BOO
 {
     TRACE("(%p %p %d)\n", this, copy, virt_init);
     istream_withassign_copy_ctor(this, copy, virt_init);
-    istream_get_ios(this)->vtable = &MSVCP_istrstream_vtable;
+    istream_get_ios(this)->vtable = &istrstream_vtable;
     return this;
 }
 
@@ -4293,7 +4296,7 @@ DEFINE_THISCALL_WRAPPER(istrstream_buffer_ctor, 16)
 istream* __thiscall istrstream_buffer_ctor(istream *this, char *buffer, int length, BOOL virt_init)
 {
     ios *base;
-    strstreambuf *ssb = MSVCRT_operator_new(sizeof(strstreambuf));
+    strstreambuf *ssb = operator_new(sizeof(strstreambuf));
 
     TRACE("(%p %p %d %d)\n", this, buffer, length, virt_init);
 
@@ -4306,7 +4309,7 @@ istream* __thiscall istrstream_buffer_ctor(istream *this, char *buffer, int leng
     istream_sb_ctor(this, &ssb->base, virt_init);
 
     base = istream_get_ios(this);
-    base->vtable = &MSVCP_istrstream_vtable;
+    base->vtable = &istrstream_vtable;
     base->delbuf = 1;
     return this;
 }
@@ -4342,7 +4345,7 @@ istream* __thiscall ifstream_copy_ctor(istream *this, const istream *copy, BOOL 
 {
     TRACE("(%p %p %d)\n", this, copy, virt_init);
     istream_withassign_copy_ctor(this, copy, virt_init);
-    istream_get_ios(this)->vtable = &MSVCP_ifstream_vtable;
+    istream_get_ios(this)->vtable = &ifstream_vtable;
     return this;
 }
 
@@ -4352,7 +4355,7 @@ DEFINE_THISCALL_WRAPPER(ifstream_buffer_ctor, 20)
 istream* __thiscall ifstream_buffer_ctor(istream *this, filedesc fd, char *buffer, int length, BOOL virt_init)
 {
     ios *base;
-    filebuf *fb = MSVCRT_operator_new(sizeof(filebuf));
+    filebuf *fb = operator_new(sizeof(filebuf));
 
     TRACE("(%p %d %p %d %d)\n", this, fd, buffer, length, virt_init);
 
@@ -4365,7 +4368,7 @@ istream* __thiscall ifstream_buffer_ctor(istream *this, filedesc fd, char *buffe
     istream_sb_ctor(this, &fb->base, virt_init);
 
     base = istream_get_ios(this);
-    base->vtable = &MSVCP_ifstream_vtable;
+    base->vtable = &ifstream_vtable;
     base->delbuf = 1;
 
     return this;
@@ -4377,7 +4380,7 @@ DEFINE_THISCALL_WRAPPER(ifstream_fd_ctor, 12)
 istream* __thiscall ifstream_fd_ctor(istream *this, filedesc fd, BOOL virt_init)
 {
     ios *base;
-    filebuf *fb = MSVCRT_operator_new(sizeof(filebuf));
+    filebuf *fb = operator_new(sizeof(filebuf));
 
     TRACE("(%p %d %d)\n", this, fd, virt_init);
 
@@ -4390,7 +4393,7 @@ istream* __thiscall ifstream_fd_ctor(istream *this, filedesc fd, BOOL virt_init)
     istream_sb_ctor(this, &fb->base, virt_init);
 
     base = istream_get_ios(this);
-    base->vtable = &MSVCP_ifstream_vtable;
+    base->vtable = &ifstream_vtable;
     base->delbuf = 1;
 
     return this;
@@ -4402,7 +4405,7 @@ DEFINE_THISCALL_WRAPPER(ifstream_open_ctor, 20)
 istream* __thiscall ifstream_open_ctor(istream *this, const char *name, ios_open_mode mode, int protection, BOOL virt_init)
 {
     ios *base;
-    filebuf *fb = MSVCRT_operator_new(sizeof(filebuf));
+    filebuf *fb = operator_new(sizeof(filebuf));
 
     TRACE("(%p %s %d %d %d)\n", this, name, mode, protection, virt_init);
 
@@ -4415,7 +4418,7 @@ istream* __thiscall ifstream_open_ctor(istream *this, const char *name, ios_open
     istream_sb_ctor(this, &fb->base, virt_init);
 
     base = istream_get_ios(this);
-    base->vtable = &MSVCP_ifstream_vtable;
+    base->vtable = &ifstream_vtable;
     base->delbuf = 1;
 
     if (filebuf_open(fb, name, mode|OPENMODE_in, protection) == NULL)
@@ -4548,7 +4551,7 @@ iostream* __thiscall iostream_ctor(iostream *this, BOOL virt_init)
         base = istream_get_ios(&this->base1);
     istream_ctor(&this->base1, FALSE);
     ostream_ctor(&this->base2, FALSE);
-    base->vtable = &MSVCP_iostream_vtable;
+    base->vtable = &iostream_vtable;
     return this;
 }
 
@@ -4646,11 +4649,11 @@ iostream* __thiscall iostream_vector_dtor(ios *base, unsigned int flags)
 
         for (i = *ptr-1; i >= 0; i--)
             iostream_vbase_dtor(this+i);
-        MSVCRT_operator_delete(ptr);
+        operator_delete(ptr);
     } else {
         iostream_vbase_dtor(this);
         if (flags & 1)
-            MSVCRT_operator_delete(this);
+            operator_delete(this);
     }
     return this;
 }
@@ -4666,7 +4669,7 @@ iostream* __thiscall iostream_scalar_dtor(ios *base, unsigned int flags)
     TRACE("(%p %x)\n", this, flags);
 
     iostream_vbase_dtor(this);
-    if (flags & 1) MSVCRT_operator_delete(this);
+    if (flags & 1) operator_delete(this);
     return this;
 }
 
@@ -4707,7 +4710,7 @@ DEFINE_THISCALL_WRAPPER(strstream_copy_ctor, 12)
 iostream* __thiscall strstream_copy_ctor(iostream *this, const iostream *copy, BOOL virt_init)
 {
     TRACE("(%p %p %d)\n", this, copy, virt_init);
-    return iostream_internal_copy_ctor(this, copy, &MSVCP_strstream_vtable, virt_init);
+    return iostream_internal_copy_ctor(this, copy, &strstream_vtable, virt_init);
 }
 
 /* ??0strstream@@QAE@PADHH@Z */
@@ -4715,7 +4718,7 @@ iostream* __thiscall strstream_copy_ctor(iostream *this, const iostream *copy, B
 DEFINE_THISCALL_WRAPPER(strstream_buffer_ctor, 20)
 iostream* __thiscall strstream_buffer_ctor(iostream *this, char *buffer, int length, int mode, BOOL virt_init)
 {
-    strstreambuf *ssb = MSVCRT_operator_new(sizeof(strstreambuf));
+    strstreambuf *ssb = operator_new(sizeof(strstreambuf));
 
     TRACE("(%p %p %d %d %d)\n", this, buffer, length, mode, virt_init);
 
@@ -4729,7 +4732,7 @@ iostream* __thiscall strstream_buffer_ctor(iostream *this, char *buffer, int len
     if ((mode & OPENMODE_out) && (mode & (OPENMODE_app|OPENMODE_ate)))
         ssb->base.pptr = buffer + strlen(buffer);
 
-    return iostream_internal_sb_ctor(this, &ssb->base, &MSVCP_strstream_vtable, virt_init);
+    return iostream_internal_sb_ctor(this, &ssb->base, &strstream_vtable, virt_init);
 }
 
 /* ??0strstream@@QAE@XZ */
@@ -4737,7 +4740,7 @@ iostream* __thiscall strstream_buffer_ctor(iostream *this, char *buffer, int len
 DEFINE_THISCALL_WRAPPER(strstream_ctor, 8)
 iostream* __thiscall strstream_ctor(iostream *this, BOOL virt_init)
 {
-    strstreambuf *ssb = MSVCRT_operator_new(sizeof(strstreambuf));
+    strstreambuf *ssb = operator_new(sizeof(strstreambuf));
 
     TRACE("(%p %d)\n", this, virt_init);
 
@@ -4748,7 +4751,7 @@ iostream* __thiscall strstream_ctor(iostream *this, BOOL virt_init)
 
     strstreambuf_ctor(ssb);
 
-    return iostream_internal_sb_ctor(this, &ssb->base, &MSVCP_strstream_vtable, virt_init);
+    return iostream_internal_sb_ctor(this, &ssb->base, &strstream_vtable, virt_init);
 }
 
 /* ?pcount@strstream@@QBEHXZ */
@@ -4781,7 +4784,7 @@ DEFINE_THISCALL_WRAPPER(stdiostream_copy_ctor, 12)
 iostream* __thiscall stdiostream_copy_ctor(iostream *this, const iostream *copy, BOOL virt_init)
 {
     TRACE("(%p %p %d)\n", this, copy, virt_init);
-    return iostream_internal_copy_ctor(this, copy, &MSVCP_stdiostream_vtable, virt_init);
+    return iostream_internal_copy_ctor(this, copy, &stdiostream_vtable, virt_init);
 }
 
 /* ??0stdiostream@@QAE@PAU_iobuf@@@Z */
@@ -4789,7 +4792,7 @@ iostream* __thiscall stdiostream_copy_ctor(iostream *this, const iostream *copy,
 DEFINE_THISCALL_WRAPPER(stdiostream_file_ctor, 12)
 iostream* __thiscall stdiostream_file_ctor(iostream *this, FILE *file, BOOL virt_init)
 {
-    stdiobuf *stb = MSVCRT_operator_new(sizeof(stdiobuf));
+    stdiobuf *stb = operator_new(sizeof(stdiobuf));
 
     TRACE("(%p %p %d)\n", this, file, virt_init);
 
@@ -4800,7 +4803,7 @@ iostream* __thiscall stdiostream_file_ctor(iostream *this, FILE *file, BOOL virt
 
     stdiobuf_file_ctor(stb, file);
 
-    return iostream_internal_sb_ctor(this, &stb->base, &MSVCP_stdiostream_vtable, virt_init);
+    return iostream_internal_sb_ctor(this, &stb->base, &stdiostream_vtable, virt_init);
 }
 
 /* ?rdbuf@stdiostream@@QBEPAVstdiobuf@@XZ */
@@ -4817,7 +4820,7 @@ DEFINE_THISCALL_WRAPPER(fstream_copy_ctor, 12)
 iostream* __thiscall fstream_copy_ctor(iostream *this, const iostream *copy, BOOL virt_init)
 {
     TRACE("(%p %p %d)\n", this, copy, virt_init);
-    iostream_internal_copy_ctor(this, copy, &MSVCP_fstream_vtable, virt_init);
+    iostream_internal_copy_ctor(this, copy, &fstream_vtable, virt_init);
     return this;
 }
 
@@ -4827,7 +4830,7 @@ DEFINE_THISCALL_WRAPPER(fstream_buffer_ctor, 20)
 iostream* __thiscall fstream_buffer_ctor(iostream *this, filedesc fd, char *buffer, int length, BOOL virt_init)
 {
     ios *base;
-    filebuf *fb = MSVCRT_operator_new(sizeof(filebuf));
+    filebuf *fb = operator_new(sizeof(filebuf));
 
     TRACE("(%p %d %p %d %d)\n", this, fd, buffer, length, virt_init);
 
@@ -4838,7 +4841,7 @@ iostream* __thiscall fstream_buffer_ctor(iostream *this, filedesc fd, char *buff
 
     filebuf_fd_reserve_ctor(fb, fd, buffer, length);
 
-    iostream_internal_sb_ctor(this, &fb->base, &MSVCP_fstream_vtable, virt_init);
+    iostream_internal_sb_ctor(this, &fb->base, &fstream_vtable, virt_init);
 
     base = istream_get_ios(&this->base1);
     base->delbuf = 1;
@@ -4852,7 +4855,7 @@ DEFINE_THISCALL_WRAPPER(fstream_fd_ctor, 12)
 iostream* __thiscall fstream_fd_ctor(iostream *this, filedesc fd, BOOL virt_init)
 {
     ios *base;
-    filebuf *fb = MSVCRT_operator_new(sizeof(filebuf));
+    filebuf *fb = operator_new(sizeof(filebuf));
 
     TRACE("(%p %d %d)\n", this, fd, virt_init);
 
@@ -4863,7 +4866,7 @@ iostream* __thiscall fstream_fd_ctor(iostream *this, filedesc fd, BOOL virt_init
 
     filebuf_fd_ctor(fb, fd);
 
-    iostream_internal_sb_ctor(this, &fb->base, &MSVCP_fstream_vtable, virt_init);
+    iostream_internal_sb_ctor(this, &fb->base, &fstream_vtable, virt_init);
 
     base = istream_get_ios(&this->base1);
     base->delbuf = 1;
@@ -4877,7 +4880,7 @@ DEFINE_THISCALL_WRAPPER(fstream_open_ctor, 20)
 iostream* __thiscall fstream_open_ctor(iostream *this, const char *name, ios_open_mode mode, int protection, BOOL virt_init)
 {
     ios *base;
-    filebuf *fb = MSVCRT_operator_new(sizeof(filebuf));
+    filebuf *fb = operator_new(sizeof(filebuf));
 
     TRACE("(%p %s %d %d %d)\n", this, name, mode, protection, virt_init);
 
@@ -4888,7 +4891,7 @@ iostream* __thiscall fstream_open_ctor(iostream *this, const char *name, ios_ope
 
     filebuf_ctor(fb);
 
-    iostream_internal_sb_ctor(this, &fb->base, &MSVCP_fstream_vtable, virt_init);
+    iostream_internal_sb_ctor(this, &fb->base, &fstream_vtable, virt_init);
 
     base = istream_get_ios(&this->base1);
     base->delbuf = 1;
@@ -5048,7 +5051,7 @@ void __cdecl ios_sync_with_stdio(void)
         ios_sunk_with_stdio++;
 
          /* calls to [io]stream_assign_sb automatically destroy the old buffers */
-        if ((new_buf = MSVCRT_operator_new(sizeof(stdiobuf)))) {
+        if ((new_buf = operator_new(sizeof(stdiobuf)))) {
             stdiobuf_file_ctor(new_buf, stdin);
             istream_assign_sb(&cin.is, &new_buf->base);
         } else
@@ -5056,7 +5059,7 @@ void __cdecl ios_sync_with_stdio(void)
         cin.vbase.delbuf = 1;
         ios_setf(&cin.vbase, FLAGS_stdio);
 
-        if ((new_buf = MSVCRT_operator_new(sizeof(stdiobuf)))) {
+        if ((new_buf = operator_new(sizeof(stdiobuf)))) {
             stdiobuf_file_ctor(new_buf, stdout);
             stdiobuf_setrwbuf(new_buf, 0, 80);
             ostream_assign_sb(&cout.os, &new_buf->base);
@@ -5065,7 +5068,7 @@ void __cdecl ios_sync_with_stdio(void)
         cout.vbase.delbuf = 1;
         ios_setf(&cout.vbase, FLAGS_unitbuf | FLAGS_stdio);
 
-        if ((new_buf = MSVCRT_operator_new(sizeof(stdiobuf)))) {
+        if ((new_buf = operator_new(sizeof(stdiobuf)))) {
             stdiobuf_file_ctor(new_buf, stderr);
             stdiobuf_setrwbuf(new_buf, 0, 80);
             ostream_assign_sb(&cerr.os, &new_buf->base);
@@ -5074,7 +5077,7 @@ void __cdecl ios_sync_with_stdio(void)
         cerr.vbase.delbuf = 1;
         ios_setf(&cerr.vbase, FLAGS_unitbuf | FLAGS_stdio);
 
-        if ((new_buf = MSVCRT_operator_new(sizeof(stdiobuf)))) {
+        if ((new_buf = operator_new(sizeof(stdiobuf)))) {
             stdiobuf_file_ctor(new_buf, stderr);
             stdiobuf_setrwbuf(new_buf, 0, 512);
             ostream_assign_sb(&MSVCP_clog.os, &new_buf->base);
@@ -5114,9 +5117,6 @@ DEFINE_VTBL_WRAPPER(56);
 
 #endif
 
-void* (__cdecl *MSVCRT_operator_new)(SIZE_T);
-void (__cdecl *MSVCRT_operator_delete)(void*);
-
 void __cdecl _mtlock(CRITICAL_SECTION *crit)
 {
     TRACE("(%p)\n", crit);
@@ -5135,13 +5135,13 @@ static void init_cxx_funcs(void)
 
     if (sizeof(void *) > sizeof(int))  /* 64-bit has different names */
     {
-        MSVCRT_operator_new = (void*)GetProcAddress(hmod, "??2@YAPEAX_K@Z");
-        MSVCRT_operator_delete = (void*)GetProcAddress(hmod, "??3@YAXPEAX@Z");
+        operator_new = (void*)GetProcAddress(hmod, "??2@YAPEAX_K@Z");
+        operator_delete = (void*)GetProcAddress(hmod, "??3@YAXPEAX@Z");
     }
     else
     {
-        MSVCRT_operator_new = (void*)GetProcAddress(hmod, "??2@YAPAXI@Z");
-        MSVCRT_operator_delete = (void*)GetProcAddress(hmod, "??3@YAXPAX@Z");
+        operator_new = (void*)GetProcAddress(hmod, "??2@YAPAXI@Z");
+        operator_delete = (void*)GetProcAddress(hmod, "??3@YAXPAX@Z");
     }
 }
 
@@ -5169,28 +5169,28 @@ static void init_io(void *base)
     init_fstream_rtti(base);
 #endif
 
-    if ((fb = MSVCRT_operator_new(sizeof(filebuf)))) {
+    if ((fb = operator_new(sizeof(filebuf)))) {
         filebuf_fd_ctor(fb, 0);
         istream_withassign_sb_ctor(&cin.is, &fb->base, TRUE);
     } else
         istream_withassign_sb_ctor(&cin.is, NULL, TRUE);
     Iostream_init_ios_ctor(NULL, &cin.vbase, 0);
 
-    if ((fb = MSVCRT_operator_new(sizeof(filebuf)))) {
+    if ((fb = operator_new(sizeof(filebuf)))) {
         filebuf_fd_ctor(fb, 1);
         ostream_withassign_sb_ctor(&cout.os, &fb->base, TRUE);
     } else
         ostream_withassign_sb_ctor(&cout.os, NULL, TRUE);
     Iostream_init_ios_ctor(NULL, &cout.vbase, -1);
 
-    if ((fb = MSVCRT_operator_new(sizeof(filebuf)))) {
+    if ((fb = operator_new(sizeof(filebuf)))) {
         filebuf_fd_ctor(fb, 2);
         ostream_withassign_sb_ctor(&cerr.os, &fb->base, TRUE);
     } else
         ostream_withassign_sb_ctor(&cerr.os, NULL, TRUE);
     Iostream_init_ios_ctor(NULL, &cerr.vbase, 1);
 
-    if ((fb = MSVCRT_operator_new(sizeof(filebuf)))) {
+    if ((fb = operator_new(sizeof(filebuf)))) {
         filebuf_fd_ctor(fb, 2);
         ostream_withassign_sb_ctor(&MSVCP_clog.os, &fb->base, TRUE);
     } else
@@ -5211,8 +5211,6 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
 {
    switch (reason)
    {
-   case DLL_WINE_PREATTACH:
-       return FALSE;  /* prefer native version */
    case DLL_PROCESS_ATTACH:
        init_cxx_funcs();
        init_exception(inst);

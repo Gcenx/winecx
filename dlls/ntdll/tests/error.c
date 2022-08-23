@@ -75,7 +75,7 @@ static void cmp_call(NTSTATUS win_nt, ULONG win32, const char* message)
 
     err = pRtlNtStatusToDosError(win_nt);
     ok(err == win32,
-       "%s (%x): got %u, expected %u\n",
+       "%s (%lx): got %lu, expected %lu\n",
             message, win_nt, err, win32);
 }
 
@@ -86,7 +86,7 @@ static void cmp_call2(NTSTATUS win_nt, ULONG win32, const char* message)
     err = pRtlNtStatusToDosError(win_nt);
     ok(err == win32 ||
        (!strict && err == ERROR_MR_MID_NOT_FOUND),
-       "%s (%x): got %u, expected %u (or MID_NOT_FOUND)\n",
+       "%s (%lx): got %lu, expected %lu (or MID_NOT_FOUND)\n",
        message, win_nt, err, win32);
 }
 
@@ -96,7 +96,7 @@ static void cmp_call3(NTSTATUS win_nt, ULONG win32_1, ULONG win32_2, const char*
 
     err = pRtlNtStatusToDosError(win_nt);
     ok(err == win32_1 || (!strict && err == win32_2),
-       "%s (%x): got %u, expected %u or %u\n",
+       "%s (%lx): got %lu, expected %lu or %lu\n",
             message, win_nt, err, win32_1, win32_2);
 }
 
@@ -107,7 +107,7 @@ static void cmp_call4(NTSTATUS win_nt, ULONG win32_1, ULONG win32_2, const char*
     err = pRtlNtStatusToDosError(win_nt);
     ok(err == win32_1 ||
        (!strict && (err == win32_2 || err == ERROR_MR_MID_NOT_FOUND)),
-       "%s (%x): got %u, expected %u or %u\n",
+       "%s (%lx): got %lu, expected %lu or %lu\n",
             message, win_nt, err, win32_1, win32_2);
 }
 
@@ -247,7 +247,7 @@ static void run_error_tests(void)
     cmp(STATUS_RESOURCE_TYPE_NOT_FOUND,          ERROR_RESOURCE_TYPE_NOT_FOUND);
     cmp(STATUS_RESOURCE_NAME_NOT_FOUND,          ERROR_RESOURCE_NAME_NOT_FOUND);
     cmp(STATUS_RESOURCE_LANG_NOT_FOUND,          ERROR_RESOURCE_LANG_NOT_FOUND);
-    cmp(STATUS_NO_SUCH_DEVICE,                   ERROR_FILE_NOT_FOUND);
+    cmp3(STATUS_NO_SUCH_DEVICE,                  ERROR_NO_SUCH_DEVICE, ERROR_FILE_NOT_FOUND);
     cmp(STATUS_NO_SUCH_FILE,                     ERROR_FILE_NOT_FOUND);
     cmp(STATUS_INVALID_DEVICE_REQUEST,           ERROR_INVALID_FUNCTION);
     cmp2(STATUS_VOLUME_NOT_UPGRADED,             ERROR_INVALID_FUNCTION);
@@ -1455,6 +1455,13 @@ static void run_error_tests(void)
     cmp2(STATUS_CTX_SECURITY_LAYER_ERROR,        ERROR_CTX_SECURITY_LAYER_ERROR);
     cmp2(STATUS_TS_INCOMPATIBLE_SESSIONS,        ERROR_TS_INCOMPATIBLE_SESSIONS);
     cmp2(STATUS_TS_VIDEO_SUBSYSTEM_ERROR,        ERROR_TS_VIDEO_SUBSYSTEM_ERROR);
+    cmp2(STATUS_MUI_FILE_NOT_FOUND,              ERROR_MUI_FILE_NOT_FOUND);
+    cmp2(STATUS_MUI_INVALID_FILE,                ERROR_MUI_INVALID_FILE);
+    cmp2(STATUS_MUI_INVALID_RC_CONFIG,           ERROR_MUI_INVALID_RC_CONFIG);
+    cmp2(STATUS_MUI_INVALID_LOCALE_NAME,         ERROR_MUI_INVALID_LOCALE_NAME);
+    cmp2(STATUS_MUI_INVALID_ULTIMATEFALLBACK_NAME, ERROR_MUI_INVALID_ULTIMATEFALLBACK_NAME);
+    cmp2(STATUS_MUI_FILE_NOT_LOADED,             ERROR_MUI_FILE_NOT_LOADED);
+    cmp2(STATUS_RESOURCE_ENUM_USER_STOP,         ERROR_RESOURCE_ENUM_USER_STOP);
     cmp2(STATUS_CLUSTER_NO_NET_ADAPTERS,         ERROR_CLUSTER_NO_NET_ADAPTERS);
     cmp2(STATUS_CLUSTER_POISONED,                ERROR_CLUSTER_POISONED);
     cmp2(STATUS_CLUSTER_NON_CSV_PATH,            ERROR_NON_CSV_PATH);

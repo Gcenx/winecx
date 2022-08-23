@@ -1,2 +1,0 @@
-MODULE    = 32autole.dll
-IMPORTS   = oleaut32

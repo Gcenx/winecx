@@ -18,6 +18,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -26,7 +27,6 @@
 #include "wincrypt.h"
 #include "winternl.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "crypt32_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(crypt);
@@ -165,7 +165,7 @@ static void check_and_store_certs(HCERTSTORE from, HCERTSTORE to)
         } while (cert);
         CertFreeCertificateChainEngine(engine);
     }
-    TRACE("Added %d root certificates\n", root_count);
+    TRACE("Added %ld root certificates\n", root_count);
 }
 
 static const BYTE authenticode[] = {
@@ -604,7 +604,7 @@ static void add_ms_root_certs(HCERTSTORE to)
     for (i = 0; i < ARRAY_SIZE(msRootCerts); i++)
         if (!CertAddEncodedCertificateToStore(to, X509_ASN_ENCODING,
          msRootCerts[i].pb, msRootCerts[i].cb, CERT_STORE_ADD_NEW, NULL))
-            WARN("adding root cert %d failed: %08x\n", i, GetLastError());
+            WARN("adding root cert %ld failed: %08lx\n", i, GetLastError());
 }
 
 /* Reads certificates from the list of known locations into store.  Stops when
@@ -616,24 +616,24 @@ static void read_trusted_roots_from_known_locations(HCERTSTORE store)
 {
     HCERTSTORE from = CertOpenStore(CERT_STORE_PROV_MEMORY,
      X509_ASN_ENCODING, 0, CERT_STORE_CREATE_NEW_FLAG, NULL);
-    SIZE_T needed, size = 2048;
-    void *buffer;
+    DWORD needed;
+    struct enum_root_certs_params params = { NULL, 2048, &needed };
 
     if (from)
     {
-        buffer = HeapAlloc( GetProcessHeap(), 0, size );
-        while (unix_funcs->enum_root_certs( buffer, size, &needed ))
+        params.buffer = CryptMemAlloc( params.size );
+        while (!CRYPT32_CALL( enum_root_certs, &params ))
         {
-            if (needed > size)
+            if (needed > params.size)
             {
-                HeapFree( GetProcessHeap(), 0, buffer );
-                buffer = HeapAlloc( GetProcessHeap(), 0, needed );
-                size = needed;
+                CryptMemFree( params.buffer );
+                params.buffer = CryptMemAlloc( needed );
+                params.size = needed;
             }
-            else CertAddEncodedCertificateToStore( from, X509_ASN_ENCODING, buffer, needed,
+            else CertAddEncodedCertificateToStore( from, X509_ASN_ENCODING, params.buffer, needed,
                                                    CERT_STORE_ADD_NEW, NULL );
         }
-        HeapFree( GetProcessHeap(), 0, buffer );
+        CryptMemFree( params.buffer );
         check_and_store_certs(from, store);
     }
     CertCloseStore(from, 0);
@@ -684,7 +684,7 @@ void CRYPT_ImportSystemRootCertsToReg(void)
             if (!rc)
             {
                 if (!CRYPT_SerializeContextsToReg(key, REG_OPTION_VOLATILE, pCertInterface, store))
-                    ERR("Failed to import system certs into registry, %08x\n", GetLastError());
+                    ERR("Failed to import system certs into registry, %08lx\n", GetLastError());
                 RegCloseKey(key);
             }
             CertCloseStore(store, 0);

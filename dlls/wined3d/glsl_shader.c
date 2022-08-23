@@ -29,9 +29,6 @@
  * mask for the destination parameter into account.
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <limits.h>
 #include <stdio.h>
 
@@ -557,7 +554,6 @@ static void shader_glsl_compile(const struct wined3d_gl_info *gl_info, GLuint sh
 {
     WORD old_fpu_cw = wined3d_get_fpu_cw();
     const char *ptr, *line;
-    const char *WINED3DPTR source[1] = {src};
 
     TRACE("Compiling shader object %u.\n", shader);
 
@@ -567,7 +563,7 @@ static void shader_glsl_compile(const struct wined3d_gl_info *gl_info, GLuint sh
         while ((line = get_info_log_line(&ptr))) TRACE_(d3d_shader)("    %.*s", (int)(ptr - line), line);
     }
 
-    GL_EXTCALL(glShaderSource(shader, 1, source, NULL));
+    GL_EXTCALL(glShaderSource(shader, 1, &src, NULL));
     checkGLcall("glShaderSource");
     if (old_fpu_cw != WINED3D_DEFAULT_FPU_CW)
         wined3d_set_fpu_cw(WINED3D_DEFAULT_FPU_CW);
@@ -827,7 +823,7 @@ static void shader_glsl_load_program_resources(const struct wined3d_context_gl *
     shader_glsl_load_samplers(&context_gl->c, priv, program_id, reg_maps);
 }
 
-static void append_transform_feedback_varying(const char *WINED3DPTR *varyings, unsigned int *varying_count,
+static void append_transform_feedback_varying(const char **varyings, unsigned int *varying_count,
         char **strings, unsigned int *strings_length, struct wined3d_string_buffer *buffer)
 {
     if (varyings && *strings)
@@ -846,7 +842,7 @@ static void append_transform_feedback_varying(const char *WINED3DPTR *varyings, 
     ++(*varying_count);
 }
 
-static void append_transform_feedback_skip_components(const char *WINED3DPTR *varyings,
+static void append_transform_feedback_skip_components(const char **varyings,
         unsigned int *varying_count, char **strings, unsigned int *strings_length,
         struct wined3d_string_buffer *buffer, unsigned int component_count)
 {
@@ -865,7 +861,7 @@ static void append_transform_feedback_skip_components(const char *WINED3DPTR *va
 }
 
 static BOOL shader_glsl_generate_transform_feedback_varyings(struct wined3d_string_buffer *buffer,
-        const char *WINED3DPTR *varyings, unsigned int *varying_count, char *strings, unsigned int *strings_length,
+        const char **varyings, unsigned int *varying_count, char *strings, unsigned int *strings_length,
         GLenum buffer_mode, struct wined3d_shader *shader)
 {
     const struct wined3d_stream_output_desc *so_desc = shader->u.gs.so_desc;
@@ -961,7 +957,7 @@ static void shader_glsl_init_transform_feedback(const struct wined3d_context_gl 
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_string_buffer *buffer;
     unsigned int i, count, length;
-    const char *WINED3DPTR *varyings;
+    const char **varyings;
     char *strings;
     GLenum mode;
 
@@ -7867,8 +7863,8 @@ static GLuint shader_glsl_generate_fragment_shader(const struct wined3d_context_
     unsigned int i, extra_constants_needed = 0;
     struct shader_glsl_ctx_priv priv_ctx;
     GLuint shader_id;
-    uint32_t map;
     struct glsl_shader_private *shader_priv = shader->backend_data;
+    uint32_t map;
 
     memset(&priv_ctx, 0, sizeof(priv_ctx));
     priv_ctx.gl_info = gl_info;
@@ -11097,7 +11093,7 @@ static void shader_glsl_destroy(struct wined3d_shader *shader)
 
     TRACE("Deleting linked programs.\n");
     linked_programs = &shader->linked_programs;
-    if (linked_programs->next)
+    if (!list_empty(linked_programs))
     {
         struct glsl_shader_prog_link *entry, *entry2;
         UINT i;
@@ -11627,6 +11623,7 @@ static const SHADER_HANDLER shader_glsl_instruction_handler_table[WINED3DSIH_TAB
     /* WINED3DSIH_ENDREP                           */ shader_glsl_end,
     /* WINED3DSIH_ENDSWITCH                        */ shader_glsl_end,
     /* WINED3DSIH_EQ                               */ shader_glsl_relop,
+    /* WINED3DSIH_EVAL_CENTROID                    */ NULL,
     /* WINED3DSIH_EVAL_SAMPLE_INDEX                */ shader_glsl_interpolate,
     /* WINED3DSIH_EXP                              */ shader_glsl_scalar_op,
     /* WINED3DSIH_EXPP                             */ shader_glsl_expp,
@@ -13129,7 +13126,7 @@ static GLuint glsl_blitter_generate_program(struct wined3d_glsl_blitter *blitter
     enum complex_fixup complex_fixup = get_complex_fixup(args->fixup);
     struct wined3d_string_buffer *buffer, *output;
     GLuint program, vshader_id, fshader_id;
-    const char *tex_type = NULL, *swizzle = NULL, *WINED3DPTR ptr;
+    const char *tex_type = NULL, *swizzle = NULL, *ptr;
     unsigned int i;
     GLint loc;
 
@@ -13509,26 +13506,7 @@ static DWORD glsl_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_bli
         dst_rect = &d;
     }
 
-    if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
-    {
-        GLenum buffer;
-
-        if (dst_location == WINED3D_LOCATION_DRAWABLE)
-        {
-            TRACE("Destination texture %p is onscreen.\n", dst_texture);
-            buffer = wined3d_texture_get_gl_buffer(dst_texture);
-        }
-        else
-        {
-            TRACE("Destination texture %p is offscreen.\n", dst_texture);
-            buffer = GL_COLOR_ATTACHMENT0;
-        }
-        wined3d_context_gl_apply_fbo_state_blit(context_gl, GL_DRAW_FRAMEBUFFER,
-                &dst_texture->resource, dst_sub_resource_idx, NULL, 0, dst_location);
-        wined3d_context_gl_set_draw_buffer(context_gl, buffer);
-        wined3d_context_gl_check_fbo_status(context_gl, GL_DRAW_FRAMEBUFFER);
-        context_invalidate_state(context, STATE_FRAMEBUFFER);
-    }
+    context_gl_apply_texture_draw_state(context_gl, dst_texture, dst_sub_resource_idx, dst_location);
 
     if (op == WINED3D_BLIT_OP_COLOR_BLIT_ALPHATEST)
     {

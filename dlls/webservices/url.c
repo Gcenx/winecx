@@ -17,6 +17,7 @@
  */
 
 #include <stdarg.h>
+#include <stdlib.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -25,7 +26,6 @@
 #include "webservices.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wine/list.h"
 #include "webservices_private.h"
 
@@ -70,7 +70,7 @@ static unsigned char *strdup_utf8( const WCHAR *str, ULONG len, ULONG *ret_len )
 {
     unsigned char *ret;
     *ret_len = WideCharToMultiByte( CP_UTF8, 0, str, len, NULL, 0, NULL, NULL );
-    if ((ret = heap_alloc( *ret_len )))
+    if ((ret = malloc( *ret_len )))
         WideCharToMultiByte( CP_UTF8, 0, str, len, (char *)ret, *ret_len, NULL, NULL );
     return ret;
 }
@@ -156,36 +156,34 @@ static WCHAR *url_decode( WCHAR *str, ULONG len, WS_HEAP *heap, ULONG *ret_len )
                                           len_utf8, NULL, 0 )))
     {
         WARN( "invalid UTF-8 sequence\n" );
-        heap_free( utf8 );
+        free( utf8 );
         return NULL;
     }
     if ((ret = ws_alloc( heap, *ret_len * sizeof(WCHAR) )))
         MultiByteToWideChar( CP_UTF8, 0, (char *)utf8, len_utf8, ret, *ret_len );
 
-    heap_free( utf8 );
+    free( utf8 );
     return ret;
 }
 
 /**************************************************************************
  *          WsDecodeUrl		[webservices.@]
  */
-HRESULT WINAPI WsDecodeUrl( const WS_STRING *str, ULONG flags, WS_HEAP *heap, WS_URL **ret,
-                            WS_ERROR *error )
+HRESULT WINAPI WsDecodeUrl( const WS_STRING *str, ULONG flags, WS_HEAP *heap, WS_URL **ret, WS_ERROR *error )
 {
     HRESULT hr = WS_E_QUOTA_EXCEEDED;
     WCHAR *p, *q, *decoded = NULL;
     WS_HTTP_URL *url = NULL;
     ULONG len, len_decoded, port = 0;
 
-    TRACE( "%s %08x %p %p %p\n", str ? debugstr_wn(str->chars, str->length) : "null", flags,
-           heap, ret, error );
+    TRACE( "%s %#lx %p %p %p\n", str ? debugstr_wn(str->chars, str->length) : "null", flags, heap, ret, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!str || !heap) return E_INVALIDARG;
     if (!str->length) return WS_E_INVALID_FORMAT;
     if (flags)
     {
-        FIXME( "unimplemented flags %08x\n", flags );
+        FIXME( "unimplemented flags %#lx\n", flags );
         return E_NOTIMPL;
     }
     if (!(decoded = url_decode( str->chars, str->length, heap, &len_decoded )) ||
@@ -203,7 +201,15 @@ HRESULT WINAPI WsDecodeUrl( const WS_STRING *str, ULONG flags, WS_HEAP *heap, WS
     if (!--len || *++q != '/') goto done;
 
     p = ++q; len--;
-    while (len && *q != '/' && *q != ':' && *q != '?' && *q != '#') { q++; len--; };
+    if (*q == '[')
+    {
+        while (len && *q != ']') { q++; len--; };
+        if (*q++ != ']') goto done;
+    }
+    else
+    {
+        while (len && *q != '/' && *q != ':' && *q != '?' && *q != '#') { q++; len--; };
+    }
     if (q == p) goto done;
     url->host.length = q - p;
     url->host.chars  = p;
@@ -263,7 +269,7 @@ done:
         if (decoded != str->chars) ws_free( heap, decoded, len_decoded );
         ws_free( heap, url, sizeof(*url) );
     }
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -351,7 +357,7 @@ static HRESULT url_encode_size( const WCHAR *str, ULONG len, const char *except,
     *ret_len = 0;
     if (!(utf8 = strdup_utf8( str, len, &len_utf8 ))) return E_OUTOFMEMORY;
     for (i = 0; i < len_utf8; i++) *ret_len += escape_size( utf8[i], except );
-    heap_free( utf8 );
+    free( utf8 );
 
     return S_OK;
 }
@@ -410,7 +416,7 @@ static HRESULT url_encode( const WCHAR *str, ULONG len, WCHAR *buf, const char *
         p += len_enc;
     }
 
-    heap_free( utf8 );
+    free( utf8 );
     return hr;
 }
 
@@ -427,13 +433,13 @@ HRESULT WINAPI WsEncodeUrl( const WS_URL *base, ULONG flags, WS_HEAP *heap, WS_S
     ULONG port = 0;
     HRESULT hr = WS_E_INVALID_FORMAT;
 
-    TRACE( "%p %08x %p %p %p\n", base, flags, heap, ret, error );
+    TRACE( "%p %#lx %p %p %p\n", base, flags, heap, ret, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!url || !heap || !ret) return E_INVALIDARG;
     if (flags)
     {
-        FIXME( "unimplemented flags %08x\n", flags );
+        FIXME( "unimplemented flags %#lx\n", flags );
         return E_NOTIMPL;
     }
     if (!(scheme = scheme_str( url->url.scheme, &len_scheme ))) goto done;
@@ -528,6 +534,6 @@ HRESULT WINAPI WsEncodeUrl( const WS_URL *base, ULONG flags, WS_HEAP *heap, WS_S
 
 done:
     if (hr != S_OK) ws_free( heap, str, ret_size );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }

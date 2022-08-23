@@ -62,7 +62,7 @@ static BOOL create_full_path(LPCWSTR path)
     BOOL ret = TRUE;
     int len;
 
-    if (!(new_path = heap_alloc((lstrlenW(path) + 1) * sizeof(WCHAR)))) return FALSE;
+    if (!(new_path = malloc((lstrlenW(path) + 1) * sizeof(WCHAR)))) return FALSE;
 
     lstrcpyW(new_path, path);
 
@@ -100,7 +100,7 @@ static BOOL create_full_path(LPCWSTR path)
         new_path[len] = '\\';
     }
 
-    heap_free(new_path);
+    free(new_path);
     return ret;
 }
 
@@ -182,7 +182,7 @@ static ULONG WINAPI IAssemblyCacheImpl_AddRef(IAssemblyCache *iface)
     IAssemblyCacheImpl *This = impl_from_IAssemblyCache(iface);
     ULONG refCount = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->(ref before = %u)\n", This, refCount - 1);
+    TRACE("(%p)->(ref before = %lu)\n", This, refCount - 1);
 
     return refCount;
 }
@@ -192,12 +192,12 @@ static ULONG WINAPI IAssemblyCacheImpl_Release(IAssemblyCache *iface)
     IAssemblyCacheImpl *cache = impl_from_IAssemblyCache(iface);
     ULONG refCount = InterlockedDecrement( &cache->ref );
 
-    TRACE("(%p)->(ref before = %u)\n", cache, refCount + 1);
+    TRACE("(%p)->(ref before = %lu)\n", cache, refCount + 1);
 
     if (!refCount)
     {
         CloseHandle( cache->lock );
-        heap_free( cache );
+        free( cache );
     }
     return refCount;
 }
@@ -226,7 +226,7 @@ static HRESULT WINAPI IAssemblyCacheImpl_UninstallAssembly(IAssemblyCache *iface
     ULONG disp;
     DWORD len;
 
-    TRACE("(%p, 0%08x, %s, %p, %p)\n", iface, dwFlags,
+    TRACE("(%p, 0%08lx, %s, %p, %p)\n", iface, dwFlags,
           debugstr_w(pszAssemblyName), pRefData, pulDisposition);
 
     if (pRefData)
@@ -255,7 +255,7 @@ static HRESULT WINAPI IAssemblyCacheImpl_UninstallAssembly(IAssemblyCache *iface
     if (hr != HRESULT_FROM_WIN32( ERROR_INSUFFICIENT_BUFFER ))
         goto done;
 
-    if (!(path = heap_alloc( len * sizeof(WCHAR) )))
+    if (!(path = malloc( len * sizeof(WCHAR) )))
     {
         hr = E_OUTOFMEMORY;
         goto done;
@@ -290,7 +290,7 @@ done:
     IAssemblyName_Release( asmname );
     if (next) IAssemblyName_Release( next );
     if (asmenum) IAssemblyEnum_Release( asmenum );
-    heap_free( path );
+    free( path );
     cache_unlock( cache );
     return hr;
 }
@@ -305,7 +305,7 @@ static HRESULT WINAPI IAssemblyCacheImpl_QueryAssemblyInfo(IAssemblyCache *iface
     IAssemblyEnum *asmenum = NULL;
     HRESULT hr;
 
-    TRACE("(%p, %d, %s, %p)\n", iface, dwFlags,
+    TRACE("(%p, %ld, %s, %p)\n", iface, dwFlags,
           debugstr_w(pszAssemblyName), pAsmInfo);
 
     if (pAsmInfo)
@@ -364,7 +364,7 @@ static HRESULT WINAPI IAssemblyCacheImpl_CreateAssemblyCacheItem(IAssemblyCache 
 {
     IAssemblyCacheItemImpl *item;
 
-    FIXME("(%p, %d, %p, %p, %s) semi-stub!\n", iface, dwFlags, pvReserved,
+    FIXME("(%p, %ld, %p, %p, %s) semi-stub!\n", iface, dwFlags, pvReserved,
           ppAsmItem, debugstr_w(pszAssemblyName));
 
     if (!ppAsmItem)
@@ -372,7 +372,7 @@ static HRESULT WINAPI IAssemblyCacheImpl_CreateAssemblyCacheItem(IAssemblyCache 
 
     *ppAsmItem = NULL;
 
-    if (!(item = heap_alloc(sizeof(*item)))) return E_OUTOFMEMORY;
+    if (!(item = malloc(sizeof(*item)))) return E_OUTOFMEMORY;
 
     item->IAssemblyCacheItem_iface.lpVtbl = &AssemblyCacheItemVtbl;
     item->ref = 1;
@@ -395,22 +395,22 @@ static HRESULT copy_file( const WCHAR *src_dir, DWORD src_len, const WCHAR *dst_
     DWORD len = lstrlenW( filename );
     HRESULT hr = S_OK;
 
-    if (!(src_file = heap_alloc( (src_len + len + 1) * sizeof(WCHAR) )))
+    if (!(src_file = malloc( (src_len + len + 1) * sizeof(WCHAR) )))
         return E_OUTOFMEMORY;
     memcpy( src_file, src_dir, src_len * sizeof(WCHAR) );
     lstrcpyW( src_file + src_len, filename );
 
-    if (!(dst_file = heap_alloc( (dst_len + len + 1) * sizeof(WCHAR) )))
+    if (!(dst_file = malloc( (dst_len + len + 1) * sizeof(WCHAR) )))
     {
-        heap_free( src_file );
+        free( src_file );
         return E_OUTOFMEMORY;
     }
     memcpy( dst_file, dst_dir, dst_len * sizeof(WCHAR) );
     lstrcpyW( dst_file + dst_len, filename );
 
     if (!CopyFileW( src_file, dst_file, FALSE )) hr = HRESULT_FROM_WIN32( GetLastError() );
-    heap_free( src_file );
-    heap_free( dst_file );
+    free( src_file );
+    free( dst_file );
     return hr;
 }
 
@@ -435,7 +435,7 @@ static HRESULT WINAPI IAssemblyCacheImpl_InstallAssembly(IAssemblyCache *iface,
     DWORD i, count = 0, src_len, dst_len = ARRAY_SIZE(format_v40);
     HRESULT hr;
 
-    TRACE("(%p, %d, %s, %p)\n", iface, dwFlags,
+    TRACE("(%p, %ld, %s, %p)\n", iface, dwFlags,
           debugstr_w(pszManifestFilePath), pRefData);
 
     if (!pszManifestFilePath || !*pszManifestFilePath)
@@ -483,7 +483,7 @@ static HRESULT WINAPI IAssemblyCacheImpl_InstallAssembly(IAssemblyCache *iface,
     get_assembly_directory(asmdir, MAX_PATH, clr_version, architecture);
 
     dst_len += lstrlenW(asmdir) + lstrlenW(name) + lstrlenW(version) + lstrlenW(token);
-    if (!(dst_dir = heap_alloc(dst_len * sizeof(WCHAR))))
+    if (!(dst_dir = malloc(dst_len * sizeof(WCHAR))))
     {
         hr = E_OUTOFMEMORY;
         goto done;
@@ -523,13 +523,13 @@ static HRESULT WINAPI IAssemblyCacheImpl_InstallAssembly(IAssemblyCache *iface,
     }
 
 done:
-    heap_free(name);
-    heap_free(token);
-    heap_free(version);
-    heap_free(asmpath);
-    heap_free(dst_dir);
-    for (i = 0; i < count; i++) heap_free(external_files[i]);
-    heap_free(external_files);
+    free(name);
+    free(token);
+    free(version);
+    free(asmpath);
+    free(dst_dir);
+    for (i = 0; i < count; i++) free(external_files[i]);
+    free(external_files);
     assembly_release(assembly);
     cache_unlock( cache );
     return hr;
@@ -553,21 +553,21 @@ HRESULT WINAPI CreateAssemblyCache(IAssemblyCache **ppAsmCache, DWORD dwReserved
 {
     IAssemblyCacheImpl *cache;
 
-    TRACE("(%p, %d)\n", ppAsmCache, dwReserved);
+    TRACE("(%p, %ld)\n", ppAsmCache, dwReserved);
 
     if (!ppAsmCache)
         return E_INVALIDARG;
 
     *ppAsmCache = NULL;
 
-    if (!(cache = heap_alloc(sizeof(*cache)))) return E_OUTOFMEMORY;
+    if (!(cache = malloc(sizeof(*cache)))) return E_OUTOFMEMORY;
 
     cache->IAssemblyCache_iface.lpVtbl = &AssemblyCacheVtbl;
     cache->ref = 1;
     cache->lock = CreateMutexW( NULL, FALSE, cache_mutex_nameW );
     if (!cache->lock)
     {
-        heap_free( cache );
+        free( cache );
         return HRESULT_FROM_WIN32( GetLastError() );
     }
     *ppAsmCache = &cache->IAssemblyCache_iface;
@@ -607,7 +607,7 @@ static ULONG WINAPI IAssemblyCacheItemImpl_AddRef(IAssemblyCacheItem *iface)
     IAssemblyCacheItemImpl *This = impl_from_IAssemblyCacheItem(iface);
     ULONG refCount = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->(ref before = %u)\n", This, refCount - 1);
+    TRACE("(%p)->(ref before = %lu)\n", This, refCount - 1);
 
     return refCount;
 }
@@ -617,10 +617,10 @@ static ULONG WINAPI IAssemblyCacheItemImpl_Release(IAssemblyCacheItem *iface)
     IAssemblyCacheItemImpl *This = impl_from_IAssemblyCacheItem(iface);
     ULONG refCount = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(ref before = %u)\n", This, refCount + 1);
+    TRACE("(%p)->(ref before = %lu)\n", This, refCount + 1);
 
     if (!refCount)
-        heap_free(This);
+        free(This);
 
     return refCount;
 }
@@ -633,7 +633,7 @@ static HRESULT WINAPI IAssemblyCacheItemImpl_CreateStream(IAssemblyCacheItem *if
                                                         IStream **ppIStream,
                                                         ULARGE_INTEGER *puliMaxSize)
 {
-    FIXME("(%p, %d, %s, %d, %d, %p, %p) stub!\n", iface, dwFlags,
+    FIXME("(%p, %ld, %s, %ld, %ld, %p, %p) stub!\n", iface, dwFlags,
           debugstr_w(pszStreamName), dwFormat, dwFormatFlags, ppIStream, puliMaxSize);
 
     return E_NOTIMPL;
@@ -643,7 +643,7 @@ static HRESULT WINAPI IAssemblyCacheItemImpl_Commit(IAssemblyCacheItem *iface,
                                                   DWORD dwFlags,
                                                   ULONG *pulDisposition)
 {
-    FIXME("(%p, %d, %p) stub!\n", iface, dwFlags, pulDisposition);
+    FIXME("(%p, %ld, %p) stub!\n", iface, dwFlags, pulDisposition);
     return E_NOTIMPL;
 }
 

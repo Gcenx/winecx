@@ -100,8 +100,8 @@ static BYTE (__cdecl *p_short_eq)(const void*, const void*);
 static char* (__cdecl *p_Copy_s)(char*, size_t, const char*, size_t);
 
 static unsigned short (__cdecl *p_wctype)(const char*);
-static MSVCP__Ctypevec* (__cdecl *p__Getctype)(MSVCP__Ctypevec*);
-static /*MSVCP__Collvec*/ULONGLONG (__cdecl *p__Getcoll)(void);
+static MSVCP__Ctypevec (__cdecl *p__Getctype)(void);
+static MSVCP__Collvec (__cdecl *p__Getcoll)(void);
 static wctrans_t (__cdecl *p_wctrans)(const char*);
 static wint_t (__cdecl *p_towctrans)(wint_t, wctrans_t);
 static void (__cdecl *p_locale__Locimp__Locimp_Addfac)(locale__Locimp*,locale_facet*,size_t);
@@ -167,7 +167,7 @@ static void __cdecl test_invalid_parameter_handler(const wchar_t *expression,
     ok(function == NULL, "function is not NULL\n");
     ok(file == NULL, "file is not NULL\n");
     ok(line == 0, "line = %u\n", line);
-    ok(arg == 0, "arg = %lx\n", (UINT_PTR)arg);
+    ok(arg == 0, "arg = %Ix\n", arg);
     invalid_parameter++;
 }
 
@@ -584,8 +584,8 @@ static void test__Getctype(void)
     MSVCP__Ctypevec ret;
     _locale_t locale;
 
-    ok(p__Getctype(&ret) == &ret, "__Getctype returned incorrect pointer\n");
-    ok(ret.handle == 0, "ret.handle = %d\n", ret.handle);
+    ret = p__Getctype();
+    ok(ret.handle == 0, "ret.handle = %ld\n", ret.handle);
     ok(ret.page == 0, "ret.page = %d\n", ret.page);
     ok(ret.delfl == 1, "ret.delfl = %d\n", ret.delfl);
     ok(ret.table[0] == 32, "ret.table[0] = %d\n", ret.table[0]);
@@ -594,8 +594,8 @@ static void test__Getctype(void)
     locale = p__get_current_locale();
     locale->locinfo->lc_handle[LC_COLLATE] = 0x1234567;
     p__free_locale(locale);
-    ok(p__Getctype(&ret) == &ret, "__Getctype returned incorrect pointer\n");
-    ok(ret.handle == 0x1234567, "ret.handle = %d\n", ret.handle);
+    ret = p__Getctype();
+    ok(ret.handle == 0x1234567, "ret.handle = %ld\n", ret.handle);
     ok(ret.page == 0, "ret.page = %d\n", ret.page);
     ok(ret.delfl == 1, "ret.delfl = %d\n", ret.delfl);
     ok(ret.table[0] == 32, "ret.table[0] = %d\n", ret.table[0]);
@@ -604,26 +604,23 @@ static void test__Getctype(void)
 
 static void test__Getcoll(void)
 {
-    ULONGLONG (__cdecl *p__Getcoll_arg)(MSVCP__Collvec*);
+#ifdef __i386__
+    /* Workaround a gcc bug */
+    ULONGLONG tmp;
+#define call__Getcoll(ret) tmp = ((ULONGLONG (__cdecl*)(void))p__Getcoll)(); \
+    memcpy(&ret, &tmp, sizeof(tmp))
+#else
+#define call__Getcoll(ret) ret = p__Getcoll()
+#endif
     _locale_t locale;
-
-    union {
-        MSVCP__Collvec collvec;
-        ULONGLONG ull;
-    }ret;
+    MSVCP__Collvec ret;
 
     locale = p__get_current_locale();
     locale->locinfo->lc_handle[LC_COLLATE] = 0x7654321;
     p__free_locale(locale);
-    ret.ull = 0;
-    p__Getcoll_arg = (void*)p__Getcoll;
-    p__Getcoll_arg(&ret.collvec);
-    ok(ret.collvec.handle == 0, "ret.handle = %x\n", ret.collvec.handle);
-    ok(ret.collvec.page == 0, "ret.page = %x\n", ret.collvec.page);
-
-    ret.ull = p__Getcoll();
-    ok(ret.collvec.handle == 0x7654321, "ret.collvec.handle = %x\n", ret.collvec.handle);
-    ok(ret.collvec.page == 0, "ret.page = %x\n", ret.collvec.page);
+    call__Getcoll(ret);
+    ok(ret.handle == 0x7654321, "ret.handle = %lx\n", ret.handle);
+    ok(ret.page == 0, "ret.page = %x\n", ret.page);
 }
 
 static void test_towctrans(void)

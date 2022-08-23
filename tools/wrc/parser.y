@@ -120,8 +120,8 @@
  *			- Corrected syntax problems with an old yacc (;)
  *			- Added extra comment about grammar
  */
+
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -130,11 +130,11 @@
 #include <ctype.h>
 #include <string.h>
 
+#include "../tools.h"
 #include "wrc.h"
 #include "utils.h"
 #include "newstruc.h"
-#include "dumpres.h"
-#include "wine/wpp.h"
+#include "wpp_private.h"
 #include "parser.h"
 #include "windef.h"
 #include "winbase.h"
@@ -155,8 +155,8 @@ static int dont_want_id = 0;	/* See language parsing for details */
 
 /* Set to the current options of the currently scanning stringtable */
 static int *tagstt_memopt;
-static characts_t *tagstt_characts;
-static version_t *tagstt_version;
+static characts_t tagstt_characts;
+static version_t tagstt_version;
 
 static const char riff[4] = "RIFF";	/* RIFF file magic for animated cursor/icon */
 
@@ -174,15 +174,15 @@ static raw_data_t *merge_raw_data(raw_data_t *r1, raw_data_t *r2);
 static raw_data_t *str2raw_data(string_t *str);
 static raw_data_t *int2raw_data(int i);
 static raw_data_t *long2raw_data(int i);
-static raw_data_t *load_file(string_t *name, language_t *lang);
+static raw_data_t *load_file(string_t *name, language_t lang);
 static itemex_opt_t *new_itemex_opt(int id, int type, int state, int helpid);
 static event_t *add_string_event(string_t *key, int id, int flags, event_t *prev);
 static event_t *add_event(int key, int id, int flags, event_t *prev);
 static name_id_t *convert_ctlclass(name_id_t *cls);
 static control_t *ins_ctrl(int type, int special_style, control_t *ctrl, control_t *prev);
-static dialog_t *dialog_version(version_t *v, dialog_t *dlg);
-static dialog_t *dialog_characteristics(characts_t *c, dialog_t *dlg);
-static dialog_t *dialog_language(language_t *l, dialog_t *dlg);
+static dialog_t *dialog_version(version_t v, dialog_t *dlg);
+static dialog_t *dialog_characteristics(characts_t c, dialog_t *dlg);
+static dialog_t *dialog_language(language_t l, dialog_t *dlg);
 static dialog_t *dialog_menu(name_id_t *m, dialog_t *dlg);
 static dialog_t *dialog_class(name_id_t *n, dialog_t *dlg);
 static dialog_t *dialog_font(font_id_t *f, dialog_t *dlg);
@@ -198,7 +198,13 @@ static resource_t *build_fontdirs(resource_t *tail);
 static resource_t *build_fontdir(resource_t **fnt, int nfnt);
 static int rsrcid_to_token(int lookahead);
 
+/* bison >= 3.6 applies api.prefix also to YYEMPTY */
+#define YYEMPTY (-2)
+
 %}
+
+%define api.prefix {parser_}
+
 %union{
 	string_t	*str;
 	int		num;
@@ -221,9 +227,9 @@ static int rsrcid_to_token(int lookahead);
 	control_t	*ctl;
 	name_id_t	*nid;
 	font_id_t	*fntid;
-	language_t	*lan;
-	version_t	*ver;
-	characts_t	*chars;
+	language_t	lan;
+	version_t	ver;
+	characts_t	chars;
 	event_t		*event;
 	menu_item_t	*menitm;
 	itemex_opt_t	*exopt;
@@ -382,8 +388,7 @@ resources
 				while(rsc)
 				{
 					if(rsc->type == head->type
-					&& rsc->lan->id == head->lan->id
-					&& rsc->lan->sub == head->lan->sub
+					&& rsc->lan == head->lan
 					&& !compare_name_id(rsc->name, head->name)
 					&& (rsc->type != res_usr || !compare_name_id(rsc->res.usr->type,head->res.usr->type)))
 					{
@@ -448,7 +453,6 @@ resource
 			$$->name = new_name_id();
 			$$->name->type = name_ord;
 			$$->name->name.i_name = $1;
-			chat("Got %s (%d)\n", get_typename($3), $$->name->name.i_name);
 			}
 			}
 	| tIDENT usrcvt resource_definition {
@@ -458,7 +462,6 @@ resource
 			$$->name = new_name_id();
 			$$->name->type = name_str;
 			$$->name->name.s_name = $1;
-			chat("Got %s (%s)\n", get_typename($3), $$->name->name.s_name->str.cstr);
 		}
 		}
 	| stringtable {
@@ -499,12 +502,11 @@ resource
 
 		if(!win32)
 			parser_warning("LANGUAGE not supported in 16-bit mode\n");
-		free(currentlanguage);
-		if (get_language_codepage($3, $5) == -1)
-			yyerror( "Language %04x is not supported", ($5<<10) + $3);
-		currentlanguage = new_language($3, $5);
+		currentlanguage = MAKELANGID($3, $5);
+		if (get_language_codepage(currentlanguage) == -1)
+			yyerror( "Language %04x is not supported", currentlanguage);
 		$$ = NULL;
-		chat("Got LANGUAGE %d,%d (0x%04x)\n", $3, $5, ($5<<10) + $3);
+		chat("Got LANGUAGE %d,%d (0x%04x)\n", $3, $5, currentlanguage);
 		}
 	;
 
@@ -553,7 +555,7 @@ resource_definition
 		{
 			$$ = rsc = new_resource(res_anicur, $1->u.ani, $1->u.ani->memopt, $1->u.ani->data->lvc.language);
 		}
-		else if($1->type == res_curg)
+		else /* res_curg */
 		{
 			cursor_t *cur;
 			$$ = rsc = new_resource(res_curg, $1->u.curg, $1->u.curg->memopt, $1->u.curg->lvc.language);
@@ -567,8 +569,6 @@ resource_definition
 				rsc->name->name.i_name = cur->id;
 			}
 		}
-		else
-			internal_error(__FILE__, __LINE__, "Invalid top-level type %d in cursor resource\n", $1->type);
 		free($1);
 		}
 	| dialog	{ $$ = new_resource(res_dlg, $1, $1->memopt, $1->lvc.language); }
@@ -587,7 +587,7 @@ resource_definition
 		{
 			$$ = rsc = new_resource(res_aniico, $1->u.ani, $1->u.ani->memopt, $1->u.ani->data->lvc.language);
 		}
-		else if($1->type == res_icog)
+		else /* res_icog */
 		{
 			icon_t *ico;
 			$$ = rsc = new_resource(res_icog, $1->u.icog, $1->u.icog->memopt, $1->u.icog->lvc.language);
@@ -601,8 +601,6 @@ resource_definition
 				rsc->name->name.i_name = ico->id;
 			}
 		}
-		else
-			internal_error(__FILE__, __LINE__, "Invalid top-level type %d in icon resource\n", $1->type);
 		free($1);
 		}
 	| menu		{ $$ = new_resource(res_men, $1, $1->memopt, $1->lvc.language); }
@@ -707,12 +705,6 @@ dlginit	: tDLGINIT loadmemopts file_raw	{ $$ = new_dlginit($3, $2); }
 
 /* ------------------------------ UserType ------------------------------ */
 userres	: usertype loadmemopts file_raw		{
-#ifdef WORDS_BIGENDIAN
-			if(pedantic && byteorder != WRC_BO_LITTLE)
-#else
-			if(pedantic && byteorder == WRC_BO_BIG)
-#endif
-				parser_warning("Byteordering is not little-endian and type cannot be interpreted\n");
 			$$ = new_user($1, $3, $2);
 		}
 	;
@@ -750,8 +742,7 @@ accelerators
 			$$->lvc = *($3);
 			free($3);
 		}
-		if(!$$->lvc.language)
-			$$->lvc.language = dup_language(currentlanguage);
+		if(!$$->lvc.language) $$->lvc.language = currentlanguage;
 		}
 	;
 
@@ -813,8 +804,7 @@ dialog	: tDIALOG loadmemopts expr ',' expr ',' expr ',' expr dlg_attributes
 		$$->style->or_mask &= ~($$->style->and_mask);
 		$$->style->and_mask = 0;
 
-		if(!$$->lvc.language)
-			$$->lvc.language = dup_language(currentlanguage);
+		if(!$$->lvc.language) $$->lvc.language = currentlanguage;
 		}
 	;
 
@@ -1029,8 +1019,7 @@ dialogex: tDIALOGEX loadmemopts expr ',' expr ',' expr ',' expr helpid dlgex_att
 		$$->style->or_mask &= ~($$->style->and_mask);
 		$$->style->and_mask = 0;
 
-		if(!$$->lvc.language)
-			$$->lvc.language = dup_language(currentlanguage);
+		if(!$$->lvc.language) $$->lvc.language = currentlanguage;
 		}
 	;
 
@@ -1206,8 +1195,7 @@ menu	: tMENU loadmemopts opt_lvc menu_body {
 			$$->lvc = *($3);
 			free($3);
 		}
-		if(!$$->lvc.language)
-			$$->lvc.language = dup_language(currentlanguage);
+		if(!$$->lvc.language) $$->lvc.language = currentlanguage;
 		}
 	;
 
@@ -1282,8 +1270,7 @@ menuex	: tMENUEX loadmemopts opt_lvc menuex_body	{
 			$$->lvc = *($3);
 			free($3);
 		}
-		if(!$$->lvc.language)
-			$$->lvc.language = dup_language(currentlanguage);
+		if(!$$->lvc.language) $$->lvc.language = currentlanguage;
 		}
 	;
 
@@ -1498,7 +1485,7 @@ versioninfo
 			$$->memopt = WRC_MO_MOVEABLE | (win32 ? WRC_MO_PURE : 0);
 		$$->blocks = get_ver_block_head($5);
 		/* Set language; there is no version or characteristics */
-		$$->lvc.language = dup_language(currentlanguage);
+		$$->lvc.language = currentlanguage;
 		}
 	;
 
@@ -1633,10 +1620,7 @@ toolbar: tTOOLBAR loadmemopts expr ',' expr opt_lvc tBEGIN toolbar_items tEND {
 			$$->lvc = *($6);
 			free($6);
 		}
-		if(!$$->lvc.language)
-		{
-			$$->lvc.language = dup_language(currentlanguage);
-		}
+		if(!$$->lvc.language) $$->lvc.language = currentlanguage;
 		}
 	;
 
@@ -1736,18 +1720,18 @@ opt_lvc	: /* Empty */		{ $$ = new_lvc(); }
 	 * The conflict is now moved to the expression handling below.
 	 */
 opt_language
-	: tLANGUAGE expr ',' expr	{ $$ = new_language($2, $4);
-					  if (get_language_codepage($2, $4) == -1)
-						yyerror( "Language %04x is not supported", ($4<<10) + $2);
+	: tLANGUAGE expr ',' expr	{ $$ = MAKELANGID($2, $4);
+					  if (get_language_codepage($$) == -1)
+						yyerror( "Language %04x is not supported", $$);
 					}
 	;
 
 opt_characts
-	: tCHARACTERISTICS expr		{ $$ = new_characts($2); }
+	: tCHARACTERISTICS expr		{ $$ = $2; }
 	;
 
 opt_version
-	: tVERSION expr			{ $$ = new_version($2); }
+	: tVERSION expr			{ $$ = $2; }
 	;
 
 /* ------------------------------ Raw data handling ------------------------------ */
@@ -1759,7 +1743,7 @@ raw_data: opt_lvc tBEGIN raw_elements tEND {
 		}
 
 		if(!$3->lvc.language)
-			$3->lvc.language = dup_language(currentlanguage);
+			$3->lvc.language = currentlanguage;
 
 		$$ = $3;
 		}
@@ -1781,7 +1765,7 @@ raw_elements
 	;
 
 /* File data or raw data */
-file_raw: filename	{ $$ = load_file($1,dup_language(currentlanguage)); }
+file_raw: filename	{ $$ = load_file($1,currentlanguage); }
 	| raw_data	{ $$ = $1; }
 	;
 
@@ -1902,7 +1886,7 @@ static dialog_t *dialog_menu(name_id_t *m, dialog_t *dlg)
 	return dlg;
 }
 
-static dialog_t *dialog_language(language_t *l, dialog_t *dlg)
+static dialog_t *dialog_language(language_t l, dialog_t *dlg)
 {
 	assert(dlg != NULL);
 	if(dlg->lvc.language)
@@ -1911,7 +1895,7 @@ static dialog_t *dialog_language(language_t *l, dialog_t *dlg)
 	return dlg;
 }
 
-static dialog_t *dialog_characteristics(characts_t *c, dialog_t *dlg)
+static dialog_t *dialog_characteristics(characts_t c, dialog_t *dlg)
 {
 	assert(dlg != NULL);
 	if(dlg->lvc.characts)
@@ -1920,7 +1904,7 @@ static dialog_t *dialog_characteristics(characts_t *c, dialog_t *dlg)
 	return dlg;
 }
 
-static dialog_t *dialog_version(version_t *v, dialog_t *dlg)
+static dialog_t *dialog_version(version_t v, dialog_t *dlg)
 {
 	assert(dlg != NULL);
 	if(dlg->lvc.version)
@@ -2158,7 +2142,7 @@ static itemex_opt_t *new_itemex_opt(int id, int type, int state, int helpid)
 }
 
 /* Raw data functions */
-static raw_data_t *load_file(string_t *filename, language_t *lang)
+static raw_data_t *load_file(string_t *filename, language_t lang)
 {
 	FILE *fp = NULL;
 	char *path, *name;
@@ -2200,24 +2184,8 @@ static raw_data_t *int2raw_data(int i)
 	rd = new_raw_data();
 	rd->size = sizeof(short);
 	rd->data = xmalloc(rd->size);
-	switch(byteorder)
-	{
-#ifdef WORDS_BIGENDIAN
-	default:
-#endif
-	case WRC_BO_BIG:
-		rd->data[0] = HIBYTE(i);
-		rd->data[1] = LOBYTE(i);
-		break;
-
-#ifndef WORDS_BIGENDIAN
-	default:
-#endif
-	case WRC_BO_LITTLE:
-		rd->data[1] = HIBYTE(i);
-		rd->data[0] = LOBYTE(i);
-		break;
-	}
+        rd->data[0] = i;
+        rd->data[1] = i >> 8;
 	return rd;
 }
 
@@ -2227,28 +2195,10 @@ static raw_data_t *long2raw_data(int i)
 	rd = new_raw_data();
 	rd->size = sizeof(int);
 	rd->data = xmalloc(rd->size);
-	switch(byteorder)
-	{
-#ifdef WORDS_BIGENDIAN
-	default:
-#endif
-	case WRC_BO_BIG:
-		rd->data[0] = HIBYTE(HIWORD(i));
-		rd->data[1] = LOBYTE(HIWORD(i));
-		rd->data[2] = HIBYTE(LOWORD(i));
-		rd->data[3] = LOBYTE(LOWORD(i));
-		break;
-
-#ifndef WORDS_BIGENDIAN
-	default:
-#endif
-	case WRC_BO_LITTLE:
-		rd->data[3] = HIBYTE(HIWORD(i));
-		rd->data[2] = LOBYTE(HIWORD(i));
-		rd->data[1] = HIBYTE(LOWORD(i));
-		rd->data[0] = LOBYTE(LOWORD(i));
-		break;
-	}
+        rd->data[0] = i;
+        rd->data[1] = i >> 8;
+        rd->data[2] = i >> 16;
+        rd->data[3] = i >> 24;
 	return rd;
 }
 
@@ -2258,37 +2208,21 @@ static raw_data_t *str2raw_data(string_t *str)
 	rd = new_raw_data();
 	rd->size = str->size * (str->type == str_char ? 1 : 2);
 	rd->data = xmalloc(rd->size);
-	if(str->type == str_char)
-		memcpy(rd->data, str->str.cstr, rd->size);
-	else if(str->type == str_unicode)
+	switch (str->type)
 	{
+	case str_char:
+		memcpy(rd->data, str->str.cstr, rd->size);
+		break;
+	case str_unicode:
+            {
 		int i;
-		switch(byteorder)
+		for(i = 0; i < str->size; i++)
 		{
-#ifdef WORDS_BIGENDIAN
-		default:
-#endif
-		case WRC_BO_BIG:
-			for(i = 0; i < str->size; i++)
-			{
-				rd->data[2*i + 0] = HIBYTE((WORD)str->str.wstr[i]);
-				rd->data[2*i + 1] = LOBYTE((WORD)str->str.wstr[i]);
-			}
-			break;
-#ifndef WORDS_BIGENDIAN
-		default:
-#endif
-		case WRC_BO_LITTLE:
-			for(i = 0; i < str->size; i++)
-			{
-				rd->data[2*i + 1] = HIBYTE((WORD)str->str.wstr[i]);
-				rd->data[2*i + 0] = LOBYTE((WORD)str->str.wstr[i]);
-			}
-			break;
+			rd->data[2*i + 0] = str->str.wstr[i];
+			rd->data[2*i + 1] = str->str.wstr[i] >> 8;
 		}
+            }
 	}
-	else
-		internal_error(__FILE__, __LINE__, "Invalid stringtype\n");
 	return rd;
 }
 
@@ -2390,12 +2324,11 @@ static stringtable_t *find_stringtable(lvc_t *lvc)
 	assert(lvc != NULL);
 
 	if(!lvc->language)
-		lvc->language = dup_language(currentlanguage);
+		lvc->language = currentlanguage;
 
 	for(stt = sttres; stt; stt = stt->next)
 	{
-		if(stt->lvc.language->id == lvc->language->id
-		&& stt->lvc.language->sub == lvc->language->sub)
+		if(stt->lvc.language == lvc->language)
 		{
 			/* Found a table with the same language */
 			/* The version and characteristics are now handled
@@ -2434,10 +2367,10 @@ static resource_t *build_stt_resources(stringtable_t *stthead)
 	resource_t *rsctail = NULL;
 	int i;
 	int j;
-	DWORD andsum;
-	DWORD orsum;
-	characts_t *characts;
-	version_t *version;
+	unsigned int andsum;
+	unsigned int orsum;
+	characts_t characts;
+	version_t version;
 
 	if(!stthead)
 		return NULL;
@@ -2468,8 +2401,8 @@ static resource_t *build_stt_resources(stringtable_t *stthead)
 			}
 			andsum = ~0;
 			orsum = 0;
-			characts = NULL;
-			version = NULL;
+			characts = 0;
+			version = 0;
 			/* Check individual memory options and get
 			 * the first characteristics/version
 			 */
@@ -2493,11 +2426,11 @@ static resource_t *build_stt_resources(stringtable_t *stthead)
 			{
 				if(characts
 				&& newstt->entries[j].characts
-				&& *newstt->entries[j].characts != *characts)
+				&& newstt->entries[j].characts != characts)
 					warning("Stringtable's characteristics are not the same (idbase: %d)\n", newstt->idbase);
 				if(version
 				&& newstt->entries[j].version
-				&& *newstt->entries[j].version != *version)
+				&& newstt->entries[j].version != version)
 					warning("Stringtable's versions are not the same (idbase: %d)\n", newstt->idbase);
 			}
 			rsc = new_resource(res_stt, newstt, newstt->memopt, newstt->lvc.language);
@@ -2689,8 +2622,6 @@ static resource_t *build_fontdirs(resource_t *tail)
 	for(i = 0; i < nfnd; i++)
 	{
 		int j;
-		WORD cnt;
-		int isswapped = 0;
 
 		if(!fnd[i])
 			continue;
@@ -2698,29 +2629,12 @@ static resource_t *build_fontdirs(resource_t *tail)
 		{
 			if(!fnt[j])
 				continue;
-			if(fnt[j]->lan->id == fnd[i]->lan->id && fnt[j]->lan->sub == fnd[i]->lan->sub)
+			if(fnt[j]->lan == fnd[i]->lan)
 			{
 				lanfnt[nlanfnt] = fnt[j];
 				nlanfnt++;
 				fnt[j] = NULL;
 			}
-		}
-
-		cnt = *(WORD *)fnd[i]->res.fnd->data->data;
-		if(nlanfnt == cnt)
-			isswapped = 0;
-		else if(nlanfnt == BYTESWAP_WORD(cnt))
-			isswapped = 1;
-		else
-			error("FONTDIR for language %d,%d has wrong count (%d, expected %d)\n",
-				fnd[i]->lan->id, fnd[i]->lan->sub, cnt, nlanfnt);
-#ifdef WORDS_BIGENDIAN
-		if((byteorder == WRC_BO_LITTLE && !isswapped) || (byteorder != WRC_BO_LITTLE && isswapped))
-#else
-		if((byteorder == WRC_BO_BIG && !isswapped) || (byteorder != WRC_BO_BIG && isswapped))
-#endif
-		{
-			internal_error(__FILE__, __LINE__, "User supplied FONTDIR needs byteswapping\n");
 		}
 	}
 
@@ -2745,7 +2659,7 @@ static resource_t *build_fontdirs(resource_t *tail)
 					fnt[i] = NULL;
 					fntleft--;
 				}
-				else if(fnt[i]->lan->id == lanfnt[0]->lan->id && fnt[i]->lan->sub == lanfnt[0]->lan->sub)
+				else if(fnt[i]->lan == lanfnt[0]->lan)
 					goto addlanfnt;
 			}
 		}

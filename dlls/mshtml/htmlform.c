@@ -17,7 +17,6 @@
  */
 
 #include <stdarg.h>
-#include <assert.h>
 
 #define COBJMACROS
 
@@ -42,6 +41,15 @@ struct HTMLFormElement {
     nsIDOMHTMLFormElement *nsform;
 };
 
+typedef struct {
+    IEnumVARIANT IEnumVARIANT_iface;
+
+    LONG ref;
+
+    ULONG iter;
+    HTMLFormElement *elem;
+} HTMLFormElementEnum;
+
 HRESULT return_nsform(nsresult nsres, nsIDOMHTMLFormElement *form, IHTMLFormElement **p)
 {
     nsIDOMNode *form_node;
@@ -49,7 +57,7 @@ HRESULT return_nsform(nsresult nsres, nsIDOMHTMLFormElement *form, IHTMLFormElem
     HRESULT hres;
 
     if (NS_FAILED(nsres)) {
-        ERR("GetForm failed: %08x\n", nsres);
+        ERR("GetForm failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -84,14 +92,14 @@ static HRESULT htmlform_item(HTMLFormElement *This, int i, IDispatch **ret)
 
     nsres = nsIDOMHTMLFormElement_GetElements(This->nsform, &elements);
     if(NS_FAILED(nsres)) {
-        FIXME("GetElements failed: 0x%08x\n", nsres);
+        FIXME("GetElements failed: 0x%08lx\n", nsres);
         return E_FAIL;
     }
 
     nsres = nsIDOMHTMLCollection_Item(elements, i, &item);
     nsIDOMHTMLCollection_Release(elements);
     if(NS_FAILED(nsres)) {
-        FIXME("Item failed: 0x%08x\n", nsres);
+        FIXME("Item failed: 0x%08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -108,6 +116,135 @@ static HRESULT htmlform_item(HTMLFormElement *This, int i, IDispatch **ret)
 
     return S_OK;
 }
+
+static inline HTMLFormElementEnum *impl_from_IEnumVARIANT(IEnumVARIANT *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLFormElementEnum, IEnumVARIANT_iface);
+}
+
+static HRESULT WINAPI HTMLFormElementEnum_QueryInterface(IEnumVARIANT *iface, REFIID riid, void **ppv)
+{
+    HTMLFormElementEnum *This = impl_from_IEnumVARIANT(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+
+    if(IsEqualGUID(riid, &IID_IUnknown)) {
+        *ppv = &This->IEnumVARIANT_iface;
+    }else if(IsEqualGUID(riid, &IID_IEnumVARIANT)) {
+        *ppv = &This->IEnumVARIANT_iface;
+    }else {
+        FIXME("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI HTMLFormElementEnum_AddRef(IEnumVARIANT *iface)
+{
+    HTMLFormElementEnum *This = impl_from_IEnumVARIANT(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%ld\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI HTMLFormElementEnum_Release(IEnumVARIANT *iface)
+{
+    HTMLFormElementEnum *This = impl_from_IEnumVARIANT(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%ld\n", This, ref);
+
+    if(!ref) {
+        IHTMLFormElement_Release(&This->elem->IHTMLFormElement_iface);
+        heap_free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI HTMLFormElementEnum_Next(IEnumVARIANT *iface, ULONG celt, VARIANT *rgVar, ULONG *pCeltFetched)
+{
+    HTMLFormElementEnum *This = impl_from_IEnumVARIANT(iface);
+    nsresult nsres;
+    HRESULT hres;
+    ULONG num, i;
+    LONG len;
+
+    TRACE("(%p)->(%lu %p %p)\n", This, celt, rgVar, pCeltFetched);
+
+    nsres = nsIDOMHTMLFormElement_GetLength(This->elem->nsform, &len);
+    if(NS_FAILED(nsres))
+        return E_FAIL;
+    num = min(len - This->iter, celt);
+
+    for(i = 0; i < num; i++) {
+        hres = htmlform_item(This->elem, This->iter + i, &V_DISPATCH(&rgVar[i]));
+        if(FAILED(hres)) {
+            while(i--)
+                VariantClear(&rgVar[i]);
+            return hres;
+        }
+        V_VT(&rgVar[i]) = VT_DISPATCH;
+    }
+
+    This->iter += num;
+    if(pCeltFetched)
+        *pCeltFetched = num;
+    return num == celt ? S_OK : S_FALSE;
+}
+
+static HRESULT WINAPI HTMLFormElementEnum_Skip(IEnumVARIANT *iface, ULONG celt)
+{
+    HTMLFormElementEnum *This = impl_from_IEnumVARIANT(iface);
+    nsresult nsres;
+    LONG len;
+
+    TRACE("(%p)->(%lu)\n", This, celt);
+
+    nsres = nsIDOMHTMLFormElement_GetLength(This->elem->nsform, &len);
+    if(NS_FAILED(nsres))
+        return E_FAIL;
+
+    if(This->iter + celt > len) {
+        This->iter = len;
+        return S_FALSE;
+    }
+
+    This->iter += celt;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLFormElementEnum_Reset(IEnumVARIANT *iface)
+{
+    HTMLFormElementEnum *This = impl_from_IEnumVARIANT(iface);
+
+    TRACE("(%p)->()\n", This);
+
+    This->iter = 0;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLFormElementEnum_Clone(IEnumVARIANT *iface, IEnumVARIANT **ppEnum)
+{
+    HTMLFormElementEnum *This = impl_from_IEnumVARIANT(iface);
+    FIXME("(%p)->(%p)\n", This, ppEnum);
+    return E_NOTIMPL;
+}
+
+static const IEnumVARIANTVtbl HTMLFormElementEnumVtbl = {
+    HTMLFormElementEnum_QueryInterface,
+    HTMLFormElementEnum_AddRef,
+    HTMLFormElementEnum_Release,
+    HTMLFormElementEnum_Next,
+    HTMLFormElementEnum_Skip,
+    HTMLFormElementEnum_Reset,
+    HTMLFormElementEnum_Clone
+};
 
 static inline HTMLFormElement *impl_from_IHTMLFormElement(IHTMLFormElement *iface)
 {
@@ -180,7 +317,7 @@ static HRESULT WINAPI HTMLFormElement_put_action(IHTMLFormElement *iface, BSTR v
     nsres = nsIDOMHTMLFormElement_SetAction(This->nsform, &action_str);
     nsAString_Finish(&action_str);
     if(NS_FAILED(nsres)) {
-        ERR("SetAction failed: %08x\n", nsres);
+        ERR("SetAction failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -203,7 +340,7 @@ static HRESULT WINAPI HTMLFormElement_get_action(IHTMLFormElement *iface, BSTR *
         nsAString_GetData(&action_str, &action);
         hres = nsuri_to_url(action, FALSE, p);
     }else {
-        ERR("GetAction failed: %08x\n", nsres);
+        ERR("GetAction failed: %08lx\n", nsres);
         hres = E_FAIL;
     }
 
@@ -311,7 +448,7 @@ static HRESULT WINAPI HTMLFormElement_get_elements(IHTMLFormElement *iface, IDis
 
     nsres = nsIDOMHTMLFormElement_GetElements(This->nsform, &elements);
     if(NS_FAILED(nsres)) {
-        ERR("GetElements failed: %08x\n", nsres);
+        ERR("GetElements failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -334,7 +471,7 @@ static HRESULT WINAPI HTMLFormElement_put_target(IHTMLFormElement *iface, BSTR v
 
     nsAString_Finish(&str);
     if (NS_FAILED(nsres)) {
-        ERR("Set Target(%s) failed: %08x\n", wine_dbgstr_w(v), nsres);
+        ERR("Set Target(%s) failed: %08lx\n", wine_dbgstr_w(v), nsres);
         return E_FAIL;
     }
 
@@ -470,7 +607,7 @@ static HRESULT WINAPI HTMLFormElement_submit(IHTMLFormElement *iface)
         nsAString_Finish(&target_str);
         IHTMLWindow2_Release(&window->base.IHTMLWindow2_iface);
         if(NS_FAILED(nsres)) {
-            ERR("Submit failed: %08x\n", nsres);
+            ERR("Submit failed: %08lx\n", nsres);
             return E_FAIL;
         }
 
@@ -485,7 +622,7 @@ static HRESULT WINAPI HTMLFormElement_submit(IHTMLFormElement *iface)
         nsAString_GetData(&action_uri_str, &action_uri);
         hres = create_uri(action_uri, 0, &uri);
     }else {
-        ERR("GetFormData failed: %08x\n", nsres);
+        ERR("GetFormData failed: %08lx\n", nsres);
         hres = E_FAIL;
     }
     nsAString_Finish(&action_uri_str);
@@ -513,7 +650,7 @@ static HRESULT WINAPI HTMLFormElement_reset(IHTMLFormElement *iface)
     TRACE("(%p)->()\n", This);
     nsres = nsIDOMHTMLFormElement_Reset(This->nsform);
     if (NS_FAILED(nsres)) {
-        ERR("Reset failed: %08x\n", nsres);
+        ERR("Reset failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -523,7 +660,7 @@ static HRESULT WINAPI HTMLFormElement_reset(IHTMLFormElement *iface)
 static HRESULT WINAPI HTMLFormElement_put_length(IHTMLFormElement *iface, LONG v)
 {
     HTMLFormElement *This = impl_from_IHTMLFormElement(iface);
-    FIXME("(%p)->(%d)\n", This, v);
+    FIXME("(%p)->(%ld)\n", This, v);
     return E_NOTIMPL;
 }
 
@@ -536,7 +673,7 @@ static HRESULT WINAPI HTMLFormElement_get_length(IHTMLFormElement *iface, LONG *
 
     nsres = nsIDOMHTMLFormElement_GetLength(This->nsform, p);
     if(NS_FAILED(nsres)) {
-        ERR("GetLength failed: %08x\n", nsres);
+        ERR("GetLength failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -546,8 +683,23 @@ static HRESULT WINAPI HTMLFormElement_get_length(IHTMLFormElement *iface, LONG *
 static HRESULT WINAPI HTMLFormElement__newEnum(IHTMLFormElement *iface, IUnknown **p)
 {
     HTMLFormElement *This = impl_from_IHTMLFormElement(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    HTMLFormElementEnum *ret;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    ret = heap_alloc(sizeof(*ret));
+    if(!ret)
+        return E_OUTOFMEMORY;
+
+    ret->IEnumVARIANT_iface.lpVtbl = &HTMLFormElementEnumVtbl;
+    ret->ref = 1;
+    ret->iter = 0;
+
+    HTMLFormElement_AddRef(&This->IHTMLFormElement_iface);
+    ret->elem = This;
+
+    *p = (IUnknown*)&ret->IEnumVARIANT_iface;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLFormElement_item(IHTMLFormElement *iface, VARIANT name,
@@ -659,17 +811,17 @@ static HRESULT HTMLFormElement_get_dispid(HTMLDOMNode *iface,
     nsresult nsres;
     HRESULT hres = DISP_E_UNKNOWNNAME;
 
-    TRACE("(%p)->(%s %x %p)\n", This, wine_dbgstr_w(name), grfdex, pid);
+    TRACE("(%p)->(%s %lx %p)\n", This, wine_dbgstr_w(name), grfdex, pid);
 
     nsres = nsIDOMHTMLFormElement_GetElements(This->nsform, &elements);
     if(NS_FAILED(nsres)) {
-        FIXME("GetElements failed: 0x%08x\n", nsres);
+        FIXME("GetElements failed: 0x%08lx\n", nsres);
         return E_FAIL;
     }
 
     nsres = nsIDOMHTMLCollection_GetLength(elements, &len);
     if(NS_FAILED(nsres)) {
-        FIXME("GetLength failed: 0x%08x\n", nsres);
+        FIXME("GetLength failed: 0x%08lx\n", nsres);
         nsIDOMHTMLCollection_Release(elements);
         return E_FAIL;
     }
@@ -696,7 +848,7 @@ static HRESULT HTMLFormElement_get_dispid(HTMLDOMNode *iface,
 
         nsres = nsIDOMHTMLCollection_Item(elements, i, &nsitem);
         if(NS_FAILED(nsres)) {
-            FIXME("Item failed: 0x%08x\n", nsres);
+            FIXME("Item failed: 0x%08lx\n", nsres);
             hres = E_FAIL;
             break;
         }
@@ -704,7 +856,7 @@ static HRESULT HTMLFormElement_get_dispid(HTMLDOMNode *iface,
         nsres = nsIDOMNode_QueryInterface(nsitem, &IID_nsIDOMElement, (void**)&elem);
         nsIDOMNode_Release(nsitem);
         if(NS_FAILED(nsres)) {
-            FIXME("Failed to get nsIDOMHTMLNode interface: 0x%08x\n", nsres);
+            FIXME("Failed to get nsIDOMHTMLNode interface: 0x%08lx\n", nsres);
             hres = E_FAIL;
             break;
         }
@@ -712,7 +864,7 @@ static HRESULT HTMLFormElement_get_dispid(HTMLDOMNode *iface,
         /* compare by id attr */
         nsres = nsIDOMElement_GetId(elem, &nsstr);
         if(NS_FAILED(nsres)) {
-            FIXME("GetId failed: 0x%08x\n", nsres);
+            FIXME("GetId failed: 0x%08lx\n", nsres);
             nsIDOMElement_Release(elem);
             hres = E_FAIL;
             break;
@@ -754,7 +906,7 @@ static HRESULT HTMLFormElement_invoke(HTMLDOMNode *iface,
     IDispatch *ret;
     HRESULT hres;
 
-    TRACE("(%p)->(%x %x %x %p %p %p %p)\n", This, id, lcid, flags, params, res, ei, caller);
+    TRACE("(%p)->(%lx %lx %x %p %p %p %p)\n", This, id, lcid, flags, params, res, ei, caller);
 
     hres = htmlform_item(This, id - MSHTML_DISPID_CUSTOM_MIN, &ret);
     if(FAILED(hres))
@@ -828,6 +980,7 @@ static const tid_t HTMLFormElement_iface_tids[] = {
 };
 
 static dispex_static_data_t HTMLFormElement_dispex = {
+    L"HTMLFormElement",
     NULL,
     DispHTMLFormElement_tid,
     HTMLFormElement_iface_tids,

@@ -289,7 +289,7 @@ static ULONG WINAPI local_server_AddRef(IServiceProvider *iface)
     struct local_server *local_server = impl_from_IServiceProvider(iface);
     LONG refcount = InterlockedIncrement(&local_server->refcount);
 
-    TRACE("%p, refcount %d\n", iface, refcount);
+    TRACE("%p, refcount %ld\n", iface, refcount);
 
     return refcount;
 }
@@ -299,7 +299,7 @@ static ULONG WINAPI local_server_Release(IServiceProvider *iface)
     struct local_server *local_server = impl_from_IServiceProvider(iface);
     LONG refcount = InterlockedDecrement(&local_server->refcount);
 
-    TRACE("%p, refcount %d\n", iface, refcount);
+    TRACE("%p, refcount %ld\n", iface, refcount);
 
     if (!refcount)
     {
@@ -380,7 +380,7 @@ HRESULT apartment_get_local_server_stream(struct apartment *apt, IStream **ret)
     LeaveCriticalSection(&apt->cs);
 
     if (FAILED(hr))
-        ERR("Failed: %#x\n", hr);
+        ERR("Failed: %#lx\n", hr);
 
     return hr;
 }
@@ -390,7 +390,7 @@ static struct apartment *apartment_construct(DWORD model)
 {
     struct apartment *apt;
 
-    TRACE("creating new apartment, model %d\n", model);
+    TRACE("creating new apartment, model %ld\n", model);
 
     apt = heap_alloc_zero(sizeof(*apt));
     apt->tid = GetCurrentThreadId();
@@ -475,7 +475,7 @@ void apartment_release(struct apartment *apt)
     EnterCriticalSection(&apt_cs);
 
     refcount = InterlockedDecrement(&apt->refs);
-    TRACE("%s: after = %d\n", wine_dbgstr_longlong(apt->oxid), refcount);
+    TRACE("%s: after = %ld\n", wine_dbgstr_longlong(apt->oxid), refcount);
 
     if (apt->being_destroyed)
     {
@@ -569,7 +569,7 @@ void apartment_release(struct apartment *apt)
 static DWORD apartment_addref(struct apartment *apt)
 {
     DWORD refs = InterlockedIncrement(&apt->refs);
-    TRACE("%s: before = %d\n", wine_dbgstr_longlong(apt->oxid), refs - 1);
+    TRACE("%s: before = %ld\n", wine_dbgstr_longlong(apt->oxid), refs - 1);
     return refs;
 }
 
@@ -688,13 +688,20 @@ struct apartment * apartment_findfromtid(DWORD tid)
     EnterCriticalSection(&apt_cs);
     LIST_FOR_EACH_ENTRY(apt, &apts, struct apartment, entry)
     {
-        if (apt->tid == tid)
+        if (apt != mta && apt->tid == tid)
         {
             result = apt;
             apartment_addref(result);
             break;
         }
     }
+
+    if (!result && mta && mta->tid == tid)
+    {
+        result = mta;
+        apartment_addref(result);
+    }
+
     LeaveCriticalSection(&apt_cs);
 
     return result;
@@ -797,7 +804,7 @@ static HRESULT apartment_getclassobject(struct apartment *apt, LPCWSTR dllpath,
         hr = p_ole32_DllGetClassObject(rclsid, riid, ppv);
 
         if (hr != S_OK)
-            ERR("DllGetClassObject returned error 0x%08x for dll %s\n", hr, debugstr_w(dllpath));
+            ERR("DllGetClassObject returned error %#lx for dll %s\n", hr, debugstr_w(dllpath));
 
         return hr;
     }
@@ -846,7 +853,7 @@ static HRESULT apartment_getclassobject(struct apartment *apt, LPCWSTR dllpath,
         hr = apartment_loaded_dll->dll->DllGetClassObject(rclsid, riid, ppv);
 
         if (hr != S_OK)
-            ERR("DllGetClassObject returned error 0x%08x for dll %s\n", hr, debugstr_w(dllpath));
+            ERR("DllGetClassObject returned error %#lx for dll %s\n", hr, debugstr_w(dllpath));
     }
 
     return hr;
@@ -1278,7 +1285,7 @@ HRESULT apartment_createwindowifneeded(struct apartment *apt)
         hwnd = CreateWindowW(aptwinclassW, NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, 0, hProxyDll, NULL);
         if (!hwnd)
         {
-            ERR("CreateWindow failed with error %d\n", GetLastError());
+            ERR("CreateWindow failed with error %ld\n", GetLastError());
             return HRESULT_FROM_WIN32(GetLastError());
         }
         if (InterlockedCompareExchangePointer((void **)&apt->win, hwnd, NULL))

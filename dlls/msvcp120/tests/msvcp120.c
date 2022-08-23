@@ -209,7 +209,7 @@ static int (__cdecl *p__ismbblead)(unsigned int);
 
 static MSVCRT_long (__cdecl *p__Xtime_diff_to_millis2)(const xtime*, const xtime*);
 static int (__cdecl *p_xtime_get)(xtime*, int);
-static _Cvtvec* (__cdecl *p__Getcvt)(_Cvtvec*);
+static _Cvtvec (__cdecl *p__Getcvt)(void);
 static void (CDECL *p__Call_once)(int *once, void (CDECL *func)(void));
 static void (CDECL *p__Call_onceEx)(int *once, void (CDECL *func)(void*), void *argv);
 static void (CDECL *p__Do_call)(void *this);
@@ -416,6 +416,8 @@ static void (__thiscall *p_vector_base_v4__Internal_reserve)(
 static void (__thiscall *p_vector_base_v4__Internal_resize)(
         vector_base_v4*, size_t, size_t, size_t, void (__cdecl*)(void*, size_t),
         void (__cdecl *copy)(void*, const void*, size_t), const void*);
+
+static const BYTE *p_byte_reverse_table;
 
 static HMODULE msvcp;
 #define SETNOFAIL(x,y) x = (void*)GetProcAddress(msvcp,y)
@@ -809,6 +811,8 @@ static BOOL init(void)
     SET(p__Cnd_do_broadcast_at_thread_exit,
             "_Cnd_do_broadcast_at_thread_exit");
 
+    SET(p_byte_reverse_table, "?_Byte_reverse_table@details@Concurrency@@3QBEB");
+
     hdll = GetModuleHandleA("msvcr120.dll");
     p_setlocale = (void*)GetProcAddress(hdll, "setlocale");
     p__setmbcp = (void*)GetProcAddress(hdll, "_setmbcp");
@@ -930,7 +934,7 @@ static void test__Getcvt(void)
     _Cvtvec cvtvec;
     int i;
 
-    p__Getcvt(&cvtvec);
+    cvtvec = p__Getcvt();
     ok(cvtvec.page == 0, "cvtvec.page = %d\n", cvtvec.page);
     ok(cvtvec.mb_max == 1, "cvtvec.mb_max = %d\n", cvtvec.mb_max);
     todo_wine ok(cvtvec.unk == 1, "cvtvec.unk = %d\n", cvtvec.unk);
@@ -941,7 +945,7 @@ static void test__Getcvt(void)
         win_skip("_Getcvt tests\n");
         return;
     }
-    p__Getcvt(&cvtvec);
+    cvtvec = p__Getcvt();
     ok(cvtvec.page == 936, "cvtvec.page = %d\n", cvtvec.page);
     ok(cvtvec.mb_max == 2, "cvtvec.mb_max = %d\n", cvtvec.mb_max);
     ok(cvtvec.unk == 0, "cvtvec.unk = %d\n", cvtvec.unk);
@@ -955,7 +959,7 @@ static void test__Getcvt(void)
     }
 
     p__setmbcp(936);
-    p__Getcvt(&cvtvec);
+    cvtvec = p__Getcvt();
     ok(cvtvec.page == 936, "cvtvec.page = %d\n", cvtvec.page);
     ok(cvtvec.mb_max == 2, "cvtvec.mb_max = %d\n", cvtvec.mb_max);
     ok(cvtvec.unk == 0, "cvtvec.unk = %d\n", cvtvec.unk);
@@ -2066,14 +2070,14 @@ static void test_thrd(void)
     /* test for equal */
     for(i=0; i<ARRAY_SIZE(testeq); i++) {
         ret = p__Thrd_equal(testeq[i].a, testeq[i].b);
-        ok(ret == testeq[i].r, "(%p %u) = (%p %u) expected %d, got %d\n",
+        ok(ret == testeq[i].r, "(%p %lu) = (%p %lu) expected %d, got %d\n",
             testeq[i].a.hnd, testeq[i].a.id, testeq[i].b.hnd, testeq[i].b.id, testeq[i].r, ret);
     }
 
     /* test for less than */
     for(i=0; i<ARRAY_SIZE(testlt); i++) {
         ret = p__Thrd_lt(testlt[i].a, testlt[i].b);
-        ok(ret == testlt[i].r, "(%p %u) < (%p %u) expected %d, got %d\n",
+        ok(ret == testlt[i].r, "(%p %lu) < (%p %lu) expected %d, got %d\n",
             testlt[i].a.hnd, testlt[i].a.id, testlt[i].b.hnd, testlt[i].b.id, testlt[i].r, ret);
     }
 
@@ -2091,10 +2095,11 @@ static void test_thrd(void)
     /* test for current */
     ta = p__Thrd_current();
     tb = p__Thrd_current();
-    ok(ta.id == tb.id, "got a %d b %d\n", ta.id, tb.id);
-    ok(ta.id == GetCurrentThreadId(), "expected %d, got %d\n", GetCurrentThreadId(), ta.id);
-    /* these can be different if new threads are created at same time */
-    ok(ta.hnd == tb.hnd, "got a %p b %p\n", ta.hnd, tb.hnd);
+    ok(ta.id == tb.id, "got a %ld b %ld\n", ta.id, tb.id);
+    ok(ta.id == GetCurrentThreadId(), "expected %ld, got %ld\n", GetCurrentThreadId(), ta.id);
+    /* the handles can be different if new threads are created at same time */
+    ok(ta.hnd != NULL, "handle a is NULL\n");
+    ok(tb.hnd != NULL, "handle b is NULL\n");
     ok(!CloseHandle(ta.hnd), "handle %p not closed\n", ta.hnd);
     ok(!CloseHandle(tb.hnd), "handle %p not closed\n", tb.hnd);
 
@@ -2109,7 +2114,7 @@ static void test_thrd(void)
     ok(!ret, "failed to create thread, got %d\n", ret);
     ret = p__Thrd_join(ta, &r);
     ok(!ret, "failed to join thread, got %d\n", ret);
-    ok(ta.id == tb.id, "expected %d, got %d\n", ta.id, tb.id);
+    ok(ta.id == tb.id, "expected %ld, got %ld\n", ta.id, tb.id);
     ok(ta.hnd != tb.hnd, "same handles, got %p\n", ta.hnd);
     ok(r == 0x42, "expected 0x42, got %d\n", r);
     ret = p__Thrd_detach(ta);
@@ -2126,7 +2131,7 @@ static void test_thrd(void)
 struct cndmtx
 {
     HANDLE initialized;
-    int started;
+    LONG started;
     int thread_no;
 
     _Cnd_t cnd;
@@ -2244,7 +2249,7 @@ static void test_cnd(void)
     p__Cnd_register_at_thread_exit(&cnd, &mtx, &r);
     p__Cnd_unregister_at_thread_exit(&mtx);
     p__Cnd_do_broadcast_at_thread_exit();
-    ok(mtx->count == 1, "mtx.count = %d\n", mtx->count);
+    ok(mtx->count == 1, "mtx.count = %ld\n", mtx->count);
 
     p__Cnd_register_at_thread_exit(&cnd, &mtx, &r);
     ok(r == 0xcafe, "r = %x\n", r);
@@ -2336,14 +2341,14 @@ static unsigned int __cdecl vtbl_func__Go(_Pad *this)
     DWORD ret;
 
     ret = WaitForSingleObject(_Pad__Launch_returned, 100);
-    ok(ret == WAIT_TIMEOUT, "WiatForSingleObject returned %x\n", ret);
-    ok(!pad.mtx->count, "pad.mtx.count = %d\n", pad.mtx->count);
+    ok(ret == WAIT_TIMEOUT, "WiatForSingleObject returned %lx\n", ret);
+    ok(!pad.mtx->count, "pad.mtx.count = %ld\n", pad.mtx->count);
     ok(!pad.launched, "pad.launched = %x\n", pad.launched);
     call_func1(p__Pad__Release, &pad);
     ok(pad.launched, "pad.launched = %x\n", pad.launched);
     ret = WaitForSingleObject(_Pad__Launch_returned, 100);
-    ok(ret == WAIT_OBJECT_0, "WiatForSingleObject returned %x\n", ret);
-    ok(pad.mtx->count == 1, "pad.mtx.count = %d\n", pad.mtx->count);
+    ok(ret == WAIT_OBJECT_0, "WiatForSingleObject returned %lx\n", ret);
+    ok(pad.mtx->count == 1, "pad.mtx.count = %ld\n", pad.mtx->count);
     return 0;
 }
 
@@ -2389,7 +2394,7 @@ static void test__Pad(void)
     memset(&pad, 0xfe, sizeof(pad));
     call_func1(p__Pad_ctor, &pad);
     ok(!pad.launched, "pad.launched = %x\n", pad.launched);
-    ok(pad.mtx->count == 1, "pad.mtx.count = %d\n", pad.mtx->count);
+    ok(pad.mtx->count == 1, "pad.mtx.count = %ld\n", pad.mtx->count);
 
     pad.vtable = &pfunc;
     call_func2(p__Pad__Launch, &pad, &thrd);
@@ -2779,7 +2784,7 @@ static void test_queue_base_v4(void)
 
     thread[1] = CreateThread(NULL, 0, queue_push_thread, &queue, 0, NULL);
     ret = WaitForSingleObject(thread[1], 100);
-    ok(ret == WAIT_TIMEOUT, "WaitForSingleObject returned %x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "WaitForSingleObject returned %lx\n", ret);
 
     SetEvent(block_end);
     WaitForSingleObject(thread[0], INFINITE);
@@ -2802,7 +2807,7 @@ static void test_queue_base_v4(void)
 
     thread[1] = CreateThread(NULL, 0, queue_pop_thread, &queue, 0, NULL);
     ret = WaitForSingleObject(thread[1], 100);
-    ok(ret == WAIT_TIMEOUT, "WaitForSingleObject returned %x\n", ret);
+    ok(ret == WAIT_TIMEOUT, "WaitForSingleObject returned %lx\n", ret);
 
     SetEvent(block_end);
     WaitForSingleObject(thread[0], INFINITE);
@@ -3304,6 +3309,26 @@ static void test_vector_base_v4(void)
     ok(!vector_alloc_count, "vector_alloc_count = %d, expected 0\n", vector_alloc_count);
 }
 
+static BYTE byte_reverse(BYTE b)
+{
+    b = ((b & 0xf0) >> 4) | ((b & 0x0f) << 4);
+    b = ((b & 0xcc) >> 2) | ((b & 0x33) << 2);
+    b = ((b & 0xaa) >> 1) | ((b & 0x55) << 1);
+    return b;
+}
+
+static void test_data_exports(void)
+{
+    unsigned int i;
+
+    ok(IsBadWritePtr((BYTE *)p_byte_reverse_table, 256), "byte_reverse_table is writeable.\n");
+    for (i = 0; i < 256; ++i)
+    {
+        ok(p_byte_reverse_table[i] == byte_reverse(i), "Got unexpected byte %#x, expected %#x.\n",
+                p_byte_reverse_table[i], byte_reverse(i));
+    }
+}
+
 START_TEST(msvcp120)
 {
     if(!init()) return;
@@ -3348,6 +3373,8 @@ START_TEST(msvcp120)
     test_vector_base_v4();
 
     test_vbtable_size_exports();
+
+    test_data_exports();
 
     free_expect_struct();
     TlsFree(expect_idx);

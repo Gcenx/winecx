@@ -80,7 +80,7 @@ static BOOL ICONTITLE_SetTitlePos( HWND hwnd, HWND owner )
                (( bMultiLineTitle ) ? 0 : DT_SINGLELINE) );
 
     SelectObject( hDC, hPrevFont );
-    ReleaseDC( hwnd, hDC );
+    NtUserReleaseDC( hwnd, hDC );
 
     cx = rect.right - rect.left +  4 * GetSystemMetrics(SM_CXBORDER);
     cy = rect.bottom - rect.top;
@@ -91,7 +91,7 @@ static BOOL ICONTITLE_SetTitlePos( HWND hwnd, HWND owner )
     /* point is relative to owner, make it relative to parent */
     MapWindowPoints( owner, GetParent(hwnd), &pt, 1 );
 
-    SetWindowPos( hwnd, owner, pt.x, pt.y, cx, cy, SWP_NOACTIVATE );
+    NtUserSetWindowPos( hwnd, owner, pt.x, pt.y, cx, cy, SWP_NOACTIVATE );
     return TRUE;
 }
 
@@ -184,7 +184,7 @@ LRESULT WINAPI IconTitleWndProc( HWND hWnd, UINT msg,
 	case WM_NCLBUTTONDBLCLK:
 	     return SendMessageW( owner, msg, wParam, lParam );
 	case WM_ACTIVATE:
-	     if( wParam ) SetActiveWindow( owner );
+	     if (wParam) NtUserSetActiveWindow( owner );
              return 0;
 	case WM_CLOSE:
 	     return 0;

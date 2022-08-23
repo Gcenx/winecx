@@ -19,8 +19,10 @@
 #ifndef _NTDEF_
 #define _NTDEF_
 
-#include <basetsd.h>
 #include "wine/winheader_enter.h"
+
+#include <basetsd.h>
+#include <specstrings.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,7 +57,7 @@ typedef enum _WAIT_TYPE {
 #define BASETYPES
 typedef unsigned char UCHAR, *PUCHAR;
 typedef unsigned short USHORT, *PUSHORT;
-#ifdef WINE_USE_LONG
+#if !defined(__LP64__) && !defined(WINE_NO_LONG_TYPES)
 typedef unsigned long ULONG, *PULONG;
 #else
 typedef unsigned int ULONG, *PULONG;
@@ -83,6 +85,7 @@ typedef struct _RTL_BALANCED_NODE
 } RTL_BALANCED_NODE, *PRTL_BALANCED_NODE;
 
 #define RTL_BALANCED_NODE_RESERVED_PARENT_MASK 3
+
 #include "wine/winheader_exit.h"
 
 #endif /* _NTDEF_ */

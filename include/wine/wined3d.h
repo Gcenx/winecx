@@ -28,7 +28,6 @@
 
 #include <stdbool.h>
 #include "wine/list.h"
-#include "wine/winheader_enter.h"
 
 #define WINED3D_OK                                              S_OK
 
@@ -1775,7 +1774,7 @@ struct wined3d_swapchain_desc
     unsigned int backbuffer_count;
     unsigned int backbuffer_bind_flags;
     enum wined3d_multisample_type multisample_type;
-    DWORD multisample_quality;
+    unsigned int multisample_quality;
     enum wined3d_swap_effect swap_effect;
     HWND device_window;
     BOOL windowed;
@@ -2120,7 +2119,7 @@ struct wined3d_shader_signature
 struct wined3d_shader_desc
 {
     const DWORD *byte_code;
-    SIZE_T byte_code_size;
+    size_t byte_code_size;
 };
 
 struct wined3d_stream_output_element
@@ -2389,8 +2388,6 @@ HRESULT __cdecl wined3d_device_get_clip_status(const struct wined3d_device *devi
         struct wined3d_clip_status *clip_status);
 void __cdecl wined3d_device_get_creation_parameters(const struct wined3d_device *device,
         struct wined3d_device_creation_parameters *creation_parameters);
-struct wined3d_rendertarget_view * __cdecl wined3d_device_context_get_depth_stencil_view(
-        const struct wined3d_device_context *context);
 HRESULT __cdecl wined3d_device_get_device_caps(const struct wined3d_device *device, struct wined3d_caps *caps);
 HRESULT __cdecl wined3d_device_get_display_mode(const struct wined3d_device *device, UINT swapchain_idx,
         struct wined3d_display_mode *mode, enum wined3d_display_rotation *rotation);
@@ -2473,6 +2470,8 @@ void __cdecl wined3d_device_context_get_constant_buffer(const struct wined3d_dev
         enum wined3d_shader_type shader_type, unsigned int idx, struct wined3d_constant_buffer_state *state);
 struct wined3d_depth_stencil_state * __cdecl wined3d_device_context_get_depth_stencil_state(
         const struct wined3d_device_context *context, unsigned int *stencil_ref);
+struct wined3d_rendertarget_view * __cdecl wined3d_device_context_get_depth_stencil_view(
+        const struct wined3d_device_context *context);
 struct wined3d_buffer * __cdecl wined3d_device_context_get_index_buffer(const struct wined3d_device_context *context,
         enum wined3d_format_id *format, unsigned int *offset);
 struct wined3d_query * __cdecl wined3d_device_context_get_predication(struct wined3d_device_context *context,
@@ -2968,7 +2967,5 @@ static inline void wined3d_box_set(struct wined3d_box *box, unsigned int left, u
     box->front = front;
     box->back = back;
 }
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_WINED3D_H */

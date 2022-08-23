@@ -18,20 +18,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdio.h>
-#ifdef HAVE_FLOAT_H
-# include <float.h>
-#endif
 
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(gl_compat);
 WINE_DECLARE_DEBUG_CHANNEL(d3d_perf);
-
-#include "wine/hostaddrspace_enter.h"
 
 /* Start GL_ARB_multitexture emulation */
 static void WINE_GLAPI wine_glMultiTexCoord1fARB(GLenum target, GLfloat s)
@@ -424,8 +416,6 @@ static void WINE_GLAPI wine_glFogCoordfvEXT(const GLfloat *f) {
 static void WINE_GLAPI wine_glFogCoorddvEXT(const GLdouble *f) {
     wine_glFogCoordfEXT((GLfloat) *f);
 }
-
-#include "wine/hostaddrspace_exit.h"
 
 /* End GL_EXT_fog_coord emulation */
 

@@ -102,7 +102,7 @@ UINT cp_from_charset_string(BSTR charset)
 
     hres = IMultiLanguage2_GetCharsetInfo(mlang, charset, &info);
     if(FAILED(hres)) {
-        FIXME("GetCharsetInfo failed: %08x\n", hres);
+        FIXME("GetCharsetInfo failed: %08lx\n", hres);
         return CP_UTF8;
     }
 
@@ -119,7 +119,7 @@ BSTR charset_string_from_cp(UINT cp)
 
     hres = IMultiLanguage2_GetCodePageInfo(mlang, cp, GetUserDefaultUILanguage(), &info);
     if(FAILED(hres)) {
-        ERR("GetCodePageInfo failed: %08x\n", hres);
+        ERR("GetCodePageInfo failed: %08lx\n", hres);
         return SysAllocString(NULL);
     }
 
@@ -182,7 +182,7 @@ static BOOL WINAPI load_compat_settings(INIT_ONCE *once, void *param, void **con
             break;
         index++;
         if(res != ERROR_SUCCESS) {
-            WARN("RegEnumKey failed: %u\n", GetLastError());
+            WARN("RegEnumKey failed: %lu\n", GetLastError());
             continue;
         }
 
@@ -397,7 +397,7 @@ static ULONG WINAPI ClassFactory_AddRef(IClassFactory *iface)
 {
     ClassFactory *This = impl_from_IClassFactory(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p) ref = %u\n", This, ref);
+    TRACE("(%p) ref = %lu\n", This, ref);
     return ref;
 }
 
@@ -406,7 +406,7 @@ static ULONG WINAPI ClassFactory_Release(IClassFactory *iface)
     ClassFactory *This = impl_from_IClassFactory(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref = %u\n", This, ref);
+    TRACE("(%p) ref = %lu\n", This, ref);
 
     if(!ref) {
         heap_free(This);
@@ -488,16 +488,6 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 
     FIXME("Unknown class %s\n", debugstr_guid(rclsid));
     return CLASS_E_CLASSNOTAVAILABLE;
-}
-
-/******************************************************************
- *              DllCanUnloadNow (MSHTML.@)
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    TRACE("()\n");
-    /* The cost of keeping this DLL in memory is small. */
-    return S_FALSE;
 }
 
 /***********************************************************************
@@ -637,7 +627,7 @@ static HRESULT register_server(BOOL do_register)
 
     for(i=0; i < ARRAY_SIZE(pse); i++) {
         pse[i].pszValue = heap_alloc(39);
-        sprintf(pse[i].pszValue, "{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+        sprintf(pse[i].pszValue, "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
                 clsids[i]->Data1, clsids[i]->Data2, clsids[i]->Data3, clsids[i]->Data4[0],
                 clsids[i]->Data4[1], clsids[i]->Data4[2], clsids[i]->Data4[3], clsids[i]->Data4[4],
                 clsids[i]->Data4[5], clsids[i]->Data4[6], clsids[i]->Data4[7]);
@@ -657,7 +647,7 @@ static HRESULT register_server(BOOL do_register)
         heap_free(pse[i].pszValue);
 
     if(FAILED(hres))
-        ERR("RegInstall failed: %08x\n", hres);
+        ERR("RegInstall failed: %08lx\n", hres);
 
     return hres;
 }
@@ -672,7 +662,7 @@ HRESULT WINAPI DllRegisterServer(void)
 {
     HRESULT hres;
 
-    hres = __wine_register_resources( hInst );
+    hres = __wine_register_resources();
     if(SUCCEEDED(hres))
         hres = register_server(TRUE);
     return hres;
@@ -683,7 +673,7 @@ HRESULT WINAPI DllRegisterServer(void)
  */
 HRESULT WINAPI DllUnregisterServer(void)
 {
-    HRESULT hres = __wine_unregister_resources( hInst );
+    HRESULT hres = __wine_unregister_resources();
     if(SUCCEEDED(hres)) hres = register_server(FALSE);
     return hres;
 }

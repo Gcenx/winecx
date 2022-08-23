@@ -182,6 +182,7 @@ extern COMCTL32_SysColor  comctl32_color DECLSPEC_HIDDEN;
 
 /* Internal function */
 HWND COMCTL32_CreateToolTip (HWND) DECLSPEC_HIDDEN;
+void COMCTL32_DrawStatusText(HDC hdc, LPCRECT lprc, LPCWSTR text, UINT style, BOOL draw_background) DECLSPEC_HIDDEN;
 VOID COMCTL32_RefreshSysColors(void) DECLSPEC_HIDDEN;
 void COMCTL32_DrawInsertMark(HDC hDC, const RECT *lpRect, COLORREF clrInsertMark, BOOL bHorizontal) DECLSPEC_HIDDEN;
 void COMCTL32_EnsureBitmapSize(HBITMAP *pBitmap, int cxMinWidth, int cyMinHeight, COLORREF crBackground) DECLSPEC_HIDDEN;
@@ -279,9 +280,5 @@ extern void UPDOWN_Unregister(void) DECLSPEC_HIDDEN;
 int MONTHCAL_MonthLength(int month, int year) DECLSPEC_HIDDEN;
 int MONTHCAL_CalculateDayOfWeek(SYSTEMTIME *date, BOOL inplace) DECLSPEC_HIDDEN;
 LONG MONTHCAL_CompareSystemTime(const SYSTEMTIME *first, const SYSTEMTIME *second) DECLSPEC_HIDDEN;
-
-extern void THEMING_Initialize(void) DECLSPEC_HIDDEN;
-extern void THEMING_Uninitialize(void) DECLSPEC_HIDDEN;
-extern LRESULT THEMING_CallOriginalClass(HWND, UINT, WPARAM, LPARAM) DECLSPEC_HIDDEN;
 
 #endif  /* __WINE_COMCTL32_H */

@@ -68,10 +68,10 @@ static PORT_INFO_2W * find_portinfo2(LPCWSTR pPort)
             win_skip("The service 'Spooler' is required for many tests\n");
             return NULL;
         }
-        ok(!res, "EnumPorts succeeded: got %d\n", res);
-        pi_buffer = HeapAlloc(GetProcessHeap(), 0, pi_needed);
+        ok(!res, "EnumPorts succeeded: got %ld\n", res);
+        pi_buffer = malloc(pi_needed);
         res = EnumPortsW(NULL, 2, pi_buffer, pi_needed, &pi_needed, &pi_numports);
-        ok(res == 1, "EnumPorts failed: got %d\n", res);
+        ok(res == 1, "EnumPorts failed: got %ld\n", res);
     }
     if (pi_buffer) {
         pi = (PORT_INFO_2W *) pi_buffer;
@@ -105,21 +105,6 @@ static LPCSTR load_functions(void)
     return NULL;
 }
 
-/* ###########################
- *   strdupW [internal]
- */
-
-static LPWSTR strdupW(LPCWSTR strW)
-{
-    LPWSTR  ptr;
-
-    ptr = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(strW) + 1) * sizeof(WCHAR));
-    if (ptr) {
-        lstrcpyW(ptr, strW);
-    }
-    return ptr;
-}
-
 /* ########################### */
 
 static void test_AddPortUI(void)
@@ -137,21 +122,21 @@ static void test_AddPortUI(void)
     res = pAddPortUI(NULL, NULL, NULL, NULL);
     ok( !res &&
         ((GetLastError() == ERROR_UNKNOWN_PORT) || (GetLastError() == ERROR_INVALID_PRINTER_NAME)),
-        "got %d with %u (expected '0' with: ERROR_UNKNOWN_PORT or "
+        "got %ld with %lu (expected '0' with: ERROR_UNKNOWN_PORT or "
         "ERROR_INVALID_PRINTER_NAME)\n", res, GetLastError());
 
     SetLastError(0xdeadbeef);
     res = pAddPortUI(NULL, NULL, L"", NULL);
     ok( !res &&
         ((GetLastError() == ERROR_UNKNOWN_PORT) || (GetLastError() == ERROR_INVALID_PRINTER_NAME)),
-        "got %d with %u (expected '0' with: ERROR_UNKNOWN_PORT or "
+        "got %ld with %lu (expected '0' with: ERROR_UNKNOWN_PORT or "
         "ERROR_INVALID_PRINTER_NAME)\n", res, GetLastError());
 
     SetLastError(0xdeadbeef);
     res = pAddPortUI(NULL, NULL, L"does_not_exist", NULL);
     ok( !res &&
         ((GetLastError() == ERROR_UNKNOWN_PORT) || (GetLastError() == ERROR_INVALID_PRINTER_NAME)),
-        "got %d with %u (expected '0' with: ERROR_UNKNOWN_PORT or "
+        "got %ld with %lu (expected '0' with: ERROR_UNKNOWN_PORT or "
         "ERROR_INVALID_PRINTER_NAME)\n", res, GetLastError());
 
     if (winetest_interactive) {
@@ -170,7 +155,7 @@ static void test_AddPortUI(void)
             (GetLastError() == ERROR_CANCELLED) ||
             (GetLastError() == ERROR_ACCESS_DENIED) ||
             (GetLastError() == ERROR_NOT_SUPPORTED),
-            "got %d with %u and %p (expected '!= 0' or '0' with: "
+            "got %ld with %lu and %p (expected '!= 0' or '0' with: "
             "ERROR_CANCELLED, ERROR_ACCESS_DENIED or ERROR_NOT_SUPPORTED)\n",
             res, GetLastError(), new_portname);
 
@@ -194,14 +179,14 @@ static void test_ConfigurePortUI(void)
     res = pConfigurePortUI(NULL, NULL, NULL);
     ok( !res &&
         ((GetLastError() == ERROR_UNKNOWN_PORT) || (GetLastError() == ERROR_INVALID_PRINTER_NAME)),
-        "got %d with %u (expected '0' with: ERROR_UNKNOWN_PORT or "
+        "got %ld with %lu (expected '0' with: ERROR_UNKNOWN_PORT or "
         "ERROR_INVALID_PRINTER_NAME)\n", res, GetLastError());
 
     SetLastError(0xdeadbeef);
     res = pConfigurePortUI(NULL, NULL, L"");
     ok( !res &&
         ((GetLastError() == ERROR_UNKNOWN_PORT) || (GetLastError() == ERROR_INVALID_PRINTER_NAME)),
-        "got %d with %u (expected '0' with: ERROR_UNKNOWN_PORT or "
+        "got %ld with %lu (expected '0' with: ERROR_UNKNOWN_PORT or "
         "ERROR_INVALID_PRINTER_NAME)\n", res, GetLastError());
 
 
@@ -209,7 +194,7 @@ static void test_ConfigurePortUI(void)
     res = pConfigurePortUI(NULL, NULL, L"does_not_exist");
     ok( !res &&
         ((GetLastError() == ERROR_UNKNOWN_PORT) || (GetLastError() == ERROR_INVALID_PRINTER_NAME)),
-        "got %d with %u (expected '0' with: ERROR_UNKNOWN_PORT or "
+        "got %ld with %lu (expected '0' with: ERROR_UNKNOWN_PORT or "
         "ERROR_INVALID_PRINTER_NAME)\n", res, GetLastError());
 
     if (winetest_interactive && lpt_present) {
@@ -217,7 +202,7 @@ static void test_ConfigurePortUI(void)
         res = pConfigurePortUI(NULL, NULL, lpt_present->pPortName);
         ok( res ||
             (GetLastError() == ERROR_CANCELLED) || (GetLastError() == ERROR_ACCESS_DENIED),
-            "got %d with %u (expected '!= 0' or '0' with: ERROR_CANCELLED or "
+            "got %ld with %lu (expected '!= 0' or '0' with: ERROR_CANCELLED or "
             "ERROR_ACCESS_DENIED)\n", res, GetLastError());
     }
 
@@ -226,7 +211,7 @@ static void test_ConfigurePortUI(void)
         res = pConfigurePortUI(NULL, NULL, lpt_absent);
         ok( !res &&
             ((GetLastError() == ERROR_UNKNOWN_PORT) || (GetLastError() == ERROR_INVALID_PRINTER_NAME)),
-            "got %d with %u (expected '0' with: ERROR_UNKNOWN_PORT or "
+            "got %ld with %lu (expected '0' with: ERROR_UNKNOWN_PORT or "
             "ERROR_INVALID_PRINTER_NAME)\n", res, GetLastError());
     }
 
@@ -235,7 +220,7 @@ static void test_ConfigurePortUI(void)
         res = pConfigurePortUI(NULL, NULL, com_present->pPortName);
         ok( res ||
             (GetLastError() == ERROR_CANCELLED) || (GetLastError() == ERROR_ACCESS_DENIED),
-            "got %d with %u (expected '!= 0' or '0' with: ERROR_CANCELLED or "
+            "got %ld with %lu (expected '!= 0' or '0' with: ERROR_CANCELLED or "
             "ERROR_ACCESS_DENIED)\n", res, GetLastError());
     }
 
@@ -244,7 +229,7 @@ static void test_ConfigurePortUI(void)
         res = pConfigurePortUI(NULL, NULL, com_absent);
         ok( !res &&
             ((GetLastError() == ERROR_UNKNOWN_PORT) || (GetLastError() == ERROR_INVALID_PRINTER_NAME)),
-            "got %d with %u (expected '0' with: ERROR_UNKNOWN_PORT or "
+            "got %ld with %lu (expected '0' with: ERROR_UNKNOWN_PORT or "
             "ERROR_INVALID_PRINTER_NAME)\n", res, GetLastError());
 
     }
@@ -254,7 +239,7 @@ static void test_ConfigurePortUI(void)
         res = pConfigurePortUI(NULL, NULL, L"FILE:");
         ok( !res &&
             ((GetLastError() == ERROR_CANCELLED) || (GetLastError() == ERROR_ACCESS_DENIED)),
-            "got %d with %u (expected '0' with: ERROR_CANCELLED or "
+            "got %ld with %lu (expected '0' with: ERROR_CANCELLED or "
             "ERROR_ACCESS_DENIED)\n", res, GetLastError());
     }
 }
@@ -267,7 +252,6 @@ START_TEST(localui)
     DWORD   numentries;
     PORT_INFO_2W * pi2;
     WCHAR   bufferW[16];
-    CHAR    bufferA[16];
     DWORD   id;
 
     /* localui.dll does not exist before w2k */
@@ -281,7 +265,7 @@ START_TEST(localui)
     if (pui) {
         numentries = (pui->dwMonitorUISize - sizeof(DWORD)) / sizeof(VOID *);
         ok( numentries == 3,
-                "dwMonitorUISize (%d) => %d Functions\n", pui->dwMonitorUISize, numentries);
+                "dwMonitorUISize (%ld) => %ld Functions\n", pui->dwMonitorUISize, numentries);
 
         if (numentries > 2) {
             pAddPortUI = pui->pfnAddPortUI;
@@ -302,29 +286,26 @@ START_TEST(localui)
     /* "LPT1:" - "LPT9:" */
     while (((lpt_present == NULL) || (lpt_absent == NULL)) && id < 9) {
         id++;
-        sprintf(bufferA, "LPT%u:", id);
-        MultiByteToWideChar( CP_ACP, 0, bufferA, -1, bufferW, ARRAY_SIZE(bufferW));
+        swprintf(bufferW, ARRAY_SIZE(bufferW), L"LPT%lu:", id);
         pi2 = find_portinfo2(bufferW);
         if (pi2 && (lpt_present == NULL)) lpt_present = pi2;
-        if (!pi2 && (lpt_absent == NULL)) lpt_absent = strdupW(bufferW);
+        if (!pi2 && (lpt_absent == NULL)) lpt_absent = wcsdup(bufferW);
     }
 
     id = 0;
     /* "COM1:" - "COM9:" */
     while (((com_present == NULL) || (com_absent == NULL)) && id < 9) {
         id++;
-        sprintf(bufferA, "COM%u:", id);
-        MultiByteToWideChar( CP_ACP, 0, bufferA, -1, bufferW, ARRAY_SIZE(bufferW));
+        swprintf(bufferW, ARRAY_SIZE(bufferW), L"COM%lu:", id);
         pi2 = find_portinfo2(bufferW);
         if (pi2 && (com_present == NULL)) com_present = pi2;
-        if (!pi2 && (com_absent == NULL)) com_absent = strdupW(bufferW);
+        if (!pi2 && (com_absent == NULL)) com_absent = wcsdup(bufferW);
     }
 
     test_AddPortUI();
     test_ConfigurePortUI();
 
-    /* cleanup */
-    HeapFree(GetProcessHeap(), 0, lpt_absent);
-    HeapFree(GetProcessHeap(), 0, com_absent);
-    HeapFree(GetProcessHeap(), 0, pi_buffer);
+    free(lpt_absent);
+    free(com_absent);
+    free(pi_buffer);
 }

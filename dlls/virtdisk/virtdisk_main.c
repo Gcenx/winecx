@@ -26,30 +26,11 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(virtdisk);
 
-/*****************************************************
- *    DllMain (VIRTDISK.@)
- */
-BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, void *reserved)
-{
-    TRACE("(%p, %d, %p)\n", hinst, reason, reserved);
-
-    switch (reason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(hinst);
-            break;
-    }
-
-    return TRUE;
-}
-
 DWORD WINAPI GetStorageDependencyInformation(HANDLE obj, GET_STORAGE_DEPENDENCY_FLAG flags, ULONG size, STORAGE_DEPENDENCY_INFO *info, ULONG *used)
 {
     ULONG temp_size = sizeof(STORAGE_DEPENDENCY_INFO);
 
-    FIXME("(%p, 0x%x, %u, %p, %p): stub\n", obj, flags, size, info, used);
+    FIXME("(%p, 0x%x, %lu, %p, %p): stub\n", obj, flags, size, info, used);
 
     if (used) *used = temp_size;
 
@@ -76,4 +57,10 @@ DWORD WINAPI OpenVirtualDisk(VIRTUAL_STORAGE_TYPE *type, const WCHAR *path, VIRT
         return ERROR_INVALID_PARAMETER;
 
     return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+DWORD WINAPI DetachVirtualDisk(HANDLE handle, DETACH_VIRTUAL_DISK_FLAG flags, ULONG specific_flags)
+{
+    FIXME("(%p, 0x%x, %ld): stub\n", handle, flags, specific_flags);
+    return ERROR_INVALID_PARAMETER;
 }

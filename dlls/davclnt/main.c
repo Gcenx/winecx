@@ -29,26 +29,12 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(davclnt);
 
-BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
-{
-    switch (reason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(instance);
-            break;
-    }
-
-    return TRUE;
-}
-
 /***********************************************************************
  *          DavRegisterAuthCallback (davclnt.@)
  */
 OPAQUE_HANDLE WINAPI DavRegisterAuthCallback(PFNDAVAUTHCALLBACK cb, ULONG version)
 {
-    FIXME("%p, %u\n", cb, version);
+    FIXME("%p, %lu\n", cb, version);
     return 0xdeadbeef;
 }
 
@@ -57,5 +43,5 @@ OPAQUE_HANDLE WINAPI DavRegisterAuthCallback(PFNDAVAUTHCALLBACK cb, ULONG versio
  */
 VOID WINAPI DavUnregisterAuthCallback(OPAQUE_HANDLE handle)
 {
-    FIXME("%08x\n", handle);
+    FIXME("%08lx\n", handle);
 }

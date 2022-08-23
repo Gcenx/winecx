@@ -89,6 +89,11 @@ like \fBas\fR, \fBnm\fR and \fBld\fR.
 Specify the C compiler to use to compile assembly files; the default
 is to instead use the assembler specified with \fB--as-cmd\fR.
 .TP
+.B \--data-only
+Build a module that contains only data and resources, and no
+executable code.  With this option, \fBwinebuild\fR directly outputs a
+PE file, instead of an assembly or object file.
+.TP
 .BI \-d,\ --delay-lib= name
 Set the delayed import mode for the specified library, which must be
 one of the libraries imported with the \fB-l\fR option. Delayed mode
@@ -209,6 +214,10 @@ output file name ends in .o, the text output is sent to a
 temporary file that is then assembled to produce the specified .o
 file.
 .TP
+.B --prefer-native
+Specify that the native DLL should be preferred if available at run
+time. This can be used on modules that are mostly unimplemented.
+.TP
 .BI \-r,\ --res= rsrc.res
 Load resources from the specified binary resource file. The
 \fIrsrc.res\fR file can be produced from a source resource file with
@@ -250,6 +259,11 @@ argument array to use Unicode strings. A graphical executable has a
 .br
 Optionally a major and minor subsystem version can also be specified;
 the default subsystem version is 4.0.
+.TP
+.BI --syscall-table= id
+Set the system call table id, between 0 and 3. The default is 0, the
+ntdll syscall table. Only useful in modules that define syscall entry
+points.
 .TP
 .BI \-u,\ --undefined= symbol
 Add \fIsymbol\fR to the list of undefined symbols when invoking the
@@ -525,6 +539,25 @@ This declaration defines an ordinal as an absolute value.
 will be the name available for dynamic linking.
 .I data
 can be a decimal number or a hex number preceded by "0x".
+.SS "Api sets"
+Syntax:
+.br
+.BI apiset\  apiset_dll\  =\  target.dll\ [host.dll:target.dll]
+.PP
+This declaration defines that the \fIapiset_dll\fR (of the form
+api-ms-*) resolves to the \fItarget\fR dll. Optionally other targets
+can be specified to resolve differently for specific host dlls. For
+example:
+.IP
+api-ms-win-core-processenvironment-l1-1-0 = kernelbase.dll
+.br
+api-ms-win-core-processthreads-l1-1-0 = kernel32.dll \\
+.br
+  kernel32.dll:kernelbase.dll
+.PP
+If apisets are defined, a corresponding .apiset section will be
+generated in the PE binary. This requires building the module with the
+--data-only option.
 .SH AUTHORS
 .B winebuild
 has been worked on by many people over the years. The main authors are

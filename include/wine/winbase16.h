@@ -25,7 +25,6 @@
 #include <winnls.h>
 #include <winternl.h>
 #include <wine/windef16.h>
-#include <wine/winheader_enter.h>
 
 #include <pshpack1.h>
 
@@ -198,7 +197,7 @@ typedef struct _STACK16FRAME
     DWORD         callfrom_ip;    /* 18 callfrom tail IP */
     DWORD         module_cs;      /* 1c module code segment */
     DWORD         relay;          /* 20 relay function address */
-    WORD          entry_ip;       /* 22 entry point IP */
+    WORD          entry_ip;       /* 24 entry point IP */
     DWORD         entry_point;    /* 26 API entry point to call, reused as mutex count */
     WORD          bp;             /* 2a 16-bit stack frame chain */
     WORD          ip;             /* 2c return address */
@@ -567,7 +566,5 @@ BOOL16      WINAPI WriteProfileSection16(LPCSTR,LPCSTR);
 #define CURRENT_DS      (CURRENT_STACK16->ds)
 #define CURRENT_SP      (((WORD *)NtCurrentTeb()->SystemReserved1)[0])
 #define CURRENT_SS      (((WORD *)NtCurrentTeb()->SystemReserved1)[1])
-
-#include <wine/winheader_exit.h>
 
 #endif /* __WINE_WINE_WINBASE16_H */

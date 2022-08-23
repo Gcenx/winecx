@@ -18,6 +18,7 @@
  */
 
 #define NONAMELESSUNION
+#define WINE_NO_NAMELESS_EXTENSION
 #include "d3d11_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d11);
@@ -729,7 +730,7 @@ static void STDMETHODCALLTYPE d3d11_device_context_PSSetShader(ID3D11DeviceConte
     TRACE("iface %p, shader %p, class_instances %p, class_instance_count %u.\n",
             iface, shader, class_instances, class_instance_count);
 
-    if (class_instances)
+    if (class_instance_count)
         FIXME("Dynamic linking is not implemented yet.\n");
 
     wined3d_device_context_set_shader(context->wined3d_context, WINED3D_SHADER_TYPE_PIXEL,
@@ -754,7 +755,7 @@ static void STDMETHODCALLTYPE d3d11_device_context_VSSetShader(ID3D11DeviceConte
     TRACE("iface %p, shader %p, class_instances %p, class_instance_count %u.\n",
             iface, shader, class_instances, class_instance_count);
 
-    if (class_instances)
+    if (class_instance_count)
         FIXME("Dynamic linking is not implemented yet.\n");
 
     wined3d_device_context_set_shader(context->wined3d_context, WINED3D_SHADER_TYPE_VERTEX,
@@ -940,7 +941,7 @@ static void STDMETHODCALLTYPE d3d11_device_context_GSSetShader(ID3D11DeviceConte
     TRACE("iface %p, shader %p, class_instances %p, class_instance_count %u.\n",
             iface, shader, class_instances, class_instance_count);
 
-    if (class_instances)
+    if (class_instance_count)
         FIXME("Dynamic linking is not implemented yet.\n");
 
     wined3d_device_context_set_shader(context->wined3d_context, WINED3D_SHADER_TYPE_GEOMETRY,
@@ -1543,7 +1544,7 @@ static void STDMETHODCALLTYPE d3d11_device_context_HSSetShader(ID3D11DeviceConte
     TRACE("iface %p, shader %p, class_instances %p, class_instance_count %u.\n",
             iface, shader, class_instances, class_instance_count);
 
-    if (class_instances)
+    if (class_instance_count)
         FIXME("Dynamic linking is not implemented yet.\n");
 
     wined3d_device_context_set_shader(context->wined3d_context, WINED3D_SHADER_TYPE_HULL,
@@ -1587,7 +1588,7 @@ static void STDMETHODCALLTYPE d3d11_device_context_DSSetShader(ID3D11DeviceConte
     TRACE("iface %p, shader %p, class_instances %p, class_instance_count %u.\n",
             iface, shader, class_instances, class_instance_count);
 
-    if (class_instances)
+    if (class_instance_count)
         FIXME("Dynamic linking is not implemented yet.\n");
 
     wined3d_device_context_set_shader(context->wined3d_context, WINED3D_SHADER_TYPE_DOMAIN,
@@ -1658,7 +1659,7 @@ static void STDMETHODCALLTYPE d3d11_device_context_CSSetShader(ID3D11DeviceConte
     TRACE("iface %p, shader %p, class_instances %p, class_instance_count %u.\n",
             iface, shader, class_instances, class_instance_count);
 
-    if (class_instances)
+    if (class_instance_count)
         FIXME("Dynamic linking is not implemented yet.\n");
 
     wined3d_device_context_set_shader(context->wined3d_context, WINED3D_SHADER_TYPE_COMPUTE,
@@ -1733,8 +1734,6 @@ static void STDMETHODCALLTYPE d3d11_device_context_PSGetShader(ID3D11DeviceConte
     TRACE("iface %p, shader %p, class_instances %p, class_instance_count %p.\n",
             iface, shader, class_instances, class_instance_count);
 
-    if (class_instances || class_instance_count)
-        FIXME("Dynamic linking not implemented yet.\n");
     if (class_instance_count)
         *class_instance_count = 0;
 
@@ -1791,8 +1790,6 @@ static void STDMETHODCALLTYPE d3d11_device_context_VSGetShader(ID3D11DeviceConte
     TRACE("iface %p, shader %p, class_instances %p, class_instance_count %p.\n",
             iface, shader, class_instances, class_instance_count);
 
-    if (class_instances || class_instance_count)
-        FIXME("Dynamic linking not implemented yet.\n");
     if (class_instance_count)
         *class_instance_count = 0;
 
@@ -1925,8 +1922,6 @@ static void STDMETHODCALLTYPE d3d11_device_context_GSGetShader(ID3D11DeviceConte
     TRACE("iface %p, shader %p, class_instances %p, class_instance_count %p.\n",
             iface, shader, class_instances, class_instance_count);
 
-    if (class_instances || class_instance_count)
-        FIXME("Dynamic linking not implemented yet.\n");
     if (class_instance_count)
         *class_instance_count = 0;
 
@@ -2392,8 +2387,6 @@ static void STDMETHODCALLTYPE d3d11_device_context_HSGetShader(ID3D11DeviceConte
     TRACE("iface %p, shader %p, class_instances %p, class_instance_count %p.\n",
             iface, shader, class_instances, class_instance_count);
 
-    if (class_instances || class_instance_count)
-        FIXME("Dynamic linking not implemented yet.\n");
     if (class_instance_count)
         *class_instance_count = 0;
 
@@ -2486,8 +2479,6 @@ static void STDMETHODCALLTYPE d3d11_device_context_DSGetShader(ID3D11DeviceConte
     TRACE("iface %p, shader %p, class_instances %p, class_instance_count %p.\n",
             iface, shader, class_instances, class_instance_count);
 
-    if (class_instances || class_instance_count)
-        FIXME("Dynamic linking not implemented yet.\n");
     if (class_instance_count)
         *class_instance_count = 0;
 
@@ -2606,8 +2597,6 @@ static void STDMETHODCALLTYPE d3d11_device_context_CSGetShader(ID3D11DeviceConte
     TRACE("iface %p, shader %p, class_instances %p, class_instance_count %p.\n",
             iface, shader, class_instances, class_instance_count);
 
-    if (class_instances || class_instance_count)
-        FIXME("Dynamic linking not implemented yet.\n");
     if (class_instance_count)
         *class_instance_count = 0;
 
@@ -3376,6 +3365,8 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateShaderResourceView(ID3D11Dev
 
     TRACE("iface %p, resource %p, desc %p, view %p.\n", iface, resource, desc, view);
 
+    *view = NULL;
+
     if (!resource)
         return E_INVALIDARG;
 
@@ -3395,6 +3386,8 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateUnorderedAccessView(ID3D11De
     HRESULT hr;
 
     TRACE("iface %p, resource %p, desc %p, view %p.\n", iface, resource, desc, view);
+
+    *view = NULL;
 
     if (FAILED(hr = d3d11_unordered_access_view_create(device, resource, desc, &object)))
         return hr;
@@ -3434,6 +3427,8 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateDepthStencilView(ID3D11Devic
     HRESULT hr;
 
     TRACE("iface %p, resource %p, desc %p, view %p.\n", iface, resource, desc, view);
+
+    *view = NULL;
 
     if (FAILED(hr = d3d_depthstencil_view_create(device, resource, desc, &object)))
         return hr;
@@ -4092,10 +4087,10 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CheckFeatureSupport(ID3D11Device2 
             options->FlagsForUpdateAndCopySeenByDriver = FALSE;
             options->ClearView = FALSE;
             options->CopyWithOverlap = FALSE;
-            options->ConstantBufferPartialUpdate = FALSE;
+            options->ConstantBufferPartialUpdate = TRUE;
             options->ConstantBufferOffsetting = TRUE;
-            options->MapNoOverwriteOnDynamicConstantBuffer = FALSE;
-            options->MapNoOverwriteOnDynamicBufferSRV = FALSE;
+            options->MapNoOverwriteOnDynamicConstantBuffer = TRUE;
+            options->MapNoOverwriteOnDynamicBufferSRV = TRUE;
             options->MultisampleRTVWithForcedSampleCountOne = FALSE;
             options->SAD4ShaderInstructions = FALSE;
             options->ExtendedDoublesShaderInstructions = FALSE;
@@ -6020,6 +6015,8 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateShaderResourceView1(ID3D10De
 
     TRACE("iface %p, resource %p, desc %p, view %p.\n", iface, resource, desc, view);
 
+    *view = NULL;
+
     if (!resource)
         return E_INVALIDARG;
 
@@ -6095,6 +6092,8 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateDepthStencilView(ID3D10Devic
     HRESULT hr;
 
     TRACE("iface %p, resource %p, desc %p, view %p.\n", iface, resource, desc, view);
+
+    *view = NULL;
 
     if (desc)
     {

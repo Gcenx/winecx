@@ -24,6 +24,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -197,13 +198,6 @@ struct wndclass_redirect_data
     ULONG module_offset;/* container name offset */
 };
 
-struct dllredirect_data
-{
-    ULONG size;
-    ULONG unk;
-    DWORD res[3];
-};
-
 struct tlibredirect_data
 {
     ULONG  size;
@@ -305,6 +299,15 @@ struct progidredirect_data
     ULONG size;
     DWORD reserved;
     ULONG clsid_offset;
+};
+
+struct activatable_class_data
+{
+    ULONG size;
+    DWORD unk;
+    DWORD module_len;
+    DWORD module_offset;
+    DWORD threading_model;
 };
 
 /*
@@ -419,6 +422,25 @@ struct progidredirect_data
    This sections uses generated alias guids from COM server section. This way
    ProgID -> CLSID mapping returns generated guid, not the real one. ProgID string
    is stored too, aligned.
+
+   - WinRT activatable class section is a plain buffer with following format:
+
+   <section header>
+   <module names[]>
+   <index[]>
+   <data[]> --- <class name>
+                <data>
+
+   Header is fixed length structure - struct strsection_header,
+   contains classes count;
+
+   Index is an array of fixed length index records, each record is
+   struct string_index.
+
+   All strings in data itself are WCHAR, null terminated, 4-bytes aligned.
+
+   All offsets are relative to section itself.
+
 */
 
 struct progids
@@ -482,6 +504,11 @@ struct entity
             WCHAR *value;
             WCHAR *ns;
         } settings;
+        struct
+        {
+            WCHAR *name;
+            DWORD  threading_model;
+        } activatable_class;
     } u;
 };
 
@@ -495,6 +522,7 @@ struct entity_array
 struct dll_redirect
 {
     WCHAR                *name;
+    WCHAR                *load_from;
     WCHAR                *hash;
     struct entity_array   entities;
 };
@@ -531,13 +559,14 @@ enum context_sections
     SERVERREDIRECT_SECTION = 8,
     IFACEREDIRECT_SECTION  = 16,
     CLRSURROGATES_SECTION  = 32,
-    PROGIDREDIRECT_SECTION = 64
+    PROGIDREDIRECT_SECTION = 64,
+    ACTIVATABLE_CLASS_SECTION = 128,
 };
 
 typedef struct _ACTIVATION_CONTEXT
 {
     ULONG               magic;
-    int                 ref_count;
+    LONG                ref_count;
     struct file_info    config;
     struct file_info    appdir;
     struct assembly    *assemblies;
@@ -548,6 +577,7 @@ typedef struct _ACTIVATION_CONTEXT
     struct strsection_header  *wndclass_section;
     struct strsection_header  *dllredirect_section;
     struct strsection_header  *progid_section;
+    struct strsection_header  *activatable_class_section;
     struct guidsection_header *tlib_section;
     struct guidsection_header *comserver_section;
     struct guidsection_header *ifaceps_section;
@@ -579,11 +609,14 @@ static const WCHAR current_archW[] = L"none";
 static const WCHAR asmv1W[] = L"urn:schemas-microsoft-com:asm.v1";
 static const WCHAR asmv2W[] = L"urn:schemas-microsoft-com:asm.v2";
 static const WCHAR asmv3W[] = L"urn:schemas-microsoft-com:asm.v3";
+static const WCHAR winrtv1W[] = L"urn:schemas-microsoft-com:winrt.v1";
 static const WCHAR compatibilityNSW[] = L"urn:schemas-microsoft-com:compatibility.v1";
 static const WCHAR windowsSettings2005NSW[] = L"http://schemas.microsoft.com/SMI/2005/WindowsSettings";
 static const WCHAR windowsSettings2011NSW[] = L"http://schemas.microsoft.com/SMI/2011/WindowsSettings";
 static const WCHAR windowsSettings2016NSW[] = L"http://schemas.microsoft.com/SMI/2016/WindowsSettings";
 static const WCHAR windowsSettings2017NSW[] = L"http://schemas.microsoft.com/SMI/2017/WindowsSettings";
+static const WCHAR windowsSettings2019NSW[] = L"http://schemas.microsoft.com/SMI/2019/WindowsSettings";
+static const WCHAR windowsSettings2020NSW[] = L"http://schemas.microsoft.com/SMI/2020/WindowsSettings";
 
 struct olemisc_entry
 {
@@ -881,6 +914,9 @@ static void free_entity_array(struct entity_array *array)
             RtlFreeHeap(GetProcessHeap(), 0, entity->u.settings.value);
             RtlFreeHeap(GetProcessHeap(), 0, entity->u.settings.ns);
             break;
+        case ACTIVATION_CONTEXT_SECTION_WINRT_ACTIVATABLE_CLASSES:
+            RtlFreeHeap(GetProcessHeap(), 0, entity->u.activatable_class.name);
+            break;
         default:
             FIXME("Unknown entity kind %d\n", entity->kind);
         }
@@ -1073,6 +1109,7 @@ static void actctx_release( ACTIVATION_CONTEXT *actctx )
                 struct dll_redirect *dll = &assembly->dlls[j];
                 free_entity_array( &dll->entities );
                 RtlFreeHeap( GetProcessHeap(), 0, dll->name );
+                RtlFreeHeap( GetProcessHeap(), 0, dll->load_from );
                 RtlFreeHeap( GetProcessHeap(), 0, dll->hash );
             }
             RtlFreeHeap( GetProcessHeap(), 0, assembly->dlls );
@@ -1092,6 +1129,7 @@ static void actctx_release( ACTIVATION_CONTEXT *actctx )
         RtlFreeHeap( GetProcessHeap(), 0, actctx->ifaceps_section );
         RtlFreeHeap( GetProcessHeap(), 0, actctx->clrsurrogate_section );
         RtlFreeHeap( GetProcessHeap(), 0, actctx->progid_section );
+        RtlFreeHeap( GetProcessHeap(), 0, actctx->activatable_class_section );
         actctx->magic = 0;
         RtlFreeHeap( GetProcessHeap(), 0, actctx );
     }
@@ -2213,6 +2251,54 @@ static void parse_noinheritable_elem( xmlbuf_t *xmlbuf, const struct xml_elem *p
     if (!end) parse_expect_end_elem(xmlbuf, parent);
 }
 
+static void parse_activatable_class_elem( xmlbuf_t *xmlbuf, struct dll_redirect *dll,
+                                          struct actctx_loader *acl, const struct xml_elem *parent )
+{
+    struct xml_elem elem;
+    struct xml_attr attr;
+    BOOL end = FALSE;
+    struct entity *entity;
+
+    if (!(entity = add_entity(&dll->entities, ACTIVATION_CONTEXT_SECTION_WINRT_ACTIVATABLE_CLASSES)))
+    {
+        set_error( xmlbuf );
+        return;
+    }
+    while (next_xml_attr(xmlbuf, &attr, &end))
+    {
+        if (xml_attr_cmp(&attr, L"name"))
+        {
+            if (!(entity->u.activatable_class.name = xmlstrdupW(&attr.value)))
+                set_error( xmlbuf );
+        }
+        else if (xml_attr_cmp(&attr, L"threadingModel"))
+        {
+            if (xmlstr_cmpi(&attr.value, L"both"))
+                entity->u.activatable_class.threading_model = 0;
+            else if (xmlstr_cmpi(&attr.value, L"sta"))
+                entity->u.activatable_class.threading_model = 1;
+            else if (xmlstr_cmpi(&attr.value, L"mta"))
+                entity->u.activatable_class.threading_model = 2;
+            else
+                set_error( xmlbuf );
+        }
+        else if (!is_xmlns_attr( &attr ))
+        {
+            WARN("unknown attr %s\n", debugstr_xml_attr(&attr));
+        }
+    }
+
+    acl->actctx->sections |= ACTIVATABLE_CLASS_SECTION;
+
+    if (end) return;
+
+    while (next_xml_elem(xmlbuf, &elem, parent))
+    {
+        WARN("unknown elem %s\n", debugstr_xml_elem(&elem));
+        parse_unknown_elem(xmlbuf, &elem);
+    }
+}
+
 static void parse_file_elem( xmlbuf_t* xmlbuf, struct assembly* assembly,
                              struct actctx_loader* acl, const struct xml_elem *parent )
 {
@@ -2233,6 +2319,10 @@ static void parse_file_elem( xmlbuf_t* xmlbuf, struct assembly* assembly,
         {
             if (!(dll->name = xmlstrdupW(&attr.value))) set_error( xmlbuf );
             TRACE("name=%s\n", debugstr_xmlstr(&attr.value));
+        }
+        else if (xml_attr_cmp(&attr, L"loadFrom"))
+        {
+            if (!(dll->load_from = xmlstrdupW(&attr.value))) set_error( xmlbuf );
         }
         else if (xml_attr_cmp(&attr, L"hash"))
         {
@@ -2277,6 +2367,10 @@ static void parse_file_elem( xmlbuf_t* xmlbuf, struct assembly* assembly,
         else if (xml_elem_cmp(&elem, L"windowClass", asmv1W))
         {
             parse_window_class_elem(xmlbuf, dll, acl, &elem);
+        }
+        else if (xml_elem_cmp(&elem, L"activatableClass", winrtv1W))
+        {
+            parse_activatable_class_elem(xmlbuf, dll, acl, &elem);
         }
         else
         {
@@ -2326,6 +2420,38 @@ static void parse_supportedos_elem( xmlbuf_t *xmlbuf, struct assembly *assembly,
     if (!end) parse_expect_end_elem(xmlbuf, parent);
 }
 
+static void parse_maxversiontested_elem( xmlbuf_t *xmlbuf, struct assembly *assembly,
+                                         struct actctx_loader *acl, const struct xml_elem *parent )
+{
+    struct xml_attr attr;
+    BOOL end = FALSE;
+
+    while (next_xml_attr(xmlbuf, &attr, &end))
+    {
+        if (xml_attr_cmp(&attr, L"Id"))
+        {
+            COMPATIBILITY_CONTEXT_ELEMENT *compat;
+            struct assembly_version version;
+
+            if (!(compat = add_compat_context(assembly)))
+            {
+                set_error( xmlbuf );
+                return;
+            }
+            parse_version( &attr.value, &version );
+            compat->Type = ACTCTX_COMPATIBILITY_ELEMENT_TYPE_MAXVERSIONTESTED;
+            compat->MaxVersionTested = (ULONGLONG)version.major << 48 |
+                (ULONGLONG)version.minor << 32 | version.build << 16 | version.revision;
+        }
+        else if (!is_xmlns_attr( &attr ))
+        {
+            WARN("unknown attr %s\n", debugstr_xml_attr(&attr));
+        }
+    }
+
+    if (!end) parse_expect_end_elem(xmlbuf, parent);
+}
+
 static void parse_compatibility_application_elem(xmlbuf_t *xmlbuf, struct assembly *assembly,
                                                  struct actctx_loader* acl, const struct xml_elem *parent)
 {
@@ -2336,6 +2462,10 @@ static void parse_compatibility_application_elem(xmlbuf_t *xmlbuf, struct assemb
         if (xml_elem_cmp(&elem, L"supportedOS", compatibilityNSW))
         {
             parse_supportedos_elem(xmlbuf, assembly, acl, &elem);
+        }
+        else if (xml_elem_cmp(&elem, L"maxversiontested", compatibilityNSW))
+        {
+            parse_maxversiontested_elem(xmlbuf, assembly, acl, &elem);
         }
         else
         {
@@ -2407,12 +2537,14 @@ static void parse_windows_settings_elem( xmlbuf_t *xmlbuf, struct assembly *asse
 
     while (next_xml_elem( xmlbuf, &elem, parent ))
     {
-        if (xml_elem_cmp( &elem, L"autoElevate", windowsSettings2005NSW ) ||
+        if (xml_elem_cmp( &elem, L"activeCodePage", windowsSettings2019NSW ) ||
+            xml_elem_cmp( &elem, L"autoElevate", windowsSettings2005NSW ) ||
             xml_elem_cmp( &elem, L"disableTheming", windowsSettings2005NSW ) ||
             xml_elem_cmp( &elem, L"disableWindowFiltering", windowsSettings2011NSW ) ||
             xml_elem_cmp( &elem, L"dpiAware", windowsSettings2005NSW ) ||
             xml_elem_cmp( &elem, L"dpiAwareness", windowsSettings2016NSW ) ||
             xml_elem_cmp( &elem, L"gdiScaling", windowsSettings2017NSW ) ||
+            xml_elem_cmp( &elem, L"heapType", windowsSettings2020NSW ) ||
             xml_elem_cmp( &elem, L"highResolutionScrollingAware", windowsSettings2017NSW ) ||
             xml_elem_cmp( &elem, L"longPathAware", windowsSettings2016NSW ) ||
             xml_elem_cmp( &elem, L"magicFutureSetting", windowsSettings2017NSW ) ||
@@ -2436,7 +2568,7 @@ static void parse_application_elem( xmlbuf_t *xmlbuf, struct assembly *assembly,
 
     while (next_xml_elem( xmlbuf, &elem, parent ))
     {
-        if (xml_elem_cmp( &elem, L"windowsSettings", asmv3W ))
+        if (xml_elem_cmp( &elem, L"windowsSettings", asmv1W ))
         {
             parse_windows_settings_elem( xmlbuf, assembly, acl, &elem );
         }
@@ -2655,7 +2787,7 @@ static void parse_assembly_elem( xmlbuf_t *xmlbuf, struct assembly* assembly,
         {
             parse_compatibility_elem(xmlbuf, assembly, acl, &elem);
         }
-        else if (xml_elem_cmp(&elem, L"application", asmv3W))
+        else if (xml_elem_cmp(&elem, L"application", asmv1W))
         {
             parse_application_elem(xmlbuf, assembly, acl, &elem);
         }
@@ -2984,7 +3116,7 @@ static NTSTATUS get_manifest_in_associated_manifest( struct actctx_loader* acl, 
         status = get_manifest_in_manifest_file( acl, ai, nameW.Buffer, directory, FALSE, file );
         NtClose( file );
     }
-    else status = STATUS_RESOURCE_TYPE_NOT_FOUND;
+    else status = STATUS_RESOURCE_NAME_NOT_FOUND;
     RtlFreeUnicodeString( &nameW );
     return status;
 }
@@ -3305,8 +3437,13 @@ static NTSTATUS build_dllredirect_section(ACTIVATION_CONTEXT* actctx, struct str
 
             /* each entry needs index, data and string data */
             total_len += sizeof(*index);
-            total_len += sizeof(*data);
             total_len += aligned_string_len((wcslen(dll->name)+1)*sizeof(WCHAR));
+            if (dll->load_from)
+            {
+                total_len += offsetof( struct dllredirect_data, paths[1] );
+                total_len += aligned_string_len( wcslen(dll->load_from) * sizeof(WCHAR) );
+            }
+            else total_len += offsetof( struct dllredirect_data, paths[0] );
         }
 
         dll_count += assembly->num_dlls;
@@ -3344,21 +3481,40 @@ static NTSTATUS build_dllredirect_section(ACTIVATION_CONTEXT* actctx, struct str
             index->name_offset = name_offset;
             index->name_len = str.Length;
             index->data_offset = index->name_offset + aligned_string_len(str.MaximumLength);
-            index->data_len = sizeof(*data);
+            index->data_len = offsetof( struct dllredirect_data, paths[0] );
             index->rosterindex = i + 1;
-
-            /* setup data */
-            data = (struct dllredirect_data*)((BYTE*)header + index->data_offset);
-            data->size = sizeof(*data);
-            data->unk = 2; /* FIXME: seems to be constant */
-            memset(data->res, 0, sizeof(data->res));
 
             /* dll name */
             ptrW = (WCHAR*)((BYTE*)header + index->name_offset);
             memcpy(ptrW, dll->name, index->name_len);
             ptrW[index->name_len/sizeof(WCHAR)] = 0;
+            name_offset += aligned_string_len(str.MaximumLength);
 
-            name_offset += sizeof(*data) + aligned_string_len(str.MaximumLength);
+            /* setup data */
+            data = (struct dllredirect_data*)((BYTE*)header + index->data_offset);
+            if (dll->load_from)
+            {
+                ULONG len = wcslen(dll->load_from) * sizeof(WCHAR);
+                data->size = offsetof( struct dllredirect_data, paths[1] );
+                data->flags = 0;
+                data->total_len = aligned_string_len( len );
+                data->paths_count = 1;
+                data->paths_offset = index->data_offset + offsetof( struct dllredirect_data, paths[0] );
+                data->paths[0].offset = index->data_offset + data->size;
+                data->paths[0].len = len;
+                ptrW = (WCHAR *)((BYTE *)header + data->paths[0].offset);
+                memcpy( ptrW, dll->load_from, len );
+                if (wcschr( dll->load_from, '%' )) data->flags |= DLL_REDIRECT_PATH_EXPAND;
+            }
+            else
+            {
+                data->size = offsetof( struct dllredirect_data, paths[0] );
+                data->flags = DLL_REDIRECT_PATH_OMITS_ASSEMBLY_ROOT;
+                data->total_len = 0;
+                data->paths_count = 0;
+                data->paths_offset = 0;
+            }
+            name_offset += data->size + data->total_len;
 
             index++;
         }
@@ -3669,6 +3825,206 @@ static NTSTATUS find_window_class(ACTIVATION_CONTEXT* actctx, const UNICODE_STRI
         data->ulSectionGlobalDataLength = 0;
         data->lpSectionBase = actctx->wndclass_section;
         data->ulSectionTotalLength = RtlSizeHeap( GetProcessHeap(), 0, actctx->wndclass_section );
+        data->hActCtx = NULL;
+
+        if (data->cbSize >= FIELD_OFFSET(ACTCTX_SECTION_KEYED_DATA, ulAssemblyRosterIndex) + sizeof(ULONG))
+            data->ulAssemblyRosterIndex = index->rosterindex;
+    }
+
+    return STATUS_SUCCESS;
+}
+
+static inline struct string_index *get_activatable_class_first_index(ACTIVATION_CONTEXT *actctx)
+{
+    return (struct string_index *)((BYTE *)actctx->activatable_class_section + actctx->activatable_class_section->index_offset);
+}
+
+static inline struct activatable_class_data *get_activatable_class_data(ACTIVATION_CONTEXT *ctxt, struct string_index *index)
+{
+    return (struct activatable_class_data *)((BYTE *)ctxt->activatable_class_section + index->data_offset);
+}
+
+static NTSTATUS build_activatable_class_section(ACTIVATION_CONTEXT *actctx, struct strsection_header **section)
+{
+    unsigned int i, j, k, total_len = 0, class_count = 0, global_offset = 0, global_len = 0;
+    struct activatable_class_data *data;
+    struct strsection_header *header;
+    struct string_index *index;
+    ULONG name_offset;
+
+    /* compute section length */
+    for (i = 0; i < actctx->num_assemblies; i++)
+    {
+        struct assembly *assembly = &actctx->assemblies[i];
+        for (j = 0; j < assembly->num_dlls; j++)
+        {
+            struct dll_redirect *dll = &assembly->dlls[j];
+            BOOL has_class = FALSE;
+
+            for (k = 0; k < dll->entities.num; k++)
+            {
+                struct entity *entity = &dll->entities.base[k];
+                if (entity->kind == ACTIVATION_CONTEXT_SECTION_WINRT_ACTIVATABLE_CLASSES)
+                {
+                    int class_len = wcslen(entity->u.activatable_class.name) + 1;
+
+                    /* each class entry needs index, data and string data */
+                    total_len += sizeof(*index);
+                    total_len += aligned_string_len(class_len * sizeof(WCHAR));
+                    total_len += sizeof(*data);
+
+                    class_count++;
+                    has_class = TRUE;
+                }
+            }
+
+            if (has_class)
+            {
+                int module_len = wcslen(dll->name) + 1;
+                global_len += aligned_string_len(module_len * sizeof(WCHAR));
+            }
+        }
+    }
+
+    total_len += sizeof(*header) + global_len;
+
+    header = RtlAllocateHeap(GetProcessHeap(), 0, total_len);
+    if (!header) return STATUS_NO_MEMORY;
+
+    memset(header, 0, sizeof(*header));
+    header->magic = STRSECTION_MAGIC;
+    header->size  = sizeof(*header);
+    header->count = class_count;
+    header->global_offset = header->size;
+    header->global_len = global_len;
+    header->index_offset = header->global_offset + header->global_len;
+    index = (struct string_index *)((BYTE *)header + header->index_offset);
+    name_offset = header->index_offset + header->count * sizeof(*index);
+
+    global_offset = header->size;
+    for (i = 0; i < actctx->num_assemblies; i++)
+    {
+        struct assembly *assembly = &actctx->assemblies[i];
+        for (j = 0; j < assembly->num_dlls; j++)
+        {
+            struct dll_redirect *dll = &assembly->dlls[j];
+            int module_len = wcslen(dll->name) * sizeof(WCHAR);
+            BOOL has_class = FALSE;
+
+            for (k = 0; k < dll->entities.num; k++)
+            {
+                struct entity *entity = &dll->entities.base[k];
+
+                if (entity->kind == ACTIVATION_CONTEXT_SECTION_WINRT_ACTIVATABLE_CLASSES)
+                {
+                    UNICODE_STRING str;
+                    WCHAR *ptrW;
+
+                    /* setup new index entry */
+                    str.Buffer = entity->u.activatable_class.name;
+                    str.Length = wcslen(entity->u.activatable_class.name) * sizeof(WCHAR);
+                    str.MaximumLength = str.Length + sizeof(WCHAR);
+                    /* hash class name */
+                    RtlHashUnicodeString(&str, TRUE, HASH_STRING_ALGORITHM_X65599, &index->hash);
+
+                    index->name_offset = name_offset;
+                    index->name_len = str.Length;
+                    index->data_offset = index->name_offset + aligned_string_len(str.MaximumLength);
+                    index->data_len = sizeof(*data);
+                    index->rosterindex = i + 1;
+
+                    /* class name */
+                    ptrW = (WCHAR *)((BYTE *)header + index->name_offset);
+                    memcpy(ptrW, entity->u.activatable_class.name, index->name_len);
+                    ptrW[index->name_len / sizeof(WCHAR)] = 0;
+
+                    /* class data */
+                    data = (struct activatable_class_data *)((BYTE *)header + index->data_offset);
+                    data->size = sizeof(*data);
+                    data->threading_model = entity->u.activatable_class.threading_model;
+                    data->module_len = module_len;
+                    data->module_offset = global_offset;
+
+                    name_offset += aligned_string_len(str.MaximumLength);
+                    name_offset += sizeof(*data);
+
+                    index++;
+                    has_class = TRUE;
+                }
+            }
+
+            if (has_class)
+            {
+                WCHAR *ptrW = (WCHAR *)((BYTE *)header + global_offset);
+                memcpy(ptrW, dll->name, module_len);
+                ptrW[module_len / sizeof(WCHAR)] = 0;
+                global_offset += aligned_string_len(module_len + sizeof(WCHAR));
+            }
+        }
+    }
+
+    *section = header;
+
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS find_activatable_class(ACTIVATION_CONTEXT* actctx, const UNICODE_STRING *name,
+                                       PACTCTX_SECTION_KEYED_DATA data)
+{
+    struct string_index *iter, *index = NULL;
+    struct activatable_class_data *class;
+    UNICODE_STRING str;
+    ULONG hash;
+    int i;
+
+    if (!(actctx->sections & ACTIVATABLE_CLASS_SECTION)) return STATUS_SXS_KEY_NOT_FOUND;
+
+    if (!actctx->activatable_class_section)
+    {
+        struct strsection_header *section;
+
+        NTSTATUS status = build_activatable_class_section(actctx, &section);
+        if (status) return status;
+
+        if (InterlockedCompareExchangePointer((void**)&actctx->activatable_class_section, section, NULL))
+            RtlFreeHeap(GetProcessHeap(), 0, section);
+    }
+
+    hash = 0;
+    RtlHashUnicodeString(name, TRUE, HASH_STRING_ALGORITHM_X65599, &hash);
+    iter = get_activatable_class_first_index(actctx);
+
+    for (i = 0; i < actctx->activatable_class_section->count; i++)
+    {
+        if (iter->hash == hash)
+        {
+            str.Buffer = (WCHAR *)((BYTE *)actctx->activatable_class_section + iter->name_offset);
+            str.Length = iter->name_len;
+            if (RtlEqualUnicodeString( &str, name, TRUE ))
+            {
+                index = iter;
+                break;
+            }
+            else
+                WARN("hash collision 0x%08x, %s, %s\n", hash, debugstr_us(name), debugstr_us(&str));
+        }
+        iter++;
+    }
+
+    if (!index) return STATUS_SXS_KEY_NOT_FOUND;
+
+    if (data)
+    {
+        class = get_activatable_class_data(actctx, index);
+
+        data->ulDataFormatVersion = 1;
+        data->lpData = class;
+        /* full length includes string length with nulls */
+        data->ulLength = class->size + class->module_len + sizeof(WCHAR);
+        data->lpSectionGlobalData = (BYTE *)actctx->activatable_class_section + actctx->activatable_class_section->global_offset;
+        data->ulSectionGlobalDataLength = actctx->activatable_class_section->global_len;
+        data->lpSectionBase = actctx->activatable_class_section;
+        data->ulSectionTotalLength = RtlSizeHeap( GetProcessHeap(), 0, actctx->activatable_class_section );
         data->hActCtx = NULL;
 
         if (data->cbSize >= FIELD_OFFSET(ACTCTX_SECTION_KEYED_DATA, ulAssemblyRosterIndex) + sizeof(ULONG))
@@ -4753,6 +5109,9 @@ static NTSTATUS find_string(ACTIVATION_CONTEXT* actctx, ULONG section_kind,
     case ACTIVATION_CONTEXT_SECTION_GLOBAL_OBJECT_RENAME_TABLE:
         FIXME("Unsupported yet section_kind %x\n", section_kind);
         return STATUS_SXS_SECTION_NOT_FOUND;
+    case ACTIVATION_CONTEXT_SECTION_WINRT_ACTIVATABLE_CLASSES:
+        status = find_activatable_class(actctx, section_name, data);
+        break;
     default:
         WARN("Unknown section_kind %x\n", section_kind);
         return STATUS_SXS_SECTION_NOT_FOUND;
@@ -5327,8 +5686,11 @@ NTSTATUS WINAPI RtlQueryInformationActivationContext( ULONG flags, HANDLE handle
 
     case CompatibilityInformationInActivationContext:
         {
-            /*ACTIVATION_CONTEXT_COMPATIBILITY_INFORMATION*/DWORD *acci = buffer;
-            COMPATIBILITY_CONTEXT_ELEMENT *elements;
+            struct acci
+            {
+                DWORD ElementCount;
+                COMPATIBILITY_CONTEXT_ELEMENT Elements[1];
+            } *acci = buffer;
             struct assembly *assembly = NULL;
             ULONG num_compat_contexts = 0, n;
             SIZE_T len;
@@ -5339,16 +5701,15 @@ NTSTATUS WINAPI RtlQueryInformationActivationContext( ULONG flags, HANDLE handle
 
             if (assembly)
                 num_compat_contexts = assembly->num_compat_contexts;
-            len = sizeof(*acci) + num_compat_contexts * sizeof(COMPATIBILITY_CONTEXT_ELEMENT);
+            len = offsetof( struct acci, Elements[num_compat_contexts] );
 
             if (retlen) *retlen = len;
             if (!buffer || bufsize < len) return STATUS_BUFFER_TOO_SMALL;
 
-            *acci = num_compat_contexts;
-            elements = (COMPATIBILITY_CONTEXT_ELEMENT*)(acci + 1);
+            acci->ElementCount = num_compat_contexts;
             for (n = 0; n < num_compat_contexts; ++n)
             {
-                elements[n] = assembly->compat_contexts[n];
+                acci->Elements[n] = assembly->compat_contexts[n];
             }
         }
         break;
@@ -5488,7 +5849,9 @@ NTSTATUS WINAPI RtlQueryActivationContextApplicationSettings( DWORD flags, HANDL
         if (wcscmp( ns, windowsSettings2005NSW ) &&
             wcscmp( ns, windowsSettings2011NSW ) &&
             wcscmp( ns, windowsSettings2016NSW ) &&
-            wcscmp( ns, windowsSettings2017NSW ))
+            wcscmp( ns, windowsSettings2017NSW ) &&
+            wcscmp( ns, windowsSettings2019NSW ) &&
+            wcscmp( ns, windowsSettings2020NSW ))
             return STATUS_INVALID_PARAMETER;
     }
     else ns = windowsSettings2005NSW;

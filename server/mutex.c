@@ -19,12 +19,12 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <sys/types.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -36,6 +36,20 @@
 #include "request.h"
 #include "security.h"
 
+static const WCHAR mutex_name[] = {'M','u','t','a','n','t'};
+
+struct type_descr mutex_type =
+{
+    { mutex_name, sizeof(mutex_name) },   /* name */
+    MUTANT_ALL_ACCESS,                    /* valid_access */
+    {                                     /* mapping */
+        STANDARD_RIGHTS_READ | MUTANT_QUERY_STATE,
+        STANDARD_RIGHTS_WRITE,
+        STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE,
+        MUTANT_ALL_ACCESS
+    },
+};
+
 struct mutex
 {
     struct object  obj;             /* object header */
@@ -46,18 +60,16 @@ struct mutex
 };
 
 static void mutex_dump( struct object *obj, int verbose );
-static struct object_type *mutex_get_type( struct object *obj );
 static int mutex_signaled( struct object *obj, struct wait_queue_entry *entry );
 static void mutex_satisfied( struct object *obj, struct wait_queue_entry *entry );
-static unsigned int mutex_map_access( struct object *obj, unsigned int access );
 static void mutex_destroy( struct object *obj );
 static int mutex_signal( struct object *obj, unsigned int access );
 
 static const struct object_ops mutex_ops =
 {
     sizeof(struct mutex),      /* size */
+    &mutex_type,               /* type */
     mutex_dump,                /* dump */
-    mutex_get_type,            /* get_type */
     add_queue,                 /* add_queue */
     remove_queue,              /* remove_queue */
     mutex_signaled,            /* signaled */
@@ -65,7 +77,7 @@ static const struct object_ops mutex_ops =
     mutex_satisfied,           /* satisfied */
     mutex_signal,              /* signal */
     no_get_fd,                 /* get_fd */
-    mutex_map_access,          /* map_access */
+    default_map_access,        /* map_access */
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
     default_get_full_name,     /* get_full_name */
@@ -142,13 +154,6 @@ static void mutex_dump( struct object *obj, int verbose )
     fprintf( stderr, "Mutex count=%u owner=%p\n", mutex->count, mutex->owner );
 }
 
-static struct object_type *mutex_get_type( struct object *obj )
-{
-    static const WCHAR name[] = {'M','u','t','a','n','t'};
-    static const struct unicode_str str = { name, sizeof(name) };
-    return get_object_type( &str );
-}
-
 static int mutex_signaled( struct object *obj, struct wait_queue_entry *entry )
 {
     struct mutex *mutex = (struct mutex *)obj;
@@ -164,15 +169,6 @@ static void mutex_satisfied( struct object *obj, struct wait_queue_entry *entry 
     do_grab( mutex, get_wait_queue_thread( entry ));
     if (mutex->abandoned) make_wait_abandoned( entry );
     mutex->abandoned = 0;
-}
-
-static unsigned int mutex_map_access( struct object *obj, unsigned int access )
-{
-    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ | MUTANT_QUERY_STATE;
-    if (access & GENERIC_WRITE)   access |= STANDARD_RIGHTS_WRITE;
-    if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE;
-    if (access & GENERIC_ALL)     access |= STANDARD_RIGHTS_ALL | MUTEX_ALL_ACCESS;
-    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
 static int mutex_signal( struct object *obj, unsigned int access )

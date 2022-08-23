@@ -19,18 +19,14 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+#include <sys/types.h>
+#include <unistd.h>
 #include <fcntl.h>
-#ifdef HAVE_SYS_IOCTL_H
-# include <sys/ioctl.h>
-#endif
+#include <sys/ioctl.h>
 #include <sys/soundcard.h>
 
 #include "windef.h"

@@ -57,7 +57,8 @@ static BOOL streams_resize_table( MSIDATABASE *db, UINT size )
     {
         MSISTREAM *tmp;
         UINT new_size = db->num_streams_allocated * 2;
-        if (!(tmp = msi_realloc_zero( db->streams, new_size * sizeof(MSISTREAM) ))) return FALSE;
+        if (!(tmp = msi_realloc( db->streams, new_size * sizeof(*tmp) ))) return FALSE;
+        memset( tmp + db->num_streams_allocated, 0, (new_size - db->num_streams_allocated) * sizeof(*tmp) );
         db->streams = tmp;
         db->num_streams_allocated = new_size;
     }
@@ -447,7 +448,8 @@ static UINT load_streams( MSIDATABASE *db )
     IEnumSTATSTG *stgenum;
     STATSTG stat;
     HRESULT hr;
-    UINT count, r = ERROR_SUCCESS;
+    ULONG count;
+    UINT r = ERROR_SUCCESS;
     IStream *stream;
 
     hr = IStorage_EnumElements( db->storage, 0, NULL, 0, &stgenum );
@@ -479,7 +481,7 @@ static UINT load_streams( MSIDATABASE *db )
         CoTaskMemFree( stat.pwcsName );
         if (FAILED( hr ))
         {
-            ERR("unable to open stream %08x\n", hr);
+            ERR( "unable to open stream %#lx\n", hr );
             r = ERROR_FUNCTION_FAILED;
             break;
         }
@@ -563,7 +565,8 @@ static HRESULT write_stream( IStream *dst, IStream *src )
     char buf[4096];
     STATSTG stat;
     LARGE_INTEGER pos;
-    UINT count, size;
+    ULONG count;
+    UINT size;
 
     hr = IStream_Stat( src, &stat, STATFLAG_NONAME );
     if (FAILED( hr )) return hr;
@@ -581,7 +584,7 @@ static HRESULT write_stream( IStream *dst, IStream *src )
         hr = IStream_Read( src, buf, size, &count );
         if (FAILED( hr ) || count != size)
         {
-            WARN("failed to read stream: %08x\n", hr);
+            WARN( "failed to read stream: %#lx\n", hr );
             return E_INVALIDARG;
         }
         stat.cbSize.QuadPart -= count;
@@ -591,7 +594,7 @@ static HRESULT write_stream( IStream *dst, IStream *src )
             hr = IStream_Write( dst, buf, size, &count );
             if (FAILED( hr ) || count != size)
             {
-                WARN("failed to write stream: %08x\n", hr);
+                WARN( "failed to write stream: %#lx\n", hr );
                 return E_INVALIDARG;
             }
         }
@@ -625,7 +628,7 @@ UINT msi_commit_streams( MSIDATABASE *db )
             hr = write_stream( stream, db->streams[i].stream );
             if (FAILED( hr ))
             {
-                ERR("failed to write stream %s (hr = %08x)\n", debugstr_w(encname), hr);
+                ERR( "failed to write stream %s (hr = %#lx)\n", debugstr_w(encname), hr );
                 msi_free( encname );
                 IStream_Release( stream );
                 return ERROR_FUNCTION_FAILED;
@@ -634,14 +637,14 @@ UINT msi_commit_streams( MSIDATABASE *db )
             IStream_Release( stream );
             if (FAILED( hr ))
             {
-                ERR("failed to commit stream %s (hr = %08x)\n", debugstr_w(encname), hr);
+                ERR( "failed to commit stream %s (hr = %#lx)\n", debugstr_w(encname), hr );
                 msi_free( encname );
                 return ERROR_FUNCTION_FAILED;
             }
         }
         else if (hr != STG_E_FILEALREADYEXISTS)
         {
-            ERR("failed to create stream %s (hr = %08x)\n", debugstr_w(encname), hr);
+            ERR( "failed to create stream %s (hr = %#lx)\n", debugstr_w(encname), hr );
             msi_free( encname );
             return ERROR_FUNCTION_FAILED;
         }

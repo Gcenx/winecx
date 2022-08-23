@@ -26,7 +26,6 @@
 #include "winnt.h"
 #include "winternl.h"
 #include "unixlib.h"
-#include "wine/server.h"
 #include "wine/asm.h"
 
 #define DECLARE_CRITICAL_SECTION(cs) \
@@ -38,7 +37,7 @@
 
 #define MAX_NT_PATH_LENGTH 277
 
-#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__) || defined(__arm__) || defined(__aarch64__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
 static const UINT_PTR page_size = 0x1000;
 #else
 extern UINT_PTR page_size DECLSPEC_HIDDEN;
@@ -49,25 +48,27 @@ extern LONG call_vectored_handlers( EXCEPTION_RECORD *rec, CONTEXT *context ) DE
 extern void DECLSPEC_NORETURN raise_status( NTSTATUS status, EXCEPTION_RECORD *rec ) DECLSPEC_HIDDEN;
 extern LONG WINAPI call_unhandled_exception_filter( PEXCEPTION_POINTERS eptr ) DECLSPEC_HIDDEN;
 
+extern void WINAPI LdrInitializeThunk(CONTEXT*,ULONG_PTR,ULONG_PTR,ULONG_PTR) DECLSPEC_HIDDEN;
+extern NTSTATUS WINAPI KiUserExceptionDispatcher(EXCEPTION_RECORD*,CONTEXT*) DECLSPEC_HIDDEN;
+extern void WINAPI KiUserApcDispatcher(CONTEXT*,ULONG_PTR,ULONG_PTR,ULONG_PTR,PNTAPCFUNC) DECLSPEC_HIDDEN;
+extern void WINAPI KiUserCallbackDispatcher(ULONG,void*,ULONG) DECLSPEC_HIDDEN;
+extern void (WINAPI *pWow64PrepareForException)( EXCEPTION_RECORD *rec, CONTEXT *context ) DECLSPEC_HIDDEN;
+
 #if defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
 extern RUNTIME_FUNCTION *lookup_function_info( ULONG_PTR pc, ULONG_PTR *base, LDR_DATA_TABLE_ENTRY **module ) DECLSPEC_HIDDEN;
 #endif
 
 /* debug helpers */
 extern LPCSTR debugstr_us( const UNICODE_STRING *str ) DECLSPEC_HIDDEN;
+extern const char *debugstr_exception_code( DWORD code ) DECLSPEC_HIDDEN;
 
 /* init routines */
 extern void version_init(void) DECLSPEC_HIDDEN;
 extern void debug_init(void) DECLSPEC_HIDDEN;
 extern void actctx_init(void) DECLSPEC_HIDDEN;
-extern void heap_set_debug_flags( HANDLE handle ) DECLSPEC_HIDDEN;
-extern void init_unix_codepage(void) DECLSPEC_HIDDEN;
-extern void init_locale( HMODULE module ) DECLSPEC_HIDDEN;
+extern void locale_init(void) DECLSPEC_HIDDEN;
 extern void init_user_process_params(void) DECLSPEC_HIDDEN;
 extern void CDECL DECLSPEC_NORETURN signal_start_thread( CONTEXT *ctx ) DECLSPEC_HIDDEN;
-
-/* server support */
-extern BOOL is_wow64 DECLSPEC_HIDDEN;
 
 /* module handling */
 extern LIST_ENTRY tls_links DECLSPEC_HIDDEN;
@@ -79,40 +80,33 @@ extern void RELAY_SetupDLL( HMODULE hmod ) DECLSPEC_HIDDEN;
 extern void SNOOP_SetupDLL( HMODULE hmod ) DECLSPEC_HIDDEN;
 extern const WCHAR windows_dir[] DECLSPEC_HIDDEN;
 extern const WCHAR system_dir[] DECLSPEC_HIDDEN;
-extern const WCHAR syswow64_dir[] DECLSPEC_HIDDEN;
 
 extern void (FASTCALL *pBaseThreadInitThunk)(DWORD,LPTHREAD_START_ROUTINE,void *) DECLSPEC_HIDDEN;
 extern const struct unix_funcs *unix_funcs DECLSPEC_HIDDEN;
 
-extern void init_directories(void) DECLSPEC_HIDDEN;
-
-/* 32on64 FIXME: Big chunk gone, most likely moved to unix lib. */
 extern struct _KUSER_SHARED_DATA *user_shared_data DECLSPEC_HIDDEN;
 
-/* locale */
-extern LCID user_lcid, system_lcid;
-extern DWORD ntdll_umbstowcs( const char* src, DWORD srclen, WCHAR* dst, DWORD dstlen ) DECLSPEC_HIDDEN;
-extern int ntdll_wcstoumbs( const WCHAR* src, DWORD srclen, char* dst, DWORD dstlen, BOOL strict ) DECLSPEC_HIDDEN;
+extern int CDECL NTDLL__vsnprintf( char *str, SIZE_T len, const char *format, va_list args ) DECLSPEC_HIDDEN;
+extern int CDECL NTDLL__vsnwprintf( WCHAR *str, SIZE_T len, const WCHAR *format, va_list args ) DECLSPEC_HIDDEN;
 
-extern int CDECL NTDLL__vsnprintf( char *str, SIZE_T len, const char *format, __ms_va_list args ) DECLSPEC_HIDDEN;
-extern int CDECL NTDLL__vsnwprintf( WCHAR *str, SIZE_T len, const WCHAR *format, __ms_va_list args ) DECLSPEC_HIDDEN;
-
-/* load order */
-
-enum loadorder
+struct dllredirect_data
 {
-    LO_INVALID,
-    LO_DISABLED,
-    LO_NATIVE,
-    LO_BUILTIN,
-    LO_NATIVE_BUILTIN,  /* native then builtin */
-    LO_BUILTIN_NATIVE,  /* builtin then native */
-    LO_DEFAULT          /* nothing specified, use default strategy */
+    ULONG size;
+    ULONG flags;
+    ULONG total_len;
+    ULONG paths_count;
+    ULONG paths_offset;
+    struct { ULONG len; ULONG offset; } paths[1];
 };
 
-extern enum loadorder get_load_order( const WCHAR *app_name, const UNICODE_STRING *nt_name ) DECLSPEC_HIDDEN;
+#define DLL_REDIRECT_PATH_INCLUDES_BASE_NAME                      1
+#define DLL_REDIRECT_PATH_OMITS_ASSEMBLY_ROOT                     2
+#define DLL_REDIRECT_PATH_EXPAND                                  4
+#define DLL_REDIRECT_PATH_SYSTEM_DEFAULT_REDIRECTED_SYSTEM32_DLL  8
 
-#ifndef _WIN64
+#ifdef _WIN64
+static inline TEB64 *NtCurrentTeb64(void) { return NULL; }
+#else
 static inline TEB64 *NtCurrentTeb64(void) { return (TEB64 *)NtCurrentTeb()->GdiBatchCount; }
 #endif
 
@@ -129,7 +123,6 @@ static inline void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )
 }
 
 /* FLS data */
-extern void init_global_fls_data(void) DECLSPEC_HIDDEN;
 extern TEB_FLS_DATA *fls_alloc_data(void) DECLSPEC_HIDDEN;
 
 #endif

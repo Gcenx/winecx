@@ -1,7 +1,10 @@
 /*
  * GDI Device Context functions
  *
- * Copyright 1993 Alexandre Julliard
+ * Copyright 1993, 1994 Alexandre Julliard
+ * Copyright 1997 Bertho A. Stultiens
+ *           1999 Huw D M Davies
+ * Copyright 2021 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,619 +21,188 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <assert.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <string.h>
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winreg.h"
-#include "winnls.h"
-#include "winternl.h"
-#include "winerror.h"
 #include "gdi_private.h"
+#include "ntuser.h"
+#include "ddrawgdi.h"
+#include "winnls.h"
+
+#include "wine/list.h"
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(dc);
+WINE_DEFAULT_DEBUG_CHANNEL(gdi);
 
-static BOOL DC_DeleteObject( HGDIOBJ handle );
+static struct list drivers = LIST_INIT( drivers );
 
-static const struct gdi_obj_funcs dc_funcs =
+static CRITICAL_SECTION driver_section;
+static CRITICAL_SECTION_DEBUG critsect_debug =
 {
-    NULL,             /* pSelectObject */
-    NULL,             /* pGetObjectA */
-    NULL,             /* pGetObjectW */
-    NULL,             /* pUnrealizeObject */
-    DC_DeleteObject   /* pDeleteObject */
+    0, 0, &driver_section,
+    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": driver_section") }
+};
+static CRITICAL_SECTION driver_section = { &critsect_debug, -1, 0, 0, 0, 0 };
+
+typedef const void * (CDECL *driver_entry_point)( unsigned int version );
+
+struct graphics_driver
+{
+    struct list         entry;
+    HMODULE             module;  /* module handle */
+    driver_entry_point  entry_point;
 };
 
 
-static inline DC *get_dc_obj( HDC hdc )
+DC_ATTR *get_dc_attr( HDC hdc )
 {
-    WORD type;
-    DC *dc = get_any_obj_ptr( hdc, &type );
-    if (!dc) return NULL;
-
-    switch (type)
+    DWORD type = gdi_handle_type( hdc );
+    DC_ATTR *dc_attr;
+    if ((type & 0x1f0000) != NTGDI_OBJ_DC || !(dc_attr = get_gdi_client_ptr( hdc, 0 )))
     {
-    case OBJ_DC:
-    case OBJ_MEMDC:
-    case OBJ_METADC:
-    case OBJ_ENHMETADC:
-        return dc;
-    default:
-        GDI_ReleaseObj( hdc );
         SetLastError( ERROR_INVALID_HANDLE );
         return NULL;
     }
+    return dc_attr->disabled ? NULL : dc_attr;
 }
 
-
-/***********************************************************************
- *           set_initial_dc_state
- */
-static void set_initial_dc_state( DC *dc )
+static BOOL is_display_device( const WCHAR *name )
 {
-    dc->wnd_org.x           = 0;
-    dc->wnd_org.y           = 0;
-    dc->wnd_ext.cx          = 1;
-    dc->wnd_ext.cy          = 1;
-    dc->vport_org.x         = 0;
-    dc->vport_org.y         = 0;
-    dc->vport_ext.cx        = 1;
-    dc->vport_ext.cy        = 1;
-    dc->miterLimit          = 10.0f; /* 10.0 is the default, from MSDN */
-    dc->layout              = 0;
-    dc->font_code_page      = CP_ACP;
-    dc->ROPmode             = R2_COPYPEN;
-    dc->polyFillMode        = ALTERNATE;
-    dc->stretchBltMode      = BLACKONWHITE;
-    dc->relAbsMode          = ABSOLUTE;
-    dc->backgroundMode      = OPAQUE;
-    dc->backgroundColor     = RGB( 255, 255, 255 );
-    dc->dcBrushColor        = RGB( 255, 255, 255 );
-    dc->dcPenColor          = RGB( 0, 0, 0 );
-    dc->textColor           = RGB( 0, 0, 0 );
-    dc->brush_org.x         = 0;
-    dc->brush_org.y         = 0;
-    dc->mapperFlags         = 0;
-    dc->textAlign           = TA_LEFT | TA_TOP | TA_NOUPDATECP;
-    dc->charExtra           = 0;
-    dc->breakExtra          = 0;
-    dc->breakRem            = 0;
-    dc->MapMode             = MM_TEXT;
-    dc->GraphicsMode        = GM_COMPATIBLE;
-    dc->cur_pos.x           = 0;
-    dc->cur_pos.y           = 0;
-    dc->ArcDirection        = AD_COUNTERCLOCKWISE;
-    dc->xformWorld2Wnd.eM11 = 1.0f;
-    dc->xformWorld2Wnd.eM12 = 0.0f;
-    dc->xformWorld2Wnd.eM21 = 0.0f;
-    dc->xformWorld2Wnd.eM22 = 1.0f;
-    dc->xformWorld2Wnd.eDx  = 0.0f;
-    dc->xformWorld2Wnd.eDy  = 0.0f;
-    dc->xformWorld2Vport    = dc->xformWorld2Wnd;
-    dc->xformVport2World    = dc->xformWorld2Wnd;
-    dc->vport2WorldValid    = TRUE;
+    const WCHAR *p = name;
 
-    reset_bounds( &dc->bounds );
-}
-
-/***********************************************************************
- *           alloc_dc_ptr
- */
-DC *alloc_dc_ptr( WORD magic )
-{
-    DC *dc;
-
-    if (!(dc = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*dc) ))) return NULL;
-
-    dc->nulldrv.funcs       = &null_driver;
-    dc->physDev             = &dc->nulldrv;
-    dc->thread              = GetCurrentThreadId();
-    dc->refcount            = 1;
-    dc->hPen                = GDI_inc_ref_count( GetStockObject( BLACK_PEN ));
-    dc->hBrush              = GDI_inc_ref_count( GetStockObject( WHITE_BRUSH ));
-    dc->hFont               = GDI_inc_ref_count( GetStockObject( SYSTEM_FONT ));
-    dc->hPalette            = GetStockObject( DEFAULT_PALETTE );
-
-    set_initial_dc_state( dc );
-
-    if (!(dc->hSelf = alloc_gdi_handle( dc, magic, &dc_funcs )))
-    {
-        HeapFree( GetProcessHeap(), 0, dc );
-        return NULL;
-    }
-    dc->nulldrv.hdc = dc->hSelf;
-
-    if (!font_driver.pCreateDC( &dc->physDev, NULL, NULL, NULL, NULL ))
-    {
-        free_dc_ptr( dc );
-        return NULL;
-    }
-    return dc;
-}
-
-
-
-/***********************************************************************
- *           free_dc_state
- */
-static void free_dc_state( DC *dc )
-{
-    if (dc->hClipRgn) DeleteObject( dc->hClipRgn );
-    if (dc->hMetaRgn) DeleteObject( dc->hMetaRgn );
-    if (dc->hVisRgn) DeleteObject( dc->hVisRgn );
-    if (dc->region) DeleteObject( dc->region );
-    if (dc->path) free_gdi_path( dc->path );
-    HeapFree( GetProcessHeap(), 0, dc );
-}
-
-
-/***********************************************************************
- *           free_dc_ptr
- */
-void free_dc_ptr( DC *dc )
-{
-    assert( dc->refcount == 1 );
-
-    while (dc->physDev != &dc->nulldrv)
-    {
-        PHYSDEV physdev = dc->physDev;
-        dc->physDev = physdev->next;
-        physdev->funcs->pDeleteDC( physdev );
-    }
-    GDI_dec_ref_count( dc->hPen );
-    GDI_dec_ref_count( dc->hBrush );
-    GDI_dec_ref_count( dc->hFont );
-    if (dc->hBitmap) GDI_dec_ref_count( dc->hBitmap );
-    free_gdi_handle( dc->hSelf );
-    free_dc_state( dc );
-}
-
-
-/***********************************************************************
- *           get_dc_ptr
- *
- * Retrieve a DC pointer but release the GDI lock.
- */
-DC *get_dc_ptr( HDC hdc )
-{
-    DC *dc = get_dc_obj( hdc );
-    if (!dc) return NULL;
-    if (dc->disabled)
-    {
-        GDI_ReleaseObj( hdc );
-        return NULL;
-    }
-
-    if (!InterlockedCompareExchange( &dc->refcount, 1, 0 ))
-    {
-        dc->thread = GetCurrentThreadId();
-    }
-    else if (dc->thread != GetCurrentThreadId())
-    {
-        WARN( "dc %p belongs to thread %04x\n", hdc, dc->thread );
-        GDI_ReleaseObj( hdc );
-        return NULL;
-    }
-    else InterlockedIncrement( &dc->refcount );
-
-    GDI_ReleaseObj( hdc );
-    return dc;
-}
-
-
-/***********************************************************************
- *           release_dc_ptr
- */
-void release_dc_ptr( DC *dc )
-{
-    LONG ref;
-
-    dc->thread = 0;
-    ref = InterlockedDecrement( &dc->refcount );
-    assert( ref >= 0 );
-    if (ref) dc->thread = GetCurrentThreadId();  /* we still own it */
-}
-
-
-/***********************************************************************
- *           update_dc
- *
- * Make sure the DC vis region is up to date.
- * This function may call up to USER so the GDI lock should _not_
- * be held when calling it.
- */
-void update_dc( DC *dc )
-{
-    if (InterlockedExchange( &dc->dirty, 0 ) && dc->hookProc)
-        dc->hookProc( dc->hSelf, DCHC_INVALIDVISRGN, dc->dwHookData, 0 );
-}
-
-
-/***********************************************************************
- *           DC_DeleteObject
- */
-static BOOL DC_DeleteObject( HGDIOBJ handle )
-{
-    return DeleteDC( handle );
-}
-
-
-/***********************************************************************
- *           DC_InitDC
- *
- * Setup device-specific DC values for a newly created DC.
- */
-void DC_InitDC( DC* dc )
-{
-    PHYSDEV physdev = GET_DC_PHYSDEV( dc, pRealizeDefaultPalette );
-    physdev->funcs->pRealizeDefaultPalette( physdev );
-    SetTextColor( dc->hSelf, dc->textColor );
-    SetBkColor( dc->hSelf, dc->backgroundColor );
-    SelectObject( dc->hSelf, dc->hPen );
-    SelectObject( dc->hSelf, dc->hBrush );
-    SelectObject( dc->hSelf, dc->hFont );
-    update_dc_clipping( dc );
-    SetVirtualResolution( dc->hSelf, 0, 0, 0, 0 );
-    physdev = GET_DC_PHYSDEV( dc, pSetBoundsRect );
-    physdev->funcs->pSetBoundsRect( physdev, &dc->bounds, dc->bounds_enabled ? DCB_ENABLE : DCB_DISABLE );
-}
-
-
-/***********************************************************************
- *           DC_InvertXform
- *
- * Computes the inverse of the transformation xformSrc and stores it to
- * xformDest. Returns TRUE if successful or FALSE if the xformSrc matrix
- * is singular.
- */
-static BOOL DC_InvertXform( const XFORM *xformSrc, XFORM *xformDest )
-{
-    double determinant;
-
-    determinant = xformSrc->eM11*xformSrc->eM22 -
-        xformSrc->eM12*xformSrc->eM21;
-    if (determinant > -1e-12 && determinant < 1e-12)
+    if (!name)
         return FALSE;
 
-    xformDest->eM11 =  xformSrc->eM22 / determinant;
-    xformDest->eM12 = -xformSrc->eM12 / determinant;
-    xformDest->eM21 = -xformSrc->eM21 / determinant;
-    xformDest->eM22 =  xformSrc->eM11 / determinant;
-    xformDest->eDx  = -xformSrc->eDx * xformDest->eM11 -
-                       xformSrc->eDy * xformDest->eM21;
-    xformDest->eDy  = -xformSrc->eDx * xformDest->eM12 -
-                       xformSrc->eDy * xformDest->eM22;
+    if (wcsnicmp( name, L"\\\\.\\DISPLAY", lstrlenW(L"\\\\.\\DISPLAY") )) return FALSE;
+
+    p += lstrlenW(L"\\\\.\\DISPLAY");
+
+    if (!iswdigit( *p++ ))
+        return FALSE;
+
+    for (; *p; p++)
+    {
+        if (!iswdigit( *p ))
+            return FALSE;
+    }
 
     return TRUE;
 }
 
-/* Construct a transformation to do the window-to-viewport conversion */
-static void construct_window_to_viewport(DC *dc, XFORM *xform)
+static BOOL get_driver_name( const WCHAR *device, WCHAR *driver, DWORD size )
 {
-    double scaleX, scaleY;
-    scaleX = (double)dc->vport_ext.cx / (double)dc->wnd_ext.cx;
-    scaleY = (double)dc->vport_ext.cy / (double)dc->wnd_ext.cy;
+    WCHAR *p;
 
-    if (dc->layout & LAYOUT_RTL) scaleX = -scaleX;
-    xform->eM11 = scaleX;
-    xform->eM12 = 0.0;
-    xform->eM21 = 0.0;
-    xform->eM22 = scaleY;
-    xform->eDx  = (double)dc->vport_org.x - scaleX * (double)dc->wnd_org.x;
-    xform->eDy  = (double)dc->vport_org.y - scaleY * (double)dc->wnd_org.y;
-    if (dc->layout & LAYOUT_RTL) xform->eDx = dc->vis_rect.right - dc->vis_rect.left - 1 - xform->eDx;
+    /* display is a special case */
+    if (!wcsicmp( device, L"display" ) || is_display_device( device ))
+    {
+        lstrcpynW( driver, L"display", size );
+        return TRUE;
+    }
+
+    size = GetProfileStringW(L"devices", device, L"", driver, size);
+    if (!size)
+    {
+        WARN("Unable to find %s in [devices] section of win.ini\n", debugstr_w(device));
+        return FALSE;
+    }
+    p = wcschr(driver, ',');
+    if (!p)
+    {
+        WARN("%s entry in [devices] section of win.ini is malformed.\n", debugstr_w(device));
+        return FALSE;
+    }
+    *p = 0;
+    TRACE("Found %s for %s\n", debugstr_w(driver), debugstr_w(device));
+    return TRUE;
 }
 
-/***********************************************************************
- *        linear_xform_cmp
- *
- * Compares the linear transform portion of two XFORMs (i.e. the 2x2 submatrix).
- * Returns 0 if they match.
- */
-static inline int linear_xform_cmp( const XFORM *a, const XFORM *b )
+static struct graphics_driver *create_driver( HMODULE module )
 {
-    return memcmp( a, b, FIELD_OFFSET( XFORM, eDx ) );
-}
+    struct graphics_driver *driver;
 
-/***********************************************************************
- *           DC_UpdateXforms
- *
- * Updates the xformWorld2Vport, xformVport2World and vport2WorldValid
- * fields of the specified DC by creating a transformation that
- * represents the current mapping mode and combining it with the DC's
- * world transform. This function should be called whenever the
- * parameters associated with the mapping mode (window and viewport
- * extents and origins) or the world transform change.
- */
-void DC_UpdateXforms( DC *dc )
-{
-    XFORM xformWnd2Vport, oldworld2vport;
+    if (!(driver = HeapAlloc( GetProcessHeap(), 0, sizeof(*driver)))) return NULL;
+    driver->module = module;
 
-    construct_window_to_viewport(dc, &xformWnd2Vport);
-
-    oldworld2vport = dc->xformWorld2Vport;
-    /* Combine with the world transformation */
-    CombineTransform( &dc->xformWorld2Vport, &dc->xformWorld2Wnd,
-        &xformWnd2Vport );
-
-    /* Create inverse of world-to-viewport transformation */
-    dc->vport2WorldValid = DC_InvertXform( &dc->xformWorld2Vport,
-        &dc->xformVport2World );
-
-    /* Reselect the font and pen back into the dc so that the size
-       gets updated. */
-    if (linear_xform_cmp( &oldworld2vport, &dc->xformWorld2Vport ) &&
-        !GdiIsMetaFileDC(dc->hSelf))
-    {
-        SelectObject(dc->hSelf, dc->hFont);
-        SelectObject(dc->hSelf, dc->hPen);
-    }
-}
-
-
-/***********************************************************************
- *           nulldrv_SaveDC
- */
-INT CDECL nulldrv_SaveDC( PHYSDEV dev )
-{
-    DC *newdc, *dc = get_nulldrv_dc( dev );
-
-    if (!(newdc = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*newdc )))) return 0;
-    newdc->layout           = dc->layout;
-    newdc->hPen             = dc->hPen;
-    newdc->hBrush           = dc->hBrush;
-    newdc->hFont            = dc->hFont;
-    newdc->hBitmap          = dc->hBitmap;
-    newdc->hPalette         = dc->hPalette;
-    newdc->ROPmode          = dc->ROPmode;
-    newdc->polyFillMode     = dc->polyFillMode;
-    newdc->stretchBltMode   = dc->stretchBltMode;
-    newdc->relAbsMode       = dc->relAbsMode;
-    newdc->backgroundMode   = dc->backgroundMode;
-    newdc->backgroundColor  = dc->backgroundColor;
-    newdc->textColor        = dc->textColor;
-    newdc->dcBrushColor     = dc->dcBrushColor;
-    newdc->dcPenColor       = dc->dcPenColor;
-    newdc->brush_org        = dc->brush_org;
-    newdc->mapperFlags      = dc->mapperFlags;
-    newdc->textAlign        = dc->textAlign;
-    newdc->charExtra        = dc->charExtra;
-    newdc->breakExtra       = dc->breakExtra;
-    newdc->breakRem         = dc->breakRem;
-    newdc->MapMode          = dc->MapMode;
-    newdc->GraphicsMode     = dc->GraphicsMode;
-    newdc->cur_pos          = dc->cur_pos;
-    newdc->ArcDirection     = dc->ArcDirection;
-    newdc->xformWorld2Wnd   = dc->xformWorld2Wnd;
-    newdc->xformWorld2Vport = dc->xformWorld2Vport;
-    newdc->xformVport2World = dc->xformVport2World;
-    newdc->vport2WorldValid = dc->vport2WorldValid;
-    newdc->wnd_org          = dc->wnd_org;
-    newdc->wnd_ext          = dc->wnd_ext;
-    newdc->vport_org        = dc->vport_org;
-    newdc->vport_ext        = dc->vport_ext;
-    newdc->virtual_res      = dc->virtual_res;
-    newdc->virtual_size     = dc->virtual_size;
-
-    /* Get/SetDCState() don't change hVisRgn field ("Undoc. Windows" p.559). */
-
-    if (dc->hClipRgn)
-    {
-        newdc->hClipRgn = CreateRectRgn( 0, 0, 0, 0 );
-        CombineRgn( newdc->hClipRgn, dc->hClipRgn, 0, RGN_COPY );
-    }
-    if (dc->hMetaRgn)
-    {
-        newdc->hMetaRgn = CreateRectRgn( 0, 0, 0, 0 );
-        CombineRgn( newdc->hMetaRgn, dc->hMetaRgn, 0, RGN_COPY );
-    }
-
-    if (!PATH_SavePath( newdc, dc ))
-    {
-        release_dc_ptr( dc );
-        free_dc_state( newdc );
-	return 0;
-    }
-
-    newdc->saved_dc = dc->saved_dc;
-    dc->saved_dc = newdc;
-    return ++dc->saveLevel;
-}
-
-
-/***********************************************************************
- *           nulldrv_RestoreDC
- */
-BOOL CDECL nulldrv_RestoreDC( PHYSDEV dev, INT level )
-{
-    DC *dcs, *first_dcs, *dc = get_nulldrv_dc( dev );
-    INT save_level;
-
-    /* find the state level to restore */
-
-    if (abs(level) > dc->saveLevel || level == 0) return FALSE;
-    if (level < 0) level = dc->saveLevel + level + 1;
-    first_dcs = dc->saved_dc;
-    for (dcs = first_dcs, save_level = dc->saveLevel; save_level > level; save_level--)
-        dcs = dcs->saved_dc;
-
-    /* restore the state */
-
-    if (!PATH_RestorePath( dc, dcs )) return FALSE;
-
-    dc->layout           = dcs->layout;
-    dc->ROPmode          = dcs->ROPmode;
-    dc->polyFillMode     = dcs->polyFillMode;
-    dc->stretchBltMode   = dcs->stretchBltMode;
-    dc->relAbsMode       = dcs->relAbsMode;
-    dc->backgroundMode   = dcs->backgroundMode;
-    dc->backgroundColor  = dcs->backgroundColor;
-    dc->textColor        = dcs->textColor;
-    dc->dcBrushColor     = dcs->dcBrushColor;
-    dc->dcPenColor       = dcs->dcPenColor;
-    dc->brush_org        = dcs->brush_org;
-    dc->mapperFlags      = dcs->mapperFlags;
-    dc->textAlign        = dcs->textAlign;
-    dc->charExtra        = dcs->charExtra;
-    dc->breakExtra       = dcs->breakExtra;
-    dc->breakRem         = dcs->breakRem;
-    dc->MapMode          = dcs->MapMode;
-    dc->GraphicsMode     = dcs->GraphicsMode;
-    dc->cur_pos          = dcs->cur_pos;
-    dc->ArcDirection     = dcs->ArcDirection;
-    dc->xformWorld2Wnd   = dcs->xformWorld2Wnd;
-    dc->xformWorld2Vport = dcs->xformWorld2Vport;
-    dc->xformVport2World = dcs->xformVport2World;
-    dc->vport2WorldValid = dcs->vport2WorldValid;
-    dc->wnd_org          = dcs->wnd_org;
-    dc->wnd_ext          = dcs->wnd_ext;
-    dc->vport_org        = dcs->vport_org;
-    dc->vport_ext        = dcs->vport_ext;
-    dc->virtual_res      = dcs->virtual_res;
-    dc->virtual_size     = dcs->virtual_size;
-
-    if (dcs->hClipRgn)
-    {
-        if (!dc->hClipRgn) dc->hClipRgn = CreateRectRgn( 0, 0, 0, 0 );
-        CombineRgn( dc->hClipRgn, dcs->hClipRgn, 0, RGN_COPY );
-    }
+    if (module)
+        driver->entry_point = (void *)GetProcAddress( module, "wine_get_gdi_driver" );
     else
-    {
-        if (dc->hClipRgn) DeleteObject( dc->hClipRgn );
-        dc->hClipRgn = 0;
-    }
-    if (dcs->hMetaRgn)
-    {
-        if (!dc->hMetaRgn) dc->hMetaRgn = CreateRectRgn( 0, 0, 0, 0 );
-        CombineRgn( dc->hMetaRgn, dcs->hMetaRgn, 0, RGN_COPY );
-    }
-    else
-    {
-        if (dc->hMetaRgn) DeleteObject( dc->hMetaRgn );
-        dc->hMetaRgn = 0;
-    }
-    DC_UpdateXforms( dc );
-    update_dc_clipping( dc );
+        driver->entry_point = NULL;
 
-    SelectObject( dev->hdc, dcs->hBitmap );
-    SelectObject( dev->hdc, dcs->hBrush );
-    SelectObject( dev->hdc, dcs->hFont );
-    SelectObject( dev->hdc, dcs->hPen );
-    SetBkColor( dev->hdc, dcs->backgroundColor);
-    SetTextColor( dev->hdc, dcs->textColor);
-    GDISelectPalette( dev->hdc, dcs->hPalette, FALSE );
-
-    dc->saved_dc  = dcs->saved_dc;
-    dcs->saved_dc = 0;
-    dc->saveLevel = save_level - 1;
-
-    /* now destroy all the saved DCs */
-
-    while (first_dcs)
-    {
-        DC *next = first_dcs->saved_dc;
-        free_dc_state( first_dcs );
-        first_dcs = next;
-    }
-    return TRUE;
+    return driver;
 }
 
+#ifdef __i386__
+static const WCHAR printer_env[] = L"w32x86";
+#elif defined __x86_64__
+static const WCHAR printer_env[] = L"x64";
+#elif defined __arm__
+static const WCHAR printer_env[] = L"arm";
+#elif defined __aarch64__
+static const WCHAR printer_env[] = L"arm64";
+#else
+#error not defined for this cpu
+#endif
 
-/***********************************************************************
- *           reset_dc_state
- */
-static BOOL reset_dc_state( HDC hdc )
+static driver_entry_point load_driver( LPCWSTR name )
 {
-    DC *dc, *dcs, *next;
+    HMODULE module;
+    struct graphics_driver *driver, *new_driver;
 
-    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
-
-    set_initial_dc_state( dc );
-    SetBkColor( hdc, RGB( 255, 255, 255 ));
-    SetTextColor( hdc, RGB( 0, 0, 0 ));
-    SelectObject( hdc, GetStockObject( WHITE_BRUSH ));
-    SelectObject( hdc, GetStockObject( SYSTEM_FONT ));
-    SelectObject( hdc, GetStockObject( BLACK_PEN ));
-    SetVirtualResolution( hdc, 0, 0, 0, 0 );
-    GDISelectPalette( hdc, GetStockObject( DEFAULT_PALETTE ), FALSE );
-    SetBoundsRect( hdc, NULL, DCB_DISABLE );
-    AbortPath( hdc );
-
-    if (dc->hClipRgn) DeleteObject( dc->hClipRgn );
-    if (dc->hMetaRgn) DeleteObject( dc->hMetaRgn );
-    dc->hClipRgn = 0;
-    dc->hMetaRgn = 0;
-    update_dc_clipping( dc );
-
-    for (dcs = dc->saved_dc; dcs; dcs = next)
+    if ((module = GetModuleHandleW( name )))
     {
-        next = dcs->saved_dc;
-        free_dc_state( dcs );
+        EnterCriticalSection( &driver_section );
+        LIST_FOR_EACH_ENTRY( driver, &drivers, struct graphics_driver, entry )
+        {
+            if (driver->module == module) goto done;
+        }
+        LeaveCriticalSection( &driver_section );
     }
-    dc->saved_dc = NULL;
-    dc->saveLevel = 0;
-    release_dc_ptr( dc );
-    return TRUE;
-}
 
-
-/***********************************************************************
- *           SaveDC    (GDI32.@)
- */
-INT WINAPI SaveDC( HDC hdc )
-{
-    DC * dc;
-    INT ret = 0;
-
-    if ((dc = get_dc_ptr( hdc )))
+    if (!(module = LoadLibraryW( name )))
     {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSaveDC );
-        ret = physdev->funcs->pSaveDC( physdev );
-        release_dc_ptr( dc );
+        WCHAR path[MAX_PATH];
+
+        GetSystemDirectoryW( path, MAX_PATH );
+        swprintf( path + wcslen(path), MAX_PATH - wcslen(path), L"\\spool\\drivers\\%s\\3\\%s",
+                  printer_env, name );
+        if (!(module = LoadLibraryW( path ))) return NULL;
     }
-    return ret;
-}
 
-
-/***********************************************************************
- *           RestoreDC    (GDI32.@)
- */
-BOOL WINAPI RestoreDC( HDC hdc, INT level )
-{
-    PHYSDEV physdev;
-    DC *dc;
-    BOOL success = FALSE;
-
-    TRACE("%p %d\n", hdc, level );
-    if ((dc = get_dc_ptr( hdc )))
+    if (!(new_driver = create_driver( module )))
     {
-        update_dc( dc );
-        physdev = GET_DC_PHYSDEV( dc, pRestoreDC );
-        success = physdev->funcs->pRestoreDC( physdev, level );
-        release_dc_ptr( dc );
+        FreeLibrary( module );
+        return NULL;
     }
-    return success;
-}
 
+    /* check if someone else added it in the meantime */
+    EnterCriticalSection( &driver_section );
+    LIST_FOR_EACH_ENTRY( driver, &drivers, struct graphics_driver, entry )
+    {
+        if (driver->module != module) continue;
+        FreeLibrary( module );
+        HeapFree( GetProcessHeap(), 0, new_driver );
+        goto done;
+    }
+    driver = new_driver;
+    list_add_head( &drivers, &driver->entry );
+    TRACE( "loaded driver %p for %s\n", driver, debugstr_w(name) );
+done:
+    LeaveCriticalSection( &driver_section );
+    return driver->entry_point;
+}
 
 /***********************************************************************
  *           CreateDCW    (GDI32.@)
  */
 HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
-                      const DEVMODEW *initData )
+                      const DEVMODEW *devmode )
 {
-    HDC hdc;
-    DC * dc;
-    const struct gdi_dc_funcs *funcs;
+    UNICODE_STRING device_str, output_str;
+    driver_entry_point entry_point = NULL;
+    const WCHAR *display = NULL, *p;
+    BOOL is_display = FALSE;
     WCHAR buf[300];
 
-    GDI_CheckNotLock();
-
-    if (!device || !DRIVER_GetDriverName( device, buf, 300 ))
+    if (!device || !get_driver_name( device, buf, 300 ))
     {
         if (!driver)
         {
@@ -640,213 +212,168 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
         lstrcpyW(buf, driver);
     }
 
-    if (!(funcs = DRIVER_load_driver( buf )))
+    if (is_display_device( driver ))
+    {
+        display = driver;
+        is_display = TRUE;
+    }
+    else if (is_display_device( device ))
+    {
+        display = device;
+        is_display = TRUE;
+    }
+    else if (!wcsicmp( buf, L"display" ) || is_display_device( buf ))
+    {
+        is_display = TRUE;
+    }
+    else if (!(entry_point = load_driver( buf )))
     {
         ERR( "no driver found for %s\n", debugstr_w(buf) );
         return 0;
     }
-    if (!(dc = alloc_dc_ptr( OBJ_DC ))) return 0;
-    hdc = dc->hSelf;
 
-    dc->hBitmap = GDI_inc_ref_count( GetStockObject( DEFAULT_BITMAP ));
-
-    TRACE("(driver=%s, device=%s, output=%s): returning %p\n",
-          debugstr_w(driver), debugstr_w(device), debugstr_w(output), dc->hSelf );
-
-    if (funcs->pCreateDC)
+    if (display)
     {
-        if (!funcs->pCreateDC( &dc->physDev, buf, device, output, initData ))
-        {
-            WARN("creation aborted by device\n" );
-            free_dc_ptr( dc );
-            return 0;
-        }
+        /* Use only the display name. For example, \\.\DISPLAY1 in \\.\DISPLAY1\Monitor0 */
+        p = display + 12;
+        while (iswdigit( *p )) p++;
+
+        device_str.Length = device_str.MaximumLength = (p - display) * sizeof(WCHAR);
+        device_str.Buffer = (WCHAR *)display;
+    }
+    else if (device)
+    {
+        device_str.Length = device_str.MaximumLength = lstrlenW( device ) * sizeof(WCHAR);
+        device_str.Buffer = (WCHAR *)device;
     }
 
-    dc->vis_rect.left   = 0;
-    dc->vis_rect.top    = 0;
-    dc->vis_rect.right  = GetDeviceCaps( hdc, DESKTOPHORZRES );
-    dc->vis_rect.bottom = GetDeviceCaps( hdc, DESKTOPVERTRES );
+    if (output)
+    {
+        output_str.Length = output_str.MaximumLength = lstrlenW(output) * sizeof(WCHAR);
+        output_str.Buffer = (WCHAR *)output;
+    }
 
-    DC_InitDC( dc );
-    release_dc_ptr( dc );
-    return hdc;
+    return NtGdiOpenDCW( device || display ? &device_str : NULL, devmode, output ? &output_str : NULL,
+                         0, is_display, entry_point, NULL, NULL );
 }
-
 
 /***********************************************************************
- *           CreateDCA    (GDI32.@)
+ *           CreateDCA  (GDI32.@)
  */
-HDC WINAPI CreateDCA( LPCSTR driver, LPCSTR device, LPCSTR output,
-                      const DEVMODEA *initData )
+HDC WINAPI CreateDCA( const char *driver, const char *device, const char *output,
+                      const DEVMODEA *init_data )
 {
     UNICODE_STRING driverW, deviceW, outputW;
-    DEVMODEW *initDataW;
+    DEVMODEW *init_dataW = NULL;
     HDC ret;
 
-    if (driver) RtlCreateUnicodeStringFromAsciiz(&driverW, driver);
+    if (driver) RtlCreateUnicodeStringFromAsciiz( &driverW, driver );
     else driverW.Buffer = NULL;
 
-    if (device) RtlCreateUnicodeStringFromAsciiz(&deviceW, device);
+    if (device) RtlCreateUnicodeStringFromAsciiz( &deviceW, device );
     else deviceW.Buffer = NULL;
 
-    if (output) RtlCreateUnicodeStringFromAsciiz(&outputW, output);
+    if (output) RtlCreateUnicodeStringFromAsciiz( &outputW, output );
     else outputW.Buffer = NULL;
 
-    initDataW = NULL;
-    if (initData)
+    if (init_data)
     {
-        /* don't convert initData for DISPLAY driver, it's not used */
+        /* don't convert init_data for DISPLAY driver, it's not used */
         if (!driverW.Buffer || wcsicmp( driverW.Buffer, L"display" ))
-            initDataW = GdiConvertToDevmodeW(initData);
+            init_dataW = GdiConvertToDevmodeW( init_data );
     }
 
-    ret = CreateDCW( driverW.Buffer, deviceW.Buffer, outputW.Buffer, initDataW );
+    ret = CreateDCW( driverW.Buffer, deviceW.Buffer, outputW.Buffer, init_dataW );
 
-    RtlFreeUnicodeString(&driverW);
-    RtlFreeUnicodeString(&deviceW);
-    RtlFreeUnicodeString(&outputW);
-    HeapFree(GetProcessHeap(), 0, initDataW);
+    RtlFreeUnicodeString( &driverW );
+    RtlFreeUnicodeString( &deviceW );
+    RtlFreeUnicodeString( &outputW );
+    HeapFree( GetProcessHeap(), 0, init_dataW );
     return ret;
 }
-
 
 /***********************************************************************
  *           CreateICA    (GDI32.@)
  */
-HDC WINAPI CreateICA( LPCSTR driver, LPCSTR device, LPCSTR output,
-                          const DEVMODEA* initData )
+HDC WINAPI CreateICA( const char *driver, const char *device, const char *output,
+                      const DEVMODEA *init_data )
 {
-      /* Nothing special yet for ICs */
-    return CreateDCA( driver, device, output, initData );
+    /* Nothing special yet for ICs */
+    return CreateDCA( driver, device, output, init_data );
 }
 
 
 /***********************************************************************
  *           CreateICW    (GDI32.@)
  */
-HDC WINAPI CreateICW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
-                          const DEVMODEW* initData )
+HDC WINAPI CreateICW( const WCHAR *driver, const WCHAR *device, const WCHAR *output,
+                      const DEVMODEW *init_data )
 {
-      /* Nothing special yet for ICs */
-    return CreateDCW( driver, device, output, initData );
+    /* Nothing special yet for ICs */
+    return CreateDCW( driver, device, output, init_data );
 }
-
 
 /***********************************************************************
- *           CreateCompatibleDC   (GDI32.@)
+ *           GdiConvertToDevmodeW    (GDI32.@)
  */
-HDC WINAPI CreateCompatibleDC( HDC hdc )
+DEVMODEW *WINAPI GdiConvertToDevmodeW( const DEVMODEA *dmA )
 {
-    DC *dc, *origDC;
-    HDC ret;
-    const struct gdi_dc_funcs *funcs;
-    PHYSDEV physDev = NULL;
+    DEVMODEW *dmW;
+    WORD dmW_size, dmA_size;
 
-    GDI_CheckNotLock();
+    dmA_size = dmA->dmSize;
 
-    if (hdc)
+    /* this is the minimal dmSize that XP accepts */
+    if (dmA_size < FIELD_OFFSET(DEVMODEA, dmFields))
+        return NULL;
+
+    if (dmA_size > sizeof(DEVMODEA))
+        dmA_size = sizeof(DEVMODEA);
+
+    dmW_size = dmA_size + CCHDEVICENAME;
+    if (dmA_size >= FIELD_OFFSET(DEVMODEA, dmFormName) + CCHFORMNAME)
+        dmW_size += CCHFORMNAME;
+
+    dmW = HeapAlloc( GetProcessHeap(), 0, dmW_size + dmA->dmDriverExtra );
+    if (!dmW) return NULL;
+
+    MultiByteToWideChar( CP_ACP, 0, (const char*) dmA->dmDeviceName, -1,
+                         dmW->dmDeviceName, CCHDEVICENAME );
+    /* copy slightly more, to avoid long computations */
+    memcpy( &dmW->dmSpecVersion, &dmA->dmSpecVersion, dmA_size - CCHDEVICENAME );
+
+    if (dmA_size >= FIELD_OFFSET(DEVMODEA, dmFormName) + CCHFORMNAME)
     {
-        if (!(origDC = get_dc_ptr( hdc ))) return 0;
-        physDev = GET_DC_PHYSDEV( origDC, pCreateCompatibleDC );
-        funcs = physDev->funcs;
-        release_dc_ptr( origDC );
-    }
-    else funcs = DRIVER_load_driver( L"display" );
+        if (dmA->dmFields & DM_FORMNAME)
+            MultiByteToWideChar( CP_ACP, 0, (const char*) dmA->dmFormName, -1,
+                                 dmW->dmFormName, CCHFORMNAME );
+        else
+            dmW->dmFormName[0] = 0;
 
-    if (!(dc = alloc_dc_ptr( OBJ_MEMDC ))) return 0;
-
-    TRACE("(%p): returning %p\n", hdc, dc->hSelf );
-
-    dc->hBitmap = GDI_inc_ref_count( GetStockObject( DEFAULT_BITMAP ));
-    dc->vis_rect.left   = 0;
-    dc->vis_rect.top    = 0;
-    dc->vis_rect.right  = 1;
-    dc->vis_rect.bottom = 1;
-    dc->device_rect = dc->vis_rect;
-
-    ret = dc->hSelf;
-
-    if (funcs->pCreateCompatibleDC && !funcs->pCreateCompatibleDC( physDev, &dc->physDev ))
-    {
-        WARN("creation aborted by device\n");
-        free_dc_ptr( dc );
-        return 0;
+        if (dmA_size > FIELD_OFFSET(DEVMODEA, dmLogPixels))
+            memcpy( &dmW->dmLogPixels, &dmA->dmLogPixels, dmA_size - FIELD_OFFSET(DEVMODEA, dmLogPixels) );
     }
 
-    if (!dib_driver.pCreateDC( &dc->physDev, NULL, NULL, NULL, NULL ))
-    {
-        free_dc_ptr( dc );
-        return 0;
-    }
-    physDev = GET_DC_PHYSDEV( dc, pSelectBitmap );
-    physDev->funcs->pSelectBitmap( physDev, dc->hBitmap );
+    if (dmA->dmDriverExtra)
+        memcpy( (char *)dmW + dmW_size, (const char *)dmA + dmA_size, dmA->dmDriverExtra );
 
-    DC_InitDC( dc );
-    release_dc_ptr( dc );
-    return ret;
+    dmW->dmSize = dmW_size;
+
+    return dmW;
 }
-
 
 /***********************************************************************
  *           DeleteDC    (GDI32.@)
  */
 BOOL WINAPI DeleteDC( HDC hdc )
 {
-    DC * dc;
+    DC_ATTR *dc_attr;
 
-    TRACE("%p\n", hdc );
-
-    GDI_CheckNotLock();
-
-    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
-    if (dc->refcount != 1)
-    {
-        FIXME( "not deleting busy DC %p refcount %u\n", dc->hSelf, dc->refcount );
-        release_dc_ptr( dc );
-        return FALSE;
-    }
-
-    /* Call hook procedure to check whether is it OK to delete this DC */
-    if (dc->hookProc && !dc->hookProc( dc->hSelf, DCHC_DELETEDC, dc->dwHookData, 0 ))
-    {
-        release_dc_ptr( dc );
-        return TRUE;
-    }
-    reset_dc_state( hdc );
-    free_dc_ptr( dc );
-    return TRUE;
+    if (is_meta_dc( hdc )) return METADC_DeleteDC( hdc );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf) EMFDC_DeleteDC( dc_attr );
+    return NtGdiDeleteObjectApp( hdc );
 }
-
-
-/***********************************************************************
- *           ResetDCW    (GDI32.@)
- */
-HDC WINAPI ResetDCW( HDC hdc, const DEVMODEW *devmode )
-{
-    DC *dc;
-    HDC ret = 0;
-
-    if ((dc = get_dc_ptr( hdc )))
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pResetDC );
-        ret = physdev->funcs->pResetDC( physdev, devmode );
-        if (ret)  /* reset the visible region */
-        {
-            dc->dirty = 0;
-            dc->vis_rect.left   = 0;
-            dc->vis_rect.top    = 0;
-            dc->vis_rect.right  = GetDeviceCaps( hdc, DESKTOPHORZRES );
-            dc->vis_rect.bottom = GetDeviceCaps( hdc, DESKTOPVERTRES );
-            if (dc->hVisRgn) DeleteObject( dc->hVisRgn );
-            dc->hVisRgn = 0;
-            update_dc_clipping( dc );
-        }
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
 
 /***********************************************************************
  *           ResetDCA    (GDI32.@)
@@ -856,1117 +383,237 @@ HDC WINAPI ResetDCA( HDC hdc, const DEVMODEA *devmode )
     DEVMODEW *devmodeW;
     HDC ret;
 
-    if (devmode) devmodeW = GdiConvertToDevmodeW(devmode);
+    if (devmode) devmodeW = GdiConvertToDevmodeW( devmode );
     else devmodeW = NULL;
 
-    ret = ResetDCW(hdc, devmodeW);
+    ret = ResetDCW( hdc, devmodeW );
 
-    HeapFree(GetProcessHeap(), 0, devmodeW);
+    HeapFree( GetProcessHeap(), 0, devmodeW );
     return ret;
 }
 
+/***********************************************************************
+ *           ResetDCW    (GDI32.@)
+ */
+HDC WINAPI ResetDCW( HDC hdc, const DEVMODEW *devmode )
+{
+    return NtGdiResetDC( hdc, devmode, NULL, NULL, NULL ) ? hdc : 0;
+}
+
+/***********************************************************************
+ *           SaveDC    (GDI32.@)
+ */
+INT WINAPI SaveDC( HDC hdc )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_SaveDC( hdc );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_SaveDC( dc_attr )) return FALSE;
+    return NtGdiSaveDC( hdc );
+}
+
+/***********************************************************************
+ *           RestoreDC    (GDI32.@)
+ */
+BOOL WINAPI RestoreDC( HDC hdc, INT level )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_RestoreDC( hdc, level );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_RestoreDC( dc_attr, level )) return FALSE;
+    return NtGdiRestoreDC( hdc, level );
+}
 
 /***********************************************************************
  *           GetDeviceCaps    (GDI32.@)
  */
 INT WINAPI GetDeviceCaps( HDC hdc, INT cap )
 {
-    DC *dc;
-    INT ret = 0;
-
-    if ((dc = get_dc_ptr( hdc )))
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pGetDeviceCaps );
-        ret = physdev->funcs->pGetDeviceCaps( physdev, cap );
-        release_dc_ptr( dc );
-    }
-    return ret;
+    if (is_meta_dc( hdc )) return METADC_GetDeviceCaps( hdc, cap );
+    if (!get_dc_attr( hdc )) return FALSE;
+    return NtGdiGetDeviceCaps( hdc, cap );
 }
-
 
 /***********************************************************************
- *		GetBkColor (GDI32.@)
+ *             Escape  (GDI32.@)
  */
-COLORREF WINAPI GetBkColor( HDC hdc )
+INT WINAPI Escape( HDC hdc, INT escape, INT in_count, const char *in_data, void *out_data )
 {
-    COLORREF ret = 0;
-    DC * dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        ret = dc->backgroundColor;
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
+    INT ret;
+    POINT *pt;
 
+    switch (escape)
+    {
+    case ABORTDOC:
+        return AbortDoc( hdc );
+
+    case ENDDOC:
+        return EndDoc( hdc );
+
+    case GETPHYSPAGESIZE:
+        pt = out_data;
+        pt->x = GetDeviceCaps( hdc, PHYSICALWIDTH );
+        pt->y = GetDeviceCaps( hdc, PHYSICALHEIGHT );
+        return 1;
+
+    case GETPRINTINGOFFSET:
+        pt = out_data;
+        pt->x = GetDeviceCaps( hdc, PHYSICALOFFSETX );
+        pt->y = GetDeviceCaps( hdc, PHYSICALOFFSETY );
+        return 1;
+
+    case GETSCALINGFACTOR:
+        pt = out_data;
+        pt->x = GetDeviceCaps( hdc, SCALINGFACTORX );
+        pt->y = GetDeviceCaps( hdc, SCALINGFACTORY );
+        return 1;
+
+    case NEWFRAME:
+        return EndPage( hdc );
+
+    case SETABORTPROC:
+        return SetAbortProc( hdc, (ABORTPROC)in_data );
+
+    case STARTDOC:
+        {
+            DOCINFOA doc;
+            char *name = NULL;
+
+            /* in_data may not be 0 terminated so we must copy it */
+            if (in_data)
+            {
+                name = HeapAlloc( GetProcessHeap(), 0, in_count+1 );
+                memcpy( name, in_data, in_count );
+                name[in_count] = 0;
+            }
+            /* out_data is actually a pointer to the DocInfo structure and used as
+             * a second input parameter */
+            if (out_data) doc = *(DOCINFOA *)out_data;
+            else
+            {
+                doc.cbSize = sizeof(doc);
+                doc.lpszOutput = NULL;
+                doc.lpszDatatype = NULL;
+                doc.fwType = 0;
+            }
+            doc.lpszDocName = name;
+            ret = StartDocA( hdc, &doc );
+            HeapFree( GetProcessHeap(), 0, name );
+            if (ret > 0) ret = StartPage( hdc );
+            return ret;
+        }
+
+    case QUERYESCSUPPORT:
+        {
+            DWORD code;
+
+            if (in_count < sizeof(SHORT)) return 0;
+            code = (in_count < sizeof(DWORD)) ? *(const USHORT *)in_data : *(const DWORD *)in_data;
+            switch (code)
+            {
+            case ABORTDOC:
+            case ENDDOC:
+            case GETPHYSPAGESIZE:
+            case GETPRINTINGOFFSET:
+            case GETSCALINGFACTOR:
+            case NEWFRAME:
+            case QUERYESCSUPPORT:
+            case SETABORTPROC:
+            case STARTDOC:
+                return TRUE;
+            }
+            break;
+        }
+    }
+
+    /* if not handled internally, pass it to the driver */
+    return ExtEscape( hdc, escape, in_count, in_data, 0, out_data );
+}
 
 /***********************************************************************
- *           SetBkColor    (GDI32.@)
+ *		ExtEscape	[GDI32.@]
  */
-COLORREF WINAPI SetBkColor( HDC hdc, COLORREF color )
+INT WINAPI ExtEscape( HDC hdc, INT escape, INT input_size, const char *input,
+                      INT output_size, char *output )
 {
-    COLORREF ret = CLR_INVALID;
-    DC * dc = get_dc_ptr( hdc );
-
-    TRACE("hdc=%p color=0x%08x\n", hdc, color);
-
-    if (dc)
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetBkColor );
-        ret = dc->backgroundColor;
-        dc->backgroundColor = physdev->funcs->pSetBkColor( physdev, color );
-        release_dc_ptr( dc );
-    }
-    return ret;
+    if (is_meta_dc( hdc ))
+        return METADC_ExtEscape( hdc, escape, input_size, input, output_size, output );
+    return NtGdiExtEscape( hdc, NULL, 0, escape, input_size, input, output_size, output );
 }
-
-
-/***********************************************************************
- *		GetTextColor (GDI32.@)
- */
-COLORREF WINAPI GetTextColor( HDC hdc )
-{
-    COLORREF ret = 0;
-    DC * dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        ret = dc->textColor;
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *           SetTextColor    (GDI32.@)
- */
-COLORREF WINAPI SetTextColor( HDC hdc, COLORREF color )
-{
-    COLORREF ret = CLR_INVALID;
-    DC * dc = get_dc_ptr( hdc );
-
-    TRACE(" hdc=%p color=0x%08x\n", hdc, color);
-
-    if (dc)
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetTextColor );
-        ret = dc->textColor;
-        dc->textColor = physdev->funcs->pSetTextColor( physdev, color );
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
 
 /***********************************************************************
  *		GetTextAlign (GDI32.@)
  */
 UINT WINAPI GetTextAlign( HDC hdc )
 {
-    UINT ret = 0;
-    DC * dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        ret = dc->textAlign;
-        release_dc_ptr( dc );
-    }
-    return ret;
+    DC_ATTR *dc_attr = get_dc_attr( hdc );
+    return dc_attr ? dc_attr->text_align : 0;
 }
-
 
 /***********************************************************************
  *           SetTextAlign    (GDI32.@)
  */
 UINT WINAPI SetTextAlign( HDC hdc, UINT align )
 {
-    UINT ret = GDI_ERROR;
-    DC *dc = get_dc_ptr( hdc );
+    DC_ATTR *dc_attr;
+    UINT ret;
 
     TRACE("hdc=%p align=%d\n", hdc, align);
 
-    if (dc)
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetTextAlign );
-        align = physdev->funcs->pSetTextAlign( physdev, align );
-        if (align != GDI_ERROR)
-        {
-            ret = dc->textAlign;
-            dc->textAlign = align;
-        }
-        release_dc_ptr( dc );
-    }
+    if (is_meta_dc( hdc )) return METADC_SetTextAlign( hdc, align );
+    if (!(dc_attr = get_dc_attr( hdc ))) return GDI_ERROR;
+    if (dc_attr->emf && !EMFDC_SetTextAlign( dc_attr, align )) return GDI_ERROR;
+
+    ret = dc_attr->text_align;
+    dc_attr->text_align = align;
     return ret;
 }
 
 /***********************************************************************
- *           GetDCOrgEx  (GDI32.@)
+ *		GetBkColor (GDI32.@)
  */
-BOOL WINAPI GetDCOrgEx( HDC hDC, LPPOINT lpp )
+COLORREF WINAPI GetBkColor( HDC hdc )
 {
-    DC * dc;
-
-    if (!lpp) return FALSE;
-    if (!(dc = get_dc_ptr( hDC ))) return FALSE;
-    lpp->x = dc->vis_rect.left;
-    lpp->y = dc->vis_rect.top;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *		GetGraphicsMode (GDI32.@)
- */
-INT WINAPI GetGraphicsMode( HDC hdc )
-{
-    INT ret = 0;
-    DC * dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        ret = dc->GraphicsMode;
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *           SetGraphicsMode    (GDI32.@)
- */
-INT WINAPI SetGraphicsMode( HDC hdc, INT mode )
-{
-    INT ret = 0;
-    DC *dc = get_dc_ptr( hdc );
-
-    /* One would think that setting the graphics mode to GM_COMPATIBLE
-     * would also reset the world transformation matrix to the unity
-     * matrix. However, in Windows, this is not the case. This doesn't
-     * make a lot of sense to me, but that's the way it is.
-     */
-    if (!dc) return 0;
-    if ((mode > 0) && (mode <= GM_LAST))
-    {
-        ret = dc->GraphicsMode;
-        dc->GraphicsMode = mode;
-    }
-    /* font metrics depend on the graphics mode */
-    if (ret != mode) SelectObject(dc->hSelf, dc->hFont);
-    release_dc_ptr( dc );
-    return ret;
-}
-
-
-/***********************************************************************
- *		GetArcDirection (GDI32.@)
- */
-INT WINAPI GetArcDirection( HDC hdc )
-{
-    INT ret = 0;
-    DC * dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        ret = dc->ArcDirection;
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *           SetArcDirection    (GDI32.@)
- */
-INT WINAPI SetArcDirection( HDC hdc, INT dir )
-{
-    DC * dc;
-    INT ret = 0;
-
-    if (dir != AD_COUNTERCLOCKWISE && dir != AD_CLOCKWISE)
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-	return 0;
-    }
-
-    if ((dc = get_dc_ptr( hdc )))
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetArcDirection );
-        dir = physdev->funcs->pSetArcDirection( physdev, dir );
-        if (dir)
-        {
-            ret = dc->ArcDirection;
-            dc->ArcDirection = dir;
-        }
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *           GetWorldTransform    (GDI32.@)
- */
-BOOL WINAPI GetWorldTransform( HDC hdc, LPXFORM xform )
-{
-    DC * dc;
-    if (!xform) return FALSE;
-    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
-    *xform = dc->xformWorld2Wnd;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *           GetTransform    (GDI32.@)
- *
- * Undocumented
- *
- * Returns one of the co-ordinate space transforms
- *
- * PARAMS
- *    hdc   [I] Device context.
- *    which [I] Which xform to return:
- *                  0x203 World -> Page transform (that set by SetWorldTransform).
- *                  0x304 Page -> Device transform (the mapping mode transform).
- *                  0x204 World -> Device transform (the combination of the above two).
- *                  0x402 Device -> World transform (the inversion of the above).
- *    xform [O] The xform.
- *
- */
-BOOL WINAPI GetTransform( HDC hdc, DWORD which, XFORM *xform )
-{
-    BOOL ret = TRUE;
-    DC *dc = get_dc_ptr( hdc );
-    if (!dc) return FALSE;
-
-    switch(which)
-    {
-    case 0x203:
-        *xform = dc->xformWorld2Wnd;
-        break;
-
-    case 0x304:
-        construct_window_to_viewport(dc, xform);
-        break;
-
-    case 0x204:
-        *xform = dc->xformWorld2Vport;
-        break;
-
-    case 0x402:
-        *xform = dc->xformVport2World;
-        break;
-
-    default:
-        FIXME("Unknown code %x\n", which);
-        ret = FALSE;
-    }
-
-    release_dc_ptr( dc );
-    return ret;
-}
-
-
-/****************************************************************************
- * CombineTransform [GDI32.@]
- * Combines two transformation matrices.
- *
- * PARAMS
- *    xformResult [O] Stores the result of combining the two matrices
- *    xform1      [I] Specifies the first matrix to apply
- *    xform2      [I] Specifies the second matrix to apply
- *
- * REMARKS
- *    The same matrix can be passed in for more than one of the parameters.
- *
- * RETURNS
- *  Success: TRUE.
- *  Failure: FALSE. Use GetLastError() to determine the cause.
- */
-BOOL WINAPI CombineTransform( LPXFORM xformResult, const XFORM *xform1,
-    const XFORM *xform2 )
-{
-    XFORM xformTemp;
-
-    /* Check for illegal parameters */
-    if (!xformResult || !xform1 || !xform2)
-        return FALSE;
-
-    /* Create the result in a temporary XFORM, since xformResult may be
-     * equal to xform1 or xform2 */
-    xformTemp.eM11 = xform1->eM11 * xform2->eM11 +
-                     xform1->eM12 * xform2->eM21;
-    xformTemp.eM12 = xform1->eM11 * xform2->eM12 +
-                     xform1->eM12 * xform2->eM22;
-    xformTemp.eM21 = xform1->eM21 * xform2->eM11 +
-                     xform1->eM22 * xform2->eM21;
-    xformTemp.eM22 = xform1->eM21 * xform2->eM12 +
-                     xform1->eM22 * xform2->eM22;
-    xformTemp.eDx  = xform1->eDx  * xform2->eM11 +
-                     xform1->eDy  * xform2->eM21 +
-                     xform2->eDx;
-    xformTemp.eDy  = xform1->eDx  * xform2->eM12 +
-                     xform1->eDy  * xform2->eM22 +
-                     xform2->eDy;
-
-    /* Copy the result to xformResult */
-    *xformResult = xformTemp;
-
-    return TRUE;
-}
-
-
-/***********************************************************************
- *           SetDCHook   (GDI32.@)
- *
- * Note: this doesn't exist in Win32, we add it here because user32 needs it.
- */
-BOOL WINAPI SetDCHook( HDC hdc, DCHOOKPROC hookProc, DWORD_PTR dwHookData )
-{
-    DC *dc = get_dc_ptr( hdc );
-
-    if (!dc) return FALSE;
-
-    dc->dwHookData = dwHookData;
-    dc->hookProc = hookProc;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *           GetDCHook   (GDI32.@)
- *
- * Note: this doesn't exist in Win32, we add it here because user32 needs it.
- */
-DWORD_PTR WINAPI GetDCHook( HDC hdc, DCHOOKPROC *proc )
-{
-    DC *dc = get_dc_ptr( hdc );
-    DWORD_PTR ret;
-
-    if (!dc) return 0;
-    if (proc) *proc = dc->hookProc;
-    ret = dc->dwHookData;
-    release_dc_ptr( dc );
-    return ret;
-}
-
-
-/***********************************************************************
- *           SetHookFlags   (GDI32.@)
- *
- * Note: this doesn't exist in Win32, we add it here because user32 needs it.
- */
-WORD WINAPI SetHookFlags( HDC hdc, WORD flags )
-{
-    DC *dc = get_dc_obj( hdc );  /* not get_dc_ptr, this needs to work from any thread */
-    LONG ret = 0;
-
-    if (!dc) return 0;
-
-    TRACE("hDC %p, flags %04x\n",hdc,flags);
-
-    if (flags & DCHF_INVALIDATEVISRGN)
-        ret = InterlockedExchange( &dc->dirty, 1 );
-    else if (flags & DCHF_VALIDATEVISRGN || !flags)
-        ret = InterlockedExchange( &dc->dirty, 0 );
-
-    if (flags & DCHF_DISABLEDC)
-        ret = InterlockedExchange( &dc->disabled, 1 );
-    else if (flags & DCHF_ENABLEDC)
-        ret = InterlockedExchange( &dc->disabled, 0 );
-
-    GDI_ReleaseObj( hdc );
-
-    if (flags & DCHF_RESETDC) ret = reset_dc_state( hdc );
-    return ret;
+    DC_ATTR *dc_attr = get_dc_attr( hdc );
+    return dc_attr ? dc_attr->background_color : CLR_INVALID;
 }
 
 /***********************************************************************
- *           SetICMMode    (GDI32.@)
+ *           SetBkColor    (GDI32.@)
  */
-INT WINAPI SetICMMode(HDC hdc, INT iEnableICM)
+COLORREF WINAPI SetBkColor( HDC hdc, COLORREF color )
 {
-/*FIXME:  Assume that ICM is always off, and cannot be turned on */
-    if (iEnableICM == ICM_OFF) return ICM_OFF;
-    if (iEnableICM == ICM_ON) return 0;
-    if (iEnableICM == ICM_QUERY) return ICM_OFF;
-    return 0;
+    DC_ATTR *dc_attr;
+    COLORREF ret;
+
+    if (is_meta_dc( hdc )) return METADC_SetBkColor( hdc, color );
+    if (!(dc_attr = get_dc_attr( hdc ))) return CLR_INVALID;
+    if (dc_attr->emf && !EMFDC_SetBkColor( dc_attr, color )) return CLR_INVALID;
+    return NtGdiGetAndSetDCDword( hdc, NtGdiSetBkColor, color, &ret ) ? ret : CLR_INVALID;
 }
 
 /***********************************************************************
- *           GetDeviceGammaRamp    (GDI32.@)
+ *           GetDCBrushColor  (GDI32.@)
  */
-BOOL WINAPI GetDeviceGammaRamp(HDC hDC, LPVOID ptr)
+COLORREF WINAPI GetDCBrushColor( HDC hdc )
 {
-    BOOL ret = FALSE;
-    DC *dc = get_dc_ptr( hDC );
-
-    TRACE("%p, %p\n", hDC, ptr);
-    if( dc )
-    {
-        if (GetObjectType( hDC ) != OBJ_MEMDC)
-        {
-            PHYSDEV physdev = GET_DC_PHYSDEV( dc, pGetDeviceGammaRamp );
-            ret = physdev->funcs->pGetDeviceGammaRamp( physdev, ptr );
-        }
-        else SetLastError( ERROR_INVALID_PARAMETER );
-	release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-static BOOL check_gamma_ramps(void *ptr)
-{
-    WORD *ramp = ptr;
-
-    while (ramp < (WORD*)ptr + 3 * 256)
-    {
-        float r_x, r_y, r_lx, r_ly, r_d, r_v, r_e, g_avg, g_min, g_max;
-        unsigned i, f, l, g_n, c;
-
-        f = ramp[0];
-        l = ramp[255];
-        if (f >= l)
-        {
-            TRACE("inverted or flat gamma ramp (%d->%d), rejected\n", f, l);
-            return FALSE;
-        }
-        r_d = l - f;
-        g_min = g_max = g_avg = 0.0;
-
-        /* check gamma ramp entries to estimate the gamma */
-        TRACE("analyzing gamma ramp (%d->%d)\n", f, l);
-        for (i=1, g_n=0; i<255; i++)
-        {
-            if (ramp[i] < f || ramp[i] > l)
-            {
-                TRACE("strange gamma ramp ([%d]=%d for %d->%d), rejected\n", i, ramp[i], f, l);
-                return FALSE;
-            }
-            c = ramp[i] - f;
-            if (!c) continue; /* avoid log(0) */
-
-            /* normalize entry values into 0..1 range */
-            r_x = i/255.0; r_y = c / r_d;
-            /* compute logarithms of values */
-            r_lx = log(r_x); r_ly = log(r_y);
-            /* compute gamma for this entry */
-            r_v = r_ly / r_lx;
-            /* compute differential (error estimate) for this entry */
-            /* some games use table-based logarithms that magnifies the error by 128 */
-            r_e = -r_lx * 128 / (c * r_lx * r_lx);
-
-            /* compute min & max while compensating for estimated error */
-            if (!g_n || g_min > (r_v + r_e)) g_min = r_v + r_e;
-            if (!g_n || g_max < (r_v - r_e)) g_max = r_v - r_e;
-
-            /* add to average */
-            g_avg += r_v;
-            g_n++;
-        }
-
-        if (!g_n)
-        {
-            TRACE("no gamma data, shouldn't happen\n");
-            return FALSE;
-        }
-        g_avg /= g_n;
-        TRACE("low bias is %d, high is %d, gamma is %5.3f\n", f, 65535-l, g_avg);
-
-        /* check that the gamma is reasonably uniform across the ramp */
-        if (g_max - g_min > 12.8)
-        {
-            TRACE("ramp not uniform (max=%f, min=%f, avg=%f), rejected\n", g_max, g_min, g_avg);
-            return FALSE;
-        }
-
-        /* check that the gamma is not too bright */
-        if (g_avg < 0.2)
-        {
-            TRACE("too bright gamma ( %5.3f), rejected\n", g_avg);
-            return FALSE;
-        }
-
-        ramp += 256;
-    }
-
-    return TRUE;
-}
-
-/***********************************************************************
- *           SetDeviceGammaRamp    (GDI32.@)
- */
-BOOL WINAPI SetDeviceGammaRamp(HDC hDC, LPVOID ptr)
-{
-    BOOL ret = FALSE;
-    DC *dc = get_dc_ptr( hDC );
-
-    TRACE("%p, %p\n", hDC, ptr);
-    if( dc )
-    {
-        if (GetObjectType( hDC ) != OBJ_MEMDC)
-        {
-            PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetDeviceGammaRamp );
-
-            if (check_gamma_ramps(ptr))
-                ret = physdev->funcs->pSetDeviceGammaRamp( physdev, ptr );
-        }
-        else SetLastError( ERROR_INVALID_PARAMETER );
-	release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-/***********************************************************************
- *           GetColorSpace    (GDI32.@)
- */
-HCOLORSPACE WINAPI GetColorSpace(HDC hdc)
-{
-/*FIXME    Need to do whatever GetColorSpace actually does */
-    return 0;
-}
-
-/***********************************************************************
- *           CreateColorSpaceA    (GDI32.@)
- */
-HCOLORSPACE WINAPI CreateColorSpaceA( LPLOGCOLORSPACEA lpLogColorSpace )
-{
-  FIXME( "stub\n" );
-  return 0;
-}
-
-/***********************************************************************
- *           CreateColorSpaceW    (GDI32.@)
- */
-HCOLORSPACE WINAPI CreateColorSpaceW( LPLOGCOLORSPACEW lpLogColorSpace )
-{
-  FIXME( "stub\n" );
-  return 0;
-}
-
-/***********************************************************************
- *           DeleteColorSpace     (GDI32.@)
- */
-BOOL WINAPI DeleteColorSpace( HCOLORSPACE hColorSpace )
-{
-  FIXME( "stub\n" );
-
-  return TRUE;
-}
-
-/***********************************************************************
- *           SetColorSpace     (GDI32.@)
- */
-HCOLORSPACE WINAPI SetColorSpace( HDC hDC, HCOLORSPACE hColorSpace )
-{
-  FIXME( "stub\n" );
-
-  return hColorSpace;
-}
-
-/***********************************************************************
- *           GetBoundsRect    (GDI32.@)
- */
-UINT WINAPI GetBoundsRect(HDC hdc, LPRECT rect, UINT flags)
-{
-    PHYSDEV physdev;
-    RECT device_rect;
-    UINT ret;
-    DC *dc = get_dc_ptr( hdc );
-
-    if ( !dc ) return 0;
-
-    physdev = GET_DC_PHYSDEV( dc, pGetBoundsRect );
-    ret = physdev->funcs->pGetBoundsRect( physdev, &device_rect, DCB_RESET );
-    if (!ret)
-    {
-        release_dc_ptr( dc );
-        return 0;
-    }
-    if (dc->bounds_enabled && ret == DCB_SET) add_bounds_rect( &dc->bounds, &device_rect );
-
-    if (rect)
-    {
-        if (is_rect_empty( &dc->bounds ))
-        {
-            rect->left = rect->top = rect->right = rect->bottom = 0;
-            ret = DCB_RESET;
-        }
-        else
-        {
-            *rect = dc->bounds;
-            rect->left   = max( rect->left, 0 );
-            rect->top    = max( rect->top, 0 );
-            rect->right  = min( rect->right, dc->vis_rect.right - dc->vis_rect.left );
-            rect->bottom = min( rect->bottom, dc->vis_rect.bottom - dc->vis_rect.top );
-            ret = DCB_SET;
-        }
-        dp_to_lp( dc, (POINT *)rect, 2 );
-    }
-    else ret = 0;
-
-    if (flags & DCB_RESET) reset_bounds( &dc->bounds );
-    release_dc_ptr( dc );
-    return ret;
-}
-
-
-/***********************************************************************
- *           SetBoundsRect    (GDI32.@)
- */
-UINT WINAPI SetBoundsRect(HDC hdc, const RECT* rect, UINT flags)
-{
-    PHYSDEV physdev;
-    UINT ret;
-    DC *dc;
-
-    if ((flags & DCB_ENABLE) && (flags & DCB_DISABLE)) return 0;
-    if (!(dc = get_dc_ptr( hdc ))) return 0;
-
-    physdev = GET_DC_PHYSDEV( dc, pSetBoundsRect );
-    ret = physdev->funcs->pSetBoundsRect( physdev, &dc->bounds, flags );
-    if (!ret)
-    {
-        release_dc_ptr( dc );
-        return 0;
-    }
-
-    ret = (dc->bounds_enabled ? DCB_ENABLE : DCB_DISABLE) |
-          (is_rect_empty( &dc->bounds ) ? ret & DCB_SET : DCB_SET);
-
-    if (flags & DCB_RESET) reset_bounds( &dc->bounds );
-
-    if ((flags & DCB_ACCUMULATE) && rect)
-    {
-        RECT rc = *rect;
-
-        lp_to_dp( dc, (POINT *)&rc, 2 );
-        add_bounds_rect( &dc->bounds, &rc );
-    }
-
-    if (flags & DCB_ENABLE) dc->bounds_enabled = TRUE;
-    if (flags & DCB_DISABLE) dc->bounds_enabled = FALSE;
-
-    release_dc_ptr( dc );
-    return ret;
-}
-
-
-/***********************************************************************
- *		GetRelAbs		(GDI32.@)
- */
-INT WINAPI GetRelAbs( HDC hdc, DWORD dwIgnore )
-{
-    INT ret = 0;
-    DC *dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        ret = dc->relAbsMode;
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-
-
-/***********************************************************************
- *		GetBkMode (GDI32.@)
- */
-INT WINAPI GetBkMode( HDC hdc )
-{
-    INT ret = 0;
-    DC * dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        ret = dc->backgroundMode;
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *		SetBkMode (GDI32.@)
- */
-INT WINAPI SetBkMode( HDC hdc, INT mode )
-{
-    INT ret = 0;
-    DC *dc;
-
-    if ((mode <= 0) || (mode > BKMODE_LAST))
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return 0;
-    }
-    if ((dc = get_dc_ptr( hdc )))
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetBkMode );
-        mode = physdev->funcs->pSetBkMode( physdev, mode );
-        if (mode)
-        {
-            ret = dc->backgroundMode;
-            dc->backgroundMode = mode;
-        }
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *		GetROP2 (GDI32.@)
- */
-INT WINAPI GetROP2( HDC hdc )
-{
-    INT ret = 0;
-    DC * dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        ret = dc->ROPmode;
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *		SetROP2 (GDI32.@)
- */
-INT WINAPI SetROP2( HDC hdc, INT mode )
-{
-    INT ret = 0;
-    DC *dc;
-
-    if ((mode < R2_BLACK) || (mode > R2_WHITE))
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return 0;
-    }
-    if ((dc = get_dc_ptr( hdc )))
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetROP2 );
-        mode = physdev->funcs->pSetROP2( physdev, mode );
-        if (mode)
-        {
-            ret = dc->ROPmode;
-            dc->ROPmode = mode;
-        }
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *		SetRelAbs (GDI32.@)
- */
-INT WINAPI SetRelAbs( HDC hdc, INT mode )
-{
-    INT ret = 0;
-    DC *dc;
-
-    if ((mode != ABSOLUTE) && (mode != RELATIVE))
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return 0;
-    }
-    if ((dc = get_dc_ptr( hdc )))
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetRelAbs );
-        mode = physdev->funcs->pSetRelAbs( physdev, mode );
-        if (mode)
-        {
-            ret = dc->relAbsMode;
-            dc->relAbsMode = mode;
-        }
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *		GetPolyFillMode (GDI32.@)
- */
-INT WINAPI GetPolyFillMode( HDC hdc )
-{
-    INT ret = 0;
-    DC * dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        ret = dc->polyFillMode;
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *		SetPolyFillMode (GDI32.@)
- */
-INT WINAPI SetPolyFillMode( HDC hdc, INT mode )
-{
-    INT ret = 0;
-    DC *dc;
-
-    if ((mode <= 0) || (mode > POLYFILL_LAST))
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return 0;
-    }
-    if ((dc = get_dc_ptr( hdc )))
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetPolyFillMode );
-        mode = physdev->funcs->pSetPolyFillMode( physdev, mode );
-        if (mode)
-        {
-            ret = dc->polyFillMode;
-            dc->polyFillMode = mode;
-        }
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *		GetStretchBltMode (GDI32.@)
- */
-INT WINAPI GetStretchBltMode( HDC hdc )
-{
-    INT ret = 0;
-    DC * dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        ret = dc->stretchBltMode;
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *		SetStretchBltMode (GDI32.@)
- */
-INT WINAPI SetStretchBltMode( HDC hdc, INT mode )
-{
-    INT ret = 0;
-    DC *dc;
-
-    if ((mode <= 0) || (mode > MAXSTRETCHBLTMODE))
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return 0;
-    }
-    if ((dc = get_dc_ptr( hdc )))
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetStretchBltMode );
-        mode = physdev->funcs->pSetStretchBltMode( physdev, mode );
-        if (mode)
-        {
-            ret = dc->stretchBltMode;
-            dc->stretchBltMode = mode;
-        }
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *		GetMapMode (GDI32.@)
- */
-INT WINAPI GetMapMode( HDC hdc )
-{
-    INT ret = 0;
-    DC * dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        ret = dc->MapMode;
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *		GetBrushOrgEx (GDI32.@)
- */
-BOOL WINAPI GetBrushOrgEx( HDC hdc, LPPOINT pt )
-{
-    DC * dc = get_dc_ptr( hdc );
-    if (!dc) return FALSE;
-    *pt = dc->brush_org;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *		GetCurrentPositionEx (GDI32.@)
- */
-BOOL WINAPI GetCurrentPositionEx( HDC hdc, LPPOINT pt )
-{
-    DC * dc = get_dc_ptr( hdc );
-    if (!dc) return FALSE;
-    *pt = dc->cur_pos;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *		GetViewportExtEx (GDI32.@)
- */
-BOOL WINAPI GetViewportExtEx( HDC hdc, LPSIZE size )
-{
-    DC * dc = get_dc_ptr( hdc );
-    if (!dc) return FALSE;
-    *size = dc->vport_ext;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *		GetViewportOrgEx (GDI32.@)
- */
-BOOL WINAPI GetViewportOrgEx( HDC hdc, LPPOINT pt )
-{
-    DC * dc = get_dc_ptr( hdc );
-    if (!dc) return FALSE;
-    *pt = dc->vport_org;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *		GetWindowExtEx (GDI32.@)
- */
-BOOL WINAPI GetWindowExtEx( HDC hdc, LPSIZE size )
-{
-    DC * dc = get_dc_ptr( hdc );
-    if (!dc) return FALSE;
-    *size = dc->wnd_ext;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *		GetWindowOrgEx (GDI32.@)
- */
-BOOL WINAPI GetWindowOrgEx( HDC hdc, LPPOINT pt )
-{
-    DC * dc = get_dc_ptr( hdc );
-    if (!dc) return FALSE;
-    *pt = dc->wnd_org;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *           GetLayout    (GDI32.@)
- *
- * Gets left->right or right->left text layout flags of a dc.
- *
- */
-DWORD WINAPI GetLayout(HDC hdc)
-{
-    DWORD layout = GDI_ERROR;
-
-    DC * dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        layout = dc->layout;
-        release_dc_ptr( dc );
-    }
-
-    TRACE("hdc : %p, layout : %08x\n", hdc, layout);
-
-    return layout;
-}
-
-/***********************************************************************
- *           SetLayout    (GDI32.@)
- *
- * Sets left->right or right->left text layout flags of a dc.
- *
- */
-DWORD WINAPI SetLayout(HDC hdc, DWORD layout)
-{
-    DWORD oldlayout = GDI_ERROR;
-
-    DC * dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetLayout );
-        layout = physdev->funcs->pSetLayout( physdev, layout );
-        if (layout != GDI_ERROR)
-        {
-            oldlayout = dc->layout;
-            dc->layout = layout;
-            if (layout != oldlayout)
-            {
-                if (layout & LAYOUT_RTL) dc->MapMode = MM_ANISOTROPIC;
-                DC_UpdateXforms( dc );
-            }
-        }
-        release_dc_ptr( dc );
-    }
-
-    TRACE("hdc : %p, old layout : %08x, new layout : %08x\n", hdc, oldlayout, layout);
-
-    return oldlayout;
-}
-
-/***********************************************************************
- *           GetDCBrushColor    (GDI32.@)
- */
-COLORREF WINAPI GetDCBrushColor(HDC hdc)
-{
-    DC *dc;
-    COLORREF dcBrushColor = CLR_INVALID;
-
-    TRACE("hdc(%p)\n", hdc);
-
-    dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        dcBrushColor = dc->dcBrushColor;
-	release_dc_ptr( dc );
-    }
-
-    return dcBrushColor;
+    DC_ATTR *dc_attr = get_dc_attr( hdc );
+    return dc_attr ? dc_attr->brush_color : CLR_INVALID;
 }
 
 /***********************************************************************
  *           SetDCBrushColor    (GDI32.@)
  */
-COLORREF WINAPI SetDCBrushColor(HDC hdc, COLORREF crColor)
+COLORREF WINAPI SetDCBrushColor( HDC hdc, COLORREF color )
 {
-    DC *dc;
-    COLORREF oldClr = CLR_INVALID;
+    DC_ATTR *dc_attr;
+    COLORREF ret;
 
-    TRACE("hdc(%p) crColor(%08x)\n", hdc, crColor);
-
-    dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetDCBrushColor );
-        crColor = physdev->funcs->pSetDCBrushColor( physdev, crColor );
-        if (crColor != CLR_INVALID)
-        {
-            oldClr = dc->dcBrushColor;
-            dc->dcBrushColor = crColor;
-        }
-        release_dc_ptr( dc );
-    }
-
-    return oldClr;
+    if (!(dc_attr = get_dc_attr( hdc ))) return CLR_INVALID;
+    if (dc_attr->emf && !EMFDC_SetDCBrushColor( dc_attr, color )) return CLR_INVALID;
+    return NtGdiGetAndSetDCDword( hdc, NtGdiSetDCBrushColor, color, &ret ) ? ret : CLR_INVALID;
 }
 
 /***********************************************************************
@@ -1974,45 +621,1515 @@ COLORREF WINAPI SetDCBrushColor(HDC hdc, COLORREF crColor)
  */
 COLORREF WINAPI GetDCPenColor(HDC hdc)
 {
-    DC *dc;
-    COLORREF dcPenColor = CLR_INVALID;
-
-    TRACE("hdc(%p)\n", hdc);
-
-    dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        dcPenColor = dc->dcPenColor;
-	release_dc_ptr( dc );
-    }
-
-    return dcPenColor;
+    DC_ATTR *dc_attr = get_dc_attr( hdc );
+    return dc_attr ? dc_attr->pen_color : CLR_INVALID;
 }
 
 /***********************************************************************
  *           SetDCPenColor    (GDI32.@)
  */
-COLORREF WINAPI SetDCPenColor(HDC hdc, COLORREF crColor)
+COLORREF WINAPI SetDCPenColor( HDC hdc, COLORREF color )
 {
-    DC *dc;
-    COLORREF oldClr = CLR_INVALID;
+    DC_ATTR *dc_attr;
+    COLORREF ret;
 
-    TRACE("hdc(%p) crColor(%08x)\n", hdc, crColor);
+    if (!(dc_attr = get_dc_attr( hdc ))) return CLR_INVALID;
+    if (dc_attr->emf && !EMFDC_SetDCPenColor( dc_attr, color )) return CLR_INVALID;
+    return NtGdiGetAndSetDCDword( hdc, NtGdiSetDCPenColor, color, &ret ) ? ret : CLR_INVALID;
+}
 
-    dc = get_dc_ptr( hdc );
-    if (dc)
+/***********************************************************************
+ *		GetTextColor (GDI32.@)
+ */
+COLORREF WINAPI GetTextColor( HDC hdc )
+{
+    DC_ATTR *dc_attr = get_dc_attr( hdc );
+    return dc_attr ? dc_attr->text_color : 0;
+}
+
+/***********************************************************************
+ *           SetTextColor    (GDI32.@)
+ */
+COLORREF WINAPI SetTextColor( HDC hdc, COLORREF color )
+{
+    DC_ATTR *dc_attr;
+    COLORREF ret;
+
+    if (is_meta_dc( hdc )) return METADC_SetTextColor( hdc, color );
+    if (!(dc_attr = get_dc_attr( hdc ))) return CLR_INVALID;
+    if (dc_attr->emf && !EMFDC_SetTextColor( dc_attr, color )) return CLR_INVALID;
+    return NtGdiGetAndSetDCDword( hdc, NtGdiSetTextColor, color, &ret ) ? ret : CLR_INVALID;
+}
+
+/***********************************************************************
+ *		GetBkMode (GDI32.@)
+ */
+INT WINAPI GetBkMode( HDC hdc )
+{
+    DC_ATTR *dc_attr = get_dc_attr( hdc );
+    return dc_attr ? dc_attr->background_mode : 0;
+}
+
+/***********************************************************************
+ *		SetBkMode (GDI32.@)
+ */
+INT WINAPI SetBkMode( HDC hdc, INT mode )
+{
+    DC_ATTR *dc_attr;
+    INT ret;
+
+    if (mode <= 0 || mode > BKMODE_LAST)
     {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetDCPenColor );
-        crColor = physdev->funcs->pSetDCPenColor( physdev, crColor );
-        if (crColor != CLR_INVALID)
-        {
-            oldClr = dc->dcPenColor;
-            dc->dcPenColor = crColor;
-        }
-        release_dc_ptr( dc );
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
     }
 
-    return oldClr;
+    if (is_meta_dc( hdc )) return METADC_SetBkMode( hdc, mode );
+    if (!(dc_attr = get_dc_attr( hdc ))) return 0;
+    if (dc_attr->emf && !EMFDC_SetBkMode( dc_attr, mode )) return 0;
+
+    ret = dc_attr->background_mode;
+    dc_attr->background_mode = mode;
+    return ret;
+}
+
+/***********************************************************************
+ *		GetGraphicsMode (GDI32.@)
+ */
+INT WINAPI GetGraphicsMode( HDC hdc )
+{
+    DC_ATTR *dc_attr = get_dc_attr( hdc );
+    return dc_attr ? dc_attr->graphics_mode : 0;
+}
+
+/***********************************************************************
+ *           SetGraphicsMode    (GDI32.@)
+ */
+INT WINAPI SetGraphicsMode( HDC hdc, INT mode )
+{
+    DWORD ret;
+    return NtGdiGetAndSetDCDword( hdc, NtGdiSetGraphicsMode, mode, &ret ) ? ret : 0;
+}
+
+/***********************************************************************
+ *		GetArcDirection (GDI32.@)
+ */
+INT WINAPI GetArcDirection( HDC hdc )
+{
+    DC_ATTR *dc_attr = get_dc_attr( hdc );
+    return dc_attr ? dc_attr->arc_direction : 0;
+}
+
+/***********************************************************************
+ *           SetArcDirection    (GDI32.@)
+ */
+INT WINAPI SetArcDirection( HDC hdc, INT dir )
+{
+    DC_ATTR *dc_attr;
+    INT ret;
+
+    if (dir != AD_COUNTERCLOCKWISE && dir != AD_CLOCKWISE)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return 0;
+    if (dc_attr->emf && !EMFDC_SetArcDirection( dc_attr, dir )) return 0;
+
+    ret = dc_attr->arc_direction;
+    dc_attr->arc_direction = dir;
+    return ret;
+}
+
+/***********************************************************************
+ *           GetLayout    (GDI32.@)
+ */
+DWORD WINAPI GetLayout( HDC hdc )
+{
+    DC_ATTR *dc_attr = get_dc_attr( hdc );
+    return dc_attr ? dc_attr->layout : GDI_ERROR;
+}
+
+/***********************************************************************
+ *           SetLayout    (GDI32.@)
+ */
+DWORD WINAPI SetLayout( HDC hdc, DWORD layout )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_SetLayout( hdc, layout );
+    if (!(dc_attr = get_dc_attr( hdc ))) return GDI_ERROR;
+    if (dc_attr->emf && !EMFDC_SetLayout( dc_attr, layout )) return GDI_ERROR;
+    return NtGdiSetLayout( hdc, -1, layout );
+}
+
+/***********************************************************************
+ *           GetMapMode  (GDI32.@)
+ */
+INT WINAPI GetMapMode( HDC hdc )
+{
+    DC_ATTR *dc_attr = get_dc_attr( hdc );
+    return dc_attr ? dc_attr->map_mode : 0;
+}
+
+/***********************************************************************
+ *           SetMapMode    (GDI32.@)
+ */
+INT WINAPI SetMapMode( HDC hdc, INT mode )
+{
+    DC_ATTR *dc_attr;
+    DWORD ret;
+
+    TRACE("%p %d\n", hdc, mode );
+
+    if (is_meta_dc( hdc )) return METADC_SetMapMode( hdc, mode );
+    if (!(dc_attr = get_dc_attr( hdc ))) return 0;
+    if (dc_attr->emf && !EMFDC_SetMapMode( dc_attr, mode )) return 0;
+    return NtGdiGetAndSetDCDword( hdc, NtGdiSetMapMode, mode, &ret ) ? ret : 0;
+}
+
+/***********************************************************************
+ *           GetTextCharacterExtra    (GDI32.@)
+ */
+INT WINAPI GetTextCharacterExtra( HDC hdc )
+{
+    DC_ATTR *dc_attr = get_dc_attr( hdc );
+    return dc_attr ? dc_attr->char_extra : 0x80000000;
+}
+
+/***********************************************************************
+ *           SetTextCharacterExtra    (GDI32.@)
+ */
+INT WINAPI SetTextCharacterExtra( HDC hdc, INT extra )
+{
+    DC_ATTR *dc_attr;
+    INT ret;
+
+    if (is_meta_dc( hdc )) return METADC_SetTextCharacterExtra( hdc, extra );
+    if (!(dc_attr = get_dc_attr( hdc ))) return 0x8000000;
+    ret = dc_attr->char_extra;
+    dc_attr->char_extra = extra;
+    return ret;
+}
+
+/***********************************************************************
+ *           SetMapperFlags    (GDI32.@)
+ */
+DWORD WINAPI SetMapperFlags( HDC hdc, DWORD flags )
+{
+    DC_ATTR *dc_attr;
+    DWORD ret;
+
+    if (is_meta_dc( hdc )) return METADC_SetMapperFlags( hdc, flags );
+    if (!(dc_attr = get_dc_attr( hdc ))) return GDI_ERROR;
+    if (dc_attr->emf && !EMFDC_SetMapperFlags( dc_attr, flags )) return GDI_ERROR;
+    ret = dc_attr->mapper_flags;
+    dc_attr->mapper_flags = flags;
+    return ret;
+}
+
+/***********************************************************************
+ *		GetPolyFillMode  (GDI32.@)
+ */
+INT WINAPI GetPolyFillMode( HDC hdc )
+{
+    DC_ATTR *dc_attr = get_dc_attr( hdc );
+    return dc_attr ? dc_attr->poly_fill_mode : 0;
+}
+
+/***********************************************************************
+ *		SetPolyFillMode (GDI32.@)
+ */
+INT WINAPI SetPolyFillMode( HDC hdc, INT mode )
+{
+    DC_ATTR *dc_attr;
+    INT ret;
+
+    if (mode <= 0 || mode > POLYFILL_LAST)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+
+    if (is_meta_dc( hdc )) return METADC_SetPolyFillMode( hdc, mode );
+    if (!(dc_attr = get_dc_attr( hdc ))) return 0;
+    if (dc_attr->emf && !EMFDC_SetPolyFillMode( dc_attr, mode )) return 0;
+
+    ret = dc_attr->poly_fill_mode;
+    dc_attr->poly_fill_mode = mode;
+    return ret;
+}
+
+/***********************************************************************
+ *		GetStretchBltMode (GDI32.@)
+ */
+INT WINAPI GetStretchBltMode( HDC hdc )
+{
+    DC_ATTR *dc_attr = get_dc_attr( hdc );
+    return dc_attr ? dc_attr->stretch_blt_mode : 0;
+}
+
+/***********************************************************************
+ *		GetBrushOrgEx (GDI32.@)
+ */
+BOOL WINAPI GetBrushOrgEx( HDC hdc, POINT *point )
+{
+    DC_ATTR *dc_attr;
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    *point = dc_attr->brush_org;
+    return TRUE;
+}
+
+/***********************************************************************
+ *           SetBrushOrgEx    (GDI32.@)
+ */
+BOOL WINAPI SetBrushOrgEx( HDC hdc, INT x, INT y, POINT *oldorg )
+{
+    DC_ATTR *dc_attr;
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (oldorg) *oldorg = dc_attr->brush_org;
+    dc_attr->brush_org.x = x;
+    dc_attr->brush_org.y = y;
+    return TRUE;
+}
+
+/***********************************************************************
+ *           FixBrushOrgEx    (GDI32.@)
+ */
+BOOL WINAPI FixBrushOrgEx( HDC hdc, INT x, INT y, POINT *oldorg )
+{
+    return SetBrushOrgEx( hdc, x, y, oldorg );
+}
+
+/***********************************************************************
+ *           GetDCOrgEx  (GDI32.@)
+ */
+BOOL WINAPI GetDCOrgEx( HDC hdc, POINT *point )
+{
+    DC_ATTR *dc_attr;
+    if (!point || !(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    point->x = dc_attr->vis_rect.left;
+    point->y = dc_attr->vis_rect.top;
+    return TRUE;
+}
+
+/***********************************************************************
+ *		GetWindowExtEx (GDI32.@)
+ */
+BOOL WINAPI GetWindowExtEx( HDC hdc, SIZE *size )
+{
+    DC_ATTR *dc_attr;
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    *size = dc_attr->wnd_ext;
+    return TRUE;
+}
+
+/***********************************************************************
+ *           SetWindowExtEx    (GDI32.@)
+ */
+BOOL WINAPI SetWindowExtEx( HDC hdc, INT x, INT y, SIZE *size )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_SetWindowExtEx( hdc, x, y );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_SetWindowExtEx( dc_attr, x, y )) return FALSE;
+
+    if (size) *size = dc_attr->wnd_ext;
+    if (dc_attr->map_mode != MM_ISOTROPIC && dc_attr->map_mode != MM_ANISOTROPIC) return TRUE;
+    if (!x || !y) return FALSE;
+    dc_attr->wnd_ext.cx = x;
+    dc_attr->wnd_ext.cy = y;
+    return NtGdiComputeXformCoefficients( hdc );
+}
+
+/***********************************************************************
+ *		GetWindowOrgEx (GDI32.@)
+ */
+BOOL WINAPI GetWindowOrgEx( HDC hdc, POINT *point )
+{
+    DC_ATTR *dc_attr;
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    *point = dc_attr->wnd_org;
+    return TRUE;
+}
+
+/***********************************************************************
+ *           SetWindowOrgEx    (GDI32.@)
+ */
+BOOL WINAPI SetWindowOrgEx( HDC hdc, INT x, INT y, POINT *point )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_SetWindowOrgEx( hdc, x, y );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_SetWindowOrgEx( dc_attr, x, y )) return FALSE;
+
+    if (point) *point = dc_attr->wnd_org;
+    dc_attr->wnd_org.x = x;
+    dc_attr->wnd_org.y = y;
+    return NtGdiComputeXformCoefficients( hdc );
+}
+
+/***********************************************************************
+ *           OffsetWindowOrgEx    (GDI32.@)
+ */
+BOOL WINAPI OffsetWindowOrgEx( HDC hdc, INT x, INT y, POINT *point )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_OffsetWindowOrgEx( hdc, x, y );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (point) *point = dc_attr->wnd_org;
+    dc_attr->wnd_org.x += x;
+    dc_attr->wnd_org.y += y;
+    if (dc_attr->emf && !EMFDC_SetWindowOrgEx( dc_attr, dc_attr->wnd_org.x,
+                                               dc_attr->wnd_org.y )) return FALSE;
+    return NtGdiComputeXformCoefficients( hdc );
+}
+
+/***********************************************************************
+ *		GetViewportExtEx (GDI32.@)
+ */
+BOOL WINAPI GetViewportExtEx( HDC hdc, SIZE *size )
+{
+    DC_ATTR *dc_attr;
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    *size = dc_attr->vport_ext;
+    return TRUE;
+}
+
+/***********************************************************************
+ *           SetViewportExtEx    (GDI32.@)
+ */
+BOOL WINAPI SetViewportExtEx( HDC hdc, INT x, INT y, LPSIZE size )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_SetViewportExtEx( hdc, x, y );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_SetViewportExtEx( dc_attr, x, y )) return FALSE;
+
+    if (size) *size = dc_attr->vport_ext;
+    if (dc_attr->map_mode != MM_ISOTROPIC && dc_attr->map_mode != MM_ANISOTROPIC) return TRUE;
+    if (!x || !y) return FALSE;
+    dc_attr->vport_ext.cx = x;
+    dc_attr->vport_ext.cy = y;
+    return NtGdiComputeXformCoefficients( hdc );
+}
+
+/***********************************************************************
+ *		GetViewportOrgEx (GDI32.@)
+ */
+BOOL WINAPI GetViewportOrgEx( HDC hdc, POINT *point )
+{
+    DC_ATTR *dc_attr;
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    *point = dc_attr->vport_org;
+    return TRUE;
+}
+
+/***********************************************************************
+ *           SetViewportOrgEx    (GDI32.@)
+ */
+BOOL WINAPI SetViewportOrgEx( HDC hdc, INT x, INT y, POINT *point )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_SetViewportOrgEx( hdc, x, y );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_SetViewportOrgEx( dc_attr, x, y )) return FALSE;
+
+    if (point) *point = dc_attr->vport_org;
+    dc_attr->vport_org.x = x;
+    dc_attr->vport_org.y = y;
+    return NtGdiComputeXformCoefficients( hdc );
+}
+
+/***********************************************************************
+ *           OffsetViewportOrgEx    (GDI32.@)
+ */
+BOOL WINAPI OffsetViewportOrgEx( HDC hdc, INT x, INT y, POINT *point )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_OffsetViewportOrgEx( hdc, x, y );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (point) *point = dc_attr->vport_org;
+    dc_attr->vport_org.x += x;
+    dc_attr->vport_org.y += y;
+    if (dc_attr->emf && !EMFDC_SetViewportOrgEx( dc_attr, dc_attr->vport_org.x,
+                                                 dc_attr->vport_org.y )) return FALSE;
+    return NtGdiComputeXformCoefficients( hdc );
+}
+
+/***********************************************************************
+ *           GetWorldTransform    (GDI32.@)
+ */
+BOOL WINAPI GetWorldTransform( HDC hdc, XFORM *xform )
+{
+    return NtGdiGetTransform( hdc, 0x203, xform );
+}
+
+/****************************************************************************
+ *           ModifyWorldTransform   (GDI32.@)
+ */
+BOOL WINAPI ModifyWorldTransform( HDC hdc, const XFORM *xform, DWORD mode )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_ModifyWorldTransform( dc_attr, xform, mode )) return FALSE;
+    return NtGdiModifyWorldTransform( hdc, xform, mode );
+}
+
+/***********************************************************************
+ *           SetWorldTransform    (GDI32.@)
+ */
+BOOL WINAPI SetWorldTransform( HDC hdc, const XFORM *xform )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_SetWorldTransform( dc_attr, xform )) return FALSE;
+    return NtGdiModifyWorldTransform( hdc, xform, MWT_SET );
+}
+
+/***********************************************************************
+ *		SetStretchBltMode (GDI32.@)
+ */
+INT WINAPI SetStretchBltMode( HDC hdc, INT mode )
+{
+    DC_ATTR *dc_attr;
+    INT ret;
+
+    if (mode <= 0 || mode > MAXSTRETCHBLTMODE)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+
+    if (is_meta_dc( hdc )) return METADC_SetStretchBltMode( hdc, mode );
+    if (!(dc_attr = get_dc_attr( hdc ))) return 0;
+    if (dc_attr->emf && !EMFDC_SetStretchBltMode( dc_attr, mode )) return 0;
+
+    ret = dc_attr->stretch_blt_mode;
+    dc_attr->stretch_blt_mode = mode;
+    return ret;
+}
+
+/***********************************************************************
+ *		GetCurrentPositionEx (GDI32.@)
+ */
+BOOL WINAPI GetCurrentPositionEx( HDC hdc, POINT *point )
+{
+    DC_ATTR *dc_attr;
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    *point = dc_attr->cur_pos;
+    return TRUE;
+}
+
+/***********************************************************************
+ *		GetROP2 (GDI32.@)
+ */
+INT WINAPI GetROP2( HDC hdc )
+{
+    DC_ATTR *dc_attr = get_dc_attr( hdc );
+    return dc_attr ? dc_attr->rop_mode : 0;
+}
+
+/***********************************************************************
+ *		GetRelAbs  (GDI32.@)
+ */
+INT WINAPI GetRelAbs( HDC hdc, DWORD ignore )
+{
+    DC_ATTR *dc_attr = get_dc_attr( hdc );
+    return dc_attr ? dc_attr->rel_abs_mode : 0;
+}
+
+/***********************************************************************
+ *		SetRelAbs (GDI32.@)
+ */
+INT WINAPI SetRelAbs( HDC hdc, INT mode )
+{
+    DC_ATTR *dc_attr;
+    INT ret;
+
+    if (mode != ABSOLUTE && mode != RELATIVE)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+
+    if (is_meta_dc( hdc )) return METADC_SetRelAbs( hdc, mode );
+    if (!(dc_attr = get_dc_attr( hdc ))) return 0;
+    ret = dc_attr->rel_abs_mode;
+    dc_attr->rel_abs_mode = mode;
+    return ret;
+}
+
+/***********************************************************************
+ *		SetROP2 (GDI32.@)
+ */
+INT WINAPI SetROP2( HDC hdc, INT mode )
+{
+    DC_ATTR *dc_attr;
+    INT ret;
+
+    if ((mode < R2_BLACK) || (mode > R2_WHITE))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+
+    if (is_meta_dc( hdc )) return METADC_SetROP2( hdc, mode );
+    if (!(dc_attr = get_dc_attr( hdc ))) return 0;
+    if (dc_attr->emf && !EMFDC_SetROP2( dc_attr, mode )) return 0;
+
+    ret = dc_attr->rop_mode;
+    dc_attr->rop_mode = mode;
+    return ret;
+}
+
+/***********************************************************************
+ *           GetMiterLimit  (GDI32.@)
+ */
+BOOL WINAPI GetMiterLimit( HDC hdc, FLOAT *limit )
+{
+    DC_ATTR *dc_attr;
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (limit) *limit = dc_attr->miter_limit;
+    return TRUE;
+}
+
+/*******************************************************************
+ *           SetMiterLimit  (GDI32.@)
+ */
+BOOL WINAPI SetMiterLimit( HDC hdc, FLOAT limit, FLOAT *old_limit )
+{
+    DC_ATTR *dc_attr;
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    /* FIXME: record EMFs */
+    if (old_limit) *old_limit = dc_attr->miter_limit;
+    dc_attr->miter_limit = limit;
+    return TRUE;
+}
+
+/***********************************************************************
+ *           SetPixel    (GDI32.@)
+ */
+COLORREF WINAPI SetPixel( HDC hdc, INT x, INT y, COLORREF color )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_SetPixel( hdc, x, y, color );
+    if (!(dc_attr = get_dc_attr( hdc ))) return CLR_INVALID;
+    if (dc_attr->emf && !EMFDC_SetPixel( dc_attr, x, y, color )) return CLR_INVALID;
+    return NtGdiSetPixel( hdc, x, y, color );
+}
+
+/***********************************************************************
+ *           SetPixelV    (GDI32.@)
+ */
+BOOL WINAPI SetPixelV( HDC hdc, INT x, INT y, COLORREF color )
+{
+    return SetPixel( hdc, x, y, color ) != CLR_INVALID;
+}
+
+/***********************************************************************
+ *           LineTo    (GDI32.@)
+ */
+BOOL WINAPI LineTo( HDC hdc, INT x, INT y )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, (%d, %d)\n", hdc, x, y );
+
+    if (is_meta_dc( hdc )) return METADC_LineTo( hdc, x, y );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_LineTo( dc_attr, x, y )) return FALSE;
+    return NtGdiLineTo( hdc, x, y );
+}
+
+/***********************************************************************
+ *           MoveToEx    (GDI32.@)
+ */
+BOOL WINAPI MoveToEx( HDC hdc, INT x, INT y, POINT *pt )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, (%d, %d), %p\n", hdc, x, y, pt );
+
+    if (is_meta_dc( hdc )) return METADC_MoveTo( hdc, x, y );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_MoveTo( dc_attr, x, y )) return FALSE;
+    return NtGdiMoveTo( hdc, x, y, pt );
+}
+
+/***********************************************************************
+ *           Arc    (GDI32.@)
+ */
+BOOL WINAPI Arc( HDC hdc, INT left, INT top, INT right, INT bottom,
+                 INT xstart, INT ystart, INT xend, INT yend )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, (%d, %d)-(%d, %d), (%d, %d), (%d, %d)\n", hdc, left, top,
+           right, bottom, xstart, ystart, xend, yend );
+
+    if (is_meta_dc( hdc ))
+        return METADC_Arc( hdc, left, top, right, bottom,
+                           xstart, ystart, xend, yend );
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_ArcChordPie( dc_attr, left, top, right, bottom,
+                                            xstart, ystart, xend, yend, EMR_ARC ))
+        return FALSE;
+
+    return NtGdiArcInternal( NtGdiArc, hdc, left, top, right, bottom,
+                             xstart, ystart, xend, yend );
+}
+
+/***********************************************************************
+ *           ArcTo    (GDI32.@)
+ */
+BOOL WINAPI ArcTo( HDC hdc, INT left, INT top, INT right, INT bottom,
+                   INT xstart, INT ystart, INT xend, INT yend )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, (%d, %d)-(%d, %d), (%d, %d), (%d, %d)\n", hdc, left, top,
+           right, bottom, xstart, ystart, xend, yend );
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_ArcChordPie( dc_attr, left, top, right, bottom,
+                                            xstart, ystart, xend, yend, EMR_ARCTO ))
+        return FALSE;
+
+    return NtGdiArcInternal( NtGdiArcTo, hdc, left, top, right, bottom,
+                             xstart, ystart, xend, yend );
+}
+
+/***********************************************************************
+ *           Chord    (GDI32.@)
+ */
+BOOL WINAPI Chord( HDC hdc, INT left, INT top, INT right, INT bottom,
+                   INT xstart, INT ystart, INT xend, INT yend )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, (%d, %d)-(%d, %d), (%d, %d), (%d, %d)\n", hdc, left, top,
+           right, bottom, xstart, ystart, xend, yend );
+
+    if (is_meta_dc( hdc ))
+        return METADC_Chord( hdc, left, top, right, bottom,
+                             xstart, ystart, xend, yend );
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_ArcChordPie( dc_attr, left, top, right, bottom,
+                                            xstart, ystart, xend, yend, EMR_CHORD ))
+        return FALSE;
+
+    return NtGdiArcInternal( NtGdiChord, hdc, left, top, right, bottom,
+                             xstart, ystart, xend, yend );
+}
+
+/***********************************************************************
+ *           Pie   (GDI32.@)
+ */
+BOOL WINAPI Pie( HDC hdc, INT left, INT top, INT right, INT bottom,
+                 INT xstart, INT ystart, INT xend, INT yend )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, (%d, %d)-(%d, %d), (%d, %d), (%d, %d)\n", hdc, left, top,
+           right, bottom, xstart, ystart, xend, yend );
+
+    if (is_meta_dc( hdc ))
+        return METADC_Pie( hdc, left, top, right, bottom,
+                           xstart, ystart, xend, yend );
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_ArcChordPie( dc_attr, left, top, right, bottom,
+                                            xstart, ystart, xend, yend, EMR_PIE ))
+        return FALSE;
+
+    return NtGdiArcInternal( NtGdiPie, hdc, left, top, right, bottom,
+                             xstart, ystart, xend, yend );
+}
+
+/***********************************************************************
+ *      AngleArc (GDI32.@)
+ */
+BOOL WINAPI AngleArc( HDC hdc, INT x, INT y, DWORD radius, FLOAT start_angle, FLOAT sweep_angle )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, (%d, %d), %lu, %f, %f\n", hdc, x, y, radius, start_angle, sweep_angle );
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_AngleArc( dc_attr, x, y, radius, start_angle, sweep_angle ))
+        return FALSE;
+    return NtGdiAngleArc( hdc, x, y, radius, start_angle, sweep_angle );
+}
+
+/***********************************************************************
+ *           Ellipse    (GDI32.@)
+ */
+BOOL WINAPI Ellipse( HDC hdc, INT left, INT top, INT right, INT bottom )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, (%d, %d)-(%d, %d)\n", hdc, left, top, right, bottom );
+
+    if (is_meta_dc( hdc )) return METADC_Ellipse( hdc, left, top, right, bottom );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_Ellipse( dc_attr, left, top, right, bottom )) return FALSE;
+    return NtGdiEllipse( hdc, left, top, right, bottom );
+}
+
+/***********************************************************************
+ *           Rectangle    (GDI32.@)
+ */
+BOOL WINAPI Rectangle( HDC hdc, INT left, INT top, INT right, INT bottom )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, (%d, %d)-(%d, %d)\n", hdc, left, top, right, bottom );
+
+    if (is_meta_dc( hdc )) return METADC_Rectangle( hdc, left, top, right, bottom );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_Rectangle( dc_attr, left, top, right, bottom )) return FALSE;
+    return NtGdiRectangle( hdc, left, top, right, bottom );
+}
+
+/***********************************************************************
+ *           RoundRect    (GDI32.@)
+ */
+BOOL WINAPI RoundRect( HDC hdc, INT left, INT top, INT right,
+                       INT bottom, INT ell_width, INT ell_height )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, (%d, %d)-(%d, %d), %dx%d\n", hdc, left, top, right, bottom,
+           ell_width, ell_height );
+
+    if (is_meta_dc( hdc ))
+        return METADC_RoundRect( hdc, left, top, right, bottom, ell_width, ell_height );
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_RoundRect( dc_attr, left, top, right, bottom,
+                                          ell_width, ell_height ))
+        return FALSE;
+
+    return NtGdiRoundRect( hdc, left, top, right, bottom, ell_width, ell_height );
+}
+
+/**********************************************************************
+ *          Polygon  (GDI32.@)
+ */
+BOOL WINAPI Polygon( HDC hdc, const POINT *points, INT count )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, %p, %d\n", hdc, points, count );
+
+    if (is_meta_dc( hdc )) return METADC_Polygon( hdc, points, count );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_Polygon( dc_attr, points, count )) return FALSE;
+    return NtGdiPolyPolyDraw( hdc, points, (const ULONG *)&count, 1, NtGdiPolyPolygon );
+}
+
+/**********************************************************************
+ *          PolyPolygon  (GDI32.@)
+ */
+BOOL WINAPI PolyPolygon( HDC hdc, const POINT *points, const INT *counts, UINT polygons )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, %p, %p, %u\n", hdc, points, counts, polygons );
+
+    if (is_meta_dc( hdc )) return METADC_PolyPolygon( hdc, points, counts, polygons );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_PolyPolygon( dc_attr, points, counts, polygons )) return FALSE;
+    return NtGdiPolyPolyDraw( hdc, points, (const ULONG *)counts, polygons, NtGdiPolyPolygon );
+}
+
+/**********************************************************************
+ *          Polyline   (GDI32.@)
+ */
+BOOL WINAPI Polyline( HDC hdc, const POINT *points, INT count )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, %p, %d\n", hdc, points, count );
+
+    if (is_meta_dc( hdc )) return METADC_Polyline( hdc, points, count );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_Polyline( dc_attr, points, count )) return FALSE;
+    return NtGdiPolyPolyDraw( hdc, points, (const ULONG *)&count, 1, NtGdiPolyPolyline );
+}
+
+/**********************************************************************
+ *          PolyPolyline  (GDI32.@)
+ */
+BOOL WINAPI PolyPolyline( HDC hdc, const POINT *points, const DWORD *counts, DWORD polylines )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, %p, %p, %lu\n", hdc, points, counts, polylines );
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_PolyPolyline( dc_attr, points, counts, polylines )) return FALSE;
+    return NtGdiPolyPolyDraw( hdc, points, counts, polylines, NtGdiPolyPolyline );
+}
+
+/******************************************************************************
+ *          PolyBezier  (GDI32.@)
+ */
+BOOL WINAPI PolyBezier( HDC hdc, const POINT *points, DWORD count )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, %p, %lu\n", hdc, points, count );
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_PolyBezier( dc_attr, points, count )) return FALSE;
+    return NtGdiPolyPolyDraw( hdc, points, &count, 1, NtGdiPolyBezier );
+}
+
+/******************************************************************************
+ *          PolyBezierTo  (GDI32.@)
+ */
+BOOL WINAPI PolyBezierTo( HDC hdc, const POINT *points, DWORD count )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, %p, %lu\n", hdc, points, count );
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_PolyBezierTo( dc_attr, points, count )) return FALSE;
+    return NtGdiPolyPolyDraw( hdc, points, &count, 1, NtGdiPolyBezierTo );
+}
+
+/**********************************************************************
+ *          PolylineTo   (GDI32.@)
+ */
+BOOL WINAPI PolylineTo( HDC hdc, const POINT *points, DWORD count )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, %p, %lu\n", hdc, points, count );
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_PolylineTo( dc_attr, points, count )) return FALSE;
+    return NtGdiPolyPolyDraw( hdc, points, &count, 1, NtGdiPolylineTo );
+}
+
+/***********************************************************************
+ *      PolyDraw (GDI32.@)
+ */
+BOOL WINAPI PolyDraw( HDC hdc, const POINT *points, const BYTE *types, DWORD count )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, %p, %p, %lu\n", hdc, points, types, count );
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_PolyDraw( dc_attr, points, types, count )) return FALSE;
+    return NtGdiPolyDraw( hdc, points, types, count );
+}
+
+/***********************************************************************
+ *           FillRgn    (GDI32.@)
+ */
+BOOL WINAPI FillRgn( HDC hdc, HRGN hrgn, HBRUSH hbrush )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, %p, %p\n", hdc, hrgn, hbrush );
+
+    if (is_meta_dc( hdc )) return METADC_FillRgn( hdc, hrgn, hbrush );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_FillRgn( dc_attr, hrgn, hbrush )) return FALSE;
+    return NtGdiFillRgn( hdc, hrgn, hbrush );
+}
+
+/***********************************************************************
+ *           PaintRgn    (GDI32.@)
+ */
+BOOL WINAPI PaintRgn( HDC hdc, HRGN hrgn )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, %p\n", hdc, hrgn );
+
+    if (is_meta_dc( hdc )) return METADC_PaintRgn( hdc, hrgn );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_PaintRgn( dc_attr, hrgn )) return FALSE;
+    return NtGdiFillRgn( hdc, hrgn, GetCurrentObject( hdc, OBJ_BRUSH ));
+}
+
+/***********************************************************************
+ *           FrameRgn     (GDI32.@)
+ */
+BOOL WINAPI FrameRgn( HDC hdc, HRGN hrgn, HBRUSH hbrush, INT width, INT height )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, %p, %p, %dx%d\n", hdc, hrgn, hbrush, width, height );
+
+    if (is_meta_dc( hdc )) return METADC_FrameRgn( hdc, hrgn, hbrush, width, height );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_FrameRgn( dc_attr, hrgn, hbrush, width, height ))
+        return FALSE;
+    return NtGdiFrameRgn( hdc, hrgn, hbrush, width, height );
+}
+
+/***********************************************************************
+ *           InvertRgn    (GDI32.@)
+ */
+BOOL WINAPI InvertRgn( HDC hdc, HRGN hrgn )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, %p\n", hdc, hrgn );
+
+    if (is_meta_dc( hdc )) return METADC_InvertRgn( hdc, hrgn );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_InvertRgn( dc_attr, hrgn )) return FALSE;
+    return NtGdiInvertRgn( hdc, hrgn );
+}
+
+/***********************************************************************
+ *          ExtFloodFill   (GDI32.@)
+ */
+BOOL WINAPI ExtFloodFill( HDC hdc, INT x, INT y, COLORREF color, UINT fill_type )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p, (%d, %d), %08lx, %x\n", hdc, x, y, color, fill_type );
+
+    if (is_meta_dc( hdc )) return METADC_ExtFloodFill( hdc, x, y, color, fill_type );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_ExtFloodFill( dc_attr, x, y, color, fill_type )) return FALSE;
+    return NtGdiExtFloodFill( hdc, x, y, color, fill_type );
+}
+
+/***********************************************************************
+ *          FloodFill   (GDI32.@)
+ */
+BOOL WINAPI FloodFill( HDC hdc, INT x, INT y, COLORREF color )
+{
+    return ExtFloodFill( hdc, x, y, color, FLOODFILLBORDER );
+}
+
+/******************************************************************************
+ *           GdiGradientFill   (GDI32.@)
+ */
+BOOL WINAPI GdiGradientFill( HDC hdc, TRIVERTEX *vert_array, ULONG nvert,
+                             void *grad_array, ULONG ngrad, ULONG mode )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p vert_array:%p nvert:%ld grad_array:%p ngrad:%ld\n", hdc, vert_array,
+           nvert, grad_array, ngrad );
+
+    if (!(dc_attr = get_dc_attr( hdc )))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    if (dc_attr->emf &&
+        !EMFDC_GradientFill( dc_attr, vert_array, nvert, grad_array, ngrad, mode ))
+        return FALSE;
+    return NtGdiGradientFill( hdc, vert_array, nvert, grad_array, ngrad, mode );
+}
+
+/***********************************************************************
+ *           SetTextJustification    (GDI32.@)
+ */
+BOOL WINAPI SetTextJustification( HDC hdc, INT extra, INT breaks )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_SetTextJustification( hdc, extra, breaks );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_SetTextJustification( dc_attr, extra, breaks ))
+        return FALSE;
+    return NtGdiSetTextJustification( hdc, extra, breaks );
+}
+
+/***********************************************************************
+ *           PatBlt    (GDI32.@)
+ */
+BOOL WINAPI PatBlt( HDC hdc, INT left, INT top, INT width, INT height, DWORD rop )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_PatBlt( hdc, left, top, width, height, rop );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_PatBlt( dc_attr, left, top, width, height, rop ))
+        return FALSE;
+    return NtGdiPatBlt( hdc, left, top, width, height, rop );
+}
+
+/***********************************************************************
+ *           BitBlt    (GDI32.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH BitBlt( HDC hdc_dst, INT x_dst, INT y_dst, INT width, INT height,
+                                      HDC hdc_src, INT x_src, INT y_src, DWORD rop )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc_dst )) return METADC_BitBlt( hdc_dst, x_dst, y_dst, width, height,
+                                                 hdc_src, x_src, y_src, rop );
+    if (!(dc_attr = get_dc_attr( hdc_dst ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_BitBlt( dc_attr, x_dst, y_dst, width, height,
+                                       hdc_src, x_src, y_src, rop ))
+        return FALSE;
+    return NtGdiBitBlt( hdc_dst, x_dst, y_dst, width, height,
+                        hdc_src, x_src, y_src, rop, 0 /* FIXME */, 0 /* FIXME */ );
+}
+
+/***********************************************************************
+ *           StretchBlt    (GDI32.@)
+ */
+BOOL WINAPI StretchBlt( HDC hdc, INT x_dst, INT y_dst, INT width_dst, INT height_dst,
+                        HDC hdc_src, INT x_src, INT y_src, INT width_src, INT height_src,
+                        DWORD rop )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_StretchBlt( hdc, x_dst, y_dst, width_dst, height_dst,
+                                                     hdc_src, x_src, y_src, width_src,
+                                                     height_src, rop );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_StretchBlt( dc_attr, x_dst, y_dst, width_dst, height_dst,
+                                           hdc_src, x_src, y_src, width_src,
+                                           height_src, rop ))
+        return FALSE;
+    return NtGdiStretchBlt( hdc, x_dst, y_dst, width_dst, height_dst,
+                            hdc_src, x_src, y_src, width_src,
+                            height_src, rop, 0 /* FIXME */ );
+}
+
+/***********************************************************************
+ *           MaskBlt [GDI32.@]
+ */
+BOOL WINAPI MaskBlt( HDC hdc, INT x_dst, INT y_dst, INT width_dst, INT height_dst,
+                     HDC hdc_src, INT x_src, INT y_src, HBITMAP mask,
+                     INT x_mask, INT y_mask, DWORD rop )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_MaskBlt( dc_attr, x_dst, y_dst, width_dst, height_dst,
+                                        hdc_src, x_src, y_src, mask, x_mask, y_mask, rop ))
+        return FALSE;
+    return NtGdiMaskBlt( hdc, x_dst, y_dst, width_dst, height_dst, hdc_src, x_src, y_src,
+                         mask, x_mask, y_mask, rop, 0 /* FIXME */ );
+}
+
+/***********************************************************************
+ *      PlgBlt    (GDI32.@)
+ */
+BOOL WINAPI PlgBlt( HDC hdc, const POINT *points, HDC hdc_src, INT x_src, INT y_src,
+                    INT width, INT height, HBITMAP mask, INT x_mask, INT y_mask )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_PlgBlt( dc_attr, points, hdc_src, x_src, y_src,
+                                       width, height, mask, x_mask, y_mask ))
+        return FALSE;
+    return NtGdiPlgBlt( hdc, points, hdc_src, x_src, y_src, width, height,
+                        mask, x_mask, y_mask, 0 /* FIXME */ );
+}
+
+/******************************************************************************
+ *           GdiTransparentBlt    (GDI32.@)
+ */
+BOOL WINAPI GdiTransparentBlt( HDC hdc, int x_dst, int y_dst, int width_dst, int height_dst,
+                               HDC hdc_src, int x_src, int y_src, int width_src, int height_src,
+                               UINT color )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_TransparentBlt( dc_attr, x_dst, y_dst, width_dst, height_dst, hdc_src,
+                                               x_src, y_src, width_src, height_src, color ))
+        return FALSE;
+    return NtGdiTransparentBlt( hdc, x_dst, y_dst, width_dst, height_dst, hdc_src, x_src, y_src,
+                                width_src, height_src, color );
+}
+
+/******************************************************************************
+ *           GdiAlphaBlend   (GDI32.@)
+ */
+BOOL WINAPI GdiAlphaBlend( HDC hdc_dst, int x_dst, int y_dst, int width_dst, int height_dst,
+                           HDC hdc_src, int x_src, int y_src, int width_src, int height_src,
+                           BLENDFUNCTION blend_function)
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc_dst ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_AlphaBlend( dc_attr, x_dst, y_dst, width_dst, height_dst,
+                                           hdc_src, x_src, y_src, width_src,
+                                           height_src, blend_function ))
+        return FALSE;
+    return NtGdiAlphaBlend( hdc_dst, x_dst, y_dst, width_dst, height_dst,
+                            hdc_src, x_src, y_src, width_src, height_src,
+                            blend_function, 0 /* FIXME */ );
+}
+
+/***********************************************************************
+ *           SetDIBitsToDevice   (GDI32.@)
+ */
+INT WINAPI SetDIBitsToDevice( HDC hdc, INT x_dst, INT y_dst, DWORD cx,
+                              DWORD cy, INT x_src, INT y_src, UINT startscan,
+                              UINT lines, const void *bits, const BITMAPINFO *bmi,
+                              UINT coloruse )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc ))
+        return METADC_SetDIBitsToDevice( hdc, x_dst, y_dst, cx, cy, x_src, y_src, startscan,
+                                         lines, bits, bmi, coloruse );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_SetDIBitsToDevice( dc_attr, x_dst, y_dst, cx, cy, x_src, y_src,
+                                                  startscan, lines, bits, bmi, coloruse ))
+        return 0;
+    return NtGdiSetDIBitsToDeviceInternal( hdc, x_dst, y_dst, cx, cy, x_src, y_src,
+                                           startscan, lines, bits, bmi, coloruse,
+                                           0, 0, FALSE, NULL );
+}
+
+/***********************************************************************
+ *           StretchDIBits   (GDI32.@)
+ */
+INT WINAPI DECLSPEC_HOTPATCH StretchDIBits( HDC hdc, INT x_dst, INT y_dst, INT width_dst,
+                                            INT height_dst, INT x_src, INT y_src, INT width_src,
+                                            INT height_src, const void *bits, const BITMAPINFO *bmi,
+                                            UINT coloruse, DWORD rop )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc ))
+        return METADC_StretchDIBits( hdc, x_dst, y_dst, width_dst, height_dst, x_src, y_src,
+                                     width_src, height_src, bits, bmi, coloruse, rop );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_StretchDIBits( dc_attr, x_dst, y_dst, width_dst, height_dst,
+                                              x_src, y_src, width_src, height_src, bits,
+                                              bmi, coloruse, rop ))
+        return FALSE;
+    return NtGdiStretchDIBitsInternal( hdc, x_dst, y_dst, width_dst, height_dst, x_src, y_src,
+                                       width_src, height_src, bits, bmi, coloruse, rop,
+                                       0, 0, NULL );
+}
+
+/***********************************************************************
+ *           BeginPath    (GDI32.@)
+ */
+BOOL WINAPI BeginPath(HDC hdc)
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_BeginPath( dc_attr )) return FALSE;
+    return NtGdiBeginPath( hdc );
+}
+
+/***********************************************************************
+ *           EndPath    (GDI32.@)
+ */
+BOOL WINAPI EndPath(HDC hdc)
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_EndPath( dc_attr )) return FALSE;
+    return NtGdiEndPath( hdc );
+}
+
+/***********************************************************************
+ *           AbortPath  (GDI32.@)
+ */
+BOOL WINAPI AbortPath( HDC hdc )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_AbortPath( dc_attr )) return FALSE;
+    return NtGdiAbortPath( hdc );
+}
+
+/***********************************************************************
+ *           CloseFigure    (GDI32.@)
+ */
+BOOL WINAPI CloseFigure( HDC hdc )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_CloseFigure( dc_attr )) return FALSE;
+    return NtGdiCloseFigure( hdc );
+}
+
+/***********************************************************************
+ *           FillPath    (GDI32.@)
+ */
+BOOL WINAPI FillPath( HDC hdc )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_FillPath( dc_attr )) return FALSE;
+    return NtGdiFillPath( hdc );
+}
+
+/*******************************************************************
+ *           StrokeAndFillPath   (GDI32.@)
+ */
+BOOL WINAPI StrokeAndFillPath( HDC hdc )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_StrokeAndFillPath( dc_attr )) return FALSE;
+    return NtGdiStrokeAndFillPath( hdc );
+}
+
+/*******************************************************************
+ *           StrokePath   (GDI32.@)
+ */
+BOOL WINAPI StrokePath( HDC hdc )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_StrokePath( dc_attr )) return FALSE;
+    return NtGdiStrokePath( hdc );
+}
+
+/***********************************************************************
+ *           FlattenPath   (GDI32.@)
+ */
+BOOL WINAPI FlattenPath( HDC hdc )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_FlattenPath( dc_attr )) return FALSE;
+    return NtGdiFlattenPath( hdc );
+}
+
+/***********************************************************************
+ *           WidenPath   (GDI32.@)
+ */
+BOOL WINAPI WidenPath( HDC hdc )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_WidenPath( dc_attr )) return FALSE;
+    return NtGdiWidenPath( hdc );
+}
+
+/***********************************************************************
+ *           SelectClipPath    (GDI32.@)
+ */
+BOOL WINAPI SelectClipPath( HDC hdc, INT mode )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_SelectClipPath( dc_attr, mode )) return FALSE;
+    return NtGdiSelectClipPath( hdc, mode );
+}
+
+/***********************************************************************
+ *           GetClipRgn  (GDI32.@)
+ */
+INT WINAPI GetClipRgn( HDC hdc, HRGN rgn )
+{
+    return NtGdiGetRandomRgn( hdc, rgn, NTGDI_RGN_MIRROR_RTL | 1 );
+}
+
+/***********************************************************************
+ *           GetMetaRgn    (GDI32.@)
+ */
+INT WINAPI GetMetaRgn( HDC hdc, HRGN rgn )
+{
+    return NtGdiGetRandomRgn( hdc, rgn, NTGDI_RGN_MIRROR_RTL | 2 );
+}
+
+/***********************************************************************
+ *           IntersectClipRect    (GDI32.@)
+ */
+INT WINAPI IntersectClipRect( HDC hdc, INT left, INT top, INT right, INT bottom )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE("%p %d,%d - %d,%d\n", hdc, left, top, right, bottom );
+
+    if (is_meta_dc( hdc )) return METADC_IntersectClipRect( hdc, left, top, right, bottom );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_IntersectClipRect( dc_attr, left, top, right, bottom ))
+        return FALSE;
+    return NtGdiIntersectClipRect( hdc, left, top, right, bottom );
+}
+
+/***********************************************************************
+ *           OffsetClipRgn    (GDI32.@)
+ */
+INT WINAPI OffsetClipRgn( HDC hdc, INT x, INT y )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_OffsetClipRgn( hdc, x, y );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_OffsetClipRgn( dc_attr, x, y )) return FALSE;
+    return NtGdiOffsetClipRgn( hdc, x, y );
+}
+
+/***********************************************************************
+ *           ExcludeClipRect    (GDI32.@)
+ */
+INT WINAPI ExcludeClipRect( HDC hdc, INT left, INT top, INT right, INT bottom )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_ExcludeClipRect( hdc, left, top, right, bottom );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_ExcludeClipRect( dc_attr, left, top, right, bottom ))
+        return FALSE;
+    return NtGdiExcludeClipRect( hdc, left, top, right, bottom );
+}
+
+/******************************************************************************
+ *		ExtSelectClipRgn     (GDI32.@)
+ */
+INT WINAPI ExtSelectClipRgn( HDC hdc, HRGN hrgn, INT mode )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE("%p %p %d\n", hdc, hrgn, mode );
+
+    if (is_meta_dc( hdc )) return METADC_ExtSelectClipRgn( hdc, hrgn, mode );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_ExtSelectClipRgn( dc_attr, hrgn, mode ))
+        return FALSE;
+    return NtGdiExtSelectClipRgn( hdc, hrgn, mode );
+}
+
+/***********************************************************************
+ *           SelectClipRgn    (GDI32.@)
+ */
+INT WINAPI SelectClipRgn( HDC hdc, HRGN hrgn )
+{
+    return ExtSelectClipRgn( hdc, hrgn, RGN_COPY );
+}
+
+/***********************************************************************
+ *           SetMetaRgn    (GDI32.@)
+ */
+INT WINAPI SetMetaRgn( HDC hdc )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf) FIXME( "EMFs are not yet supported\n" );
+    return NtGdiSetMetaRgn( hdc );
+}
+
+/***********************************************************************
+ *           DPtoLP    (GDI32.@)
+ */
+BOOL WINAPI DPtoLP( HDC hdc, POINT *points, INT count )
+{
+    return NtGdiTransformPoints( hdc, points, points, count, NtGdiDPtoLP );
+}
+
+/***********************************************************************
+ *           LPtoDP    (GDI32.@)
+ */
+BOOL WINAPI LPtoDP( HDC hdc, POINT *points, INT count )
+{
+    return NtGdiTransformPoints( hdc, points, points, count, NtGdiLPtoDP );
+}
+
+/***********************************************************************
+ *           ScaleViewportExtEx    (GDI32.@)
+ */
+BOOL WINAPI ScaleViewportExtEx( HDC hdc, INT x_num, INT x_denom,
+                                INT y_num, INT y_denom, SIZE *size )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_ScaleViewportExtEx( hdc, x_num, x_denom, y_num, y_denom );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_ScaleViewportExtEx( dc_attr, x_num, x_denom, y_num, y_denom ))
+        return FALSE;
+    return NtGdiScaleViewportExtEx( hdc, x_num, x_denom, y_num, y_denom, size );
+}
+
+/***********************************************************************
+ *           ScaleWindowExtEx    (GDI32.@)
+ */
+BOOL WINAPI ScaleWindowExtEx( HDC hdc, INT x_num, INT x_denom,
+                              INT y_num, INT y_denom, SIZE *size )
+{
+    DC_ATTR *dc_attr;
+
+    if (is_meta_dc( hdc )) return METADC_ScaleWindowExtEx( hdc, x_num, x_denom, y_num, y_denom );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_ScaleWindowExtEx( dc_attr, x_num, x_denom, y_num, y_denom ))
+        return FALSE;
+    return NtGdiScaleWindowExtEx( hdc, x_num, x_denom, y_num, y_denom, size );
+}
+
+static UINT WINAPI realize_palette( HDC hdc )
+{
+    return NtUserRealizePalette( hdc );
+}
+
+/* Pointers to USER implementation of SelectPalette/RealizePalette */
+/* they will be patched by USER on startup */
+HPALETTE (WINAPI *pfnSelectPalette)( HDC hdc, HPALETTE hpal, WORD bkgnd ) = NtUserSelectPalette;
+UINT (WINAPI *pfnRealizePalette)( HDC hdc ) = realize_palette;
+
+/***********************************************************************
+ *           SelectPalette    (GDI32.@)
+ */
+HPALETTE WINAPI SelectPalette( HDC hdc, HPALETTE palette, BOOL force_background )
+{
+    DC_ATTR *dc_attr;
+
+    palette = get_full_gdi_handle( palette );
+    if (is_meta_dc( hdc )) return ULongToHandle( METADC_SelectPalette( hdc, palette ) );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_SelectPalette( dc_attr, palette )) return 0;
+    return pfnSelectPalette( hdc, palette, force_background );
+}
+
+/***********************************************************************
+ *           RealizePalette    (GDI32.@)
+ */
+UINT WINAPI RealizePalette( HDC hdc )
+{
+    if (is_meta_dc( hdc )) return METADC_RealizePalette( hdc );
+    return pfnRealizePalette( hdc );
+}
+
+/***********************************************************************
+ *           GdiSetPixelFormat   (GDI32.@)
+ */
+BOOL WINAPI GdiSetPixelFormat( HDC hdc, INT format, const PIXELFORMATDESCRIPTOR *descr )
+{
+    TRACE( "(%p,%d,%p)\n", hdc, format, descr );
+    return NtGdiSetPixelFormat( hdc, format );
 }
 
 /***********************************************************************
@@ -2020,75 +2137,152 @@ COLORREF WINAPI SetDCPenColor(HDC hdc, COLORREF crColor)
  */
 BOOL WINAPI CancelDC(HDC hdc)
 {
-    FIXME("stub\n");
+    FIXME( "stub\n" );
     return TRUE;
 }
 
-/*******************************************************************
- *      GetMiterLimit [GDI32.@]
+/***********************************************************************
+ *           StartDocW  [GDI32.@]
  *
+ * StartDoc calls the STARTDOC Escape with the input data pointing to DocName
+ * and the output data (which is used as a second input parameter).pointing at
+ * the whole docinfo structure.  This seems to be an undocumented feature of
+ * the STARTDOC Escape.
  *
+ * Note: we now do it the other way, with the STARTDOC Escape calling StartDoc.
  */
-BOOL WINAPI GetMiterLimit(HDC hdc, PFLOAT peLimit)
+INT WINAPI StartDocW( HDC hdc, const DOCINFOW *doc )
 {
-    BOOL bRet = FALSE;
-    DC *dc;
+    DC_ATTR *dc_attr;
 
-    TRACE("(%p,%p)\n", hdc, peLimit);
+    TRACE("DocName %s, Output %s, Datatype %s, fwType %#lx\n",
+          debugstr_w(doc->lpszDocName), debugstr_w(doc->lpszOutput),
+          debugstr_w(doc->lpszDatatype), doc->fwType);
 
-    dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        if (peLimit)
-            *peLimit = dc->miterLimit;
+    if (!(dc_attr = get_dc_attr( hdc ))) return SP_ERROR;
 
-        release_dc_ptr( dc );
-        bRet = TRUE;
-    }
-    return bRet;
+    if (dc_attr->abort_proc && !dc_attr->abort_proc( hdc, 0 )) return 0;
+    return NtGdiStartDoc( hdc, doc, NULL, 0 );
 }
 
-/*******************************************************************
- *      SetMiterLimit [GDI32.@]
- *
- *
+/***********************************************************************
+ *           StartDocA [GDI32.@]
  */
-BOOL WINAPI SetMiterLimit(HDC hdc, FLOAT eNewLimit, PFLOAT peOldLimit)
+INT WINAPI StartDocA( HDC hdc, const DOCINFOA *doc )
 {
-    BOOL bRet = FALSE;
-    DC *dc;
+    WCHAR *doc_name = NULL, *output = NULL, *data_type = NULL;
+    DOCINFOW docW;
+    INT ret, len;
 
-    TRACE("(%p,%f,%p)\n", hdc, eNewLimit, peOldLimit);
-
-    dc = get_dc_ptr( hdc );
-    if (dc)
+    docW.cbSize = doc->cbSize;
+    if (doc->lpszDocName)
     {
-        if (peOldLimit)
-            *peOldLimit = dc->miterLimit;
-        dc->miterLimit = eNewLimit;
-        release_dc_ptr( dc );
-        bRet = TRUE;
+        len = MultiByteToWideChar( CP_ACP, 0, doc->lpszDocName, -1, NULL, 0 );
+        doc_name = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+        MultiByteToWideChar( CP_ACP, 0, doc->lpszDocName, -1, doc_name, len );
     }
-    return bRet;
+    if (doc->lpszOutput)
+    {
+        len = MultiByteToWideChar( CP_ACP, 0, doc->lpszOutput, -1, NULL, 0 );
+        output = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+        MultiByteToWideChar( CP_ACP, 0, doc->lpszOutput, -1, output, len );
+    }
+    if (doc->lpszDatatype)
+    {
+        len = MultiByteToWideChar( CP_ACP, 0, doc->lpszDatatype, -1, NULL, 0);
+        data_type = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+        MultiByteToWideChar( CP_ACP, 0, doc->lpszDatatype, -1, data_type, len );
+    }
+
+    docW.lpszDocName = doc_name;
+    docW.lpszOutput = output;
+    docW.lpszDatatype = data_type;
+    docW.fwType = doc->fwType;
+
+    ret = StartDocW(hdc, &docW);
+
+    HeapFree( GetProcessHeap(), 0, doc_name );
+    HeapFree( GetProcessHeap(), 0, output );
+    HeapFree( GetProcessHeap(), 0, data_type );
+    return ret;
 }
 
-/*******************************************************************
- *      GdiIsMetaPrintDC [GDI32.@]
+/***********************************************************************
+ *           StartPage    (GDI32.@)
  */
-BOOL WINAPI GdiIsMetaPrintDC(HDC hdc)
+INT WINAPI StartPage( HDC hdc )
 {
-    FIXME("%p\n", hdc);
+    return NtGdiStartPage( hdc );
+}
+
+/***********************************************************************
+ *           EndPage    (GDI32.@)
+ */
+INT WINAPI EndPage( HDC hdc )
+{
+    return NtGdiEndPage( hdc );
+}
+
+/***********************************************************************
+ *           EndDoc    (GDI32.@)
+ */
+INT WINAPI EndDoc( HDC hdc )
+{
+    return NtGdiEndDoc( hdc );
+}
+
+/***********************************************************************
+ *           AbortDoc    (GDI32.@)
+ */
+INT WINAPI AbortDoc( HDC hdc )
+{
+    return NtGdiAbortDoc( hdc );
+}
+
+/**********************************************************************
+ *           SetAbortProc   (GDI32.@)
+ */
+INT WINAPI SetAbortProc( HDC hdc, ABORTPROC abrtprc )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    dc_attr->abort_proc = abrtprc;
+    return TRUE;
+}
+
+/***********************************************************************
+ *           SetICMMode    (GDI32.@)
+ */
+INT WINAPI SetICMMode( HDC hdc, INT mode )
+{
+    /* FIXME: Assume that ICM is always off, and cannot be turned on */
+    switch (mode)
+    {
+    case ICM_OFF:   return ICM_OFF;
+    case ICM_ON:    return 0;
+    case ICM_QUERY: return ICM_OFF;
+    }
+    return 0;
+}
+
+/***********************************************************************
+ *           GdiIsMetaPrintDC  (GDI32.@)
+ */
+BOOL WINAPI GdiIsMetaPrintDC( HDC hdc )
+{
+    FIXME( "%p\n", hdc );
     return FALSE;
 }
 
-/*******************************************************************
- *      GdiIsMetaFileDC [GDI32.@]
+/***********************************************************************
+ *           GdiIsMetaFileDC  (GDI32.@)
  */
-BOOL WINAPI GdiIsMetaFileDC(HDC hdc)
+BOOL WINAPI GdiIsMetaFileDC( HDC hdc )
 {
-    TRACE("%p\n", hdc);
+    TRACE( "%p\n", hdc );
 
-    switch( GetObjectType( hdc ) )
+    switch (GetObjectType( hdc ))
     {
     case OBJ_METADC:
     case OBJ_ENHMETADC:
@@ -2097,11 +2291,42 @@ BOOL WINAPI GdiIsMetaFileDC(HDC hdc)
     return FALSE;
 }
 
-/*******************************************************************
- *      GdiIsPlayMetafileDC [GDI32.@]
+/***********************************************************************
+ *           GdiIsPlayMetafileDC  (GDI32.@)
  */
-BOOL WINAPI GdiIsPlayMetafileDC(HDC hdc)
+BOOL WINAPI GdiIsPlayMetafileDC( HDC hdc )
 {
-    FIXME("%p\n", hdc);
+    FIXME( "%p\n", hdc );
     return FALSE;
+}
+
+/*******************************************************************
+ *           DrawEscape    (GDI32.@)
+ */
+INT WINAPI DrawEscape( HDC hdc, INT escape, INT input_size, const char *input )
+{
+    FIXME( "stub\n" );
+    return 0;
+}
+
+/*******************************************************************
+ *           NamedEscape    (GDI32.@)
+ */
+INT WINAPI NamedEscape( HDC hdc, const WCHAR *driver, INT escape, INT input_size,
+                        const char *input, INT output_size, char *output )
+{
+    FIXME( "(%p %s %d, %d %p %d %p)\n", hdc, wine_dbgstr_w(driver), escape, input_size,
+           input, output_size, output );
+    return 0;
+}
+
+/*******************************************************************
+ *           DdQueryDisplaySettingsUniqueness    (GDI32.@)
+ *           GdiEntry13
+ */
+ULONG WINAPI DdQueryDisplaySettingsUniqueness(void)
+{
+    static int warn_once;
+    if (!warn_once++) FIXME( "stub\n" );
+    return 0;
 }

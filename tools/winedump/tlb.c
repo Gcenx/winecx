@@ -20,13 +20,10 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-
-#include "windef.h"
 
 #include "winedump.h"
 
@@ -260,7 +257,7 @@ static void print_guid(const char *name)
     print_offset();
 
     printf("%s = {%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}\n", name,
-           guid.Data1, guid.Data2, guid.Data3, guid.Data4[0],
+           (unsigned int)guid.Data1, guid.Data2, guid.Data3, guid.Data4[0],
            guid.Data4[1], guid.Data4[2], guid.Data4[3], guid.Data4[4],
            guid.Data4[5], guid.Data4[6], guid.Data4[7]);
 }
@@ -1174,7 +1171,7 @@ static const char *lookup_code(const BYTE *table, DWORD table_size, struct bitst
     return NULL;
 }
 
-static const char *decode_string(const BYTE *table, const char *stream, DWORD stream_length, DWORD *read_bytes)
+static const char *decode_string(const BYTE *table, const char *stream, UINT stream_length, UINT *read_bytes)
 {
     char *buf;
     DWORD buf_size, table_size;
@@ -1190,7 +1187,7 @@ static const char *decode_string(const BYTE *table, const char *stream, DWORD st
     table_size = *(const DWORD *)table;
     table += sizeof(DWORD);
 
-    buf = malloc(buf_size);
+    buf = xmalloc(buf_size);
     buf[0] = 0;
 
     while ((p = lookup_code(table, table_size, &bits)))
@@ -1499,7 +1496,7 @@ static void dump_type(int len, const char *hlp_strings)
         unsigned flags;
     } misc;
     int typeinfo_start_offset, extra, member_offset, href_offset, i;
-    int vars_header_bytes = 0, vars_bytes = 0, saved_offset;
+    int saved_offset;
     const void *block;
     const struct sltg_typeinfo_header *ti;
     const struct sltg_member_header *mem;
@@ -1641,7 +1638,7 @@ static void dump_type(int len, const char *hlp_strings)
                        value, vars_start_offset, value + vars_start_offset);
                 print_offset();
                 printf("type:\n");
-                vars_bytes += sltg_print_compound_type(vars_start_offset, value);
+                sltg_print_compound_type(vars_start_offset, value);
             }
             else
             {
@@ -1658,7 +1655,7 @@ static void dump_type(int len, const char *hlp_strings)
             if (value != -1)
             {
                 const char *str;
-                DWORD hlpstr_maxlen;
+                UINT hlpstr_maxlen;
 
                 printf("helpstring offset = %#x (+%#x=%#x)\n",
                        value, vars_start_offset, value + vars_start_offset);
@@ -1684,13 +1681,7 @@ static void dump_type(int len, const char *hlp_strings)
             else
                 printf("helpstring offset = ffffh\n");
 
-            if (magic & 0x20)
-            {
-                print_short_hex("varflags");
-                vars_header_bytes += 2;
-            }
-
-            vars_header_bytes += sizeof(struct sltg_variable);
+            if (magic & 0x20) print_short_hex("varflags");
 
             if (next != -1)
             {
@@ -1764,7 +1755,7 @@ static void dump_type(int len, const char *hlp_strings)
             if (value != -1)
             {
                 const char *str;
-                DWORD hlpstr_maxlen;
+                UINT hlpstr_maxlen;
 
                 printf("helpstring offset = %#x (+%#x=%#x)\n",
                        value, funcs_start_offset, value + funcs_start_offset);

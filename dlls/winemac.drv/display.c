@@ -25,19 +25,14 @@
 #include "winuser.h"
 #include "winreg.h"
 #include "ddrawi.h"
-#include "rpc.h"
-#include "initguid.h"
-#include "devguid.h"
-#include "devpkey.h"
-#include "setupapi.h"
 #define WIN32_NO_STATUS
 #include "winternl.h"
-#include "wine/server.h"
 #include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(display);
 
 /* CrossOver Hack #18576: don't check for kDisplayModeSafeFlag on Apple Silicon. */
+/* Also used by CrossOver Hack #20512. */
 #include <sys/types.h>
 #include <sys/sysctl.h>
 static int apple_silicon_status;
@@ -53,12 +48,26 @@ static BOOL CALLBACK init_is_apple_silicon(INIT_ONCE* once, void* param, void** 
 
     return TRUE;
 }
-static int is_apple_silicon(void)
+int is_apple_silicon(void)
 {
     static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
     InitOnceExecuteOnce(&once, init_is_apple_silicon, NULL, NULL);
     return apple_silicon_status;
 }
+
+/* CrossOver Hack #20512 */
+int is_skyrim_se_launcher(void)
+{
+    char name[MAX_PATH], *module_exe;
+    if (!GetModuleFileNameA(NULL, name, sizeof(name)))
+        return FALSE;
+
+    module_exe = strrchr(name, '\\');
+    module_exe = module_exe ? module_exe + 1 : name;
+
+    return !strcasecmp(module_exe, "SkyrimSELauncher.exe");
+}
+
 
 struct display_mode_descriptor
 {
@@ -72,76 +81,18 @@ struct display_mode_descriptor
 };
 
 
-BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode, LPDEVMODEW devmode, DWORD flags);
-
-DEFINE_DEVPROPKEY(DEVPROPKEY_GPU_LUID, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0xf1, 0x73, 0xab, 0xad, 0x3e, 0xc6, 2);
-DEFINE_DEVPROPKEY(DEVPROPKEY_MONITOR_GPU_LUID, 0xca085853, 0x16ce, 0x48aa, 0xb1, 0x14, 0xde, 0x9c, 0x72, 0x33, 0x42, 0x23, 1);
-DEFINE_DEVPROPKEY(DEVPROPKEY_MONITOR_OUTPUT_ID, 0xca085853, 0x16ce, 0x48aa, 0xb1, 0x14, 0xde, 0x9c, 0x72, 0x33, 0x42, 0x23, 2);
-
-/* Wine specific monitor properties */
-DEFINE_DEVPROPKEY(WINE_DEVPROPKEY_MONITOR_STATEFLAGS, 0x233a9ef3, 0xafc4, 0x4abd, 0xb5, 0x64, 0xc3, 0x2f, 0x21, 0xf1, 0x53, 0x5b, 2);
-DEFINE_DEVPROPKEY(WINE_DEVPROPKEY_MONITOR_ADAPTERNAME, 0x233a9ef3, 0xafc4, 0x4abd, 0xb5, 0x64, 0xc3, 0x2f, 0x21, 0xf1, 0x53, 0x5b, 5);
+BOOL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode, LPDEVMODEW devmode, DWORD flags);
 
 static const char initial_mode_key[] = "Initial Display Mode";
 static const WCHAR pixelencodingW[] = {'P','i','x','e','l','E','n','c','o','d','i','n','g',0};
-static const WCHAR driver_date_dataW[] = {'D','r','i','v','e','r','D','a','t','e','D','a','t','a',0};
-static const WCHAR driver_descW[] = {'D','r','i','v','e','r','D','e','s','c',0};
-static const WCHAR displayW[] = {'D','I','S','P','L','A','Y',0};
-static const WCHAR pciW[] = {'P','C','I',0};
-static const WCHAR video_idW[] = {'V','i','d','e','o','I','D',0};
-static const WCHAR symbolic_link_valueW[]= {'S','y','m','b','o','l','i','c','L','i','n','k','V','a','l','u','e',0};
-static const WCHAR gpu_idW[] = {'G','P','U','I','D',0};
-static const WCHAR monitor_id_fmtW[] = {'M','o','n','i','t','o','r','I','D','%','d',0};
 static const WCHAR adapter_prefixW[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y'};
-static const WCHAR adapter_name_fmtW[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y','%','d',0};
-static const WCHAR state_flagsW[] = {'S','t','a','t','e','F','l','a','g','s',0};
-static const WCHAR guid_fmtW[] = {
-    '{','%','0','8','x','-','%','0','4','x','-','%','0','4','x','-','%','0','2','x','%','0','2','x','-',
-    '%','0','2','x','%','0','2','x','%','0','2','x','%','0','2','x','%','0','2','x','%','0','2','x','}',0};
-static const WCHAR gpu_instance_fmtW[] = {
-    'P','C','I','\\',
-    'V','E','N','_','%','0','4','X','&',
-    'D','E','V','_','%','0','4','X','&',
-    'S','U','B','S','Y','S','_','%','0','8','X','&',
-    'R','E','V','_','%','0','2','X','\\',
-    '%','0','8','X',0};
-static const WCHAR gpu_hardware_id_fmtW[] = {
-    'P','C','I','\\',
-    'V','E','N','_','%','0','4','X','&',
-    'D','E','V','_','%','0','4','X','&',
-    'S','U','B','S','Y','S','_','0','0','0','0','0','0','0','0','&',
-    'R','E','V','_','0','0',0};
 static const WCHAR video_keyW[] = {
     'H','A','R','D','W','A','R','E','\\',
     'D','E','V','I','C','E','M','A','P','\\',
     'V','I','D','E','O',0};
-static const WCHAR adapter_key_fmtW[] = {
-    'S','y','s','t','e','m','\\',
-    'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
-    'C','o','n','t','r','o','l','\\',
-    'V','i','d','e','o','\\',
-    '%','s','\\',
-    '%','0','4','x',0};
 static const WCHAR device_video_fmtW[] = {
     '\\','D','e','v','i','c','e','\\',
     'V','i','d','e','o','%','d',0};
-static const WCHAR machine_prefixW[] = {
-    '\\','R','e','g','i','s','t','r','y','\\',
-    'M','a','c','h','i','n','e','\\',0};
-static const WCHAR nt_classW[] = {
-    '\\','R','e','g','i','s','t','r','y','\\',
-    'M','a','c','h','i','n','e','\\',
-    'S','y','s','t','e','m','\\',
-    'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
-    'C','o','n','t','r','o','l','\\',
-    'C','l','a','s','s','\\',0};
-static const WCHAR monitor_instance_fmtW[] = {
-    'D','I','S','P','L','A','Y','\\',
-    'D','e','f','a','u','l','t','_','M','o','n','i','t','o','r','\\',
-    '%','0','4','X','&','%','0','4','X',0};
-static const WCHAR monitor_hardware_idW[] = {
-    'M','O','N','I','T','O','R','\\',
-    'D','e','f','a','u','l','t','_','M','o','n','i','t','o','r',0,0};
 
 
 static CFArrayRef modes;
@@ -448,7 +399,7 @@ static struct display_mode_descriptor* create_original_display_mode_descriptor(C
     HKEY hkey;
     DWORD type, size;
     DWORD refresh100;
-    WCHAR* pixel_encoding = NULL, *end;
+    WCHAR* pixel_encoding = NULL;
 
     init_original_display_mode();
 
@@ -480,12 +431,11 @@ static struct display_mode_descriptor* create_original_display_mode_descriptor(C
     size = 0;
     if (RegQueryValueExW(hkey, pixelencodingW, 0, &type, NULL, &size) || type != REG_SZ)
         goto done;
-    pixel_encoding = HeapAlloc(GetProcessHeap(), 0, size * sizeof(WCHAR));
+    size += sizeof(WCHAR);
+    pixel_encoding = HeapAlloc(GetProcessHeap(), 0, size);
     if (RegQueryValueExW(hkey, pixelencodingW, 0, &type, (BYTE*)pixel_encoding, &size) || type != REG_SZ)
         goto done;
-    if ((end = memchrW(pixel_encoding, 0, size)))
-        size = end - pixel_encoding;
-    desc->pixel_encoding = CFStringCreateWithCharacters(NULL, (const UniChar*)pixel_encoding, size);
+    desc->pixel_encoding = CFStringCreateWithCharacters(NULL, (const UniChar*)pixel_encoding, strlenW(pixel_encoding));
 
     ret = desc;
 
@@ -611,6 +561,16 @@ static int get_default_bpp(void)
 }
 
 
+static BOOL display_mode_is_supported(CGDisplayModeRef display_mode)
+{
+    uint32_t io_flags = CGDisplayModeGetIOFlags(display_mode);
+    /* CrossOver Hack #18576: don't check for kDisplayModeSafeFlag for builtin display on Apple Silicon. */
+    return (io_flags & kDisplayModeValidFlag) &&
+            ((io_flags & kDisplayModeSafeFlag) ||
+             (is_apple_silicon() && CGDisplayIsBuiltin(CGMainDisplayID())));
+}
+
+
 #if defined(MAC_OS_X_VERSION_10_8) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_8
 static CFDictionaryRef create_mode_dict(CGDisplayModeRef display_mode, BOOL is_original)
 {
@@ -663,7 +623,119 @@ static CFDictionaryRef create_mode_dict(CGDisplayModeRef display_mode, BOOL is_o
 
     return ret;
 }
+
+
+static BOOL mode_is_preferred(CGDisplayModeRef new_mode, CGDisplayModeRef old_mode,
+                              struct display_mode_descriptor *original_mode_desc,
+                              BOOL include_unsupported)
+{
+    BOOL new_is_supported;
+    CFStringRef pixel_encoding;
+    size_t width_points, height_points;
+    size_t old_width_pixels, old_height_pixels, new_width_pixels, new_height_pixels;
+    BOOL old_size_same, new_size_same;
+
+    /* If a given mode is the user's default, then always list it in preference to any similar
+       modes that may exist. */
+    if (display_mode_matches_descriptor(new_mode, original_mode_desc))
+        return TRUE;
+
+    /* Skip unsupported modes unless told to do otherwise. */
+    new_is_supported = display_mode_is_supported(new_mode);
+    if (!new_is_supported && !include_unsupported)
+        return FALSE;
+
+    pixel_encoding = CGDisplayModeCopyPixelEncoding(new_mode);
+    if (pixel_encoding)
+    {
+        BOOL bpp30 = CFEqual(pixel_encoding, CFSTR(kIO30BitDirectPixels));
+        CFRelease(pixel_encoding);
+        if (bpp30)
+        {
+            /* This is an odd pixel encoding.  It seems it's only returned
+               when using kCGDisplayShowDuplicateLowResolutionModes.  It's
+               32bpp in terms of the actual raster layout, but it's 10
+               bits per component.  I think that no Windows program is
+               likely to need it and they will probably be confused by it.
+               Skip it. */
+            return FALSE;
+        }
+    }
+
+    if (!old_mode)
+        return TRUE;
+
+    /* Prefer the original mode over any similar mode. */
+    if (display_mode_matches_descriptor(old_mode, original_mode_desc))
+        return FALSE;
+
+    /* Prefer supported modes over similar unsupported ones. */
+    if (!new_is_supported && display_mode_is_supported(old_mode))
+        return FALSE;
+
+    /* Otherwise, prefer a mode whose pixel size equals its point size over one which
+       is scaled. */
+    width_points = CGDisplayModeGetWidth(new_mode);
+    height_points = CGDisplayModeGetHeight(new_mode);
+    new_width_pixels = CGDisplayModeGetPixelWidth(new_mode);
+    new_height_pixels = CGDisplayModeGetPixelHeight(new_mode);
+    old_width_pixels = CGDisplayModeGetPixelWidth(old_mode);
+    old_height_pixels = CGDisplayModeGetPixelHeight(old_mode);
+    new_size_same = (new_width_pixels == width_points && new_height_pixels == height_points);
+    old_size_same = (old_width_pixels == width_points && old_height_pixels == height_points);
+
+    if (new_size_same && !old_size_same)
+        return TRUE;
+
+    if (!new_size_same && old_size_same)
+        return FALSE;
+
+    /* Otherwise, prefer the mode with the smaller pixel size. */
+    return new_width_pixels < old_width_pixels && new_height_pixels < old_height_pixels;
+}
 #endif
+
+
+static CFComparisonResult mode_compare(const void * HOSTPTR p1, const void * HOSTPTR p2, void * HOSTPTR context)
+{
+    CGDisplayModeRef a = (CGDisplayModeRef)p1, b = (CGDisplayModeRef)p2;
+    size_t a_val, b_val;
+    double a_refresh_rate, b_refresh_rate;
+
+    /* Sort by bpp descending, */
+    a_val = display_mode_bits_per_pixel(a);
+    b_val = display_mode_bits_per_pixel(b);
+    if (a_val < b_val)
+        return kCFCompareGreaterThan;
+    else if (a_val > b_val)
+        return kCFCompareLessThan;
+
+    /* then width ascending, */
+    a_val = CGDisplayModeGetWidth(a);
+    b_val = CGDisplayModeGetWidth(b);
+    if (a_val < b_val)
+        return kCFCompareLessThan;
+    else if (a_val > b_val)
+        return kCFCompareGreaterThan;
+
+    /* then height ascending, */
+    a_val = CGDisplayModeGetHeight(a);
+    b_val = CGDisplayModeGetHeight(b);
+    if (a_val < b_val)
+        return kCFCompareLessThan;
+    else if (a_val > b_val)
+        return kCFCompareGreaterThan;
+
+    /* then refresh rate descending. */
+    a_refresh_rate = CGDisplayModeGetRefreshRate(a);
+    b_refresh_rate = CGDisplayModeGetRefreshRate(b);
+    if (a_refresh_rate < b_refresh_rate)
+        return kCFCompareGreaterThan;
+    else if (a_refresh_rate > b_refresh_rate)
+        return kCFCompareLessThan;
+
+    return kCFCompareEqualTo;
+}
 
 
 /***********************************************************************
@@ -677,8 +749,11 @@ static CFDictionaryRef create_mode_dict(CGDisplayModeRef display_mode, BOOL is_o
  * returned from CGDisplayCopyAllDisplayModes() without special options.
  * This is especially bad if that's the user's default mode, since then
  * no "available" mode matches the initial settings.
+ *
+ * If include_unsupported is FALSE, display modes with IO flags that
+ * indicate that they are invalid or unsafe are filtered.
  */
-static CFArrayRef copy_display_modes(CGDirectDisplayID display)
+static CFArrayRef copy_display_modes(CGDirectDisplayID display, BOOL include_unsupported)
 {
     CFArrayRef modes = NULL;
 
@@ -707,72 +782,12 @@ static CFArrayRef copy_display_modes(CGDirectDisplayID display)
         count = CFArrayGetCount(modes);
         for (i = 0; i < count; i++)
         {
-            BOOL better = TRUE;
             CGDisplayModeRef new_mode = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
             BOOL new_is_original = display_mode_matches_descriptor(new_mode, desc);
             CFDictionaryRef key = create_mode_dict(new_mode, new_is_original);
+            CGDisplayModeRef old_mode = (CGDisplayModeRef)CFDictionaryGetValue(modes_by_size, key);
 
-            /* If a given mode is the user's default, then always list it in preference to any similar
-               modes that may exist. */
-            if (new_is_original)
-                better = TRUE;
-            else
-            {
-                CFStringRef pixel_encoding = CGDisplayModeCopyPixelEncoding(new_mode);
-                CGDisplayModeRef old_mode;
-
-                if (pixel_encoding)
-                {
-                    BOOL bpp30 = CFEqual(pixel_encoding, CFSTR(kIO30BitDirectPixels));
-                    CFRelease(pixel_encoding);
-                    if (bpp30)
-                    {
-                        /* This is an odd pixel encoding.  It seems it's only returned
-                           when using kCGDisplayShowDuplicateLowResolutionModes.  It's
-                           32bpp in terms of the actual raster layout, but it's 10
-                           bits per component.  I think that no Windows program is
-                           likely to need it and they will probably be confused by it.
-                           Skip it. */
-                        CFRelease(key);
-                        continue;
-                    }
-                }
-
-                old_mode = (CGDisplayModeRef)CFDictionaryGetValue(modes_by_size, key);
-                if (old_mode)
-                {
-                    BOOL old_is_original = display_mode_matches_descriptor(old_mode, desc);
-
-                    if (old_is_original)
-                        better = FALSE;
-                    else
-                    {
-                        /* Otherwise, prefer a mode whose pixel size equals its point size over one which
-                           is scaled. */
-                        size_t width_points = CGDisplayModeGetWidth(new_mode);
-                        size_t height_points = CGDisplayModeGetHeight(new_mode);
-                        size_t new_width_pixels = CGDisplayModeGetPixelWidth(new_mode);
-                        size_t new_height_pixels = CGDisplayModeGetPixelHeight(new_mode);
-                        size_t old_width_pixels = CGDisplayModeGetPixelWidth(old_mode);
-                        size_t old_height_pixels = CGDisplayModeGetPixelHeight(old_mode);
-                        BOOL new_size_same = (new_width_pixels == width_points && new_height_pixels == height_points);
-                        BOOL old_size_same = (old_width_pixels == width_points && old_height_pixels == height_points);
-
-                        if (new_size_same && !old_size_same)
-                            better = TRUE;
-                        else if (!new_size_same && old_size_same)
-                            better = FALSE;
-                        else
-                        {
-                            /* Otherwise, prefer the mode with the smaller pixel size. */
-                            if (old_width_pixels < new_width_pixels || old_height_pixels < new_height_pixels)
-                                better = FALSE;
-                        }
-                    }
-                }
-            }
-
-            if (better)
+            if (mode_is_preferred(new_mode, old_mode, desc, include_unsupported))
                 CFDictionarySetValue(modes_by_size, key, new_mode);
 
             CFRelease(key);
@@ -792,7 +807,16 @@ static CFArrayRef copy_display_modes(CGDirectDisplayID display)
 #endif
         modes = CGDisplayCopyAllDisplayModes(display, NULL);
 
-    return modes;
+    if (modes)
+    {
+        CFIndex count = CFArrayGetCount(modes);
+        CFMutableArrayRef sorted_modes = CFArrayCreateMutableCopy(NULL, count, modes);
+        CFRelease(modes);
+        CFArraySortValues(sorted_modes, CFRangeMake(0, count), mode_compare, NULL);
+        return sorted_modes;
+    }
+
+    return NULL;
 }
 
 
@@ -843,8 +867,8 @@ static BOOL is_detached_mode(const DEVMODEW *mode)
  *              ChangeDisplaySettingsEx  (MACDRV.@)
  *
  */
-LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
-                                          HWND hwnd, DWORD flags, LPVOID lpvoid)
+LONG macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
+                                    HWND hwnd, DWORD flags, LPVOID lpvoid)
 {
     WCHAR primary_adapter[CCHDEVICENAME];
     LONG ret = DISP_CHANGE_BADMODE;
@@ -854,7 +878,7 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
     int num_displays;
     CFArrayRef display_modes;
     struct display_mode_descriptor* desc;
-    CFIndex count, i, safe, best;
+    CFIndex count, i, best;
     CGDisplayModeRef best_display_mode;
     uint32_t best_io_flags;
     BOOL best_is_original;
@@ -889,7 +913,7 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
     if (macdrv_get_displays(&displays, &num_displays))
         return DISP_CHANGE_FAILED;
 
-    display_modes = copy_display_modes(displays[0].displayID);
+    display_modes = copy_display_modes(displays[0].displayID, FALSE);
     if (!display_modes)
     {
         macdrv_free_displays(displays);
@@ -913,7 +937,6 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
 
     desc = create_original_display_mode_descriptor(displays[0].displayID);
 
-    safe = -1;
     best_display_mode = NULL;
     count = CFArrayGetCount(display_modes);
     for (i = 0; i < count; i++)
@@ -930,13 +953,6 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
             width *= 2;
             height *= 2;
         }
-
-        /* CrossOver Hack #18576: don't check for kDisplayModeSafeFlag on Apple Silicon. */
-        if (!(io_flags & kDisplayModeValidFlag) ||
-            (!(io_flags & kDisplayModeSafeFlag) && !is_apple_silicon()))
-            continue;
-
-        safe++;
 
         if (bpp != mode_bpp)
             continue;
@@ -991,7 +1007,7 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
 
 better:
         best_display_mode = display_mode;
-        best = safe;
+        best = i;
         best_io_flags = io_flags;
         best_is_original = is_original;
     }
@@ -1055,8 +1071,7 @@ better:
  *              EnumDisplaySettingsEx  (MACDRV.@)
  *
  */
-BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode,
-                                        LPDEVMODEW devmode, DWORD flags)
+BOOL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode, DEVMODEW *devmode, DWORD flags)
 {
     static const WCHAR dev_name[CCHDEVICENAME] =
         { 'W','i','n','e',' ','M','a','c',' ','d','r','i','v','e','r',0 };
@@ -1103,7 +1118,7 @@ BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode,
         if (mode == 0 || !modes)
         {
             if (modes) CFRelease(modes);
-            modes = copy_display_modes(displays[0].displayID);
+            modes = copy_display_modes(displays[0].displayID, (flags & EDS_RAWMODE) != 0);
             modes_has_8bpp = modes_has_16bpp = FALSE;
 
             if (modes)
@@ -1124,20 +1139,13 @@ BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode,
         display_mode = NULL;
         if (modes)
         {
-            int default_bpp = get_default_bpp();
+            int default_bpp;
             DWORD seen_modes = 0;
 
             count = CFArrayGetCount(modes);
             for (i = 0; i < count; i++)
             {
                 CGDisplayModeRef candidate = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
-
-                io_flags = CGDisplayModeGetIOFlags(candidate);
-                /* CrossOver Hack #18576: don't check for kDisplayModeSafeFlag on Apple Silicon. */
-                if (!(flags & EDS_RAWMODE) &&
-                    (!(io_flags & kDisplayModeValidFlag) ||
-                     (!(io_flags & kDisplayModeSafeFlag) && !is_apple_silicon())))
-                    continue;
 
                 seen_modes++;
                 if (seen_modes > mode)
@@ -1146,33 +1154,41 @@ BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode,
                     display_mode_bpp = display_mode_bits_per_pixel(display_mode);
                     break;
                 }
+            }
 
-                /* We only synthesize modes from those having the default bpp. */
-                if (display_mode_bits_per_pixel(candidate) != default_bpp)
-                    continue;
+            default_bpp = get_default_bpp();
 
-                if (!modes_has_8bpp)
+            /* If all the real modes are exhausted, synthesize lower bpp modes. */
+            if (!display_mode && (!modes_has_16bpp || !modes_has_8bpp))
+            {
+                /* We want to synthesize higher depths first. */
+                int synth_bpps[] = { modes_has_16bpp ? 0 : 16, modes_has_8bpp ? 0 : 8 };
+                size_t synth_bpp_idx;
+                for (synth_bpp_idx = 0; synth_bpp_idx < 2; synth_bpp_idx++)
                 {
-                    seen_modes++;
-                    if (seen_modes > mode)
-                    {
-                        display_mode = (CGDisplayModeRef)CFRetain(candidate);
-                        display_mode_bpp = 8;
-                        synthesized = TRUE;
-                        break;
-                    }
-                }
+                    int synth_bpp = synth_bpps[synth_bpp_idx];
+                    if (synth_bpp == 0)
+                        continue;
 
-                if (!modes_has_16bpp)
-                {
-                    seen_modes++;
-                    if (seen_modes > mode)
+                    for (i = 0; i < count; i++)
                     {
-                        display_mode = (CGDisplayModeRef)CFRetain(candidate);
-                        display_mode_bpp = 16;
-                        synthesized = TRUE;
-                        break;
+                        CGDisplayModeRef candidate = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
+                        /* We only synthesize modes from those having the default bpp. */
+                        if (display_mode_bits_per_pixel(candidate) != default_bpp)
+                            continue;
+
+                        seen_modes++;
+                        if (seen_modes > mode)
+                        {
+                            display_mode = (CGDisplayModeRef)CFRetain(candidate);
+                            display_mode_bpp = synth_bpp;
+                            synthesized = TRUE;
+                            break;
+                        }
                     }
+
+                    if (display_mode)
+                        break;
                 }
             }
         }
@@ -1256,7 +1272,7 @@ failed:
 /***********************************************************************
  *              GetDeviceGammaRamp (MACDRV.@)
  */
-BOOL CDECL macdrv_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
+BOOL macdrv_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
 {
     BOOL ret = FALSE;
     DDGAMMARAMP *r = ramp;
@@ -1340,7 +1356,7 @@ done:
 /***********************************************************************
  *              SetDeviceGammaRamp (MACDRV.@)
  */
-BOOL CDECL macdrv_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
+BOOL macdrv_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
 {
     DDGAMMARAMP *r = ramp;
     struct macdrv_display *displays;
@@ -1465,362 +1481,83 @@ void macdrv_displays_changed(const macdrv_event *event)
     }
 }
 
-/***********************************************************************
- *              macdrv_init_gpu
- *
- * Initialize a GPU instance.
- * Return its GUID string in guid_string, driver value in driver parameter and LUID in gpu_luid.
- *
- * Return FALSE on failure and TRUE on success.
- */
-static BOOL macdrv_init_gpu(HDEVINFO devinfo, const struct macdrv_gpu *gpu, int gpu_index, WCHAR *guid_string,
-                            WCHAR *driver, LUID *gpu_luid)
+static BOOL force_display_devices_refresh;
+
+void macdrv_UpdateDisplayDevices( const struct gdi_device_manager *device_manager,
+                                  BOOL force, void *param )
 {
-    static const BOOL present = TRUE;
-    SP_DEVINFO_DATA device_data = {sizeof(device_data)};
-    WCHAR instanceW[MAX_PATH];
-    DEVPROPTYPE property_type;
-    WCHAR nameW[MAX_PATH];
-    WCHAR bufferW[1024];
-    FILETIME filetime;
-    HKEY hkey = NULL;
-    GUID guid;
-    LUID luid;
-    INT written;
-    DWORD size;
-    BOOL ret = FALSE;
-    char copy[ARRAY_SIZE(gpu->name)];
+    struct macdrv_adapter *adapters, *adapter;
+    struct macdrv_monitor *monitors, *monitor;
+    struct macdrv_gpu *gpus, *gpu;
+    INT gpu_count, adapter_count, monitor_count;
+    DWORD len;
 
-    sprintfW(instanceW, gpu_instance_fmtW, gpu->vendor_id, gpu->device_id, gpu->subsys_id, gpu->revision_id, gpu_index);
-    /* 32on64 FIXME: We allocate the gpu struct, so we should be able to keep it in low memory. But arrays of pointers
-     * are passed to system libs. */
-    memcpy(copy, gpu->name, sizeof(gpu->name));
-    MultiByteToWideChar(CP_UTF8, 0, copy, -1, nameW, ARRAY_SIZE(nameW));
-    if (!SetupDiOpenDeviceInfoW(devinfo, instanceW, NULL, 0, &device_data))
+    if (!force && !force_display_devices_refresh) return;
+    force_display_devices_refresh = FALSE;
+
+    /* Initialize GPUs */
+    if (macdrv_get_gpus(&gpus, &gpu_count))
     {
-        SetupDiCreateDeviceInfoW(devinfo, instanceW, &GUID_DEVCLASS_DISPLAY, nameW, NULL, 0, &device_data);
-        if (!SetupDiRegisterDeviceInfo(devinfo, &device_data, 0, NULL, NULL, NULL))
-            goto done;
+        ERR("could not get GPUs\n");
+        return;
     }
+    TRACE("GPU count: %d\n", gpu_count);
 
-    /* Write HardwareID registry property, REG_MULTI_SZ */
-    written = sprintfW(bufferW, gpu_hardware_id_fmtW, gpu->vendor_id, gpu->device_id);
-    bufferW[written + 1] = 0;
-    if (!SetupDiSetDeviceRegistryPropertyW(devinfo, &device_data, SPDRP_HARDWAREID, (const BYTE *)bufferW,
-                                           (written + 2) * sizeof(WCHAR)))
-        goto done;
-
-    /* Write DEVPKEY_Device_IsPresent property */
-    if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &DEVPKEY_Device_IsPresent, DEVPROP_TYPE_BOOLEAN,
-                                   (const BYTE *)&present, sizeof(present), 0))
-        goto done;
-
-    /* Write DEVPROPKEY_GPU_LUID property */
-    if (!SetupDiGetDevicePropertyW(devinfo, &device_data, &DEVPROPKEY_GPU_LUID, &property_type,
-                                   (BYTE *)&luid, sizeof(luid), NULL, 0))
+    for (gpu = gpus; gpu < gpus + gpu_count; gpu++)
     {
-        if (!AllocateLocallyUniqueId(&luid))
-            goto done;
-
-        if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &DEVPROPKEY_GPU_LUID,
-                                       DEVPROP_TYPE_UINT64, (const BYTE *)&luid, sizeof(luid), 0))
-            goto done;
-    }
-    *gpu_luid = luid;
-    TRACE("GPU id:0x%s name:%s LUID:%08x:%08x.\n", wine_dbgstr_longlong(gpu->id), gpu->name,
-          luid.HighPart, luid.LowPart);
-
-    /* Open driver key.
-     * This is where HKLM\System\CurrentControlSet\Control\Video\{GPU GUID}\{Adapter Index} links to */
-    hkey = SetupDiCreateDevRegKeyW(devinfo, &device_data, DICS_FLAG_GLOBAL, 0, DIREG_DRV, NULL, NULL);
-
-    /* Write DriverDesc value */
-    if (RegSetValueExW(hkey, driver_descW, 0, REG_SZ, (const BYTE *)nameW, (lstrlenW(nameW) + 1) * sizeof(WCHAR)))
-        goto done;
-    /* Write DriverDateData value, using current time as driver date, needed by Evoland */
-    GetSystemTimeAsFileTime(&filetime);
-    if (RegSetValueExW(hkey, driver_date_dataW, 0, REG_BINARY, (BYTE *)&filetime, sizeof(filetime)))
-        goto done;
-    RegCloseKey(hkey);
-
-    /* Retrieve driver value for adapters */
-    if (!SetupDiGetDeviceRegistryPropertyW(devinfo, &device_data, SPDRP_DRIVER, NULL, (BYTE *)bufferW, sizeof(bufferW),
-                                           NULL))
-        goto done;
-    lstrcpyW(driver, nt_classW);
-    lstrcatW(driver, bufferW);
-
-    /* Write GUID in VideoID in .../instance/Device Parameters, reuse the GUID if it's existent */
-    hkey = SetupDiCreateDevRegKeyW(devinfo, &device_data, DICS_FLAG_GLOBAL, 0, DIREG_DEV, NULL, NULL);
-
-    size = sizeof(bufferW);
-    if (RegQueryValueExW(hkey, video_idW, 0, NULL, (BYTE *)bufferW, &size))
-    {
-        UuidCreate(&guid);
-        sprintfW(bufferW, guid_fmtW, guid.Data1, guid.Data2, guid.Data3, guid.Data4[0], guid.Data4[1], guid.Data4[2],
-                 guid.Data4[3], guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
-        if (RegSetValueExW(hkey, video_idW, 0, REG_SZ, (const BYTE *)bufferW, (lstrlenW(bufferW) + 1) * sizeof(WCHAR)))
-            goto done;
-    }
-    lstrcpyW(guid_string, bufferW);
-
-    ret = TRUE;
-done:
-    RegCloseKey(hkey);
-    if (!ret)
-        ERR("Failed to initialize GPU\n");
-    return ret;
-}
-
-/***********************************************************************
- *              macdrv_init_adapter
- *
- * Initialize an adapter.
- *
- * Return FALSE on failure and TRUE on success.
- */
-static BOOL macdrv_init_adapter(HKEY video_hkey, int video_index, int gpu_index, int adapter_index, int monitor_count,
-                                const struct macdrv_gpu *gpu, const WCHAR *guid_string, const WCHAR *gpu_driver,
-                                const struct macdrv_adapter *adapter)
-{
-    WCHAR adapter_keyW[MAX_PATH];
-    WCHAR key_nameW[MAX_PATH];
-    WCHAR bufferW[1024];
-    HKEY hkey = NULL;
-    BOOL ret = FALSE;
-    LSTATUS ls;
-    INT i;
-    DWORD temp;
-
-    sprintfW(key_nameW, device_video_fmtW, video_index);
-    lstrcpyW(bufferW, machine_prefixW);
-    sprintfW(adapter_keyW, adapter_key_fmtW, guid_string, adapter_index);
-    lstrcatW(bufferW, adapter_keyW);
-
-    /* Write value of \Device\Video? (adapter key) in HKLM\HARDWARE\DEVICEMAP\VIDEO\ */
-    if (RegSetValueExW(video_hkey, key_nameW, 0, REG_SZ, (const BYTE *)bufferW, (lstrlenW(bufferW) + 1) * sizeof(WCHAR)))
-        goto done;
-
-    /* Create HKLM\System\CurrentControlSet\Control\Video\{GPU GUID}\{Adapter Index} link to GPU driver */
-    ls = RegCreateKeyExW(HKEY_LOCAL_MACHINE, adapter_keyW, 0, NULL, REG_OPTION_VOLATILE | REG_OPTION_CREATE_LINK,
-                         KEY_ALL_ACCESS, NULL, &hkey, NULL);
-    if (ls == ERROR_ALREADY_EXISTS)
-        RegCreateKeyExW(HKEY_LOCAL_MACHINE, adapter_keyW, 0, NULL, REG_OPTION_VOLATILE | REG_OPTION_OPEN_LINK,
-                        KEY_ALL_ACCESS, NULL, &hkey, NULL);
-    if (RegSetValueExW(hkey, symbolic_link_valueW, 0, REG_LINK, (const BYTE *)gpu_driver,
-                       lstrlenW(gpu_driver) * sizeof(WCHAR)))
-        goto done;
-    RegCloseKey(hkey);
-    hkey = NULL;
-
-    /* FIXME:
-     * Following information is Wine specific, it doesn't really exist on Windows. It is used so that we can
-     * implement EnumDisplayDevices etc by querying registry only. This information is most likely reported by the
-     * device driver on Windows */
-    RegCreateKeyExW(HKEY_CURRENT_CONFIG, adapter_keyW, 0, NULL, REG_OPTION_VOLATILE, KEY_WRITE, NULL, &hkey, NULL);
-
-    /* Write GPU instance path so that we can find the GPU instance via adapters quickly. Another way is trying to match
-     * them via the GUID in Device Parameters/VideoID, but it would require enumerating all GPU instances */
-    sprintfW(bufferW, gpu_instance_fmtW, gpu->vendor_id, gpu->device_id, gpu->subsys_id, gpu->revision_id, gpu_index);
-    if (RegSetValueExW(hkey, gpu_idW, 0, REG_SZ, (const BYTE *)bufferW, (lstrlenW(bufferW) + 1) * sizeof(WCHAR)))
-        goto done;
-
-    /* Write all monitor instance paths under this adapter */
-    for (i = 0; i < monitor_count; i++)
-    {
-        sprintfW(key_nameW, monitor_id_fmtW, i);
-        sprintfW(bufferW, monitor_instance_fmtW, video_index, i);
-        if (RegSetValueExW(hkey, key_nameW, 0, REG_SZ, (const BYTE *)bufferW, (lstrlenW(bufferW) + 1) * sizeof(WCHAR)))
-            goto done;
-    }
-
-    /* Write StateFlags */
-    temp = adapter->state_flags;
-    if (RegSetValueExW(hkey, state_flagsW, 0, REG_DWORD, (const BYTE *)&temp,
-                       sizeof(temp)))
-        goto done;
-
-    ret = TRUE;
-done:
-    RegCloseKey(hkey);
-    if (!ret)
-        ERR("Failed to initialize adapter\n");
-    return ret;
-}
-
-/***********************************************************************
- *              macdrv_init_monitor
- *
- * Initialize an monitor.
- *
- * Return FALSE on failure and TRUE on success.
- */
-static BOOL macdrv_init_monitor(HDEVINFO devinfo, const struct macdrv_monitor *monitor, int monitor_index,
-                                 int video_index, const LUID *gpu_luid, UINT output_id)
-{
-    SP_DEVINFO_DATA device_data = {sizeof(SP_DEVINFO_DATA)};
-    RECT monitor_rect, work_rect;
-    WCHAR nameW[MAX_PATH];
-    WCHAR bufferW[MAX_PATH];
-    NTSTATUS status;
-    DWORD length;
-    HKEY hkey;
-    BOOL ret = FALSE;
-    DWORD temp;
-    char copy[ARRAY_SIZE(monitor->name)];
-
-    /* Create GUID_DEVCLASS_MONITOR instance */
-    sprintfW(bufferW, monitor_instance_fmtW, video_index, monitor_index);
-    /* 32on64 FIXME: See similar code re gpu->name. */
-    memcpy(copy, monitor->name, sizeof(monitor->name));
-    MultiByteToWideChar(CP_UTF8, 0, copy, -1, nameW, ARRAY_SIZE(nameW));
-    SetupDiCreateDeviceInfoW(devinfo, bufferW, &GUID_DEVCLASS_MONITOR, nameW, NULL, 0, &device_data);
-    if (!SetupDiRegisterDeviceInfo(devinfo, &device_data, 0, NULL, NULL, NULL))
-        goto done;
-
-    /* Write HardwareID registry property */
-    if (!SetupDiSetDeviceRegistryPropertyW(devinfo, &device_data, SPDRP_HARDWAREID,
-                                           (const BYTE *)monitor_hardware_idW, sizeof(monitor_hardware_idW)))
-        goto done;
-
-    /* Write DEVPROPKEY_MONITOR_GPU_LUID */
-    if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &DEVPROPKEY_MONITOR_GPU_LUID,
-                                   DEVPROP_TYPE_INT64, (const BYTE *)gpu_luid, sizeof(*gpu_luid), 0))
-        goto done;
-
-    /* Write DEVPROPKEY_MONITOR_OUTPUT_ID */
-    if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &DEVPROPKEY_MONITOR_OUTPUT_ID,
-                                   DEVPROP_TYPE_UINT32, (const BYTE *)&output_id, sizeof(output_id), 0))
-        goto done;
-
-    /* Create driver key */
-    hkey = SetupDiCreateDevRegKeyW(devinfo, &device_data, DICS_FLAG_GLOBAL, 0, DIREG_DRV, NULL, NULL);
-    RegCloseKey(hkey);
-
-    /* FIXME:
-     * Following properties are Wine specific, see comments in macdrv_init_adapter for details */
-    /* StateFlags */
-    temp = monitor->state_flags;
-    if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &WINE_DEVPROPKEY_MONITOR_STATEFLAGS, DEVPROP_TYPE_UINT32,
-                                   (const BYTE *)&temp, sizeof(temp), 0))
-        goto done;
-    /* Adapter name */
-    length = sprintfW(bufferW, adapter_name_fmtW, video_index + 1);
-    if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &WINE_DEVPROPKEY_MONITOR_ADAPTERNAME, DEVPROP_TYPE_STRING,
-                                   (const BYTE *)bufferW, (length + 1) * sizeof(WCHAR), 0))
-        goto done;
-
-    /* EnumDisplayMonitors() doesn't enumerate mirrored replicas and inactive monitors */
-    if (monitor_index == 0 && monitor->state_flags & DISPLAY_DEVICE_ACTIVE)
-    {
-        SERVER_START_REQ(create_monitor)
+        char gpucopy[ARRAY_SIZE(gpu->name)];
+        struct gdi_gpu gdi_gpu =
         {
-            monitor_rect = rect_from_cgrect(monitor->rc_monitor);
-            work_rect = rect_from_cgrect(monitor->rc_work);
-            req->monitor_rect.top = monitor_rect.top;
-            req->monitor_rect.left = monitor_rect.left;
-            req->monitor_rect.right = monitor_rect.right;
-            req->monitor_rect.bottom = monitor_rect.bottom;
-            req->work_rect.top = work_rect.top;
-            req->work_rect.left = work_rect.left;
-            req->work_rect.right = work_rect.right;
-            req->work_rect.bottom = work_rect.bottom;
-            req->serial_no = monitor->serial_no;
-            wine_server_add_data(req, bufferW, length * sizeof(WCHAR));
-            status = wine_server_call(req);
-        }
-        SERVER_END_REQ;
+            .id = gpu->id,
+            .vendor_id = gpu->vendor_id,
+            .device_id = gpu->device_id,
+            .subsys_id = gpu->subsys_id,
+            .revision_id = gpu->revision_id,
+        };
+        memcpy(gpucopy, gpu->name, sizeof(gpu->name));
+        RtlUTF8ToUnicodeN(gdi_gpu.name, sizeof(gdi_gpu.name), &len, gpucopy, strlen(gpucopy));
+        device_manager->add_gpu(&gdi_gpu, param);
 
-        if (status)
-            goto done;
-    }
+        /* Initialize adapters */
+        if (macdrv_get_adapters(gpu->id, &adapters, &adapter_count)) break;
+        TRACE("GPU: %llx %s, adapter count: %d\n", gpu->id, debugstr_a(gpucopy), adapter_count);
 
-    ret = TRUE;
-done:
-    if (!ret)
-        ERR("Failed to initialize monitor\n");
-    return ret;
-}
-
-static void prepare_devices(HKEY video_hkey)
-{
-    static const BOOL not_present = FALSE;
-    SP_DEVINFO_DATA device_data = {sizeof(device_data)};
-    HMONITOR monitor = NULL;
-    HDEVINFO devinfo;
-    NTSTATUS status;
-    DWORD i = 0;
-
-    /* Remove all monitors */
-    devinfo = SetupDiGetClassDevsW(&GUID_DEVCLASS_MONITOR, displayW, NULL, 0);
-    while (SetupDiEnumDeviceInfo(devinfo, i++, &device_data))
-    {
-        if (!SetupDiRemoveDevice(devinfo, &device_data))
-            ERR("Failed to remove monitor\n");
-    }
-    SetupDiDestroyDeviceInfoList(devinfo);
-
-    while (TRUE)
-    {
-        SERVER_START_REQ(enum_monitor)
+        for (adapter = adapters; adapter < adapters + adapter_count; adapter++)
         {
-            req->index = 0;
-            if (!(status = wine_server_call(req)))
-                monitor = wine_server_ptr_handle(reply->handle);
+            struct gdi_adapter gdi_adapter =
+            {
+                .id = adapter->id,
+                .state_flags = adapter->state_flags,
+            };
+            device_manager->add_adapter( &gdi_adapter, param );
+
+            if (macdrv_get_monitors(adapter->id, &monitors, &monitor_count)) break;
+            TRACE("adapter: %#x, monitor count: %d\n", adapter->id, monitor_count);
+
+            /* Initialize monitors */
+            for (monitor = monitors; monitor < monitors + monitor_count; monitor++)
+            {
+                char monitorcopy[ARRAY_SIZE(monitor->name)];
+                struct gdi_monitor gdi_monitor =
+                {
+                    .rc_monitor = rect_from_cgrect(monitor->rc_monitor),
+                    .rc_work = rect_from_cgrect(monitor->rc_work),
+                    .state_flags = monitor->state_flags,
+                };
+                memcpy(monitorcopy, monitor->name, sizeof(monitor->name));
+                RtlUTF8ToUnicodeN(gdi_monitor.name, sizeof(gdi_monitor.name), &len,
+                                  monitorcopy, strlen(monitorcopy));
+                TRACE("monitor: %s\n", debugstr_a(monitorcopy));
+                device_manager->add_monitor( &gdi_monitor, param );
+            }
+
+            macdrv_free_monitors(monitors);
         }
-        SERVER_END_REQ;
 
-        if (status)
-            break;
-
-        SERVER_START_REQ(destroy_monitor)
-        {
-            req->handle = wine_server_user_handle(monitor);
-            status = wine_server_call(req);
-        }
-        SERVER_END_REQ;
-
-        if (status)
-            ERR("Failed to destroy monitor %p.\n", monitor);
+        macdrv_free_adapters(adapters);
     }
 
-    /* Clean up old adapter keys for reinitialization */
-    RegDeleteTreeW(video_hkey, NULL);
-
-    /* FIXME:
-     * Currently SetupDiGetClassDevsW with DIGCF_PRESENT is unsupported, So we need to clean up not present devices in
-     * case application uses SetupDiGetClassDevsW to enumerate devices. Wrong devices could exist in registry as a result
-     * of prefix copying or having devices unplugged. But then we couldn't simply delete GPUs because we need to retain
-     * the same GUID for the same GPU. */
-    i = 0;
-    devinfo = SetupDiGetClassDevsW(&GUID_DEVCLASS_DISPLAY, pciW, NULL, 0);
-    while (SetupDiEnumDeviceInfo(devinfo, i++, &device_data))
-    {
-        if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &DEVPKEY_Device_IsPresent, DEVPROP_TYPE_BOOLEAN,
-                                       (const BYTE *)&not_present, sizeof(not_present), 0))
-            ERR("Failed to set GPU present property\n");
-    }
-    SetupDiDestroyDeviceInfoList(devinfo);
-}
-
-static void cleanup_devices(void)
-{
-    SP_DEVINFO_DATA device_data = {sizeof(device_data)};
-    HDEVINFO devinfo;
-    DWORD type;
-    DWORD i = 0;
-    BOOL present;
-
-    devinfo = SetupDiGetClassDevsW(&GUID_DEVCLASS_DISPLAY, pciW, NULL, 0);
-    while (SetupDiEnumDeviceInfo(devinfo, i++, &device_data))
-    {
-        present = FALSE;
-        SetupDiGetDevicePropertyW(devinfo, &device_data, &DEVPKEY_Device_IsPresent, &type, (BYTE *)&present,
-                                  sizeof(present), NULL, 0);
-        if (!present && !SetupDiRemoveDevice(devinfo, &device_data))
-            ERR("Failed to remove GPU\n");
-    }
-    SetupDiDestroyDeviceInfoList(devinfo);
+    macdrv_free_gpus(gpus);
 }
 
 /***********************************************************************
@@ -1830,94 +1567,9 @@ static void cleanup_devices(void)
  */
 void macdrv_init_display_devices(BOOL force)
 {
-    HANDLE mutex;
-    struct macdrv_gpu *gpus = NULL;
-    struct macdrv_adapter *adapters = NULL;
-    struct macdrv_monitor *monitors = NULL;
-    INT gpu_count, adapter_count, monitor_count;
-    INT gpu, adapter, monitor;
-    HDEVINFO gpu_devinfo = NULL, monitor_devinfo = NULL;
-    HKEY video_hkey = NULL;
-    INT video_index = 0;
-    DWORD disposition = 0;
-    WCHAR guidW[40];
-    WCHAR driverW[1024];
-    LUID gpu_luid;
-    UINT output_id = 0;
+    UINT32 num_path, num_mode;
 
-    mutex = get_display_device_init_mutex();
-
-    if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, video_keyW, 0, NULL, REG_OPTION_VOLATILE, KEY_ALL_ACCESS, NULL, &video_hkey,
-                        &disposition))
-    {
-        ERR("Failed to create video device key\n");
-        goto done;
-    }
-
-    /* Avoid unnecessary reinit */
-    if (!force && disposition != REG_CREATED_NEW_KEY)
-        goto done;
-
-    TRACE("\n");
-
-    prepare_devices(video_hkey);
-
-    gpu_devinfo = SetupDiCreateDeviceInfoList(&GUID_DEVCLASS_DISPLAY, NULL);
-    monitor_devinfo = SetupDiCreateDeviceInfoList(&GUID_DEVCLASS_MONITOR, NULL);
-
-    /* Initialize GPUs */
-    if (macdrv_get_gpus(&gpus, &gpu_count))
-        goto done;
-    TRACE("GPU count: %d\n", gpu_count);
-    if (!gpu_count)
-        ERR("No GPUs detected\n");
-
-    for (gpu = 0; gpu < gpu_count; gpu++)
-    {
-        if (!macdrv_init_gpu(gpu_devinfo, &gpus[gpu], gpu, guidW, driverW, &gpu_luid))
-            goto done;
-
-        /* Initialize adapters */
-        if (macdrv_get_adapters(gpus[gpu].id, &adapters, &adapter_count))
-            goto done;
-        TRACE("GPU: %#llx %s, adapter count: %d\n", gpus[gpu].id, gpus[gpu].name, adapter_count);
-
-        for (adapter = 0; adapter < adapter_count; adapter++)
-        {
-            if (macdrv_get_monitors(adapters[adapter].id, &monitors, &monitor_count))
-                goto done;
-            TRACE("adapter: %#x, monitor count: %d\n", adapters[adapter].id, monitor_count);
-
-            if (!macdrv_init_adapter(video_hkey, video_index, gpu, adapter, monitor_count, &gpus[gpu], guidW, driverW,
-                                     &adapters[adapter]))
-                goto done;
-
-            /* Initialize monitors */
-            for (monitor = 0; monitor < monitor_count; monitor++)
-            {
-                TRACE("monitor: %#x %s\n", monitor, monitors[monitor].name);
-                if (!macdrv_init_monitor(monitor_devinfo, &monitors[monitor], monitor, video_index, &gpu_luid, output_id++))
-                    goto done;
-            }
-
-            macdrv_free_monitors(monitors);
-            monitors = NULL;
-            video_index++;
-        }
-
-        macdrv_free_adapters(adapters);
-        adapters = NULL;
-    }
-
-done:
-    cleanup_devices();
-    SetupDiDestroyDeviceInfoList(monitor_devinfo);
-    SetupDiDestroyDeviceInfoList(gpu_devinfo);
-    RegCloseKey(video_hkey);
-
-    release_display_device_init_mutex(mutex);
-
-    macdrv_free_gpus(gpus);
-    macdrv_free_adapters(adapters);
-    macdrv_free_monitors(monitors);
+    if (force) force_display_devices_refresh = TRUE;
+    /* trigger refresh in win32u */
+    NtUserGetDisplayConfigBufferSizes( QDC_ONLY_ACTIVE_PATHS, &num_path, &num_mode );
 }

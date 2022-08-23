@@ -454,10 +454,8 @@ unsigned short CDECL MSVCP_char_traits_short_not_eof(const unsigned short *in)
 /* ?_Xlen@_String_base@std@@SAXXZ */
 void  CDECL MSVCP__String_base_Xlen(void)
 {
-    static const char msg[] = "string too long";
-
     TRACE("\n");
-    throw_exception(EXCEPTION_LENGTH_ERROR, msg);
+    _Xlength_error("string too long");
 }
 
 /* ?_Xlen@_String_base@std@@QBEXXZ */
@@ -470,10 +468,8 @@ void __thiscall _String_base__Xlen(const void/*_String_base*/ *this)
 /* ?_Xran@_String_base@std@@SAXXZ */
 void CDECL MSVCP__String_base_Xran(void)
 {
-    static const char msg[] = "invalid string position";
-
     TRACE("\n");
-    throw_exception(EXCEPTION_OUT_OF_RANGE, msg);
+    _Xout_of_range("invalid string position");
 }
 
 /* ?_Xran@_String_base@std@@QBEXXZ */
@@ -486,10 +482,8 @@ void __thiscall _String_base__Xran(const void/*_String_base*/ *this)
 /* ?_Xinvarg@_String_base@std@@SAXXZ */
 void CDECL MSVCP__String_base_Xinvarg(void)
 {
-    static const char msg[] = "invalid string argument";
-
     TRACE("\n");
-    throw_exception(EXCEPTION_INVALID_ARGUMENT, msg);
+    _Xinvalid_argument("invalid string argument");
 }
 
 
@@ -1630,7 +1624,7 @@ void __thiscall _Yarn_char__Tidy(_Yarn_char *this)
     TRACE("(%p)\n", this);
 
     if(this->str)
-        MSVCRT_operator_delete(this->str);
+        operator_delete(this->str);
     this->str = NULL;
 }
 
@@ -1647,11 +1641,7 @@ _Yarn_char* __thiscall _Yarn_char_op_assign_cstr(_Yarn_char *this, const char *s
         if(str) {
             size_t len = strlen(str);
 
-            this->str = MSVCRT_operator_new((len+1)*sizeof(char));
-            if(!this->str) {
-                ERR("out of memory\n");
-                return NULL;
-            }
+            this->str = operator_new((len+1)*sizeof(char));
             memcpy(this->str, str, (len+1)*sizeof(char));
         }
     }
@@ -1741,7 +1731,7 @@ void __thiscall _Yarn_wchar__Tidy(_Yarn_wchar *this)
     TRACE("(%p)\n", this);
 
     if(this->str)
-        MSVCRT_operator_delete(this->str);
+        operator_delete(this->str);
     this->str = NULL;
 }
 
@@ -1767,11 +1757,7 @@ _Yarn_wchar* __thiscall _Yarn_wchar_op_assign_cstr(_Yarn_wchar *this, const wcha
         if(str) {
             size_t len = wcslen(str);
 
-            this->str = MSVCRT_operator_new((len+1)*sizeof(wchar_t));
-            if(!this->str) {
-                ERR("out of memory\n");
-                return NULL;
-            }
+            this->str = operator_new((len+1)*sizeof(wchar_t));
             memcpy(this->str, str, (len+1)*sizeof(wchar_t));
         }
     }

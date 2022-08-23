@@ -1,12 +1,8 @@
 MODULE    = iphlpapi.dll
 IMPORTLIB = iphlpapi
-IMPORTS   = advapi32
-EXTRALIBS = $(RESOLV_LIBS) $(KSTAT_LIBS) $(PROCSTAT_LIBS)
+IMPORTS   = advapi32 dnsapi nsi uuid
 
 C_SRCS = \
-	icmp.c \
-	ifenum.c \
-	iphlpapi_main.c \
-	ipstats.c
+	iphlpapi_main.c
 
 RC_SRCS = version.rc

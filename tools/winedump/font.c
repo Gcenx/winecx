@@ -19,20 +19,10 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
-#ifdef HAVE_SYS_TYPES_H
-# include <sys/types.h>
-#endif
-#ifdef HAVE_SYS_MMAN_H
-#include <sys/mman.h>
-#endif
 #include <fcntl.h>
 
 #include "windef.h"
@@ -83,7 +73,7 @@ typedef struct
 typedef struct
 {
     SHORT dfVersion;		/* Version */
-    LONG dfSize;		/* Total File Size */
+    int  dfSize;		/* Total File Size */
     char dfCopyright[60];	/* Copyright notice */
     FONTINFO16 fi;		/* FONTINFO structure */
 } WINFNT;

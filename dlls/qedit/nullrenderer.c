@@ -24,12 +24,11 @@
 #include "wine/debug.h"
 #include "wine/strmbase.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(qedit);
+WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
 struct null_renderer
 {
     struct strmbase_renderer renderer;
-    HANDLE run_event;
 };
 
 static struct null_renderer *impl_from_strmbase_renderer(struct strmbase_renderer *iface)
@@ -37,24 +36,13 @@ static struct null_renderer *impl_from_strmbase_renderer(struct strmbase_rendere
     return CONTAINING_RECORD(iface, struct null_renderer, renderer);
 }
 
-static HRESULT WINAPI NullRenderer_DoRenderSample(struct strmbase_renderer *iface, IMediaSample *sample)
+static HRESULT null_renderer_render(struct strmbase_renderer *iface, IMediaSample *sample)
 {
-    struct null_renderer *filter = impl_from_strmbase_renderer(iface);
-
-    if (filter->renderer.filter.state == State_Paused)
-    {
-        const HANDLE events[2] = {filter->run_event, filter->renderer.flush_event};
-
-        SetEvent(filter->renderer.state_event);
-        WaitForMultipleObjects(2, events, FALSE, INFINITE);
-    }
-
     return S_OK;
 }
 
-static HRESULT WINAPI NullRenderer_CheckMediaType(struct strmbase_renderer *iface, const AM_MEDIA_TYPE *mt)
+static HRESULT null_renderer_query_accept(struct strmbase_renderer *iface, const AM_MEDIA_TYPE *mt)
 {
-    TRACE("Not a stub!\n");
     return S_OK;
 }
 
@@ -62,29 +50,14 @@ static void null_renderer_destroy(struct strmbase_renderer *iface)
 {
     struct null_renderer *filter = impl_from_strmbase_renderer(iface);
 
-    CloseHandle(filter->run_event);
     strmbase_renderer_cleanup(&filter->renderer);
     free(filter);
 }
 
-static void null_renderer_start_stream(struct strmbase_renderer *iface)
-{
-    struct null_renderer *filter = impl_from_strmbase_renderer(iface);
-    SetEvent(filter->run_event);
-}
-
-static void null_renderer_stop_stream(struct strmbase_renderer *iface)
-{
-    struct null_renderer *filter = impl_from_strmbase_renderer(iface);
-    ResetEvent(filter->run_event);
-}
-
 static const struct strmbase_renderer_ops renderer_ops =
 {
-    .pfnCheckMediaType = NullRenderer_CheckMediaType,
-    .pfnDoRenderSample = NullRenderer_DoRenderSample,
-    .renderer_start_stream = null_renderer_start_stream,
-    .renderer_stop_stream = null_renderer_stop_stream,
+    .renderer_query_accept = null_renderer_query_accept,
+    .renderer_render = null_renderer_render,
     .renderer_destroy = null_renderer_destroy,
 };
 
@@ -96,7 +69,6 @@ HRESULT null_renderer_create(IUnknown *outer, IUnknown **out)
         return E_OUTOFMEMORY;
 
     strmbase_renderer_init(&object->renderer, outer, &CLSID_NullRenderer, L"In", &renderer_ops);
-    object->run_event = CreateEventW(NULL, TRUE, FALSE, NULL);
 
     TRACE("Created null renderer %p.\n", object);
     *out = &object->renderer.filter.IUnknown_inner;

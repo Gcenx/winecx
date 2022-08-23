@@ -19,10 +19,14 @@
  */
 
 #include <stdarg.h>
+#include <stdlib.h>
+
+#include <ntstatus.h>
+#define WIN32_NO_STATUS
 #include <windef.h>
 #include <winbase.h>
-#include <stdlib.h>
 #include <winerror.h>
+#include <winternl.h>
 
 #include "wine/test.h"
 
@@ -44,7 +48,7 @@ static DWORD WINAPI test_WaitOnAddress_func(void *arg)
             ret = pWaitOnAddress(&address, &compare, sizeof(compare), INFINITE);
             ok(ret, "wait failed\n");
             ok(GetLastError() == 0xdeadbeef || broken(GetLastError() == ERROR_SUCCESS) /* Win 8 */,
-                    "got error %d\n", GetLastError());
+                    "got error %ld\n", GetLastError());
         }
     } while (InterlockedCompareExchange(&address, compare - 1, compare) != compare);
 
@@ -77,17 +81,17 @@ static void test_WaitOnAddress(void)
     SetLastError(0xdeadbeef);
     pWakeByAddressSingle(NULL);
     gle = GetLastError();
-    ok(gle == 0xdeadbeef, "got %d\n", gle);
+    ok(gle == 0xdeadbeef, "got %ld\n", gle);
 
     SetLastError(0xdeadbeef);
     pWakeByAddressAll(NULL);
     gle = GetLastError();
-    ok(gle == 0xdeadbeef, "got %d\n", gle);
+    ok(gle == 0xdeadbeef, "got %ld\n", gle);
 
     SetLastError(0xdeadbeef);
     ret = pWaitOnAddress(NULL, NULL, 0, 0);
     gle = GetLastError();
-    ok(gle == ERROR_INVALID_PARAMETER, "got %d\n", gle);
+    ok(gle == ERROR_INVALID_PARAMETER, "got %ld\n", gle);
     ok(!ret, "got %d\n", ret);
 
     address = 0;
@@ -95,7 +99,7 @@ static void test_WaitOnAddress(void)
     SetLastError(0xdeadbeef);
     ret = pWaitOnAddress(&address, &compare, 5, 0);
     gle = GetLastError();
-    ok(gle == ERROR_INVALID_PARAMETER, "got %d\n", gle);
+    ok(gle == ERROR_INVALID_PARAMETER, "got %ld\n", gle);
     ok(!ret, "got %d\n", ret);
     ok(address == 0, "got %s\n", wine_dbgstr_longlong(address));
     ok(compare == 0, "got %s\n", wine_dbgstr_longlong(compare));
@@ -105,13 +109,13 @@ static void test_WaitOnAddress(void)
     SetLastError(0xdeadbeef);
     pWakeByAddressSingle(&address);
     gle = GetLastError();
-    ok(gle == 0xdeadbeef, "got %d\n", gle);
+    ok(gle == 0xdeadbeef, "got %ld\n", gle);
     ok(address == 0, "got %s\n", wine_dbgstr_longlong(address));
 
     SetLastError(0xdeadbeef);
     pWakeByAddressAll(&address);
     gle = GetLastError();
-    ok(gle == 0xdeadbeef, "got %d\n", gle);
+    ok(gle == 0xdeadbeef, "got %ld\n", gle);
     ok(address == 0, "got %s\n", wine_dbgstr_longlong(address));
 
     /* different address size */
@@ -120,13 +124,13 @@ static void test_WaitOnAddress(void)
     SetLastError(0xdeadbeef);
     ret = pWaitOnAddress(&address, &compare, 2, 0);
     gle = GetLastError();
-    ok(gle == 0xdeadbeef || broken(gle == ERROR_SUCCESS) /* Win 8 */, "got %d\n", gle);
+    ok(gle == 0xdeadbeef || broken(gle == ERROR_SUCCESS) /* Win 8 */, "got %ld\n", gle);
     ok(ret, "got %d\n", ret);
 
     SetLastError(0xdeadbeef);
     ret = pWaitOnAddress(&address, &compare, 1, 0);
     gle = GetLastError();
-    ok(gle == ERROR_TIMEOUT, "got %d\n", gle);
+    ok(gle == ERROR_TIMEOUT, "got %ld\n", gle);
     ok(!ret, "got %d\n", ret);
 
     /* simple wait case */
@@ -135,7 +139,7 @@ static void test_WaitOnAddress(void)
     SetLastError(0xdeadbeef);
     ret = pWaitOnAddress(&address, &compare, 4, 0);
     gle = GetLastError();
-    ok(gle == 0xdeadbeef || broken(gle == ERROR_SUCCESS) /* Win 8 */, "got %d\n", gle);
+    ok(gle == 0xdeadbeef || broken(gle == ERROR_SUCCESS) /* Win 8 */, "got %ld\n", gle);
     ok(ret, "got %d\n", ret);
 
     /* WakeByAddressAll */
@@ -147,7 +151,7 @@ static void test_WaitOnAddress(void)
     address = ARRAY_SIZE(threads);
     pWakeByAddressAll(&address);
     val = WaitForMultipleObjects(ARRAY_SIZE(threads), threads, TRUE, 5000);
-    ok(val == WAIT_OBJECT_0, "got %d\n", val);
+    ok(val == WAIT_OBJECT_0, "got %ld\n", val);
     for (i = 0; i < ARRAY_SIZE(threads); i++)
         CloseHandle(threads[i]);
     ok(!address, "got unexpected value %s\n", wine_dbgstr_longlong(address));
@@ -164,7 +168,7 @@ static void test_WaitOnAddress(void)
     {
         pWakeByAddressSingle(&address);
         val = WaitForMultipleObjects(nthreads, threads, FALSE, 2000);
-        ok(val < WAIT_OBJECT_0 + nthreads, "got %u\n", val);
+        ok(val < WAIT_OBJECT_0 + nthreads, "got %lu\n", val);
         CloseHandle(threads[val]);
         memmove(&threads[val], &threads[val+1], (nthreads - val - 1) * sizeof(threads[0]));
         nthreads--;
@@ -176,7 +180,9 @@ static void test_Sleep(void)
 {
     LARGE_INTEGER frequency;
     LARGE_INTEGER t1, t2;
-    double elapsed_time;
+    double elapsed_time, min, max;
+    ULONG dummy, r1, r2;
+    NTSTATUS status;
     BOOL ret;
     int i;
 
@@ -186,15 +192,30 @@ static void test_Sleep(void)
     ret = QueryPerformanceCounter(&t1);
     ok(ret, "QueryPerformanceCounter failed\n");
 
-    for (i = 0; i < 100; i++) {
+    /* Get the timer resolution before... */
+    r1 = 156250;
+    status = NtQueryTimerResolution(&dummy, &dummy, &r1);
+    ok(status == STATUS_SUCCESS, "NtQueryTimerResolution() failed (%lx)\n", status);
+
+    for (i = 0; i < 50; i++) {
         Sleep(1);
     }
 
     ret = QueryPerformanceCounter(&t2);
     ok(ret, "QueryPerformanceCounter failed\n");
 
+    /* ...and after in case some other process changes it during this test */
+    r2 = 156250;
+    status = NtQueryTimerResolution(&dummy, &dummy, &r2);
+    ok(status == STATUS_SUCCESS, "NtQueryTimerResolution() failed (%lx)\n", status);
+
     elapsed_time = (t2.QuadPart - t1.QuadPart) / (double)frequency.QuadPart;
-    todo_wine ok(elapsed_time >= 1.5 && elapsed_time <= 4.0, "got %f\n", elapsed_time);
+    min = 50.0 * (r1 < r2 ? r1 : r2) / 10000000.0;
+    max = 50.0 * (r1 < r2 ? r2 : r1) / 10000000.0;
+
+    /* Add an extra 1s to account for potential scheduling delays */
+    ok(0.9 * min <= elapsed_time && elapsed_time <= 1.0 + max,
+       "got %f, expected between %f and %f\n", elapsed_time, min, max);
 }
 
 START_TEST(sync)

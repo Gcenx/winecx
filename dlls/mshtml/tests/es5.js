@@ -17,6 +17,14 @@
  */
 
 var JS_E_PROP_DESC_MISMATCH = 0x800a01bd;
+var JS_E_NUMBER_EXPECTED = 0x800a1389;
+var JS_E_FUNCTION_EXPECTED = 0x800a138a;
+var JS_E_DATE_EXPECTED = 0x800a138e;
+var JS_E_OBJECT_EXPECTED = 0x800a138f;
+var JS_E_BOOLEAN_EXPECTED = 0x800a1392;
+var JS_E_VBARRAY_EXPECTED = 0x800a1395;
+var JS_E_ENUMERATOR_EXPECTED = 0x800a1397;
+var JS_E_REGEXP_EXPECTED = 0x800a1398;
 var JS_E_INVALID_WRITABLE_PROP_DESC = 0x800a13ac;
 var JS_E_NONCONFIGURABLE_REDEFINED = 0x800a13d6;
 var JS_E_NONWRITABLE_MODIFIED = 0x800a13d7;
@@ -290,9 +298,25 @@ sync_test("getOwnPropertyDescriptor", function() {
     test_own_data_prop_desc(function(){}, "prototype", true, false, false);
     test_own_data_prop_desc(Function, "prototype", false, false, false);
     test_own_data_prop_desc(String.prototype, "constructor", true, false, true);
+
+    try {
+        Object.getOwnPropertyDescriptor(null, "prototype");
+        ok(false, "expected exception with null");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_OBJECT_EXPECTED, "with null context threw " + n);
+    }
+    try {
+        Object.getOwnPropertyDescriptor(external.nullDisp, "prototype");
+        ok(false, "expected exception calling getOwnPropertyDescriptor(nullDisp)");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_OBJECT_EXPECTED, "getOwnPropertyDescriptor(nullDisp) threw " + n);
+    }
 });
 
 sync_test("defineProperty", function() {
+    var nullDisp = external.nullDisp;
     function test_accessor_prop_desc(obj, prop, orig_desc) {
         var expected_enumerable = "enumerable" in orig_desc && !!orig_desc.enumerable;
         var expected_configurable = "configurable" in orig_desc && !!orig_desc.configurable;
@@ -342,7 +366,8 @@ sync_test("defineProperty", function() {
         },
         set: function(v) {
             getsetprop_value = v;
-        }
+        },
+        configurable: true
     };
     Object.defineProperty(obj, "getsetprop", desc);
     test_accessor_prop_desc(obj, "getsetprop", desc);
@@ -352,6 +377,9 @@ sync_test("defineProperty", function() {
     ok(getsetprop_value === 2, "getsetprop_value = " + getsetprop_value);
     test_accessor_prop_desc(obj, "getsetprop", desc);
     ok(obj.getsetprop === 2, "getsetprop = " + obj.getsetprop);
+
+    ok((delete obj.getsetprop) === true, "delete getsetprop returned false");
+    ok(!("getsetprop" in obj), "getsetprop still in obj after delete");
 
     Object.defineProperty(obj, "notConf", {writable: true, enumerable: true, configurable: false, value: 1});
     test_own_data_prop_desc(obj, "notConf", true, true, false);
@@ -514,6 +542,16 @@ sync_test("defineProperty", function() {
     obj.no_setter = false;
     ok(obj.no_setter === true, "no_setter = " + obj.no_setter);
 
+    ok((delete obj.no_setter) === true, "delete no_setter returned false");
+    ok(!("no_setter" in obj), "no_setter still in obj after delete");
+
+    Object.defineProperty(child.prototype, "no_setter", desc);
+    test_accessor_prop_desc(child.prototype, "no_setter", desc);
+    ok(!obj.hasOwnProperty("no_setter"), "no_setter is a property of obj");
+    obj.no_setter = false;
+    ok(obj.no_setter === true, "no_setter = " + obj.no_setter);
+    ok(!obj.hasOwnProperty("no_setter"), "no_setter is a property of obj");
+
     /* call prop with getter */
     desc = {
         get: function() {
@@ -526,6 +564,16 @@ sync_test("defineProperty", function() {
     Object.defineProperty(obj, "funcprop", desc);
     test_accessor_prop_desc(obj, "funcprop", desc);
     ok(obj.funcprop(100) === 10, "obj.funcprop() = " + obj.funcprop(100));
+
+    expect_exception(function() {
+        Object.defineProperty(null, "funcprop", desc);
+    }, JS_E_OBJECT_EXPECTED);
+    expect_exception(function() {
+        Object.defineProperty(nullDisp, "funcprop", desc);
+    }, JS_E_OBJECT_EXPECTED);
+    expect_exception(function() {
+        Object.defineProperty(obj, "funcprop", nullDisp);
+    }, JS_E_OBJECT_EXPECTED);
 });
 
 sync_test("defineProperties", function() {
@@ -629,6 +677,41 @@ sync_test("property_definitions", function() {
     ok(obj.prop === 6, "obj.prop = " + obj.prop);
     test_accessor_prop_desc(obj, "0", true, false);
     ok(obj[0] === 7, "obj.prop = " + obj[0]);
+});
+
+sync_test("string_idx", function() {
+    var i, s = "foobar";
+    ok(s[0] === "f", "s[0] = " + s[0]);
+    ok(s[5] === "r", "s[5] = " + s[5]);
+    ok(s[6] === undefined, "s[6] = " + s[6]);
+    ok((delete s[0]) === false, "delete s[0] returned true");
+    ok((delete s[6]) === true, "delete s[6] returned false");
+    s[6] = "X";
+    ok(s[6] === undefined, "s[6] = " + s[6]);
+
+    s = new String(s);
+    test_own_data_prop_desc(s, "0", false, true, false);
+    test_own_data_prop_desc(s, "1", false, true, false);
+    ok(!s.hasOwnProperty("6"), "'6' is a property");
+
+    s[7] = "X";
+    ok(s[7] === "X", "s[7] = " + s[7]);
+    // s.hasOwnProperty("7") returns false on Win8 likely due to a bug in its js engine
+
+    Object.defineProperty(s, "8", {writable: false, enumerable: true, configurable: true, value: "Y"});
+    ok(s[8] === "Y", "s[8] = " + s[8]);
+    ok(s.hasOwnProperty("8"), "'8' not a property");
+
+    String.prototype[9] = "Z";
+    ok(s[9] === "Z", "s[9] = " + s[9]);
+    delete String.prototype[9];
+
+    i = 0;
+    for(var idx in s) {
+        ok(s[idx] === "foobar XY"[idx], "enum s[" + idx + "] = " + s[idx]);
+        i++;
+    }
+    ok(i === 8, "enum did " + i + " iterations");
 });
 
 sync_test("string_trim", function() {
@@ -772,6 +855,15 @@ sync_test("getPrototypeOf", function() {
     obj = Object.create(null);
     ok(!("toString" in obj), "toString is in obj");
     ok(Object.getPrototypeOf(obj) === null, "Object.getPrototypeOf(obj) = " + Object.getPrototypeOf(obj));
+
+    ok(Object.getPrototypeOf(external) === null, "Object.getPrototypeOf(non-JS obj) = " + Object.getPrototypeOf(external));
+    try {
+        Object.getOwnPropertyDescriptor(external.nullDisp);
+        ok(false, "expected exception calling getOwnPropertyDescriptor(nullDisp)");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_OBJECT_EXPECTED, "getOwnPropertyDescriptor(nullDisp) threw " + n);
+    }
 });
 
 sync_test("toString", function() {
@@ -784,13 +876,10 @@ sync_test("toString", function() {
     todo_wine.
     ok(tmp === "[object Window]", "toString.call(null) = " + tmp);
     tmp = Object.prototype.toString.call(null);
-    todo_wine.
     ok(tmp === "[object Null]", "toString.call(null) = " + tmp);
     tmp = Object.prototype.toString.call(undefined);
-    todo_wine.
     ok(tmp === "[object Undefined]", "toString.call(undefined) = " + tmp);
     tmp = Object.prototype.toString.call();
-    todo_wine.
     ok(tmp === "[object Undefined]", "toString.call() = " + tmp);
 
     obj = Object.create(null);
@@ -900,6 +989,14 @@ sync_test("keys", function() {
     ok(keys === "", "keys([]) = " + keys);
 
     ok(Object.keys.length === 1, "Object.keys.length = " + Object.keys.length);
+
+    try {
+        Object.keys(external.nullDisp);
+        ok(false, "expected exception calling keys(nullDisp)");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_OBJECT_EXPECTED, "keys(nullDisp) threw " + n);
+    }
 });
 
 sync_test("getOwnPropertyNames", function() {
@@ -924,6 +1021,14 @@ sync_test("getOwnPropertyNames", function() {
     ok(names === "length", "names = " + names);
 
     ok(Object.getOwnPropertyNames.length === 1, "Object.getOwnPropertyNames.length = " + Object.getOwnPropertyNames.length);
+
+    try {
+        Object.getOwnPropertyNames(external.nullDisp);
+        ok(false, "expected exception calling getOwnPropertyNames(nullDisp)");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_OBJECT_EXPECTED, "getOwnPropertyNames(nullDisp) threw " + n);
+    }
 });
 
 sync_test("reduce", function() {
@@ -999,6 +1104,12 @@ sync_test("preventExtensions", function() {
     ok(o.prop === 1, "o.prop = " + o.prop);
     r = Object.isExtensible(o);
     ok(r === false, "isExtensible(o) returned " + r);
+    try {
+        Object.defineProperty(o, "prop", { value: true });
+        ok(false, "expected exception");
+    }catch(e) {
+        ok(e.name === "TypeError", "got " + e.name + " exception");
+    }
 
     r = Object.isExtensible({});
     ok(r === true, "isExtensible(o) returned " + r);
@@ -1029,6 +1140,14 @@ sync_test("preventExtensions", function() {
 
     ok(Object.preventExtensions.length === 1, "Object.preventExtensions.length = " + Object.preventExtensions.length);
     ok(Object.isExtensible.length === 1, "Object.isExtensible.length = " + Object.isExtensible.length);
+
+    try {
+        Object.preventExtensions(external.nullDisp);
+        ok(false, "expected exception calling preventExtensions(nullDisp)");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_OBJECT_EXPECTED, "preventExtensions(nullDisp) threw " + n);
+    }
 });
 
 sync_test("freeze", function() {
@@ -1081,6 +1200,14 @@ sync_test("freeze", function() {
     }
     ok(o[0] === 1, "o[0] = " + o[0]);
     ok(o.length === 1, "o.length = " + o.length);
+
+    try {
+        Object.freeze(external.nullDisp);
+        ok(false, "expected exception freeze(nullDisp)");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_OBJECT_EXPECTED, "freeze(nullDisp) threw " + n);
+    }
 });
 
 sync_test("seal", function() {
@@ -1133,9 +1260,18 @@ sync_test("seal", function() {
     }
     ok(o[0] === 1, "o[0] = " + o[0]);
     ok(o.length === 1, "o.length = " + o.length);
+
+    try {
+        Object.seal(external.nullDisp);
+        ok(false, "expected exception calling seal(nullDisp)");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_OBJECT_EXPECTED, "seal(nullDisp) threw " + n);
+    }
 });
 
 sync_test("isFrozen", function() {
+    var nullDisp = external.nullDisp;
     ok(Object.isFrozen.length === 1, "Object.isFrozen.length = " + Object.isFrozen.length);
     ok(Object.isSealed.length === 1, "Object.isSealed.length = " + Object.isSealed.length);
 
@@ -1201,9 +1337,451 @@ sync_test("isFrozen", function() {
     ok(Object.isFrozen(o) === true, "o is not frozen");
     ok(Object.isSealed(o) === true, "o is not sealed");
     ok(Object.isExtensible(o) === false, "o is extensible");
+
+    try {
+        Object.isFrozen(nullDisp);
+        ok(false, "expected exception calling isFrozen(nullDisp)");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_OBJECT_EXPECTED, "isFrozen(nullDisp) threw " + n);
+    }
+    try {
+        Object.isSealed(nullDisp);
+        ok(false, "expected exception calling isSealed(nullDisp)");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_OBJECT_EXPECTED, "isSealed(nullDisp) threw " + n);
+    }
+    try {
+        Object.isExtensible(nullDisp);
+        ok(false, "expected exception calling isExtensible(nullDisp)");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_OBJECT_EXPECTED, "isExtensible(nullDisp) threw " + n);
+    }
+});
+
+sync_test("builtin_context", function() {
+    var nullDisp = external.nullDisp;
+    var tests = [
+        [ "Array.map",              JS_E_OBJECT_EXPECTED,       function(ctx) { Array.prototype.map.call(ctx, function(a, b) {}); } ],
+        [ "Array.sort",             JS_E_OBJECT_EXPECTED,       function(ctx) { Array.prototype.sort.call(ctx); } ],
+        [ "Boolean.toString",       JS_E_BOOLEAN_EXPECTED,      function(ctx) { Boolean.prototype.toString.call(ctx); } ],
+        [ "Date.getTime",           JS_E_DATE_EXPECTED,         function(ctx) { Date.prototype.getTime.call(ctx); } ],
+        [ "Date.toGMTString",       JS_E_DATE_EXPECTED,         function(ctx) { Date.prototype.toGMTString.call(ctx); } ],
+        [ "Enumerator.item",        JS_E_ENUMERATOR_EXPECTED,   function(ctx) { Enumerator.prototype.item.call(ctx); } ],
+        [ "Error.toString",         JS_E_OBJECT_EXPECTED,       function(ctx) { Error.prototype.toString.call(ctx); } ],
+        [ "Function.call",          JS_E_FUNCTION_EXPECTED,     function(ctx) { Function.prototype.call.call(ctx, function() {}); } ],
+        [ "Map.clear",              JS_E_OBJECT_EXPECTED,       function(ctx) { Map.prototype.clear.call(ctx); } ],
+        [ "Number.toFixed",         JS_E_NUMBER_EXPECTED,       function(ctx) { Number.prototype.toFixed.call(ctx); } ],
+        [ "Object.isPrototypeOf",   JS_E_OBJECT_EXPECTED,       function(ctx) { Object.prototype.isPrototypeOf.call(ctx, Object); } ],
+        [ "RegExp.exec",            JS_E_REGEXP_EXPECTED,       function(ctx) { RegExp.prototype.exec.call(ctx, "foobar"); } ],
+        [ "Set.add",                JS_E_OBJECT_EXPECTED,       function(ctx) { Set.prototype.add.call(ctx, 5); } ],
+        [ "String.search",          JS_E_OBJECT_EXPECTED,       function(ctx) { String.prototype.search.call(ctx, /foobar/g); } ],
+        [ "String.trim",            JS_E_OBJECT_EXPECTED,       function(ctx) { String.prototype.trim.call(ctx); } ],
+        [ "VBArray.dimensions",     JS_E_VBARRAY_EXPECTED,      function(ctx) { VBArray.prototype.dimensions.call(ctx); } ]
+    ];
+
+    /* make global object suitable for some calls */
+    window[0] = "foo";
+    window[1] = "bar";
+    window.length = 2;
+
+    for(var i = 0; i < tests.length; i++) {
+        try {
+            tests[i][2](null);
+            ok(false, "expected exception calling " + tests[i][0] + " with null context");
+        }catch(ex) {
+            var n = ex.number >>> 0; /* make it unsigned like HRESULT */
+            ok(n === tests[i][1], tests[i][0] + " with null context exception code = " + n);
+        }
+        try {
+            tests[i][2](undefined);
+            ok(false, "expected exception calling " + tests[i][0] + " with undefined context");
+        }catch(ex) {
+            var n = ex.number >>> 0;
+            ok(n === tests[i][1], tests[i][0] + " with undefined context exception code = " + n);
+        }
+        try {
+            tests[i][2](nullDisp);
+            ok(false, "expected exception calling " + tests[i][0] + " with nullDisp context");
+        }catch(ex) {
+            var n = ex.number >>> 0;
+            ok(n === tests[i][1], tests[i][0] + " with nullDisp context exception code = " + n);
+        }
+    }
+
+    var obj = (function() { return this; }).call(null);
+    ok(obj === window, "obj = " + obj);
+    var obj = (function() { return this; }).call(undefined);
+    ok(obj === window, "obj = " + obj);
+    obj = (function() { return this; }).call(42);
+    ok(obj.valueOf() === 42, "obj = " + obj);
 });
 
 sync_test("head_setter", function() {
     document.head = "";
     ok(typeof(document.head) === "object", "typeof(document.head) = " + typeof(document.head));
+});
+
+
+sync_test("declaration_let", function() {
+    ok(typeof(func) === "undefined", "typeof(func)  = " + typeof(func));
+    with(new Object()) {
+        var x = false && function func() {};
+    }
+    ok(typeof(func) === "undefined", "typeof(func)  = " + typeof(func));
+
+    function expect_exception(func, todo) {
+        try {
+            func();
+        }catch(e) {
+            return;
+        }
+        if (typeof todo === 'undefined' || !todo)
+            ok(false, "expected exception");
+        else
+            todo_wine.ok(false, "expected exception");
+    }
+
+    function call_func(f, expected_a)
+    {
+        f(2, expected_a);
+    }
+
+    ok(a === undefined, "a is not undefined");
+    var a = 3;
+
+    {
+        let a = 2;
+        let b
+
+        ok(typeof b === 'undefined', "b is defined");
+        ok(b === undefined, "b !== undefined");
+
+        ok(a == 2, "a != 2");
+
+        a = 4;
+        ok(a == 4, "a != 4");
+
+        eval('ok(a == 4, "eval: a != 4"); b = a; a = 5;')
+        ok(b == 4, "b != 4");
+        ok(a == 5, "a != 5");
+
+        function func1()
+        {
+            ok(typeof b === 'undefined', "func1: b is defined");
+            ok(b === undefined, "func1: should produce exception");
+            let b = 1;
+        }
+        expect_exception(func1, true);
+
+        function func2()
+        {
+            let b = 1;
+            ok(b == 1, "func2: b != 1");
+        }
+        func2();
+
+        var w = 8;
+        with({w: 9})
+        {
+            {
+                let c = 5
+
+                function func3(b, expected)
+                {
+                    var b = 2
+
+                    ok(typeof d === 'undefined', "d is defined");
+
+                    ok(c == expected, "func3: c != expected");
+                    ok(w == 9, "w != 9")
+                    ok(b == 2, "func3: b != 2");
+                    b = 3;
+                    ok(b == 3, "func3: b != 3");
+                    ok(a == expected, "func3: a != expected");
+                    a = 6;
+                    c = 6;
+                }
+
+                let f3 = func3
+                let f4 = function()
+                    {
+                        ok(a == 6, "f4: a != 6");
+                    }
+
+                ok(a == 5, "tmp 2 a != 5");
+                ok(c == 5, "c != 5");
+                func3(1, 5)
+                ok(c == 6, "c != 6");
+                call_func(func3, 6);
+                f3(1, 6)
+                ok(a == 6, "a != 6");
+                ok(b == 4, "b != 4");
+                ok(c == 6, "c != 6");
+
+                call_func(f4);
+                f4();
+            }
+        }
+        {
+            let c = 4;
+            let d = 1;
+
+            func3(1, 6);
+        }
+    }
+
+    ok(a == 3, "a != 3");
+
+    var except = false
+
+    try
+    {
+        eval('if (true) let a = 3');
+    }
+    catch (e)
+    {
+        except = true;
+    }
+    ok(except, "with({w:9}) let a = 3: expected exception.");
+
+    let for_count = 0;
+    for (let for_i1 = 0, for_i2 = 1; for_i1 < 3; ++for_i1, ++for_i2, ++for_count)
+    {
+        let for_i2 = 10;
+
+        ok(for_i2 == 10, "for_i2 != 10");
+    }
+
+    ok(typeof for_i1 == 'undefined', "for_i1 is defined");
+    ok(typeof for_i2 == 'undefined', "for_i2 is defined");
+    ok(for_count == 3, "for_count != 3");
+});
+
+sync_test("let scope instances", function() {
+    var a = [], i;
+    for(i = 0; i < 3; i++) {
+        a[i] = function() { return v; };
+        let v = i;
+    }
+    for(i = 0; i < 3; i++)
+        ok(a[i]() == i, "a[" + i + "]() = " + a[i]());
+
+    ok(typeof f == 'undefined', "f is defined");
+
+    for(i = 0; i < 3; i++) {
+        function f() { return v; }
+        a[i] = f;
+        let v = i;
+    }
+    for(i = 0; i < 3; i++)
+        ok(a[i]() == i, "a[" + i + "]() = " + a[i]());
+
+    ok(f() == 2, "f() = " + f());
+});
+
+sync_test("functions scope", function() {
+    function f(){ return 1; }
+    function f(){ return 2; }
+
+    var f0 = f, f1, f2, f3, i, o, a = [];
+    ok(f0() === 2, "f0() = " + f0());
+
+    {
+        f1 = f;
+        function f() { return 3; }
+        ok(f1 === f, "f1 != f");
+        ok(f0 != f1, "f0 == f1");
+    }
+    ok(f === f1, "f != f1");
+
+    for(i = 0; i < 3; i++) {
+        a[i] = f;
+        function f() {}
+        ok(f === a[i], "f != a[i]");
+    }
+    ok(a[0] != a[1], "a[0] == a[1]");
+    ok(a[1] != a[2], "a[1] == a[2]");
+    ok(f === a[2], "f != a[2]");
+
+    {
+        f2 = f;
+        ok(f() === 4, "f() = " + f());
+        function f() { return 4; }
+
+        {
+            f3 = f;
+            ok(f() === 5, "f() = " + f());
+            function f() { return 5;}
+        }
+        ok(f() === 4, "f() = " + f());
+        ok(f === f2, "f != f2");
+    }
+    ok(f === f3, "f != f3");
+
+    with(o = {f: 1}) {
+        ok(f === 1, "f != 1");
+        {
+            ok(f() === 6, "f() = " + f());
+            function f() { return 6; }
+        }
+        ok(f === 1, "f != 1");
+        delete o.f;
+        ok(f() === 6, "f() = " + f());
+    }
+
+    if(false) {
+        function f() { throw "unexpected call"; }
+    }
+    ok(f() === 6, "f() = " + f());
+
+    /* 'with' has no effect for function defined in a single statement context. */
+    let w = 8;
+    with({w:10, value:11})
+        function with_function()
+        {
+            var except
+
+            ok(w == 8, "w != 8");
+            except = false;
+            try
+            {
+                ok(value === undefined, "value is defined");
+            }
+            catch(e)
+            {
+                except = true;
+            }
+            ok(except, "with_function: expected exception");
+
+            let ret = w;
+            w = 9;
+            return ret;
+        }
+    val = with_function();
+    ok(val == 8, "val != 8");
+    ok(w == 9, "w != 9");
+
+    var func, func_outer, ret;
+    var o = new Object();
+
+    func_outer = function e()
+    {
+        function func_inner()
+        {
+            ok(typeof e == "function", "typeof e == " + typeof e);
+            ret = e
+        }
+        func = func_inner
+    }
+    func_outer();
+    func();
+    ok(ret === func_outer, "ret != func_outer");
+
+    func_outer = function f(f)
+    {
+        function func_inner()
+        {
+            ok(typeof f == "object", "typeof f == " + typeof f);
+            ret = f
+        }
+        func = func_inner
+    }
+    func_outer(o);
+    func();
+    ok(ret === o, "ret != o");
+
+    func_outer = function g() {
+        var g2 = g;
+        g = 10;
+        ok(g !== 10, "g was redefined to 10");
+        g = function() {};
+        ok(g === g2, "g !== g2: " + g);
+    }
+    func_outer();
+
+    function h() {
+        h = 1;
+        ok(h === 1, "h was not redefined: " + h);
+    }
+    h();
+    ok(h === 1, "h = " + h);
+
+    function h2() { return function() { h2 = 2; }; }
+    h2()();
+    ok(h2 === 2, "h2 = " + h2);
+
+    (function e() {
+        var f = e;
+        ok(typeof(f) === "function", "f = " + f);
+        (function () { e = 1; })();
+        e = 2;
+        ok(f === e, "f != e");
+    })();
+});
+
+sync_test("console", function() {
+    var except
+
+    window.console.log('1', '2');
+    console.info('1', '2', '3');
+    console.info();
+    console.log();
+    console.trace();
+    console.warn();
+    console.debug();
+    console.error();
+
+    console.assert(false, '1');
+    console.assert(true, '1');
+    console.assert('1');
+
+    console.clear();
+    console.count('1');
+    console.count(1);
+
+
+    except = false;
+    try
+    {
+        console.countReset('1');
+    }
+    catch(e)
+    {
+        except = true;
+    }
+    ok(except, "console.countReset: expected exception");
+    console.dir(document);
+    console.dir();
+    console.dirxml(document);
+    console.group('1');
+    console.groupCollapsed('1');
+    console.groupEnd();
+
+    except = false;
+    try
+    {
+        console.table(['1', '2']);
+    }
+    catch(e)
+    {
+        except = true;
+    }
+    ok(except, "console.table: expected exception");
+
+    console.time('1');
+    console.timeEnd('1');
+
+    except = false;
+    try
+    {
+        console.timeLog('1');
+    }
+    catch(e)
+    {
+        except = true;
+    }
+    ok(except, "console.timeLog: expected exception");
 });

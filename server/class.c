@@ -20,7 +20,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -30,7 +29,6 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 
-#define WINE_LIST_HOSTADDRSPACE
 #include "wine/list.h"
 
 #include "request.h"

@@ -247,7 +247,7 @@ void _dbg_ILSimpleGetText (LPCITEMIDLIST pidl, LPSTR szOut, UINT uOutSize)
 	else if (( riid = _dbg_ILGetGUIDPointer(pidl) ))
 	{
 	  if (szOut)
-            sprintf( szOut, "{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
+            sprintf( szOut, "{%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
                  riid->Data1, riid->Data2, riid->Data3,
                  riid->Data4[0], riid->Data4[1], riid->Data4[2], riid->Data4[3],
                  riid->Data4[4], riid->Data4[5], riid->Data4[6], riid->Data4[7] );
@@ -287,7 +287,7 @@ void pdump (LPCITEMIDLIST pidl)
               if ( pData && (PT_FOLDER == type || PT_VALUE == type) )
                 dwAttrib = pData->u.file.uFileAttribs;
 
-              MESSAGE ("[%p] size=%04u type=%x attr=0x%08x name=%s (%s,%s)\n",
+              MESSAGE ("[%p] size=%04u type=%lx attr=0x%08lx name=%s (%s,%s)\n",
                        pidltemp, pidltemp->mkid.cb, type, dwAttrib,
                            debugstr_a(szName), debugstr_w(szLongName), debugstr_w(szShortName));
           }
@@ -304,7 +304,7 @@ void pdump (LPCITEMIDLIST pidl)
               if ( pData && (PT_FOLDER == type || PT_VALUE == type) )
                 dwAttrib = pData->u.file.uFileAttribs;
 
-              MESSAGE ("[%p] size=%04u type=%x attr=0x%08x name=%s (%s,%s)\n",
+              MESSAGE ("[%p] size=%04u type=%lx attr=0x%08lx name=%s (%s,%s)\n",
                        pidltemp, pidltemp->mkid.cb, type, dwAttrib,
                            debugstr_a(szName), debugstr_a(szLongName), debugstr_a(szShortName));
           }
@@ -376,7 +376,7 @@ BOOL pcheck( LPCITEMIDLIST pidl )
         case PT_SHARE:
             break;
         default:
-            ERR("unknown IDLIST %p [%p] size=%u type=%x\n",
+            ERR("unknown IDLIST %p [%p] size=%u type=%lx\n",
                 pidl, pidltemp, pidltemp->mkid.cb,type );
             dump_pidl_hex( pidltemp );
             return FALSE;

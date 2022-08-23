@@ -16,6 +16,7 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+
 #include <assert.h>
 #include <stdarg.h>
 
@@ -28,7 +29,6 @@
 #include "winternl.h"
 #include "shlwapi.h"
 #include "sspi.h"
-#include "secur32_priv.h"
 #include "secext.h"
 #include "ntsecapi.h"
 #include "thunks.h"
@@ -36,9 +36,11 @@
 
 #include "wine/list.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
+#include "secur32_priv.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(secur32);
+
+HINSTANCE hsecur32;
 
 /**
  *  Type definitions
@@ -172,64 +174,10 @@ PSecurityFunctionTableW WINAPI InitSecurityInterfaceW(void)
     return &securityFunctionTableW;
 }
 
-static PWSTR SECUR32_strdupW(PCWSTR str)
+static WCHAR *strdupW( const WCHAR *str )
 {
-    PWSTR ret;
-
-    if (str)
-    {
-        ret = heap_alloc((lstrlenW(str) + 1) * sizeof(WCHAR));
-        if (ret)
-            lstrcpyW(ret, str);
-    }
-    else
-        ret = NULL;
-    return ret;
-}
-
-PWSTR SECUR32_AllocWideFromMultiByte(PCSTR str)
-{
-    PWSTR ret;
-
-    if (str)
-    {
-        int charsNeeded = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
-
-        if (charsNeeded)
-        {
-            ret = heap_alloc(charsNeeded * sizeof(WCHAR));
-            if (ret)
-                MultiByteToWideChar(CP_ACP, 0, str, -1, ret, charsNeeded);
-        }
-        else
-            ret = NULL;
-    }
-    else
-        ret = NULL;
-    return ret;
-}
-
-PSTR SECUR32_AllocMultiByteFromWide(PCWSTR str)
-{
-    PSTR ret;
-
-    if (str)
-    {
-        int charsNeeded = WideCharToMultiByte(CP_ACP, 0, str, -1, NULL, 0,
-         NULL, NULL);
-
-        if (charsNeeded)
-        {
-            ret = heap_alloc(charsNeeded);
-            if (ret)
-                WideCharToMultiByte(CP_ACP, 0, str, -1, ret, charsNeeded,
-                 NULL, NULL);
-        }
-        else
-            ret = NULL;
-    }
-    else
-        ret = NULL;
+    WCHAR *ret = NULL;
+    if (str && (ret = malloc( (wcslen(str) + 1) * sizeof(WCHAR) ))) wcscpy( ret, str );
     return ret;
 }
 
@@ -375,6 +323,17 @@ static void _makeFnTableW(PSecurityFunctionTableW fnTableW,
     }
 }
 
+static WCHAR *strdupAW( const char *str )
+{
+    WCHAR *ret = NULL;
+    if (str)
+    {
+        int len = MultiByteToWideChar( CP_ACP, 0, str, -1, NULL, 0 );
+        if ((ret = malloc( len * sizeof(WCHAR) ))) MultiByteToWideChar( CP_ACP, 0, str, -1, ret, len );
+    }
+    return ret;
+}
+
 static void _copyPackageInfo(PSecPkgInfoW info, const SecPkgInfoA *inInfoA,
  const SecPkgInfoW *inInfoW)
 {
@@ -386,13 +345,13 @@ static void _copyPackageInfo(PSecPkgInfoW info, const SecPkgInfoA *inInfoA,
         memcpy(info, inInfoW ? inInfoW : (const SecPkgInfoW *)inInfoA, sizeof(*info));
         if (inInfoW)
         {
-            info->Name = SECUR32_strdupW(inInfoW->Name);
-            info->Comment = SECUR32_strdupW(inInfoW->Comment);
+            info->Name = strdupW(inInfoW->Name);
+            info->Comment = strdupW(inInfoW->Comment);
         }
         else
         {
-            info->Name = SECUR32_AllocWideFromMultiByte(inInfoA->Name);
-            info->Comment = SECUR32_AllocWideFromMultiByte(inInfoA->Comment);
+            info->Name = strdupAW(inInfoA->Name);
+            info->Comment = strdupAW(inInfoA->Comment);
         }
     }
 }
@@ -406,8 +365,7 @@ SecureProvider *SECUR32_addProvider(const SecurityFunctionTableA *fnTableA,
 
     if (!providerTable)
     {
-        providerTable = heap_alloc(sizeof(SecureProviderTable));
-        if (!providerTable)
+        if (!(providerTable = malloc(sizeof(*providerTable))))
         {
             LeaveCriticalSection(&cs);
             return NULL;
@@ -416,8 +374,7 @@ SecureProvider *SECUR32_addProvider(const SecurityFunctionTableA *fnTableA,
         list_init(&providerTable->table);
     }
 
-    ret = heap_alloc(sizeof(SecureProvider));
-    if (!ret)
+    if (!(ret = malloc(sizeof(*ret))))
     {
         LeaveCriticalSection(&cs);
         return NULL;
@@ -428,17 +385,17 @@ SecureProvider *SECUR32_addProvider(const SecurityFunctionTableA *fnTableA,
 
     if (fnTableA || fnTableW)
     {
-        ret->moduleName = moduleName ? SECUR32_strdupW(moduleName) : NULL;
+        ret->moduleName = moduleName ? strdupW(moduleName) : NULL;
         _makeFnTableA(&ret->fnTableA, fnTableA, fnTableW);
         _makeFnTableW(&ret->fnTableW, fnTableA, fnTableW);
         ret->loaded = !moduleName;
     }
     else
     {
-        ret->moduleName = SECUR32_strdupW(moduleName);
+        ret->moduleName = strdupW(moduleName);
         ret->loaded = FALSE;
     }
-    
+
     LeaveCriticalSection(&cs);
     return ret;
 }
@@ -455,8 +412,7 @@ void SECUR32_addPackages(SecureProvider *provider, ULONG toAdd,
 
     if (!packageTable)
     {
-        packageTable = heap_alloc(sizeof(SecurePackageTable));
-        if (!packageTable)
+        if (!(packageTable = malloc(sizeof(*packageTable))))
         {
             LeaveCriticalSection(&cs);
             return;
@@ -465,19 +421,17 @@ void SECUR32_addPackages(SecureProvider *provider, ULONG toAdd,
         packageTable->numPackages = 0;
         list_init(&packageTable->table);
     }
-        
+
     for (i = 0; i < toAdd; i++)
     {
-        SecurePackage *package = heap_alloc(sizeof(SecurePackage));
-        if (!package)
-            continue;
+        SecurePackage *package;
+
+        if (!(package = malloc(sizeof(*package)))) continue;
 
         list_add_tail(&packageTable->table, &package->entry);
 
         package->provider = provider;
-        _copyPackageInfo(&package->infoW,
-            infoA ? &infoA[i] : NULL,
-            infoW ? &infoW[i] : NULL);
+        _copyPackageInfo(&package->infoW, infoA ? &infoA[i] : NULL, infoW ? &infoW[i] : NULL);
     }
     packageTable->numPackages += toAdd;
 
@@ -546,15 +500,6 @@ static void _tryLoadProvider(PWSTR moduleName)
         WARN("failed to load %s\n", debugstr_w(moduleName));
 }
 
-static const WCHAR securityProvidersKeyW[] = {
- 'S','Y','S','T','E','M','\\','C','u','r','r','e','n','t','C','o','n','t','r',
- 'o','l','S','e','t','\\','C','o','n','t','r','o','l','\\','S','e','c','u','r',
- 'i','t','y','P','r','o','v','i','d','e','r','s','\0'
- };
-static const WCHAR securityProvidersW[] = {
- 'S','e','c','u','r','i','t','y','P','r','o','v','i','d','e','r','s',0
- };
- 
 static void SECUR32_initializeProviders(void)
 {
     HKEY key;
@@ -563,7 +508,6 @@ static void SECUR32_initializeProviders(void)
     TRACE("\n");
     /* First load built-in providers */
     SECUR32_initSchannelSP();
-    SECUR32_initNTLMSP();
     /* Load SSP/AP packages (Kerberos and others) */
     load_auth_packages();
     /* Load the Negotiate provider last so apps stumble over the working NTLM
@@ -571,15 +515,14 @@ static void SECUR32_initializeProviders(void)
      * application reported on wine-users on 2006-09-12 working. */
     SECUR32_initNegotiateSP();
     /* Now load providers from registry */
-    apiRet = RegOpenKeyExW(HKEY_LOCAL_MACHINE, securityProvidersKeyW, 0,
-     KEY_READ, &key);
+    apiRet = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\SecurityProviders", 0,
+                           KEY_READ, &key);
     if (apiRet == ERROR_SUCCESS)
     {
         WCHAR securityPkgNames[MAX_PATH]; /* arbitrary len */
         DWORD size = sizeof(securityPkgNames), type;
 
-        apiRet = RegQueryValueExW(key, securityProvidersW, NULL, &type,
-         (PBYTE)securityPkgNames, &size);
+        apiRet = RegQueryValueExW(key, L"SecurityProviders", NULL, &type, (PBYTE)securityPkgNames, &size);
         if (apiRet == ERROR_SUCCESS && type == REG_SZ)
         {
             WCHAR *ptr;
@@ -594,7 +537,7 @@ static void SECUR32_initializeProviders(void)
                     ;
                 if (*comma == ',')
                     *comma = '\0';
-                for (; *ptr && isspaceW(*ptr) && ptr < securityPkgNames + size;
+                for (; *ptr && iswspace(*ptr) && ptr < securityPkgNames + size;
                      ptr++)
                     ;
                 if (*ptr)
@@ -616,14 +559,11 @@ SecurePackage *SECUR32_findPackageW(PCWSTR packageName)
         LIST_FOR_EACH_ENTRY(ret, &packageTable->table, SecurePackage, entry)
         {
             matched = !lstrcmpiW(ret->infoW.Name, packageName);
-	    if (matched)
-		break;
+            if (matched) break;
         }
-        
-	if (!matched)
-		return NULL;
+        if (!matched) return NULL;
 
-	if (ret->provider && !ret->provider->loaded)
+        if (ret->provider && !ret->provider->loaded)
         {
             ret->provider->lib = LoadLibraryW(ret->provider->moduleName);
             if (ret->provider->lib)
@@ -685,28 +625,26 @@ static void SECUR32_freeProviders(void)
         LIST_FOR_EACH_ENTRY_SAFE(package, package_next, &packageTable->table,
                                  SecurePackage, entry)
         {
-            heap_free(package->infoW.Name);
-            heap_free(package->infoW.Comment);
-            heap_free(package);
+            free(package->infoW.Name);
+            free(package->infoW.Comment);
+            free(package);
         }
 
-        heap_free(packageTable);
+        free(packageTable);
         packageTable = NULL;
     }
 
     if (providerTable)
     {
         SecureProvider *provider, *provider_next;
-        LIST_FOR_EACH_ENTRY_SAFE(provider, provider_next, &providerTable->table,
-                                 SecureProvider, entry)
+        LIST_FOR_EACH_ENTRY_SAFE(provider, provider_next, &providerTable->table, SecureProvider, entry)
         {
-            heap_free(provider->moduleName);
-            if (provider->lib)
-                FreeLibrary(provider->lib);
-            heap_free(provider);
+            free(provider->moduleName);
+            if (provider->lib) FreeLibrary(provider->lib);
+            free(provider);
         }
 
-        heap_free(providerTable);
+        free(providerTable);
         providerTable = NULL;
     }
 
@@ -721,9 +659,9 @@ static void SECUR32_freeProviders(void)
  * The sample ssp seems to use LocalAlloc/LocalFee, but there doesn't seem to
  * be any guarantee, nor is there an alloc function in secur32.
  */
-SECURITY_STATUS WINAPI FreeContextBuffer(PVOID pv)
+SECURITY_STATUS WINAPI FreeContextBuffer( void *pv )
 {
-    heap_free(pv);
+    RtlFreeHeap( GetProcessHeap(), 0, pv );
     return SEC_E_OK;
 }
 
@@ -755,8 +693,8 @@ SECURITY_STATUS WINAPI EnumerateSecurityPackagesW(PULONG pcPackages,
         }
         if (bytesNeeded)
         {
-            *ppPackageInfo = heap_alloc(bytesNeeded);
-            if (*ppPackageInfo)
+            /* freed with FeeContextBuffer */
+            if ((*ppPackageInfo = RtlAllocateHeap(GetProcessHeap(), 0, bytesNeeded)))
             {
                 ULONG i = 0;
                 PWSTR nextString;
@@ -771,7 +709,7 @@ SECURITY_STATUS WINAPI EnumerateSecurityPackagesW(PULONG pcPackages,
                     *pkgInfo = package->infoW;
                     if (package->infoW.Name)
                     {
-                        TRACE("Name[%d] = %s\n", i - 1, debugstr_w(package->infoW.Name));
+                        TRACE("Name[%ld] = %s\n", i - 1, debugstr_w(package->infoW.Name));
                         pkgInfo->Name = nextString;
                         lstrcpyW(nextString, package->infoW.Name);
                         nextString += lstrlenW(nextString) + 1;
@@ -780,7 +718,7 @@ SECURITY_STATUS WINAPI EnumerateSecurityPackagesW(PULONG pcPackages,
                         pkgInfo->Name = NULL;
                     if (package->infoW.Comment)
                     {
-                        TRACE("Comment[%d] = %s\n", i - 1, debugstr_w(package->infoW.Comment));
+                        TRACE("Comment[%ld] = %s\n", i - 1, debugstr_w(package->infoW.Comment));
                         pkgInfo->Comment = nextString;
                         lstrcpyW(nextString, package->infoW.Comment);
                         nextString += lstrlenW(nextString) + 1;
@@ -794,7 +732,7 @@ SECURITY_STATUS WINAPI EnumerateSecurityPackagesW(PULONG pcPackages,
         }
     }
     LeaveCriticalSection(&cs);
-    TRACE("<-- 0x%08x\n", ret);
+    TRACE("<-- 0x%08lx\n", ret);
     return ret;
 }
 
@@ -820,8 +758,8 @@ static PSecPkgInfoA thunk_PSecPkgInfoWToA(ULONG cPackages,
                 bytesNeeded += WideCharToMultiByte(CP_ACP, 0, info[i].Comment,
                  -1, NULL, 0, NULL, NULL);
         }
-        ret = heap_alloc(bytesNeeded);
-        if (ret)
+        /* freed with FreeContextBuffer */
+        if ((ret = RtlAllocateHeap(GetProcessHeap(), 0, bytesNeeded)))
         {
             PSTR nextString;
 
@@ -912,7 +850,7 @@ SECURITY_STATUS WINAPI EnumerateSecurityPackagesA(PULONG pcPackages,
  *  nSize returns the number of characters written when lpNameBuffer is not
  *  NULL or the size of the buffer needed to hold the name when the buffer
  *  is too short or lpNameBuffer is NULL.
- * 
+ *
  *  It the buffer is too short, ERROR_INSUFFICIENT_BUFFER error will be set.
  */
 BOOLEAN WINAPI GetComputerObjectNameA(
@@ -925,8 +863,7 @@ BOOLEAN WINAPI GetComputerObjectNameA(
     TRACE("(%d %p %p)\n", NameFormat, lpNameBuffer, nSize);
 
     if (lpNameBuffer) {
-        bufferW = heap_alloc(sizeW * sizeof(WCHAR));
-        if (bufferW == NULL) {
+        if (!(bufferW = malloc(sizeW * sizeof(WCHAR)))) {
             SetLastError(ERROR_NOT_ENOUGH_MEMORY);
             return FALSE;
         }
@@ -939,7 +876,7 @@ BOOLEAN WINAPI GetComputerObjectNameA(
     }
     else
         *nSize = sizeW;
-    heap_free(bufferW);
+    free(bufferW);
     return rc;
 }
 
@@ -972,7 +909,7 @@ BOOLEAN WINAPI GetComputerObjectNameW(
     if (ntStatus != STATUS_SUCCESS)
     {
         SetLastError(LsaNtStatusToWinError(ntStatus));
-        WARN("LsaOpenPolicy failed with NT status %u\n", GetLastError());
+        WARN("LsaOpenPolicy failed with NT status %lu\n", GetLastError());
         return FALSE;
     }
 
@@ -982,7 +919,7 @@ BOOLEAN WINAPI GetComputerObjectNameW(
     if (ntStatus != STATUS_SUCCESS)
     {
         SetLastError(LsaNtStatusToWinError(ntStatus));
-        WARN("LsaQueryInformationPolicy failed with NT status %u\n",
+        WARN("LsaQueryInformationPolicy failed with NT status %lu\n",
              GetLastError());
         LsaClose(policyHandle);
         return FALSE;
@@ -1001,17 +938,15 @@ BOOLEAN WINAPI GetComputerObjectNameW(
                     DWORD len = domainInfo->Name.Length + size + 3;
                     if (lpNameBuffer && *nSize >= len)
                     {
-                        static const WCHAR bs[] = { '\\', 0 };
-                        static const WCHAR ds[] = { '$', 0 };
                         if (domainInfo->Name.Buffer)
                         {
                             lstrcpyW(lpNameBuffer, domainInfo->Name.Buffer);
-                            lstrcatW(lpNameBuffer, bs);
+                            lstrcatW(lpNameBuffer, L"\\");
                         }
                         else
                             *lpNameBuffer = 0;
                         lstrcatW(lpNameBuffer, name);
-                        lstrcatW(lpNameBuffer, ds);
+                        lstrcatW(lpNameBuffer, L"$");
                         status = TRUE;
                     }
                     else	/* just requesting length required */
@@ -1030,10 +965,6 @@ BOOLEAN WINAPI GetComputerObjectNameW(
             break;
         case NameFullyQualifiedDN:
         {
-            static const WCHAR cnW[] = { 'C','N','=',0 };
-            static const WCHAR ComputersW[] = { 'C','N','=','C','o','m','p','u','t','e','r','s',0 };
-            static const WCHAR dcW[] = { 'D','C','=',0 };
-            static const WCHAR commaW[] = { ',',0 };
             WCHAR name[MAX_COMPUTERNAME_LENGTH + 1];
             DWORD len, size;
             WCHAR *suffix;
@@ -1045,35 +976,35 @@ BOOLEAN WINAPI GetComputerObjectNameW(
                 break;
             }
 
-            len = strlenW(cnW) + size + 1 + strlenW(ComputersW) + 1 + strlenW(dcW);
+            len = wcslen(L"CN=") + size + 1 + wcslen(L"CN=Computers") + 1 + wcslen(L"DC=");
             if (domainInfo->DnsDomainName.Buffer)
             {
-                suffix = strrchrW(domainInfo->DnsDomainName.Buffer, '.');
+                suffix = wcsrchr(domainInfo->DnsDomainName.Buffer, '.');
                 if (suffix)
                 {
                     *suffix++ = 0;
-                    len += 1 + strlenW(dcW) + strlenW(suffix);
+                    len += 1 + wcslen(L"DC=") + wcslen(suffix);
                 }
-                len += strlenW(domainInfo->DnsDomainName.Buffer);
+                len += wcslen(domainInfo->DnsDomainName.Buffer);
             }
             else
                 suffix = NULL;
 
             if (lpNameBuffer && *nSize > len)
             {
-                lstrcpyW(lpNameBuffer, cnW);
+                lstrcpyW(lpNameBuffer, L"CN=");
                 lstrcatW(lpNameBuffer, name);
-                lstrcatW(lpNameBuffer, commaW);
-                lstrcatW(lpNameBuffer, ComputersW);
+                lstrcatW(lpNameBuffer, L",");
+                lstrcatW(lpNameBuffer, L"CN=Computers");
                 if (domainInfo->DnsDomainName.Buffer)
                 {
-                    lstrcatW(lpNameBuffer, commaW);
-                    lstrcatW(lpNameBuffer, dcW);
+                    lstrcatW(lpNameBuffer, L",");
+                    lstrcatW(lpNameBuffer, L"DC=");
                     lstrcatW(lpNameBuffer, domainInfo->DnsDomainName.Buffer);
                     if (suffix)
                     {
-                        lstrcatW(lpNameBuffer, commaW);
-                        lstrcatW(lpNameBuffer, dcW);
+                        lstrcatW(lpNameBuffer, L",");
+                        lstrcatW(lpNameBuffer, L"DC=");
                         lstrcatW(lpNameBuffer, suffix);
                     }
                 }
@@ -1127,6 +1058,18 @@ SECURITY_STATUS WINAPI AddSecurityPackageW(LPWSTR name, SECURITY_PACKAGE_OPTIONS
     return E_NOTIMPL;
 }
 
+SECURITY_STATUS WINAPI DeleteSecurityPackageA(LPSTR name)
+{
+    FIXME("(%s)\n", debugstr_a(name));
+    return E_NOTIMPL;
+}
+
+SECURITY_STATUS WINAPI DeleteSecurityPackageW(LPWSTR name)
+{
+    FIXME("(%s)\n", debugstr_w(name));
+    return E_NOTIMPL;
+}
+
 /***********************************************************************
  *		GetUserNameExA (SECUR32.@)
  */
@@ -1138,7 +1081,7 @@ BOOLEAN WINAPI GetUserNameExA(
     ULONG sizeW = *nSize;
     TRACE("(%d %p %p)\n", NameFormat, lpNameBuffer, nSize);
     if (lpNameBuffer) {
-        bufferW = heap_alloc(sizeW * sizeof(WCHAR));
+        bufferW = malloc(sizeW * sizeof(WCHAR));
         if (bufferW == NULL) {
             SetLastError(ERROR_NOT_ENOUGH_MEMORY);
             return FALSE;
@@ -1161,7 +1104,7 @@ BOOLEAN WINAPI GetUserNameExA(
     }
     else
         *nSize = sizeW;
-    heap_free(bufferW);
+    free(bufferW);
     return rc;
 }
 
@@ -1247,6 +1190,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved)
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
+        hsecur32 = hinstDLL;
         DisableThreadLibraryCalls(hinstDLL);
         SECUR32_initializeProviders();
         break;

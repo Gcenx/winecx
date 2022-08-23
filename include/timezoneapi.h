@@ -19,8 +19,6 @@
 #ifndef _APISETTIMEZONE_
 #define _APISETTIMEZONE_
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -69,7 +67,5 @@ WINBASEAPI BOOL  WINAPI TzSpecificLocalTimeToSystemTimeEx(const DYNAMIC_TIME_ZON
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif  /* _APISETTIMEZONE_ */

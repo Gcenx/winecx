@@ -83,9 +83,9 @@ static HRESULT LoadTextMetadata(IStream *stream, const GUID *preferred_vendor,
     value[value_len] = 0;
 
     result[0].id.vt = VT_LPSTR;
-    result[0].id.u.pszVal = name;
+    result[0].id.pszVal = name;
     result[0].value.vt = VT_LPSTR;
-    result[0].value.u.pszVal = value;
+    result[0].value.pszVal = value;
 
     *items = result;
     *item_count = 1;
@@ -146,9 +146,9 @@ static HRESULT LoadGamaMetadata(IStream *stream, const GUID *preferred_vendor,
     memcpy(name, L"ImageGamma", sizeof(L"ImageGamma"));
 
     result[0].id.vt = VT_LPWSTR;
-    result[0].id.u.pwszVal = name;
+    result[0].id.pwszVal = name;
     result[0].value.vt = VT_UI4;
-    result[0].value.u.ulVal = gamma;
+    result[0].value.ulVal = gamma;
 
     *items = result;
     *item_count = 1;
@@ -218,12 +218,12 @@ static HRESULT LoadChrmMetadata(IStream *stream, const GUID *preferred_vendor,
 
         PropVariantInit(&result[i].id);
         result[i].id.vt = VT_LPWSTR;
-        result[i].id.u.pwszVal = dyn_names[i];
+        result[i].id.pwszVal = dyn_names[i];
         lstrcpyW(dyn_names[i], names[i]);
 
         PropVariantInit(&result[i].value);
         result[i].value.vt = VT_UI4;
-        result[i].value.u.ulVal = read_ulong_be(&data[i*4]);
+        result[i].value.ulVal = read_ulong_be(&data[i*4]);
     }
 
     *items = result;
@@ -251,7 +251,7 @@ HRESULT PngDecoder_CreateInstance(REFIID iid, void** ppv)
     struct decoder *decoder;
     struct decoder_info decoder_info;
 
-    hr = get_unix_decoder(&CLSID_WICPngDecoder, &decoder_info, &decoder);
+    hr = png_decoder_create(&decoder_info, &decoder);
 
     if (SUCCEEDED(hr))
         hr = CommonDecoder_CreateInstance(decoder, &decoder_info, iid, ppv);
@@ -265,7 +265,7 @@ HRESULT PngEncoder_CreateInstance(REFIID iid, void** ppv)
     struct encoder *encoder;
     struct encoder_info encoder_info;
 
-    hr = get_unix_encoder(&CLSID_WICPngEncoder, &encoder_info, &encoder);
+    hr = png_encoder_create(&encoder_info, &encoder);
 
     if (SUCCEEDED(hr))
         hr = CommonEncoder_CreateInstance(encoder, &encoder_info, iid, ppv);

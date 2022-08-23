@@ -22,7 +22,7 @@
 
 #include "wine/winheader_enter.h"
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 #include <pshpack4.h>
 #endif
 
@@ -450,7 +450,7 @@ DEFINE_GUID(D3DKEYEXCHANGE_DXVA,        0x43d3775c, 0x38e5, 0x4924, 0x8d, 0x86, 
 
 #endif
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 #include <poppack.h>
 #endif
 

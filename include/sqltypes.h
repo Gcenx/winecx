@@ -92,7 +92,7 @@ typedef signed short int        SWORD;
 typedef unsigned int            UDWORD;
 typedef unsigned short int      UWORD;
 typedef UDWORD                  SQLUINTEGER;
-typedef signed __int3264        SLONG;
+typedef signed long             SLONG;
 typedef signed short            SSHORT;
 typedef double                  SDOUBLE;
 typedef double            		LDOUBLE;
@@ -242,9 +242,6 @@ typedef struct  tagSQLGUID
 
 
 typedef SQLULEN BOOKMARK;
-
-#define SQL_WCHAR             (-8)
-#define SQL_C_WCHAR            SQL_WCHAR
 
 #ifdef __cplusplus
 }

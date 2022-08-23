@@ -1,10 +1,8 @@
 MODULE    = ole32.dll
 IMPORTLIB = ole32
-IMPORTS   = uuid advapi32 user32 gdi32 combase rpcrt4
+IMPORTS   = uuid advapi32 user32 gdi32 combase rpcrt4 kernelbase
 DELAYIMPORTS = oleaut32
 EXTRADEFS = -D_OLE32_
-
-EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	antimoniker.c \
@@ -26,7 +24,6 @@ C_SRCS = \
 	memlockbytes.c \
 	moniker.c \
 	ole2.c \
-	ole2impl.c \
 	ole2stubs.c \
 	ole32_main.c \
 	oleobj.c \

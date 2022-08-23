@@ -66,7 +66,7 @@ static void __cdecl test_invalid_parameter_handler(const wchar_t *expression,
     ok(function == NULL, "function is not NULL\n");
     ok(file == NULL, "file is not NULL\n");
     ok(line == 0, "line = %u\n", line);
-    ok(arg == 0, "arg = %lx\n", (UINT_PTR)arg);
+    ok(arg == 0, "arg = %Ix\n", arg);
 }
 
 _ACRTIMP int __cdecl _o_tolower(int);
@@ -150,6 +150,42 @@ static void test_strtod(void)
     test_strtod_str("4.9406564584124654e-324", 4.9406564584124654e-324, 23);
     test_strtod_str("2.48e-324", 4.9406564584124654e-324, 9);
     test_strtod_str_errno("2.47e-324", 0, 9, ERANGE);
+}
+
+static void test_strtof(void)
+{
+    static const struct {
+        const char *str;
+        int len;
+        float ret;
+        int err;
+    } tests[] = {
+        { "12.1", 4, 12.1f },
+        { "-13.721", 7, -13.721f },
+        { "1.e40", 5, INFINITY, ERANGE },
+        { "-1.e40", 6, -INFINITY, ERANGE },
+        { "0.0", 3, 0.0f },
+        { "-0.0", 4, 0.0f },
+        { "1.4e-45", 7, 1.4e-45f },
+        { "-1.4e-45", 8, -1.4e-45f },
+        { "1.e-60", 6, 0, ERANGE },
+        { "-1.e-60", 7, 0, ERANGE },
+    };
+
+    char *end;
+    float f;
+    int i;
+
+    for (i=0; i<ARRAY_SIZE(tests); i++)
+    {
+        errno = 0xdeadbeef;
+        f = strtof(tests[i].str, &end);
+        ok(f == tests[i].ret, "%d) f = %.16e\n", i, f);
+        ok(end == tests[i].str + tests[i].len, "%d) len = %d\n",
+                i, (int)(end - tests[i].str));
+        ok(errno == tests[i].err || (!tests[i].err && errno == 0xdeadbeef),
+                "%d) errno = %d\n", i, errno);
+    }
 }
 
 static void test__memicmp(void)
@@ -418,6 +454,24 @@ static void test_wcstok(void)
     ok(!wcscmp(L"words", token), "expected \"words\", got \"%ls\"\n", token);
     token = wcstok(NULL, L" ", NULL);
     ok(!token, "expected NULL, got %p\n", token);
+
+    next = NULL;
+    wcscpy(buffer, input);
+    token = wcstok(buffer, L"=", &next);
+    ok(!wcscmp(token, input), "expected \"%ls\", got \"%ls\"\n", input, token);
+    ok(next == buffer + wcslen(input), "expected %p, got %p\n", buffer + wcslen(input), next);
+    token = wcstok(NULL, L"=", &next);
+    ok(!token, "expected NULL, got \"%ls\"\n", token);
+    ok(next == buffer + wcslen(input), "expected %p, got %p\n", buffer + wcslen(input), next);
+
+    next = NULL;
+    wcscpy(buffer, L"");
+    token = wcstok(buffer, L"=", &next);
+    ok(token == NULL, "expected NULL, got \"%ls\"\n", token);
+    ok(next == buffer, "expected %p, got %p\n", buffer, next);
+    token = wcstok(NULL, L"=", &next);
+    ok(!token, "expected NULL, got \"%ls\"\n", token);
+    ok(next == buffer, "expected %p, got %p\n", buffer, next);
 }
 
 static void test__strnicmp(void)
@@ -434,6 +488,20 @@ static void test__strnicmp(void)
     todo_wine ok(errno == EINVAL, "Unexpected errno %d.\n", errno);
 
     ret = _strnicmp(str1, str2, 0x7fffffff);
+    ok(!ret, "got %d.\n", ret);
+}
+
+static void test_wcsnicmp(void)
+{
+    static const wchar_t str1[] = L"TEST";
+    static const wchar_t str2[] = L"test";
+    int ret;
+
+    errno = 0xdeadbeef;
+    ret = wcsnicmp(str1, str2, -1);
+    ok(!ret, "got %d.\n", ret);
+
+    ret = wcsnicmp(str1, str2, 0x7fffffff);
     ok(!ret, "got %d.\n", ret);
 }
 
@@ -540,6 +608,7 @@ START_TEST(string)
             "Invalid parameter handler was already set\n");
 
     test_strtod();
+    test_strtof();
     test__memicmp();
     test__memicmp_l();
     test___strncnt();
@@ -547,6 +616,7 @@ START_TEST(string)
     test_mbsspn();
     test_wcstok();
     test__strnicmp();
+    test_wcsnicmp();
     test_SpecialCasing();
     test__mbbtype_l();
 }

@@ -74,7 +74,7 @@ static ULONG WINAPI CommonDecoder_AddRef(IWICBitmapDecoder *iface)
     CommonDecoder *This = impl_from_IWICBitmapDecoder(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     return ref;
 }
@@ -84,7 +84,7 @@ static ULONG WINAPI CommonDecoder_Release(IWICBitmapDecoder *iface)
     CommonDecoder *This = impl_from_IWICBitmapDecoder(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     if (ref == 0)
     {
@@ -250,7 +250,7 @@ typedef struct {
     DWORD frame;
     struct decoder_frame decoder_frame;
     BOOL metadata_initialized;
-    ULONG metadata_count;
+    UINT metadata_count;
     struct decoder_block* metadata_blocks;
 } CommonDecoderFrame;
 
@@ -296,7 +296,7 @@ static ULONG WINAPI CommonDecoderFrame_AddRef(IWICBitmapFrameDecode *iface)
     CommonDecoderFrame *This = impl_from_IWICBitmapFrameDecode(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     return ref;
 }
@@ -306,7 +306,7 @@ static ULONG WINAPI CommonDecoderFrame_Release(IWICBitmapFrameDecode *iface)
     CommonDecoderFrame *This = impl_from_IWICBitmapFrameDecode(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     if (ref == 0)
     {
@@ -433,6 +433,8 @@ static HRESULT WINAPI CommonDecoderFrame_GetMetadataQueryReader(IWICBitmapFrameD
     IWICMetadataQueryReader **ppIMetadataQueryReader)
 {
     CommonDecoderFrame *This = impl_from_IWICBitmapFrameDecode(iface);
+    IWICComponentFactory* factory;
+    HRESULT hr;
 
     TRACE("(%p,%p)\n", iface, ppIMetadataQueryReader);
 
@@ -442,7 +444,18 @@ static HRESULT WINAPI CommonDecoderFrame_GetMetadataQueryReader(IWICBitmapFrameD
     if (!(This->parent->file_info.flags & WICBitmapDecoderCapabilityCanEnumerateMetadata))
         return WINCODEC_ERR_UNSUPPORTEDOPERATION;
 
-    return MetadataQueryReader_CreateInstance(&This->IWICMetadataBlockReader_iface, NULL, ppIMetadataQueryReader);
+    hr = create_instance(&CLSID_WICImagingFactory, &IID_IWICComponentFactory, (void**)&factory);
+
+    if (SUCCEEDED(hr))
+    {
+        hr = IWICComponentFactory_CreateQueryReaderFromBlockReader(factory, &This->IWICMetadataBlockReader_iface, ppIMetadataQueryReader);
+        IWICComponentFactory_Release(factory);
+    }
+
+    if (FAILED(hr))
+        *ppIMetadataQueryReader = NULL;
+
+    return hr;
 }
 
 static HRESULT WINAPI CommonDecoderFrame_GetColorContexts(IWICBitmapFrameDecode *iface,
@@ -552,7 +565,7 @@ static HRESULT WINAPI CommonDecoderFrame_Block_GetContainerFormat(IWICMetadataBl
     return S_OK;
 }
 
-static HRESULT WINAPI CommonDecoderFrame_InitializeMetadata(CommonDecoderFrame *This)
+static HRESULT CommonDecoderFrame_InitializeMetadata(CommonDecoderFrame *This)
 {
     HRESULT hr=S_OK;
 
@@ -595,7 +608,7 @@ static HRESULT WINAPI CommonDecoderFrame_Block_GetReaderByIndex(IWICMetadataBloc
 {
     CommonDecoderFrame *This = impl_from_IWICMetadataBlockReader(iface);
     HRESULT hr;
-    IWICComponentFactory* factory;
+    IWICComponentFactory* factory = NULL;
     IWICStream* stream;
 
     TRACE("%p,%d,%p\n", iface, nIndex, ppIMetadataReader);
@@ -609,7 +622,10 @@ static HRESULT WINAPI CommonDecoderFrame_Block_GetReaderByIndex(IWICMetadataBloc
         hr = E_INVALIDARG;
 
     if (SUCCEEDED(hr))
-        hr = StreamImpl_Create(&stream);
+        hr = create_instance(&CLSID_WICImagingFactory, &IID_IWICComponentFactory, (void**)&factory);
+
+    if (SUCCEEDED(hr))
+        hr = IWICComponentFactory_CreateStream(factory, &stream);
 
     if (SUCCEEDED(hr))
     {
@@ -664,22 +680,16 @@ static HRESULT WINAPI CommonDecoderFrame_Block_GetReaderByIndex(IWICMetadataBloc
         }
         else
         {
-            if (SUCCEEDED(hr))
-                hr = ImagingFactory_CreateInstance(&IID_IWICComponentFactory, (void**)&factory);
-
-            if (SUCCEEDED(hr))
-            {
-                hr = IWICComponentFactory_CreateMetadataReaderFromContainer(factory,
-                    &This->parent->decoder_info.block_format, NULL,
-                    This->metadata_blocks[nIndex].options & DECODER_BLOCK_OPTION_MASK,
-                    (IStream*)stream, ppIMetadataReader);
-
-                IWICComponentFactory_Release(factory);
-            }
+            hr = IWICComponentFactory_CreateMetadataReaderFromContainer(factory,
+                &This->parent->decoder_info.block_format, NULL,
+                This->metadata_blocks[nIndex].options & DECODER_BLOCK_OPTION_MASK,
+                (IStream*)stream, ppIMetadataReader);
         }
 
         IWICStream_Release(stream);
     }
+
+    if (factory) IWICComponentFactory_Release(factory);
 
     if (FAILED(hr))
         *ppIMetadataReader = NULL;
@@ -714,7 +724,7 @@ static HRESULT WINAPI CommonDecoder_GetFrame(IWICBitmapDecoder *iface,
     TRACE("(%p,%u,%p)\n", iface, index, ppIBitmapFrame);
 
     if (!ppIBitmapFrame)
-        return E_POINTER;
+        return E_INVALIDARG;
 
     EnterCriticalSection(&This->lock);
 
@@ -752,7 +762,7 @@ static HRESULT WINAPI CommonDecoder_GetFrame(IWICBitmapDecoder *iface,
 
     if (SUCCEEDED(hr))
     {
-        TRACE("-> %ux%u, %u-bit pixelformat=%s res=%f,%f colors=%u contexts=%u\n",
+        TRACE("-> %ux%u, %u-bit pixelformat=%s res=%f,%f colors=%lu contexts=%lu\n",
             result->decoder_frame.width, result->decoder_frame.height,
             result->decoder_frame.bpp, wine_dbgstr_guid(&result->decoder_frame.pixel_format),
             result->decoder_frame.dpix, result->decoder_frame.dpiy,

@@ -28,10 +28,9 @@
 #define NONAMELESSUNION
 
 #include "wine/debug.h"
-#include "undocshell.h"
-#include "commoncontrols.h"
 #include "pidl.h"
 #include "shell32_main.h"
+#include "commoncontrols.h"
 #include "shellapi.h"
 #include "shresdef.h"
 #include "shellfolder.h"
@@ -97,12 +96,6 @@ static void FillTreeView(browse_info*, LPSHELLFOLDER,
                LPITEMIDLIST, HTREEITEM, IEnumIDList*);
 static HTREEITEM InsertTreeViewItem( browse_info*, IShellFolder *,
                LPCITEMIDLIST, LPCITEMIDLIST, IEnumIDList*, HTREEITEM);
-
-static const WCHAR szBrowseFolderInfo[] = {
-    '_','_','W','I','N','E','_',
-    'B','R','S','F','O','L','D','E','R','D','L','G','_',
-    'I','N','F','O',0
-};
 
 static inline DWORD BrowseFlagsToSHCONTF(UINT ulFlags)
 {
@@ -228,7 +221,7 @@ static void InitializeTreeView( browse_info *info )
         IShellFolder *lpsfDesktop;
         hr = SHGetDesktopFolder(&lpsfDesktop);
         if (FAILED(hr)) {
-            WARN("SHGetDesktopFolder failed! hr = %08x\n", hr);
+            WARN("SHGetDesktopFolder failed! hr = %08lx\n", hr);
             ILFree(pidlChild);
             ILFree(pidlParent);
             return;
@@ -238,7 +231,7 @@ static void InitializeTreeView( browse_info *info )
     }
 
     if (FAILED(hr)) {
-        WARN("Could not bind to parent shell folder! hr = %08x\n", hr);
+        WARN("Could not bind to parent shell folder! hr = %08lx\n", hr);
         ILFree(pidlChild);
         ILFree(pidlParent);
         return;
@@ -252,7 +245,7 @@ static void InitializeTreeView( browse_info *info )
     }
 
     if (FAILED(hr)) {
-        WARN("Could not bind to root shell folder! hr = %08x\n", hr);
+        WARN("Could not bind to root shell folder! hr = %08lx\n", hr);
         IShellFolder_Release(lpsfParent);
         ILFree(pidlChild);
         ILFree(pidlParent);
@@ -262,7 +255,7 @@ static void InitializeTreeView( browse_info *info )
     flags = BrowseFlagsToSHCONTF( info->lpBrowseInfo->ulFlags );
     hr = IShellFolder_EnumObjects( lpsfRoot, info->hWnd, flags, &pEnumChildren );
     if (FAILED(hr)) {
-        WARN("Could not get child iterator! hr = %08x\n", hr);
+        WARN("Could not get child iterator! hr = %08lx\n", hr);
         IShellFolder_Release(lpsfParent);
         IShellFolder_Release(lpsfRoot);
         ILFree(pidlChild);
@@ -334,7 +327,7 @@ static BOOL GetName(LPSHELLFOLDER lpsf, LPCITEMIDLIST lpi, DWORD dwFlags, LPWSTR
 	BOOL   bSuccess=TRUE;
 	STRRET str;
 
-	TRACE("%p %p %x %p\n", lpsf, lpi, dwFlags, lpFriendlyName);
+	TRACE("%p %p %lx %p\n", lpsf, lpi, dwFlags, lpFriendlyName);
 	if (SUCCEEDED(IShellFolder_GetDisplayNameOf(lpsf, lpi, dwFlags, &str)))
           bSuccess = StrRetToStrNW(lpFriendlyName, MAX_PATH, &str, lpi);
 	else
@@ -592,11 +585,11 @@ static LRESULT BrsFolder_Treeview_Rename(browse_info *info, NMTVDISPINFOW *pnmtv
     item_data = (LPTV_ITEMDATA)item.lParam;
 
     SHGetPathFromIDListW(item_data->lpifq, old_path);
-    if(!(p = strrchrW(old_path, '\\')))
+    if(!(p = wcsrchr(old_path, '\\')))
         return 0;
     p = new_path+(p-old_path+1);
     memcpy(new_path, old_path, (p-new_path)*sizeof(WCHAR));
-    strcpyW(p, pnmtv->item.pszText);
+    lstrcpyW(p, pnmtv->item.pszText);
 
     if(!MoveFileW(old_path, new_path))
         return 0;
@@ -711,7 +704,7 @@ static BOOL BrsFolder_OnCreate( HWND hWnd, browse_info *info )
     LPBROWSEINFOW lpBrowseInfo = info->lpBrowseInfo;
 
     info->hWnd = hWnd;
-    SetPropW( hWnd, szBrowseFolderInfo, info );
+    SetPropW( hWnd, L"__WINE_BRSFOLDERDLG_INFO", info );
 
     if (lpBrowseInfo->ulFlags & BIF_NEWDIALOGSTYLE)
         FIXME("flags BIF_NEWDIALOGSTYLE partially implemented\n");
@@ -824,7 +817,7 @@ static HRESULT BrsFolder_NewFolder(browse_info *info)
         goto cleanup;
     }
 
-    len = strlenW(name);
+    len = lstrlenW(name);
     if(len<MAX_PATH)
         name[len++] = '\\';
     hr = ISFHelper_GetUniqueName(sfhelper, &name[len], MAX_PATH-len);
@@ -1076,7 +1069,7 @@ static LRESULT BrsFolder_OnChange(browse_info *info, const LPCITEMIDLIST *pidls,
 {
     BOOL ret = TRUE;
 
-    TRACE("(%p)->(%p, %p, 0x%08x)\n", info, pidls[0], pidls[1], event);
+    TRACE("(%p)->(%p, %p, 0x%08lx)\n", info, pidls[0], pidls[1], event);
 
     switch (event)
     {
@@ -1103,12 +1096,12 @@ static INT_PTR CALLBACK BrsFolderDlgProc( HWND hWnd, UINT msg, WPARAM wParam,
 {
     browse_info *info;
 
-    TRACE("hwnd=%p msg=%04x 0x%08lx 0x%08lx\n", hWnd, msg, wParam, lParam );
+    TRACE("hwnd=%p msg=%04x 0x%08Ix 0x%08Ix\n", hWnd, msg, wParam, lParam );
 
     if (msg == WM_INITDIALOG)
         return BrsFolder_OnCreate( hWnd, (browse_info*) lParam );
 
-    info = GetPropW( hWnd, szBrowseFolderInfo );
+    info = GetPropW( hWnd, L"__WINE_BRSFOLDERDLG_INFO" );
     if (!info)
         return FALSE;
 
@@ -1139,7 +1132,7 @@ static INT_PTR CALLBACK BrsFolderDlgProc( HWND hWnd, UINT msg, WPARAM wParam,
         break;
 
     case BFFM_ENABLEOK:
-        TRACE("Enable %ld\n", lParam);
+        TRACE("Enable %Id\n", lParam);
         EnableWindow(GetDlgItem(hWnd, 1), lParam != 0);
         break;
 
@@ -1165,11 +1158,6 @@ static INT_PTR CALLBACK BrsFolderDlgProc( HWND hWnd, UINT msg, WPARAM wParam,
     }
     return FALSE;
 }
-
-static const WCHAR swBrowseTemplateName[] = {
-    'S','H','B','R','S','F','O','R','F','O','L','D','E','R','_','M','S','G','B','O','X',0};
-static const WCHAR swNewBrowseTemplateName[] = {
-    'S','H','N','E','W','B','R','S','F','O','R','F','O','L','D','E','R','_','M','S','G','B','O','X',0};
 
 /*************************************************************************
  * SHBrowseForFolderA [SHELL32.@]
@@ -1244,9 +1232,9 @@ LPITEMIDLIST WINAPI SHBrowseForFolderW (LPBROWSEINFOW lpbi)
     hr = OleInitialize(NULL);
 
     if (lpbi->ulFlags & BIF_NEWDIALOGSTYLE)
-        templateName = swNewBrowseTemplateName;
+        templateName = L"SHNEWBRSFORFOLDER_MSGBOX";
     else
-        templateName = swBrowseTemplateName;
+        templateName = L"SHBRSFORFOLDER_MSGBOX";
     r = DialogBoxParamW( shell32_hInstance, templateName, lpbi->hwndOwner,
 	                 BrsFolderDlgProc, (LPARAM)&info );
     if (SUCCEEDED(hr)) 

@@ -25,8 +25,13 @@
 #include "gdiplus.h"
 #include "wine/test.h"
 
-#define expect(expected, got) ok(got == expected, "Expected %d, got %d\n", expected, got)
-#define expect_(expected, got, precision) ok(abs((expected) - (got)) <= (precision), "Expected %d, got %d\n", (expected), (got))
+#define expect(expected,got) expect_inline(__LINE__, expected, got)
+static inline void expect_inline(unsigned line, DWORD expected, DWORD got)
+{
+    ok_(__FILE__, line)(expected == got, "Expected %ld, got %ld\n", expected, got);
+}
+
+#define expect_(expected, got, precision) ok(abs((expected) - (got)) <= (precision), "Expected %d, got %ld\n", (expected), (got))
 #define expectf_(expected, got, precision) ok(fabs((expected) - (got)) <= (precision), "Expected %f, got %f\n", (expected), (got))
 #define expectf(expected, got) expectf_((expected), (got), 0.001)
 
@@ -49,7 +54,7 @@ static void create_testfontfile(const WCHAR *filename, int resource, WCHAR pathW
     lstrcatW(pathW, filename);
 
     file = CreateFileW(pathW, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
-    ok(file != INVALID_HANDLE_VALUE, "file creation failed, at %s, error %d\n", wine_dbgstr_w(pathW), GetLastError());
+    ok(file != INVALID_HANDLE_VALUE, "file creation failed, at %s, error %ld\n", wine_dbgstr_w(pathW), GetLastError());
 
     res = FindResourceA(GetModuleHandleA(NULL), MAKEINTRESOURCEA(resource), (LPCSTR)RT_RCDATA);
     ok(res != 0, "couldn't find resource\n");
@@ -63,7 +68,7 @@ static void create_testfontfile(const WCHAR *filename, int resource, WCHAR pathW
 static void _delete_testfontfile(const WCHAR *filename, int line)
 {
     BOOL ret = DeleteFileW(filename);
-    ok_(__FILE__,line)(ret, "failed to delete file %s, error %d\n", wine_dbgstr_w(filename), GetLastError());
+    ok_(__FILE__,line)(ret, "failed to delete file %s, error %ld\n", wine_dbgstr_w(filename), GetLastError());
 }
 
 static void test_long_name(void)
@@ -388,12 +393,9 @@ static void test_fontfamily (void)
     expect (Ok, stat);
     expect (0, lstrcmpiW(itsName, L"Tahoma"));
 
-    if (0)
-    {
-        /* Crashes on Windows XP SP2, Vista, and so Wine as well */
-        stat = GdipGetFamilyName (family, NULL, LANG_NEUTRAL);
-        expect (Ok, stat);
-    }
+    /* Crashes on Windows XP SP2 and Vista */
+    stat = GdipGetFamilyName (family, NULL, LANG_NEUTRAL);
+    expect (Ok, stat);
 
     /* Make sure we don't read old data */
     ZeroMemory (itsName, sizeof(itsName));
@@ -750,14 +752,14 @@ static void test_font_metrics(void)
 
     gdip_get_font_metrics(font, &fm_gdip);
     trace("gdiplus:\n");
-    trace("%s,%d: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
+    trace("%s,%ld: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
           wine_dbgstr_w(lf.lfFaceName), lf.lfHeight,
           fm_gdip.em_height, fm_gdip.line_spacing, fm_gdip.ascent, fm_gdip.descent,
           fm_gdip.font_height, fm_gdip.font_size);
 
     gdi_get_font_metrics(&lf, &fm_gdi);
     trace("gdi:\n");
-    trace("%s,%d: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
+    trace("%s,%ld: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
           wine_dbgstr_w(lf.lfFaceName), lf.lfHeight,
           fm_gdi.em_height, fm_gdi.line_spacing, fm_gdi.ascent, fm_gdi.descent,
           fm_gdi.font_height, fm_gdi.font_size);
@@ -766,10 +768,10 @@ static void test_font_metrics(void)
 
     stat = GdipGetLogFontW(font, graphics, &lf);
     expect(Ok, stat);
-    ok(lf.lfHeight < 0, "lf.lfHeight should be negative, got %d\n", lf.lfHeight);
+    ok(lf.lfHeight < 0, "lf.lfHeight should be negative, got %ld\n", lf.lfHeight);
     gdi_get_font_metrics(&lf, &fm_gdi);
     trace("gdi:\n");
-    trace("%s,%d: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
+    trace("%s,%ld: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
           wine_dbgstr_w(lf.lfFaceName), lf.lfHeight,
           fm_gdi.em_height, fm_gdi.line_spacing, fm_gdi.ascent, fm_gdi.descent,
           fm_gdi.font_height, fm_gdi.font_size);
@@ -791,14 +793,14 @@ static void test_font_metrics(void)
 
     gdip_get_font_metrics(font, &fm_gdip);
     trace("gdiplus:\n");
-    trace("%s,%d: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
+    trace("%s,%ld: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
           wine_dbgstr_w(lf.lfFaceName), lf.lfHeight,
           fm_gdip.em_height, fm_gdip.line_spacing, fm_gdip.ascent, fm_gdip.descent,
           fm_gdip.font_height, fm_gdip.font_size);
 
     gdi_get_font_metrics(&lf, &fm_gdi);
     trace("gdi:\n");
-    trace("%s,%d: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
+    trace("%s,%ld: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
           wine_dbgstr_w(lf.lfFaceName), lf.lfHeight,
           fm_gdi.em_height, fm_gdi.line_spacing, fm_gdi.ascent, fm_gdi.descent,
           fm_gdi.font_height, fm_gdi.font_size);
@@ -807,10 +809,10 @@ static void test_font_metrics(void)
 
     stat = GdipGetLogFontW(font, graphics, &lf);
     expect(Ok, stat);
-    ok(lf.lfHeight < 0, "lf.lfHeight should be negative, got %d\n", lf.lfHeight);
+    ok(lf.lfHeight < 0, "lf.lfHeight should be negative, got %ld\n", lf.lfHeight);
     gdi_get_font_metrics(&lf, &fm_gdi);
     trace("gdi:\n");
-    trace("%s,%d: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
+    trace("%s,%ld: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
           wine_dbgstr_w(lf.lfFaceName), lf.lfHeight,
           fm_gdi.em_height, fm_gdi.line_spacing, fm_gdi.ascent, fm_gdi.descent,
           fm_gdi.font_height, fm_gdi.font_size);
@@ -829,17 +831,17 @@ static void test_font_metrics(void)
 
     gdip_get_font_metrics(font, &fm_gdip);
     trace("gdiplus:\n");
-    trace("%s,%d: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
+    trace("%s,%ld: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
           wine_dbgstr_w(lf.lfFaceName), lf.lfHeight,
           fm_gdip.em_height, fm_gdip.line_spacing, fm_gdip.ascent, fm_gdip.descent,
           fm_gdip.font_height, fm_gdip.font_size);
 
     stat = GdipGetLogFontW(font, graphics, &lf);
     expect(Ok, stat);
-    ok(lf.lfHeight < 0, "lf.lfHeight should be negative, got %d\n", lf.lfHeight);
+    ok(lf.lfHeight < 0, "lf.lfHeight should be negative, got %ld\n", lf.lfHeight);
     gdi_get_font_metrics(&lf, &fm_gdi);
     trace("gdi:\n");
-    trace("%s,%d: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
+    trace("%s,%ld: EmHeight %u, LineSpacing %u, CellAscent %u, CellDescent %u, FontHeight %f, FontSize %f\n",
           wine_dbgstr_w(lf.lfFaceName), lf.lfHeight,
           fm_gdi.em_height, fm_gdi.line_spacing, fm_gdi.ascent, fm_gdi.descent,
           fm_gdi.font_height, fm_gdi.font_size);
@@ -886,8 +888,10 @@ static void test_font_substitution(void)
     ok(lstrcmpA(lf.lfFaceName, "MS Shell Dlg") != 0, "expected substitution of MS Shell Dlg\n");
     GdipDeleteFont(font);
 
+    family = NULL;
     status = GdipCreateFontFamilyFromName(L"MS Shell Dlg", NULL, &family);
     expect(Ok, status);
+    font = NULL;
     status = GdipCreateFont(family, 12, FontStyleRegular, UnitPoint, &font);
     expect(Ok, status);
     memset(&lf, 0xfe, sizeof(lf));
@@ -935,7 +939,7 @@ static void test_font_substitution(void)
     lstrcpyA(lf.lfFaceName, "ThisFontShouldNotExist");
     font = NULL;
     status = GdipCreateFontFromLogfontA(hdc, &lf, &font);
-todo_wine
+    todo_wine
     ok(status == NotTrueTypeFont || broken(status == FileNotFound), /* before XP */
        "expected NotTrueTypeFont, got %d\n", status);
     /* FIXME: remove when wine is fixed */
@@ -945,7 +949,7 @@ todo_wine
     lf.lfFaceName[0] = 0;
     font = NULL;
     status = GdipCreateFontFromLogfontA(hdc, &lf, &font);
-todo_wine
+    todo_wine
     ok(status == NotTrueTypeFont || broken(status == FileNotFound), /* before XP */
        "expected NotTrueTypeFont, got %d\n", status);
     /* FIXME: remove when wine is fixed */
@@ -1010,7 +1014,7 @@ static void test_font_transform(void)
     expect(Ok, status);
     expectf(0.0, bounds.X);
     expectf(0.0, bounds.Y);
-todo_wine
+    todo_wine
     expectf(height + margin_y, bounds.Height);
     set_rect_empty(&rect);
     set_rect_empty(&bounds);
@@ -1054,7 +1058,7 @@ todo_wine
     expect(Ok, status);
     expectf(0.0, bounds.X);
     expectf(0.0, bounds.Y);
-todo_wine
+    todo_wine
     expectf(height + margin_y, bounds.Height);
     set_rect_empty(&rect);
     set_rect_empty(&bounds);
@@ -1075,9 +1079,9 @@ todo_wine
                                      DriverStringOptionsCmapLookup, matrix, &bounds);
     expect(Ok, status);
     expectf(0.0, bounds.X);
-todo_wine
+    todo_wine
     expectf_(-300.0, bounds.Y, 0.15);
-todo_wine
+    todo_wine
     expectf(height * 3.0, bounds.Height);
 
     /* scale + ratate matrix */
@@ -1100,7 +1104,7 @@ todo_wine
     expect(Ok, status);
     expectf(0.0, bounds.X);
     expectf(0.0, bounds.Y);
-todo_wine
+    todo_wine
     expectf(height + margin_y, bounds.Height);
     set_rect_empty(&rect);
     set_rect_empty(&bounds);
@@ -1120,11 +1124,11 @@ todo_wine
     status = GdipMeasureDriverString(graphics, (const UINT16 *)string, -1, font, pos,
                                      DriverStringOptionsCmapLookup, matrix, &bounds);
     expect(Ok, status);
-todo_wine
+    todo_wine
     expectf_(-43.814377, bounds.X, 0.05);
-todo_wine
+    todo_wine
     expectf_(-212.235611, bounds.Y, 0.05);
-todo_wine
+    todo_wine
     expectf_(340.847534, bounds.Height, 0.05);
 
     /* scale + ratate + shear matrix */
@@ -1134,7 +1138,7 @@ todo_wine
     expect(Ok, status);
     status = GdipGetLogFontA(font, graphics, &lf);
     expect(Ok, status);
-todo_wine
+    todo_wine
     expect(1032, lf.lfHeight);
     expect(0, lf.lfWidth);
     expect_(3099, lf.lfEscapement, 1);
@@ -1148,7 +1152,7 @@ todo_wine
     expect(Ok, status);
     expectf(0.0, bounds.X);
     expectf(0.0, bounds.Y);
-todo_wine
+    todo_wine
     expectf(height + margin_y, bounds.Height);
     set_rect_empty(&rect);
     set_rect_empty(&bounds);
@@ -1168,11 +1172,11 @@ todo_wine
     status = GdipMeasureDriverString(graphics, (const UINT16 *)string, -1, font, pos,
                                      DriverStringOptionsCmapLookup, matrix, &bounds);
     expect(Ok, status);
-todo_wine
+    todo_wine
     expectf_(-636.706848, bounds.X, 0.05);
-todo_wine
+    todo_wine
     expectf_(-175.257523, bounds.Y, 0.05);
-todo_wine
+    todo_wine
     expectf_(1532.984985, bounds.Height, 0.05);
 
     /* scale + ratate + shear + translate matrix */
@@ -1182,7 +1186,7 @@ todo_wine
     expect(Ok, status);
     status = GdipGetLogFontA(font, graphics, &lf);
     expect(Ok, status);
-todo_wine
+    todo_wine
     expect(1032, lf.lfHeight);
     expect(0, lf.lfWidth);
     expect_(3099, lf.lfEscapement, 1);
@@ -1196,7 +1200,7 @@ todo_wine
     expect(Ok, status);
     expectf(0.0, bounds.X);
     expectf(0.0, bounds.Y);
-todo_wine
+    todo_wine
     expectf(height + margin_y, bounds.Height);
     set_rect_empty(&rect);
     set_rect_empty(&bounds);
@@ -1216,11 +1220,11 @@ todo_wine
     status = GdipMeasureDriverString(graphics, (const UINT16 *)string, -1, font, pos,
                                      DriverStringOptionsCmapLookup, matrix, &bounds);
     expect(Ok, status);
-todo_wine
+    todo_wine
     expectf_(-626.706848, bounds.X, 0.05);
-todo_wine
+    todo_wine
     expectf_(-155.257523, bounds.Y, 0.05);
-todo_wine
+    todo_wine
     expectf_(1532.984985, bounds.Height, 0.05);
 
     GdipDeleteMatrix(matrix);

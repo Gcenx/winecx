@@ -12,11 +12,11 @@
 @ stub ConvertDevModeToPrintTicketThunk
 @ stub ConvertPrintTicketToDevModeThunk2
 @ stub ConvertPrintTicketToDevModeThunk
-@ stub DllCanUnloadNow
+@ stdcall -private DllCanUnloadNow()
 @ stub DllGetClassObject
 @ stdcall -private DllMain(long long ptr)
-@ stub DllRegisterServer
-@ stub DllUnregisterServer
+@ stdcall -private DllRegisterServer()
+@ stdcall -private DllUnregisterServer()
 @ stub GetDeviceDefaultPrintTicketThunk
 @ stub GetDeviceNamespacesThunk
 @ stub GetPrintCapabilitiesThunk2

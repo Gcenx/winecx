@@ -23,11 +23,9 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winerror.h"
-#include "winternl.h"
 #include "winnls.h"
+#include "ntuser.h"
 #include "wine/debug.h"
-#include "user_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(resource);
 WINE_DECLARE_DEBUG_CHANNEL(accel);
@@ -41,35 +39,32 @@ typedef struct
     WORD   pad;
 } PE_ACCEL;
 
-/* the accelerator user object */
-struct accelerator
-{
-    struct user_object obj;
-    unsigned int       count;
-    PE_ACCEL           table[1];
-};
-
 /**********************************************************************
  *			LoadAcceleratorsW	(USER32.@)
  */
 HACCEL WINAPI LoadAcceleratorsW(HINSTANCE instance, LPCWSTR name)
 {
-    struct accelerator *accel;
-    const PE_ACCEL *table;
+    const PE_ACCEL *pe_table;
+    ACCEL *table;
+    unsigned int i;
     HRSRC rsrc;
     HACCEL handle;
     DWORD count;
 
     if (!(rsrc = FindResourceW( instance, name, (LPWSTR)RT_ACCELERATOR ))) return 0;
-    table = LoadResource( instance, rsrc );
-    count = SizeofResource( instance, rsrc ) / sizeof(*table);
+    pe_table = LoadResource( instance, rsrc );
+    count = SizeofResource( instance, rsrc ) / sizeof(*pe_table);
     if (!count) return 0;
-    accel = HeapAlloc( GetProcessHeap(), 0, FIELD_OFFSET( struct accelerator, table[count] ));
-    if (!accel) return 0;
-    accel->count = count;
-    memcpy( accel->table, table, count * sizeof(*table) );
-    if (!(handle = alloc_user_handle( &accel->obj, USER_ACCEL )))
-        HeapFree( GetProcessHeap(), 0, accel );
+    table = HeapAlloc( GetProcessHeap(), 0, count * sizeof(*table) );
+    if (!table) return 0;
+    for (i = 0; i < count; i++)
+    {
+        table[i].fVirt = pe_table[i].fVirt;
+        table[i].key   = pe_table[i].key;
+        table[i].cmd   = pe_table[i].cmd;
+    }
+    handle = NtUserCreateAcceleratorTable( table, count );
+    HeapFree( GetProcessHeap(), 0, table );
     TRACE_(accel)("%p %s returning %p\n", instance, debugstr_w(name), handle );
     return handle;
 }
@@ -101,7 +96,7 @@ HACCEL WINAPI LoadAcceleratorsA(HINSTANCE instance,LPCSTR lpTableName)
 INT WINAPI CopyAcceleratorTableA(HACCEL src, LPACCEL dst, INT count)
 {
     char ch;
-    int i, ret = CopyAcceleratorTableW( src, dst, count );
+    int i, ret = NtUserCopyAcceleratorTable( src, dst, count );
 
     if (ret && dst)
     {
@@ -115,42 +110,13 @@ INT WINAPI CopyAcceleratorTableA(HACCEL src, LPACCEL dst, INT count)
     return ret;
 }
 
-/**********************************************************************
- *             CopyAcceleratorTableW   (USER32.@)
- */
-INT WINAPI CopyAcceleratorTableW(HACCEL src, LPACCEL dst, INT count)
-{
-    struct accelerator *accel;
-    int i;
-
-    if (!(accel = get_user_handle_ptr( src, USER_ACCEL ))) return 0;
-    if (accel == OBJ_OTHER_PROCESS)
-    {
-        FIXME( "other process handle %p?\n", src );
-        return 0;
-    }
-    if (dst)
-    {
-        if (count > accel->count) count = accel->count;
-        for (i = 0; i < count; i++)
-        {
-            dst[i].fVirt = accel->table[i].fVirt & 0x7f;
-            dst[i].key   = accel->table[i].key;
-            dst[i].cmd   = accel->table[i].cmd;
-        }
-    }
-    else count = accel->count;
-    release_user_handle_ptr( accel );
-    return count;
-}
-
 /*********************************************************************
  *                    CreateAcceleratorTableA   (USER32.@)
  */
-HACCEL WINAPI CreateAcceleratorTableA(LPACCEL lpaccel, INT count)
+HACCEL WINAPI CreateAcceleratorTableA( ACCEL *accel, INT count )
 {
-    struct accelerator *accel;
     HACCEL handle;
+    ACCEL *table;
     int i;
 
     if (count < 1)
@@ -158,77 +124,23 @@ HACCEL WINAPI CreateAcceleratorTableA(LPACCEL lpaccel, INT count)
         SetLastError( ERROR_INVALID_PARAMETER );
         return 0;
     }
-    accel = HeapAlloc( GetProcessHeap(), 0, FIELD_OFFSET( struct accelerator, table[count] ));
-    if (!accel) return 0;
-    accel->count = count;
+    table = HeapAlloc( GetProcessHeap(), 0, count * sizeof(*table) );
+    if (!table) return 0;
     for (i = 0; i < count; i++)
     {
-        accel->table[i].fVirt = lpaccel[i].fVirt;
-        accel->table[i].cmd   = lpaccel[i].cmd;
-        if (!(lpaccel[i].fVirt & FVIRTKEY))
+        table[i].fVirt = accel[i].fVirt;
+        table[i].cmd   = accel[i].cmd;
+        if (!(accel[i].fVirt & FVIRTKEY))
         {
-            char ch = lpaccel[i].key;
-            MultiByteToWideChar( CP_ACP, 0, &ch, 1, &accel->table[i].key, 1 );
+            char ch = accel[i].key;
+            MultiByteToWideChar( CP_ACP, 0, &ch, 1, &table[i].key, 1 );
         }
-        else accel->table[i].key = lpaccel[i].key;
+        else table[i].key = accel[i].key;
     }
-    if (!(handle = alloc_user_handle( &accel->obj, USER_ACCEL )))
-        HeapFree( GetProcessHeap(), 0, accel );
+    handle = NtUserCreateAcceleratorTable( table, count );
+    HeapFree( GetProcessHeap(), 0, table );
     TRACE_(accel)("returning %p\n", handle );
     return handle;
-}
-
-/*********************************************************************
- *                    CreateAcceleratorTableW   (USER32.@)
- */
-HACCEL WINAPI CreateAcceleratorTableW(LPACCEL lpaccel, INT count)
-{
-    struct accelerator *accel;
-    HACCEL handle;
-    int i;
-
-    if (count < 1)
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return 0;
-    }
-    accel = HeapAlloc( GetProcessHeap(), 0, FIELD_OFFSET( struct accelerator, table[count] ));
-    if (!accel) return 0;
-    accel->count = count;
-    for (i = 0; i < count; i++)
-    {
-        accel->table[i].fVirt = lpaccel[i].fVirt;
-        accel->table[i].key   = lpaccel[i].key;
-        accel->table[i].cmd   = lpaccel[i].cmd;
-    }
-    if (!(handle = alloc_user_handle( &accel->obj, USER_ACCEL )))
-        HeapFree( GetProcessHeap(), 0, accel );
-    TRACE_(accel)("returning %p\n", handle );
-    return handle;
-}
-
-/******************************************************************************
- * DestroyAcceleratorTable [USER32.@]
- * Destroys an accelerator table
- *
- * PARAMS
- *    handle [I] Handle to accelerator table
- *
- * RETURNS
- *    Success: TRUE
- *    Failure: FALSE
- */
-BOOL WINAPI DestroyAcceleratorTable( HACCEL handle )
-{
-    struct accelerator *accel;
-
-    if (!(accel = free_user_handle( handle, USER_ACCEL ))) return FALSE;
-    if (accel == OBJ_OTHER_PROCESS)
-    {
-        FIXME( "other process handle %p?\n", accel );
-        return FALSE;
-    }
-    return HeapFree( GetProcessHeap(), 0, accel );
 }
 
 /**********************************************************************

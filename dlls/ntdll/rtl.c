@@ -37,6 +37,7 @@
 #include "ntdll_misc.h"
 #include "in6addr.h"
 #include "ddk/ntddk.h"
+#include "ddk/ntifs.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 WINE_DECLARE_DEBUG_CHANNEL(debugstr);
@@ -310,11 +311,11 @@ static LONG WINAPI debug_exception_handler( EXCEPTION_POINTERS *eptr )
 NTSTATUS WINAPIV DbgPrint(LPCSTR fmt, ...)
 {
     NTSTATUS ret;
-    __ms_va_list args;
+    va_list args;
 
-    __ms_va_start(args, fmt);
+    va_start(args, fmt);
     ret = vDbgPrintEx(0, DPFLTR_ERROR_LEVEL, fmt, args);
-    __ms_va_end(args);
+    va_end(args);
     return ret;
 }
 
@@ -325,18 +326,18 @@ NTSTATUS WINAPIV DbgPrint(LPCSTR fmt, ...)
 NTSTATUS WINAPIV DbgPrintEx(ULONG iComponentId, ULONG Level, LPCSTR fmt, ...)
 {
     NTSTATUS ret;
-    __ms_va_list args;
+    va_list args;
 
-    __ms_va_start(args, fmt);
+    va_start(args, fmt);
     ret = vDbgPrintEx(iComponentId, Level, fmt, args);
-    __ms_va_end(args);
+    va_end(args);
     return ret;
 }
 
 /******************************************************************************
  *	vDbgPrintEx	[NTDLL.@]
  */
-NTSTATUS WINAPI vDbgPrintEx( ULONG id, ULONG level, LPCSTR fmt, __ms_va_list args )
+NTSTATUS WINAPI vDbgPrintEx( ULONG id, ULONG level, LPCSTR fmt, va_list args )
 {
     return vDbgPrintExWithPrefix( "", id, level, fmt, args );
 }
@@ -344,7 +345,7 @@ NTSTATUS WINAPI vDbgPrintEx( ULONG id, ULONG level, LPCSTR fmt, __ms_va_list arg
 /******************************************************************************
  *	vDbgPrintExWithPrefix  [NTDLL.@]
  */
-NTSTATUS WINAPI vDbgPrintExWithPrefix( LPCSTR prefix, ULONG id, ULONG level, LPCSTR fmt, __ms_va_list args )
+NTSTATUS WINAPI vDbgPrintExWithPrefix( LPCSTR prefix, ULONG id, ULONG level, LPCSTR fmt, va_list args )
 {
     ULONG level_mask = level <= 31 ? (1 << level) : level;
     SIZE_T len = strlen( prefix );
@@ -428,7 +429,18 @@ void WINAPI RtlInitializeGenericTable(RTL_GENERIC_TABLE *table, PRTL_GENERIC_COM
                                       PRTL_GENERIC_ALLOCATE_ROUTINE allocate, PRTL_GENERIC_FREE_ROUTINE free,
                                       void *context)
 {
-    FIXME("(%p, %p, %p, %p, %p) stub!\n", table, compare, allocate, free, context);
+    TRACE("(%p, %p, %p, %p, %p)\n", table, compare, allocate, free, context);
+
+    table->TableRoot = NULL;
+    table->InsertOrderList.Flink = &table->InsertOrderList;
+    table->InsertOrderList.Blink = &table->InsertOrderList;
+    table->OrderedPointer = &table->InsertOrderList;
+    table->NumberGenericTableElements = 0;
+    table->WhichOrderedElement = 0;
+    table->CompareRoutine = compare;
+    table->AllocateRoutine = allocate;
+    table->FreeRoutine = free;
+    table->TableContext = context;
 }
 
 /******************************************************************************
@@ -448,8 +460,26 @@ void * WINAPI RtlEnumerateGenericTableWithoutSplaying(RTL_GENERIC_TABLE *table, 
  */
 ULONG WINAPI RtlNumberGenericTableElements(RTL_GENERIC_TABLE *table)
 {
-    FIXME("(%p) stub!\n", table);
-    return 0;
+    TRACE("(%p)\n", table);
+    return table->NumberGenericTableElements;
+}
+
+/******************************************************************************
+ *  RtlGetElementGenericTable           [NTDLL.@]
+ */
+void * WINAPI RtlGetElementGenericTable(RTL_GENERIC_TABLE *table, ULONG index)
+{
+    FIXME("(%p, %u) stub!\n", table, index);
+    return NULL;
+}
+
+/******************************************************************************
+ *  RtlLookupElementGenericTable           [NTDLL.@]
+ */
+void * WINAPI RtlLookupElementGenericTable(RTL_GENERIC_TABLE *table, void *buffer)
+{
+    FIXME("(%p, %p) stub!\n", table, buffer);
+    return NULL;
 }
 
 /******************************************************************************
@@ -2140,6 +2170,14 @@ void WINAPI RtlGetCurrentProcessorNumberEx(PROCESSOR_NUMBER *processor)
 }
 
 /***********************************************************************
+ *           RtlIsProcessorFeaturePresent [NTDLL.@]
+ */
+BOOLEAN WINAPI RtlIsProcessorFeaturePresent( UINT feature )
+{
+    return feature < PROCESSOR_FEATURE_MAX && user_shared_data->ProcessorFeatures[feature];
+}
+
+/***********************************************************************
  *           RtlInitializeGenericTableAvl  (NTDLL.@)
  */
 void WINAPI RtlInitializeGenericTableAvl(PRTL_AVL_TABLE table, PRTL_AVL_COMPARE_ROUTINE compare,
@@ -2164,4 +2202,13 @@ NTSTATUS WINAPI RtlQueryPackageIdentity(HANDLE token, WCHAR *fullname, SIZE_T *f
 {
     FIXME("(%p, %p, %p, %p, %p, %p): stub\n", token, fullname, fullname_size, appid, appid_size, packaged);
     return STATUS_NOT_FOUND;
+}
+
+/*********************************************************************
+ *           RtlQueryProcessPlaceholderCompatibilityMode [NTDLL.@]
+ */
+char WINAPI RtlQueryProcessPlaceholderCompatibilityMode(void)
+{
+    FIXME("stub\n");
+    return PHCM_APPLICATION_DEFAULT;
 }

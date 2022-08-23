@@ -296,7 +296,7 @@ static HRESULT RuntimeHost_Invoke(RuntimeHost *This, MonoDomain *domain,
     hr = RuntimeHost_DoInvoke(This, domain, methodname, method, obj, args, result);
     if (FAILED(hr))
     {
-        ERR("Method %s.%s:%s raised an exception, hr=%x\n", namespace, typename, methodname, hr);
+        ERR("Method %s.%s:%s raised an exception, hr=%lx\n", namespace, typename, methodname, hr);
     }
 
     domain_restore(prev_domain);
@@ -340,7 +340,7 @@ static HRESULT RuntimeHost_VirtualInvoke(RuntimeHost *This, MonoDomain *domain,
     hr = RuntimeHost_DoInvoke(This, domain, methodname, method, obj, args, result);
     if (FAILED(hr))
     {
-        ERR("Method %s.%s:%s raised an exception, hr=%x\n", namespace, typename, methodname, hr);
+        ERR("Method %s.%s:%s raised an exception, hr=%lx\n", namespace, typename, methodname, hr);
     }
 
     domain_restore(prev_domain);
@@ -482,7 +482,7 @@ void RuntimeHost_ExitProcess(RuntimeHost *This, INT exitcode)
     hr = RuntimeHost_GetDefaultDomain(This, NULL, &domain);
     if (FAILED(hr))
     {
-        ERR("Cannot get domain, hr=%x\n", hr);
+        ERR("Cannot get domain, hr=%lx\n", hr);
         return;
     }
 
@@ -842,14 +842,14 @@ static HRESULT WINAPI CLRRuntimeHost_GetCLRControl(ICLRRuntimeHost* iface,
 static HRESULT WINAPI CLRRuntimeHost_UnloadAppDomain(ICLRRuntimeHost* iface,
     DWORD dwAppDomainId, BOOL fWaitUntilDone)
 {
-    FIXME("(%p,%u,%i)\n", iface, dwAppDomainId, fWaitUntilDone);
+    FIXME("(%p,%lu,%i)\n", iface, dwAppDomainId, fWaitUntilDone);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI CLRRuntimeHost_ExecuteInAppDomain(ICLRRuntimeHost* iface,
     DWORD dwAppDomainId, FExecuteInAppDomainCallback pCallback, void *cookie)
 {
-    FIXME("(%p,%u,%p,%p)\n", iface, dwAppDomainId, pCallback, cookie);
+    FIXME("(%p,%lu,%p,%p)\n", iface, dwAppDomainId, pCallback, cookie);
     return E_NOTIMPL;
 }
 
@@ -864,7 +864,7 @@ static HRESULT WINAPI CLRRuntimeHost_ExecuteApplication(ICLRRuntimeHost* iface,
     LPCWSTR pwzAppFullName, DWORD dwManifestPaths, LPCWSTR *ppwzManifestPaths,
     DWORD dwActivationData, LPCWSTR *ppwzActivationData, int *pReturnValue)
 {
-    FIXME("(%p,%s,%u,%u)\n", iface, debugstr_w(pwzAppFullName), dwManifestPaths, dwActivationData);
+    FIXME("(%p,%s,%lu,%lu)\n", iface, debugstr_w(pwzAppFullName), dwManifestPaths, dwActivationData);
     return E_NOTIMPL;
 }
 
@@ -1093,7 +1093,7 @@ static void get_utf8_args(int *argc, char ***argv)
 
     (*argv)[*argc] = NULL;
 
-    HeapFree(GetProcessHeap(), 0, argvw);
+    LocalFree(argvw);
 }
 
 #if __i386__
@@ -1248,7 +1248,7 @@ DWORD WINAPI GetTokenForVTableEntry(HINSTANCE hinst, BYTE **ppVTEntry)
     }
     LeaveCriticalSection(&fixup_list_cs);
 
-    TRACE("<-- %x\n", result);
+    TRACE("<-- %lx\n", result);
     return result;
 }
 
@@ -1311,7 +1311,6 @@ static void CDECL ReallyFixupVTable(struct dll_fixup *fixup)
                 ULONG_PTR *tokens = fixup->tokens;
                 for (i=0; i<fixup->fixup->count; i++)
                 {
-                    TRACE("%#lx\n", tokens[i]);
                     vtable[i] = mono_marshal_get_vtfixup_ftnptr(
                         image, tokens[i], fixup->fixup->type);
                 }
@@ -1330,7 +1329,7 @@ static void CDECL ReallyFixupVTable(struct dll_fixup *fixup)
 
     if (!fixup->done)
     {
-        ERR("unable to fixup vtable, hr=%x, status=%d\n", hr, status);
+        ERR("unable to fixup vtable, hr=%lx, status=%d\n", hr, status);
         /* If we returned now, we'd get an infinite loop. */
         assert(0);
     }
@@ -1355,7 +1354,6 @@ static void FixupVTableEntry(HMODULE hmodule, VTableFixup *vtable_fixup)
     fixup->vtable = (BYTE*)hmodule + vtable_fixup->rva;
     fixup->done = FALSE;
 
-    TRACE("vtable_fixup->type=0x%x\n",vtable_fixup->type);
 #if __x86_64__
     if (vtable_fixup->type & COR_VTABLE_64BIT)
 #else
@@ -1416,7 +1414,7 @@ static void FixupVTable(HMODULE hmodule)
         assembly_release(assembly);
     }
     else
-        ERR("failed to read CLR headers, hr=%x\n", hr);
+        ERR("failed to read CLR headers, hr=%lx\n", hr);
 }
 
 __int32 WINAPI _CorExeMain(void)
@@ -1443,10 +1441,7 @@ __int32 WINAPI _CorExeMain(void)
 
     GetModuleFileNameW(NULL, filename, MAX_PATH);
 
-    TRACE("%s", debugstr_w(filename));
-    for (i=0; i<argc; i++)
-        TRACE(" %s", debugstr_a(argv[i]));
-    TRACE("\n");
+    TRACE("%s argc=%i\n", debugstr_w(filename), argc);
 
     filenameA = WtoA(filename);
     if (!filenameA)
@@ -1540,7 +1535,7 @@ BOOL WINAPI _CorDllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     ASSEMBLY *assembly=NULL;
     HRESULT hr;
 
-    TRACE("(%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
+    TRACE("(%p, %ld, %p)\n", hinstDLL, fdwReason, lpvReserved);
 
     hr = assembly_from_hmodule(&assembly, hinstDLL);
     if (SUCCEEDED(hr))
@@ -1560,7 +1555,7 @@ BOOL WINAPI _CorDllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
             return NativeEntryPoint(hinstDLL, fdwReason, lpvReserved);
     }
     else
-        ERR("failed to read CLR headers, hr=%x\n", hr);
+        ERR("failed to read CLR headers, hr=%lx\n", hr);
 
     return TRUE;
 }
@@ -1668,7 +1663,7 @@ static BOOL try_create_registration_free_com(REFIID clsid, WCHAR *classname, UIN
     {
         DWORD error = GetLastError();
         if (error != ERROR_SXS_KEY_NOT_FOUND)
-            ERR("Failed to find guid: %d\n", error);
+            ERR("Failed to find guid: %ld\n", error);
         goto end;
     }
 
@@ -1677,7 +1672,7 @@ static BOOL try_create_registration_free_com(REFIID clsid, WCHAR *classname, UIN
     if (!QueryActCtxW(0, guid_info.hActCtx, &guid_info.ulAssemblyRosterIndex,
             AssemblyDetailedInformationInActivationContext, assembly_info, bytes_assembly_info, &bytes_assembly_info))
     {
-        ERR("QueryActCtxW failed: %d!\n", GetLastError());
+        ERR("QueryActCtxW failed: %ld!\n", GetLastError());
         goto end;
     }
 
@@ -1721,15 +1716,11 @@ end:
 
 #define CHARS_IN_GUID 39
 
-HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
+HRESULT create_monodata(REFCLSID clsid, LPVOID *ppObj)
 {
-    static const WCHAR wszAssembly[] = {'A','s','s','e','m','b','l','y',0};
-    static const WCHAR wszCodebase[] = {'C','o','d','e','B','a','s','e',0};
-    static const WCHAR wszClass[] = {'C','l','a','s','s',0};
-    static const WCHAR wszFileSlash[] = {'f','i','l','e',':','/','/','/',0};
-    static const WCHAR wszCLSIDSlash[] = {'C','L','S','I','D','\\',0};
-    static const WCHAR wszInprocServer32[] = {'\\','I','n','p','r','o','c','S','e','r','v','e','r','3','2',0};
-    static const WCHAR wszDLL[] = {'.','d','l','l',0};
+    static const WCHAR wszFileSlash[] = L"file:///";
+    static const WCHAR wszCLSIDSlash[] = L"CLSID\\";
+    static const WCHAR wszInprocServer32[] = L"\\InprocServer32";
     WCHAR path[CHARS_IN_GUID + ARRAY_SIZE(wszCLSIDSlash) + ARRAY_SIZE(wszInprocServer32) - 1];
     MonoDomain *domain;
     MonoAssembly *assembly;
@@ -1748,7 +1739,7 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
     DWORD dwBufLen = 350;
 
     lstrcpyW(path, wszCLSIDSlash);
-    StringFromGUID2(riid, path + lstrlenW(wszCLSIDSlash), CHARS_IN_GUID);
+    StringFromGUID2(clsid, path + lstrlenW(wszCLSIDSlash), CHARS_IN_GUID);
     lstrcatW(path, wszInprocServer32);
 
     TRACE("Registry key: %s\n", debugstr_w(path));
@@ -1756,7 +1747,53 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
     res = RegOpenKeyExW(HKEY_CLASSES_ROOT, path, 0, KEY_READ, &key);
     if (res != ERROR_FILE_NOT_FOUND)
     {
-        res = RegGetValueW( key, NULL, wszClass, RRF_RT_REG_SZ, NULL, classname, &dwBufLen);
+        res = RegOpenKeyExW( key, L"Server", 0, KEY_READ, &subkey );
+        if (res == ERROR_SUCCESS)
+        {
+            /* Not a managed class, just chain through LoadLibraryShim */
+            HMODULE module;
+            HRESULT (WINAPI *pDllGetClassObject)(REFCLSID,REFIID,LPVOID*);
+            IClassFactory *classfactory;
+
+            dwBufLen = ARRAY_SIZE( filename );
+            res = RegGetValueW( subkey, NULL, NULL, RRF_RT_REG_SZ, NULL, filename, &dwBufLen );
+
+            RegCloseKey( subkey );
+
+            if (res != ERROR_SUCCESS)
+            {
+                WARN("Can't read default value from Server subkey.\n");
+                hr = CLASS_E_CLASSNOTAVAILABLE;
+                goto cleanup;
+            }
+
+            hr = LoadLibraryShim( filename, L"v4.0.30319", NULL, &module);
+            if (FAILED(hr))
+            {
+                WARN("Can't load %s.\n", debugstr_w(filename));
+                goto cleanup;
+            }
+
+            pDllGetClassObject = (void*)GetProcAddress( module, "DllGetClassObject" );
+            if (!pDllGetClassObject)
+            {
+                WARN("Can't get DllGetClassObject from %s.\n", debugstr_w(filename));
+                hr = CLASS_E_CLASSNOTAVAILABLE;
+                goto cleanup;
+            }
+
+            hr = pDllGetClassObject( clsid, &IID_IClassFactory, (void**)&classfactory );
+            if (SUCCEEDED(hr))
+            {
+                hr = IClassFactory_CreateInstance( classfactory, NULL, &IID_IUnknown, ppObj );
+
+                IClassFactory_Release( classfactory );
+            }
+
+            goto cleanup;
+        }
+
+        res = RegGetValueW( key, NULL, L"Class", RRF_RT_REG_SZ, NULL, classname, &dwBufLen);
         if(res != ERROR_SUCCESS)
         {
             WARN("Class value cannot be found.\n");
@@ -1767,7 +1804,7 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
         TRACE("classname (%s)\n", debugstr_w(classname));
 
         dwBufLen = MAX_PATH + 8;
-        res = RegGetValueW( key, NULL, wszCodebase, RRF_RT_REG_SZ, NULL, codebase, &dwBufLen);
+        res = RegGetValueW( key, NULL, L"CodeBase", RRF_RT_REG_SZ, NULL, codebase, &dwBufLen);
         if(res == ERROR_SUCCESS)
         {
             /* Strip file:/// */
@@ -1802,7 +1839,7 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
                 if (res != ERROR_SUCCESS)
                     goto cleanup;
                 dwBufLen = MAX_PATH + 8;
-                res = RegGetValueW(subkey, NULL, wszAssembly, RRF_RT_REG_SZ, NULL, assemblyname, &dwBufLen);
+                res = RegGetValueW(subkey, NULL, L"Assembly", RRF_RT_REG_SZ, NULL, assemblyname, &dwBufLen);
                 RegCloseKey(subkey);
                 if (res != ERROR_SUCCESS)
                     goto cleanup;
@@ -1810,7 +1847,7 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
             else
             {
                 dwBufLen = MAX_PATH + 8;
-                res = RegGetValueW(key, NULL, wszAssembly, RRF_RT_REG_SZ, NULL, assemblyname, &dwBufLen);
+                res = RegGetValueW(key, NULL, L"Assembly", RRF_RT_REG_SZ, NULL, assemblyname, &dwBufLen);
                 if (res != ERROR_SUCCESS)
                     goto cleanup;
             }
@@ -1835,13 +1872,13 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
                 *(ns) = '\0';
                 lstrcatW(filename, assemblyname);
                 *(ns) = '.';
-                lstrcatW(filename, wszDLL);
+                lstrcatW(filename, L".dll");
             }
         }
     }
     else
     {
-        if (!try_create_registration_free_com(riid, classname, ARRAY_SIZE(classname), filename, ARRAY_SIZE(filename)))
+        if (!try_create_registration_free_com(clsid, classname, ARRAY_SIZE(classname), filename, ARRAY_SIZE(filename)))
             return CLASS_E_CLASSNOTAVAILABLE;
 
         TRACE("classname (%s)\n", debugstr_w(classname));

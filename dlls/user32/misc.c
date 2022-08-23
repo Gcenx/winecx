@@ -443,6 +443,24 @@ BOOL WINAPI UnregisterPowerSettingNotification(HPOWERNOTIFY handle)
     return TRUE;
 }
 
+/**********************************************************************
+ * RegisterSuspendResumeNotification (USER32.@)
+ */
+HPOWERNOTIFY WINAPI RegisterSuspendResumeNotification(HANDLE recipient, DWORD flags)
+{
+    FIXME("%p, %#x: stub.\n", recipient, flags);
+    return (HPOWERNOTIFY)0xdeadbeef;
+}
+
+/**********************************************************************
+ * UnregisterSuspendResumeNotification (USER32.@)
+ */
+BOOL WINAPI UnregisterSuspendResumeNotification(HPOWERNOTIFY handle)
+{
+    FIXME("%p: stub.\n", handle);
+    return TRUE;
+}
+
 /*****************************************************************************
  * GetGestureConfig (USER32.@)
  */
@@ -606,7 +624,7 @@ LRESULT WINAPI ImeWndProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
 
     if (imm_get_ui_window && is_ime_ui_msg(msg))
     {
-        if ((uiwnd = imm_get_ui_window(GetKeyboardLayout(0))))
+        if ((uiwnd = imm_get_ui_window( NtUserGetKeyboardLayout(0) )))
             return SendMessageA(uiwnd, msg, wParam, lParam);
         return FALSE;
     }
@@ -626,7 +644,7 @@ LRESULT WINAPI ImeWndProcW( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
 
     if (imm_get_ui_window && is_ime_ui_msg(msg))
     {
-        if ((uiwnd = imm_get_ui_window(GetKeyboardLayout(0))))
+        if ((uiwnd = imm_get_ui_window( NtUserGetKeyboardLayout(0) )))
             return SendMessageW(uiwnd, msg, wParam, lParam);
         return FALSE;
     }

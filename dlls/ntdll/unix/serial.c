@@ -25,32 +25,20 @@
 #endif
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
-#ifdef HAVE_TERMIOS_H
 #include <termios.h>
-#endif
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+#include <unistd.h>
 #include <fcntl.h>
-#ifdef HAVE_SYS_STAT_H
-# include <sys/stat.h>
-#endif
+#include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/ioctl.h>
 #ifdef HAVE_SYS_FILIO_H
 # include <sys/filio.h>
-#endif
-#ifdef HAVE_SYS_IOCTL_H
-#include <sys/ioctl.h>
-#endif
-#ifdef HAVE_SYS_POLL_H
-# include <sys/poll.h>
 #endif
 #ifdef HAVE_SYS_MODEM_H
 # include <sys/modem.h>
@@ -841,7 +829,7 @@ typedef struct async_commio
 {
     HANDLE              hDevice;
     DWORD*              events;
-    IO_STATUS_BLOCK*    iosb;
+    client_ptr_t        iosb;
     HANDLE              hEvent;
     DWORD               evtmask;
     DWORD               cookie;
@@ -995,23 +983,15 @@ static void CALLBACK wait_for_event(LPVOID arg)
         }
         if (needs_close) close( fd );
     }
-    if (commio->iosb)
-    {
-        if (*commio->events)
-        {
-            commio->iosb->u.Status = STATUS_SUCCESS;
-            commio->iosb->Information = sizeof(DWORD);
-        }
-        else
-            commio->iosb->u.Status = STATUS_CANCELLED;
-    }
+    if (*commio->events) set_async_iosb( commio->iosb, STATUS_SUCCESS, sizeof(DWORD) );
+    else set_async_iosb( commio->iosb, STATUS_CANCELLED, 0 );
     stop_waiting(commio->hDevice);
     if (commio->hEvent) NtSetEvent(commio->hEvent, NULL);
     free( commio );
     NtTerminateThread( GetCurrentThread(), 0 );
 }
 
-static NTSTATUS wait_on(HANDLE hDevice, int fd, HANDLE hEvent, PIO_STATUS_BLOCK piosb, DWORD* events)
+static NTSTATUS wait_on(HANDLE hDevice, int fd, HANDLE hEvent, client_ptr_t iosb_ptr, DWORD* events)
 {
     async_commio*       commio;
     NTSTATUS            status;
@@ -1020,13 +1000,12 @@ static NTSTATUS wait_on(HANDLE hDevice, int fd, HANDLE hEvent, PIO_STATUS_BLOCK 
     if ((status = NtResetEvent(hEvent, NULL)))
         return status;
 
-    /* Due to passing it to NtCreateThreadEx */
-    commio = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(async_commio) );
+    commio = malloc( sizeof(async_commio) );
     if (!commio) return STATUS_NO_MEMORY;
 
     commio->hDevice = hDevice;
     commio->events  = events;
-    commio->iosb    = piosb;
+    commio->iosb    = iosb_ptr;
     commio->hEvent  = hEvent;
     commio->pending_write = 0;
     status = get_wait_mask(commio->hDevice, &commio->evtmask, &commio->cookie, (commio->evtmask & EV_TXEMPTY) ? &commio->pending_write : NULL, TRUE);
@@ -1103,7 +1082,7 @@ error_caps:
 #endif
 out_now:
     stop_waiting(commio->hDevice);
-    RtlFreeHeap( GetProcessHeap(), 0, commio );
+    free( commio );
     return status;
 }
 
@@ -1117,7 +1096,7 @@ static NTSTATUS xmit_immediate(HANDLE hDevice, int fd, const char* ptr)
 }
 
 static NTSTATUS io_control( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
-                            IO_STATUS_BLOCK *io, ULONG code, void *in_buffer,
+                            client_ptr_t io, ULONG code, void *in_buffer,
                             ULONG in_size, void *out_buffer, ULONG out_size )
 {
     DWORD sz = 0, access = FILE_READ_DATA;
@@ -1125,8 +1104,8 @@ static NTSTATUS io_control( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, vo
     int fd = -1, needs_close = 0;
     enum server_fd_type type;
 
-    TRACE("%p %s %p %d %p %d %p\n",
-          device, iocode2str(code), in_buffer, in_size, out_buffer, out_size, io);
+    TRACE("%p %s %p %d %p %d\n",
+          device, iocode2str(code), in_buffer, in_size, out_buffer, out_size);
 
     switch (code)
     {
@@ -1137,8 +1116,6 @@ static NTSTATUS io_control( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, vo
         /* these are handled on the server side */
         return STATUS_NOT_SUPPORTED;
     }
-
-    io->Information = 0;
 
     if ((status = server_get_unix_fd( device, access, &fd, &needs_close, &type, NULL ))) goto error;
     if (type != FD_TYPE_SERIAL)
@@ -1331,8 +1308,7 @@ static NTSTATUS io_control( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, vo
     }
     if (needs_close) close( fd );
  error:
-    io->u.Status = status;
-    io->Information = sz;
+    set_async_iosb( io, status, sz );
     if (event && status != STATUS_PENDING) NtSetEvent(event, NULL);
     return status;
 }
@@ -1341,7 +1317,7 @@ static NTSTATUS io_control( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, vo
  *		serial_DeviceIoControl
  */
 NTSTATUS serial_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
-                                 IO_STATUS_BLOCK *io, ULONG code, void *in_buffer,
+                                 client_ptr_t io, ULONG code, void *in_buffer,
                                  ULONG in_size, void *out_buffer, ULONG out_size )
 {
     NTSTATUS    status;

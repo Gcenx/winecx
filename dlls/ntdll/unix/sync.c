@@ -26,27 +26,20 @@
 #endif
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
+#include <sys/types.h>
+#include <sys/mman.h>
 #ifdef HAVE_SYS_SYSCALL_H
 #include <sys/syscall.h>
 #endif
-#ifdef HAVE_SYS_TIME_H
-# include <sys/time.h>
-#endif
-#ifdef HAVE_POLL_H
+#include <sys/time.h>
 #include <poll.h>
-#endif
-#ifdef HAVE_SYS_POLL_H
-# include <sys/poll.h>
-#endif
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+#include <unistd.h>
 #ifdef HAVE_SCHED_H
 # include <sched.h>
 #endif
@@ -69,7 +62,6 @@
 #include "winternl.h"
 #include "ddk/wdm.h"
 #include "wine/server.h"
-#include "wine/exception.h"
 #include "wine/debug.h"
 #include "unix_private.h"
 #include "esync.h"
@@ -78,9 +70,11 @@ WINE_DEFAULT_DEBUG_CHANNEL(sync);
 
 HANDLE keyed_event = 0;
 
-static const LARGE_INTEGER zero_timeout;
-
-static pthread_mutex_t addr_mutex = PTHREAD_MUTEX_INITIALIZER;
+static const char *debugstr_timeout( const LARGE_INTEGER *timeout )
+{
+    if (!timeout) return "(infinite)";
+    return wine_dbgstr_longlong( timeout->QuadPart );
+}
 
 /* return a monotonic time counter, in Win32 ticks */
 static inline ULONGLONG monotonic_counter(void)
@@ -113,29 +107,28 @@ static inline ULONGLONG monotonic_counter(void)
 
 #define FUTEX_WAIT 0
 #define FUTEX_WAKE 1
-#define FUTEX_WAIT_BITSET 9
-#define FUTEX_WAKE_BITSET 10
 
 static int futex_private = 128;
 
 static inline int futex_wait( const int *addr, int val, struct timespec *timeout )
 {
+#if (defined(__i386__) || defined(__arm__)) && _TIME_BITS==64
+    if (timeout && sizeof(*timeout) != 8)
+    {
+        struct {
+            long tv_sec;
+            long tv_nsec;
+        } timeout32 = { timeout->tv_sec, timeout->tv_nsec };
+
+        return syscall( __NR_futex, addr, FUTEX_WAIT | futex_private, val, &timeout32, 0, 0 );
+    }
+#endif
     return syscall( __NR_futex, addr, FUTEX_WAIT | futex_private, val, timeout, 0, 0 );
 }
 
 static inline int futex_wake( const int *addr, int val )
 {
     return syscall( __NR_futex, addr, FUTEX_WAKE | futex_private, val, NULL, 0, 0 );
-}
-
-static inline int futex_wait_bitset( const int *addr, int val, struct timespec *timeout, int mask )
-{
-    return syscall( __NR_futex, addr, FUTEX_WAIT_BITSET | futex_private, val, timeout, 0, mask );
-}
-
-static inline int futex_wake_bitset( const int *addr, int val, int mask )
-{
-    return syscall( __NR_futex, addr, FUTEX_WAKE_BITSET | futex_private, val, NULL, 0, mask );
 }
 
 static inline int use_futexes(void)
@@ -155,56 +148,11 @@ static inline int use_futexes(void)
     return supported;
 }
 
-static int *get_futex(void **ptr)
-{
-    if (sizeof(void *) == 8)
-        return (int *)((((ULONG_PTR)ptr) + 3) & ~3);
-    else if (!(((ULONG_PTR)ptr) & 3))
-        return (int *)ptr;
-    else
-        return NULL;
-}
-
-static void timespec_from_timeout( struct timespec *timespec, const LARGE_INTEGER *timeout )
-{
-    LARGE_INTEGER now;
-    timeout_t diff;
-
-    if (timeout->QuadPart > 0)
-    {
-        NtQuerySystemTime( &now );
-        diff = timeout->QuadPart - now.QuadPart;
-    }
-    else
-        diff = -timeout->QuadPart;
-
-    timespec->tv_sec  = diff / TICKSPERSEC;
-    timespec->tv_nsec = (diff % TICKSPERSEC) * 100;
-}
-
 #endif
 
 
-static BOOL compare_addr( const void *addr, const void *cmp, SIZE_T size )
-{
-    switch (size)
-    {
-        case 1:
-            return (*(const UCHAR *)addr == *(const UCHAR *)cmp);
-        case 2:
-            return (*(const USHORT *)addr == *(const USHORT *)cmp);
-        case 4:
-            return (*(const ULONG *)addr == *(const ULONG *)cmp);
-        case 8:
-            return (*(const ULONG64 *)addr == *(const ULONG64 *)cmp);
-    }
-
-    return FALSE;
-}
-
-
 /* create a struct security_descriptor and contained information in one contiguous piece of memory */
-NTSTATUS alloc_object_attributes( const OBJECT_ATTRIBUTES *attr, struct object_attributes * HOSTPTR * HOSTPTR ret,
+NTSTATUS alloc_object_attributes( const OBJECT_ATTRIBUTES *attr, struct object_attributes **ret,
                                   data_size_t *ret_len )
 {
     unsigned int len = sizeof(**ret);
@@ -250,6 +198,7 @@ NTSTATUS alloc_object_attributes( const OBJECT_ATTRIBUTES *attr, struct object_a
 
     if (attr->ObjectName)
     {
+        if ((ULONG_PTR)attr->ObjectName->Buffer & (sizeof(WCHAR) - 1)) return STATUS_DATATYPE_MISALIGNMENT;
         if (attr->ObjectName->Length & (sizeof(WCHAR) - 1)) return STATUS_OBJECT_NAME_INVALID;
         len += attr->ObjectName->Length;
     }
@@ -264,8 +213,8 @@ NTSTATUS alloc_object_attributes( const OBJECT_ATTRIBUTES *attr, struct object_a
 
     if (attr->SecurityDescriptor)
     {
-        struct security_descriptor * HOSTPTR descr = (struct security_descriptor * HOSTPTR)(*ret + 1);
-        unsigned char * HOSTPTR ptr = (unsigned char * HOSTPTR)(descr + 1);
+        struct security_descriptor *descr = (struct security_descriptor *)(*ret + 1);
+        unsigned char *ptr = (unsigned char *)(descr + 1);
 
         descr->control = sd->Control & ~SE_SELF_RELATIVE;
         if (owner) descr->owner_len = offsetof( SID, SubAuthority[owner->SubAuthorityCount] );
@@ -286,7 +235,7 @@ NTSTATUS alloc_object_attributes( const OBJECT_ATTRIBUTES *attr, struct object_a
 
     if (attr->ObjectName)
     {
-        unsigned char * HOSTPTR ptr = (unsigned char * HOSTPTR)(*ret + 1) + (*ret)->sd_len;
+        unsigned char *ptr = (unsigned char *)(*ret + 1) + (*ret)->sd_len;
         (*ret)->name_len = attr->ObjectName->Length;
         memcpy( ptr, attr->ObjectName->Buffer, (*ret)->name_len );
     }
@@ -302,6 +251,7 @@ static NTSTATUS validate_open_object_attributes( const OBJECT_ATTRIBUTES *attr )
 
     if (attr->ObjectName)
     {
+        if ((ULONG_PTR)attr->ObjectName->Buffer & (sizeof(WCHAR) - 1)) return STATUS_DATATYPE_MISALIGNMENT;
         if (attr->ObjectName->Length & (sizeof(WCHAR) - 1)) return STATUS_OBJECT_NAME_INVALID;
     }
     else if (attr->RootDirectory) return STATUS_OBJECT_NAME_INVALID;
@@ -318,8 +268,9 @@ NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJ
 {
     NTSTATUS ret;
     data_size_t len;
-    struct object_attributes * HOSTPTR objattr;
+    struct object_attributes *objattr;
 
+    *handle = 0;
     if (max <= 0 || initial < 0 || initial > max) return STATUS_INVALID_PARAMETER;
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
 
@@ -348,6 +299,8 @@ NTSTATUS WINAPI NtCreateSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJ
 NTSTATUS WINAPI NtOpenSemaphore( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr )
 {
     NTSTATUS ret;
+
+    *handle = 0;
 
     if (do_esync())
         return esync_open_semaphore( handle, access, attr );
@@ -438,7 +391,10 @@ NTSTATUS WINAPI NtCreateEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_
 {
     NTSTATUS ret;
     data_size_t len;
-    struct object_attributes * HOSTPTR objattr;
+    struct object_attributes *objattr;
+
+    *handle = 0;
+    if (type != NotificationEvent && type != SynchronizationEvent) return STATUS_INVALID_PARAMETER;
 
     if (do_esync())
         return esync_create_event( handle, access, attr, type, state );
@@ -468,6 +424,7 @@ NTSTATUS WINAPI NtOpenEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_AT
 {
     NTSTATUS ret;
 
+    *handle = 0;
     if ((ret = validate_open_object_attributes( attr ))) return ret;
 
     if (do_esync())
@@ -493,6 +450,7 @@ NTSTATUS WINAPI NtOpenEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_AT
  */
 NTSTATUS WINAPI NtSetEvent( HANDLE handle, LONG *prev_state )
 {
+    /* This comment is a dummy to make sure this patch applies in the right place. */
     NTSTATUS ret;
 
     if (do_esync())
@@ -515,6 +473,7 @@ NTSTATUS WINAPI NtSetEvent( HANDLE handle, LONG *prev_state )
  */
 NTSTATUS WINAPI NtResetEvent( HANDLE handle, LONG *prev_state )
 {
+    /* This comment is a dummy to make sure this patch applies in the right place. */
     NTSTATUS ret;
 
     if (do_esync())
@@ -610,7 +569,9 @@ NTSTATUS WINAPI NtCreateMutant( HANDLE *handle, ACCESS_MASK access, const OBJECT
 {
     NTSTATUS ret;
     data_size_t len;
-    struct object_attributes * HOSTPTR objattr;
+    struct object_attributes *objattr;
+
+    *handle = 0;
 
     if (do_esync())
         return esync_create_mutex( handle, access, attr, owned );
@@ -639,6 +600,7 @@ NTSTATUS WINAPI NtOpenMutant( HANDLE *handle, ACCESS_MASK access, const OBJECT_A
 {
     NTSTATUS ret;
 
+    *handle = 0;
     if ((ret = validate_open_object_attributes( attr ))) return ret;
 
     if (do_esync())
@@ -725,8 +687,9 @@ NTSTATUS WINAPI NtCreateJobObject( HANDLE *handle, ACCESS_MASK access, const OBJ
 {
     NTSTATUS ret;
     data_size_t len;
-    struct object_attributes * HOSTPTR objattr;
+    struct object_attributes *objattr;
 
+    *handle = 0;
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
 
     SERVER_START_REQ( create_job )
@@ -749,6 +712,7 @@ NTSTATUS WINAPI NtOpenJobObject( HANDLE *handle, ACCESS_MASK access, const OBJEC
 {
     NTSTATUS ret;
 
+    *handle = 0;
     if ((ret = validate_open_object_attributes( attr ))) return ret;
 
     SERVER_START_REQ( open_job )
@@ -823,11 +787,40 @@ NTSTATUS WINAPI NtQueryInformationJobObject( HANDLE handle, JOBOBJECTINFOCLASS c
     case JobObjectBasicProcessIdList:
     {
         JOBOBJECT_BASIC_PROCESS_ID_LIST *process = info;
+        DWORD count, i;
 
         if (len < sizeof(*process)) return STATUS_INFO_LENGTH_MISMATCH;
-        memset( process, 0, sizeof(*process) );
-        if (ret_len) *ret_len = sizeof(*process);
-        return STATUS_SUCCESS;
+
+        count  = len - offsetof( JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList );
+        count /= sizeof(process->ProcessIdList[0]);
+
+        SERVER_START_REQ( get_job_info )
+        {
+            req->handle = wine_server_user_handle(handle);
+            wine_server_set_reply(req, process->ProcessIdList, count * sizeof(process_id_t));
+            if (!(ret = wine_server_call(req)))
+            {
+                process->NumberOfAssignedProcesses = reply->active_processes;
+                process->NumberOfProcessIdsInList = min(count, reply->active_processes);
+            }
+        }
+        SERVER_END_REQ;
+
+        if (ret != STATUS_SUCCESS) return ret;
+
+        if (sizeof(process_id_t) < sizeof(process->ProcessIdList[0]))
+        {
+            /* start from the end to not overwrite */
+            for (i = process->NumberOfProcessIdsInList; i--;)
+            {
+                ULONG_PTR id = ((process_id_t *)process->ProcessIdList)[i];
+                process->ProcessIdList[i] = id;
+            }
+        }
+
+        if (ret_len)
+            *ret_len = offsetof( JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList[process->NumberOfProcessIdsInList] );
+        return count < process->NumberOfAssignedProcesses ? STATUS_MORE_ENTRIES : STATUS_SUCCESS;
     }
     case JobObjectExtendedLimitInformation:
     {
@@ -948,6 +941,166 @@ NTSTATUS WINAPI NtAssignProcessToJobObject( HANDLE job, HANDLE process )
 }
 
 
+/**********************************************************************
+ *           NtCreateDebugObject  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtCreateDebugObject( HANDLE *handle, ACCESS_MASK access,
+                                     OBJECT_ATTRIBUTES *attr, ULONG flags )
+{
+    NTSTATUS ret;
+    data_size_t len;
+    struct object_attributes *objattr;
+
+    *handle = 0;
+    if (flags & ~DEBUG_KILL_ON_CLOSE) return STATUS_INVALID_PARAMETER;
+    if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
+
+    SERVER_START_REQ( create_debug_obj )
+    {
+        req->access = access;
+        req->flags  = flags;
+        wine_server_add_data( req, objattr, len );
+        ret = wine_server_call( req );
+        *handle = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+    free( objattr );
+    return ret;
+}
+
+
+/**********************************************************************
+ *           NtSetInformationDebugObject  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtSetInformationDebugObject( HANDLE handle, DEBUGOBJECTINFOCLASS class,
+                                             void *info, ULONG len, ULONG *ret_len )
+{
+    NTSTATUS ret;
+    ULONG flags;
+
+    if (class != DebugObjectKillProcessOnExitInformation) return STATUS_INVALID_PARAMETER;
+    if (len != sizeof(ULONG))
+    {
+        if (ret_len) *ret_len = sizeof(ULONG);
+        return STATUS_INFO_LENGTH_MISMATCH;
+    }
+    flags = *(ULONG *)info;
+    if (flags & ~DEBUG_KILL_ON_CLOSE) return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( set_debug_obj_info )
+    {
+        req->debug = wine_server_obj_handle( handle );
+        req->flags = flags;
+        ret = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    if (!ret && ret_len) *ret_len = 0;
+    return ret;
+}
+
+
+/* convert the server event data to an NT state change; helper for NtWaitForDebugEvent */
+static NTSTATUS event_data_to_state_change( const debug_event_t *data, DBGUI_WAIT_STATE_CHANGE *state )
+{
+    int i;
+
+    switch (data->code)
+    {
+    case DbgIdle:
+    case DbgReplyPending:
+        return STATUS_PENDING;
+    case DbgCreateThreadStateChange:
+    {
+        DBGUI_CREATE_THREAD *info = &state->StateInfo.CreateThread;
+        info->HandleToThread         = wine_server_ptr_handle( data->create_thread.handle );
+        info->NewThread.StartAddress = wine_server_get_ptr( data->create_thread.start );
+        return STATUS_SUCCESS;
+    }
+    case DbgCreateProcessStateChange:
+    {
+        DBGUI_CREATE_PROCESS *info = &state->StateInfo.CreateProcessInfo;
+        info->HandleToProcess                       = wine_server_ptr_handle( data->create_process.process );
+        info->HandleToThread                        = wine_server_ptr_handle( data->create_process.thread );
+        info->NewProcess.FileHandle                 = wine_server_ptr_handle( data->create_process.file );
+        info->NewProcess.BaseOfImage                = wine_server_get_ptr( data->create_process.base );
+        info->NewProcess.DebugInfoFileOffset        = data->create_process.dbg_offset;
+        info->NewProcess.DebugInfoSize              = data->create_process.dbg_size;
+        info->NewProcess.InitialThread.StartAddress = wine_server_get_ptr( data->create_process.start );
+        return STATUS_SUCCESS;
+    }
+    case DbgExitThreadStateChange:
+        state->StateInfo.ExitThread.ExitStatus = data->exit.exit_code;
+        return STATUS_SUCCESS;
+    case DbgExitProcessStateChange:
+        state->StateInfo.ExitProcess.ExitStatus = data->exit.exit_code;
+        return STATUS_SUCCESS;
+    case DbgExceptionStateChange:
+    case DbgBreakpointStateChange:
+    case DbgSingleStepStateChange:
+    {
+        DBGKM_EXCEPTION *info = &state->StateInfo.Exception;
+        info->FirstChance = data->exception.first;
+        info->ExceptionRecord.ExceptionCode    = data->exception.exc_code;
+        info->ExceptionRecord.ExceptionFlags   = data->exception.flags;
+        info->ExceptionRecord.ExceptionRecord  = wine_server_get_ptr( data->exception.record );
+        info->ExceptionRecord.ExceptionAddress = wine_server_get_ptr( data->exception.address );
+        info->ExceptionRecord.NumberParameters = data->exception.nb_params;
+        for (i = 0; i < data->exception.nb_params; i++)
+            info->ExceptionRecord.ExceptionInformation[i] = data->exception.params[i];
+        return STATUS_SUCCESS;
+    }
+    case DbgLoadDllStateChange:
+    {
+        DBGKM_LOAD_DLL *info = &state->StateInfo.LoadDll;
+        info->FileHandle          = wine_server_ptr_handle( data->load_dll.handle );
+        info->BaseOfDll           = wine_server_get_ptr( data->load_dll.base );
+        info->DebugInfoFileOffset = data->load_dll.dbg_offset;
+        info->DebugInfoSize       = data->load_dll.dbg_size;
+        info->NamePointer         = wine_server_get_ptr( data->load_dll.name );
+        return STATUS_SUCCESS;
+    }
+    case DbgUnloadDllStateChange:
+        state->StateInfo.UnloadDll.BaseAddress = wine_server_get_ptr( data->unload_dll.base );
+        return STATUS_SUCCESS;
+    }
+    return STATUS_INTERNAL_ERROR;
+}
+
+/**********************************************************************
+ *           NtWaitForDebugEvent  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtWaitForDebugEvent( HANDLE handle, BOOLEAN alertable, LARGE_INTEGER *timeout,
+                                     DBGUI_WAIT_STATE_CHANGE *state )
+{
+    debug_event_t data;
+    NTSTATUS ret;
+    BOOL wait = TRUE;
+
+    for (;;)
+    {
+        SERVER_START_REQ( wait_debug_event )
+        {
+            req->debug = wine_server_obj_handle( handle );
+            wine_server_set_reply( req, &data, sizeof(data) );
+            ret = wine_server_call( req );
+            if (!ret && !(ret = event_data_to_state_change( &data, state )))
+            {
+                state->NewState = data.code;
+                state->AppClientId.UniqueProcess = ULongToHandle( reply->pid );
+                state->AppClientId.UniqueThread  = ULongToHandle( reply->tid );
+            }
+        }
+        SERVER_END_REQ;
+
+        if (ret != STATUS_PENDING) return ret;
+        if (!wait) return STATUS_TIMEOUT;
+        wait = FALSE;
+        ret = NtWaitForSingleObject( handle, alertable, timeout );
+        if (ret != STATUS_WAIT_0) return ret;
+    }
+}
+
+
 /**************************************************************************
  *           NtCreateDirectoryObject   (NTDLL.@)
  */
@@ -955,10 +1108,9 @@ NTSTATUS WINAPI NtCreateDirectoryObject( HANDLE *handle, ACCESS_MASK access, OBJ
 {
     NTSTATUS ret;
     data_size_t len;
-    struct object_attributes * HOSTPTR objattr;
+    struct object_attributes *objattr;
 
-    if (!handle) return STATUS_ACCESS_VIOLATION;
-
+    *handle = 0;
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
 
     SERVER_START_REQ( create_directory )
@@ -981,7 +1133,7 @@ NTSTATUS WINAPI NtOpenDirectoryObject( HANDLE *handle, ACCESS_MASK access, const
 {
     NTSTATUS ret;
 
-    if (!handle) return STATUS_ACCESS_VIOLATION;
+    *handle = 0;
     if ((ret = validate_open_object_attributes( attr ))) return ret;
 
     SERVER_START_REQ( open_directory )
@@ -1006,25 +1158,23 @@ NTSTATUS WINAPI NtQueryDirectoryObject( HANDLE handle, DIRECTORY_BASIC_INFORMATI
                                         ULONG size, BOOLEAN single_entry, BOOLEAN restart,
                                         ULONG *context, ULONG *ret_size )
 {
+    ULONG index = restart ? 0 : *context;
     NTSTATUS ret;
-
-    if (restart) *context = 0;
 
     if (single_entry)
     {
-        if (size <= sizeof(*buffer) + 2 * sizeof(WCHAR)) return STATUS_BUFFER_OVERFLOW;
-
         SERVER_START_REQ( get_directory_entry )
         {
             req->handle = wine_server_obj_handle( handle );
-            req->index = *context;
-            wine_server_set_reply( req, buffer + 1, size - sizeof(*buffer) - 2*sizeof(WCHAR) );
+            req->index = index;
+            if (size >= 2 * sizeof(*buffer) + 2 * sizeof(WCHAR))
+                wine_server_set_reply( req, buffer + 2, size - 2 * sizeof(*buffer) - 2 * sizeof(WCHAR) );
             if (!(ret = wine_server_call( req )))
             {
-                buffer->ObjectName.Buffer = (WCHAR *)(buffer + 1);
+                buffer->ObjectName.Buffer = (WCHAR *)(buffer + 2);
                 buffer->ObjectName.Length = reply->name_len;
                 buffer->ObjectName.MaximumLength = reply->name_len + sizeof(WCHAR);
-                buffer->ObjectTypeName.Buffer = (WCHAR *)(buffer + 1) + reply->name_len/sizeof(WCHAR) + 1;
+                buffer->ObjectTypeName.Buffer = (WCHAR *)(buffer + 2) + reply->name_len/sizeof(WCHAR) + 1;
                 buffer->ObjectTypeName.Length = wine_server_reply_size( reply ) - reply->name_len;
                 buffer->ObjectTypeName.MaximumLength = buffer->ObjectTypeName.Length + sizeof(WCHAR);
                 /* make room for the terminating null */
@@ -1032,12 +1182,22 @@ NTSTATUS WINAPI NtQueryDirectoryObject( HANDLE handle, DIRECTORY_BASIC_INFORMATI
                          buffer->ObjectTypeName.Length );
                 buffer->ObjectName.Buffer[buffer->ObjectName.Length/sizeof(WCHAR)] = 0;
                 buffer->ObjectTypeName.Buffer[buffer->ObjectTypeName.Length/sizeof(WCHAR)] = 0;
-                (*context)++;
+
+                memset( &buffer[1], 0, sizeof(buffer[1]) );
+
+                *context = index + 1;
             }
+            else if (ret == STATUS_NO_MORE_ENTRIES)
+            {
+                if (size > sizeof(*buffer))
+                    memset( buffer, 0, sizeof(*buffer) );
+                if (ret_size) *ret_size = sizeof(*buffer);
+            }
+
+            if (ret_size && (!ret || ret == STATUS_BUFFER_TOO_SMALL))
+                *ret_size = 2 * sizeof(*buffer) + reply->total_len + 2 * sizeof(WCHAR);
         }
         SERVER_END_REQ;
-        if (ret_size)
-            *ret_size = buffer->ObjectName.MaximumLength + buffer->ObjectTypeName.MaximumLength + sizeof(*buffer);
     }
     else
     {
@@ -1056,11 +1216,11 @@ NTSTATUS WINAPI NtCreateSymbolicLinkObject( HANDLE *handle, ACCESS_MASK access,
 {
     NTSTATUS ret;
     data_size_t len;
-    struct object_attributes * HOSTPTR objattr;
+    struct object_attributes *objattr;
 
-    if (!handle || !attr || !target) return STATUS_ACCESS_VIOLATION;
-    if (!target->Buffer) return STATUS_INVALID_PARAMETER;
-
+    *handle = 0;
+    if (!target->MaximumLength) return STATUS_INVALID_PARAMETER;
+    if (!target->Buffer) return STATUS_ACCESS_VIOLATION;
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
 
     SERVER_START_REQ( create_symlink )
@@ -1085,7 +1245,7 @@ NTSTATUS WINAPI NtOpenSymbolicLinkObject( HANDLE *handle, ACCESS_MASK access,
 {
     NTSTATUS ret;
 
-    if (!handle) return STATUS_ACCESS_VIOLATION;
+    *handle = 0;
     if ((ret = validate_open_object_attributes( attr ))) return ret;
 
     SERVER_START_REQ( open_symlink )
@@ -1157,10 +1317,10 @@ NTSTATUS WINAPI NtCreateTimer( HANDLE *handle, ACCESS_MASK access, const OBJECT_
 {
     NTSTATUS ret;
     data_size_t len;
-    struct object_attributes * HOSTPTR objattr;
+    struct object_attributes *objattr;
 
+    *handle = 0;
     if (type != NotificationTimer && type != SynchronizationTimer) return STATUS_INVALID_PARAMETER;
-
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
 
     SERVER_START_REQ( create_timer )
@@ -1186,6 +1346,7 @@ NTSTATUS WINAPI NtOpenTimer( HANDLE *handle, ACCESS_MASK access, const OBJECT_AT
 {
     NTSTATUS ret;
 
+    *handle = 0;
     if ((ret = validate_open_object_attributes( attr ))) return ret;
 
     SERVER_START_REQ( open_timer )
@@ -1392,7 +1553,7 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
         }
 
         /* Note that we yield after establishing the desired timeout */
-        NtYieldExecution();
+        usleep(0);
         if (!when) return STATUS_SUCCESS;
 
         for (;;)
@@ -1481,8 +1642,10 @@ NTSTATUS WINAPI NtSetSystemTime( const LARGE_INTEGER *new, LARGE_INTEGER *old )
  */
 NTSTATUS WINAPI NtQueryTimerResolution( ULONG *min_res, ULONG *max_res, ULONG *current_res )
 {
-    FIXME( "(%p,%p,%p), stub!\n", min_res, max_res, current_res );
-    return STATUS_NOT_IMPLEMENTED;
+    TRACE( "(%p,%p,%p)\n", min_res, max_res, current_res );
+    *max_res = *current_res = 10000; /* See NtSetTimerResolution() */
+    *min_res = 156250;
+    return STATUS_SUCCESS;
 }
 
 
@@ -1491,8 +1654,26 @@ NTSTATUS WINAPI NtQueryTimerResolution( ULONG *min_res, ULONG *max_res, ULONG *c
  */
 NTSTATUS WINAPI NtSetTimerResolution( ULONG res, BOOLEAN set, ULONG *current_res )
 {
-    FIXME( "(%u,%u,%p), stub!\n", res, set, current_res );
-    return STATUS_NOT_IMPLEMENTED;
+    static BOOL has_request = FALSE;
+
+    TRACE( "(%u,%u,%p), semi-stub!\n", res, set, current_res );
+
+    /* Wine has no support for anything other that 1 ms and does not keep of
+     * track resolution requests anyway.
+     * Fortunately NtSetTimerResolution() should ignore requests to lower the
+     * timer resolution. So by claiming that 'some other process' requested the
+     * max resolution already, there no need to actually change it.
+     */
+    *current_res = 10000;
+
+    /* Just keep track of whether this process requested a specific timer
+     * resolution.
+     */
+    if (!has_request && !set)
+        return STATUS_TIMER_RESOLUTION_NOT_SET;
+    has_request = set;
+
+    return STATUS_SUCCESS;
 }
 
 
@@ -1541,8 +1722,9 @@ NTSTATUS WINAPI NtCreateKeyedEvent( HANDLE *handle, ACCESS_MASK access,
 {
     NTSTATUS ret;
     data_size_t len;
-    struct object_attributes * HOSTPTR objattr;
+    struct object_attributes *objattr;
 
+    *handle = 0;
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
 
     SERVER_START_REQ( create_keyed_event )
@@ -1566,6 +1748,7 @@ NTSTATUS WINAPI NtOpenKeyedEvent( HANDLE *handle, ACCESS_MASK access, const OBJE
 {
     NTSTATUS ret;
 
+    *handle = 0;
     if ((ret = validate_open_object_attributes( attr ))) return ret;
 
     SERVER_START_REQ( open_keyed_event )
@@ -1628,11 +1811,11 @@ NTSTATUS WINAPI NtCreateIoCompletion( HANDLE *handle, ACCESS_MASK access, OBJECT
 {
     NTSTATUS status;
     data_size_t len;
-    struct object_attributes * HOSTPTR objattr;
+    struct object_attributes *objattr;
 
     TRACE( "(%p, %x, %p, %d)\n", handle, access, attr, threads );
 
-    if (!handle) return STATUS_INVALID_PARAMETER;
+    *handle = 0;
     if ((status = alloc_object_attributes( attr, &objattr, &len ))) return status;
 
     SERVER_START_REQ( create_completion )
@@ -1656,7 +1839,7 @@ NTSTATUS WINAPI NtOpenIoCompletion( HANDLE *handle, ACCESS_MASK access, const OB
 {
     NTSTATUS status;
 
-    if (!handle) return STATUS_INVALID_PARAMETER;
+    *handle = 0;
     if ((status = validate_open_object_attributes( attr ))) return status;
 
     SERVER_START_REQ( open_completion )
@@ -1819,7 +2002,9 @@ NTSTATUS WINAPI NtCreateSection( HANDLE *handle, ACCESS_MASK access, const OBJEC
     NTSTATUS ret;
     unsigned int file_access;
     data_size_t len;
-    struct object_attributes * HOSTPTR objattr;
+    struct object_attributes *objattr;
+
+    *handle = 0;
 
     switch (protect & 0xff)
     {
@@ -1869,6 +2054,7 @@ NTSTATUS WINAPI NtOpenSection( HANDLE *handle, ACCESS_MASK access, const OBJECT_
 {
     NTSTATUS ret;
 
+    *handle = 0;
     if ((ret = validate_open_object_attributes( attr ))) return ret;
 
     SERVER_START_REQ( open_mapping )
@@ -2049,7 +2235,6 @@ NTSTATUS WINAPI NtAddAtom( const WCHAR *name, ULONG length, RTL_ATOM *atom )
         SERVER_START_REQ( add_atom )
         {
             wine_server_add_data( req, name, length );
-            req->table = 0;
             status = wine_server_call( req );
             *atom = reply->atom;
         }
@@ -2070,7 +2255,6 @@ NTSTATUS WINAPI NtDeleteAtom( RTL_ATOM atom )
     SERVER_START_REQ( delete_atom )
     {
         req->atom = atom;
-        req->table = 0;
         status = wine_server_call( req );
     }
     SERVER_END_REQ;
@@ -2090,7 +2274,6 @@ NTSTATUS WINAPI NtFindAtom( const WCHAR *name, ULONG length, RTL_ATOM *atom )
         SERVER_START_REQ( find_atom )
         {
             wine_server_add_data( req, name, length );
-            req->table = 0;
             status = wine_server_call( req );
             *atom = reply->atom;
         }
@@ -2172,591 +2355,262 @@ NTSTATUS WINAPI NtQueryInformationAtom( RTL_ATOM atom, ATOM_INFORMATION_CLASS cl
 }
 
 
+union tid_alert_entry
+{
+#ifdef __APPLE__
+    semaphore_t sem;
+#else
+    HANDLE event;
 #ifdef __linux__
+    int futex;
+#endif
+#endif
+};
 
-NTSTATUS CDECL fast_RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit, int timeout )
+#define TID_ALERT_BLOCK_SIZE (65536 / sizeof(union tid_alert_entry))
+static union tid_alert_entry *tid_alert_blocks[4096];
+
+static unsigned int handle_to_index( HANDLE handle, unsigned int *block_idx )
 {
-    int val;
-    struct timespec timespec;
+    unsigned int idx = (wine_server_obj_handle(handle) >> 2) - 1;
+    *block_idx = idx / TID_ALERT_BLOCK_SIZE;
+    return idx % TID_ALERT_BLOCK_SIZE;
+}
 
-    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
+static union tid_alert_entry *get_tid_alert_entry( HANDLE tid )
+{
+    unsigned int block_idx, idx = handle_to_index( tid, &block_idx );
+    union tid_alert_entry *entry;
 
-    timespec.tv_sec  = timeout;
-    timespec.tv_nsec = 0;
-    while ((val = InterlockedCompareExchange( (int *)&crit->LockSemaphore, 0, 1 )) != 1)
+    if (block_idx > ARRAY_SIZE(tid_alert_blocks))
     {
-        /* note: this may wait longer than specified in case of signals or */
-        /*       multiple wake-ups, but that shouldn't be a problem */
-        if (futex_wait( (int *)&crit->LockSemaphore, val, &timespec ) == -1 && errno == ETIMEDOUT)
-            return STATUS_TIMEOUT;
+        FIXME( "tid %p is too high\n", tid );
+        return NULL;
     }
-    return STATUS_WAIT_0;
-}
 
-NTSTATUS CDECL fast_RtlpUnWaitCriticalSection( RTL_CRITICAL_SECTION *crit )
-{
-    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
+    if (!tid_alert_blocks[block_idx])
+    {
+        static const size_t size = TID_ALERT_BLOCK_SIZE * sizeof(union tid_alert_entry);
+        void *ptr = anon_mmap_alloc( size, PROT_READ | PROT_WRITE );
+        if (ptr == MAP_FAILED) return NULL;
+        if (InterlockedCompareExchangePointer( (void **)&tid_alert_blocks[block_idx], ptr, NULL ))
+            munmap( ptr, size ); /* someone beat us to it */
+    }
 
-    *(int *)&crit->LockSemaphore = 1;
-    futex_wake( (int *)&crit->LockSemaphore, 1 );
-    return STATUS_SUCCESS;
-}
+    entry = &tid_alert_blocks[block_idx][idx % TID_ALERT_BLOCK_SIZE];
 
-NTSTATUS CDECL fast_RtlDeleteCriticalSection( RTL_CRITICAL_SECTION *crit )
-{
-    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
-    return STATUS_SUCCESS;
-}
-
-#elif defined(__APPLE__)
-
-static inline semaphore_t get_mach_semaphore( RTL_CRITICAL_SECTION *crit )
-{
-    semaphore_t ret = *(int *)&crit->LockSemaphore;
-    if (!ret)
+#ifdef __APPLE__
+    if (!entry->sem)
     {
         semaphore_t sem;
-        if (semaphore_create( mach_task_self(), &sem, SYNC_POLICY_FIFO, 0 )) return 0;
-        if (!(ret = InterlockedCompareExchange( (int *)&crit->LockSemaphore, sem, 0 )))
-            ret = sem;
-        else
-            semaphore_destroy( mach_task_self(), sem );  /* somebody beat us to it */
+
+        if (semaphore_create( mach_task_self(), &sem, SYNC_POLICY_FIFO, 0 ))
+            return NULL;
+        if (InterlockedCompareExchange( (int *)&entry->sem, sem, 0 ))
+            semaphore_destroy( mach_task_self(), sem );
     }
-    return ret;
-}
+#else
+#ifdef __linux__
+    if (use_futexes())
+        return entry;
+#endif
 
-NTSTATUS CDECL fast_RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit, int timeout )
-{
-    mach_timespec_t timespec;
-    semaphore_t sem = get_mach_semaphore( crit );
-
-    timespec.tv_sec = timeout;
-    timespec.tv_nsec = 0;
-    for (;;)
+    if (!entry->event)
     {
-        switch( semaphore_timedwait( sem, timespec ))
-        {
-        case KERN_SUCCESS:
-            return STATUS_WAIT_0;
-        case KERN_ABORTED:
-            continue;  /* got a signal, restart */
-        case KERN_OPERATION_TIMED_OUT:
-            return STATUS_TIMEOUT;
-        default:
-            return STATUS_INVALID_HANDLE;
-        }
+        HANDLE event;
+
+        if (NtCreateEvent( &event, EVENT_ALL_ACCESS, NULL, SynchronizationEvent, FALSE ))
+            return NULL;
+        if (InterlockedCompareExchangePointer( &entry->event, event, NULL ))
+            NtClose( event );
     }
+#endif
+
+    return entry;
 }
 
-NTSTATUS CDECL fast_RtlpUnWaitCriticalSection( RTL_CRITICAL_SECTION *crit )
+
+/***********************************************************************
+ *             NtAlertThreadByThreadId (NTDLL.@)
+ */
+NTSTATUS WINAPI NtAlertThreadByThreadId( HANDLE tid )
 {
-    semaphore_t sem = get_mach_semaphore( crit );
-    semaphore_signal( sem );
+    union tid_alert_entry *entry = get_tid_alert_entry( tid );
+
+    TRACE( "%p\n", tid );
+
+    if (!entry) return STATUS_INVALID_CID;
+
+#ifdef __APPLE__
+    semaphore_signal( entry->sem );
     return STATUS_SUCCESS;
+#else
+#ifdef __linux__
+    if (use_futexes())
+    {
+        int *futex = &entry->futex;
+        if (!InterlockedExchange( futex, 1 ))
+            futex_wake( futex, 1 );
+        return STATUS_SUCCESS;
+    }
+#endif
+
+    return NtSetEvent( entry->event, NULL );
+#endif
 }
 
-NTSTATUS CDECL fast_RtlDeleteCriticalSection( RTL_CRITICAL_SECTION *crit )
+
+#if defined(__linux__) || defined(__APPLE__)
+static LONGLONG get_absolute_timeout( const LARGE_INTEGER *timeout )
 {
-    semaphore_destroy( mach_task_self(), *(int *)&crit->LockSemaphore );
-    return STATUS_SUCCESS;
+    LARGE_INTEGER now;
+
+    if (timeout->QuadPart >= 0) return timeout->QuadPart;
+    NtQuerySystemTime( &now );
+    return now.QuadPart - timeout->QuadPart;
 }
 
-#else  /* __APPLE__ */
-
-NTSTATUS CDECL fast_RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit, int timeout )
+static LONGLONG update_timeout( ULONGLONG end )
 {
-    return STATUS_NOT_IMPLEMENTED;
-}
+    LARGE_INTEGER now;
+    LONGLONG timeleft;
 
-NTSTATUS CDECL fast_RtlpUnWaitCriticalSection( RTL_CRITICAL_SECTION *crit )
-{
-    return STATUS_NOT_IMPLEMENTED;
+    NtQuerySystemTime( &now );
+    timeleft = end - now.QuadPart;
+    if (timeleft < 0) timeleft = 0;
+    return timeleft;
 }
-
-NTSTATUS CDECL fast_RtlDeleteCriticalSection( RTL_CRITICAL_SECTION *crit )
-{
-    return STATUS_NOT_IMPLEMENTED;
-}
-
 #endif
 
 
-#ifdef __linux__
+#ifdef __APPLE__
 
-/* Futex-based SRW lock implementation:
- *
- * Since we can rely on the kernel to release all threads and don't need to
- * worry about NtReleaseKeyedEvent(), we can simplify the layout a bit. The
- * layout looks like this:
- *
- *    31 - Exclusive lock bit, set if the resource is owned exclusively.
- * 30-16 - Number of exclusive waiters. Unlike the fallback implementation,
- *         this does not include the thread owning the lock, or shared threads
- *         waiting on the lock.
- *    15 - Does this lock have any shared waiters? We use this as an
- *         optimization to avoid unnecessary FUTEX_WAKE_BITSET calls when
- *         releasing an exclusive lock.
- *  14-0 - Number of shared owners. Unlike the fallback implementation, this
- *         does not include the number of shared threads waiting on the lock.
- *         Thus the state [1, x, >=1] will never occur.
+/***********************************************************************
+ *             NtWaitForAlertByThreadId (NTDLL.@)
  */
-
-#define SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT        0x80000000
-#define SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK    0x7fff0000
-#define SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_INC     0x00010000
-#define SRWLOCK_FUTEX_SHARED_WAITERS_BIT        0x00008000
-#define SRWLOCK_FUTEX_SHARED_OWNERS_MASK        0x00007fff
-#define SRWLOCK_FUTEX_SHARED_OWNERS_INC         0x00000001
-
-/* Futex bitmasks; these are independent from the bits in the lock itself. */
-#define SRWLOCK_FUTEX_BITSET_EXCLUSIVE  1
-#define SRWLOCK_FUTEX_BITSET_SHARED     2
-
-NTSTATUS CDECL fast_RtlTryAcquireSRWLockExclusive( RTL_SRWLOCK *lock )
+NTSTATUS WINAPI NtWaitForAlertByThreadId( const void *address, const LARGE_INTEGER *timeout )
 {
-    int old, new, *futex;
-    NTSTATUS ret;
-
-    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
-
-    if (!(futex = get_futex( &lock->Ptr )))
-        return STATUS_NOT_IMPLEMENTED;
-
-    do
-    {
-        old = *futex;
-
-        if (!(old & SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT)
-                && !(old & SRWLOCK_FUTEX_SHARED_OWNERS_MASK))
-        {
-            /* Not locked exclusive or shared. We can try to grab it. */
-            new = old | SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT;
-            ret = STATUS_SUCCESS;
-        }
-        else
-        {
-            new = old;
-            ret = STATUS_TIMEOUT;
-        }
-    } while (InterlockedCompareExchange( futex, new, old ) != old);
-
-    return ret;
-}
-
-NTSTATUS CDECL fast_RtlAcquireSRWLockExclusive( RTL_SRWLOCK *lock )
-{
-    int old, new, *futex;
-    BOOLEAN wait;
-
-    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
-
-    if (!(futex = get_futex( &lock->Ptr )))
-        return STATUS_NOT_IMPLEMENTED;
-
-    /* Atomically increment the exclusive waiter count. */
-    do
-    {
-        old = *futex;
-        new = old + SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_INC;
-        assert(new & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK);
-    } while (InterlockedCompareExchange( futex, new, old ) != old);
-
-    for (;;)
-    {
-        do
-        {
-            old = *futex;
-
-            if (!(old & SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT)
-                    && !(old & SRWLOCK_FUTEX_SHARED_OWNERS_MASK))
-            {
-                /* Not locked exclusive or shared. We can try to grab it. */
-                new = old | SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT;
-                assert(old & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK);
-                new -= SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_INC;
-                wait = FALSE;
-            }
-            else
-            {
-                new = old;
-                wait = TRUE;
-            }
-        } while (InterlockedCompareExchange( futex, new, old ) != old);
-
-        if (!wait)
-            return STATUS_SUCCESS;
-
-        futex_wait_bitset( futex, new, NULL, SRWLOCK_FUTEX_BITSET_EXCLUSIVE );
-    }
-
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS CDECL fast_RtlTryAcquireSRWLockShared( RTL_SRWLOCK *lock )
-{
-    int new, old, *futex;
-    NTSTATUS ret;
-
-    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
-
-    if (!(futex = get_futex( &lock->Ptr )))
-        return STATUS_NOT_IMPLEMENTED;
-
-    do
-    {
-        old = *futex;
-
-        if (!(old & SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT)
-                && !(old & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK))
-        {
-            /* Not locked exclusive, and no exclusive waiters. We can try to
-             * grab it. */
-            new = old + SRWLOCK_FUTEX_SHARED_OWNERS_INC;
-            assert(new & SRWLOCK_FUTEX_SHARED_OWNERS_MASK);
-            ret = STATUS_SUCCESS;
-        }
-        else
-        {
-            new = old;
-            ret = STATUS_TIMEOUT;
-        }
-    } while (InterlockedCompareExchange( futex, new, old ) != old);
-
-    return ret;
-}
-
-NTSTATUS CDECL fast_RtlAcquireSRWLockShared( RTL_SRWLOCK *lock )
-{
-    int old, new, *futex;
-    BOOLEAN wait;
-
-    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
-
-    if (!(futex = get_futex( &lock->Ptr )))
-        return STATUS_NOT_IMPLEMENTED;
-
-    for (;;)
-    {
-        do
-        {
-            old = *futex;
-
-            if (!(old & SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT)
-                    && !(old & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK))
-            {
-                /* Not locked exclusive, and no exclusive waiters. We can try
-                 * to grab it. */
-                new = old + SRWLOCK_FUTEX_SHARED_OWNERS_INC;
-                assert(new & SRWLOCK_FUTEX_SHARED_OWNERS_MASK);
-                wait = FALSE;
-            }
-            else
-            {
-                new = old | SRWLOCK_FUTEX_SHARED_WAITERS_BIT;
-                wait = TRUE;
-            }
-        } while (InterlockedCompareExchange( futex, new, old ) != old);
-
-        if (!wait)
-            return STATUS_SUCCESS;
-
-        futex_wait_bitset( futex, new, NULL, SRWLOCK_FUTEX_BITSET_SHARED );
-    }
-
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS CDECL fast_RtlReleaseSRWLockExclusive( RTL_SRWLOCK *lock )
-{
-    int old, new, *futex;
-
-    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
-
-    if (!(futex = get_futex( &lock->Ptr )))
-        return STATUS_NOT_IMPLEMENTED;
-
-    do
-    {
-        old = *futex;
-
-        if (!(old & SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT))
-        {
-            ERR("Lock %p is not owned exclusive! (%#x)\n", lock, *futex);
-            return STATUS_RESOURCE_NOT_OWNED;
-        }
-
-        new = old & ~SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT;
-
-        if (!(new & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK))
-            new &= ~SRWLOCK_FUTEX_SHARED_WAITERS_BIT;
-    } while (InterlockedCompareExchange( futex, new, old ) != old);
-
-    if (new & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK)
-        futex_wake_bitset( futex, 1, SRWLOCK_FUTEX_BITSET_EXCLUSIVE );
-    else if (old & SRWLOCK_FUTEX_SHARED_WAITERS_BIT)
-        futex_wake_bitset( futex, INT_MAX, SRWLOCK_FUTEX_BITSET_SHARED );
-
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS CDECL fast_RtlReleaseSRWLockShared( RTL_SRWLOCK *lock )
-{
-    int old, new, *futex;
-
-    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
-
-    if (!(futex = get_futex( &lock->Ptr )))
-        return STATUS_NOT_IMPLEMENTED;
-
-    do
-    {
-        old = *futex;
-
-        if (old & SRWLOCK_FUTEX_EXCLUSIVE_LOCK_BIT)
-        {
-            ERR("Lock %p is owned exclusive! (%#x)\n", lock, *futex);
-            return STATUS_RESOURCE_NOT_OWNED;
-        }
-        else if (!(old & SRWLOCK_FUTEX_SHARED_OWNERS_MASK))
-        {
-            ERR("Lock %p is not owned shared! (%#x)\n", lock, *futex);
-            return STATUS_RESOURCE_NOT_OWNED;
-        }
-
-        new = old - SRWLOCK_FUTEX_SHARED_OWNERS_INC;
-    } while (InterlockedCompareExchange( futex, new, old ) != old);
-
-    /* Optimization: only bother waking if there are actually exclusive waiters. */
-    if (!(new & SRWLOCK_FUTEX_SHARED_OWNERS_MASK) && (new & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK))
-        futex_wake_bitset( futex, 1, SRWLOCK_FUTEX_BITSET_EXCLUSIVE );
-
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS CDECL fast_wait_cv( RTL_CONDITION_VARIABLE *variable, const void *value, const LARGE_INTEGER *timeout )
-{
-    const char *value_ptr;
-    int aligned_value, *futex;
-    struct timespec timespec;
-    int ret;
-
-    if (!use_futexes())
-        return STATUS_NOT_IMPLEMENTED;
-
-    if (!(futex = get_futex( &variable->Ptr )))
-        return STATUS_NOT_IMPLEMENTED;
-
-    value_ptr = (const char *)&value;
-    value_ptr += ((ULONG_PTR)futex) - ((ULONG_PTR)&variable->Ptr);
-    aligned_value = *(int *)value_ptr;
-
-    if (timeout && timeout->QuadPart != TIMEOUT_INFINITE)
-    {
-        timespec_from_timeout( &timespec, timeout );
-        ret = futex_wait( futex, aligned_value, &timespec );
-    }
-    else
-        ret = futex_wait( futex, aligned_value, NULL );
-
-    if (ret == -1 && errno == ETIMEDOUT)
-        return STATUS_TIMEOUT;
-    return STATUS_WAIT_0;
-}
-
-NTSTATUS CDECL fast_RtlWakeConditionVariable( RTL_CONDITION_VARIABLE *variable, int count )
-{
-    int *futex;
-
-    if (!use_futexes()) return STATUS_NOT_IMPLEMENTED;
-
-    if (!(futex = get_futex( &variable->Ptr )))
-        return STATUS_NOT_IMPLEMENTED;
-
-    InterlockedIncrement( futex );
-    futex_wake( futex, count );
-    return STATUS_SUCCESS;
-}
-
-
-/* We can't map addresses to futex directly, because an application can wait on
- * 8 bytes, and we can't pass all 8 as the compare value to futex(). Instead we
- * map all addresses to a small fixed table of futexes. This may result in
- * spurious wakes, but the application is already expected to handle those. */
-
-static int addr_futex_table[256];
-
-static inline int *hash_addr( const void *addr )
-{
-    ULONG_PTR val = (ULONG_PTR)addr;
-
-    return &addr_futex_table[(val >> 2) & 255];
-}
-
-static inline NTSTATUS fast_wait_addr( const void *addr, const void *cmp, SIZE_T size,
-                                       const LARGE_INTEGER *timeout )
-{
-    int *futex;
-    int val;
-    struct timespec timespec;
-    int ret;
-
-    if (!use_futexes())
-        return STATUS_NOT_IMPLEMENTED;
-
-    futex = hash_addr( addr );
-
-    /* We must read the previous value of the futex before checking the value
-     * of the address being waited on. That way, if we receive a wake between
-     * now and waiting on the futex, we know that val will have changed.
-     * Use an atomic load so that memory accesses are ordered between this read
-     * and the increment below. */
-    val = InterlockedCompareExchange( futex, 0, 0 );
-    if (!compare_addr( addr, cmp, size ))
-        return STATUS_SUCCESS;
+    union tid_alert_entry *entry = get_tid_alert_entry( NtCurrentTeb()->ClientId.UniqueThread );
+    semaphore_t sem;
+    ULONGLONG end;
+    kern_return_t ret;
+
+    TRACE( "%p %s\n", address, debugstr_timeout( timeout ) );
+
+    if (!entry) return STATUS_INVALID_CID;
+    sem = entry->sem;
 
     if (timeout)
     {
-        timespec_from_timeout( &timespec, timeout );
-        ret = futex_wait( futex, val, &timespec );
+        if (timeout->QuadPart == TIMEOUT_INFINITE)
+            timeout = NULL;
+        else
+            end = get_absolute_timeout( timeout );
     }
-    else
-        ret = futex_wait( futex, val, NULL );
 
-    if (ret == -1 && errno == ETIMEDOUT)
-        return STATUS_TIMEOUT;
-    return STATUS_SUCCESS;
-}
+    for (;;)
+    {
+        if (timeout)
+        {
+            LONGLONG timeleft = update_timeout( end );
+            mach_timespec_t timespec;
 
-static inline NTSTATUS fast_wake_addr( const void *addr )
-{
-    int *futex;
+            timespec.tv_sec = timeleft / (ULONGLONG)TICKSPERSEC;
+            timespec.tv_nsec = (timeleft % TICKSPERSEC) * 100;
+            ret = semaphore_timedwait( sem, timespec );
+        }
+        else
+            ret = semaphore_wait( sem );
 
-    if (!use_futexes())
-        return STATUS_NOT_IMPLEMENTED;
-
-    futex = hash_addr( addr );
-
-    InterlockedIncrement( futex );
-
-    futex_wake( futex, INT_MAX );
-    return STATUS_SUCCESS;
+        switch (ret)
+        {
+        case KERN_SUCCESS: return STATUS_ALERTED;
+        case KERN_ABORTED: continue;
+        case KERN_OPERATION_TIMED_OUT: return STATUS_TIMEOUT;
+        default: return STATUS_INVALID_HANDLE;
+        }
+    }
 }
 
 #else
 
-NTSTATUS CDECL fast_RtlTryAcquireSRWLockExclusive( RTL_SRWLOCK *lock )
+/***********************************************************************
+ *             NtWaitForAlertByThreadId (NTDLL.@)
+ */
+NTSTATUS WINAPI NtWaitForAlertByThreadId( const void *address, const LARGE_INTEGER *timeout )
 {
-    return STATUS_NOT_IMPLEMENTED;
-}
+    union tid_alert_entry *entry = get_tid_alert_entry( NtCurrentTeb()->ClientId.UniqueThread );
+    NTSTATUS status;
 
-NTSTATUS CDECL fast_RtlAcquireSRWLockExclusive( RTL_SRWLOCK *lock )
-{
-    return STATUS_NOT_IMPLEMENTED;
-}
+    TRACE( "%p %s\n", address, debugstr_timeout( timeout ) );
 
-NTSTATUS CDECL fast_RtlTryAcquireSRWLockShared( RTL_SRWLOCK *lock )
-{
-    return STATUS_NOT_IMPLEMENTED;
-}
+    if (!entry) return STATUS_INVALID_CID;
 
-NTSTATUS CDECL fast_RtlAcquireSRWLockShared( RTL_SRWLOCK *lock )
-{
-    return STATUS_NOT_IMPLEMENTED;
-}
+#ifdef __linux__
+    if (use_futexes())
+    {
+        int *futex = &entry->futex;
+        ULONGLONG end;
+        int ret;
 
-NTSTATUS CDECL fast_RtlReleaseSRWLockExclusive( RTL_SRWLOCK *lock )
-{
-    return STATUS_NOT_IMPLEMENTED;
-}
+        if (timeout)
+        {
+            if (timeout->QuadPart == TIMEOUT_INFINITE)
+                timeout = NULL;
+            else
+                end = get_absolute_timeout( timeout );
+        }
 
-NTSTATUS CDECL fast_RtlReleaseSRWLockShared( RTL_SRWLOCK *lock )
-{
-    return STATUS_NOT_IMPLEMENTED;
-}
+        while (!InterlockedExchange( futex, 0 ))
+        {
+            if (timeout)
+            {
+                LONGLONG timeleft = update_timeout( end );
+                struct timespec timespec;
 
-NTSTATUS CDECL fast_RtlWakeConditionVariable( RTL_CONDITION_VARIABLE *variable, int count )
-{
-    return STATUS_NOT_IMPLEMENTED;
-}
+                timespec.tv_sec = timeleft / (ULONGLONG)TICKSPERSEC;
+                timespec.tv_nsec = (timeleft % TICKSPERSEC) * 100;
+                ret = futex_wait( futex, 0, &timespec );
+            }
+            else
+                ret = futex_wait( futex, 0, NULL );
 
-NTSTATUS CDECL fast_wait_cv( RTL_CONDITION_VARIABLE *variable, const void *value, const LARGE_INTEGER *timeout )
-{
-    return STATUS_NOT_IMPLEMENTED;
-}
+            if (ret == -1 && errno == ETIMEDOUT) return STATUS_TIMEOUT;
+        }
+        return STATUS_ALERTED;
+    }
+#endif
 
-static inline NTSTATUS fast_wait_addr( const void *addr, const void *cmp, SIZE_T size,
-                                       const LARGE_INTEGER *timeout )
-{
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-static inline NTSTATUS fast_wake_addr( const void *addr )
-{
-    return STATUS_NOT_IMPLEMENTED;
+    status = NtWaitForSingleObject( entry->event, FALSE, timeout );
+    if (!status) return STATUS_ALERTED;
+    return status;
 }
 
 #endif
 
-
-/***********************************************************************
- *           RtlWaitOnAddress   (NTDLL.@)
+/* Notify direct completion of async and close the wait handle if it is no longer needed.
+ * This function is a no-op (returns status as-is) if the supplied handle is NULL.
  */
-NTSTATUS WINAPI RtlWaitOnAddress( const void *addr, const void *cmp, SIZE_T size,
-                                  const LARGE_INTEGER *timeout )
+void set_async_direct_result( HANDLE *optional_handle, NTSTATUS status, ULONG_PTR information, BOOL mark_pending )
 {
-    select_op_t select_op;
     NTSTATUS ret;
-    timeout_t abs_timeout = timeout ? timeout->QuadPart : TIMEOUT_INFINITE;
 
-    if (size != 1 && size != 2 && size != 4 && size != 8)
-        return STATUS_INVALID_PARAMETER;
+    if (!*optional_handle) return;
 
-    if ((ret = fast_wait_addr( addr, cmp, size, timeout )) != STATUS_NOT_IMPLEMENTED)
-        return ret;
-
-    mutex_lock( &addr_mutex );
-    if (!compare_addr( addr, cmp, size ))
+    SERVER_START_REQ( set_async_direct_result )
     {
-        mutex_unlock( &addr_mutex );
-        return STATUS_SUCCESS;
+        req->handle       = wine_server_obj_handle( *optional_handle );
+        req->status       = status;
+        req->information  = information;
+        req->mark_pending = mark_pending;
+        ret = wine_server_call( req );
+        if (ret == STATUS_SUCCESS)
+            *optional_handle = wine_server_ptr_handle( reply->handle );
     }
+    SERVER_END_REQ;
 
-    if (abs_timeout < 0)
-    {
-        LARGE_INTEGER now;
+    if (ret != STATUS_SUCCESS)
+        ERR( "cannot report I/O result back to server: %08x\n", ret );
 
-        NtQueryPerformanceCounter( &now, NULL );
-        abs_timeout -= now.QuadPart;
-    }
-
-    select_op.keyed_event.op     = SELECT_KEYED_EVENT_WAIT;
-    select_op.keyed_event.handle = wine_server_obj_handle( keyed_event );
-    select_op.keyed_event.key    = wine_server_client_ptr( addr );
-
-    return server_select( &select_op, sizeof(select_op.keyed_event), SELECT_INTERRUPTIBLE,
-                          abs_timeout, NULL, &addr_mutex, NULL );
-}
-
-/***********************************************************************
- *           RtlWakeAddressAll    (NTDLL.@)
- */
-void WINAPI RtlWakeAddressAll( const void *addr )
-{
-    if (fast_wake_addr( addr ) != STATUS_NOT_IMPLEMENTED) return;
-
-    mutex_lock( &addr_mutex );
-    while (NtReleaseKeyedEvent( 0, addr, 0, &zero_timeout ) == STATUS_SUCCESS) {}
-    mutex_unlock( &addr_mutex );
-}
-
-/***********************************************************************
- *           RtlWakeAddressSingle (NTDLL.@)
- */
-void WINAPI RtlWakeAddressSingle( const void *addr )
-{
-    if (fast_wake_addr( addr ) != STATUS_NOT_IMPLEMENTED) return;
-
-    mutex_lock( &addr_mutex );
-    NtReleaseKeyedEvent( 0, addr, 0, &zero_timeout );
-    mutex_unlock( &addr_mutex );
+    return;
 }

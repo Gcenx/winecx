@@ -1,4 +1,0 @@
-MODULE    = libdxerr8.a
-
-C_SRCS = \
-	dxerr8.c

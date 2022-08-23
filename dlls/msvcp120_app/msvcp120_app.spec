@@ -1114,7 +1114,7 @@
 @ stub -arch=win64 ?_Assign@_Concurrent_queue_iterator_base_v4@details@Concurrency@@IEAAXAEBV123@@Z
 @ stub ?_Atexit@@YAXP6AXXZ@Z
 @ extern ?_BADOFF@std@@3_JB msvcp120.?_BADOFF@std@@3_JB
-# extern ?_Byte_reverse_table@details@Concurrency@@3QBEB
+@ extern ?_Byte_reverse_table@details@Concurrency@@3QBEB msvcp120.?_Byte_reverse_table@details@Concurrency@@3QBEB
 @ cdecl -arch=arm ?_C_str@?$_Yarn@D@std@@QBAPBDXZ(ptr) msvcp120.?_C_str@?$_Yarn@D@std@@QBAPBDXZ
 @ thiscall -arch=i386 ?_C_str@?$_Yarn@D@std@@QBEPBDXZ(ptr) msvcp120.?_C_str@?$_Yarn@D@std@@QBEPBDXZ
 @ cdecl -arch=win64 ?_C_str@?$_Yarn@D@std@@QEBAPEBDXZ(ptr) msvcp120.?_C_str@?$_Yarn@D@std@@QEBAPEBDXZ
@@ -3469,9 +3469,9 @@
 @ thiscall -arch=i386 ?sync@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MAEHXZ(ptr) msvcp120.?sync@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MAEHXZ
 @ cdecl -arch=win64 ?sync@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MEAAHXZ(ptr) msvcp120.?sync@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MEAAHXZ
 @ cdecl ?sync_with_stdio@ios_base@std@@SA_N_N@Z(long) msvcp120.?sync_with_stdio@ios_base@std@@SA_N_N@Z
-@ stub -arch=arm ?table@?$ctype@D@std@@QBAPBFXZ
-@ stub -arch=i386 ?table@?$ctype@D@std@@QBEPBFXZ
-@ stub -arch=win64 ?table@?$ctype@D@std@@QEBAPEBFXZ
+@ cdecl -arch=arm ?table@?$ctype@D@std@@QBAPBFXZ(ptr) msvcp120.?table@?$ctype@D@std@@QBAPBFXZ
+@ thiscall -arch=i386 ?table@?$ctype@D@std@@QBEPBFXZ(ptr) msvcp120.?table@?$ctype@D@std@@QBEPBFXZ
+@ cdecl -arch=win64 ?table@?$ctype@D@std@@QEBAPEBFXZ(ptr) msvcp120.?table@?$ctype@D@std@@QEBAPEBFXZ
 @ extern -arch=win32 ?table_size@?$ctype@D@std@@2IB msvcp120.?table_size@?$ctype@D@std@@2IB
 @ extern -arch=win64 ?table_size@?$ctype@D@std@@2_KB msvcp120.?table_size@?$ctype@D@std@@2_KB
 @ cdecl -arch=arm ?tellg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAA?AV?$fpos@H@2@XZ(ptr ptr) msvcp120.?tellg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAA?AV?$fpos@H@2@XZ
@@ -3721,9 +3721,9 @@
 @ stub _FXp_sqrtx
 @ stub _FXp_subx
 # extern _FZero
-@ cdecl -ret64 _Getcoll() msvcp120._Getcoll
-@ cdecl _Getctype(ptr) msvcp120._Getctype
-@ cdecl -ret64 _Getcvt() msvcp120._Getcvt
+@ cdecl -norelay _Getcoll() msvcp120._Getcoll
+@ cdecl -norelay _Getctype() msvcp120._Getctype
+@ cdecl -norelay _Getcvt() msvcp120._Getcvt
 @ cdecl _Getdateorder() msvcp120._Getdateorder
 @ cdecl _Getwctype(long ptr) msvcp120._Getwctype
 @ cdecl _Getwctypes(ptr ptr ptr ptr) msvcp120._Getwctypes
@@ -3762,13 +3762,13 @@
 @ extern _LZero msvcp120._LZero
 @ cdecl _Lock_shared_ptr_spin_lock() msvcp120._Lock_shared_ptr_spin_lock
 @ cdecl _Mbrtowc(ptr ptr long ptr ptr) msvcp120._Mbrtowc
-@ stub _Mtx_clear_owner
+@ cdecl _Mtx_clear_owner(ptr) msvcp120._Mtx_clear_owner
 @ cdecl _Mtx_current_owns(ptr) msvcp120._Mtx_current_owns
 @ cdecl _Mtx_destroy(ptr) msvcp120._Mtx_destroy
 @ cdecl _Mtx_getconcrtcs(ptr) msvcp120._Mtx_getconcrtcs
 @ cdecl _Mtx_init(ptr long) msvcp120._Mtx_init
 @ cdecl _Mtx_lock(ptr) msvcp120._Mtx_lock
-@ stub _Mtx_reset_owner
+@ cdecl _Mtx_reset_owner(ptr) msvcp120._Mtx_reset_owner
 @ stub _Mtx_timedlock
 @ cdecl _Mtx_trylock(ptr) msvcp120._Mtx_trylock
 @ cdecl _Mtx_unlock(ptr) msvcp120._Mtx_unlock

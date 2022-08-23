@@ -430,7 +430,8 @@ static void taskdialog_get_expando_size(struct taskdialog_info *dialog_info, HWN
     HFONT hfont, old_hfont;
     HDC hdc;
     RECT rect = {0};
-    LONG icon_width, icon_height, text_offset;
+    LONG icon_width, icon_height;
+    INT text_offset;
     LONG max_width, max_text_height;
 
     hdc = GetDC(hwnd);
@@ -1092,7 +1093,8 @@ static void taskdialog_draw_expando_control(struct taskdialog_info *dialog_info,
     HDC hdc;
     RECT rect = {0};
     WCHAR *text;
-    LONG icon_width, icon_height, text_offset;
+    LONG icon_width, icon_height;
+    INT text_offset;
     UINT style = DFCS_FLAT;
     BOOL draw_focus;
 
@@ -1208,7 +1210,7 @@ static INT_PTR CALLBACK taskdialog_proc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
     struct taskdialog_info *dialog_info;
     LRESULT result;
 
-    TRACE("hwnd=%p msg=0x%04x wparam=%lx lparam=%lx\n", hwnd, msg, wParam, lParam);
+    TRACE("hwnd %p, msg 0x%04x, wparam %Ix, lparam %Ix\n", hwnd, msg, wParam, lParam);
 
     if (msg != WM_INITDIALOG)
         dialog_info = GetPropW(hwnd, taskdialog_info_propnameW);

@@ -30,7 +30,6 @@
 #include "wine/debug.h"
 #include "kernel16_private.h"
 #include "dosexe.h"
-#include "wine/exception.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(int);
 WINE_DECLARE_DEBUG_CHANNEL(io);
@@ -75,20 +74,6 @@ static inline struct idtr get_idtr(void)
     struct idtr ret;
 #if defined(__i386__) && defined(__GNUC__)
     __asm__( "sidtl %0" : "=m" (ret) );
-#elif defined(__i386_on_x86_64__)
-    #include "pshpack1.h"
-    struct idtr64
-    {
-        WORD limit;
-        unsigned __int64 base;
-    };
-    #include "poppack.h"
-    struct idtr64 tmp;
-    __asm__( "sidtl %0" : "=m" (tmp) );
-    if (tmp.base >= 0x100000000 - tmp.limit)
-        ERR("IDT extends above 4GB");
-    ret.base = (BYTE*)tmp.base;
-    ret.limit = tmp.limit;
 #else
     ret.base = (BYTE *)idt;
     ret.limit = sizeof(idt) - 1;
@@ -400,7 +385,7 @@ static DWORD INSTR_inport( WORD port, int size, CONTEXT *context )
                      (WORD)context->SegCs, LOWORD(context->Eip));
             break;
         case 4:
-            TRACE_(io)( "0x%x < %08x @ %04x:%04x\n", port, res,
+            TRACE_(io)( "0x%x < %08lx @ %04x:%04x\n", port, res,
                      (WORD)context->SegCs, LOWORD(context->Eip));
             break;
         }
@@ -431,7 +416,7 @@ static void INSTR_outport( WORD port, int size, DWORD val, CONTEXT *context )
                     (WORD)context->SegCs, LOWORD(context->Eip));
             break;
         case 4:
-            TRACE_(io)("0x%x > %08x @ %04x:%04x\n", port, val,
+            TRACE_(io)("0x%x > %08lx @ %04x:%04x\n", port, val,
                     (WORD)context->SegCs, LOWORD(context->Eip));
             break;
         }
@@ -538,7 +523,7 @@ DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
                 switch (instr[2])
                 {
                 case 0xc0:
-                    FIXME("mov %%eax, %%cr0 at 0x%08x, EAX=0x%08x\n",
+                    FIXME("mov %%eax, %%cr0 at 0x%08lx, EAX=0x%08lx\n",
                           context->Eip,context->Eax );
                           context->Eip += prefixlen+3;
                     return ExceptionContinueExecution;
@@ -561,12 +546,12 @@ DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
                      * bit 7: PGE Enable global pages
                      * bit 8: PCE Enable performance counters at IPL3
                      */
-                    FIXME("mov %%cr4, %%eax at 0x%08x\n",context->Eip);
+                    FIXME("mov %%cr4, %%eax at 0x%08lx\n",context->Eip);
                     context->Eax = 0;
                     context->Eip += prefixlen+3;
                     return ExceptionContinueExecution;
                 case 0xc0: /* mov %cr0, %eax */
-                    FIXME("mov %%cr0, %%eax at 0x%08x\n",context->Eip);
+                    FIXME("mov %%cr0, %%eax at 0x%08lx\n",context->Eip);
                     context->Eax = 0x10; /* FIXME: set more bits ? */
                     context->Eip += prefixlen+3;
                     return ExceptionContinueExecution;
@@ -579,12 +564,12 @@ DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
                 switch (instr[2])
                 {
                 case 0xc8: /* mov %dr1, %eax */
-                    TRACE("mov %%dr1, %%eax at 0x%08x\n",context->Eip);
+                    TRACE("mov %%dr1, %%eax at 0x%08lx\n",context->Eip);
                     context->Eax = context->Dr1;
                     context->Eip += prefixlen+3;
                     return ExceptionContinueExecution;
                 case 0xf8: /* mov %dr7, %eax */
-                    TRACE("mov %%dr7, %%eax at 0x%08x\n",context->Eip);
+                    TRACE("mov %%dr7, %%eax at 0x%08lx\n",context->Eip);
                     context->Eax = 0x400;
                     context->Eip += prefixlen+3;
                     return ExceptionContinueExecution;
@@ -909,7 +894,7 @@ LONG CALLBACK INSTR_vectored_handler( EXCEPTION_POINTERS *ptrs )
  */
 void WINAPI DOS3Call( CONTEXT *context )
 {
-    __wine_call_int_handler( context, 0x21 );
+    __wine_call_int_handler16( 0x21, context );
 }
 
 
@@ -918,7 +903,7 @@ void WINAPI DOS3Call( CONTEXT *context )
  */
 void WINAPI NetBIOSCall16( CONTEXT *context )
 {
-    __wine_call_int_handler( context, 0x5c );
+    __wine_call_int_handler16( 0x5c, context );
 }
 
 

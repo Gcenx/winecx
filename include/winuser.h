@@ -2876,12 +2876,6 @@ typedef struct {
 #define	DSS_PREFIXONLY	0x0400
 #define	DSS_RIGHT	0x8000
 
-/* UserObjectInformation classes */
-#define UOI_FLAGS 1
-#define UOI_NAME 2
-#define UOI_TYPE 3
-#define UOI_USER_SID 4
-
 
 /* Sent as the lParam of a WM_DRAWITEM message to instruct how an
  * owner drawn control is to be drawn */
@@ -3258,6 +3252,7 @@ typedef struct
 #define EVENT_OBJECT_HELPCHANGE        0x8010
 #define EVENT_OBJECT_DEFACTIONCHANGE   0x8011
 #define EVENT_OBJECT_ACCELERATORCHANGE 0x8012
+#define EVENT_OBJECT_INVOKED           0x8013
 
 /* Sound events */
 #define SOUND_SYSTEM_STARTUP      1
@@ -4129,6 +4124,7 @@ WINUSERAPI BOOL        WINAPI RegisterPointerDeviceNotifications(HWND,BOOL);
 WINUSERAPI HPOWERNOTIFY WINAPI RegisterPowerSettingNotification(HANDLE,LPCGUID,DWORD);
 WINUSERAPI BOOL        WINAPI RegisterRawInputDevices(PRAWINPUTDEVICE,UINT,UINT);
 WINUSERAPI BOOL        WINAPI RegisterShellHookWindow(HWND);
+WINUSERAPI HPOWERNOTIFY WINAPI RegisterSuspendResumeNotification(HANDLE,DWORD);
 WINUSERAPI BOOL        WINAPI RegisterTouchWindow(HWND,ULONG);
 WINUSERAPI UINT        WINAPI RegisterWindowMessageA(LPCSTR);
 WINUSERAPI UINT        WINAPI RegisterWindowMessageW(LPCWSTR);
@@ -4223,7 +4219,7 @@ WINUSERAPI BOOL        WINAPI SetScrollRange(HWND,INT,INT,INT,BOOL);
 #define                       SetSysModalWindow(hwnd) ((HWND)0)
 WINUSERAPI BOOL        WINAPI SetSystemCursor(HCURSOR,DWORD);
 WINUSERAPI BOOL        WINAPI SetSystemMenu(HWND,HMENU);
-WINUSERAPI UINT_PTR    WINAPI SetSystemTimer(HWND,UINT_PTR,UINT,TIMERPROC);
+WINUSERAPI UINT_PTR    WINAPI SetSystemTimer(HWND,UINT_PTR,UINT,void*);
 WINUSERAPI BOOL        WINAPI SetThreadDesktop(HDESK);
 WINUSERAPI DPI_AWARENESS_CONTEXT WINAPI SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT);
 WINUSERAPI UINT_PTR    WINAPI SetTimer(HWND,UINT_PTR,UINT,TIMERPROC);
@@ -4301,6 +4297,7 @@ WINUSERAPI BOOL        WINAPI UnregisterClassW(LPCWSTR,HINSTANCE);
 WINUSERAPI BOOL        WINAPI UnregisterDeviceNotification(HDEVNOTIFY);
 WINUSERAPI BOOL        WINAPI UnregisterHotKey(HWND,INT);
 WINUSERAPI BOOL        WINAPI UnregisterPowerSettingNotification(HPOWERNOTIFY);
+WINUSERAPI BOOL        WINAPI UnregisterSuspendResumeNotification(HPOWERNOTIFY);
 WINUSERAPI BOOL        WINAPI UnregisterTouchWindow(HWND);
 WINUSERAPI BOOL        WINAPI UpdateWindow(HWND);
 WINUSERAPI BOOL        WINAPI UserHandleGrantAccess(HANDLE,HANDLE,BOOL);
@@ -4408,7 +4405,43 @@ static inline BOOL WINAPI SetRectEmpty(LPRECT rect)
 WORD        WINAPI SYSTEM_KillSystemTimer( WORD );
 
 #ifdef __WINESRC__
-WINUSERAPI BOOL CDECL __wine_send_input( HWND hwnd, const INPUT *input );
+WINUSERAPI BOOL CDECL __wine_send_input( HWND hwnd, const INPUT *input, const RAWINPUT *rawinput );
+
+/* Uxtheme hook functions and struct */
+
+/* Scroll bar hit testing */
+enum SCROLL_HITTEST
+{
+    SCROLL_NOWHERE,      /* Outside the scroll bar */
+    SCROLL_TOP_ARROW,    /* Top or left arrow */
+    SCROLL_TOP_RECT,     /* Rectangle between the top arrow and the thumb */
+    SCROLL_THUMB,        /* Thumb rectangle */
+    SCROLL_BOTTOM_RECT,  /* Rectangle between the thumb and the bottom arrow */
+    SCROLL_BOTTOM_ARROW  /* Bottom or right arrow */
+};
+
+/* Scroll bar tracking information */
+struct SCROLL_TRACKING_INFO
+{
+    HWND win;                       /* Tracking window */
+    INT bar;                        /* SB_HORZ/SB_VERT/SB_CTL */
+    INT thumb_pos;                  /* Thumb position */
+    INT thumb_val;                  /* Current thumb value from thumb position */
+    BOOL vertical;                  /* Is scroll bar vertical */
+    enum SCROLL_HITTEST hit_test;   /* Hit Test code of the last button-down event */
+};
+
+struct user_api_hook
+{
+    LRESULT (WINAPI *pDefDlgProc)(HWND, UINT, WPARAM, LPARAM, BOOL);
+    void (WINAPI *pScrollBarDraw)(HWND, HDC, INT, enum SCROLL_HITTEST,
+                                  const struct SCROLL_TRACKING_INFO *, BOOL, BOOL, RECT *, INT, INT,
+                                  INT, BOOL);
+    LRESULT (WINAPI *pScrollBarWndProc)(HWND, UINT, WPARAM, LPARAM, BOOL);
+};
+
+WINUSERAPI BOOL WINAPI RegisterUserApiHook(const struct user_api_hook *new_hook, struct user_api_hook *old_hook);
+WINUSERAPI void WINAPI UnregisterUserApiHook(void);
 #endif
 
 #ifdef __cplusplus

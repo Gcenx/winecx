@@ -19,8 +19,8 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -29,16 +29,6 @@
 #include <errno.h>
 
 #include "utils.h"
-
-#if !defined(min)
-# define min(x,y) (((x) < (y)) ? (x) : (y))
-#endif
-
-#if defined(_WIN32) && !defined(__CYGWIN__)
-# define PATH_SEPARATOR ';'
-#else
-# define PATH_SEPARATOR ':'
-#endif
 
 int verbose = 0;
 
@@ -51,152 +41,6 @@ void error(const char* s, ...)
     vfprintf(stderr, s, ap);
     va_end(ap);
     exit(2);
-}
-
-void* xmalloc(size_t size)
-{
-    void* p;
-
-    if ((p = malloc (size)) == NULL)
-	error("Could not malloc %d bytes\n", size);
-
-    return p;
-}
-
-void *xrealloc(void* p, size_t size)
-{
-    void* p2 = realloc (p, size);
-    if (size && !p2)
-	error("Could not realloc %d bytes\n", size);
-
-    return p2;
-}
-
-char *xstrdup( const char *str )
-{
-    char *res = strdup( str );
-    if (!res) error("Virtual memory exhausted.\n");
-    return res;
-}
-
-int strendswith(const char* str, const char* end)
-{
-    int l = strlen(str);
-    int m = strlen(end);
-   
-    return l >= m && strcmp(str + l - m, end) == 0; 
-}
-
-char* strmake(const char* fmt, ...)
-{
-    int n;
-    size_t size = 100;
-    va_list ap;
-
-    while (1)
-    {
-        char *p = xmalloc (size);
-        va_start(ap, fmt);
-	n = vsnprintf (p, size, fmt, ap);
-	va_end(ap);
-        if (n == -1) size *= 2;
-        else if ((size_t)n >= size) size = n + 1;
-        else return p;
-        free(p);
-    }
-}
-
-strarray* strarray_alloc(void)
-{
-    strarray* arr = xmalloc(sizeof(*arr));
-    arr->maximum = arr->size = 0;
-    arr->base = NULL;
-    return arr;
-}
-
-void strarray_free(strarray* arr)
-{
-    free(arr->base);
-    free(arr);
-}
-
-void strarray_add(strarray* arr, const char* str)
-{
-    if (arr->size == arr->maximum)
-    {
-	arr->maximum += 10;
-	arr->base = xrealloc(arr->base, sizeof(*(arr->base)) * arr->maximum);
-    }
-    arr->base[arr->size++] = str;
-}
-
-void strarray_del(strarray* arr, unsigned int i)
-{
-    if (i >= arr->size) error("Invalid index i=%d\n", i);
-    memmove(&arr->base[i], &arr->base[i + 1], (arr->size - i - 1) * sizeof(arr->base[0]));
-    arr->size--;
-}
-
-void strarray_addall(strarray* arr, const strarray* from)
-{
-    unsigned int i;
-
-    for (i = 0; i < from->size; i++)
-	strarray_add(arr, from->base[i]);
-}
-
-strarray* strarray_dup(const strarray* arr)
-{
-    strarray* dup = strarray_alloc();
-    unsigned int i;
-
-    for (i = 0; i < arr->size; i++)
-	strarray_add(dup, arr->base[i]);
-
-    return dup;
-}
-
-strarray* strarray_fromstring(const char* str, const char* delim)
-{
-    strarray* arr = strarray_alloc();
-    char* buf = strdup(str);
-    const char* tok;
-
-    for(tok = strtok(buf, delim); tok; tok = strtok(0, delim))
-	strarray_add(arr, strdup(tok));
-
-    free(buf);
-    return arr;
-}
-
-char* strarray_tostring(const strarray* arr, const char* sep)
-{
-    char *str, *newstr;
-    unsigned int i;
-
-    str = strmake("%s", arr->base[0]);
-    for (i = 1; i < arr->size; i++)
-    {
-	newstr = strmake("%s%s%s", str, sep, arr->base[i]);
-	free(str);
-	str = newstr;
-    }
-
-    return str;
-}
-
-char* get_basename(const char* file)
-{
-    const char* name;
-    char *base_name, *p;
-
-    if ((name = strrchr(file, '/'))) name++;
-    else name = file;
-
-    base_name = strdup(name);
-    if ((p = strrchr(base_name, '.'))) *p = 0;
-
-    return base_name;
 }
 
 void create_file(const char* name, int mode, const char* fmt, ...)
@@ -219,6 +63,7 @@ file_type get_file_type(const char* filename)
     /* see tools/winebuild/res32.c: check_header for details */
     static const char res_sig[] = { 0,0,0,0, 32,0,0,0, 0xff,0xff, 0,0, 0xff,0xff, 0,0, 0,0,0,0, 0,0, 0,0, 0,0,0,0, 0,0,0,0 };
     static const char elf_sig[4] = "\177ELF";
+    static const char ar_sig[8] = "!<arch>\n";
     char buf[sizeof(res_sig)];
     int fd, cnt;
 
@@ -230,6 +75,7 @@ file_type get_file_type(const char* filename)
 
     if (cnt == sizeof(res_sig) && !memcmp(buf, res_sig, sizeof(res_sig))) return file_res;
     if (strendswith(filename, ".o")) return file_obj;
+    if (strendswith(filename, ".obj")) return file_obj;
     if (strendswith(filename, ".a")) return file_arh;
     if (strendswith(filename, ".res")) return file_res;
     if (strendswith(filename, ".so")) return file_so;
@@ -238,6 +84,7 @@ file_type get_file_type(const char* filename)
     if (strendswith(filename, ".spec")) return file_spec;
     if (strendswith(filename, ".rc")) return file_rc;
     if (cnt >= sizeof(elf_sig) && !memcmp(buf, elf_sig, sizeof(elf_sig))) return file_so;  /* ELF lib */
+    if (cnt >= sizeof(ar_sig) && !memcmp(buf, ar_sig, sizeof(ar_sig))) return file_arh;
     if (cnt >= sizeof(unsigned int) &&
         (*(unsigned int *)buf == 0xfeedface || *(unsigned int *)buf == 0xcefaedfe ||
          *(unsigned int *)buf == 0xfeedfacf || *(unsigned int *)buf == 0xcffaedfe))
@@ -270,49 +117,52 @@ static char* try_lib_path(const char* dir, const char* pre,
     return 0; 
 }
 
-static file_type guess_lib_type(enum target_platform platform, const char* dir,
-                                const char* library, const char *suffix, char** file)
+static file_type guess_lib_type(struct target target, const char* dir,
+                                const char* library, const char *prefix, const char *suffix, char** file)
 {
-    if (platform != PLATFORM_WINDOWS && platform != PLATFORM_MINGW && platform != PLATFORM_CYGWIN)
+    if (target.platform != PLATFORM_WINDOWS &&
+        target.platform != PLATFORM_MINGW &&
+        target.platform != PLATFORM_CYGWIN)
     {
         /* Unix shared object */
-        if ((*file = try_lib_path(dir, "lib", library, ".so", file_so)))
+        if ((*file = try_lib_path(dir, prefix, library, ".so", file_so)))
             return file_so;
 
         /* Mach-O (Darwin/Mac OS X) Dynamic Library behaves mostly like .so */
-        if ((*file = try_lib_path(dir, "lib", library, ".dylib", file_so)))
+        if ((*file = try_lib_path(dir, prefix, library, ".dylib", file_so)))
             return file_so;
 
         /* Windows DLL */
-        if ((*file = try_lib_path(dir, "lib", library, ".def", file_def)))
+        if ((*file = try_lib_path(dir, prefix, library, ".def", file_def)))
             return file_dll;
     }
 
     /* static archives */
-    if ((*file = try_lib_path(dir, "lib", library, suffix, file_arh)))
+    if ((*file = try_lib_path(dir, prefix, library, suffix, file_arh)))
 	return file_arh;
 
     return file_na;
 }
 
-file_type get_lib_type(enum target_platform platform, strarray* path, const char *library,
-                       const char *suffix, char** file)
+file_type get_lib_type(struct target target, struct strarray path, const char *library,
+                       const char *prefix, const char *suffix, char** file)
 {
     unsigned int i;
 
     if (!suffix) suffix = ".a";
-    for (i = 0; i < path->size; i++)
+    for (i = 0; i < path.count; i++)
     {
-        file_type type = guess_lib_type(platform, path->base[i], library, suffix, file);
+        file_type type = guess_lib_type(target, path.str[i], library, prefix, suffix, file);
 	if (type != file_na) return type;
     }
     return file_na;
 }
 
-const char *find_binary( const strarray* prefix, const char *name )
+const char *find_binary( struct strarray prefix, const char *name )
 {
     char *file_name, *args;
-    static strarray *path;
+    struct strarray dirs = empty_strarray;
+    static struct strarray path;
     unsigned int i;
 
     if (strchr( name, '/' )) return name;
@@ -320,67 +170,34 @@ const char *find_binary( const strarray* prefix, const char *name )
     file_name = xstrdup( name );
     if ((args = strchr( file_name, ' ' ))) *args++ = 0;
 
-    if (prefix)
-    {
-        for (i = 0; i < prefix->size; i++)
-        {
-            struct stat st;
-            char *prog = strmake( "%s/%s%s", prefix->base[i], file_name, EXEEXT );
-            if (stat( prog, &st ) == 0 && S_ISREG( st.st_mode ) && (st.st_mode & 0111))
-                return args ? strmake( "%s %s", prog, args ) : prog;
-            free( prog );
-        }
-    }
-    if (!path)
-    {
-        path = strarray_alloc();
+    if (!path.count) strarray_addall( &path, strarray_frompath( getenv( "PATH" )));
 
-        /* then append the PATH directories */
-        if (getenv( "PATH" ))
-        {
-            char *p = xstrdup( getenv( "PATH" ));
-            while (*p)
-            {
-                strarray_add( path, p );
-                while (*p && *p != PATH_SEPARATOR) p++;
-                if (!*p) break;
-                *p++ = 0;
-            }
-        }
+    strarray_addall( &dirs, prefix );
+    strarray_addall( &dirs, path );
+    for (i = 0; i < dirs.count; i++)
+    {
+        struct stat st;
+        char *prog = strmake( "%s/%s%s", dirs.str[i], file_name, EXEEXT );
+        if (stat( prog, &st ) == 0 && S_ISREG( st.st_mode ) && (st.st_mode & 0111))
+            return args ? strmake( "%s %s", prog, args ) : prog;
+        free( prog );
     }
-    return prefix == path ? NULL : find_binary( path, name );
+    return NULL;
 }
 
-int spawn(const strarray* prefix, const strarray* args, int ignore_errors)
+int spawn(struct strarray prefix, struct strarray args, int ignore_errors)
 {
-    unsigned int i;
     int status;
-    strarray* arr = strarray_dup(args);
-    const char** argv;
-    char* prog = 0;
 
-    strarray_add(arr, NULL);
-    argv = arr->base;
-    argv[0] = find_binary( prefix, argv[0] );
+    args.str[0] = find_binary( prefix, args.str[0] );
+    if (verbose) strarray_trace( args );
 
-    if (verbose)
+    if ((status = strarray_spawn( args )) && !ignore_errors)
     {
-	for(i = 0; argv[i]; i++)
-	{
-	    if (strpbrk(argv[i], " \t\n\r")) printf("\"%s\" ", argv[i]);
-	    else printf("%s ", argv[i]);
-	}
-	printf("\n");
-    }
-
-    if ((status = _spawnvp( _P_WAIT, argv[0], argv)) && !ignore_errors)
-    {
-	if (status > 0) error("%s failed\n", argv[0]);
+	if (status > 0) error("%s failed\n", args.str[0]);
 	else perror("winegcc");
 	exit(3);
     }
 
-    free(prog);
-    strarray_free(arr);
     return status;
 }

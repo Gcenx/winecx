@@ -18,14 +18,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdio.h>
 
 #define COBJMACROS
 
 #include <windows.h>
+#include <winternl.h>
 #include <shlobj.h>
 #include <shlwapi.h>
 #include <errno.h>
@@ -38,13 +36,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(menubuilder);
 
 int cx_mode = 1;
 int cx_dump_menus = 0;
-FILE *cx_menu_file = NULL;
 
-#ifdef __ANDROID__
-int cx_write_to_file = 1;
-#else
-int cx_write_to_file = 0;
-#endif
+static BOOL cx_link_is_64_bit(IShellLinkW *sl, int recurse_level);
 
 
 /*
@@ -53,9 +46,9 @@ int cx_write_to_file = 0;
 
 static int cx_wineshelllink(LPCWSTR linkW, int is_desktop, LPCWSTR rootW,
                             LPCWSTR pathW, LPCWSTR argsW,
-                            const char* icon_name, const char* description, const char* arch)
+                            LPCWSTR icon_name, LPCWSTR description, LPCWSTR arch)
 {
-    const char * HOSTPTR argv[20];
+    const char *argv[20];
     int pos = 0;
     int retcode;
 
@@ -76,21 +69,21 @@ static int cx_wineshelllink(LPCWSTR linkW, int is_desktop, LPCWSTR rootW,
     if (icon_name)
     {
         argv[pos++] = "--icon";
-        argv[pos++] = icon_name;
+        argv[pos++] = wchars_to_utf8_chars(icon_name);
     }
     if (description && *description)
     {
         argv[pos++] = "--descr";
-        argv[pos++] = description;
+        argv[pos++] = wchars_to_utf8_chars(description);
     }
     if (arch && *arch)
     {
         argv[pos++] = "--arch";
-        argv[pos++] = arch;
+        argv[pos++] = wchars_to_utf8_chars(arch);
     }
     argv[pos] = NULL;
 
-    retcode = _spawnvp(_P_WAIT, argv[0], argv);
+    retcode = __wine_unix_spawnvp((char **)argv, TRUE);
     if (retcode!=0)
         WINE_ERR("%s returned %d\n", argv[0], retcode);
     return retcode;
@@ -152,52 +145,17 @@ static void cx_print_value(const char* name, const WCHAR* value)
 
         strA = wchars_to_utf8_chars(str);
 
-        fprintf(cx_menu_file, "\"%s\"=\"%s\"\n", name, strA);
+        printf("\"%s\"=\"%s\"\n", name, strA);
 
         HeapFree(GetProcessHeap(), 0, str);
         HeapFree(GetProcessHeap(), 0, strA);
     }
 }
 
-static void cx_write_profile_value(const char *fname, const WCHAR *section,
-                                   const WCHAR *key, const WCHAR *value)
-{
-    if (value)
-    {
-        WCHAR *dosfname;
-        WCHAR *str = cx_escape_string(value);
-        WCHAR *str2 = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(str) + 3) * sizeof(WCHAR));
-
-        static const WCHAR quoteW[] = {'"',0};
-
-        lstrcpyW(str2, quoteW);
-        lstrcatW(str2, str);
-        lstrcatW(str2, quoteW);
-
-        dosfname = wine_get_dos_file_name(fname);
-
-        if (!WritePrivateProfileStringW(section, key, str2, dosfname))
-            WINE_TRACE("Failed to dump %s for %s : %d\n", debugstr_w(key), debugstr_w(section), GetLastError());
-
-        HeapFree(GetProcessHeap(), 0, dosfname);
-        HeapFree(GetProcessHeap(), 0, str);
-        HeapFree(GetProcessHeap(), 0, str2);
-    }
-}
-
-
 static void cx_dump_menu(LPCWSTR linkW, int is_desktop, LPCWSTR rootW,
                          LPCWSTR pathW, LPCWSTR argsW,
-                         const char *icon_name, const char *description, const char *arch)
+                         LPCWSTR icon_name, LPCWSTR description, LPCWSTR arch)
 {
-    static const WCHAR zeroW[] = {'0',0};
-    static const WCHAR oneW[] = {'1',0};
-
-    WCHAR *icon_nameW = NULL, *descriptionW = NULL, *archW = NULL;
-    const char *s = "/menuItems.txt";
-    char *fname = HeapAlloc( GetProcessHeap(), 0, strlen(xdg_data_dir) + strlen(s) + 1 );
-    sprintf(fname, "%s%s", xdg_data_dir, s);
-
     /* -----------------------------------------------------------
     **   The Menu hack in particular is tracked by 
     ** CrossOver Hack 13785.
@@ -205,79 +163,40 @@ static void cx_dump_menu(LPCWSTR linkW, int is_desktop, LPCWSTR rootW,
     ** is a diff from winehq which does not appear to be tracked
     ** by a bug in the hacks milestone.)
     ** ----------------------------------------------------------- */
-    if (!cx_menu_file)
-    {
-        if (cx_write_to_file)
-        {
-            if (!(cx_menu_file = fopen(fname, "a+")))
-                WINE_TRACE("Could not open menu file %s : %d (%s)\n", fname,
-                           errno, strerror(errno));
-        }
+    char *link = wchars_to_utf8_chars(linkW);
 
-        if (!cx_menu_file)
-            cx_menu_file = stdout;
-    }
+    printf("[%s]\n", link);
+    cx_print_value("IsMenu", (is_desktop ? L"0" : L"1"));
+    cx_print_value("Root", rootW);
+    cx_print_value("Path", pathW);
+    cx_print_value("Args", argsW);
+    cx_print_value("Icon", icon_name);
+    cx_print_value("Description", description);
+    cx_print_value("Arch", arch);
+    printf("\n");
 
-    if (icon_name) icon_nameW = utf8_chars_to_wchars(icon_name);
-    if (description) descriptionW = utf8_chars_to_wchars(description);
-    if (arch) archW = utf8_chars_to_wchars(arch);
-
-    if (cx_menu_file == stdout)
-    {
-        char *link = wchars_to_utf8_chars(linkW);
-
-        fprintf(cx_menu_file, "[%s]\n", link);
-        cx_print_value("IsMenu", (is_desktop ? zeroW : oneW));
-        cx_print_value("Root", rootW);
-        cx_print_value("Path", pathW);
-        cx_print_value("Args", argsW);
-        cx_print_value("Icon", icon_nameW);
-        cx_print_value("Description", descriptionW);
-        cx_print_value("Arch", archW);
-        fprintf(cx_menu_file, "\n");
-
-        HeapFree(GetProcessHeap(), 0, link);
-    }
-    else
-    {
-        static const WCHAR IsMenuW[] = {'I','s','M','e','n','u',0};
-        static const WCHAR RootW[] = {'R','o','o','t',0};
-        static const WCHAR PathW[] = {'P','a','t','h',0};
-        static const WCHAR ArgsW[] = {'A','r','g','s',0};
-        static const WCHAR IconW[] = {'I','c','o','n',0};
-        static const WCHAR DescriptionW[] = {'D','e','s','c','r','i','p','t','i','o','n',0};
-        static const WCHAR ArchW[] = {'A','r','c','h',0};
-
-        cx_write_profile_value(fname, linkW, IsMenuW, (is_desktop ? zeroW : oneW));
-        cx_write_profile_value(fname, linkW, RootW, rootW);
-        cx_write_profile_value(fname, linkW, PathW, pathW);
-        cx_write_profile_value(fname, linkW, ArgsW, argsW);
-        cx_write_profile_value(fname, linkW, IconW, icon_nameW);
-        cx_write_profile_value(fname, linkW, DescriptionW, descriptionW);
-        cx_write_profile_value(fname, linkW, ArchW, archW);
-    }
-
-    if (icon_nameW) HeapFree(GetProcessHeap(), 0, icon_nameW);
-    if (descriptionW) HeapFree(GetProcessHeap(), 0, descriptionW);
-    if (archW) HeapFree(GetProcessHeap(), 0, archW);
-    if (fname) HeapFree(GetProcessHeap(), 0, fname);
+    HeapFree(GetProcessHeap(), 0, link);
 }
 
 int cx_process_menu(LPCWSTR linkW, BOOL is_desktop, DWORD root_csidl,
                     LPCWSTR pathW, LPCWSTR argsW,
-                    LPCSTR icon_name, LPCSTR description, LPCSTR arch)
+                    LPCWSTR icon_name, LPCWSTR description, IShellLinkW *sl)
 {
+    const WCHAR *arch = NULL; /* CrossOver hack 14227 */
     WCHAR rootW[MAX_PATH];
     int rc;
 
+    /* CrossOver hack 14227 */
+    if (sl && cx_link_is_64_bit(sl, 0)) arch = L"x86_64";
+
     SHGetSpecialFolderPathW(NULL, rootW, root_csidl, FALSE);
 
-    WINE_TRACE("link='%s' %s: '%s' path='%s' args='%s' icon='%s' desc='%s' arch='%s'\n",
+    WINE_TRACE("link=%s %s: %s path=%s args=%s icon=%s desc=%s arch=%s\n",
                debugstr_w(linkW), is_desktop ? "desktop" : "menu", debugstr_w(rootW),
-               debugstr_w(pathW), debugstr_w(argsW), icon_name, description,
-               arch);
+               debugstr_w(pathW), debugstr_w(argsW), debugstr_w(icon_name), debugstr_w(description),
+               debugstr_w(arch));
 
-    if (cx_dump_menus || cx_write_to_file)
+    if (cx_dump_menus)
     {
         rc = 0;
         cx_dump_menu(linkW, is_desktop, rootW, pathW, argsW, icon_name, description, arch);
@@ -312,9 +231,8 @@ static IShellLinkW* load_link(const WCHAR* link)
     return sl;
 }
 
-BOOL cx_link_is_64_bit(IShellLinkW *sl, int recurse_level)
+static BOOL cx_link_is_64_bit(IShellLinkW *sl, int recurse_level)
 {
-    static const WCHAR lnk[] = {'.','l','n','k',0};
     HRESULT hr;
     WCHAR temp[MAX_PATH];
     WCHAR path[MAX_PATH];
@@ -327,7 +245,7 @@ BOOL cx_link_is_64_bit(IShellLinkW *sl, int recurse_level)
     ExpandEnvironmentStringsW(temp, path, sizeof(path)/sizeof(path[0]));
 
     ext = PathFindExtensionW(path);
-    if (!lstrcmpiW(ext, lnk) && recurse_level < 5)
+    if (!lstrcmpiW(ext, L".lnk") && recurse_level < 5)
     {
         IShellLinkW *sl2 = load_link(path);
         if (sl2)
@@ -350,11 +268,6 @@ BOOL cx_link_is_64_bit(IShellLinkW *sl, int recurse_level)
 
 static BOOL cx_process_dir(WCHAR* dir)
 {
-    static const WCHAR wWILD[]={'\\','*',0};
-    static const WCHAR wDOT[]={'.',0};
-    static const WCHAR wDOTDOT[]={'.','.',0};
-    static const WCHAR wLNK[]={'.','l','n','k',0};
-    static const WCHAR wURL[]={'.','u','r','l',0};
     HANDLE hFind;
     WIN32_FIND_DATAW item;
     int lendir, len;
@@ -363,7 +276,7 @@ static BOOL cx_process_dir(WCHAR* dir)
 
     WINE_TRACE("scanning directory %s\n", wine_dbgstr_w(dir));
     lendir = lstrlenW(dir);
-    lstrcatW(dir, wWILD);
+    lstrcatW(dir, L"\\*");
     hFind=FindFirstFileW(dir, &item);
     if (hFind == INVALID_HANDLE_VALUE)
     {
@@ -377,13 +290,13 @@ static BOOL cx_process_dir(WCHAR* dir)
     path[lendir] = '\\';
     while (1)
     {
-        if (lstrcmpW(item.cFileName, wDOT) && lstrcmpW(item.cFileName, wDOTDOT))
+        if (wcscmp(item.cFileName, L".") && wcscmp(item.cFileName, L".."))
         {
             WINE_TRACE("  %s\n", wine_dbgstr_w(item.cFileName));
             len=lstrlenW(item.cFileName);
             if ((item.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
-                (len >= 5 && lstrcmpiW(item.cFileName+len-4, wLNK) == 0) ||
-                (len >= 5 && lstrcmpiW(item.cFileName+len-4, wURL) == 0))
+                (len >= 5 && lstrcmpiW(item.cFileName+len-4, L".lnk") == 0) ||
+                (len >= 5 && lstrcmpiW(item.cFileName+len-4, L".url") == 0))
             {
                 lstrcpyW(path+lendir+1, item.cFileName);
                 if (item.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
@@ -394,7 +307,7 @@ static BOOL cx_process_dir(WCHAR* dir)
                             rc = FALSE;
                     }
                 }
-                else if (len >= 5 && lstrcmpiW(item.cFileName+len-4, wURL) == 0)
+                else if (len >= 5 && lstrcmpiW(item.cFileName+len-4, L".url") == 0)
                 {
                     WINE_TRACE("  url %s\n", wine_dbgstr_w(path));
 
@@ -435,9 +348,7 @@ BOOL cx_process_all_menus(void)
         /* CSIDL_COMMON_STARTUP, Not interested in this one */
         CSIDL_COMMON_DESKTOPDIRECTORY, CSIDL_COMMON_STARTMENU };
     WCHAR dir[MAX_PATH+2]; /* +2 for cx_process_dir() */
-    char* unix_dir;
-    struct stat st;
-    DWORD i, len;
+    DWORD i, len, attr;
     BOOL rc;
 
     rc = TRUE;
@@ -464,13 +375,11 @@ BOOL cx_process_all_menus(void)
         /* Only scan directories. This is particularly important for Desktop
          * which may be a symbolic link to the native desktop.
          */
-        unix_dir = wine_get_unix_file_name(dir);
-        if (!unix_dir || lstat(unix_dir, &st) || !S_ISDIR(st.st_mode))
-            WINE_TRACE("'%s' is not a directory, skipping it\n", unix_dir);
+        attr = GetFileAttributesW( dir );
+        if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY))
+            WINE_TRACE("%s is not a directory, skipping it\n", debugstr_w(dir));
         else if (!cx_process_dir(dir))
             rc = FALSE;
-        if (unix_dir)
-            HeapFree(GetProcessHeap(), 0, unix_dir);
     }
     return rc;
 }

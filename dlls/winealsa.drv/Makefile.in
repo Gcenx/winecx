@@ -1,8 +1,12 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE    = winealsa.drv
+UNIXLIB   = winealsa.so
 IMPORTS   = uuid ole32 advapi32
 DELAYIMPORTS = winmm
-EXTRALIBS = $(ALSA_LIBS)
+EXTRALIBS = $(ALSA_LIBS) $(PTHREAD_LIBS)
 
 C_SRCS = \
+	alsa.c \
+	alsamidi.c \
 	midi.c \
 	mmdevdrv.c

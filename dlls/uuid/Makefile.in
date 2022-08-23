@@ -1,5 +1,0 @@
-MODULE    = libuuid.a
-
-C_SRCS = \
-	d2d.c \
-	uuid.c

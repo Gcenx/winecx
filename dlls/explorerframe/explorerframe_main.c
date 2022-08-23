@@ -45,7 +45,7 @@ LONG EFRAME_refCount = 0;
  */
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD fdwReason, LPVOID fImpLoad)
 {
-    TRACE("%p, 0x%x, %p\n", hinst, fdwReason, fImpLoad);
+    TRACE("%p, 0x%lx, %p\n", hinst, fdwReason, fImpLoad);
     switch (fdwReason)
     {
     case DLL_PROCESS_ATTACH:
@@ -61,7 +61,7 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD fdwReason, LPVOID fImpLoad)
  */
 HRESULT WINAPI DllCanUnloadNow(void)
 {
-    TRACE("refCount is %d\n", EFRAME_refCount);
+    TRACE("refCount is %ld\n", EFRAME_refCount);
     return EFRAME_refCount ? S_FALSE : S_OK;
 }
 
@@ -206,20 +206,4 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **ppv)
         return IClassFactory_QueryInterface(&TaskbarListFactory.IClassFactory_iface, riid, ppv);
 
     return CLASS_E_CLASSNOTAVAILABLE;
-}
-
-/*************************************************************************
- *          DllRegisterServer (ExplorerFrame.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( explorerframe_hinstance );
-}
-
-/*************************************************************************
- *          DllUnregisterServer (ExplorerFrame.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( explorerframe_hinstance );
 }

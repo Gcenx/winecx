@@ -23,6 +23,8 @@
 
 #include "wine/winheader_enter.h"
 
+#include "ifdef.h"
+
 #define MOUNTMGRCONTROLTYPE  ((ULONG)'m')
 #define MOUNTDEVCONTROLTYPE  ((ULONG)'M')
 
@@ -51,8 +53,10 @@ static const WCHAR MOUNTMGR_DOS_DEVICE_NAME[] = {'\\','\\','.','\\','M','o','u',
 /* Wine extensions */
 #ifdef WINE_MOUNTMGR_EXTENSIONS
 
-#define IOCTL_MOUNTMGR_DEFINE_UNIX_DRIVE CTL_CODE(MOUNTMGRCONTROLTYPE, 32, METHOD_BUFFERED, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
-#define IOCTL_MOUNTMGR_QUERY_UNIX_DRIVE  CTL_CODE(MOUNTMGRCONTROLTYPE, 33, METHOD_BUFFERED, FILE_READ_ACCESS)
+#define IOCTL_MOUNTMGR_DEFINE_UNIX_DRIVE   CTL_CODE(MOUNTMGRCONTROLTYPE, 32, METHOD_BUFFERED, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_MOUNTMGR_QUERY_UNIX_DRIVE    CTL_CODE(MOUNTMGRCONTROLTYPE, 33, METHOD_BUFFERED, FILE_READ_ACCESS)
+#define IOCTL_MOUNTMGR_DEFINE_SHELL_FOLDER CTL_CODE(MOUNTMGRCONTROLTYPE, 34, METHOD_BUFFERED, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_MOUNTMGR_QUERY_SHELL_FOLDER  CTL_CODE(MOUNTMGRCONTROLTYPE, 35, METHOD_BUFFERED, FILE_READ_ACCESS)
 
 enum mountmgr_fs_type
 {
@@ -74,6 +78,14 @@ struct mountmgr_unix_drive
     USHORT    mount_point_offset;
     USHORT    device_offset;
     USHORT    label_offset;
+};
+
+struct mountmgr_shell_folder
+{
+    BOOL     create_backup;
+    ULONG    folder_offset;
+    ULONG    folder_size;
+    ULONG    symlink_offset;
 };
 
 #define IOCTL_MOUNTMGR_READ_CREDENTIAL       CTL_CODE(MOUNTMGRCONTROLTYPE, 48, METHOD_BUFFERED, FILE_READ_ACCESS)
@@ -121,7 +133,7 @@ struct mountmgr_dhcp_request_params
 {
     ULONG size;
     ULONG count;
-    WCHAR adapter[IF_MAX_STRING_SIZE + 1];
+    char  unix_name[16];
     struct mountmgr_dhcp_request_param params[1];
 };
 

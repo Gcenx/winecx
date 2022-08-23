@@ -76,7 +76,7 @@ ME_StreamOutFlush(ME_OutStream *pStream)
     nWritten = pStream->pos;
     stream->dwError = stream->pfnCallback(stream->dwCookie, (LPBYTE)pStream->buffer,
                                           pStream->pos, &nWritten);
-    TRACE("error=%u written=%u\n", stream->dwError, nWritten);
+    TRACE("error=%lu written=%lu\n", stream->dwError, nWritten);
     if (nWritten == 0 || stream->dwError)
       return FALSE;
     /* Don't resend partial chunks if nWritten < pStream->pos */
@@ -92,7 +92,7 @@ static LONG
 ME_StreamOutFree(ME_OutStream *pStream)
 {
   LONG written = pStream->written;
-  TRACE("total length = %u\n", written);
+  TRACE("total length = %lu\n", written);
 
   heap_free(pStream);
   return written;
@@ -125,11 +125,11 @@ ME_StreamOutPrint(ME_OutStream *pStream, const char *format, ...)
 {
   char string[STREAMOUT_BUFFER_SIZE]; /* This is going to be enough */
   int len;
-  __ms_va_list valist;
+  va_list valist;
 
-  __ms_va_start(valist, format);
+  va_start(valist, format);
   len = vsnprintf(string, sizeof(string), format, valist);
-  __ms_va_end(valist);
+  va_end(valist);
 
   return ME_StreamOutMove(pStream, string, len);
 }
@@ -400,9 +400,9 @@ static BOOL stream_out_table_props( ME_TextEditor *editor, ME_OutStream *pStream
     cell = table_row_first_cell( para );
     assert( cell );
     if (pFmt->dxOffset)
-      sprintf(props + strlen(props), "\\trgaph%d", pFmt->dxOffset);
+      sprintf(props + strlen(props), "\\trgaph%ld", pFmt->dxOffset);
     if (pFmt->dxStartIndent)
-      sprintf(props + strlen(props), "\\trleft%d", pFmt->dxStartIndent);
+      sprintf(props + strlen(props), "\\trleft%ld", pFmt->dxStartIndent);
     do
     {
       ME_Border* borders[4] = { &cell->border.top, &cell->border.left,
@@ -434,9 +434,9 @@ static BOOL stream_out_table_props( ME_TextEditor *editor, ME_OutStream *pStream
 
     assert( !(para->nFlags & (MEPF_ROWSTART | MEPF_ROWEND | MEPF_CELL)) );
     if (pFmt->dxOffset)
-      sprintf(props + strlen(props), "\\trgaph%d", pFmt->dxOffset);
+      sprintf(props + strlen(props), "\\trgaph%ld", pFmt->dxOffset);
     if (pFmt->dxStartIndent)
-      sprintf(props + strlen(props), "\\trleft%d", pFmt->dxStartIndent);
+      sprintf(props + strlen(props), "\\trleft%ld", pFmt->dxStartIndent);
     for (i = 0; i < 4; i++)
     {
       if (borders[i]->width)
@@ -452,7 +452,7 @@ static BOOL stream_out_table_props( ME_TextEditor *editor, ME_OutStream *pStream
     }
     for (i = 0; i < pFmt->cTabCount; i++)
     {
-      sprintf(props + strlen(props), "\\cellx%d", pFmt->rgxTabs[i] & 0x00FFFFFF);
+      sprintf(props + strlen(props), "\\cellx%ld", pFmt->rgxTabs[i] & 0x00FFFFFF);
     }
   }
   if (!ME_StreamOutPrint(pStream, props))
@@ -631,13 +631,13 @@ static BOOL stream_out_para_props( ME_TextEditor *editor, ME_OutStream *pStream,
         strcat(props, "\\sl-480\\slmult1");
         break;
       case 3:
-        sprintf(props + strlen(props), "\\sl%d\\slmult0", fmt->dyLineSpacing);
+        sprintf(props + strlen(props), "\\sl%ld\\slmult0", fmt->dyLineSpacing);
         break;
       case 4:
-        sprintf(props + strlen(props), "\\sl-%d\\slmult0", fmt->dyLineSpacing);
+        sprintf(props + strlen(props), "\\sl-%ld\\slmult0", fmt->dyLineSpacing);
         break;
       case 5:
-        sprintf(props + strlen(props), "\\sl-%d\\slmult1", fmt->dyLineSpacing * 240 / 20);
+        sprintf(props + strlen(props), "\\sl-%ld\\slmult1", fmt->dyLineSpacing * 240 / 20);
         break;
     }
   }
@@ -663,11 +663,11 @@ static BOOL stream_out_para_props( ME_TextEditor *editor, ME_OutStream *pStream,
         fmt->dwMask & PFM_TABLE && fmt->wEffects & PFE_TABLE))
   {
     if (fmt->dxOffset)
-      sprintf(props + strlen(props), "\\li%d", fmt->dxOffset);
+      sprintf(props + strlen(props), "\\li%ld", fmt->dxOffset);
     if (fmt->dxStartIndent)
-      sprintf(props + strlen(props), "\\fi%d", fmt->dxStartIndent);
+      sprintf(props + strlen(props), "\\fi%ld", fmt->dxStartIndent);
     if (fmt->dxRightIndent)
-      sprintf(props + strlen(props), "\\ri%d", fmt->dxRightIndent);
+      sprintf(props + strlen(props), "\\ri%ld", fmt->dxRightIndent);
     if (fmt->dwMask & PFM_TABSTOPS) {
       static const char * const leader[6] = { "", "\\tldot", "\\tlhyph", "\\tlul", "\\tlth", "\\tleq" };
 
@@ -690,14 +690,14 @@ static BOOL stream_out_para_props( ME_TextEditor *editor, ME_OutStream *pStream,
         }
         if (fmt->rgxTabs[i] >> 28 <= 5)
           strcat(props, leader[fmt->rgxTabs[i] >> 28]);
-        sprintf(props+strlen(props), "\\tx%d", fmt->rgxTabs[i]&0x00FFFFFF);
+        sprintf(props+strlen(props), "\\tx%ld", fmt->rgxTabs[i]&0x00FFFFFF);
       }
     }
   }
   if (fmt->dySpaceAfter)
-    sprintf(props + strlen(props), "\\sa%d", fmt->dySpaceAfter);
+    sprintf(props + strlen(props), "\\sa%ld", fmt->dySpaceAfter);
   if (fmt->dySpaceBefore)
-    sprintf(props + strlen(props), "\\sb%d", fmt->dySpaceBefore);
+    sprintf(props + strlen(props), "\\sb%ld", fmt->dySpaceBefore);
   if (fmt->sStyle != -1)
     sprintf(props + strlen(props), "\\s%d", fmt->sStyle);
   
@@ -791,12 +791,12 @@ ME_StreamOutRTFCharProps(ME_OutStream *pStream, CHARFORMAT2W *fmt)
   if (old_fmt->yOffset != fmt->yOffset)
   {
     if (fmt->yOffset >= 0)
-      sprintf(props + strlen(props), "\\up%d", fmt->yOffset);
+      sprintf(props + strlen(props), "\\up%ld", fmt->yOffset);
     else
-      sprintf(props + strlen(props), "\\dn%d", -fmt->yOffset);
+      sprintf(props + strlen(props), "\\dn%ld", -fmt->yOffset);
   }
   if (old_fmt->yHeight != fmt->yHeight)
-    sprintf(props + strlen(props), "\\fs%d", fmt->yHeight / 10);
+    sprintf(props + strlen(props), "\\fs%ld", fmt->yHeight / 10);
   if (old_fmt->sSpacing != fmt->sSpacing)
     sprintf(props + strlen(props), "\\expnd%u\\expndtw%u", fmt->sSpacing / 5, fmt->sSpacing);
   if ((old_fmt->dwEffects ^ fmt->dwEffects) & (CFM_SUBSCRIPT | CFM_SUPERSCRIPT))
@@ -939,11 +939,13 @@ static BOOL stream_out_graphics( ME_TextEditor *editor, ME_OutStream *stream,
     UINT size;
     SIZE goal, pic;
     ME_Context c;
+    HDC hdc;
 
     hr = IOleObject_QueryInterface( run->reobj->obj.poleobj, &IID_IDataObject, (void **)&data );
     if (FAILED(hr)) return FALSE;
 
-    ME_InitContext( &c, editor, ITextHost_TxGetDC( editor->texthost ) );
+    hdc = ITextHost_TxGetDC( editor->texthost );
+    ME_InitContext( &c, editor, hdc );
     hr = IDataObject_QueryGetData( data, &fmt );
     if (hr != S_OK) goto done;
 
@@ -985,6 +987,7 @@ static BOOL stream_out_graphics( ME_TextEditor *editor, ME_OutStream *stream,
 
 done:
     ME_DestroyContext( &c );
+    ITextHost_TxReleaseDC( editor->texthost, hdc );
     HeapFree( GetProcessHeap(), 0, emf_bits );
     ReleaseStgMedium( &med );
     IDataObject_Release( data );
@@ -1195,7 +1198,7 @@ ME_StreamOut(ME_TextEditor *editor, DWORD dwFormat, EDITSTREAM *stream)
   int nChars;
 
   if (dwFormat & SFF_SELECTION) {
-    int nStart, nTo;
+    LONG nStart, nTo;
     start = editor->pCursors[ME_GetSelectionOfs(editor, &nStart, &nTo)];
     nChars = nTo - nStart;
   } else {

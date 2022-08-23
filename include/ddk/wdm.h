@@ -24,6 +24,7 @@
 #define _NTDDK_
 
 #include <ntstatus.h>
+#include <devpropdef.h>
 
 #ifdef _WIN64
 #define POINTER_ALIGNMENT DECLSPEC_ALIGN(8)
@@ -399,6 +400,7 @@ typedef struct _WAIT_CONTEXT_BLOCK {
 #define IO_TYPE_ERROR_LOG               0x0b
 #define IO_TYPE_ERROR_MESSAGE           0x0c
 #define IO_TYPE_DEVICE_OBJECT_EXTENSION 0x0d
+#define IO_TYPE_DEVICE_QUEUE            0x14
 
 typedef struct _DEVICE_OBJECT {
   CSHORT  Type;
@@ -834,7 +836,8 @@ typedef enum _BUS_QUERY_ID_TYPE {
   BusQueryHardwareIDs,
   BusQueryCompatibleIDs,
   BusQueryInstanceID,
-  BusQueryDeviceSerialNumber
+  BusQueryDeviceSerialNumber,
+  BusQueryContainerID,
 } BUS_QUERY_ID_TYPE, *PBUS_QUERY_ID_TYPE;
 
 typedef enum _CREATE_FILE_TYPE {
@@ -1295,11 +1298,25 @@ typedef struct _KUSER_SHARED_DATA {
     volatile ULONGLONG QpcBias;                            /* 0x3b8 */
     ULONG ActiveProcessorCount;                            /* 0x3c0 */
     volatile UCHAR ActiveGroupCount;                       /* 0x3c4 */
-    USHORT QpcData;                                        /* 0x3c6 */
+    union {
+        USHORT QpcData;                                    /* 0x3c6 */
+        struct {
+            UCHAR volatile QpcBypassEnabled;
+            UCHAR QpcShift;
+        } DUMMYSTRUCTNAME;
+    } DUMMYUNIONNAME3;
     LARGE_INTEGER TimeZoneBiasEffectiveStart;              /* 0x3c8 */
     LARGE_INTEGER TimeZoneBiasEffectiveEnd;                /* 0x3d0 */
     XSTATE_CONFIGURATION XState;                           /* 0x3d8 */
 } KSHARED_USER_DATA, *PKSHARED_USER_DATA;
+
+#define SHARED_GLOBAL_FLAGS_QPC_BYPASS_ENABLED 0x01
+#define SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_HV_PAGE 0x02
+#define SHARED_GLOBAL_FLAGS_QPC_BYPASS_DISABLE_32BIT 0x04
+#define SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_MFENCE 0x10
+#define SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_LFENCE 0x20
+#define SHARED_GLOBAL_FLAGS_QPC_BYPASS_A73_ERRATA 0x40
+#define SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_RDTSCP 0x80
 
 typedef enum _MEMORY_CACHING_TYPE {
     MmNonCached = 0,
@@ -1450,7 +1467,7 @@ typedef struct _LOOKASIDE_LIST_EX
 typedef struct LOOKASIDE_ALIGN _NPAGED_LOOKASIDE_LIST
 {
     GENERAL_LOOKASIDE L;
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#if defined(__i386__)
     KSPIN_LOCK Lock__ObsoleteButDoNotDelete;
 #endif
 } NPAGED_LOOKASIDE_LIST, *PNPAGED_LOOKASIDE_LIST;
@@ -1458,7 +1475,7 @@ typedef struct LOOKASIDE_ALIGN _NPAGED_LOOKASIDE_LIST
 typedef struct LOOKASIDE_ALIGN _PAGED_LOOKASIDE_LIST
 {
     GENERAL_LOOKASIDE L;
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#if defined(__i386__)
     FAST_MUTEX Lock__ObsoleteButDoNotDelete;
 #endif
 } PAGED_LOOKASIDE_LIST, *PPAGED_LOOKASIDE_LIST;
@@ -1635,6 +1652,8 @@ static inline void IoCopyCurrentIrpStackLocationToNext(IRP *irp)
 #define SYMBOLIC_LINK_ALL_ACCESS        (STANDARD_RIGHTS_REQUIRED | 0x1)
 
 NTSTATUS  WINAPI DbgQueryDebugFilterState(ULONG, ULONG);
+
+void    FASTCALL ExAcquireFastMutex(FAST_MUTEX*);
 void    FASTCALL ExAcquireFastMutexUnsafe(PFAST_MUTEX);
 BOOLEAN   WINAPI ExAcquireResourceExclusiveLite(ERESOURCE*,BOOLEAN);
 BOOLEAN   WINAPI ExAcquireResourceSharedLite(ERESOURCE*,BOOLEAN);
@@ -1661,10 +1680,13 @@ LIST_ENTRY * WINAPI ExInterlockedRemoveHeadList(LIST_ENTRY*,KSPIN_LOCK*);
 BOOLEAN   WINAPI ExIsResourceAcquiredExclusiveLite(ERESOURCE*);
 ULONG     WINAPI ExIsResourceAcquiredSharedLite(ERESOURCE*);
 void *    WINAPI ExRegisterCallback(PCALLBACK_OBJECT,PCALLBACK_FUNCTION,void*);
+void    FASTCALL ExReleaseFastMutex(FAST_MUTEX*);
 void    FASTCALL ExReleaseFastMutexUnsafe(PFAST_MUTEX);
 void      WINAPI ExReleaseResourceForThreadLite(ERESOURCE*,ERESOURCE_THREAD);
 ULONG     WINAPI ExSetTimerResolution(ULONG,BOOLEAN);
 void      WINAPI ExUnregisterCallback(void*);
+
+#define PLUGPLAY_PROPERTY_PERSISTENT 0x0001
 
 void      WINAPI IoAcquireCancelSpinLock(KIRQL*);
 NTSTATUS  WINAPI IoAcquireRemoveLockEx(IO_REMOVE_LOCK*,void*,const char*,ULONG, ULONG);
@@ -1682,6 +1704,7 @@ NTSTATUS  WINAPI IoCallDriver(DEVICE_OBJECT*,IRP*);
 BOOLEAN   WINAPI IoCancelIrp(IRP*);
 VOID      WINAPI IoCompleteRequest(IRP*,UCHAR);
 NTSTATUS  WINAPI IoCreateDevice(DRIVER_OBJECT*,ULONG,UNICODE_STRING*,DEVICE_TYPE,ULONG,BOOLEAN,DEVICE_OBJECT**);
+NTSTATUS  WINAPI IoCreateDeviceSecure(DRIVER_OBJECT*,ULONG,UNICODE_STRING*,DEVICE_TYPE,ULONG,BOOLEAN,PCUNICODE_STRING,LPCGUID,DEVICE_OBJECT**);
 NTSTATUS  WINAPI IoCreateDriver(UNICODE_STRING*,PDRIVER_INITIALIZE);
 NTSTATUS  WINAPI IoCreateSymbolicLink(UNICODE_STRING*,UNICODE_STRING*);
 PKEVENT   WINAPI IoCreateSynchronizationEvent(UNICODE_STRING*,HANDLE*);
@@ -1713,10 +1736,11 @@ void      WINAPI IoReleaseRemoveLockAndWaitEx(IO_REMOVE_LOCK*,void*,ULONG);
 void      WINAPI IoReleaseRemoveLockEx(IO_REMOVE_LOCK*,void*,ULONG);
 void      WINAPI IoReuseIrp(IRP*,NTSTATUS);
 NTSTATUS  WINAPI IoSetDeviceInterfaceState(UNICODE_STRING*,BOOLEAN);
+NTSTATUS  WINAPI IoSetDevicePropertyData(DEVICE_OBJECT*,const DEVPROPKEY*,LCID,ULONG,DEVPROPTYPE,ULONG,void*);
 NTSTATUS  WINAPI IoWMIRegistrationControl(PDEVICE_OBJECT,ULONG);
 
 void    FASTCALL KeAcquireInStackQueuedSpinLockAtDpcLevel(KSPIN_LOCK*,KLOCK_QUEUE_HANDLE*);
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 void      WINAPI KeAcquireSpinLock(KSPIN_LOCK*,KIRQL*);
 #else
 #define KeAcquireSpinLock( lock, irql ) *(irql) = KeAcquireSpinLockRaiseToDpc( lock )
@@ -1731,13 +1755,18 @@ void      WINAPI KeEnterCriticalRegion(void);
 void      WINAPI KeGenericCallDpc(PKDEFERRED_ROUTINE,PVOID);
 ULONG     WINAPI KeGetCurrentProcessorNumber(void);
 PKTHREAD  WINAPI KeGetCurrentThread(void);
+void      WINAPI KeInitializeDeviceQueue(KDEVICE_QUEUE*);
 void      WINAPI KeInitializeDpc(KDPC*,PKDEFERRED_ROUTINE,void*);
 void      WINAPI KeInitializeEvent(PRKEVENT,EVENT_TYPE,BOOLEAN);
 void      WINAPI KeInitializeMutex(PRKMUTEX,ULONG);
 void      WINAPI KeInitializeSemaphore(PRKSEMAPHORE,LONG,LONG);
-void      WINAPI KeInitializeSpinLock(KSPIN_LOCK*);
+static FORCEINLINE void WINAPI KeInitializeSpinLock( KSPIN_LOCK *lock )
+{
+  *lock = 0;
+}
 void      WINAPI KeInitializeTimerEx(PKTIMER,TIMER_TYPE);
 void      WINAPI KeInitializeTimer(KTIMER*);
+BOOLEAN   WINAPI KeInsertDeviceQueue(KDEVICE_QUEUE*,KDEVICE_QUEUE_ENTRY*);
 void      WINAPI KeLeaveCriticalRegion(void);
 ULONG     WINAPI KeQueryActiveProcessorCountEx(USHORT);
 KAFFINITY WINAPI KeQueryActiveProcessors(void);
@@ -1750,6 +1779,7 @@ LONG      WINAPI KeReleaseMutex(PRKMUTEX,BOOLEAN);
 LONG      WINAPI KeReleaseSemaphore(PRKSEMAPHORE,KPRIORITY,LONG,BOOLEAN);
 void      WINAPI KeReleaseSpinLock(KSPIN_LOCK*,KIRQL);
 void      WINAPI KeReleaseSpinLockFromDpcLevel(KSPIN_LOCK*);
+KDEVICE_QUEUE_ENTRY * WINAPI KeRemoveDeviceQueue(KDEVICE_QUEUE*);
 LONG      WINAPI KeResetEvent(PRKEVENT);
 void      WINAPI KeRevertToUserAffinityThread(void);
 void      WINAPI KeRevertToUserAffinityThreadEx(KAFFINITY affinity);

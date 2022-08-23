@@ -26,6 +26,7 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winreg.h"
+#include "winnls.h"
 #include "winspool.h"
 #include "winuser.h"
 #include "ddk/winddiui.h"
@@ -37,6 +38,132 @@
 #include "localspl_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(localspl);
+
+static const struct builtin_form
+{
+    const WCHAR *name;
+    SIZEL size;
+    DWORD res_id;
+} builtin_forms[] =
+{
+    { L"Letter", { 215900, 279400 }, IDS_FORM_LETTER },
+    { L"Letter Small", { 215900, 279400 }, IDS_FORM_LETTER_SMALL },
+    { L"Tabloid", { 279400, 431800 }, IDS_FORM_TABLOID },
+    { L"Ledger", { 431800, 279400 }, IDS_FORM_LEDGER },
+    { L"Legal", { 215900, 355600 }, IDS_FORM_LEGAL },
+    { L"Statement", { 139700, 215900 }, IDS_FORM_STATEMENT },
+    { L"Executive", { 184150, 266700 }, IDS_FORM_EXECUTIVE },
+    { L"A3", { 297000, 420000 }, IDS_FORM_A3 },
+    { L"A4", { 210000, 297000 }, IDS_FORM_A4 },
+    { L"A4 Small", { 210000, 297000 }, IDS_FORM_A4_SMALL },
+    { L"A5", { 148000, 210000 }, IDS_FORM_A5 },
+    { L"B4 (JIS)", { 257000, 364000 }, IDS_FORM_B4_JIS },
+    { L"B5 (JIS)", { 182000, 257000 }, IDS_FORM_B5_JIS },
+    { L"Folio", { 215900, 330200 }, IDS_FORM_FOLIO },
+    { L"Quarto", { 215000, 275000 }, IDS_FORM_QUARTO },
+    { L"10x14", { 254000, 355600 }, IDS_FORM_10x14 },
+    { L"11x17", { 279400, 431800 }, IDS_FORM_11x17 },
+    { L"Note", { 215900, 279400 }, IDS_FORM_NOTE },
+    { L"Envelope #9", { 98425, 225425 }, IDS_FORM_ENVELOPE_9 },
+    { L"Envelope #10", { 104775, 241300 }, IDS_FORM_ENVELOPE_10 },
+    { L"Envelope #11", { 114300, 263525 }, IDS_FORM_ENVELOPE_11 },
+    { L"Envelope #12", { 120650, 279400 }, IDS_FORM_ENVELOPE_12 },
+    { L"Envelope #14", { 127000, 292100 }, IDS_FORM_ENVELOPE_14 },
+    { L"C size sheet", { 431800, 558800 }, IDS_FORM_C_SIZE_SHEET },
+    { L"D size sheet", { 558800, 863600 }, IDS_FORM_D_SIZE_SHEET },
+    { L"E size sheet", { 863600, 1117600 }, IDS_FORM_E_SIZE_SHEET },
+    { L"Envelope DL", { 110000, 220000 }, IDS_FORM_ENVELOPE_DL },
+    { L"Envelope C5", { 162000, 229000 }, IDS_FORM_ENVELOPE_C5 },
+    { L"Envelope C3", { 324000, 458000 }, IDS_FORM_ENVELOPE_C3 },
+    { L"Envelope C4", { 229000, 324000 }, IDS_FORM_ENVELOPE_C4 },
+    { L"Envelope C6", { 114000, 162000 }, IDS_FORM_ENVELOPE_C6 },
+    { L"Envelope C65", { 114000, 229000 }, IDS_FORM_ENVELOPE_C65 },
+    { L"Envelope B4", { 250000, 353000 }, IDS_FORM_ENVELOPE_B4 },
+    { L"Envelope B5", { 176000, 250000 }, IDS_FORM_ENVELOPE_B5 },
+    { L"Envelope B6", { 176000, 125000 }, IDS_FORM_ENVELOPE_B6 },
+    { L"Envelope", { 110000, 230000 }, IDS_FORM_ENVELOPE },
+    { L"Envelope Monarch", { 98425, 190500 }, IDS_FORM_ENVELOPE_MONARCH },
+    { L"6 3/4 Envelope", { 92075, 165100 }, IDS_FORM_6_34_ENVELOPE },
+    { L"US Std Fanfold", { 377825, 279400 }, IDS_FORM_US_STD_FANFOLD },
+    { L"German Std Fanfold", { 215900, 304800 }, IDS_FORM_GERMAN_STD_FANFOLD },
+    { L"German Legal Fanfold", { 215900, 330200 }, IDS_FORM_GERMAN_LEGAL_FANFOLD },
+    { L"B4 (ISO)", { 250000, 353000 }, IDS_FORM_B4_ISO },
+    { L"Japanese Postcard", { 100000, 148000 }, IDS_FORM_JAPANESE_POSTCARD },
+    { L"9x11", { 228600, 279400 }, IDS_FORM_9x11 },
+    { L"10x11", { 254000, 279400 }, IDS_FORM_10x11 },
+    { L"15x11", { 381000, 279400 }, IDS_FORM_15x11 },
+    { L"Envelope Invite", { 220000, 220000 }, IDS_FORM_ENVELOPE_INVITE },
+    { L"Letter Extra", { 241300, 304800 }, IDS_FORM_LETTER_EXTRA },
+    { L"Legal Extra", { 241300, 381000 }, IDS_FORM_LEGAL_EXTRA },
+    { L"Tabloid Extra", { 304800, 457200 }, IDS_FORM_TABLOID_EXTRA },
+    { L"A4 Extra", { 235458, 322326 }, IDS_FORM_A4_EXTRA },
+    { L"Letter Transverse", { 215900, 279400 }, IDS_FORM_LETTER_TRANSVERSE },
+    { L"A4 Transverse", { 210000, 297000 }, IDS_FORM_A4_TRANSVERSE },
+    { L"Letter Extra Transverse", { 241300, 304800 }, IDS_FORM_LETTER_EXTRA_TRANSVERSE },
+    { L"Super A", { 227000, 356000 }, IDS_FORM_SUPER_A },
+    { L"Super B", { 305000, 487000 }, IDS_FORM_SUPER_B },
+    { L"Letter Plus", { 215900, 322326 }, IDS_FORM_LETTER_PLUS },
+    { L"A4 Plus", { 210000, 330000 }, IDS_FORM_A4_PLUS },
+    { L"A5 Transverse", { 148000, 210000 }, IDS_FORM_A5_TRANSVERSE },
+    { L"B5 (JIS) Transverse", { 182000, 257000 }, IDS_FORM_B5_JIS_TRANSVERSE },
+    { L"A3 Extra", { 322000, 445000 }, IDS_FORM_A3_EXTRA },
+    { L"A5 Extra", { 174000, 235000 }, IDS_FORM_A5_EXTRA },
+    { L"B5 (ISO) Extra", { 201000, 276000 }, IDS_FORM_B5_ISO_EXTRA },
+    { L"A2", { 420000, 594000 }, IDS_FORM_A2 },
+    { L"A3 Transverse", { 297000, 420000 }, IDS_FORM_A3_TRANSVERSE },
+    { L"A3 Extra Transverse", { 322000, 445000 }, IDS_FORM_A3_EXTRA_TRANSVERSE },
+    { L"Japanese Double Postcard", { 200000, 148000 }, IDS_FORM_JAPANESE_DOUBLE_POSTCARD },
+    { L"A6", { 105000, 148000 }, IDS_FORM_A6 },
+    { L"Japanese Envelope Kaku #2", { 240000, 332000 }, IDS_FORM_JAPANESE_ENVELOPE_KAKU_2 },
+    { L"Japanese Envelope Kaku #3", { 216000, 277000 }, IDS_FORM_JAPANESE_ENVELOPE_KAKU_3 },
+    { L"Japanese Envelope Chou #3", { 120000, 235000 }, IDS_FORM_JAPANESE_ENVELOPE_CHOU_3 },
+    { L"Japanese Envelope Chou #4", { 90000, 205000 }, IDS_FORM_JAPANESE_ENVELOPE_CHOU_4 },
+    { L"Letter Rotated", { 279400, 215900 }, IDS_FORM_LETTER_ROTATED },
+    { L"A3 Rotated", { 420000, 297000 }, IDS_FORM_A3_ROTATED },
+    { L"A4 Rotated", { 297000, 210000 }, IDS_FORM_A4_ROTATED },
+    { L"A5 Rotated", { 210000, 148000 }, IDS_FORM_A5_ROTATED },
+    { L"B4 (JIS) Rotated", { 364000, 257000 }, IDS_FORM_B4_JIS_ROTATED },
+    { L"B5 (JIS) Rotated", { 257000, 182000 }, IDS_FORM_B5_JIS_ROTATED },
+    { L"Japanese Postcard Rotated", { 148000, 100000 }, IDS_FORM_JAPANESE_POSTCARD_ROTATED },
+    { L"Double Japan Postcard Rotated", { 148000, 200000 }, IDS_FORM_DOUBLE_JAPAN_POSTCARD_ROTATED },
+    { L"A6 Rotated", { 148000, 105000 }, IDS_FORM_A6_ROTATED },
+    { L"Japan Envelope Kaku #2 Rotated", { 332000, 240000 }, IDS_FORM_JAPAN_ENVELOPE_KAKU_2_ROTATED },
+    { L"Japan Envelope Kaku #3 Rotated", { 277000, 216000 }, IDS_FORM_JAPAN_ENVELOPE_KAKU_3_ROTATED },
+    { L"Japan Envelope Chou #3 Rotated", { 235000, 120000 }, IDS_FORM_JAPAN_ENVELOPE_CHOU_3_ROTATED },
+    { L"Japan Envelope Chou #4 Rotated", { 205000, 90000 }, IDS_FORM_JAPAN_ENVELOPE_CHOU_4_ROTATED },
+    { L"B6 (JIS)", { 128000, 182000 }, IDS_FORM_B6_JIS },
+    { L"B6 (JIS) Rotated", { 182000, 128000 }, IDS_FORM_B6_JIS_ROTATED },
+    { L"12x11", { 304932, 279521 }, IDS_FORM_12x11 },
+    { L"Japan Envelope You #4", { 105000, 235000 }, IDS_FORM_JAPAN_ENVELOPE_YOU_4 },
+    { L"Japan Envelope You #4 Rotated", { 235000, 105000 }, IDS_FORM_JAPAN_ENVELOPE_YOU_4_ROTATED },
+    { L"PRC 16K", { 188000, 260000 }, IDS_FORM_PRC_16K },
+    { L"PRC 32K", { 130000, 184000 }, IDS_FORM_PRC_32K },
+    { L"PRC 32K(Big)", { 140000, 203000 }, IDS_FORM_PRC_32K_BIG },
+    { L"PRC Envelope #1", { 102000, 165000 }, IDS_FORM_PRC_ENVELOPE_1 },
+    { L"PRC Envelope #2", { 102000, 176000 }, IDS_FORM_PRC_ENVELOPE_2 },
+    { L"PRC Envelope #3", { 125000, 176000 }, IDS_FORM_PRC_ENVELOPE_3 },
+    { L"PRC Envelope #4", { 110000, 208000 }, IDS_FORM_PRC_ENVELOPE_4 },
+    { L"PRC Envelope #5", { 110000, 220000 }, IDS_FORM_PRC_ENVELOPE_5 },
+    { L"PRC Envelope #6", { 120000, 230000 }, IDS_FORM_PRC_ENVELOPE_6 },
+    { L"PRC Envelope #7", { 160000, 230000 }, IDS_FORM_PRC_ENVELOPE_7 },
+    { L"PRC Envelope #8", { 120000, 309000 }, IDS_FORM_PRC_ENVELOPE_8 },
+    { L"PRC Envelope #9", { 229000, 324000 }, IDS_FORM_PRC_ENVELOPE_9 },
+    { L"PRC Envelope #10", { 324000, 458000 }, IDS_FORM_PRC_ENVELOPE_10 },
+    { L"PRC 16K Rotated", { 260000, 188000 }, IDS_FORM_PRC_16K_ROTATED },
+    { L"PRC 32K Rotated", { 184000, 130000 }, IDS_FORM_PRC_32K_ROTATED },
+    { L"PRC 32K(Big) Rotated", { 203000, 140000 }, IDS_FORM_PRC_32K_BIG_ROTATED },
+    { L"PRC Envelope #1 Rotated", { 165000, 102000 }, IDS_FORM_PRC_ENVELOPE_1_ROTATED },
+    { L"PRC Envelope #2 Rotated", { 176000, 102000 }, IDS_FORM_PRC_ENVELOPE_2_ROTATED },
+    { L"PRC Envelope #3 Rotated", { 176000, 125000 }, IDS_FORM_PRC_ENVELOPE_3_ROTATED },
+    { L"PRC Envelope #4 Rotated", { 208000, 110000 }, IDS_FORM_PRC_ENVELOPE_4_ROTATED },
+    { L"PRC Envelope #5 Rotated", { 220000, 110000 }, IDS_FORM_PRC_ENVELOPE_5_ROTATED },
+    { L"PRC Envelope #6 Rotated", { 230000, 120000 }, IDS_FORM_PRC_ENVELOPE_6_ROTATED },
+    { L"PRC Envelope #7 Rotated", { 230000, 160000 }, IDS_FORM_PRC_ENVELOPE_7_ROTATED },
+    { L"PRC Envelope #8 Rotated", { 309000, 120000 }, IDS_FORM_PRC_ENVELOPE_8_ROTATED },
+    { L"PRC Envelope #9 Rotated", { 324000, 229000 }, IDS_FORM_PRC_ENVELOPE_9_ROTATED },
+    { L"PRC Envelope #10 Rotated", { 458000, 324000 }, IDS_FORM_PRC_ENVELOPE_10_ROTATED }
+};
+
 
 /* ############################### */
 
@@ -99,8 +226,6 @@ typedef struct {
 static struct list monitor_handles = LIST_INIT( monitor_handles );
 static monitor_t * pm_localport;
 
-static const PRINTPROVIDOR * pprovider = NULL;
-
 static const WCHAR fmt_driversW[] =
     L"System\\CurrentControlSet\\control\\Print\\Environments\\%s\\Drivers%s";
 static const WCHAR fmt_printprocessorsW[] =
@@ -120,10 +245,28 @@ static const printenv_t env_x86 =   {x86_envnameW, L"w32x86", 3,
 static const printenv_t env_x64 =   {L"Windows x64", L"x64", 3,
                                      L"\\Version-3", L"\\3"};
 
+static const printenv_t env_arm =   {L"Windows ARM", L"arm", 3,
+                                     L"\\Version-3", L"\\3"};
+
+static const printenv_t env_arm64 = {L"Windows ARM64", L"arm64", 3,
+                                     L"\\Version-3", L"\\3"};
+
 static const printenv_t env_win40 = {L"Windows 4.0", L"win40", 0,
                                      L"\\Version-0", L"\\0"};
 
-static const printenv_t * const all_printenv[] = {&env_x86, &env_x64, &env_ia64, &env_win40};
+static const printenv_t * const all_printenv[] = {&env_x86, &env_x64, &env_ia64, &env_arm, &env_arm64, &env_win40};
+
+#ifdef __i386__
+#define env_arch env_x86
+#elif defined __x86_64__
+#define env_arch env_x64
+#elif defined __arm__
+#define env_arch env_arm
+#elif defined __aarch64__
+#define env_arch env_arm64
+#else
+#error not defined for this cpu
+#endif
 
 
 static const DWORD di_sizeof[] = {0, sizeof(DRIVER_INFO_1W), sizeof(DRIVER_INFO_2W),
@@ -186,7 +329,7 @@ static BOOL apd_copyfile( WCHAR *pathname, WCHAR *file_part, apd_data_t *apd )
 
     /* FIXME: handle APD_COPY_NEW_FILES */
     res = CopyFileW(srcname, apd->dst, FALSE);
-    TRACE("got %d with %u\n", res, GetLastError());
+    TRACE("got %d with %lu\n", res, GetLastError());
 
     return apd->lazy || res;
 }
@@ -276,7 +419,7 @@ static LPCWSTR get_basename_from_name(LPCWSTR name)
 static void monitor_unload(monitor_t * pm)
 {
     if (pm == NULL) return;
-    TRACE("%p (refcount: %d) %s\n", pm, pm->refcount, debugstr_w(pm->name));
+    TRACE("%p (refcount: %ld) %s\n", pm, pm->refcount, debugstr_w(pm->name));
 
     EnterCriticalSection(&monitor_handles_cs);
 
@@ -486,7 +629,7 @@ static monitor_t * monitor_load(LPCWSTR name, LPWSTR dllname)
         }
 
         pm->hdll = LoadLibraryW(driver);
-        TRACE("%p: LoadLibrary(%s) => %d\n", pm->hdll, debugstr_w(driver), GetLastError());
+        TRACE("%p: LoadLibrary(%s) => %ld\n", pm->hdll, debugstr_w(driver), GetLastError());
 
         if (pm->hdll == NULL) {
             monitor_unload(pm);
@@ -512,7 +655,7 @@ static monitor_t * monitor_load(LPCWSTR name, LPWSTR dllname)
             pm->monitorUI = pInitializePrintMonitorUI();
             TRACE("%p: MONITORUI from %s,InitializePrintMonitorUI()\n", pm->monitorUI, debugstr_w(driver));
             if (pm->monitorUI) {
-                TRACE("0x%08x: dwMonitorSize (%d)\n",
+                TRACE("0x%08lx: dwMonitorSize (%ld)\n",
                         pm->monitorUI->dwMonitorUISize, pm->monitorUI->dwMonitorUISize);
 
             }
@@ -617,7 +760,7 @@ static DWORD monitor_loadall(void)
         RegQueryInfoKeyW(hmonitors, NULL, NULL, NULL, &registered, NULL, NULL,
                         NULL, NULL, NULL, NULL, NULL);
 
-        TRACE("%d monitors registered\n", registered);
+        TRACE("%ld monitors registered\n", registered);
 
         while (id < registered) {
             buffer[0] = '\0';
@@ -628,7 +771,7 @@ static DWORD monitor_loadall(void)
         }
         RegCloseKey(hmonitors);
     }
-    TRACE("%d monitors loaded\n", loaded);
+    TRACE("%ld monitors loaded\n", loaded);
     return loaded;
 }
 
@@ -664,10 +807,10 @@ static monitor_t * monitor_loadui(monitor_t * pm)
         res = pm->monitor.pfnXcvOpenPort(pm->hmon, L"", SERVER_ACCESS_ADMINISTER, &hXcv);
     else if (pm->old_XcvOpenPort)
         res = pm->old_XcvOpenPort(L"", SERVER_ACCESS_ADMINISTER, &hXcv);
-    TRACE("got %u with %p\n", res, hXcv);
+    TRACE("got %lu with %p\n", res, hXcv);
     if (res) {
         res = pm->monitor.pfnXcvDataPort(hXcv, L"MonitorUI", NULL, 0, (BYTE *) buffer, sizeof(buffer), &len);
-        TRACE("got %u with %s\n", res, debugstr_w(buffer));
+        TRACE("got %lu with %s\n", res, debugstr_w(buffer));
         if (res == ERROR_SUCCESS) pui = monitor_load(NULL, buffer);
         pm->monitor.pfnXcvClosePort(hXcv);
     }
@@ -791,7 +934,7 @@ static const  printenv_t * validate_envW(LPCWSTR env)
     }
     else
     {
-        result = (GetVersion() & 0x80000000) ? &env_win40 : &env_x86;
+        result = (GetVersion() & 0x80000000) ? &env_win40 : &env_arch;
     }
 
     TRACE("=> using %p: %s\n", result, debugstr_w(result ? result->envname : NULL));
@@ -838,7 +981,7 @@ static DWORD get_local_monitors(DWORD level, LPBYTE pMonitors, DWORD cbBuf, LPDW
     if (RegCreateKeyW(HKEY_LOCAL_MACHINE, monitorsW, &hroot) == ERROR_SUCCESS) {
         /* Scan all Monitor-Registry-Keys */
         while (RegEnumKeyExW(hroot, index, buffer, &len, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
-            TRACE("Monitor_%d: %s\n", numentries, debugstr_w(buffer));
+            TRACE("Monitor_%ld: %s\n", numentries, debugstr_w(buffer));
             dllsize = sizeof(dllname);
             dllname[0] = '\0';
 
@@ -868,7 +1011,7 @@ static DWORD get_local_monitors(DWORD level, LPBYTE pMonitors, DWORD cbBuf, LPDW
                     mi = (LPMONITOR_INFO_2W) pMonitors;
                     pMonitors += entrysize;
 
-                    TRACE("%p: writing MONITOR_INFO_%dW #%d\n", mi, level, numentries);
+                    TRACE("%p: writing MONITOR_INFO_%ldW #%ld\n", mi, level, numentries);
                     mi->pName = ptr;
                     lstrcpyW(ptr, buffer);      /* Name of the Monitor */
                     ptr += (len+1);               /* len is lstrlenW(monitorname) */
@@ -890,7 +1033,7 @@ static DWORD get_local_monitors(DWORD level, LPBYTE pMonitors, DWORD cbBuf, LPDW
         RegCloseKey(hroot);
     }
     *lpreturned = numentries;
-    TRACE("need %d byte for %d entries\n", needed, numentries);
+    TRACE("need %ld byte for %ld entries\n", needed, numentries);
     return needed;
 }
 
@@ -931,7 +1074,7 @@ static DWORD get_local_printprocessors(LPWSTR regpathW, LPBYTE pPPInfo, DWORD cb
             ppi = (PPRINTPROCESSOR_INFO_1W) pPPInfo;
             pPPInfo += sizeof(PRINTPROCESSOR_INFO_1W);
 
-            TRACE("%p: writing PRINTPROCESSOR_INFO_1W #%d\n", ppi, numentries);
+            TRACE("%p: writing PRINTPROCESSOR_INFO_1W #%ld\n", ppi, numentries);
             ppi->pName = ptr;
             lstrcpyW(ptr, L"winprint");      /* Name of the Print Processor */
             ptr += ARRAY_SIZE(L"winprint");
@@ -940,7 +1083,7 @@ static DWORD get_local_printprocessors(LPWSTR regpathW, LPBYTE pPPInfo, DWORD cb
         /* Scan all Printprocessor Keys */
         while ((RegEnumKeyExW(hroot, index, buffer, &len, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) &&
             (lstrcmpiW(buffer, L"winprint") != 0)) {
-            TRACE("PrintProcessor_%d: %s\n", numentries, debugstr_w(buffer));
+            TRACE("PrintProcessor_%ld: %s\n", numentries, debugstr_w(buffer));
             dllsize = sizeof(dllname);
             dllname[0] = '\0';
 
@@ -963,7 +1106,7 @@ static DWORD get_local_printprocessors(LPWSTR regpathW, LPBYTE pPPInfo, DWORD cb
                     ppi = (PPRINTPROCESSOR_INFO_1W) pPPInfo;
                     pPPInfo += sizeof(PRINTPROCESSOR_INFO_1W);
 
-                    TRACE("%p: writing PRINTPROCESSOR_INFO_1W #%d\n", ppi, numentries);
+                    TRACE("%p: writing PRINTPROCESSOR_INFO_1W #%ld\n", ppi, numentries);
                     ppi->pName = ptr;
                     lstrcpyW(ptr, buffer);      /* Name of the Print Processor */
                     ptr += (len+1);             /* len is lstrlenW(printprosessor name) */
@@ -976,7 +1119,7 @@ static DWORD get_local_printprocessors(LPWSTR regpathW, LPBYTE pPPInfo, DWORD cb
         RegCloseKey(hroot);
     }
     *lpreturned = numentries;
-    TRACE("need %d byte for %d entries\n", needed, numentries);
+    TRACE("need %ld byte for %ld entries\n", needed, numentries);
     return needed;
 }
 
@@ -1017,7 +1160,7 @@ static DWORD get_ports_from_all_monitors(DWORD level, LPBYTE pPorts, DWORD cbBuf
     DWORD   numentries;
     DWORD   entrysize;
 
-    TRACE("(%d, %p, %d, %p)\n", level, pPorts, cbBuf, lpreturned);
+    TRACE("(%ld, %p, %ld, %p)\n", level, pPorts, cbBuf, lpreturned);
     entrysize = (level == 1) ? sizeof(PORT_INFO_1W) : sizeof(PORT_INFO_2W);
 
     numentries = *lpreturned;       /* this is 0, when we scan the registry */
@@ -1040,7 +1183,7 @@ static DWORD get_ports_from_all_monitors(DWORD level, LPBYTE pPorts, DWORD cbBuf
                 pi_allocated = (pi_buffer) ? pi_needed : 0;
                 res = wrap_EnumPorts(pm, NULL, level, pi_buffer, pi_allocated, &pi_needed, &pi_returned);
             }
-            TRACE("(%s) got %d with %d (need %d byte for %d entries)\n",
+            TRACE("(%s) got %ld with %ld (need %ld byte for %ld entries)\n",
                   debugstr_w(pm->name), res, GetLastError(), pi_needed, pi_returned);
 
             numentries += pi_returned;
@@ -1076,7 +1219,7 @@ static DWORD get_ports_from_all_monitors(DWORD level, LPBYTE pPorts, DWORD cbBuf
     heap_free(pi_buffer);
 
     *lpreturned = numentries;
-    TRACE("need %d byte for %d entries\n", needed, numentries);
+    TRACE("need %ld byte for %ld entries\n", needed, numentries);
     return needed;
 }
 
@@ -1147,7 +1290,7 @@ static BOOL WINAPI fpGetPrinterDriverDirectory(LPWSTR pName, LPWSTR pEnvironment
     const printenv_t * env;
     WCHAR * const dir = (WCHAR *)pDriverDirectory;
 
-    TRACE("(%s, %s, %d, %p, %d, %p)\n", debugstr_w(pName),
+    TRACE("(%s, %s, %ld, %p, %ld, %p)\n", debugstr_w(pName),
           debugstr_w(pEnvironment), Level, pDriverDirectory, cbBuf, pcbNeeded);
 
     if (pName != NULL && pName[0]) {
@@ -1227,7 +1370,7 @@ static HMODULE driver_load(const printenv_t * env, LPWSTR dllname)
     lstrcatW(fullname, dllname);
 
     hui = LoadLibraryW(fullname);
-    TRACE("%p: LoadLibrary(%s) %d\n", hui, debugstr_w(fullname), GetLastError());
+    TRACE("%p: LoadLibrary(%s) %ld\n", hui, debugstr_w(fullname), GetLastError());
 
     return hui;
 }
@@ -1408,7 +1551,7 @@ static BOOL myAddPrinterDriverEx(DWORD level, LPBYTE pDriverInfo, DWORD dwFileCo
     }
 
     /* dump the most used infos */
-    TRACE("%p: .cVersion    : 0x%x/%d\n", pDriverInfo, di.cVersion, di.cVersion);
+    TRACE("%p: .cVersion    : 0x%lx/%ld\n", pDriverInfo, di.cVersion, di.cVersion);
     TRACE("%p: .pName       : %s\n", di.pName, debugstr_w(di.pName));
     TRACE("%p: .pEnvironment: %s\n", di.pEnvironment, debugstr_w(di.pEnvironment));
     TRACE("%p: .pDriverPath : %s\n", di.pDriverPath, debugstr_w(di.pDriverPath));
@@ -1452,7 +1595,7 @@ static BOOL myAddPrinterDriverEx(DWORD level, LPBYTE pDriverInfo, DWORD dwFileCo
                                 KEY_WRITE | KEY_QUERY_VALUE, NULL,
                                 &hdrv, &disposition)) != ERROR_SUCCESS) {
 
-        ERR("can't create driver %s: %u\n", debugstr_w(di.pName), lres);
+        ERR("can't create driver %s: %lu\n", debugstr_w(di.pName), lres);
         RegCloseKey(hroot);
         SetLastError(lres);
         return FALSE;
@@ -1526,7 +1669,7 @@ static BOOL myAddPrinterDriverEx(DWORD level, LPBYTE pDriverInfo, DWORD dwFileCo
     else
         RegSetValueExW(hdrv, L"Previous Names", 0, REG_MULTI_SZ, (const BYTE*)L"", sizeof(L""));
 
-    if (level > 5) TRACE("level %u for Driver %s is incomplete\n", level, debugstr_w(di.pName));
+    if (level > 5) TRACE("level %lu for Driver %s is incomplete\n", level, debugstr_w(di.pName));
 
     RegCloseKey(hdrv);
     hui = driver_load(env, di.pConfigFile);
@@ -1541,7 +1684,7 @@ static BOOL myAddPrinterDriverEx(DWORD level, LPBYTE pDriverInfo, DWORD dwFileCo
     }
     FreeLibrary(hui);
 
-    TRACE("=> TRUE with %u\n", GetLastError());
+    TRACE("=> TRUE with %lu\n", GetLastError());
     return TRUE;
 
 }
@@ -1575,7 +1718,7 @@ static BOOL WINAPI fpAddMonitor(LPWSTR pName, DWORD Level, LPBYTE pMonitors)
     BOOL    res = FALSE;
 
     mi2w = (LPMONITOR_INFO_2W) pMonitors;
-    TRACE("(%s, %d, %p): %s %s %s\n", debugstr_w(pName), Level, pMonitors,
+    TRACE("(%s, %ld, %p): %s %s %s\n", debugstr_w(pName), Level, pMonitors,
         debugstr_w(mi2w->pName), debugstr_w(mi2w->pEnvironment), debugstr_w(mi2w->pDLLName));
 
     if (copy_servername_from_name(pName, NULL)) {
@@ -1700,14 +1843,14 @@ static BOOL WINAPI fpAddPort(LPWSTR pName, HWND hWnd, LPWSTR pMonitorName)
     pm = monitor_load(pMonitorName, NULL);
     if (pm && (pm->monitor.pfnAddPort || pm->old_AddPort)) {
         res = wrap_AddPort(pm, pName, hWnd, pMonitorName);
-        TRACE("got %d with %u (%s)\n", res, GetLastError(), debugstr_w(pm->dllname));
+        TRACE("got %ld with %lu (%s)\n", res, GetLastError(), debugstr_w(pm->dllname));
     }
     else
     {
         pui = monitor_loadui(pm);
         if (pui && pui->monitorUI && pui->monitorUI->pfnAddPortUI) {
             res = pui->monitorUI->pfnAddPortUI(pName, hWnd, pMonitorName, NULL);
-            TRACE("got %d with %u (%s)\n", res, GetLastError(), debugstr_w(pui->dllname));
+            TRACE("got %ld with %lu (%s)\n", res, GetLastError(), debugstr_w(pui->dllname));
         }
         else
         {
@@ -1722,7 +1865,7 @@ static BOOL WINAPI fpAddPort(LPWSTR pName, HWND hWnd, LPWSTR pMonitorName)
     }
     monitor_unload(pm);
 
-    TRACE("returning %d with %u\n", res, GetLastError());
+    TRACE("returning %ld with %lu\n", res, GetLastError());
     return res;
 }
 
@@ -1763,7 +1906,7 @@ static BOOL WINAPI fpAddPortEx(LPWSTR pName, DWORD level, LPBYTE pBuffer, LPWSTR
 
     pi2 = (PORT_INFO_2W *) pBuffer;
 
-    TRACE("(%s, %d, %p, %s): %s %s %s\n", debugstr_w(pName), level, pBuffer,
+    TRACE("(%s, %ld, %p, %s): %s %s %s\n", debugstr_w(pName), level, pBuffer,
             debugstr_w(pMonitorName), debugstr_w(pi2 ? pi2->pPortName : NULL),
             debugstr_w(((level > 1) && pi2) ? pi2->pMonitorName : NULL),
             debugstr_w(((level > 1) && pi2) ? pi2->pDescription : NULL));
@@ -1790,7 +1933,7 @@ static BOOL WINAPI fpAddPortEx(LPWSTR pName, DWORD level, LPBYTE pBuffer, LPWSTR
     if (pm && (pm->monitor.pfnAddPortEx || pm->old_AddPortEx))
     {
         res = wrap_AddPortEx(pm, pName, level, pBuffer, pMonitorName);
-        TRACE("got %d with %u (%s)\n", res, GetLastError(), debugstr_w(pm->dllname));
+        TRACE("got %ld with %lu (%s)\n", res, GetLastError(), debugstr_w(pm->dllname));
     }
     else
     {
@@ -1823,7 +1966,7 @@ static BOOL WINAPI fpAddPrinterDriverEx(LPWSTR pName, DWORD level, LPBYTE pDrive
 {
     LONG lres;
 
-    TRACE("(%s, %d, %p, 0x%x)\n", debugstr_w(pName), level, pDriverInfo, dwFileCopyFlags);
+    TRACE("(%s, %ld, %p, 0x%lx)\n", debugstr_w(pName), level, pDriverInfo, dwFileCopyFlags);
     lres = copy_servername_from_name(pName, NULL);
     if (lres) {
         FIXME("server %s not supported\n", debugstr_w(pName));
@@ -1832,7 +1975,7 @@ static BOOL WINAPI fpAddPrinterDriverEx(LPWSTR pName, DWORD level, LPBYTE pDrive
     }
 
     if ((dwFileCopyFlags & ~APD_COPY_FROM_DIRECTORY) != APD_COPY_ALL_FILES) {
-        TRACE("Flags 0x%x ignored (using APD_COPY_ALL_FILES)\n", dwFileCopyFlags & ~APD_COPY_FROM_DIRECTORY);
+        TRACE("Flags 0x%lx ignored (using APD_COPY_ALL_FILES)\n", dwFileCopyFlags & ~APD_COPY_FROM_DIRECTORY);
     }
 
     return myAddPrinterDriverEx(level, pDriverInfo, dwFileCopyFlags, TRUE);
@@ -1919,7 +2062,7 @@ static BOOL WINAPI fpConfigurePort(LPWSTR pName, HWND hWnd, LPWSTR pPortName)
         TRACE("use %s for %s (monitor %p: %s)\n", debugstr_w(pm->name),
                 debugstr_w(pPortName), pm, debugstr_w(pm->dllname));
         res = wrap_ConfigurePort(pm, pName, hWnd, pPortName);
-        TRACE("got %d with %u\n", res, GetLastError());
+        TRACE("got %ld with %lu\n", res, GetLastError());
     }
     else
     {
@@ -1928,7 +2071,7 @@ static BOOL WINAPI fpConfigurePort(LPWSTR pName, HWND hWnd, LPWSTR pPortName)
             TRACE("use %s for %s (monitorui %p: %s)\n", debugstr_w(pui->name),
                         debugstr_w(pPortName), pui, debugstr_w(pui->dllname));
             res = pui->monitorUI->pfnConfigurePortUI(pName, hWnd, pPortName);
-            TRACE("got %d with %u\n", res, GetLastError());
+            TRACE("got %ld with %lu\n", res, GetLastError());
         }
         else
         {
@@ -1943,7 +2086,7 @@ static BOOL WINAPI fpConfigurePort(LPWSTR pName, HWND hWnd, LPWSTR pPortName)
     }
     monitor_unload(pm);
 
-    TRACE("returning %d with %u\n", res, GetLastError());
+    TRACE("returning %ld with %lu\n", res, GetLastError());
     return res;
 }
 
@@ -2075,7 +2218,7 @@ static BOOL WINAPI fpDeletePort(LPWSTR pName, HWND hWnd, LPWSTR pPortName)
         TRACE("use %s for %s (monitor %p: %s)\n", debugstr_w(pm->name),
                 debugstr_w(pPortName), pm, debugstr_w(pm->dllname));
         res = wrap_DeletePort(pm, pName, hWnd, pPortName);
-        TRACE("got %d with %u\n", res, GetLastError());
+        TRACE("got %ld with %lu\n", res, GetLastError());
     }
     else
     {
@@ -2084,7 +2227,7 @@ static BOOL WINAPI fpDeletePort(LPWSTR pName, HWND hWnd, LPWSTR pPortName)
             TRACE("use %s for %s (monitorui %p: %s)\n", debugstr_w(pui->name),
                         debugstr_w(pPortName), pui, debugstr_w(pui->dllname));
             res = pui->monitorUI->pfnDeletePortUI(pName, hWnd, pPortName);
-            TRACE("got %d with %u\n", res, GetLastError());
+            TRACE("got %ld with %lu\n", res, GetLastError());
         }
         else
         {
@@ -2099,7 +2242,7 @@ static BOOL WINAPI fpDeletePort(LPWSTR pName, HWND hWnd, LPWSTR pPortName)
     }
     monitor_unload(pm);
 
-    TRACE("returning %d with %u\n", res, GetLastError());
+    TRACE("returning %ld with %lu\n", res, GetLastError());
     return res;
 }
 
@@ -2132,7 +2275,7 @@ static BOOL WINAPI fpEnumMonitors(LPWSTR pName, DWORD Level, LPBYTE pMonitors, D
     LONG    lres;
     BOOL    res = FALSE;
 
-    TRACE("(%s, %d, %p, %d, %p, %p)\n", debugstr_w(pName), Level, pMonitors,
+    TRACE("(%s, %ld, %p, %ld, %p, %p)\n", debugstr_w(pName), Level, pMonitors,
           cbBuf, pcbNeeded, pcReturned);
 
     lres = copy_servername_from_name(pName, NULL);
@@ -2143,7 +2286,7 @@ static BOOL WINAPI fpEnumMonitors(LPWSTR pName, DWORD Level, LPBYTE pMonitors, D
     }
 
     if (!Level || (Level > 2)) {
-        WARN("level (%d) is ignored in win9x\n", Level);
+        WARN("level (%ld) is ignored in win9x\n", Level);
         SetLastError(ERROR_INVALID_LEVEL);
         return FALSE;
     }
@@ -2166,7 +2309,7 @@ em_cleanup:
     if (pcbNeeded)  *pcbNeeded = needed;
     if (pcReturned) *pcReturned = numentries;
 
-    TRACE("returning %d with %d (%d byte for %d entries)\n",
+    TRACE("returning %d with %ld (%ld byte for %ld entries)\n",
             res, GetLastError(), needed, numentries);
 
     return (res);
@@ -2198,7 +2341,7 @@ static BOOL WINAPI fpEnumPorts(LPWSTR pName, DWORD Level, LPBYTE pPorts, DWORD c
     LONG    lres;
     BOOL    res = FALSE;
 
-    TRACE("(%s, %d, %p, %d, %p, %p)\n", debugstr_w(pName), Level, pPorts,
+    TRACE("(%s, %ld, %p, %ld, %p, %p)\n", debugstr_w(pName), Level, pPorts,
           cbBuf, pcbNeeded, pcReturned);
 
     lres = copy_servername_from_name(pName, NULL);
@@ -2249,7 +2392,7 @@ emP_cleanup:
     if (pcbNeeded)  *pcbNeeded = needed;
     if (pcReturned) *pcReturned = (res) ? numentries : 0;
 
-    TRACE("returning %d with %d (%d byte for %d of %d entries)\n",
+    TRACE("returning %d with %ld (%ld byte for %ld of %ld entries)\n",
           (res), GetLastError(), needed, (res) ? numentries : 0, numentries);
 
     return (res);
@@ -2284,7 +2427,7 @@ static BOOL WINAPI fpEnumPrintProcessors(LPWSTR pName, LPWSTR pEnvironment, DWOR
     LONG    lres;
     BOOL    res = FALSE;
 
-    TRACE("(%s, %s, %d, %p, %d, %p, %p)\n", debugstr_w(pName), debugstr_w(pEnvironment),
+    TRACE("(%s, %s, %ld, %p, %ld, %p, %p)\n", debugstr_w(pName), debugstr_w(pEnvironment),
                                 Level, pPPInfo, cbBuf, pcbNeeded, pcReturned);
 
     lres = copy_servername_from_name(pName, NULL);
@@ -2330,7 +2473,7 @@ epp_cleanup:
     if (pcbNeeded)  *pcbNeeded = needed;
     if (pcReturned) *pcReturned = numentries;
 
-    TRACE("returning %d with %d (%d byte for %d entries)\n",
+    TRACE("returning %d with %ld (%ld byte for %ld entries)\n",
             res, GetLastError(), needed, numentries);
 
     return (res);
@@ -2368,7 +2511,7 @@ static BOOL WINAPI fpGetPrintProcessorDirectory(LPWSTR pName, LPWSTR pEnvironmen
     DWORD needed;
     LONG  lres;
 
-    TRACE("(%s, %s, %d, %p, %d, %p)\n", debugstr_w(pName), debugstr_w(pEnvironment),
+    TRACE("(%s, %s, %ld, %p, %ld, %p)\n", debugstr_w(pName), debugstr_w(pEnvironment),
                                         level, pPPInfo, cbBuf, pcbNeeded);
 
     *pcbNeeded = 0;
@@ -2480,7 +2623,7 @@ static BOOL WINAPI fpXcvData(HANDLE hXcv, LPCWSTR pszDataName, PBYTE pInputData,
 {
     printer_t *printer = (printer_t * ) hXcv;
 
-    TRACE("(%p, %s, %p, %d, %p, %d, %p, %p)\n", hXcv, debugstr_w(pszDataName),
+    TRACE("(%p, %s, %p, %ld, %p, %ld, %p, %p)\n", hXcv, debugstr_w(pszDataName),
           pInputData, cbInputData, pOutputData,
           cbOutputData, pcbOutputNeeded, pdwStatus);
 
@@ -2508,12 +2651,163 @@ static BOOL WINAPI fpXcvData(HANDLE hXcv, LPCWSTR pszDataName, PBYTE pInputData,
     return TRUE;
 }
 
-/*****************************************************
- *  setup_provider [internal]
- */
-void setup_provider(void)
+static inline size_t form_struct_size( DWORD level )
 {
-    static const PRINTPROVIDOR backend = {
+    if (level == 1) return sizeof(FORM_INFO_1W);
+    if (level == 2) return sizeof(FORM_INFO_2W);
+
+    SetLastError( ERROR_INVALID_LEVEL );
+    return 0;
+}
+
+static void fill_builtin_form_info( BYTE **base, WCHAR **strings, const struct builtin_form *form, DWORD level,
+                                    DWORD size, DWORD *used )
+{
+    FORM_INFO_2W *info = *(FORM_INFO_2W**)base;
+    DWORD name_len = lstrlenW( form->name ) + 1, res_len, keyword_len, total_size;
+    static const WCHAR dll_name[] = L"localspl.dll";
+    const WCHAR *resource;
+
+    total_size = name_len * sizeof(WCHAR);
+
+    if (level > 1)
+    {
+        keyword_len = WideCharToMultiByte( CP_ACP, 0, form->name, -1, NULL, 0, NULL, NULL );
+        keyword_len = (keyword_len + 1) & ~1;
+        total_size += keyword_len;
+        res_len = LoadStringW( localspl_instance, form->res_id, (WCHAR *)&resource, 0 );
+        if (res_len && resource[res_len - 1]) res_len++;
+        total_size += (res_len + ARRAY_SIZE(dll_name)) * sizeof(WCHAR);
+    }
+
+    if (*used + total_size <= size)
+    {
+        info->Flags = FORM_BUILTIN;
+        info->pName = memcpy( *strings, form->name, name_len * sizeof(WCHAR) );
+        *strings += name_len;
+        info->Size = form->size;
+        info->ImageableArea.left = info->ImageableArea.top = 0;
+        info->ImageableArea.right = info->Size.cx;
+        info->ImageableArea.bottom = info->Size.cy;
+        if (level > 1)
+        {
+            info->pKeyword = (char *)*strings;
+            WideCharToMultiByte( CP_ACP, 0, form->name, -1, (char *)info->pKeyword, keyword_len, NULL, NULL );
+            *strings += keyword_len / sizeof(WCHAR);
+            info->StringType = STRING_MUIDLL;
+            info->pMuiDll = memcpy( *strings, dll_name, sizeof(dll_name) );
+            *strings += ARRAY_SIZE(dll_name);
+            info->dwResourceId = form->res_id;
+            if (res_len)
+            {
+                info->StringType |= STRING_LANGPAIR;
+                info->pDisplayName = memcpy( *strings, resource, (res_len - 1) * sizeof(WCHAR) );
+                info->pDisplayName[res_len - 1] = '\0';
+                *strings += res_len;
+                info->wLangId = GetUserDefaultLangID();
+            }
+            else
+            {
+                info->pDisplayName = NULL;
+                info->wLangId = 0;
+            }
+        }
+    }
+
+    *base += form_struct_size( level );
+    *used += total_size;
+}
+
+static BOOL WINAPI fpAddForm( HANDLE printer, DWORD level, BYTE *form )
+{
+    FIXME( "(%p, %ld, %p): stub\n", printer, level, form );
+    return TRUE;
+}
+
+static BOOL WINAPI fpDeleteForm( HANDLE printer, WCHAR *name )
+{
+    FIXME( "(%p, %s): stub\n", printer, debugstr_w( name ) );
+    return TRUE;
+}
+
+static BOOL WINAPI fpGetForm( HANDLE printer, WCHAR *name, DWORD level, BYTE *form, DWORD size, DWORD *needed )
+{
+    size_t struct_size = form_struct_size( level );
+    const struct builtin_form *builtin = NULL;
+    WCHAR *strings = NULL;
+    BYTE *base = form;
+    DWORD i;
+
+    TRACE( "(%p, %s, %ld, %p, %ld, %p)\n", printer, debugstr_w( name ), level, form, size, needed );
+
+    *needed = 0;
+
+    if (!struct_size) return FALSE;
+
+    for (i = 0; i < ARRAY_SIZE(builtin_forms); i++)
+    {
+        if (!wcscmp( name, builtin_forms[i].name ))
+        {
+            builtin = builtin_forms + i;
+            break;
+        }
+    }
+
+    if (!builtin)
+    {
+        SetLastError( ERROR_INVALID_FORM_NAME );
+        return FALSE;
+    }
+
+    *needed = struct_size;
+    if (*needed < size) strings = (WCHAR *)(form + *needed);
+
+    fill_builtin_form_info( &base, &strings, builtin, level, size, needed );
+
+    if (*needed > size)
+    {
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static BOOL WINAPI fpSetForm( HANDLE printer, WCHAR *name, DWORD level, BYTE *form )
+{
+    FIXME( "(%p, %s, %ld, %p): stub\n", printer, debugstr_w( name ), level, form );
+    return FALSE;
+}
+
+static BOOL WINAPI fpEnumForms( HANDLE printer, DWORD level, BYTE *form, DWORD size, DWORD *needed, DWORD *count )
+{
+    DWORD num = ARRAY_SIZE(builtin_forms), i;
+    WCHAR *strings = NULL;
+    BYTE *base = form;
+    size_t struct_size = form_struct_size( level );
+
+    TRACE( "(%p, %ld, %p, %ld, %p, %p)\n", printer, level, form, size, needed, count );
+
+    *count = *needed = 0;
+
+    if (!struct_size) return FALSE;
+
+    *needed = num * struct_size;
+    if (*needed < size) strings = (WCHAR *)(form + *needed);
+
+    for (i = 0; i < ARRAY_SIZE(builtin_forms); i++)
+        fill_builtin_form_info( &base, &strings, builtin_forms + i, level, size, needed );
+
+    if (*needed > size)
+    {
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        return FALSE;
+    }
+
+    *count = i;
+    return TRUE;
+}
+
+static const PRINTPROVIDOR backend = {
         fpOpenPrinter,
         NULL,   /* fpSetJob */
         NULL,   /* fpGetJob */
@@ -2546,11 +2840,11 @@ void setup_provider(void)
         NULL,   /* fpSetPrinterData */
         NULL,   /* fpWaitForPrinterChange */
         fpClosePrinter,
-        NULL,   /* fpAddForm */
-        NULL,   /* fpDeleteForm */
-        NULL,   /* fpGetForm */
-        NULL,   /* fpSetForm */
-        NULL,   /* fpEnumForms */
+        fpAddForm,
+        fpDeleteForm,
+        fpGetForm,
+        fpSetForm,
+        fpEnumForms,
         fpEnumMonitors,
         fpEnumPorts,
         fpAddPort,
@@ -2600,10 +2894,7 @@ void setup_provider(void)
         NULL,   /* fpFlushPrinter */
         NULL,   /* fpSendRecvBidiData */
         NULL    /* fpAddDriverCatalog */
-    };
-    pprovider = &backend;
-
-}
+};
 
 /*****************************************************
  * InitializePrintProvidor     (localspl.@)
@@ -2630,8 +2921,8 @@ BOOL WINAPI InitializePrintProvidor(LPPRINTPROVIDOR pPrintProvidor,
                                     DWORD cbPrintProvidor, LPWSTR pFullRegistryPath)
 {
 
-    TRACE("(%p, %u, %s)\n", pPrintProvidor, cbPrintProvidor, debugstr_w(pFullRegistryPath));
-    memcpy(pPrintProvidor, pprovider,
+    TRACE("(%p, %lu, %s)\n", pPrintProvidor, cbPrintProvidor, debugstr_w(pFullRegistryPath));
+    memcpy(pPrintProvidor, &backend,
           (cbPrintProvidor < sizeof(PRINTPROVIDOR)) ? cbPrintProvidor : sizeof(PRINTPROVIDOR));
 
     return TRUE;

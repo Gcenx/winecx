@@ -18,6 +18,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#ifndef __WINE_MOUNTMGR_H
+#define __WINE_MOUNTMGR_H
+
 #include <stdarg.h>
 
 #include "ntstatus.h"
@@ -33,11 +36,6 @@
 #define WINE_MOUNTMGR_EXTENSIONS
 #include "ddk/mountmgr.h"
 
-extern void initialize_dbus(void) DECLSPEC_HIDDEN;
-extern void initialize_diskarbitration(void) DECLSPEC_HIDDEN;
-
-extern WCHAR *strdupW( const WCHAR * ) DECLSPEC_HIDDEN;
-
 /* device functions */
 
 enum device_type
@@ -52,23 +50,9 @@ enum device_type
     DEVICE_RAMDISK
 };
 
-extern NTSTATUS add_volume( const char *udi, const char *device, const char *mount_point,
-                            enum device_type type, const GUID *guid, const char *disk_serial ) DECLSPEC_HIDDEN;
-extern NTSTATUS remove_volume( const char *udi ) DECLSPEC_HIDDEN;
-extern NTSTATUS add_dos_device( int letter, const char *udi, const char *device,
-                                const char *mount_point, enum device_type type, const GUID *guid,
-                                UNICODE_STRING *devname ) DECLSPEC_HIDDEN;
-extern NTSTATUS remove_dos_device( int letter, const char *udi ) DECLSPEC_HIDDEN;
-extern NTSTATUS query_dos_device( int letter, enum device_type *type, enum mountmgr_fs_type *fs_type, DWORD *serial,
-                                  char **device, char **mount_point, WCHAR **label ) DECLSPEC_HIDDEN;
-extern NTSTATUS query_unix_device( ULONGLONG unix_dev, enum device_type *type,
-                                   DWORD *serial, enum mountmgr_fs_type *fs_type, char **device,
-                                   char **mount_point, WCHAR **label ) DECLSPEC_HIDDEN;
 extern NTSTATUS WINAPI harddisk_driver_entry( DRIVER_OBJECT *driver, UNICODE_STRING *path ) DECLSPEC_HIDDEN;
 extern NTSTATUS WINAPI serial_driver_entry( DRIVER_OBJECT *driver, UNICODE_STRING *path ) DECLSPEC_HIDDEN;
 extern NTSTATUS WINAPI parallel_driver_entry( DRIVER_OBJECT *driver, UNICODE_STRING *path ) DECLSPEC_HIDDEN;
-
-/* SCSI entry functions */
 
 enum scsi_device_type
 {
@@ -95,10 +79,25 @@ enum scsi_device_type
     SCSI_UNKNOWN_PERIPHERAL = ~0
 };
 
-extern void create_scsi_entry( SCSI_ADDRESS *scsi_addr, UINT init_id,
-                               const char *driver, UINT type, const char *drive,
-                               const UNICODE_STRING *devname ) DECLSPEC_HIDDEN;
-extern void set_scsi_device_name( SCSI_ADDRESS *scsi_addr, const UNICODE_STRING *devname ) DECLSPEC_HIDDEN;
+struct scsi_info
+{
+    ULONG                 type;
+    SCSI_ADDRESS          addr;
+    UINT                  init_id;
+    char                  driver[64];
+    char                  model[64];
+};
+
+extern NTSTATUS add_volume( const char *udi, const char *device, const char *mount_point,
+                            enum device_type type, const GUID *guid, const char *disk_serial,
+                            const struct scsi_info *info ) DECLSPEC_HIDDEN;
+extern NTSTATUS remove_volume( const char *udi ) DECLSPEC_HIDDEN;
+extern NTSTATUS add_dos_device( int letter, const char *udi, const char *device,
+                                const char *mount_point, enum device_type type, const GUID *guid,
+                                const struct scsi_info *info ) DECLSPEC_HIDDEN;
+extern NTSTATUS remove_dos_device( int letter, const char *udi ) DECLSPEC_HIDDEN;
+extern NTSTATUS query_unix_drive( void *buff, SIZE_T insize, SIZE_T outsize,
+                                  IO_STATUS_BLOCK *iosb ) DECLSPEC_HIDDEN;
 
 /* mount point functions */
 
@@ -111,5 +110,4 @@ extern struct mount_point *add_volume_mount_point( DEVICE_OBJECT *device, UNICOD
 extern void delete_mount_point( struct mount_point *mount ) DECLSPEC_HIDDEN;
 extern void set_mount_point_id( struct mount_point *mount, const void *id, unsigned int id_len ) DECLSPEC_HIDDEN;
 
-extern ULONG get_dhcp_request_param( const WCHAR *adapter, struct mountmgr_dhcp_request_param *param, char *buf,
-                                     ULONG offset, ULONG size ) DECLSPEC_HIDDEN;
+#endif /* __WINE_MOUNTMGR_H */

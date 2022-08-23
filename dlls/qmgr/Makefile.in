@@ -1,7 +1,7 @@
 MODULE    = qmgr.dll
 IMPORTS   = uuid winhttp ole32 advapi32
 
-EXTRADLLFLAGS = -mno-cygwin
+EXTRADLLFLAGS = -Wb,--prefer-native
 
 C_SRCS = \
 	enum_files.c \
@@ -10,7 +10,6 @@ C_SRCS = \
 	file.c \
 	job.c \
 	qmgr.c \
-	qmgr_main.c \
 	service.c
 
 RC_SRCS = rsrc.rc

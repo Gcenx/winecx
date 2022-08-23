@@ -31,7 +31,7 @@
 #include <float.h>
 #include <ddraw.h>
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 #include <pshpack4.h>
 #endif
 
@@ -1365,7 +1365,7 @@ typedef enum _D3DTEXTURETRANSFORMFLAGS {
 #define D3DFVF_TEXCOORDSIZE4(CoordIndex) (D3DFVF_TEXTUREFORMAT4 << (CoordIndex*2 + 16))
 #define D3DFVF_TEXCOORDSIZE1(CoordIndex) (D3DFVF_TEXTUREFORMAT1 << (CoordIndex*2 + 16))
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 #include <poppack.h>
 #endif
 

@@ -19,16 +19,15 @@
 #define COBJMACROS
 
 #include <stdarg.h>
+#include <zlib.h>
 
 #include "windef.h"
 #include "winternl.h"
 #include "msopc.h"
 
 #include "opc_private.h"
-#include "zlib.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msopc);
 
@@ -120,7 +119,7 @@ HRESULT compress_create_archive(IStream *output, struct zip_archive **out)
     WORD date, time;
     FILETIME ft;
 
-    if (!(archive = heap_alloc(sizeof(*archive))))
+    if (!(archive = malloc(sizeof(*archive))))
         return E_OUTOFMEMORY;
 
     archive->files = NULL;
@@ -152,7 +151,8 @@ static void compress_write(struct zip_archive *archive, void *data, ULONG size)
         archive->position += written;
 
     if (FAILED(archive->write_result))
-        WARN("Failed to write output %p, size %u, written %u, hr %#x.\n", data, size, written, archive->write_result);
+        WARN("Failed to write output %p, size %lu, written %lu, hr %#lx.\n",
+                data, size, written, archive->write_result);
 }
 
 void compress_finalize_archive(struct zip_archive *archive)
@@ -179,9 +179,9 @@ void compress_finalize_archive(struct zip_archive *archive)
     IStream_Release(archive->output);
 
     for (i = 0; i < archive->file_count; i++)
-        heap_free(archive->files[i]);
-    heap_free(archive->files);
-    heap_free(archive);
+        free(archive->files[i]);
+    free(archive->files);
+    free(archive);
 }
 
 static void compress_write_content(struct zip_archive *archive, IStream *content,
@@ -269,7 +269,7 @@ HRESULT compress_add_file(struct zip_archive *archive, const WCHAR *path,
     DWORD len;
 
     len = WideCharToMultiByte(CP_ACP, 0, path, -1, NULL, 0, NULL, NULL);
-    if (!(name = heap_alloc(len)))
+    if (!(name = malloc(len)))
         return E_OUTOFMEMORY;
     WideCharToMultiByte(CP_ACP, 0, path, -1, name, len, NULL, NULL);
 
@@ -301,9 +301,9 @@ HRESULT compress_add_file(struct zip_archive *archive, const WCHAR *path,
         return archive->write_result;
 
     /* Set directory entry */
-    if (!(entry = heap_alloc_zero(sizeof(*entry) + local_header.name_length)))
+    if (!(entry = calloc(1, sizeof(*entry) + local_header.name_length)))
     {
-        heap_free(name);
+        free(name);
         return E_OUTOFMEMORY;
     }
 
@@ -319,12 +319,12 @@ HRESULT compress_add_file(struct zip_archive *archive, const WCHAR *path,
     entry->name_length = local_header.name_length;
     entry->local_file_offset = local_header_pos;
     memcpy(entry + 1, name, entry->name_length);
-    heap_free(name);
+    free(name);
 
     if (!opc_array_reserve((void **)&archive->files, &archive->file_size, archive->file_count + 1,
             sizeof(*archive->files)))
     {
-        heap_free(entry);
+        free(entry);
         return E_OUTOFMEMORY;
     }
 

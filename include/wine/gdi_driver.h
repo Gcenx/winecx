@@ -22,6 +22,7 @@
 #define __WINE_WINE_GDI_DRIVER_H
 
 #include "winternl.h"
+#include "ntuser.h"
 #include "ddk/d3dkmthk.h"
 #include "wine/list.h"
 
@@ -78,32 +79,25 @@ struct gdi_dc_funcs
     BOOL     (CDECL *pChord)(PHYSDEV,INT,INT,INT,INT,INT,INT,INT,INT);
     BOOL     (CDECL *pCloseFigure)(PHYSDEV);
     BOOL     (CDECL *pCreateCompatibleDC)(PHYSDEV,PHYSDEV*);
-    BOOL     (CDECL *pCreateDC)(PHYSDEV*,LPCWSTR,LPCWSTR,LPCWSTR,const DEVMODEW*);
+    BOOL     (CDECL *pCreateDC)(PHYSDEV*,LPCWSTR,LPCWSTR,const DEVMODEW*);
     BOOL     (CDECL *pDeleteDC)(PHYSDEV);
     BOOL     (CDECL *pDeleteObject)(PHYSDEV,HGDIOBJ);
-    DWORD    (CDECL *pDeviceCapabilities)(LPSTR,LPCSTR,LPCSTR,WORD,LPSTR,LPDEVMODEA);
     BOOL     (CDECL *pEllipse)(PHYSDEV,INT,INT,INT,INT);
     INT      (CDECL *pEndDoc)(PHYSDEV);
     INT      (CDECL *pEndPage)(PHYSDEV);
     BOOL     (CDECL *pEndPath)(PHYSDEV);
     BOOL     (CDECL *pEnumFonts)(PHYSDEV,LPLOGFONTW,FONTENUMPROCW,LPARAM);
-    INT      (CDECL *pEnumICMProfiles)(PHYSDEV,ICMENUMPROCW,LPARAM);
-    INT      (CDECL *pExcludeClipRect)(PHYSDEV,INT,INT,INT,INT);
-    INT      (CDECL *pExtDeviceMode)(LPSTR,HWND,LPDEVMODEA,LPSTR,LPSTR,LPDEVMODEA,LPSTR,DWORD);
     INT      (CDECL *pExtEscape)(PHYSDEV,INT,INT,LPCVOID,INT,LPVOID);
     BOOL     (CDECL *pExtFloodFill)(PHYSDEV,INT,INT,COLORREF,UINT);
-    INT      (CDECL *pExtSelectClipRgn)(PHYSDEV,HRGN,INT);
     BOOL     (CDECL *pExtTextOut)(PHYSDEV,INT,INT,UINT,const RECT*,LPCWSTR,UINT,const INT*);
     BOOL     (CDECL *pFillPath)(PHYSDEV);
     BOOL     (CDECL *pFillRgn)(PHYSDEV,HRGN,HBRUSH);
-    BOOL     (CDECL *pFlattenPath)(PHYSDEV);
     BOOL     (CDECL *pFontIsLinked)(PHYSDEV);
     BOOL     (CDECL *pFrameRgn)(PHYSDEV,HRGN,HBRUSH,INT,INT);
-    BOOL     (CDECL *pGdiComment)(PHYSDEV,UINT,const BYTE*);
     UINT     (CDECL *pGetBoundsRect)(PHYSDEV,RECT*,UINT);
-    BOOL     (CDECL *pGetCharABCWidths)(PHYSDEV,UINT,UINT,LPABC);
+    BOOL     (CDECL *pGetCharABCWidths)(PHYSDEV,UINT,UINT,WCHAR*,LPABC);
     BOOL     (CDECL *pGetCharABCWidthsI)(PHYSDEV,UINT,UINT,WORD*,LPABC);
-    BOOL     (CDECL *pGetCharWidth)(PHYSDEV,UINT,UINT,LPINT);
+    BOOL     (CDECL *pGetCharWidth)(PHYSDEV,UINT,UINT,const WCHAR*,LPINT);
     BOOL     (CDECL *pGetCharWidthInfo)(PHYSDEV,void*);
     INT      (CDECL *pGetDeviceCaps)(PHYSDEV,INT);
     BOOL     (CDECL *pGetDeviceGammaRamp)(PHYSDEV,LPVOID);
@@ -112,7 +106,7 @@ struct gdi_dc_funcs
     DWORD    (CDECL *pGetFontUnicodeRanges)(PHYSDEV,LPGLYPHSET);
     DWORD    (CDECL *pGetGlyphIndices)(PHYSDEV,LPCWSTR,INT,LPWORD,DWORD);
     DWORD    (CDECL *pGetGlyphOutline)(PHYSDEV,UINT,UINT,LPGLYPHMETRICS,DWORD,LPVOID,const MAT2*);
-    BOOL     (CDECL *pGetICMProfile)(PHYSDEV,LPDWORD,LPWSTR);
+    BOOL     (CDECL *pGetICMProfile)(PHYSDEV,BOOL,LPDWORD,LPWSTR);
     DWORD    (CDECL *pGetImage)(PHYSDEV,BITMAPINFO*,struct gdi_image_bits*,struct bitblt_coords*);
     DWORD    (CDECL *pGetKerningPairs)(PHYSDEV,DWORD,LPKERNINGPAIR);
     COLORREF (CDECL *pGetNearestColor)(PHYSDEV,COLORREF);
@@ -125,14 +119,9 @@ struct gdi_dc_funcs
     INT      (CDECL *pGetTextFace)(PHYSDEV,INT,LPWSTR);
     BOOL     (CDECL *pGetTextMetrics)(PHYSDEV,TEXTMETRICW*);
     BOOL     (CDECL *pGradientFill)(PHYSDEV,TRIVERTEX*,ULONG,void*,ULONG,ULONG);
-    INT      (CDECL *pIntersectClipRect)(PHYSDEV,INT,INT,INT,INT);
     BOOL     (CDECL *pInvertRgn)(PHYSDEV,HRGN);
     BOOL     (CDECL *pLineTo)(PHYSDEV,INT,INT);
-    BOOL     (CDECL *pModifyWorldTransform)(PHYSDEV,const XFORM*,DWORD);
     BOOL     (CDECL *pMoveTo)(PHYSDEV,INT,INT);
-    INT      (CDECL *pOffsetClipRgn)(PHYSDEV,INT,INT);
-    BOOL     (CDECL *pOffsetViewportOrgEx)(PHYSDEV,INT,INT,POINT*);
-    BOOL     (CDECL *pOffsetWindowOrgEx)(PHYSDEV,INT,INT,POINT*);
     BOOL     (CDECL *pPaintRgn)(PHYSDEV,HRGN);
     BOOL     (CDECL *pPatBlt)(PHYSDEV,struct bitblt_coords*,DWORD);
     BOOL     (CDECL *pPie)(PHYSDEV,INT,INT,INT,INT,INT,INT,INT,INT);
@@ -141,51 +130,26 @@ struct gdi_dc_funcs
     BOOL     (CDECL *pPolyDraw)(PHYSDEV,const POINT*,const BYTE *,DWORD);
     BOOL     (CDECL *pPolyPolygon)(PHYSDEV,const POINT*,const INT*,UINT);
     BOOL     (CDECL *pPolyPolyline)(PHYSDEV,const POINT*,const DWORD*,DWORD);
-    BOOL     (CDECL *pPolygon)(PHYSDEV,const POINT*,INT);
-    BOOL     (CDECL *pPolyline)(PHYSDEV,const POINT*,INT);
     BOOL     (CDECL *pPolylineTo)(PHYSDEV,const POINT*,INT);
     DWORD    (CDECL *pPutImage)(PHYSDEV,HRGN,BITMAPINFO*,const struct gdi_image_bits*,struct bitblt_coords*,struct bitblt_coords*,DWORD);
     UINT     (CDECL *pRealizeDefaultPalette)(PHYSDEV);
     UINT     (CDECL *pRealizePalette)(PHYSDEV,HPALETTE,BOOL);
     BOOL     (CDECL *pRectangle)(PHYSDEV,INT,INT,INT,INT);
-    HDC      (CDECL *pResetDC)(PHYSDEV,const DEVMODEW*);
-    BOOL     (CDECL *pRestoreDC)(PHYSDEV,INT);
+    BOOL     (CDECL *pResetDC)(PHYSDEV,const DEVMODEW*);
     BOOL     (CDECL *pRoundRect)(PHYSDEV,INT,INT,INT,INT,INT,INT);
-    INT      (CDECL *pSaveDC)(PHYSDEV);
-    BOOL     (CDECL *pScaleViewportExtEx)(PHYSDEV,INT,INT,INT,INT,SIZE*);
-    BOOL     (CDECL *pScaleWindowExtEx)(PHYSDEV,INT,INT,INT,INT,SIZE*);
     HBITMAP  (CDECL *pSelectBitmap)(PHYSDEV,HBITMAP);
     HBRUSH   (CDECL *pSelectBrush)(PHYSDEV,HBRUSH,const struct brush_pattern*);
-    BOOL     (CDECL *pSelectClipPath)(PHYSDEV,INT);
     HFONT    (CDECL *pSelectFont)(PHYSDEV,HFONT,UINT*);
-    HPALETTE (CDECL *pSelectPalette)(PHYSDEV,HPALETTE,BOOL);
     HPEN     (CDECL *pSelectPen)(PHYSDEV,HPEN,const struct brush_pattern*);
-    INT      (CDECL *pSetArcDirection)(PHYSDEV,INT);
     COLORREF (CDECL *pSetBkColor)(PHYSDEV,COLORREF);
-    INT      (CDECL *pSetBkMode)(PHYSDEV,INT);
     UINT     (CDECL *pSetBoundsRect)(PHYSDEV,RECT*,UINT);
     COLORREF (CDECL *pSetDCBrushColor)(PHYSDEV, COLORREF);
     COLORREF (CDECL *pSetDCPenColor)(PHYSDEV, COLORREF);
     INT      (CDECL *pSetDIBitsToDevice)(PHYSDEV,INT,INT,DWORD,DWORD,INT,INT,UINT,UINT,LPCVOID,BITMAPINFO*,UINT);
     VOID     (CDECL *pSetDeviceClipping)(PHYSDEV,HRGN);
     BOOL     (CDECL *pSetDeviceGammaRamp)(PHYSDEV,LPVOID);
-    DWORD    (CDECL *pSetLayout)(PHYSDEV,DWORD);
-    INT      (CDECL *pSetMapMode)(PHYSDEV,INT);
-    DWORD    (CDECL *pSetMapperFlags)(PHYSDEV,DWORD);
     COLORREF (CDECL *pSetPixel)(PHYSDEV,INT,INT,COLORREF);
-    INT      (CDECL *pSetPolyFillMode)(PHYSDEV,INT);
-    INT      (CDECL *pSetROP2)(PHYSDEV,INT);
-    INT      (CDECL *pSetRelAbs)(PHYSDEV,INT);
-    INT      (CDECL *pSetStretchBltMode)(PHYSDEV,INT);
-    UINT     (CDECL *pSetTextAlign)(PHYSDEV,UINT);
-    INT      (CDECL *pSetTextCharacterExtra)(PHYSDEV,INT);
     COLORREF (CDECL *pSetTextColor)(PHYSDEV,COLORREF);
-    BOOL     (CDECL *pSetTextJustification)(PHYSDEV,INT,INT);
-    BOOL     (CDECL *pSetViewportExtEx)(PHYSDEV,INT,INT,SIZE*);
-    BOOL     (CDECL *pSetViewportOrgEx)(PHYSDEV,INT,INT,POINT*);
-    BOOL     (CDECL *pSetWindowExtEx)(PHYSDEV,INT,INT,SIZE*);
-    BOOL     (CDECL *pSetWindowOrgEx)(PHYSDEV,INT,INT,POINT*);
-    BOOL     (CDECL *pSetWorldTransform)(PHYSDEV,const XFORM*);
     INT      (CDECL *pStartDoc)(PHYSDEV,const DOCINFOW*);
     INT      (CDECL *pStartPage)(PHYSDEV);
     BOOL     (CDECL *pStretchBlt)(PHYSDEV,struct bitblt_coords*,PHYSDEV,struct bitblt_coords*,DWORD);
@@ -193,18 +157,15 @@ struct gdi_dc_funcs
     BOOL     (CDECL *pStrokeAndFillPath)(PHYSDEV);
     BOOL     (CDECL *pStrokePath)(PHYSDEV);
     BOOL     (CDECL *pUnrealizePalette)(HPALETTE);
-    BOOL     (CDECL *pWidenPath)(PHYSDEV);
     NTSTATUS (CDECL *pD3DKMTCheckVidPnExclusiveOwnership)(const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *);
     NTSTATUS (CDECL *pD3DKMTSetVidPnSourceOwner)(const D3DKMT_SETVIDPNSOURCEOWNER *);
-    struct opengl_funcs * (CDECL *wine_get_wgl_driver)(PHYSDEV,UINT);
-    const struct vulkan_funcs * (CDECL *wine_get_vulkan_driver)(PHYSDEV,UINT);
 
     /* priority order for the driver on the stack */
     UINT       priority;
 };
 
 /* increment this when you change the DC function table */
-#define WINE_GDI_DRIVER_VERSION 51
+#define WINE_GDI_DRIVER_VERSION 77
 
 #define GDI_PRIORITY_NULL_DRV        0  /* null driver */
 #define GDI_PRIORITY_FONT_DRV      100  /* any font driver */
@@ -234,15 +195,17 @@ static inline void push_dc_driver( PHYSDEV *dev, PHYSDEV physdev, const struct g
 
 struct window_surface;
 
+#ifndef __WINE_USE_MSVCRT
+
 struct window_surface_funcs
 {
-    void  (CDECL *lock)( struct window_surface *surface );
-    void  (CDECL *unlock)( struct window_surface *surface );
-    void* (CDECL *get_info)( struct window_surface *surface, BITMAPINFO *info );
-    RECT* (CDECL *get_bounds)( struct window_surface *surface );
-    void  (CDECL *set_region)( struct window_surface *surface, HRGN region );
-    void  (CDECL *flush)( struct window_surface *surface );
-    void  (CDECL *destroy)( struct window_surface *surface );
+    void  (*lock)( struct window_surface *surface );
+    void  (*unlock)( struct window_surface *surface );
+    void* (*get_info)( struct window_surface *surface, BITMAPINFO *info );
+    RECT* (*get_bounds)( struct window_surface *surface );
+    void  (*set_region)( struct window_surface *surface, HRGN region );
+    void  (*flush)( struct window_surface *surface );
+    void  (*destroy)( struct window_surface *surface );
 };
 
 struct window_surface
@@ -266,27 +229,110 @@ static inline ULONG window_surface_release( struct window_surface *surface )
     return ret;
 }
 
-/* the DC hook support is only exported on Win16, the 32-bit version is a Wine extension */
+/* display manager interface, used to initialize display device registry data */
 
-#define DCHC_INVALIDVISRGN      0x0001
-#define DCHC_DELETEDC           0x0002
-#define DCHF_INVALIDATEVISRGN   0x0001
-#define DCHF_VALIDATEVISRGN     0x0002
-#define DCHF_RESETDC            0x0004  /* Wine extension */
-#define DCHF_DISABLEDC          0x0008  /* Wine extension */
-#define DCHF_ENABLEDC           0x0010  /* Wine extension */
+struct gdi_gpu
+{
+    ULONG_PTR id;
+    WCHAR name[128];      /* name */
+    UINT vendor_id;       /* PCI ID */
+    UINT device_id;
+    UINT subsys_id;
+    UINT revision_id;
+    GUID vulkan_uuid;     /* Vulkan device UUID */
+};
 
-typedef BOOL (CALLBACK *DCHOOKPROC)(HDC,WORD,DWORD_PTR,LPARAM);
+struct gdi_adapter
+{
+    ULONG_PTR id;
+    DWORD state_flags;
+};
 
-WINGDIAPI DWORD_PTR WINAPI GetDCHook(HDC,DCHOOKPROC*);
-WINGDIAPI BOOL      WINAPI SetDCHook(HDC,DCHOOKPROC,DWORD_PTR);
-WINGDIAPI WORD      WINAPI SetHookFlags(HDC,WORD);
+struct gdi_monitor
+{
+    WCHAR name[128];      /* name */
+    RECT rc_monitor;      /* RcMonitor in MONITORINFO struct */
+    RECT rc_work;         /* RcWork in MONITORINFO struct */
+    DWORD state_flags;    /* StateFlags in DISPLAY_DEVICE struct */
+    unsigned char *edid;  /* Extended Device Identification Data */
+    UINT edid_len;
+};
 
-extern void CDECL __wine_make_gdi_object_system( HGDIOBJ handle, BOOL set );
-extern void CDECL __wine_set_visible_region( HDC hdc, HRGN hrgn, const RECT *vis_rect,
-                                             const RECT *device_rect, struct window_surface *surface );
-extern void CDECL __wine_set_display_driver( HMODULE module );
+struct gdi_device_manager
+{
+    void (*add_gpu)( const struct gdi_gpu *gpu, void *param );
+    void (*add_adapter)( const struct gdi_adapter *adapter, void *param );
+    void (*add_monitor)( const struct gdi_monitor *monitor, void *param );
+};
+
+struct tagUPDATELAYEREDWINDOWINFO;
+
+struct user_driver_funcs
+{
+    struct gdi_dc_funcs dc_funcs;
+
+    /* keyboard functions */
+    BOOL    (*pActivateKeyboardLayout)(HKL, UINT);
+    void    (*pBeep)(void);
+    INT     (*pGetKeyNameText)(LONG,LPWSTR,INT);
+    UINT    (*pGetKeyboardLayoutList)(INT, HKL *);
+    UINT    (*pMapVirtualKeyEx)(UINT,UINT,HKL);
+    BOOL    (*pRegisterHotKey)(HWND,UINT,UINT);
+    INT     (*pToUnicodeEx)(UINT,UINT,const BYTE *,LPWSTR,int,UINT,HKL);
+    void    (*pUnregisterHotKey)(HWND, UINT, UINT);
+    SHORT   (*pVkKeyScanEx)(WCHAR, HKL);
+    /* cursor/icon functions */
+    void    (*pDestroyCursorIcon)(HCURSOR);
+    void    (*pSetCursor)(HCURSOR);
+    BOOL    (*pGetCursorPos)(LPPOINT);
+    BOOL    (*pSetCursorPos)(INT,INT);
+    BOOL    (*pClipCursor)(LPCRECT);
+    /* clipboard functions */
+    void    (*pUpdateClipboard)(void);
+    /* display modes */
+    LONG    (*pChangeDisplaySettingsEx)(LPCWSTR,LPDEVMODEW,HWND,DWORD,LPVOID);
+    BOOL    (*pEnumDisplaySettingsEx)(LPCWSTR,DWORD,LPDEVMODEW,DWORD);
+    void    (*pUpdateDisplayDevices)(const struct gdi_device_manager *,BOOL,void*);
+    /* windowing functions */
+    BOOL    (*pCreateDesktopWindow)(HWND);
+    BOOL    (*pCreateWindow)(HWND);
+    void    (*pDestroyWindow)(HWND);
+    void    (*pFlashWindowEx)(FLASHWINFO*);
+    void    (*pGetDC)(HDC,HWND,HWND,const RECT *,const RECT *,DWORD);
+    DWORD   (*pMsgWaitForMultipleObjectsEx)(DWORD,const HANDLE*,DWORD,DWORD,DWORD);
+    void    (*pReleaseDC)(HWND,HDC);
+    BOOL    (*pScrollDC)(HDC,INT,INT,HRGN);
+    void    (*pSetCapture)(HWND,UINT);
+    void    (*pSetFocus)(HWND);
+    void    (*pSetLayeredWindowAttributes)(HWND,COLORREF,BYTE,DWORD);
+    void    (*pSetParent)(HWND,HWND,HWND);
+    void    (*pSetWindowRgn)(HWND,HRGN,BOOL);
+    void    (*pSetWindowIcon)(HWND,UINT,HICON);
+    void    (*pSetWindowStyle)(HWND,INT,STYLESTRUCT*);
+    void    (*pSetWindowText)(HWND,LPCWSTR);
+    UINT    (*pShowWindow)(HWND,INT,RECT*,UINT);
+    LRESULT (*pSysCommand)(HWND,WPARAM,LPARAM);
+    BOOL    (*pUpdateLayeredWindow)(HWND,const struct tagUPDATELAYEREDWINDOWINFO *,const RECT *);
+    LRESULT (*pWindowMessage)(HWND,UINT,WPARAM,LPARAM);
+    BOOL    (*pWindowPosChanging)(HWND,HWND,UINT,const RECT *,const RECT *,RECT *,
+                                  struct window_surface**);
+    void    (*pWindowPosChanged)(HWND,HWND,UINT,const RECT *,const RECT *,const RECT *,
+                                 const RECT *,struct window_surface*);
+    /* system parameters */
+    BOOL    (*pSystemParametersInfo)(UINT,UINT,void*,UINT);
+    /* vulkan support */
+    const struct vulkan_funcs * (*pwine_get_vulkan_driver)(UINT);
+    /* opengl support */
+    struct opengl_funcs * (*pwine_get_wgl_driver)(UINT);
+    /* thread management */
+    void    (*pThreadDetach)(void);
+};
+
+#endif /* __WINE_USE_MSVCRT */
+
+struct user_driver_funcs;
+extern void CDECL __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT version );
 extern struct opengl_funcs * CDECL __wine_get_wgl_driver( HDC hdc, UINT version );
-extern const struct vulkan_funcs * CDECL __wine_get_vulkan_driver( HDC hdc, UINT version );
+extern const struct vulkan_funcs * CDECL __wine_get_vulkan_driver( UINT version );
 
 #endif /* __WINE_WINE_GDI_DRIVER_H */

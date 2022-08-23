@@ -63,12 +63,14 @@ __lc_time_data cloc_time_data =
     MAKELCID(LANG_ENGLISH, SORT_DEFAULT),
 #endif
     1, 0,
+#if _MSVCR_VER == 0 || _MSVCR_VER >= 100
     {{L"Sun", L"Mon", L"Tue", L"Wed", L"Thu", L"Fri", L"Sat",
       L"Sunday", L"Monday", L"Tuesday", L"Wednesday", L"Thursday", L"Friday", L"Saturday",
       L"Jan", L"Feb", L"Mar", L"Apr", L"May", L"Jun", L"Jul", L"Aug", L"Sep", L"Oct", L"Nov", L"Dec",
       L"January", L"February", L"March", L"April", L"May", L"June", L"July",
       L"August", L"September", L"October", L"November", L"December",
       L"AM", L"PM", L"MM/dd/yy", L"dddd, MMMM dd, yyyy", L"HH:mm:ss"}},
+#endif
 #if _MSVCR_VER >= 110
     L"en-US",
 #endif
@@ -253,22 +255,21 @@ static int compare_info(LCID lcid, DWORD flags, char* buff, const char* cmp, BOO
 }
 
 static BOOL CALLBACK
-find_best_locale_proc(HMODULE hModule, LPCSTR type, LPCSTR name, WORD LangID, LONG_PTR lParam)
+find_best_locale_proc( WCHAR *name, DWORD locale_flags, LPARAM lParam )
 {
   locale_search_t *res = (locale_search_t *)lParam;
-  const LCID lcid = MAKELCID(LangID, SORT_DEFAULT);
+  const LCID lcid = LocaleNameToLCID( name, 0 );
   char buff[MAX_ELEM_LEN];
   unsigned int flags = 0;
 
-  if(PRIMARYLANGID(LangID) == LANG_NEUTRAL)
-    return CONTINUE_LOOKING;
+  if (lcid == LOCALE_CUSTOM_UNSPECIFIED) return CONTINUE_LOOKING;
 
 #if _MSVCR_VER >= 110
   if (res->allow_sname && compare_info(lcid,LOCALE_SNAME,buff,res->search_language, TRUE))
   {
     TRACE(":Found locale: %s->%s\n", res->search_language, buff);
     res->match_flags = FOUND_SNAME;
-    res->found_lang_id = LangID;
+    res->found_lang_id = LANGIDFROMLCID(lcid);
     return STOP_LOOKING;
   }
 #endif
@@ -303,7 +304,7 @@ find_best_locale_proc(HMODULE hModule, LPCSTR type, LPCSTR name, WORD LangID, LO
   {
     /* Found a better match than previously */
     res->match_flags = flags;
-    res->found_lang_id = LangID;
+    res->found_lang_id = LANGIDFROMLCID(lcid);
   }
   if ((flags & (FOUND_LANGUAGE | FOUND_COUNTRY)) ==
         (FOUND_LANGUAGE | FOUND_COUNTRY))
@@ -361,12 +362,7 @@ LCID locale_to_LCID(const char *locale, unsigned short *codepage, BOOL *sname)
             search.allow_sname = TRUE;
         }
 
-        if(!_stricmp(search.search_country, "China"))
-            strcpy(search.search_country, "People's Republic of China");
-
-        EnumResourceLanguagesA(GetModuleHandleA("KERNEL32"), (LPSTR)RT_STRING,
-                (LPCSTR)LOCALE_ILANGUAGE,find_best_locale_proc,
-                (LONG_PTR)&search);
+        EnumSystemLocalesEx( find_best_locale_proc, 0, (LPARAM)&search, NULL);
 
         if (!search.match_flags)
             return -1;
@@ -427,13 +423,13 @@ static void copy_threadlocinfo_category(pthreadlocinfo locinfo,
     if(!locinfo->lc_category[category].locale) {
         locinfo->lc_category[category].locale = old_locinfo->lc_category[category].locale;
         locinfo->lc_category[category].refcount = old_locinfo->lc_category[category].refcount;
-        InterlockedIncrement(locinfo->lc_category[category].refcount);
+        InterlockedIncrement((LONG *)locinfo->lc_category[category].refcount);
     }
 #if _MSVCR_VER >= 110
     locinfo->lc_name[category] = old_locinfo->lc_name[category];
     locinfo->lc_category[category].wrefcount = old_locinfo->lc_category[category].wrefcount;
     if(locinfo->lc_category[category].wrefcount)
-        InterlockedIncrement(locinfo->lc_category[category].wrefcount);
+        InterlockedIncrement((LONG *)locinfo->lc_category[category].wrefcount);
 #endif
 }
 
@@ -523,8 +519,13 @@ static BOOL update_threadlocinfo_category(LCID lcid, unsigned short cp,
     if(!locinfo->lc_category[category].locale) {
         int len = 0;
 
-        len += GetLocaleInfoA(lcid, LOCALE_SENGLANGUAGE
-                |LOCALE_NOUSEROVERRIDE, buf, 256);
+        if (lcid == MAKELANGID( LANG_NORWEGIAN, SUBLANG_NORWEGIAN_NYNORSK ))
+        {
+            /* locale.nls contains "Norwegian Nynorsk" instead for LOCALE_SENGLANGUAGE */
+            strcpy( buf, "Norwegian-Nynorsk" );
+            len = strlen( buf ) + 1;
+        }
+        else len += GetLocaleInfoA(lcid, LOCALE_SENGLANGUAGE|LOCALE_NOUSEROVERRIDE, buf, 256);
         buf[len-1] = '_';
         len += GetLocaleInfoA(lcid, LOCALE_SENGCOUNTRY
                 |LOCALE_NOUSEROVERRIDE, &buf[len], 256-len);
@@ -554,29 +555,29 @@ void CDECL _unlock_locales(void)
     _unlock(_SETLOCALE_LOCK);
 }
 
-static void CDECL grab_locinfo(pthreadlocinfo locinfo)
+static void grab_locinfo(pthreadlocinfo locinfo)
 {
     int i;
 
-    InterlockedIncrement(&locinfo->refcount);
+    InterlockedIncrement((LONG *)&locinfo->refcount);
     for(i=LC_MIN+1; i<=LC_MAX; i++)
     {
-        InterlockedIncrement(locinfo->lc_category[i].refcount);
+        InterlockedIncrement((LONG *)locinfo->lc_category[i].refcount);
         if(locinfo->lc_category[i].wrefcount)
-            InterlockedIncrement(locinfo->lc_category[i].wrefcount);
+            InterlockedIncrement((LONG *)locinfo->lc_category[i].wrefcount);
     }
     if(locinfo->lconv_intl_refcount)
-        InterlockedIncrement(locinfo->lconv_intl_refcount);
+        InterlockedIncrement((LONG *)locinfo->lconv_intl_refcount);
     if(locinfo->lconv_num_refcount)
-        InterlockedIncrement(locinfo->lconv_num_refcount);
+        InterlockedIncrement((LONG *)locinfo->lconv_num_refcount);
     if(locinfo->lconv_mon_refcount)
-        InterlockedIncrement(locinfo->lconv_mon_refcount);
+        InterlockedIncrement((LONG *)locinfo->lconv_mon_refcount);
     if(locinfo->ctype1_refcount)
-        InterlockedIncrement(locinfo->ctype1_refcount);
+        InterlockedIncrement((LONG *)locinfo->ctype1_refcount);
     InterlockedIncrement(&locinfo->lc_time_curr->refcount);
 }
 
-static void CDECL update_thread_locale(thread_data_t *data)
+static void update_thread_locale(thread_data_t *data)
 {
     if((data->locale_flags & LOCALE_FREE) && ((data->locale_flags & LOCALE_THREAD) ||
                 (data->locinfo == MSVCRT_locale->locinfo && data->mbcinfo == MSVCRT_locale->mbcinfo)))
@@ -852,7 +853,7 @@ int CDECL __crtLCMapStringA(
     WCHAR buf_out[32], *out = buf_out;
     int in_len, out_len, r;
 
-    TRACE("(lcid %x, flags %x, %s(%d), %p(%d), %x, %d), partial stub!\n",
+    TRACE("(lcid %lx, flags %lx, %s(%d), %p(%d), %x, %d), partial stub!\n",
             lcid, mapflags, src, srclen, dst, dstlen, codepage, xflag);
 
     in_len = MultiByteToWideChar(codepage, MB_ERR_INVALID_CHARS, src, srclen, NULL, 0);
@@ -902,7 +903,7 @@ done:
 int CDECL __crtLCMapStringW(LCID lcid, DWORD mapflags, const wchar_t *src,
         int srclen, wchar_t *dst, int dstlen, unsigned int codepage, int xflag)
 {
-    FIXME("(lcid %x, flags %x, %s(%d), %p(%d), %x, %d), partial stub!\n",
+    FIXME("(lcid %lx, flags %lx, %s(%d), %p(%d), %x, %d), partial stub!\n",
             lcid, mapflags, debugstr_w(src), srclen, dst, dstlen, codepage, xflag);
 
     return LCMapStringW(lcid, mapflags, src, srclen, dst, dstlen);
@@ -914,7 +915,7 @@ int CDECL __crtLCMapStringW(LCID lcid, DWORD mapflags, const wchar_t *src,
 int CDECL __crtCompareStringA( LCID lcid, DWORD flags, const char *src1, int len1,
                                const char *src2, int len2 )
 {
-    FIXME("(lcid %x, flags %x, %s(%d), %s(%d), partial stub\n",
+    FIXME("(lcid %lx, flags %lx, %s(%d), %s(%d), partial stub\n",
           lcid, flags, debugstr_a(src1), len1, debugstr_a(src2), len2 );
     /* FIXME: probably not entirely right */
     return CompareStringA( lcid, flags, src1, len1, src2, len2 );
@@ -926,7 +927,7 @@ int CDECL __crtCompareStringA( LCID lcid, DWORD flags, const char *src1, int len
 int CDECL __crtCompareStringW( LCID lcid, DWORD flags, const wchar_t *src1, int len1,
                                const wchar_t *src2, int len2 )
 {
-    FIXME("(lcid %x, flags %x, %s(%d), %s(%d), partial stub\n",
+    FIXME("(lcid %lx, flags %lx, %s(%d), %s(%d), partial stub\n",
           lcid, flags, debugstr_w(src1), len1, debugstr_w(src2), len2 );
     /* FIXME: probably not entirely right */
     return CompareStringW( lcid, flags, src1, len1, src2, len2 );
@@ -937,7 +938,7 @@ int CDECL __crtCompareStringW( LCID lcid, DWORD flags, const wchar_t *src1, int 
  */
 int CDECL __crtGetLocaleInfoW( LCID lcid, LCTYPE type, wchar_t *buffer, int len )
 {
-    FIXME("(lcid %x, type %x, %p(%d), partial stub\n", lcid, type, buffer, len );
+    FIXME("(lcid %lx, type %lx, %p(%d), partial stub\n", lcid, type, buffer, len );
     /* FIXME: probably not entirely right */
     return GetLocaleInfoW( lcid, type, buffer, len );
 }
@@ -948,7 +949,7 @@ int CDECL __crtGetLocaleInfoW( LCID lcid, LCTYPE type, wchar_t *buffer, int len 
  */
 int CDECL __crtGetLocaleInfoEx( const WCHAR *locale, LCTYPE type, wchar_t *buffer, int len )
 {
-    TRACE("(%s, %x, %p, %d)\n", debugstr_w(locale), type, buffer, len);
+    TRACE("(%s, %lx, %p, %d)\n", debugstr_w(locale), type, buffer, len);
     return GetLocaleInfoEx(locale, type, buffer, len);
 }
 #endif
@@ -962,7 +963,7 @@ int CDECL __crtGetLocaleInfoEx( const WCHAR *locale, LCTYPE type, wchar_t *buffe
 BOOL CDECL __crtGetStringTypeW(DWORD unk, DWORD type,
         wchar_t *buffer, int len, WORD *out)
 {
-    FIXME("(unk %x, type %x, wstr %p(%d), %p) partial stub\n",
+    FIXME("(unk %lx, type %lx, wstr %p(%d), %p) partial stub\n",
             unk, type, buffer, len, out);
 
     return GetStringTypeW(type, buffer, len, out);
@@ -1037,12 +1038,12 @@ void free_locinfo(pthreadlocinfo locinfo)
 
     for(i=LC_MIN+1; i<=LC_MAX; i++) {
         if(!locinfo->lc_category[i].refcount
-                || !InterlockedDecrement(locinfo->lc_category[i].refcount)) {
+                || !InterlockedDecrement((LONG *)locinfo->lc_category[i].refcount)) {
             free(locinfo->lc_category[i].locale);
             free(locinfo->lc_category[i].refcount);
         }
         if(!locinfo->lc_category[i].wrefcount
-                || !InterlockedDecrement(locinfo->lc_category[i].wrefcount)) {
+                || !InterlockedDecrement((LONG *)locinfo->lc_category[i].wrefcount)) {
 #if _MSVCR_VER >= 110
             free(locinfo->lc_name[i]);
 #endif
@@ -1051,7 +1052,7 @@ void free_locinfo(pthreadlocinfo locinfo)
     }
 
     if(locinfo->lconv_num_refcount
-            && !InterlockedDecrement(locinfo->lconv_num_refcount)) {
+            && !InterlockedDecrement((LONG *)locinfo->lconv_num_refcount)) {
         free(locinfo->lconv->decimal_point);
         free(locinfo->lconv->thousands_sep);
         free(locinfo->lconv->grouping);
@@ -1062,7 +1063,7 @@ void free_locinfo(pthreadlocinfo locinfo)
         free(locinfo->lconv_num_refcount);
     }
     if(locinfo->lconv_mon_refcount
-            && !InterlockedDecrement(locinfo->lconv_mon_refcount)) {
+            && !InterlockedDecrement((LONG *)locinfo->lconv_mon_refcount)) {
         free(locinfo->lconv->int_curr_symbol);
         free(locinfo->lconv->currency_symbol);
         free(locinfo->lconv->mon_decimal_point);
@@ -1081,13 +1082,13 @@ void free_locinfo(pthreadlocinfo locinfo)
         free(locinfo->lconv_mon_refcount);
     }
     if(locinfo->lconv_intl_refcount
-            && !InterlockedDecrement(locinfo->lconv_intl_refcount)) {
+            && !InterlockedDecrement((LONG *)locinfo->lconv_intl_refcount)) {
         free(locinfo->lconv_intl_refcount);
         free(locinfo->lconv);
     }
 
     if(locinfo->ctype1_refcount
-            && !InterlockedDecrement(locinfo->ctype1_refcount)) {
+            && !InterlockedDecrement((LONG *)locinfo->ctype1_refcount)) {
         free(locinfo->ctype1_refcount);
         free(locinfo->ctype1);
         free((void*)locinfo->pclmap);
@@ -1098,7 +1099,7 @@ void free_locinfo(pthreadlocinfo locinfo)
             && locinfo->lc_time_curr != &cloc_time_data)
         free(locinfo->lc_time_curr);
 
-    if(InterlockedDecrement(&locinfo->refcount))
+    if(InterlockedDecrement((LONG *)&locinfo->refcount))
         return;
 
     free(locinfo);
@@ -1196,10 +1197,12 @@ static __lc_time_data* create_time_data(LCID lcid)
             return NULL;
         size += ret;
 
+#if _MSVCR_VER == 0 || _MSVCR_VER >= 100
         ret = GetLocaleInfoW(lcid, time_data[i], NULL, 0);
         if(!ret)
             return NULL;
         size += ret*sizeof(wchar_t);
+#endif
     }
 #if _MSVCR_VER >= 110
     size += LCIDToLocaleName(lcid, NULL, 0, 0)*sizeof(wchar_t);
@@ -1214,11 +1217,13 @@ static __lc_time_data* create_time_data(LCID lcid)
         cur->str.str[i] = &cur->data[ret];
         ret += GetLocaleInfoA(lcid, time_data[i], &cur->data[ret], size-ret);
     }
+#if _MSVCR_VER == 0 || _MSVCR_VER >= 100
     for(i=0; i<ARRAY_SIZE(time_data); i++) {
         cur->wstr.wstr[i] = (wchar_t*)&cur->data[ret];
         ret += GetLocaleInfoW(lcid, time_data[i],
                 (wchar_t*)&cur->data[ret], size-ret)*sizeof(wchar_t);
     }
+#endif
 #if _MSVCR_VER >= 110
     cur->locname = (wchar_t*)&cur->data[ret];
     LCIDToLocaleName(lcid, (wchar_t*)&cur->data[ret], (size-ret)/sizeof(wchar_t), 0);
@@ -1392,7 +1397,7 @@ static pthreadlocinfo create_locinfo(int category,
         locinfo->pclmap = old_locinfo->pclmap;
         locinfo->pcumap = old_locinfo->pcumap;
         if(locinfo->ctype1_refcount)
-            InterlockedIncrement(locinfo->ctype1_refcount);
+            InterlockedIncrement((LONG *)locinfo->ctype1_refcount);
     } else if(lcid[LC_CTYPE]) {
         CPINFO cp_info;
         int j;
@@ -1474,7 +1479,7 @@ static pthreadlocinfo create_locinfo(int category,
         locinfo->lconv = old_locinfo->lconv;
         locinfo->lconv_intl_refcount = old_locinfo->lconv_intl_refcount;
         if(locinfo->lconv_intl_refcount)
-            InterlockedIncrement(locinfo->lconv_intl_refcount);
+            InterlockedIncrement((LONG *)locinfo->lconv_intl_refcount);
     } else if(lcid[LC_MONETARY] || lcid[LC_NUMERIC]) {
         locinfo->lconv = malloc(sizeof(struct lconv));
         locinfo->lconv_intl_refcount = malloc(sizeof(int));
@@ -1504,7 +1509,7 @@ static pthreadlocinfo create_locinfo(int category,
         copy_threadlocinfo_category(locinfo, old_locinfo, LC_MONETARY);
         locinfo->lconv_mon_refcount = old_locinfo->lconv_mon_refcount;
         if(locinfo->lconv_mon_refcount)
-            InterlockedIncrement(locinfo->lconv_mon_refcount);
+            InterlockedIncrement((LONG *)locinfo->lconv_mon_refcount);
         if(locinfo->lconv != &cloc_lconv && locinfo->lconv != old_locinfo->lconv) {
             locinfo->lconv->int_curr_symbol = old_locinfo->lconv->int_curr_symbol;
             locinfo->lconv->currency_symbol = old_locinfo->lconv->currency_symbol;
@@ -1779,7 +1784,7 @@ static pthreadlocinfo create_locinfo(int category,
         copy_threadlocinfo_category(locinfo, old_locinfo, LC_NUMERIC);
         locinfo->lconv_num_refcount = old_locinfo->lconv_num_refcount;
         if(locinfo->lconv_num_refcount)
-            InterlockedIncrement(locinfo->lconv_num_refcount);
+            InterlockedIncrement((LONG *)locinfo->lconv_num_refcount);
         if(locinfo->lconv != &cloc_lconv && locinfo->lconv != old_locinfo->lconv) {
             locinfo->lconv->decimal_point = old_locinfo->lconv->decimal_point;
             locinfo->lconv->thousands_sep = old_locinfo->lconv->thousands_sep;

@@ -32,6 +32,7 @@
 #include "compobj_private.h"
 #include "moniker.h"
 #include "irot.h"
+#include "pathcch.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
@@ -158,7 +159,7 @@ static HRESULT get_moniker_comparison_data(IMoniker *pMoniker, MonikerComparison
         IROTData_Release(pROTData);
         if (hr != S_OK)
         {
-            ERR("Failed to copy comparison data into buffer, hr = 0x%08x\n", hr);
+            ERR("Failed to copy comparison data into buffer, hr = %#lx\n", hr);
             HeapFree(GetProcessHeap(), 0, *moniker_data);
             return hr;
         }
@@ -217,7 +218,7 @@ static HRESULT reduce_moniker(IMoniker *pmk, IBindCtx *pbc, IMoniker **pmkReduce
     }
     hr = IMoniker_Reduce(pmk, pbc, MKRREDUCE_ALL, NULL, pmkReduced);
     if (FAILED(hr))
-        ERR("reducing moniker failed with error 0x%08x\n", hr);
+        ERR("reducing moniker failed with error %#lx.\n", hr);
     if (pbcNew) IBindCtx_Release(pbcNew);
     return hr;
 }
@@ -287,11 +288,11 @@ RunningObjectTableImpl_Register(IRunningObjectTable* iface, DWORD flags,
     IBindCtx *pbc;
     InterfaceData *moniker = NULL;
 
-    TRACE("%p, %#x, %p, %p, %p\n", This, flags, punkObject, pmkObjectName, pdwRegister);
+    TRACE("%p, %#lx, %p, %p, %p\n", iface, flags, punkObject, pmkObjectName, pdwRegister);
 
     if (flags & ~(ROTFLAGS_REGISTRATIONKEEPSALIVE|ROTFLAGS_ALLOWANYCLIENT))
     {
-        ERR("Invalid flags: 0x%08x\n", flags & ~(ROTFLAGS_REGISTRATIONKEEPSALIVE|ROTFLAGS_ALLOWANYCLIENT));
+        ERR("Invalid flags: %#lx\n", flags & ~(ROTFLAGS_REGISTRATIONKEEPSALIVE|ROTFLAGS_ALLOWANYCLIENT));
         return E_INVALIDARG;
     }
 
@@ -434,7 +435,7 @@ RunningObjectTableImpl_Revoke( IRunningObjectTable* iface, DWORD dwRegister)
     RunningObjectTableImpl *This = impl_from_IRunningObjectTable(iface);
     struct rot_entry *rot_entry;
 
-    TRACE("(%p,%d)\n",This,dwRegister);
+    TRACE("%p, %ld.\n", iface, dwRegister);
 
     EnterCriticalSection(&This->lock);
     LIST_FOR_EACH_ENTRY(rot_entry, &This->rot, struct rot_entry, entry)
@@ -567,7 +568,7 @@ RunningObjectTableImpl_GetObject( IRunningObjectTable* iface,
         }
     }
     else
-        WARN("Moniker unavailable, IrotGetObject returned 0x%08x\n", hr);
+        WARN("Moniker unavailable, IrotGetObject returned %#lx\n", hr);
 
     HeapFree(GetProcessHeap(), 0, moniker_data);
 
@@ -589,7 +590,7 @@ RunningObjectTableImpl_NoteChangeTime(IRunningObjectTable* iface,
     struct rot_entry *rot_entry;
     HRESULT hr = E_INVALIDARG;
 
-    TRACE("(%p,%d,%p)\n",This,dwRegister,pfiletime);
+    TRACE("%p, %ld, %p.\n", iface, dwRegister, pfiletime);
 
     EnterCriticalSection(&This->lock);
     LIST_FOR_EACH_ENTRY(rot_entry, &This->rot, struct rot_entry, entry)
@@ -607,7 +608,7 @@ RunningObjectTableImpl_NoteChangeTime(IRunningObjectTable* iface,
     LeaveCriticalSection(&This->lock);
 
 done:
-    TRACE("-- 0x08%x\n", hr);
+    TRACE("-- %#lx\n", hr);
     return hr;
 }
 
@@ -660,7 +661,7 @@ RunningObjectTableImpl_GetTimeOfLastChange(IRunningObjectTable* iface,
 
     HeapFree(GetProcessHeap(), 0, moniker_data);
 
-    TRACE("-- 0x%08x\n", hr);
+    TRACE("-- %#lx\n", hr);
     return hr;
 }
 
@@ -716,7 +717,7 @@ static RunningObjectTableImpl rot =
  */
 HRESULT WINAPI GetRunningObjectTable(DWORD reserved, IRunningObjectTable **ret)
 {
-    TRACE("%#x, %p\n", reserved, ret);
+    TRACE("%#lx, %p\n", reserved, ret);
 
     if (reserved!=0)
         return E_UNEXPECTED;
@@ -827,7 +828,6 @@ HRESULT WINAPI MkParseDisplayName(LPBC pbc, LPCOLESTR szDisplayName,
 				LPDWORD pchEaten, LPMONIKER *ppmk)
 {
     HRESULT hr = MK_E_SYNTAX;
-    static const WCHAR wszClsidColon[] = {'c','l','s','i','d',':'};
     IMoniker *moniker;
     DWORD chEaten;
 
@@ -845,7 +845,7 @@ HRESULT WINAPI MkParseDisplayName(LPBC pbc, LPCOLESTR szDisplayName,
     *pchEaten = 0;
     *ppmk = NULL;
 
-    if (!wcsnicmp(szDisplayName, wszClsidColon, ARRAY_SIZE(wszClsidColon)))
+    if (!wcsnicmp(szDisplayName, L"clsid:", 6))
     {
         hr = ClassMoniker_CreateFromDisplayName(pbc, szDisplayName, &chEaten, &moniker);
         if (FAILED(hr) && (hr != MK_E_SYNTAX))
@@ -911,10 +911,9 @@ HRESULT WINAPI GetClassFile(LPCOLESTR filePathName,CLSID *pclsid)
 {
     IStorage *pstg=0;
     HRESULT res;
-    int nbElm, length, i;
     LONG sizeProgId, ret;
-    LPOLESTR *pathDec=0,absFile=0,progId=0;
-    LPWSTR extension;
+    LPOLESTR progId=0;
+    const WCHAR *extension;
 
     TRACE("%s, %p\n", debugstr_w(filePathName), pclsid);
 
@@ -955,26 +954,9 @@ HRESULT WINAPI GetClassFile(LPCOLESTR filePathName,CLSID *pclsid)
 
     /* if the above strategies fail then search for the extension key in the registry */
 
-    /* get the last element (absolute file) in the path name */
-    nbElm=FileMonikerImpl_DecomposePath(filePathName,&pathDec);
-    absFile=pathDec[nbElm-1];
-
-    /* failed if the path represents a directory and not an absolute file name*/
-    if (!wcscmp(absFile, L"\\")) {
-        CoTaskMemFree(pathDec);
+    res = PathCchFindExtension(filePathName, PATHCCH_MAX_CCH, &extension);
+    if (FAILED(res) || !extension || !*extension || !wcscmp(extension, L"."))
         return MK_E_INVALIDEXTENSION;
-    }
-
-    /* get the extension of the file */
-    extension = NULL;
-    length=lstrlenW(absFile);
-    for(i = length-1; (i >= 0) && *(extension = &absFile[i]) != '.'; i--)
-        /* nothing */;
-
-    if (!extension || !wcscmp(extension, L".")) {
-        CoTaskMemFree(pathDec);
-        return MK_E_INVALIDEXTENSION;
-    }
 
     ret = RegQueryValueW(HKEY_CLASSES_ROOT, extension, NULL, &sizeProgId);
     if (!ret) {
@@ -990,10 +972,6 @@ HRESULT WINAPI GetClassFile(LPCOLESTR filePathName,CLSID *pclsid)
     }
     else
         res = HRESULT_FROM_WIN32(ret);
-
-    for(i=0; pathDec[i]!=NULL;i++)
-        CoTaskMemFree(pathDec[i]);
-    CoTaskMemFree(pathDec);
 
     return res != S_OK ? MK_E_INVALIDEXTENSION : res;
 }
@@ -1070,7 +1048,7 @@ static HRESULT   WINAPI EnumMonikerImpl_Next(IEnumMoniker* iface, ULONG celt, IM
     EnumMonikerImpl *This = impl_from_IEnumMoniker(iface);
     HRESULT hr = S_OK;
 
-    TRACE("(%p) TabCurrentPos %d Tablastindx %d\n", This, This->pos, This->moniker_list->size);
+    TRACE("%p, %lu, %p, %p.\n", iface, celt, rgelt, pceltFetched);
 
     /* retrieve the requested number of moniker from the current position */
     for(i = 0; (This->pos < This->moniker_list->size) && (i < celt); i++)
@@ -1292,7 +1270,7 @@ static HRESULT WINAPI MonikerMarshal_GetUnmarshalClass(
 {
     MonikerMarshal *This = impl_from_IMarshal(iface);
 
-    TRACE("(%s, %p, %x, %p, %x, %p)\n", debugstr_guid(riid), pv,
+    TRACE("%s, %p, %lx, %p, %lx, %p.\n", debugstr_guid(riid), pv,
         dwDestContext, pvDestContext, mshlflags, pCid);
 
     return IMoniker_GetClassID(This->moniker, pCid);
@@ -1306,7 +1284,7 @@ static HRESULT WINAPI MonikerMarshal_GetMarshalSizeMax(
     HRESULT hr;
     ULARGE_INTEGER size;
 
-    TRACE("(%s, %p, %x, %p, %x, %p)\n", debugstr_guid(riid), pv,
+    TRACE("%s, %p, %lx, %p, %lx, %p.\n", debugstr_guid(riid), pv,
         dwDestContext, pvDestContext, mshlflags, pSize);
 
     hr = IMoniker_GetSizeMax(This->moniker, &size);
@@ -1321,7 +1299,7 @@ static HRESULT WINAPI MonikerMarshal_MarshalInterface(LPMARSHAL iface, IStream *
 {
     MonikerMarshal *This = impl_from_IMarshal(iface);
 
-    TRACE("(%p, %s, %p, %x, %p, %x)\n", pStm, debugstr_guid(riid), pv,
+    TRACE("%p, %s, %p, %lx, %p, %lx.\n", pStm, debugstr_guid(riid), pv,
         dwDestContext, pvDestContext, mshlflags);
 
     return IMoniker_Save(This->moniker, pStm, FALSE);

@@ -1,6 +1,6 @@
-@ stub DllCanUnloadNow
+@ stdcall -private DllCanUnloadNow()
 @ stub DllGetClassObject
-@ stub DllRegisterServer
-@ stub DllUnregisterServer
+@ stdcall -private DllRegisterServer()
+@ stdcall -private DllUnregisterServer()
 @ stdcall MFPCreateMediaPlayer(wstr long long ptr long ptr)
 @ stub MFPCreateMediaPlayerEx

@@ -69,7 +69,7 @@ static ULONG WINAPI IWSDiscoveryPublisherImpl_AddRef(IWSDiscoveryPublisher *ifac
     IWSDiscoveryPublisherImpl *This = impl_from_IWSDiscoveryPublisher(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
     return ref;
 }
 
@@ -80,7 +80,7 @@ static ULONG WINAPI IWSDiscoveryPublisherImpl_Release(IWSDiscoveryPublisher *ifa
     struct notificationSink *sink, *cursor;
     struct message_id *msg_id, *msg_id_cursor;
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if (ref == 0)
     {
@@ -118,7 +118,7 @@ static HRESULT WINAPI IWSDiscoveryPublisherImpl_SetAddressFamily(IWSDiscoveryPub
 {
     IWSDiscoveryPublisherImpl *impl = impl_from_IWSDiscoveryPublisher(This);
 
-    TRACE("(%p, %d)\n", This, dwAddressFamily);
+    TRACE("(%p, %ld)\n", This, dwAddressFamily);
 
     /* Has the address family already been set? */
     if (impl->addressFamily != 0)
@@ -469,4 +469,11 @@ HRESULT WINAPI WSDCreateDiscoveryPublisher(IWSDXMLContext *pContext, IWSDiscover
     TRACE("Returning iface %p\n", *ppPublisher);
 
     return S_OK;
+}
+
+HRESULT WINAPI WSDCreateDiscoveryProvider(IWSDXMLContext *context, IWSDiscoveryProvider **provider)
+{
+    FIXME("(%p, %p) stub\n", context, provider);
+
+    return E_NOTIMPL;
 }

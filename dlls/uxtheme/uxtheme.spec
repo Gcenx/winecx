@@ -29,13 +29,14 @@
 31 stub -noname InitUserTheme
 32 stub -noname InitUserRegistry
 33 stub -noname ReestablishServerConnection
-34 stub -noname ThemeHooksInstall
-35 stub -noname ThemeHooksRemove
+34 stdcall -noname ThemeHooksInstall()
+35 stdcall -noname ThemeHooksRemove()
 36 stub -noname RefreshThemeForTS
 43 stub -noname ClassicGetSystemMetrics
 44 stub -noname ClassicSystemParametersInfoA
 45 stub -noname ClassicSystemParametersInfoW
 46 stub -noname ClassicAdjustWindowRectEx
+47 stdcall DrawThemeBackgroundEx(ptr ptr long long ptr ptr)
 48 stub -noname GetThemeParseErrorInfo
 60 stub -noname CreateThemeDataFromObjects
 61 stdcall OpenThemeDataEx(ptr wstr long)
@@ -53,7 +54,6 @@
 @ stdcall BufferedPaintUnInit()
 @ stdcall CloseThemeData(ptr)
 @ stdcall DrawThemeBackground(ptr ptr long long ptr ptr)
-@ stdcall DrawThemeBackgroundEx(ptr ptr long long ptr ptr)
 @ stdcall DrawThemeEdge(ptr ptr long long ptr long long ptr)
 @ stdcall DrawThemeIcon(ptr ptr long long ptr ptr long)
 @ stdcall DrawThemeParentBackground(ptr ptr ptr)
@@ -106,6 +106,7 @@
 @ stdcall IsThemeDialogTextureEnabled(ptr)
 @ stdcall IsThemePartDefined(ptr long long)
 @ stdcall OpenThemeData(ptr wstr)
+@ stdcall OpenThemeDataForDpi(ptr wstr long)
 @ stdcall SetThemeAppProperties(long)
 @ stdcall SetWindowTheme(ptr wstr wstr)
 @ stdcall SetWindowThemeAttribute(ptr long ptr long)

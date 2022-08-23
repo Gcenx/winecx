@@ -29,21 +29,14 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
-#ifdef HAVE_POLL_H
-#include <poll.h>
-#endif
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
-#ifdef HAVE_SYS_MMAN_H
-# include <sys/mman.h>
-#endif
-#ifdef HAVE_SYS_POLL_H
-# include <sys/poll.h>
-#endif
+#include <sys/mman.h>
 #ifdef HAVE_SYS_STAT_H
 # include <sys/stat.h>
 #endif
+#include <poll.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -79,12 +72,12 @@ struct esync
     int readfd, writefd;
 #endif
     int refcount;
-    void * HOSTPTR shm;
+    void *shm;
 };
 
 /* Emulate read() on an eventfd: clear the object if it's not a semaphore, read
  * 1 from it if it is. Return a nonzero value if the object was signaled. */
-static ssize_t efd_read(struct esync * HOSTPTR esync)
+static ssize_t efd_read(struct esync *esync)
 {
 #ifdef HAVE_SYS_EVENTFD_H
     uint64_t value;
@@ -109,7 +102,7 @@ static ssize_t efd_read(struct esync * HOSTPTR esync)
 }
 
 /* Emulate write() on an eventfd. Return -1 on failure. */
-static ssize_t efd_write(struct esync * HOSTPTR esync, uint64_t value)
+static ssize_t efd_write(struct esync *esync, uint64_t value)
 {
 #ifdef HAVE_SYS_EVENTFD_H
     return write( esync->fd, &value, sizeof(value) );
@@ -127,7 +120,7 @@ static ssize_t efd_write(struct esync * HOSTPTR esync, uint64_t value)
 #endif
 }
 
-static void efd_close(struct esync * HOSTPTR esync)
+static void efd_close(struct esync *esync)
 {
 #ifdef HAVE_SYS_EVENTFD_H
     close( esync->fd );
@@ -137,12 +130,12 @@ static void efd_close(struct esync * HOSTPTR esync)
 #endif
 }
 
-static void grab_object( struct esync * HOSTPTR obj )
+static void grab_object( struct esync *obj )
 {
     InterlockedIncrement( &obj->refcount );
 }
 
-static void release_object( struct esync * HOSTPTR obj )
+static void release_object( struct esync *obj )
 {
     if (!InterlockedDecrement( &obj->refcount ))
     {
@@ -152,7 +145,7 @@ static void release_object( struct esync * HOSTPTR obj )
 }
 
 /* Careful how this is used—we can't reliably completely clear an object with it. */
-static int get_read_fd( struct esync * HOSTPTR obj )
+static int get_read_fd( struct esync *obj )
 {
     if (!obj) return -1;
 
@@ -163,7 +156,6 @@ static int get_read_fd( struct esync * HOSTPTR obj )
 #endif
 }
 
-#include "wine/hostptraddrspace_enter.h"
 struct semaphore
 {
     int max;
@@ -184,21 +176,20 @@ struct event
     int locked;
 };
 C_ASSERT(sizeof(struct event) == 8);
-#include "wine/hostptraddrspace_exit.h"
 
 static char shm_name[29];
 static int shm_fd;
-static void * HOSTPTR * HOSTPTR shm_addrs;
+static void **shm_addrs;
 static int shm_addrs_size;  /* length of the allocated shm_addrs array */
 static long pagesize;
 
 static pthread_mutex_t shm_addrs_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static void * HOSTPTR get_shm( unsigned int idx )
+static void *get_shm( unsigned int idx )
 {
     int entry  = (idx * 8) / pagesize;
     int offset = (idx * 8) % pagesize;
-    void * HOSTPTR ret;
+    void *ret;
 
     pthread_mutex_lock( &shm_addrs_mutex );
 
@@ -214,8 +205,8 @@ static void * HOSTPTR get_shm( unsigned int idx )
 
     if (!shm_addrs[entry])
     {
-        void * HOSTPTR addr = mmap( NULL, pagesize, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, entry * pagesize );
-        if (addr == MAP_FAILED_HOSTPTR)
+        void *addr = mmap( NULL, pagesize, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, entry * pagesize );
+        if (addr == (void *)-1)
             ERR("Failed to map page %d (offset %#lx).\n", entry, entry * pagesize);
 
         TRACE("Mapping page %d at %p.\n", entry, addr);
@@ -224,7 +215,7 @@ static void * HOSTPTR get_shm( unsigned int idx )
             munmap( addr, pagesize ); /* someone beat us to it */
     }
 
-    ret = (void * HOSTPTR)((unsigned long)shm_addrs[entry] + offset);
+    ret = (void *)((unsigned long)shm_addrs[entry] + offset);
 
     pthread_mutex_unlock( &shm_addrs_mutex );
 
@@ -234,11 +225,11 @@ static void * HOSTPTR get_shm( unsigned int idx )
 /* We'd like lookup to be fast. To that end, we use a static list indexed by handle.
  * This is copied and adapted from the fd cache code. */
 
-#define ESYNC_LIST_BLOCK_SIZE  (65536 / sizeof(struct esync * HOSTPTR))
+#define ESYNC_LIST_BLOCK_SIZE  (65536 / sizeof(struct esync *))
 #define ESYNC_LIST_ENTRIES     256
 
-static struct esync * HOSTPTR * HOSTPTR esync_list[ESYNC_LIST_ENTRIES];
-static struct esync * HOSTPTR esync_list_initial_block[ESYNC_LIST_BLOCK_SIZE];
+static struct esync * *esync_list[ESYNC_LIST_ENTRIES];
+static struct esync * esync_list_initial_block[ESYNC_LIST_BLOCK_SIZE];
 
 static inline UINT_PTR handle_to_index( HANDLE handle, UINT_PTR *entry )
 {
@@ -247,7 +238,7 @@ static inline UINT_PTR handle_to_index( HANDLE handle, UINT_PTR *entry )
     return idx % ESYNC_LIST_BLOCK_SIZE;
 }
 
-static struct esync * HOSTPTR add_to_list( HANDLE handle, enum esync_type type, int fd, void * HOSTPTR shm )
+static struct esync *add_to_list( HANDLE handle, enum esync_type type, int fd, void *shm )
 {
     UINT_PTR entry, idx = handle_to_index( handle, &entry );
 
@@ -258,7 +249,7 @@ static struct esync * HOSTPTR add_to_list( HANDLE handle, enum esync_type type, 
     sigset_t sigset;
     NTSTATUS ret;
     obj_handle_t fd_handle;
-    struct esync * HOSTPTR obj;
+    struct esync *obj;
 
     if (!(obj = malloc( sizeof(*obj) )))
     {
@@ -297,9 +288,9 @@ static struct esync * HOSTPTR add_to_list( HANDLE handle, enum esync_type type, 
         if (!entry) esync_list[0] = esync_list_initial_block;
         else
         {
-            void * HOSTPTR ptr = anon_mmap_alloc( ESYNC_LIST_BLOCK_SIZE * sizeof(struct esync),
+            void *ptr = anon_mmap_alloc( ESYNC_LIST_BLOCK_SIZE * sizeof(struct esync),
                                          PROT_READ | PROT_WRITE );
-            if (ptr == MAP_FAILED_HOSTPTR) return FALSE;
+            if (ptr == MAP_FAILED) return FALSE;
             esync_list[entry] = ptr;
         }
     }
@@ -314,11 +305,11 @@ static struct esync * HOSTPTR add_to_list( HANDLE handle, enum esync_type type, 
     obj->refcount = 1;
     obj->shm = shm;
 
-    assert(!InterlockedExchangePointer((void * HOSTPTR)&esync_list[entry][idx], obj));
+    assert(!InterlockedExchangePointer((void **)&esync_list[entry][idx], obj));
     return obj;
 }
 
-static struct esync * HOSTPTR get_cached_object( HANDLE handle )
+static struct esync *get_cached_object( HANDLE handle )
 {
     UINT_PTR entry, idx = handle_to_index( handle, &entry );
 
@@ -331,7 +322,7 @@ static struct esync * HOSTPTR get_cached_object( HANDLE handle )
  * semaphore, etc. created using create_esync) or a generic synchronizable
  * server-side object which the server will signal (e.g. a process, thread,
  * message queue, etc.) */
-static NTSTATUS get_object( HANDLE handle, struct esync * HOSTPTR * HOSTPTR obj )
+static NTSTATUS get_object( HANDLE handle, struct esync **obj )
 {
     NTSTATUS ret = STATUS_SUCCESS;
     enum esync_type type = 0;
@@ -396,13 +387,13 @@ static NTSTATUS get_object( HANDLE handle, struct esync * HOSTPTR * HOSTPTR obj 
 NTSTATUS esync_close( HANDLE handle )
 {
     UINT_PTR entry, idx = handle_to_index( handle, &entry );
-    struct esync * HOSTPTR obj;
+    struct esync *obj;
 
     TRACE("%p.\n", handle);
 
     if (entry < ESYNC_LIST_ENTRIES && esync_list[entry])
     {
-        if ((obj = InterlockedExchangePointer((void * HOSTPTR)&esync_list[entry][idx], 0)))
+        if ((obj = InterlockedExchangePointer((void **)&esync_list[entry][idx], 0)))
         {
             release_object( obj );
             return STATUS_SUCCESS;
@@ -417,7 +408,7 @@ static NTSTATUS create_esync( enum esync_type type, HANDLE *handle, ACCESS_MASK 
 {
     NTSTATUS ret;
     data_size_t len;
-    struct object_attributes * HOSTPTR objattr;
+    struct object_attributes *objattr;
     obj_handle_t fd_handle;
     unsigned int shm_idx;
     sigset_t sigset;
@@ -516,7 +507,7 @@ NTSTATUS esync_open_semaphore( HANDLE *handle, ACCESS_MASK access,
 
 NTSTATUS esync_release_semaphore( HANDLE handle, ULONG count, ULONG *prev )
 {
-    struct esync * HOSTPTR obj;
+    struct esync *obj;
     struct semaphore *semaphore;
     uint64_t count64 = count;
     ULONG current;
@@ -552,7 +543,7 @@ NTSTATUS esync_release_semaphore( HANDLE handle, ULONG count, ULONG *prev )
 
 NTSTATUS esync_query_semaphore( HANDLE handle, void *info, ULONG *ret_len )
 {
-    struct esync * HOSTPTR obj;
+    struct esync *obj;
     struct semaphore *semaphore;
     SEMAPHORE_BASIC_INFORMATION *out = info;
     NTSTATUS ret;
@@ -649,7 +640,7 @@ static inline void small_pause(void)
 
 NTSTATUS esync_set_event( HANDLE handle )
 {
-    struct esync * HOSTPTR obj;
+    struct esync *obj;
     struct event *event;
     NTSTATUS ret;
 
@@ -692,7 +683,7 @@ NTSTATUS esync_set_event( HANDLE handle )
 
 NTSTATUS esync_reset_event( HANDLE handle )
 {
-    struct esync * HOSTPTR obj;
+    struct esync *obj;
     struct event *event;
     NTSTATUS ret;
 
@@ -730,7 +721,7 @@ NTSTATUS esync_reset_event( HANDLE handle )
 
 NTSTATUS esync_pulse_event( HANDLE handle )
 {
-    struct esync * HOSTPTR obj;
+    struct esync *obj;
     NTSTATUS ret;
 
     TRACE("%p.\n", handle);
@@ -754,7 +745,7 @@ NTSTATUS esync_pulse_event( HANDLE handle )
 
 NTSTATUS esync_query_event( HANDLE handle, void *info, ULONG *ret_len )
 {
-    struct esync * HOSTPTR obj;
+    struct esync *obj;
     EVENT_BASIC_INFORMATION *out = info;
     struct pollfd fd;
     NTSTATUS ret;
@@ -791,7 +782,7 @@ NTSTATUS esync_open_mutex( HANDLE *handle, ACCESS_MASK access,
 
 NTSTATUS esync_release_mutex( HANDLE *handle, LONG *prev )
 {
-    struct esync * HOSTPTR obj;
+    struct esync *obj;
     struct mutex *mutex;
     NTSTATUS ret;
 
@@ -824,7 +815,7 @@ NTSTATUS esync_release_mutex( HANDLE *handle, LONG *prev )
 
 NTSTATUS esync_query_mutex( HANDLE handle, void *info, ULONG *ret_len )
 {
-    struct esync * HOSTPTR obj;
+    struct esync *obj;
     struct mutex *mutex;
     MUTANT_BASIC_INFORMATION *out = info;
     NTSTATUS ret;
@@ -887,7 +878,7 @@ static int do_poll( struct pollfd *fds, nfds_t nfds, ULONGLONG *end )
 }
 
 /* Return TRUE if abandoned. */
-static BOOL update_grabbed_object( struct esync * HOSTPTR obj )
+static BOOL update_grabbed_object( struct esync *obj )
 {
     BOOL ret = FALSE;
 
@@ -930,7 +921,7 @@ static NTSTATUS __esync_wait_objects( DWORD count, const HANDLE *handles, BOOLEA
 {
     static const LARGE_INTEGER zero;
 
-    struct esync * HOSTPTR objs[MAXIMUM_WAIT_OBJECTS];
+    struct esync *objs[MAXIMUM_WAIT_OBJECTS];
     struct pollfd fds[MAXIMUM_WAIT_OBJECTS + 1];
     int has_esync = 0, has_server = 0;
     BOOL msgwait = FALSE;
@@ -1025,7 +1016,7 @@ static NTSTATUS __esync_wait_objects( DWORD count, const HANDLE *handles, BOOLEA
         /* Try to check objects now, so we can obviate poll() at least. */
         for (i = 0; i < count; i++)
         {
-            struct esync * HOSTPTR obj = objs[i];
+            struct esync *obj = objs[i];
 
             if (obj)
             {
@@ -1142,7 +1133,7 @@ static NTSTATUS __esync_wait_objects( DWORD count, const HANDLE *handles, BOOLEA
                 /* Find out which object triggered the wait. */
                 for (i = 0; i < count; i++)
                 {
-                    struct esync * HOSTPTR obj = objs[i];
+                    struct esync *obj = objs[i];
 
                     if (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL))
                     {
@@ -1226,7 +1217,7 @@ tryagain:
             }
             for (i = 0; i < count; i++)
             {
-                struct esync * HOSTPTR obj = objs[i];
+                struct esync *obj = objs[i];
 
                 fds[0].fd = get_read_fd( obj );
 
@@ -1272,7 +1263,7 @@ tryagain:
                 /* Quick, grab everything. */
                 for (i = 0; i < count; i++)
                 {
-                    struct esync * HOSTPTR obj = objs[i];
+                    struct esync *obj = objs[i];
 
                     switch (obj->type)
                     {
@@ -1387,7 +1378,7 @@ NTSTATUS esync_wait_objects( DWORD count, const HANDLE *handles, BOOLEAN wait_an
                              BOOLEAN alertable, const LARGE_INTEGER *timeout )
 {
     BOOL msgwait = FALSE;
-    struct esync * HOSTPTR obj;
+    struct esync *obj;
     NTSTATUS ret;
 
     if (count && !get_object( handles[count - 1], &obj ) && obj->type == ESYNC_QUEUE)
@@ -1407,7 +1398,7 @@ NTSTATUS esync_wait_objects( DWORD count, const HANDLE *handles, BOOLEAN wait_an
 NTSTATUS esync_signal_and_wait( HANDLE signal, HANDLE wait, BOOLEAN alertable,
     const LARGE_INTEGER *timeout )
 {
-    struct esync * HOSTPTR obj;
+    struct esync *obj;
     NTSTATUS ret;
 
     if ((ret = get_object( signal, &obj ))) return ret;

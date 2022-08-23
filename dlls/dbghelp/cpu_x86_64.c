@@ -125,14 +125,14 @@ static void dump_unwind_info(struct cpu_stack_walk* csw, ULONG64 base, RUNTIME_F
     RUNTIME_FUNCTION snext;
     ULONG64 addr;
 
-    TRACE("**** func %x-%x\n", function->BeginAddress, function->EndAddress);
+    TRACE("**** func %lx-%lx\n", function->BeginAddress, function->EndAddress);
     for (;;)
     {
         if (function->UnwindData & 1)
         {
             if (!sw_read_mem(csw, base + function->UnwindData, &snext, sizeof(snext)))
             {
-                TRACE("Couldn't unwind RUNTIME_INFO at %lx\n", base + function->UnwindData);
+                TRACE("Couldn't unwind RUNTIME_INFO at %Ix\n", base + function->UnwindData);
                 return;
             }
             TRACE("unwind info for function %p-%p chained to function %p-%p\n",
@@ -146,7 +146,7 @@ static void dump_unwind_info(struct cpu_stack_walk* csw, ULONG64 base, RUNTIME_F
             !sw_read_mem(csw, addr + FIELD_OFFSET(UNWIND_INFO, UnwindCode),
                          info->UnwindCode, info->CountOfCodes * sizeof(UNWIND_CODE)))
         {
-            FIXME("couldn't read memory for UNWIND_INFO at %lx\n", addr);
+            FIXME("couldn't read memory for UNWIND_INFO at %Ix\n", addr);
             return;
         }
         TRACE("unwind info at %p flags %x prolog 0x%x bytes function %p-%p\n",
@@ -209,6 +209,19 @@ static void dump_unwind_info(struct cpu_stack_walk* csw, ULONG64 base, RUNTIME_F
             case UWOP_PUSH_MACHFRAME:
                 TRACE("PUSH_MACHFRAME %u\n", info->UnwindCode[i].u.OpInfo);
                 break;
+            case UWOP_EPILOG:
+                if (info->Version == 2)
+                {
+                    unsigned int offset;
+                    if (info->UnwindCode[i].u.OpInfo)
+                        offset = info->UnwindCode[i].u.CodeOffset;
+                    else
+                        offset = (info->UnwindCode[i+1].u.OpInfo << 8) + info->UnwindCode[i+1].u.CodeOffset;
+                    TRACE("UWOP_EPILOG %u offset %u\n", info->UnwindCode[i].u.OpInfo, offset);
+                    i += 1;
+                    break;
+                }
+                /* Fall through */
             default:
                 FIXME("unknown code %u\n", info->UnwindCode[i].u.UnwindOp);
                 break;
@@ -474,6 +487,7 @@ static BOOL interpret_function_table_entry(struct cpu_stack_walk* csw,
     DWORD64             newframe, prolog_offset, off, value;
     M128A               floatvalue;
     union handler_data  handler_data;
+    BOOL                mach_frame = FALSE;
 
     /* FIXME: we have some assumptions here */
     assert(context);
@@ -485,13 +499,13 @@ static BOOL interpret_function_table_entry(struct cpu_stack_walk* csw,
             !sw_read_mem(csw, base + function->UnwindData + FIELD_OFFSET(UNWIND_INFO, UnwindCode),
                          info->UnwindCode, info->CountOfCodes * sizeof(UNWIND_CODE)))
         {
-            WARN("Couldn't read unwind_code at %lx\n", base + function->UnwindData);
+            WARN("Couldn't read unwind_code at %Ix\n", base + function->UnwindData);
             return FALSE;
         }
 
-        if (info->Version != 1)
+        if (info->Version != 1 && info->Version != 2)
         {
-            WARN("unknown unwind info version %u at %lx\n", info->Version, base + function->UnwindData);
+            WARN("unknown unwind info version %u at %Ix\n", info->Version, base + function->UnwindData);
             return FALSE;
         }
 
@@ -556,7 +570,23 @@ static BOOL interpret_function_table_entry(struct cpu_stack_walk* csw,
                 set_float_reg(context, info->UnwindCode[i].u.OpInfo, floatvalue);
                 break;
             case UWOP_PUSH_MACHFRAME:
-                FIXME("PUSH_MACHFRAME %u\n", info->UnwindCode[i].u.OpInfo);
+                if (info->Flags & UNW_FLAG_CHAININFO)
+                {
+                    FIXME("PUSH_MACHFRAME with chained unwind info.\n");
+                    break;
+                }
+                if (i + get_opcode_size(info->UnwindCode[i]) < info->CountOfCodes)
+                {
+                    FIXME("PUSH_MACHFRAME is not the last opcode.\n");
+                    break;
+                }
+
+                if (info->UnwindCode[i].u.OpInfo)
+                    context->Rsp += 0x8;
+
+                if (!sw_read_mem(csw, context->Rsp, &context->Rip, sizeof(DWORD64))) return FALSE;
+                if (!sw_read_mem(csw, context->Rsp + 24, &context->Rsp, sizeof(DWORD64))) return FALSE;
+                mach_frame = TRUE;
                 break;
             default:
                 FIXME("unknown code %u\n", info->UnwindCode[i].u.UnwindOp);
@@ -569,7 +599,7 @@ static BOOL interpret_function_table_entry(struct cpu_stack_walk* csw,
                          &handler_data, sizeof(handler_data))) return FALSE;
         function = &handler_data.chain;  /* restart with the chained info */
     }
-    return default_unwind(csw, context);
+    return mach_frame ? TRUE : default_unwind(csw, context);
 }
 
 /* fetch_next_frame()
@@ -595,14 +625,14 @@ static BOOL fetch_next_frame(struct cpu_stack_walk *csw, union ctx *pcontext,
     else if (dwarf2_virtual_unwind(csw, curr_pc, pcontext, &cfa))
     {
         context->Rsp = cfa;
-        TRACE("next function rip=%016lx\n", context->Rip);
-        TRACE("  rax=%016lx rbx=%016lx rcx=%016lx rdx=%016lx\n",
+        TRACE("next function rip=%016Ix\n", context->Rip);
+        TRACE("  rax=%016Ix rbx=%016Ix rcx=%016Ix rdx=%016Ix\n",
               context->Rax, context->Rbx, context->Rcx, context->Rdx);
-        TRACE("  rsi=%016lx rdi=%016lx rbp=%016lx rsp=%016lx\n",
+        TRACE("  rsi=%016Ix rdi=%016Ix rbp=%016Ix rsp=%016Ix\n",
               context->Rsi, context->Rdi, context->Rbp, context->Rsp);
-        TRACE("   r8=%016lx  r9=%016lx r10=%016lx r11=%016lx\n",
+        TRACE("   r8=%016Ix  r9=%016Ix r10=%016Ix r11=%016Ix\n",
               context->R8, context->R9, context->R10, context->R11);
-        TRACE("  r12=%016lx r13=%016lx r14=%016lx r15=%016lx\n",
+        TRACE("  r12=%016Ix r13=%016Ix r14=%016Ix r15=%016Ix\n",
               context->R12, context->R13, context->R14, context->R15);
         return TRUE;
     }

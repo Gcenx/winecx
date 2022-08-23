@@ -23,7 +23,7 @@
 
 #include <ddraw.h>
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 #include <pshpack4.h>
 #endif
 
@@ -434,7 +434,7 @@ typedef struct _D3DDEVINFO_TEXTURING {
 	DWORD   dwNumGetDCs;
 } D3DDEVINFO_TEXTURING, *LPD3DDEVINFO_TEXTURING;
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 #include <poppack.h>
 #endif
 

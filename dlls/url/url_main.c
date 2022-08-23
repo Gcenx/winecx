@@ -32,22 +32,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(url);
 
 /***********************************************************************
- *		DllMain  (URL.@)
- */
-BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
-{
-    switch(reason)
-    {
-    case DLL_WINE_PREATTACH:
-        return FALSE;  /* prefer native version */
-    case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls( inst );
-        break;
-    }
-    return TRUE;
-}
-
-/***********************************************************************
  * AddMIMEFileTypesPS (URL.@)
  *
  * Build and Manage a Filetype-Association Property Sheet
@@ -72,7 +56,7 @@ DWORD WINAPI AddMIMEFileTypesPS(VOID * unknown1, LPPROPSHEETHEADERA lppsh)
  */
 BOOL WINAPI InetIsOffline(DWORD flags)
 {
-    FIXME("(%08x): stub!\n", flags);
+    FIXME("(%08lx): stub!\n", flags);
 
     return FALSE;
 }

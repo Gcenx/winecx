@@ -19,34 +19,20 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #define COBJMACROS
 
 #include <stdarg.h>
-#ifdef HAVE_LIBXML2
-# ifdef __i386_on_x86_64__
-#  include <pthread.h>
-# endif
-# include <libxml/parser.h>
-# include <libxml/xmlerror.h>
-# ifdef SONAME_LIBXSLT
-#  ifdef HAVE_LIBXSLT_PATTERN_H
-#   include <libxslt/pattern.h>
-#  endif
-#  ifdef HAVE_LIBXSLT_TRANSFORM_H
-#   include <libxslt/transform.h>
-#  endif
-#  include <libxslt/imports.h>
-#  include <libxslt/xsltutils.h>
-#  include <libxslt/variables.h>
-#  include <libxslt/xsltInternals.h>
-#  include <libxslt/documents.h>
-#  include <libxslt/extensions.h>
-#  include <libxslt/extra.h>
-# endif
-#endif
+#include <libxml/parser.h>
+#include <libxml/xmlerror.h>
+#include <libxslt/pattern.h>
+#include <libxslt/transform.h>
+#include <libxslt/imports.h>
+#include <libxslt/xsltutils.h>
+#include <libxslt/variables.h>
+#include <libxslt/xsltInternals.h>
+#include <libxslt/documents.h>
+#include <libxslt/extensions.h>
+#include <libxslt/extra.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -57,48 +43,13 @@
 #include "msxml2.h"
 #include "msxml6.h"
 
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 #include "msxml_private.h"
 
 HINSTANCE MSXML_hInstance = NULL;
 
-#ifdef HAVE_LIBXML2
-
 WINE_DEFAULT_DEBUG_CHANNEL(msxml);
-
-#include "wine/hostptraddrspace_enter.h"
-
-#ifdef __i386_on_x86_64__
-static void XMLCALL wineXmlFree(void *mem)
-{
-    if (pthread_main_np())
-        return free(mem);
-    heap_free(mem);
-}
-
-static void * LIBXML_ATTR_ALLOC_SIZE(1) XMLCALL wineXmlMalloc(size_t size)
-{
-    if (pthread_main_np())
-        return malloc(size);
-    return heap_alloc(size);
-}
-
-static void * XMLCALL wineXmlRealloc(void *mem, size_t size)
-{
-    if (pthread_main_np())
-        return realloc(mem, size);
-    return heap_realloc(mem, size);
-}
-
-static char * XMLCALL wineXmlStrdup(const char *str)
-{
-    if (pthread_main_np())
-        return strdup(str);
-    return heap_strdup(str);
-}
-#endif
 
 void wineXmlCallbackLog(char const* caller, xmlErrorLevel lvl, char const* msg, va_list ap)
 {
@@ -185,126 +136,48 @@ static int wineXmlReadCallback(void * context, char * buffer, int len)
     if ((context == NULL) || (buffer == NULL))
         return(-1);
 
-    if(!ReadFile( ADDRSPACECAST(HANDLE, context), ADDRSPACECAST(char * WIN32PTR, buffer),len, &dwBytesRead, NULL))
+    if(!ReadFile( context, buffer,len, &dwBytesRead, NULL))
     {
         ERR("Failed to read file\n");
         return -1;
     }
 
-    TRACE("Read %d\n", dwBytesRead);
+    TRACE("Read %ld bytes.\n", dwBytesRead);
 
     return dwBytesRead;
 }
 
 static int wineXmlFileCloseCallback (void * context)
 {
-    return CloseHandle(ADDRSPACECAST(void * WIN32PTR, context)) ? 0 : -1;
+    return CloseHandle(context) ? 0 : -1;
 }
-
-void* libxslt_handle = NULL;
-#ifdef SONAME_LIBXSLT
-# define DECL_FUNCPTR(f) typeof(f) * p##f = NULL
-DECL_FUNCPTR(xsltApplyStylesheet);
-DECL_FUNCPTR(xsltApplyStylesheetUser);
-DECL_FUNCPTR(xsltCleanupGlobals);
-DECL_FUNCPTR(xsltFreeStylesheet);
-DECL_FUNCPTR(xsltFreeTransformContext);
-DECL_FUNCPTR(xsltFunctionNodeSet);
-DECL_FUNCPTR(xsltNewTransformContext);
-DECL_FUNCPTR(xsltNextImport);
-DECL_FUNCPTR(xsltParseStylesheetDoc);
-DECL_FUNCPTR(xsltQuoteUserParams);
-DECL_FUNCPTR(xsltRegisterExtModuleFunction);
-DECL_FUNCPTR(xsltSaveResultTo);
-DECL_FUNCPTR(xsltSetLoaderFunc);
-# undef DECL_FUNCPTR
-#endif
 
 static void init_libxslt(void)
 {
-#ifdef SONAME_LIBXSLT
-    void (*pxsltInit)(void); /* Missing in libxslt <= 1.1.14 */
-
-    libxslt_handle = dlopen(SONAME_LIBXSLT, RTLD_NOW);
-    if (!libxslt_handle)
-        return;
-
-#define LOAD_FUNCPTR(f, needed) \
-    if ((p##f = dlsym(libxslt_handle, #f)) == NULL) \
-        if (needed) { WARN("Can't find symbol %s\n", #f); goto sym_not_found; }
-    LOAD_FUNCPTR(xsltInit, 0);
-    LOAD_FUNCPTR(xsltApplyStylesheet, 1);
-    LOAD_FUNCPTR(xsltApplyStylesheetUser, 1);
-    LOAD_FUNCPTR(xsltCleanupGlobals, 1);
-    LOAD_FUNCPTR(xsltFreeStylesheet, 1);
-    LOAD_FUNCPTR(xsltFreeTransformContext, 1);
-    LOAD_FUNCPTR(xsltFunctionNodeSet, 1);
-    LOAD_FUNCPTR(xsltNewTransformContext, 1);
-    LOAD_FUNCPTR(xsltNextImport, 1);
-    LOAD_FUNCPTR(xsltParseStylesheetDoc, 1);
-    LOAD_FUNCPTR(xsltQuoteUserParams, 1);
-    LOAD_FUNCPTR(xsltRegisterExtModuleFunction, 1);
-    LOAD_FUNCPTR(xsltSaveResultTo, 1);
-    LOAD_FUNCPTR(xsltSetLoaderFunc, 1);
-#undef LOAD_FUNCPTR
-
-    if (pxsltInit)
-        pxsltInit();
-
-    pxsltSetLoaderFunc(xslt_doc_default_loader);
-    pxsltRegisterExtModuleFunction(
+    xsltInit();
+    xsltSetLoaderFunc(xslt_doc_default_loader);
+    xsltRegisterExtModuleFunction(
         (const xmlChar *)"node-set",
         (const xmlChar *)"urn:schemas-microsoft-com:xslt",
-        pxsltFunctionNodeSet);
-
-    return;
-
- sym_not_found:
-    dlclose(libxslt_handle);
-    libxslt_handle = NULL;
-#endif
+        xsltFunctionNodeSet);
 }
 
 static int to_utf8(int cp, unsigned char *out, int *outlen, const unsigned char *in, int *inlen)
 {
     WCHAR *tmp;
-    int len;
-    char * WIN32PTR copy;
+    int len = 0;
 
-    if (!in || !inlen) return 0;
+    if (!in || !inlen) goto done;
 
-    if (*inlen == -1)
-        len = strlen((const char *)in) + 1;
-    else
-        len = *inlen;
-    copy = heap_alloc(len);
-    memcpy(copy, in, len);
-    
-    len = MultiByteToWideChar(cp, 0, copy, *inlen, NULL, 0);
+    len = MultiByteToWideChar(cp, 0, (const char *)in, *inlen, NULL, 0);
     tmp = heap_alloc(len * sizeof(WCHAR));
-    if (!tmp)
-    {
-        heap_free(copy);
-        return -1;
-    }
-    MultiByteToWideChar(cp, 0, copy, *inlen, tmp, len);
-    heap_free(copy);
+    if (!tmp) return -1;
+    MultiByteToWideChar(cp, 0, (const char *)in, *inlen, tmp, len);
 
-    if (out && outlen && *outlen)
-        copy = heap_alloc(*outlen);
-    else
-        copy = NULL;
-
-    len = WideCharToMultiByte(CP_UTF8, 0, tmp, len, copy, *outlen, NULL, NULL);
+    len = WideCharToMultiByte(CP_UTF8, 0, tmp, len, (char *)out, *outlen, NULL, NULL);
     heap_free(tmp);
-    if (copy)
-    {
-        if (len)
-            memcpy(out, copy, len);
-        heap_free(copy);
-    }
     if (!len) return -1;
-
+done:
     *outlen = len;
     return len;
 }
@@ -312,46 +185,31 @@ static int to_utf8(int cp, unsigned char *out, int *outlen, const unsigned char 
 static int from_utf8(int cp, unsigned char *out, int *outlen, const unsigned char *in, int *inlen)
 {
     WCHAR *tmp;
-    int len;
-    char * WIN32PTR copy;
+    int len = 0;
 
-    if (!in || !inlen) return 0;
+    if (!in || !inlen) goto done;
 
-    if (*inlen == -1)
-        len = strlen((const char *)in) + 1;
-    else
-        len = *inlen;
-
-    copy = heap_alloc(len);
-    memcpy(copy, in, len);
-
-    len = MultiByteToWideChar(CP_UTF8, 0, copy, *inlen, NULL, 0);
+    len = MultiByteToWideChar(CP_UTF8, 0, (const char *)in, *inlen, NULL, 0);
     tmp = heap_alloc(len * sizeof(WCHAR));
-    if (!tmp)
-    {
-        heap_free(copy);
-        return -1;
-    }
-    MultiByteToWideChar(CP_UTF8, 0, copy, *inlen, tmp, len);
-    heap_free(copy);
+    if (!tmp) return -1;
+    MultiByteToWideChar(CP_UTF8, 0, (const char *)in, *inlen, tmp, len);
 
-    if (out && outlen && *outlen)
-        copy = heap_alloc(*outlen);
-    else
-        copy = NULL;
-
-    len = WideCharToMultiByte(cp, 0, tmp, len, copy, *outlen, NULL, NULL);
+    len = WideCharToMultiByte(cp, 0, tmp, len, (char *)out, *outlen, NULL, NULL);
     heap_free(tmp);
-    if (copy)
-    {
-        if (len)
-            memcpy(out, copy, len);
-        heap_free(copy);
-    }
     if (!len) return -1;
-
+done:
     *outlen = len;
     return len;
+}
+
+static int gbk_to_utf8(unsigned char *out, int *outlen, const unsigned char *in, int *inlen)
+{
+    return to_utf8(936, out, outlen, in, inlen);
+}
+
+static int utf8_to_gbk(unsigned char *out, int *outlen, const unsigned char *in, int *inlen)
+{
+    return from_utf8(936, out, outlen, in, inlen);
 }
 
 static int win1250_to_utf8(unsigned char *out, int *outlen, const unsigned char *in, int *inlen)
@@ -443,8 +301,6 @@ static int utf8_to_win1258(unsigned char *out, int *outlen, const unsigned char 
     return from_utf8(1258, out, outlen, in, inlen);
 }
 
-#include "wine/hostptraddrspace_exit.h"
-
 static void init_char_encoders(void)
 {
     static const struct
@@ -454,6 +310,7 @@ static void init_char_encoders(void)
         xmlCharEncodingOutputFunc output;
     } encoder[] =
     {
+        { "gbk",          gbk_to_utf8,     utf8_to_gbk     },
         { "windows-1250", win1250_to_utf8, utf8_to_win1250 },
         { "windows-1251", win1251_to_utf8, utf8_to_win1251 },
         { "windows-1252", win1252_to_utf8, utf8_to_win1252 },
@@ -478,8 +335,6 @@ static void init_char_encoders(void)
     }
 }
 
-#endif  /* HAVE_LIBXML2 */
-
 const CLSID* DOMDocument_version(MSXML_VERSION v)
 {
     switch (v)
@@ -492,24 +347,6 @@ const CLSID* DOMDocument_version(MSXML_VERSION v)
     }
 }
 
-const CLSID* SchemaCache_version(MSXML_VERSION v)
-{
-    switch (v)
-    {
-    default:
-    case MSXML_DEFAULT: return &CLSID_XMLSchemaCache;
-    case MSXML3: return &CLSID_XMLSchemaCache30;
-    case MSXML4: return &CLSID_XMLSchemaCache40;
-    case MSXML6: return &CLSID_XMLSchemaCache60;
-    }
-}
-
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
-}
-
-
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID reserved)
 {
     MSXML_hInstance = hInstDLL;
@@ -517,14 +354,6 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID reserved)
     switch(fdwReason)
     {
     case DLL_PROCESS_ATTACH:
-#ifdef HAVE_LIBXML2
-#ifdef __i386_on_x86_64__
-        xmlInitMemory();
-        if(xmlMemSetup(wineXmlFree, wineXmlMalloc, wineXmlRealloc,
-                       wineXmlStrdup) == -1)
-            WARN("Failed to register memory callbacks\n");
-#endif
-
         xmlInitParser();
 
         /* Set the default indent character to a single tab,
@@ -541,47 +370,19 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID reserved)
 
         schemasInit();
         init_libxslt();
-#endif
         DisableThreadLibraryCalls(hInstDLL);
         break;
     case DLL_PROCESS_DETACH:
         if (reserved) break;
-#ifdef HAVE_LIBXML2
-#ifdef SONAME_LIBXSLT
-        if (libxslt_handle)
-        {
-            pxsltCleanupGlobals();
-            dlclose(libxslt_handle);
-        }
-#endif
+        xsltCleanupGlobals();
         /* Restore default Callbacks */
         xmlCleanupInputCallbacks();
         xmlRegisterDefaultInputCallbacks();
 
         xmlCleanupParser();
         schemasCleanup();
-#ifdef __i386_on_x86_64__
-        xmlCleanupMemory();
-#endif
-#endif
         release_typelib();
         break;
     }
     return TRUE;
-}
-
-/***********************************************************************
- *		DllRegisterServer (MSXML3.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( MSXML_hInstance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (MSXML3.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( MSXML_hInstance );
 }

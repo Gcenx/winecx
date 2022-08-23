@@ -85,13 +85,12 @@ UINT VIEW_find_column( MSIVIEW *table, LPCWSTR name, LPCWSTR table_name, UINT *n
     return ERROR_INVALID_PARAMETER;
 }
 
-UINT WINAPI MsiDatabaseOpenViewA(MSIHANDLE hdb,
-              LPCSTR szQuery, MSIHANDLE *phView)
+UINT WINAPI MsiDatabaseOpenViewA( MSIHANDLE hdb, const char *szQuery, MSIHANDLE *phView )
 {
     UINT r;
-    LPWSTR szwQuery;
+    WCHAR *szwQuery;
 
-    TRACE("%d %s %p\n", hdb, debugstr_a(szQuery), phView);
+    TRACE( "%lu, %s, %p\n", hdb, debugstr_a(szQuery), phView );
 
     if( szQuery )
     {
@@ -108,13 +107,12 @@ UINT WINAPI MsiDatabaseOpenViewA(MSIHANDLE hdb,
     return r;
 }
 
-UINT MSI_DatabaseOpenViewW(MSIDATABASE *db,
-              LPCWSTR szQuery, MSIQUERY **pView)
+UINT MSI_DatabaseOpenViewW( MSIDATABASE *db, const WCHAR *szQuery, MSIQUERY **pView )
 {
     MSIQUERY *query;
     UINT r;
 
-    TRACE("%s %p\n", debugstr_w(szQuery), pView);
+    TRACE( "%s, %p\n", debugstr_w(szQuery), pView );
 
     /* pre allocate a handle to hold a pointer to the view */
     query = alloc_msiobject( MSIHANDLETYPE_VIEW, sizeof (MSIQUERY),
@@ -146,11 +144,11 @@ UINT WINAPIV MSI_OpenQuery( MSIDATABASE *db, MSIQUERY **view, LPCWSTR fmt, ... )
     /* construct the string */
     for (;;)
     {
-        __ms_va_list va;
+        va_list va;
         query = msi_alloc( size*sizeof(WCHAR) );
-        __ms_va_start(va, fmt);
+        va_start(va, fmt);
         res = vswprintf(query, size, fmt, va);
-        __ms_va_end(va);
+        va_end(va);
         if (res == -1) size *= 2;
         else if (res >= size) size = res + 1;
         else break;
@@ -211,11 +209,11 @@ MSIRECORD * WINAPIV MSI_QueryGetRecord( MSIDATABASE *db, LPCWSTR fmt, ... )
     /* construct the string */
     for (;;)
     {
-        __ms_va_list va;
+        va_list va;
         query = msi_alloc( size*sizeof(WCHAR) );
-        __ms_va_start(va, fmt);
+        va_start(va, fmt);
         res = vswprintf(query, size, fmt, va);
-        __ms_va_end(va);
+        va_end(va);
         if (res == -1) size *= 2;
         else if (res >= size) size = res + 1;
         else break;
@@ -394,17 +392,22 @@ UINT MSI_ViewFetch(MSIQUERY *query, MSIRECORD **prec)
         (*prec)->cookie = (UINT64)(ULONG_PTR)query;
         MSI_RecordSetInteger(*prec, 0, 1);
     }
+    else if (r == ERROR_NO_MORE_ITEMS)
+    {
+        /* end of view; reset cursor to first row */
+        query->row = 0;
+    }
 
     return r;
 }
 
-UINT WINAPI MsiViewFetch(MSIHANDLE hView, MSIHANDLE *record)
+UINT WINAPI MsiViewFetch( MSIHANDLE hView, MSIHANDLE *record )
 {
     MSIQUERY *query;
     MSIRECORD *rec = NULL;
     UINT ret;
 
-    TRACE("%d %p\n", hView, record);
+    TRACE( "%lu, %p\n", hView, record );
 
     if( !record )
         return ERROR_INVALID_PARAMETER;
@@ -463,12 +466,12 @@ UINT MSI_ViewClose(MSIQUERY *query)
     return view->ops->close( view );
 }
 
-UINT WINAPI MsiViewClose(MSIHANDLE hView)
+UINT WINAPI MsiViewClose( MSIHANDLE hView )
 {
     MSIQUERY *query;
     UINT ret;
 
-    TRACE("%d\n", hView );
+    TRACE( "%lu\n", hView );
 
     query = msihandle2msiinfo( hView, MSIHANDLETYPE_VIEW );
     if (!query)
@@ -512,13 +515,13 @@ UINT MSI_ViewExecute(MSIQUERY *query, MSIRECORD *rec )
     return view->ops->execute( view, rec );
 }
 
-UINT WINAPI MsiViewExecute(MSIHANDLE hView, MSIHANDLE hRec)
+UINT WINAPI MsiViewExecute( MSIHANDLE hView, MSIHANDLE hRec )
 {
     MSIQUERY *query;
     MSIRECORD *rec = NULL;
     UINT ret;
 
-    TRACE("%d %d\n", hView, hRec);
+    TRACE( "%lu, %lu\n", hView, hRec );
 
     if( hRec )
     {
@@ -636,13 +639,13 @@ UINT MSI_ViewGetColumnInfo( MSIQUERY *query, MSICOLINFO info, MSIRECORD **prec )
     return ERROR_SUCCESS;
 }
 
-UINT WINAPI MsiViewGetColumnInfo(MSIHANDLE hView, MSICOLINFO info, MSIHANDLE *hRec)
+UINT WINAPI MsiViewGetColumnInfo( MSIHANDLE hView, MSICOLINFO info, MSIHANDLE *hRec )
 {
     MSIQUERY *query = NULL;
     MSIRECORD *rec = NULL;
     UINT r;
 
-    TRACE("%d %d %p\n", hView, info, hRec);
+    TRACE( "%lu, %d, %p\n", hView, info, hRec );
 
     if( !hRec )
         return ERROR_INVALID_PARAMETER;
@@ -714,14 +717,13 @@ UINT MSI_ViewModify( MSIQUERY *query, MSIMODIFY mode, MSIRECORD *rec )
     return r;
 }
 
-UINT WINAPI MsiViewModify( MSIHANDLE hView, MSIMODIFY eModifyMode,
-                MSIHANDLE hRecord)
+UINT WINAPI MsiViewModify( MSIHANDLE hView, MSIMODIFY eModifyMode, MSIHANDLE hRecord )
 {
     MSIQUERY *query = NULL;
     MSIRECORD *rec = NULL;
     UINT r = ERROR_FUNCTION_FAILED;
 
-    TRACE("%d %x %d\n", hView, eModifyMode, hRecord);
+    TRACE( "%lu, %#x, %lu\n", hView, eModifyMode, hRecord );
 
     rec = msihandle2msiinfo( hRecord, MSIHANDLETYPE_RECORD );
 
@@ -765,13 +767,13 @@ UINT WINAPI MsiViewModify( MSIHANDLE hView, MSIMODIFY eModifyMode,
     return r;
 }
 
-MSIDBERROR WINAPI MsiViewGetErrorW( MSIHANDLE handle, LPWSTR buffer, LPDWORD buflen )
+MSIDBERROR WINAPI MsiViewGetErrorW( MSIHANDLE handle, WCHAR *buffer, DWORD *buflen )
 {
     MSIQUERY *query;
     const WCHAR *column;
     MSIDBERROR r;
 
-    TRACE("%u %p %p\n", handle, buffer, buflen);
+    TRACE( "%lu, %p, %p\n", handle, buffer, buflen );
 
     if (!buflen)
         return MSIDBERROR_INVALIDARG;
@@ -816,13 +818,13 @@ MSIDBERROR WINAPI MsiViewGetErrorW( MSIHANDLE handle, LPWSTR buffer, LPDWORD buf
     return r;
 }
 
-MSIDBERROR WINAPI MsiViewGetErrorA( MSIHANDLE handle, LPSTR buffer, LPDWORD buflen )
+MSIDBERROR WINAPI MsiViewGetErrorA( MSIHANDLE handle, char *buffer, DWORD *buflen )
 {
     MSIQUERY *query;
     const WCHAR *column;
     MSIDBERROR r;
 
-    TRACE("%u %p %p\n", handle, buffer, buflen);
+    TRACE( "%lu, %p, %p\n", handle, buffer, buflen );
 
     if (!buflen)
         return MSIDBERROR_INVALIDARG;
@@ -887,7 +889,7 @@ UINT MSI_DatabaseApplyTransformW( MSIDATABASE *db, const WCHAR *transform, int e
         hr = IStorage_OpenStorage( db->storage, transform + 1, NULL, STGM_SHARE_EXCLUSIVE, NULL, 0, &stg );
         if (FAILED( hr ))
         {
-            WARN( "failed to open substorage transform 0x%08x\n", hr );
+            WARN( "failed to open substorage transform %#lx\n", hr );
             return ERROR_FUNCTION_FAILED;
         }
     }
@@ -896,7 +898,7 @@ UINT MSI_DatabaseApplyTransformW( MSIDATABASE *db, const WCHAR *transform, int e
         hr = StgOpenStorage( transform, NULL, STGM_DIRECT|STGM_READ|STGM_SHARE_DENY_WRITE, NULL, 0, &stg );
         if (FAILED( hr ))
         {
-            WARN( "failed to open file transform 0x%08x\n", hr );
+            WARN( "failed to open file transform %#lx\n", hr );
             return ERROR_FUNCTION_FAILED;
         }
     }
@@ -933,7 +935,7 @@ UINT WINAPI MsiDatabaseApplyTransformA( MSIHANDLE hdb, const char *transform, in
     WCHAR *wstr;
     UINT ret;
 
-    TRACE( "%d %s %08x\n", hdb, debugstr_a(transform), error_cond );
+    TRACE( "%lu, %s, %#x\n", hdb, debugstr_a(transform), error_cond );
 
     wstr = strdupAtoW( transform );
     if (transform && !wstr)
@@ -944,19 +946,17 @@ UINT WINAPI MsiDatabaseApplyTransformA( MSIHANDLE hdb, const char *transform, in
     return ret;
 }
 
-UINT WINAPI MsiDatabaseGenerateTransformA( MSIHANDLE hdb, MSIHANDLE hdbref,
-                 LPCSTR szTransformFile, int iReserved1, int iReserved2 )
+UINT WINAPI MsiDatabaseGenerateTransformA( MSIHANDLE hdb, MSIHANDLE hdbref, const char *szTransformFile,
+                                           int iReserved1, int iReserved2 )
 {
-    FIXME("%d %d %s %d %d\n", hdb, hdbref,
-           debugstr_a(szTransformFile), iReserved1, iReserved2);
+    FIXME( "%lu, %lu, %s, %d, %d\n", hdb, hdbref, debugstr_a(szTransformFile), iReserved1, iReserved2 );
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-UINT WINAPI MsiDatabaseGenerateTransformW( MSIHANDLE hdb, MSIHANDLE hdbref,
-                 LPCWSTR szTransformFile, int iReserved1, int iReserved2 )
+UINT WINAPI MsiDatabaseGenerateTransformW( MSIHANDLE hdb, MSIHANDLE hdbref, const WCHAR *szTransformFile,
+                                           int iReserved1, int iReserved2 )
 {
-    FIXME("%d %d %s %d %d\n", hdb, hdbref,
-           debugstr_w(szTransformFile), iReserved1, iReserved2);
+    FIXME( "%lu, %lu, %s, %d, %d\n", hdb, hdbref, debugstr_w(szTransformFile), iReserved1, iReserved2 );
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
@@ -965,7 +965,7 @@ UINT WINAPI MsiDatabaseCommit( MSIHANDLE hdb )
     MSIDATABASE *db;
     UINT r;
 
-    TRACE("%d\n", hdb);
+    TRACE( "%lu\n", hdb );
 
     db = msihandle2msiinfo( hdb, MSIHANDLETYPE_DATABASE );
     if( !db )
@@ -1061,7 +1061,7 @@ UINT MSI_DatabaseGetPrimaryKeys( MSIDATABASE *db,
     r = MSI_IterateRecords( query, 0, msi_primary_key_iterator, &info );
     if( r == ERROR_SUCCESS )
     {
-        TRACE("Found %d primary keys\n", info.n );
+        TRACE( "found %lu primary keys\n", info.n );
 
         /* allocate a record and fill in the names of the tables */
         info.rec = MSI_CreateRecord( info.n );
@@ -1077,14 +1077,13 @@ UINT MSI_DatabaseGetPrimaryKeys( MSIDATABASE *db,
     return r;
 }
 
-UINT WINAPI MsiDatabaseGetPrimaryKeysW( MSIHANDLE hdb,
-                    LPCWSTR table, MSIHANDLE* phRec )
+UINT WINAPI MsiDatabaseGetPrimaryKeysW( MSIHANDLE hdb, const WCHAR *table, MSIHANDLE *phRec )
 {
     MSIRECORD *rec = NULL;
     MSIDATABASE *db;
     UINT r;
 
-    TRACE("%d %s %p\n", hdb, debugstr_w(table), phRec);
+    TRACE( "%lu, %s, %p\n", hdb, debugstr_w(table), phRec );
 
     db = msihandle2msiinfo( hdb, MSIHANDLETYPE_DATABASE );
     if( !db )
@@ -1127,13 +1126,12 @@ UINT WINAPI MsiDatabaseGetPrimaryKeysW( MSIHANDLE hdb,
     return r;
 }
 
-UINT WINAPI MsiDatabaseGetPrimaryKeysA(MSIHANDLE hdb,
-                    LPCSTR table, MSIHANDLE* phRec)
+UINT WINAPI MsiDatabaseGetPrimaryKeysA( MSIHANDLE hdb, const char *table, MSIHANDLE *phRec )
 {
-    LPWSTR szwTable = NULL;
+    WCHAR *szwTable = NULL;
     UINT r;
 
-    TRACE("%d %s %p\n", hdb, debugstr_a(table), phRec);
+    TRACE( "%lu, %s, %p\n", hdb, debugstr_a(table), phRec );
 
     if( table )
     {
@@ -1147,13 +1145,12 @@ UINT WINAPI MsiDatabaseGetPrimaryKeysA(MSIHANDLE hdb,
     return r;
 }
 
-MSICONDITION WINAPI MsiDatabaseIsTablePersistentA(
-              MSIHANDLE hDatabase, LPCSTR szTableName)
+MSICONDITION WINAPI MsiDatabaseIsTablePersistentA( MSIHANDLE hDatabase, const char *szTableName )
 {
-    LPWSTR szwTableName = NULL;
+    WCHAR *szwTableName = NULL;
     MSICONDITION r;
 
-    TRACE("%x %s\n", hDatabase, debugstr_a(szTableName));
+    TRACE( "%lu, %s\n", hDatabase, debugstr_a(szTableName) );
 
     if( szTableName )
     {
@@ -1167,13 +1164,12 @@ MSICONDITION WINAPI MsiDatabaseIsTablePersistentA(
     return r;
 }
 
-MSICONDITION WINAPI MsiDatabaseIsTablePersistentW(
-              MSIHANDLE hDatabase, LPCWSTR szTableName)
+MSICONDITION WINAPI MsiDatabaseIsTablePersistentW( MSIHANDLE hDatabase, const WCHAR *szTableName )
 {
     MSIDATABASE *db;
     MSICONDITION r;
 
-    TRACE("%x %s\n", hDatabase, debugstr_w(szTableName));
+    TRACE( "%lu, %s\n", hDatabase, debugstr_w(szTableName) );
 
     db = msihandle2msiinfo( hDatabase, MSIHANDLETYPE_DATABASE );
     if( !db )

@@ -32,7 +32,6 @@
 #include "shlguid.h"
 #include "rpcproxy.h"
 
-#include "wine/heap.h"
 #include "browseui.h"
 
 #include "initguid.h"
@@ -72,7 +71,7 @@ static inline ClassFactory *impl_from_IClassFactory(IClassFactory *iface)
 static void ClassFactory_Destructor(ClassFactory *This)
 {
     TRACE("Destroying class factory %p\n", This);
-    heap_free(This);
+    free(This);
     InterlockedDecrement(&BROWSEUI_refCount);
 }
 
@@ -147,7 +146,7 @@ static const IClassFactoryVtbl ClassFactoryVtbl = {
 
 static HRESULT ClassFactory_Constructor(LPFNCONSTRUCTOR ctor, LPVOID *ppvOut)
 {
-    ClassFactory *This = heap_alloc(sizeof(ClassFactory));
+    ClassFactory *This = malloc(sizeof(*This));
     This->IClassFactory_iface.lpVtbl = &ClassFactoryVtbl;
     This->ref = 1;
     This->ctor = ctor;
@@ -162,11 +161,9 @@ static HRESULT ClassFactory_Constructor(LPFNCONSTRUCTOR ctor, LPVOID *ppvOut)
  */
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD fdwReason, LPVOID fImpLoad)
 {
-    TRACE("%p 0x%x %p\n", hinst, fdwReason, fImpLoad);
+    TRACE("%p 0x%lx %p\n", hinst, fdwReason, fImpLoad);
     switch (fdwReason)
     {
-        case DLL_WINE_PREATTACH:
-            return FALSE;   /* prefer native version */
         case DLL_PROCESS_ATTACH:
             DisableThreadLibraryCalls(hinst);
             BROWSEUI_hinstance = hinst;
@@ -238,20 +235,4 @@ HRESULT WINAPI DllInstall(BOOL bInstall, LPCWSTR cmdline)
 {
     FIXME("(%s, %s): stub\n", bInstall ? "TRUE" : "FALSE", debugstr_w(cmdline));
     return S_OK;
-}
-
-/***********************************************************************
- *		DllRegisterServer (BROWSEUI.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( BROWSEUI_hinstance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (BROWSEUI.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( BROWSEUI_hinstance );
 }

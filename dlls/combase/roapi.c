@@ -286,8 +286,26 @@ HRESULT WINAPI GetRestrictedErrorInfo(IRestrictedErrorInfo **info)
  */
 BOOL WINAPI RoOriginateLanguageException(HRESULT error, HSTRING message, IUnknown *language_exception)
 {
-    FIXME("(%x %s %p) stub\n", error, debugstr_hstring(message), language_exception);
+    FIXME("%#lx, %s, %p: stub\n", error, debugstr_hstring(message), language_exception);
     return FALSE;
+}
+
+/***********************************************************************
+ *      RoOriginateError (combase.@)
+ */
+BOOL WINAPI RoOriginateError(HRESULT error, HSTRING message)
+{
+    FIXME("%#lx, %s: stub\n", error, debugstr_hstring(message));
+    return FALSE;
+}
+
+/***********************************************************************
+ *      RoSetErrorReportingFlags (combase.@)
+ */
+HRESULT WINAPI RoSetErrorReportingFlags(UINT32 flags)
+{
+    FIXME("(%08x): stub\n", flags);
+    return S_OK;
 }
 
 /***********************************************************************

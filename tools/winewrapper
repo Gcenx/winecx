@@ -69,9 +69,9 @@ if [ "`uname -s`" = "Darwin" ]
 then
   if [ -n "$DYLD_LIBRARY_PATH" ]
   then
-    DYLD_LIBRARY_PATH="$topdir/libs/wine:$DYLD_LIBRARY_PATH"
+    DYLD_LIBRARY_PATH="$topdir/libs/wine:$topdir/dlls/ntdll:$DYLD_LIBRARY_PATH"
   else
-    DYLD_LIBRARY_PATH="$topdir/libs/wine"
+    DYLD_LIBRARY_PATH="$topdir/libs/wine:$topdir/dlls/ntdll"
   fi
   export DYLD_LIBRARY_PATH
 else
@@ -86,9 +86,6 @@ fi
 
 if [ -x "$topdir/loader/$name" ]
 then WINELOADER="$topdir/loader/$name"
-elif [ -n "$WINE_USE_32ON64" ] || ( [ -x "$topdir/loader/wine32on64" ] && \
-    [ -r /usr/lib/libSystem.dylib ] && ! file /usr/lib/libSystem.dylib 2>/dev/null | grep -qs i386 )
-then WINELOADER="$topdir/loader/wine32on64"
 elif [ -x "$topdir/loader/wine" ]
 then WINELOADER="$topdir/loader/wine"
 elif [ -x "$topdir/loader/wine64" ]

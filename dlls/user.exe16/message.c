@@ -78,6 +78,12 @@ static LRESULT defdlg_proc_callback( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
     return *result;
 }
 
+static LRESULT defwnd_proc_callback( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
+                                     LRESULT *result, void *arg )
+{
+    return *result = DefWindowProcA( hwnd, msg, wp, lp );
+}
+
 static LRESULT call_window_proc_callback( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
                                           LRESULT *result, void *arg )
 {
@@ -155,6 +161,7 @@ static WNDPROC16 alloc_win16_thunk( WNDPROC handle )
         if (!(thunk_selector = GlobalAlloc16( GMEM_FIXED | GMEM_ZEROINIT,
                                               MAX_WINPROCS16 * sizeof(WINPROC_THUNK) )))
             return NULL;
+        FarSetOwner16( thunk_selector, 0 );
         PrestoChangoSelector16( thunk_selector, thunk_selector );
         thunk_array = GlobalLock16( thunk_selector );
         relay = GetProcAddress16( GetModuleHandle16("user"), "__wine_call_wndproc" );
@@ -604,6 +611,7 @@ LRESULT WINPROC_CallProc16To32A( winproc_callback_t callback, HWND16 hwnd, UINT1
             CREATESTRUCT16 *cs16 = MapSL(lParam);
             CREATESTRUCTA cs;
             MDICREATESTRUCTA mdi_cs;
+            SEGPTR mdi_cs_segptr = 0;
 
             CREATESTRUCT16to32A( cs16, &cs );
             if (GetWindowLongW(hwnd32, GWL_EXSTYLE) & WS_EX_MDICHILD)
@@ -611,9 +619,15 @@ LRESULT WINPROC_CallProc16To32A( winproc_callback_t callback, HWND16 hwnd, UINT1
                 MDICREATESTRUCT16 *mdi_cs16 = MapSL(cs16->lpCreateParams);
                 MDICREATESTRUCT16to32A(mdi_cs16, &mdi_cs);
                 cs.lpCreateParams = &mdi_cs;
+                mdi_cs_segptr = cs16->lpCreateParams;
             }
             ret = callback( hwnd32, msg, wParam, (LPARAM)&cs, result, arg );
             CREATESTRUCT32Ato16( &cs, cs16 );
+            if (mdi_cs_segptr)
+            {
+                MDICREATESTRUCT32Ato16( &mdi_cs, MapSL( mdi_cs_segptr ) );
+                cs16->lpCreateParams = mdi_cs_segptr;
+            }
         }
         break;
     case WM_MDICREATE:
@@ -881,7 +895,7 @@ LRESULT WINPROC_CallProc16To32A( winproc_callback_t callback, HWND16 hwnd, UINT1
             case 1:
                 break; /* atom, nothing to do */
             case 3:
-                WARN("DDE_ACK: %lx both atom and handle... choosing handle\n", hi);
+                WARN("DDE_ACK: %Ix both atom and handle... choosing handle\n", hi);
                 /* fall through */
             case 2:
                 hi = convert_handle_16_to_32(hi, GMEM_DDESHARE);
@@ -898,6 +912,9 @@ LRESULT WINPROC_CallProc16To32A( winproc_callback_t callback, HWND16 hwnd, UINT1
     case WM_PAINTCLIPBOARD:
     case WM_SIZECLIPBOARD:
         FIXME_(msg)( "message %04x needs translation\n", msg );
+        break;
+    case WM_ERASEBKGND:
+        ret = callback( hwnd32, msg, (WPARAM)HDC_32(wParam), lParam, result, arg );
         break;
     default:
         ret = callback( hwnd32, msg, wParam, lParam, result, arg );
@@ -1261,7 +1278,7 @@ LRESULT WINPROC_CallProc32ATo16( winproc_callback16_t callback, HWND hwnd, UINT 
             case 1:
                 break; /* atom, nothing to do */
             case 3:
-                WARN("DDE_ACK: %lx both atom and handle... choosing handle\n", hi);
+                WARN("DDE_ACK: %Ix both atom and handle... choosing handle\n", hi);
                 /* fall through */
             case 2:
                 hi = convert_handle_32_to_16(hi, GMEM_DDESHARE);
@@ -1275,6 +1292,11 @@ LRESULT WINPROC_CallProc32ATo16( winproc_callback16_t callback, HWND hwnd, UINT 
         lParam = MAKELPARAM( 0, convert_handle_32_to_16( lParam, GMEM_DDESHARE ));
         ret = callback( HWND_16(hwnd), msg, wParam, lParam, result, arg );
         break; /* FIXME don't know how to free allocated memory (handle) !! */
+    case WM_TIMER:
+        if (wParam & SYSTEM_TIMER_FLAG)
+            msg = WM_SYSTIMER;
+        ret = callback( HWND_16(hwnd), msg, wParam, lParam, result, arg );
+        break;
     case SBM_SETRANGE:
         ret = callback( HWND_16(hwnd), SBM_SETRANGE16, 0, MAKELPARAM(wParam, lParam), result, arg );
         break;
@@ -1601,78 +1623,8 @@ BOOL16 WINAPI PeekMessage32_16( MSG32_16 *msg16, HWND16 hwnd16,
 LRESULT WINAPI DefWindowProc16( HWND16 hwnd16, UINT16 msg, WPARAM16 wParam, LPARAM lParam )
 {
     LRESULT result;
-    HWND hwnd = WIN_Handle32( hwnd16 );
-
-    switch(msg)
-    {
-    case WM_NCCREATE:
-        {
-            CREATESTRUCT16 *cs16 = MapSL(lParam);
-            CREATESTRUCTA cs32;
-
-            cs32.lpCreateParams = ULongToPtr(cs16->lpCreateParams);
-            cs32.hInstance      = HINSTANCE_32(cs16->hInstance);
-            cs32.hMenu          = HMENU_32(cs16->hMenu);
-            cs32.hwndParent     = WIN_Handle32(cs16->hwndParent);
-            cs32.cy             = cs16->cy;
-            cs32.cx             = cs16->cx;
-            cs32.y              = cs16->y;
-            cs32.x              = cs16->x;
-            cs32.style          = cs16->style;
-            cs32.dwExStyle      = cs16->dwExStyle;
-            cs32.lpszName       = MapSL(cs16->lpszName);
-            cs32.lpszClass      = MapSL(cs16->lpszClass);
-            return DefWindowProcA( hwnd, msg, wParam, (LPARAM)&cs32 );
-        }
-    case WM_NCCALCSIZE:
-        {
-            RECT16 *rect16 = MapSL(lParam);
-            RECT rect32;
-
-            rect32.left    = rect16->left;
-            rect32.top     = rect16->top;
-            rect32.right   = rect16->right;
-            rect32.bottom  = rect16->bottom;
-
-            result = DefWindowProcA( hwnd, msg, wParam, (LPARAM)&rect32 );
-
-            rect16->left   = rect32.left;
-            rect16->top    = rect32.top;
-            rect16->right  = rect32.right;
-            rect16->bottom = rect32.bottom;
-            return result;
-        }
-    case WM_WINDOWPOSCHANGING:
-    case WM_WINDOWPOSCHANGED:
-        {
-            WINDOWPOS16 *pos16 = MapSL(lParam);
-            WINDOWPOS pos32;
-
-            pos32.hwnd             = WIN_Handle32(pos16->hwnd);
-            pos32.hwndInsertAfter  = WIN_Handle32(pos16->hwndInsertAfter);
-            pos32.x                = pos16->x;
-            pos32.y                = pos16->y;
-            pos32.cx               = pos16->cx;
-            pos32.cy               = pos16->cy;
-            pos32.flags            = pos16->flags;
-
-            result = DefWindowProcA( hwnd, msg, wParam, (LPARAM)&pos32 );
-
-            pos16->hwnd            = HWND_16(pos32.hwnd);
-            pos16->hwndInsertAfter = HWND_16(pos32.hwndInsertAfter);
-            pos16->x               = pos32.x;
-            pos16->y               = pos32.y;
-            pos16->cx              = pos32.cx;
-            pos16->cy              = pos32.cy;
-            pos16->flags           = pos32.flags;
-            return result;
-        }
-    case WM_GETTEXT:
-    case WM_SETTEXT:
-        return DefWindowProcA( hwnd, msg, wParam, (LPARAM)MapSL(lParam) );
-    default:
-        return DefWindowProcA( hwnd, msg, wParam, lParam );
-    }
+    WINPROC_CallProc16To32A( defwnd_proc_callback, hwnd16, msg, wParam, lParam, &result, 0 );
+    return result;
 }
 
 
@@ -2617,20 +2569,6 @@ static LRESULT static_proc16( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
 
 
 /***********************************************************************
- *           wait_message16
- */
-static DWORD wait_message16( DWORD count, const HANDLE *handles, DWORD timeout, DWORD mask, DWORD flags )
-{
-    DWORD lock, ret;
-
-    ReleaseThunkLock( &lock );
-    ret = wow_handlers32.wait_message( count, handles, timeout, mask, flags );
-    RestoreThunkLock( lock );
-    return ret;
-}
-
-
-/***********************************************************************
  *           create_window16
  */
 HWND create_window16( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE instance, BOOL unicode )
@@ -2643,17 +2581,28 @@ HWND create_window16( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE instance, 
 }
 
 
-/***********************************************************************
- *           free_icon_param
- */
-static void free_icon_param( ULONG_PTR param )
+static void WINAPI User16CallFreeIcon( ULONG *param, ULONG size )
 {
-    GlobalFree16( LOWORD(param) );
+    GlobalFree16( LOWORD(*param) );
+}
+
+
+static DWORD WINAPI User16ThunkLock( DWORD *param, ULONG size )
+{
+    if (size != sizeof(DWORD))
+    {
+        DWORD lock;
+        ReleaseThunkLock( &lock );
+        return lock;
+    }
+    RestoreThunkLock( *param );
+    return 0;
 }
 
 
 void register_wow_handlers(void)
 {
+    void **callback_table = NtCurrentTeb()->Peb->KernelCallbackTable;
     static const struct wow_handlers16 handlers16 =
     {
         button_proc16,
@@ -2663,12 +2612,15 @@ void register_wow_handlers(void)
         mdiclient_proc16,
         scrollbar_proc16,
         static_proc16,
-        wait_message16,
         create_window16,
         call_window_proc_Ato16,
         call_dialog_proc_Ato16,
-        free_icon_param
     };
+
+    callback_table[NtUserCallFreeIcon] = User16CallFreeIcon;
+    callback_table[NtUserThunkLock]    = User16ThunkLock;
+
+    NtUserEnableThunkLock( TRUE );
 
     UserRegisterWowHandlers( &handlers16, &wow_handlers32 );
 }

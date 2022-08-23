@@ -71,6 +71,7 @@ void WCMD_endlocal (void);
 void WCMD_enter_paged_mode(const WCHAR *);
 void WCMD_exit (CMD_LIST **cmdList);
 void WCMD_for (WCHAR *, CMD_LIST **cmdList);
+BOOL WCMD_get_fullpath(const WCHAR *, SIZE_T, WCHAR *, WCHAR **);
 void WCMD_give_help (const WCHAR *args);
 void WCMD_goto (CMD_LIST **cmdList);
 void WCMD_if (WCHAR *, CMD_LIST **cmdList);
@@ -110,7 +111,7 @@ WCHAR *WCMD_parameter (WCHAR *s, int n, WCHAR **start, BOOL raw, BOOL wholecmdli
 WCHAR *WCMD_parameter_with_delims (WCHAR *s, int n, WCHAR **start, BOOL raw,
                                    BOOL wholecmdline, const WCHAR *delims);
 WCHAR *WCMD_skip_leading_spaces (WCHAR *string);
-BOOL WCMD_keyword_ws_found(const WCHAR *keyword, int len, const WCHAR *ptr);
+BOOL WCMD_keyword_ws_found(const WCHAR *keyword, const WCHAR *ptr);
 void WCMD_HandleTildeModifiers(WCHAR **start, BOOL atExecute);
 
 WCHAR *WCMD_strip_quotes(WCHAR *cmd);
@@ -317,3 +318,4 @@ extern WCHAR version_string[];
 #define WCMD_NOOPERATOR       1043
 #define WCMD_BADPAREN         1044
 #define WCMD_BADHEXOCT        1045
+#define WCMD_FILENAMETOOLONG  1046

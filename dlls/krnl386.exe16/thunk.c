@@ -137,8 +137,8 @@ struct SLApiDB
     DWORD                  errorReturnValue;
 };
 
-SEGPTR CALL32_CBClient_RetAddr = 0;
-SEGPTR CALL32_CBClientEx_RetAddr = 0;
+WORD cbclient_selector = 0;
+WORD cbclientex_selector = 0;
 
 extern int call_entry_point( void *func, int nb_args, const DWORD *args );
 extern void __wine_call_from_16_thunk(void);
@@ -274,14 +274,14 @@ static LPVOID _loadthunk(LPCSTR module, LPCSTR func, LPCSTR module32,
 
     if (TD32 && TD16->checksum != TD32->checksum)
     {
-        ERR("(%s, %s, %s): Wrong checksum %08x (should be %08x)\n",
+        ERR("(%s, %s, %s): Wrong checksum %08lx (should be %08lx)\n",
                    module, func, module32, TD16->checksum, TD32->checksum);
         return 0;
     }
 
     if (!TD32 && checksum && checksum != *(LPDWORD)TD16)
     {
-        ERR("(%s, %s, %s): Wrong checksum %08x (should be %08x)\n",
+        ERR("(%s, %s, %s): Wrong checksum %08lx (should be %08lx)\n",
                    module, func, module32, *(LPDWORD)TD16, checksum);
         return 0;
     }
@@ -324,14 +324,14 @@ UINT WINAPI ThunkConnect32(
     {
         directionSL = TRUE;
 
-        TRACE("SL01 thunk %s (%p) <- %s (%s), Reason: %d\n",
+        TRACE("SL01 thunk %s (%p) <- %s (%s), Reason: %ld\n",
               module32, TD, module16, thunkfun16, dwReason);
     }
     else if (!strncmp(TD->magic, "LS01", 4))
     {
         directionSL = FALSE;
 
-        TRACE("LS01 thunk %s (%p) -> %s (%s), Reason: %d\n",
+        TRACE("LS01 thunk %s (%p) -> %s (%s), Reason: %ld\n",
               module32, TD, module16, thunkfun16, dwReason);
     }
     else
@@ -370,7 +370,7 @@ UINT WINAPI ThunkConnect32(
                 tdb->next = SL32->data->targetDB;   /* FIXME: not thread-safe! */
                 SL32->data->targetDB = tdb;
 
-                TRACE("Process %08x allocated TargetDB entry for ThunkDataSL %p\n",
+                TRACE("Process %08lx allocated TargetDB entry for ThunkDataSL %p\n",
                       GetCurrentProcessId(), SL32->data);
             }
             else
@@ -992,11 +992,11 @@ DWORD WINAPIV SSCall(
     DWORD i,ret;
     DWORD *args = ((DWORD *)&fun) + 1;
 
-    TRACE("(%d,0x%08x,%p,[",nr,flags,fun);
-    for (i = 0; i < nr/4; i++) TRACE("0x%08x,",args[i]);
+    TRACE("(%ld,0x%08lx,%p,[",nr,flags,fun);
+    for (i = 0; i < nr/4; i++) TRACE("0x%08lx,",args[i]);
     TRACE("])\n");
     ret = call_entry_point( fun, nr / sizeof(DWORD), args );
-    TRACE(" returning %d ...\n",ret);
+    TRACE(" returning %ld ...\n",ret);
     return ret;
 }
 
@@ -1079,7 +1079,7 @@ void WINAPI
 FreeSLCallback(
 	DWORD x	/* [in] 16 bit callback (segmented pointer?) */
 ) {
-	FIXME("(0x%08x): stub\n",x);
+	FIXME("(0x%08lx): stub\n",x);
 }
 
 /**********************************************************************
@@ -1234,7 +1234,7 @@ void WINAPI __regs_K32Thk1632Prolog( CONTEXT *context )
       WORD  stackSel  = SELECTOROF(frame32->frame16);
       DWORD stackBase = GetSelectorBase(stackSel);
 
-      TRACE("before SYSTHUNK hack: EBP: %08x ESP: %08x cur_stack: %04x:%04x\n",
+      TRACE("before SYSTHUNK hack: EBP: %08lx ESP: %08lx cur_stack: %04x:%04x\n",
             context->Ebp, context->Esp, CURRENT_SS, CURRENT_SP);
 
       memset(frame16, '\0', sizeof(STACK16FRAME));
@@ -1248,7 +1248,7 @@ void WINAPI __regs_K32Thk1632Prolog( CONTEXT *context )
       context->Esp = (DWORD)stack32 + 4;
       context->Ebp = context->Esp + argSize;
 
-      TRACE("after  SYSTHUNK hack: EBP: %08x ESP: %08x cur_stack: %04x:%04x\n",
+      TRACE("after  SYSTHUNK hack: EBP: %08lx ESP: %08lx cur_stack: %04x:%04x\n",
             context->Ebp, context->Esp, CURRENT_SS, CURRENT_SP);
    }
 
@@ -1279,7 +1279,7 @@ void WINAPI __regs_K32Thk1632Epilog( CONTEXT *context )
 
       DWORD nArgsPopped = context->Esp - (DWORD)stack32;
 
-      TRACE("before SYSTHUNK hack: EBP: %08x ESP: %08x cur_stack: %04x:%04x\n",
+      TRACE("before SYSTHUNK hack: EBP: %08lx ESP: %08lx cur_stack: %04x:%04x\n",
             context->Ebp, context->Esp, CURRENT_SS, CURRENT_SP);
 
       kernel_get_thread_data()->stack = (SEGPTR)frame16->frame32;
@@ -1287,7 +1287,7 @@ void WINAPI __regs_K32Thk1632Epilog( CONTEXT *context )
       context->Esp = (DWORD)stack16 + nArgsPopped;
       context->Ebp = frame16->ebp;
 
-      TRACE("after  SYSTHUNK hack: EBP: %08x ESP: %08x cur_stack: %04x:%04x\n",
+      TRACE("after  SYSTHUNK hack: EBP: %08lx ESP: %08lx cur_stack: %04x:%04x\n",
             context->Ebp, context->Esp, CURRENT_SS, CURRENT_SP);
    }
 }
@@ -1336,14 +1336,14 @@ UINT WINAPI ThunkConnect16(
     {
         directionSL = TRUE;
 
-        TRACE("SL01 thunk %s (%p) -> %s (%s), Reason: %d\n",
+        TRACE("SL01 thunk %s (%p) -> %s (%s), Reason: %ld\n",
               module16, TD, module32, thunkfun32, dwReason);
     }
     else if (!strncmp(TD->magic, "LS01", 4))
     {
         directionSL = FALSE;
 
-        TRACE("LS01 thunk %s (%p) <- %s (%s), Reason: %d\n",
+        TRACE("LS01 thunk %s (%p) <- %s (%s), Reason: %ld\n",
               module16, TD, module32, thunkfun32, dwReason);
     }
     else
@@ -1510,7 +1510,7 @@ void WINAPI C16ThkSL01(CONTEXT *context)
         DWORD targetNr = LOWORD(context->Ecx) / 4;
         struct SLTargetDB *tdb;
 
-        TRACE("Process %08x calling target %d of ThunkDataSL %p\n",
+        TRACE("Process %08lx calling target %ld of ThunkDataSL %p\n",
               GetCurrentProcessId(), targetNr, td);
 
         for (tdb = td->targetDB; tdb; tdb = tdb->next)
@@ -1531,7 +1531,7 @@ void WINAPI C16ThkSL01(CONTEXT *context)
         {
             context->Edx = tdb->targetTable[targetNr];
 
-            TRACE("Call target is %08x\n", context->Edx);
+            TRACE("Call target is %08lx\n", context->Edx);
         }
         else
         {
@@ -1542,7 +1542,7 @@ void WINAPI C16ThkSL01(CONTEXT *context)
             context->SegCs  = stack[3];
             context->Esp += td->apiDB[targetNr].nrArgBytes + 4;
 
-            ERR("Process %08x did not ThunkConnect32 %s to %s\n",
+            ERR("Process %08lx did not ThunkConnect32 %s to %s\n",
                 GetCurrentProcessId(), td->pszDll32, td->pszDll16);
         }
     }
@@ -1951,10 +1951,134 @@ void WINAPI CBClientGlueSL( CONTEXT *context )
     context->Eip   = OFFSETOF  ( glue );
 }
 
+/*******************************************************************
+ *         CALL32_CBClient
+ *
+ * Call a CBClient relay stub from 32-bit code (KERNEL.620).
+ *
+ * Since the relay stub is itself 32-bit, this should not be a problem;
+ * unfortunately, the relay stubs are expected to switch back to a
+ * 16-bit stack (and 16-bit code) after completion :-(
+ *
+ * This would conflict with our 16- vs. 32-bit stack handling, so
+ * we simply switch *back* to our 32-bit stack before returning to
+ * the caller ...
+ *
+ * The CBClient relay stub expects to be called with the following
+ * 16-bit stack layout, and with ebp and ebx pointing into the 16-bit
+ * stack at the designated places:
+ *
+ *    ...
+ *  (ebp+14) original arguments to the callback routine
+ *  (ebp+10) far return address to original caller
+ *  (ebp+6)  Thunklet target address
+ *  (ebp+2)  Thunklet relay ID code
+ *  (ebp)    BP (saved by CBClientGlueSL)
+ *  (ebp-2)  SI (saved by CBClientGlueSL)
+ *  (ebp-4)  DI (saved by CBClientGlueSL)
+ *  (ebp-6)  DS (saved by CBClientGlueSL)
+ *
+ *   ...     buffer space used by the 16-bit side glue for temp copies
+ *
+ *  (ebx+4)  far return address to 16-bit side glue code
+ *  (ebx)    saved 16-bit ss:sp (pointing to ebx+4)
+ *
+ * The 32-bit side glue code accesses both the original arguments (via ebp)
+ * and the temporary copies prepared by the 16-bit side glue (via ebx).
+ * After completion, the stub will load ss:sp from the buffer at ebx
+ * and perform a far return to 16-bit code.
+ *
+ * To trick the relay stub into returning to us, we replace the 16-bit
+ * return address to the glue code by a cs:ip pair pointing to our
+ * return entry point (the original return address is saved first).
+ * Our return stub thus called will then reload the 32-bit ss:esp and
+ * return to 32-bit code (by using and ss:esp value that we have also
+ * pushed onto the 16-bit stack before and a cs:eip values found at
+ * that position on the 32-bit stack).  The ss:esp to be restored is
+ * found relative to the 16-bit stack pointer at:
+ *
+ *  (ebx-4)   ss  (flat)
+ *  (ebx-8)   sp  (32-bit stack pointer)
+ *
+ * The second variant of this routine, CALL32_CBClientEx, which is used
+ * to implement KERNEL.621, has to cope with yet another problem: Here,
+ * the 32-bit side directly returns to the caller of the CBClient thunklet,
+ * restoring registers saved by CBClientGlueSL and cleaning up the stack.
+ * As we have to return to our 32-bit code first, we have to adapt the
+ * layout of our temporary area so as to include values for the registers
+ * that are to be restored, and later (in the implementation of KERNEL.621)
+ * we *really* restore them. The return stub restores DS, DI, SI, and BP
+ * from the stack, skips the next 8 bytes (CBClient relay code / target),
+ * and then performs a lret NN, where NN is the number of arguments to be
+ * removed. Thus, we prepare our temporary area as follows:
+ *
+ *     (ebx+22) 16-bit cs  (this segment)
+ *     (ebx+20) 16-bit ip  ('16-bit' return entry point)
+ *     (ebx+16) 32-bit ss  (flat)
+ *     (ebx+12) 32-bit sp  (32-bit stack pointer)
+ *     (ebx+10) 16-bit bp  (points to ebx+24)
+ *     (ebx+8)  16-bit si  (ignored)
+ *     (ebx+6)  16-bit di  (ignored)
+ *     (ebx+4)  16-bit ds  (we actually use the flat DS here)
+ *     (ebx+2)  16-bit ss  (16-bit stack segment)
+ *     (ebx+0)  16-bit sp  (points to ebx+4)
+ *
+ * Note that we ensure that DS is not changed and remains the flat segment,
+ * and the 32-bit stack pointer our own return stub needs fits just
+ * perfectly into the 8 bytes that are skipped by the Windows stub.
+ * One problem is that we have to determine the number of removed arguments,
+ * as these have to be really removed in KERNEL.621. Thus, the BP value
+ * that we place in the temporary area to be restored, contains the value
+ * that SP would have if no arguments were removed. By comparing the actual
+ * value of SP with this value in our return stub we can compute the number
+ * of removed arguments. This is then returned to KERNEL.621.
+ *
+ * The stack layout of this function:
+ * (ebp+20)  nArgs     pointer to variable receiving nr. of args (Ex only)
+ * (ebp+16)  esi       pointer to caller's esi value
+ * (ebp+12)  arg       ebp value to be set for relay stub
+ * (ebp+8)   func      CBClient relay stub address
+ * (ebp+4)   ret addr
+ * (ebp)     ebp
+ */
+extern DWORD CALL32_CBClient( FARPROC proc, LPWORD args, WORD *stackLin, DWORD *esi );
+__ASM_GLOBAL_FUNC( CALL32_CBClient,
+                   "pushl %ebp\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                   __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                   "movl %esp,%ebp\n\t"
+                   __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                   "pushl %edi\n\t"
+                   __ASM_CFI(".cfi_rel_offset %edi,-4\n\t")
+                   "pushl %esi\n\t"
+                   __ASM_CFI(".cfi_rel_offset %esi,-8\n\t")
+                   "pushl %ebx\n\t"
+                   __ASM_CFI(".cfi_rel_offset %ebx,-12\n\t")
+                   "movl 16(%ebp),%ebx\n\t"
+                   "leal -8(%esp),%eax\n\t"
+                   "movl %eax,-8(%ebx)\n\t"
+                   "movl 20(%ebp),%esi\n\t"
+                   "movl (%esi),%esi\n\t"
+                   "movl 8(%ebp),%eax\n\t"
+                   "movl 12(%ebp),%ebp\n\t"
+                   "pushl %cs\n\t"
+                   "call *%eax\n\t"
+                   "movl 32(%esp),%edi\n\t"
+                   "movl %esi,(%edi)\n\t"
+                   "popl %ebx\n\t"
+                   __ASM_CFI(".cfi_same_value %ebx\n\t")
+                   "popl %esi\n\t"
+                   __ASM_CFI(".cfi_same_value %esi\n\t")
+                   "popl %edi\n\t"
+                   __ASM_CFI(".cfi_same_value %edi\n\t")
+                   "popl %ebp\n\t"
+                   __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                   __ASM_CFI(".cfi_same_value %ebp\n\t")
+                   "ret\n\t" )
+
 /***********************************************************************
  *     CBClientThunkSL                      (KERNEL.620)
  */
-extern DWORD CALL32_CBClient( FARPROC proc, LPWORD args, WORD *stackLin, DWORD *esi );
 void WINAPI CBClientThunkSL( CONTEXT *context )
 {
     /* Call 32-bit relay code */
@@ -1970,16 +2094,52 @@ void WINAPI CBClientThunkSL( CONTEXT *context )
     stackLin[3] = 0;
     stackLin[4] = OFFSETOF(stack) + 12;
     stackLin[5] = SELECTOROF(stack);
-    stackLin[6] = OFFSETOF(CALL32_CBClientEx_RetAddr);  /* overwrite return address */
-    stackLin[7] = SELECTOROF(CALL32_CBClientEx_RetAddr);
+    stackLin[6] = 0; /* overwrite return address */
+    stackLin[7] = cbclient_selector;
     context->Eax = CALL32_CBClient( proc, args, stackLin + 4, &context->Esi );
     stack16_pop( 12 );
 }
 
+extern DWORD CALL32_CBClientEx( FARPROC proc, LPWORD args, WORD *stackLin, DWORD *esi, INT *nArgs );
+__ASM_GLOBAL_FUNC( CALL32_CBClientEx,
+                   "pushl %ebp\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                   __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                   "movl %esp,%ebp\n\t"
+                   __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                   "pushl %edi\n\t"
+                   __ASM_CFI(".cfi_rel_offset %edi,-4\n\t")
+                   "pushl %esi\n\t"
+                   __ASM_CFI(".cfi_rel_offset %esi,-8\n\t")
+                   "pushl %ebx\n\t"
+                   __ASM_CFI(".cfi_rel_offset %ebx,-12\n\t")
+                   "movl 16(%ebp),%ebx\n\t"
+                   "leal -8(%esp),%eax\n\t"
+                   "movl %eax,12(%ebx)\n\t"
+                   "movl 20(%ebp),%esi\n\t"
+                   "movl (%esi),%esi\n\t"
+                   "movl 8(%ebp),%eax\n\t"
+                   "movl 12(%ebp),%ebp\n\t"
+                   "pushl %cs\n\t"
+                   "call *%eax\n\t"
+                   "movl 32(%esp),%edi\n\t"
+                   "movl %esi,(%edi)\n\t"
+                   "movl 36(%esp),%ebx\n\t"
+                   "movl %ebp,(%ebx)\n\t"
+                   "popl %ebx\n\t"
+                   __ASM_CFI(".cfi_same_value %ebx\n\t")
+                   "popl %esi\n\t"
+                   __ASM_CFI(".cfi_same_value %esi\n\t")
+                   "popl %edi\n\t"
+                   __ASM_CFI(".cfi_same_value %edi\n\t")
+                   "popl %ebp\n\t"
+                   __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                   __ASM_CFI(".cfi_same_value %ebp\n\t")
+                   "ret\n\t" )
+
 /***********************************************************************
  *     CBClientThunkSLEx                    (KERNEL.621)
  */
-extern DWORD CALL32_CBClientEx( FARPROC proc, LPWORD args, WORD *stackLin, DWORD *esi, INT *nArgs );
 void WINAPI CBClientThunkSLEx( CONTEXT *context )
 {
     /* Call 32-bit relay code */
@@ -1999,8 +2159,8 @@ void WINAPI CBClientThunkSLEx( CONTEXT *context )
     /* stackLin[6] and stackLin[7] reserved for the 32-bit stack ptr */
     stackLin[8] = get_ds();
     stackLin[9] = 0;
-    stackLin[10] = OFFSETOF(CALL32_CBClientEx_RetAddr);
-    stackLin[11] = SELECTOROF(CALL32_CBClientEx_RetAddr);
+    stackLin[10] = 0;
+    stackLin[11] = cbclientex_selector;
 
     context->Eax = CALL32_CBClientEx( proc, args, stackLin, &context->Esi, &nArgs );
     stack16_pop( 24 );
@@ -2128,7 +2288,7 @@ void WINAPI HouseCleanLogicallyDeadHandles(void)
  */
 BOOL WINAPI _KERNEL32_100(HANDLE threadid,DWORD exitcode,DWORD x)
 {
-	FIXME("(%p,%d,0x%08x): stub\n",threadid,exitcode,x);
+	FIXME("(%p,%ld,0x%08lx): stub\n",threadid,exitcode,x);
 	return TRUE;
 }
 
@@ -2141,7 +2301,7 @@ BOOL WINAPI _KERNEL32_100(HANDLE threadid,DWORD exitcode,DWORD x)
  */
 DWORD WINAPI _KERNEL32_99(DWORD x)
 {
-	FIXME("(0x%08x): stub\n",x);
+	FIXME("(0x%08lx): stub\n",x);
 	return 1;
 }
 
@@ -2221,9 +2381,9 @@ INT WINAPI k32LoadStringA(HINSTANCE instance, UINT resource_id,
 /***********************************************************************
  *		k32wvsprintfA   (KERNEL32.16)
  */
-INT WINAPI k32wvsprintfA(LPSTR buffer, LPCSTR spec, __ms_va_list args)
+INT WINAPI k32wvsprintfA(LPSTR buffer, LPCSTR spec, va_list args)
 {
-    static INT (WINAPI *pwvsprintfA)(LPSTR, LPCSTR, __ms_va_list);
+    static INT (WINAPI *pwvsprintfA)(LPSTR, LPCSTR, va_list);
 
     if(!pwvsprintfA) pwvsprintfA = user32_proc_address("wvsprintfA");
     return (*pwvsprintfA)(buffer, spec, args);
@@ -2234,12 +2394,12 @@ INT WINAPI k32wvsprintfA(LPSTR buffer, LPCSTR spec, __ms_va_list args)
  */
 INT WINAPIV k32wsprintfA(LPSTR buffer, LPCSTR spec, ...)
 {
-    __ms_va_list args;
+    va_list args;
     INT res;
 
-    __ms_va_start(args, spec);
+    va_start(args, spec);
     res = k32wvsprintfA(buffer, spec, args);
-    __ms_va_end(args);
+    va_end(args);
     return res;
 }
 
@@ -2412,7 +2572,7 @@ static DWORD WOW_CallProc32W16( FARPROC proc32, DWORD nrofargs, DWORD *args )
     else ret = call_entry_point( proc32, nrofargs & ~CPEX_DEST_CDECL, args );
     RestoreThunkLock( mutex_count );
 
-    TRACE("returns %08x\n",ret);
+    TRACE("returns %08lx\n",ret);
     return ret;
 }
 
@@ -2424,7 +2584,7 @@ DWORD WINAPIV CallProc32W16( DWORD nrofargs, DWORD argconvmask, FARPROC proc32, 
     DWORD args[32];
     unsigned int i;
 
-    TRACE("(%d,%d,%p args[",nrofargs,argconvmask,proc32);
+    TRACE("(%ld,%ld,%p args[",nrofargs,argconvmask,proc32);
 
     for (i=0;i<nrofargs;i++)
     {
@@ -2433,14 +2593,14 @@ DWORD WINAPIV CallProc32W16( DWORD nrofargs, DWORD argconvmask, FARPROC proc32, 
             SEGPTR ptr = VA_ARG16( valist, SEGPTR );
             /* pascal convention, have to reverse the arguments order */
             args[nrofargs - i - 1] = (DWORD)MapSL(ptr);
-            TRACE("%08x(%p),",ptr,MapSL(ptr));
+            TRACE("%08lx(%p),",ptr,MapSL(ptr));
         }
         else
         {
             DWORD arg = VA_ARG16( valist, DWORD );
             /* pascal convention, have to reverse the arguments order */
             args[nrofargs - i - 1] = arg;
-            TRACE("%d,", arg);
+            TRACE("%ld,", arg);
         }
     }
     TRACE("])\n");
@@ -2459,7 +2619,7 @@ DWORD WINAPIV CallProcEx32W16( DWORD nrofargs, DWORD argconvmask, FARPROC proc32
     DWORD args[32];
     unsigned int i, count = min( 32, nrofargs & ~CPEX_DEST_CDECL );
 
-    TRACE("(%s,%d,%d,%p args[", nrofargs & CPEX_DEST_CDECL ? "cdecl": "stdcall",
+    TRACE("(%s,%ld,%ld,%p args[", nrofargs & CPEX_DEST_CDECL ? "cdecl": "stdcall",
           nrofargs & ~CPEX_DEST_CDECL, argconvmask, proc32);
 
     for (i = 0; i < count; i++)
@@ -2468,13 +2628,13 @@ DWORD WINAPIV CallProcEx32W16( DWORD nrofargs, DWORD argconvmask, FARPROC proc32
         {
             SEGPTR ptr = VA_ARG16( valist, SEGPTR );
             args[i] = (DWORD)MapSL(ptr);
-            TRACE("%08x(%p),",ptr,MapSL(ptr));
+            TRACE("%08lx(%p),",ptr,MapSL(ptr));
         }
         else
         {
             DWORD arg = VA_ARG16( valist, DWORD );
             args[i] = arg;
-            TRACE("%d,", arg);
+            TRACE("%ld,", arg);
         }
     }
     TRACE("])\n");
@@ -2500,6 +2660,6 @@ DWORD WINAPIV WOW16Call(WORD x, WORD y, WORD z, VA_LIST16 args)
         }
         calladdr = VA_ARG16(args,DWORD);
         stack16_pop( 3*sizeof(WORD) + x + sizeof(DWORD) );
-        FIXME(") calling address was 0x%08x\n",calladdr);
+        FIXME(") calling address was 0x%08lx\n",calladdr);
         return 0;
 }

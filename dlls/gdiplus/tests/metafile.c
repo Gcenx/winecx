@@ -22,9 +22,14 @@
 
 #include "objbase.h"
 #include "gdiplus.h"
+#include "winspool.h"
 #include "wine/test.h"
 
-#define expect(expected, got) ok(got == expected, "Expected %.8x, got %.8x\n", expected, got)
+#define expect(expected,got) expect_(__LINE__, expected, got)
+static inline void expect_(unsigned line, DWORD expected, DWORD got)
+{
+    ok_(__FILE__, line)(expected == got, "Expected %.8ld, got %.8ld\n", expected, got);
+}
 #define expectf_(expected, got, precision) ok(fabs((expected) - (got)) <= (precision), "Expected %f, got %f\n", (expected), (got))
 #define expectf(expected, got) expectf_((expected), (got), 0.001)
 
@@ -59,14 +64,14 @@ static void check_record(int count, const char *desc, const struct emfplus_recor
     todo_wine_if (expected->todo)
         ok(expected->record_type == actual->record_type && (expected->flags == actual->flags ||
             broken(expected->broken_flags == actual->flags)),
-            "%s.%i: Expected record type 0x%x, got 0x%x. Expected flags %#x, got %#x.\n", desc, count,
+            "%s.%i: Expected record type 0x%lx, got 0x%lx. Expected flags %#lx, got %#lx.\n", desc, count,
             expected->record_type, actual->record_type, expected->flags, actual->flags);
     }
     else
     {
     todo_wine_if (expected->todo)
         ok(expected->record_type == actual->record_type,
-            "%s.%i: Expected record type 0x%x, got 0x%x.\n", desc, count,
+            "%s.%i: Expected record type 0x%lx, got 0x%lx.\n", desc, count,
             expected->record_type, actual->record_type);
     }
 }
@@ -131,7 +136,7 @@ static int CALLBACK enum_emf_proc(HDC hDC, HANDLETABLE *lpHTable, const ENHMETAR
                 const EmfPlusRecordHeader *record = (const EmfPlusRecordHeader*)&comment->Data[offset];
 
                 ok(record->Size == record->DataSize + sizeof(EmfPlusRecordHeader),
-                    "%s: EMF+ record datasize %u and size %u mismatch\n", state->desc, record->DataSize, record->Size);
+                    "%s: EMF+ record datasize %lu and size %lu mismatch\n", state->desc, record->DataSize, record->Size);
 
                 ok(offset + record->DataSize <= comment->cbData,
                     "%s: EMF+ record truncated\n", state->desc);
@@ -191,7 +196,7 @@ static int CALLBACK enum_emf_proc(HDC hDC, HANDLETABLE *lpHTable, const ENHMETAR
     }
     else
     {
-        ok(0, "%s: Unexpected EMF 0x%x record\n", state->desc, lpEMFR->iType);
+        ok(0, "%s: Unexpected EMF 0x%lx record\n", state->desc, lpEMFR->iType);
     }
 
     return 1;
@@ -289,7 +294,7 @@ static BOOL CALLBACK play_metafile_proc(EmfPlusRecordType record_type, unsigned 
 
         todo_wine_if (state->expected[state->count].todo)
             ok(state->expected[state->count].record_type == record_type,
-                "%s.%i: expected record type 0x%x, got 0x%x\n", state->desc, state->count,
+                "%s.%i: expected record type 0x%lx, got 0x%x\n", state->desc, state->count,
                 state->expected[state->count].record_type, record_type);
         state->count++;
     }
@@ -2660,6 +2665,8 @@ static const emfplus_record properties_records[] = {
     { EmfPlusRecordTypeSetCompositingMode, CompositingModeSourceCopy },
     { EmfPlusRecordTypeSetCompositingQuality, CompositingQualityHighQuality },
     { EmfPlusRecordTypeSetInterpolationMode, InterpolationModeHighQualityBicubic },
+    { EmfPlusRecordTypeSetRenderingOrigin },
+    { EmfPlusRecordTypeSetRenderingOrigin },
     { EmfPlusRecordTypeEndOfFile },
     { EMR_EOF },
     { 0 }
@@ -2711,6 +2718,15 @@ static void test_properties(void)
     stat = GdipSetInterpolationMode(graphics, InterpolationModeDefault);
     expect(Ok, stat);
     stat = GdipSetInterpolationMode(graphics, InterpolationModeHighQuality);
+    expect(Ok, stat);
+
+    stat = GdipSetRenderingOrigin(graphics, 1, 2);
+    expect(Ok, stat);
+
+    stat = GdipSetRenderingOrigin(graphics, 1, 2);
+    expect(Ok, stat);
+
+    stat = GdipSetRenderingOrigin(graphics, 2, 1);
     expect(Ok, stat);
 
     stat = GdipDeleteGraphics(graphics);
@@ -3138,7 +3154,7 @@ static void test_unknownfontdecode(void)
     lstrcatW(path, L"wine_testfont0.ttf");
 
     file = CreateFileW(path, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
-    ok(file != INVALID_HANDLE_VALUE, "file creation failed, at %s, error %d\n",
+    ok(file != INVALID_HANDLE_VALUE, "file creation failed, at %s, error %ld\n",
         wine_dbgstr_w(path), GetLastError());
 
     res = FindResourceA(GetModuleHandleA(NULL), MAKEINTRESOURCEA(testfont0_resnum),
@@ -3457,6 +3473,407 @@ static void test_lineargradient(void)
     GdipDisposeImage((GpImage*)metafile);
 }
 
+static HDC create_printer_dc(void)
+{
+    char buffer[260];
+    DWORD len;
+    PRINTER_INFO_2A *pbuf = NULL;
+    DRIVER_INFO_3A *dbuf = NULL;
+    HANDLE hprn = 0;
+    HDC hdc = 0;
+    HMODULE winspool = LoadLibraryA("winspool.drv");
+    BOOL (WINAPI *pOpenPrinterA)(LPSTR, HANDLE *, LPPRINTER_DEFAULTSA);
+    BOOL (WINAPI *pGetDefaultPrinterA)(LPSTR, LPDWORD);
+    BOOL (WINAPI *pGetPrinterA)(HANDLE, DWORD, LPBYTE, DWORD, LPDWORD);
+    BOOL (WINAPI *pGetPrinterDriverA)(HANDLE, LPSTR, DWORD, LPBYTE, DWORD, LPDWORD);
+    BOOL (WINAPI *pClosePrinter)(HANDLE);
+
+    pGetDefaultPrinterA = (void *)GetProcAddress(winspool, "GetDefaultPrinterA");
+    pOpenPrinterA = (void *)GetProcAddress(winspool, "OpenPrinterA");
+    pGetPrinterA = (void *)GetProcAddress(winspool, "GetPrinterA");
+    pGetPrinterDriverA = (void *)GetProcAddress(winspool, "GetPrinterDriverA");
+    pClosePrinter = (void *)GetProcAddress(winspool, "ClosePrinter");
+
+    if (!pGetDefaultPrinterA || !pOpenPrinterA || !pGetPrinterA || !pGetPrinterDriverA || !pClosePrinter)
+        goto done;
+
+    len = sizeof(buffer);
+    if (!pGetDefaultPrinterA(buffer, &len)) goto done;
+    if (!pOpenPrinterA(buffer, &hprn, NULL)) goto done;
+
+    pGetPrinterA(hprn, 2, NULL, 0, &len);
+    pbuf = HeapAlloc(GetProcessHeap(), 0, len);
+    if (!pGetPrinterA(hprn, 2, (LPBYTE)pbuf, len, &len)) goto done;
+
+    pGetPrinterDriverA(hprn, NULL, 3, NULL, 0, &len);
+    dbuf = HeapAlloc(GetProcessHeap(), 0, len);
+    if (!pGetPrinterDriverA(hprn, NULL, 3, (LPBYTE)dbuf, len, &len)) goto done;
+
+    hdc = CreateDCA(dbuf->pDriverPath, pbuf->pPrinterName, pbuf->pPortName, pbuf->pDevMode);
+    trace("hdc %p for driver '%s' printer '%s' port '%s'\n", hdc,
+          dbuf->pDriverPath, pbuf->pPrinterName, pbuf->pPortName);
+done:
+    HeapFree(GetProcessHeap(), 0, dbuf);
+    HeapFree(GetProcessHeap(), 0, pbuf);
+    if (hprn) pClosePrinter(hprn);
+    if (winspool) FreeLibrary(winspool);
+    return hdc;
+}
+
+static void test_printer_dc(void)
+{
+    HDC hdc;
+    Status status;
+    RectF frame = { 0.0, 0.0, 1.0, 1.0 };
+    GpMetafile *metafile;
+    GpGraphics *graphics;
+    REAL dpix, dpiy;
+
+    hdc = create_printer_dc();
+    if (!hdc)
+    {
+        skip("could not create a DC for the default printer\n");
+        return;
+    }
+
+    status = GdipRecordMetafile(hdc, EmfTypeEmfPlusOnly, &frame, MetafileFrameUnitInch, L"winetest", &metafile);
+    expect(Ok, status);
+
+    status = GdipGetImageGraphicsContext((GpImage *)metafile, &graphics);
+    expect(Ok, status);
+
+    GdipGetDpiX(graphics, &dpix);
+    GdipGetDpiX(graphics, &dpiy);
+    expectf((REAL)(GetDeviceCaps(hdc, LOGPIXELSX)), dpix);
+    expectf((REAL)(GetDeviceCaps(hdc, LOGPIXELSY)), dpiy);
+
+    GdipDeleteGraphics(graphics);
+    GdipDisposeImage((GpImage *)metafile);
+}
+
+static const emfplus_record draw_ellipse_records[] =
+{
+    { EMR_HEADER },
+    { EmfPlusRecordTypeHeader },
+    { EmfPlusRecordTypeObject, ObjectTypePen << 8 },
+    { EmfPlusRecordTypeDrawEllipse, 0x4000 },
+    { EMR_SAVEDC, 0, 1 },
+    { EMR_SETICMMODE, 0, 1 },
+    { EMR_BITBLT, 0, 1 },
+    { EMR_RESTOREDC, 0, 1 },
+    { EmfPlusRecordTypeEndOfFile },
+    { EMR_EOF },
+    { 0 }
+};
+
+static void test_drawellipse(void)
+{
+    static const GpRectF frame = { 0.0f, 0.0f, 100.0f, 100.0f };
+
+    GpMetafile *metafile;
+    GpGraphics *graphics;
+    HENHMETAFILE hemf;
+    GpStatus stat;
+    GpPen *pen;
+    HDC hdc;
+
+    hdc = CreateCompatibleDC(0);
+    stat = GdipRecordMetafile(hdc, EmfTypeEmfPlusOnly, &frame, MetafileFrameUnitPixel, description, &metafile);
+    expect(Ok, stat);
+    DeleteDC(hdc);
+
+    stat = GdipGetImageGraphicsContext((GpImage *)metafile, &graphics);
+    expect(Ok, stat);
+
+    stat = GdipCreatePen1((ARGB)0xffff00ff, 10.0f, UnitPixel, &pen);
+    expect(Ok, stat);
+
+    stat = GdipDrawEllipse(graphics, pen, 1.0f, 1.0f, 16.0f, 32.0f);
+    expect(Ok, stat);
+
+    stat = GdipDeletePen(pen);
+    expect(Ok, stat);
+
+    stat = GdipDeleteGraphics(graphics);
+    expect(Ok, stat);
+    sync_metafile(&metafile, "draw_ellipse.emf");
+
+    stat = GdipGetHemfFromMetafile(metafile, &hemf);
+    expect(Ok, stat);
+
+    check_emfplus(hemf, draw_ellipse_records, "draw ellipse");
+    DeleteEnhMetaFile(hemf);
+
+    stat = GdipDisposeImage((GpImage*)metafile);
+    expect(Ok, stat);
+}
+
+static const emfplus_record fill_ellipse_records[] =
+{
+    { EMR_HEADER },
+    { EmfPlusRecordTypeHeader },
+    { EmfPlusRecordTypeFillEllipse, 0xc000 },
+    { EMR_SAVEDC, 0, 1 },
+    { EMR_SETICMMODE, 0, 1 },
+    { EMR_BITBLT, 0, 1 },
+    { EMR_RESTOREDC, 0, 1 },
+    { EmfPlusRecordTypeEndOfFile },
+    { EMR_EOF },
+    { 0 }
+};
+
+static void test_fillellipse(void)
+{
+    static const GpRectF frame = { 0.0f, 0.0f, 100.0f, 100.0f };
+
+    GpMetafile *metafile;
+    GpGraphics *graphics;
+    GpSolidFill *brush;
+    HENHMETAFILE hemf;
+    GpStatus stat;
+    HDC hdc;
+
+    hdc = CreateCompatibleDC(0);
+    stat = GdipRecordMetafile(hdc, EmfTypeEmfPlusOnly, &frame, MetafileFrameUnitPixel, description, &metafile);
+    expect(Ok, stat);
+    DeleteDC(hdc);
+
+    stat = GdipGetImageGraphicsContext((GpImage*)metafile, &graphics);
+    expect(Ok, stat);
+
+    stat = GdipCreateSolidFill(0xffaabbcc, &brush);
+    expect(Ok, stat);
+
+    stat = GdipFillEllipse(graphics, (GpBrush *)brush, 0.0f, 0.0f, 10.0f, 20.0f);
+    expect(Ok, stat);
+
+    stat = GdipDeleteBrush((GpBrush*)brush);
+    expect(Ok, stat);
+
+    stat = GdipDeleteGraphics(graphics);
+    expect(Ok, stat);
+    sync_metafile(&metafile, "fill_ellipse.emf");
+
+    stat = GdipGetHemfFromMetafile(metafile, &hemf);
+    expect(Ok, stat);
+
+    check_emfplus(hemf, fill_ellipse_records, "fill ellipse");
+
+    DeleteEnhMetaFile(hemf);
+
+    stat = GdipDisposeImage((GpImage*)metafile);
+    expect(Ok, stat);
+}
+
+static const emfplus_record draw_rectangle_records[] =
+{
+    { EMR_HEADER },
+    { EmfPlusRecordTypeHeader },
+    { EmfPlusRecordTypeObject, ObjectTypePen << 8 },
+    { EmfPlusRecordTypeDrawRects, 0x4000 },
+    { EMR_SAVEDC, 0, 1 },
+    { EMR_SETICMMODE, 0, 1 },
+    { EMR_BITBLT, 0, 1 },
+    { EMR_RESTOREDC, 0, 1 },
+    { EmfPlusRecordTypeEndOfFile },
+    { EMR_EOF },
+    { 0 }
+};
+
+static void test_drawrectangle(void)
+{
+    static const GpRectF frame = { 0.0f, 0.0f, 100.0f, 100.0f };
+
+    GpMetafile *metafile;
+    GpGraphics *graphics;
+    HENHMETAFILE hemf;
+    GpStatus stat;
+    GpPen *pen;
+    HDC hdc;
+
+    hdc = CreateCompatibleDC(0);
+    stat = GdipRecordMetafile(hdc, EmfTypeEmfPlusOnly, &frame, MetafileFrameUnitPixel, description, &metafile);
+    expect(Ok, stat);
+    DeleteDC(hdc);
+
+    stat = GdipGetImageGraphicsContext((GpImage *)metafile, &graphics);
+    expect(Ok, stat);
+
+    stat = GdipCreatePen1((ARGB)0xffff00ff, 10.0f, UnitPixel, &pen);
+    expect(Ok, stat);
+
+    stat = GdipDrawRectangle(graphics, pen, 1.0f, 1.0f, 16.0f, 32.0f);
+    expect(Ok, stat);
+
+    stat = GdipDeletePen(pen);
+    expect(Ok, stat);
+
+    stat = GdipDeleteGraphics(graphics);
+    expect(Ok, stat);
+    sync_metafile(&metafile, "draw_rectangle.emf");
+
+    stat = GdipGetHemfFromMetafile(metafile, &hemf);
+    expect(Ok, stat);
+
+    check_emfplus(hemf, draw_rectangle_records, "draw rectangle");
+    DeleteEnhMetaFile(hemf);
+
+    stat = GdipDisposeImage((GpImage*)metafile);
+    expect(Ok, stat);
+}
+
+static void test_offsetclip(void)
+{
+    static const GpRectF frame = { 0.0f, 0.0f, 100.0f, 100.0f };
+    static const emfplus_record offset_clip_records[] =
+    {
+       { EMR_HEADER },
+       { EmfPlusRecordTypeHeader },
+       { EmfPlusRecordTypeOffsetClip },
+       { EmfPlusRecordTypeOffsetClip },
+       { EmfPlusRecordTypeEndOfFile },
+       { EMR_EOF },
+       { 0 },
+    };
+
+    GpMetafile *metafile;
+    GpGraphics *graphics;
+    HENHMETAFILE hemf;
+    GpStatus stat;
+    HDC hdc;
+
+    hdc = CreateCompatibleDC(0);
+    stat = GdipRecordMetafile(hdc, EmfTypeEmfPlusOnly, &frame, MetafileFrameUnitPixel, description, &metafile);
+    expect(Ok, stat);
+    DeleteDC(hdc);
+
+    stat = GdipGetImageGraphicsContext((GpImage *)metafile, &graphics);
+    expect(Ok, stat);
+
+    stat = GdipTranslateClip(graphics, 1.0f, -1.0f);
+    expect(Ok, stat);
+
+    stat = GdipTranslateClipI(graphics, 2, 3);
+    expect(Ok, stat);
+
+    stat = GdipDeleteGraphics(graphics);
+    expect(Ok, stat);
+    sync_metafile(&metafile, "offset_clip.emf");
+
+    stat = GdipGetHemfFromMetafile(metafile, &hemf);
+    expect(Ok, stat);
+
+    check_emfplus(hemf, offset_clip_records, "offset clip");
+    DeleteEnhMetaFile(hemf);
+
+    stat = GdipDisposeImage((GpImage*)metafile);
+    expect(Ok, stat);
+}
+
+static void test_resetclip(void)
+{
+    static const GpRectF frame = { 0.0f, 0.0f, 100.0f, 100.0f };
+    static const emfplus_record reset_clip_records[] =
+    {
+       { EMR_HEADER },
+       { EmfPlusRecordTypeHeader },
+       { EmfPlusRecordTypeResetClip },
+       { EmfPlusRecordTypeResetClip },
+       { EmfPlusRecordTypeEndOfFile },
+       { EMR_EOF },
+       { 0 },
+    };
+
+    GpMetafile *metafile;
+    GpGraphics *graphics;
+    HENHMETAFILE hemf;
+    GpStatus stat;
+    HDC hdc;
+
+    hdc = CreateCompatibleDC(0);
+    stat = GdipRecordMetafile(hdc, EmfTypeEmfPlusOnly, &frame, MetafileFrameUnitPixel, description, &metafile);
+    expect(Ok, stat);
+    DeleteDC(hdc);
+
+    stat = GdipGetImageGraphicsContext((GpImage *)metafile, &graphics);
+    expect(Ok, stat);
+
+    stat = GdipResetClip(graphics);
+    expect(Ok, stat);
+
+    stat = GdipResetClip(graphics);
+    expect(Ok, stat);
+
+    stat = GdipDeleteGraphics(graphics);
+    expect(Ok, stat);
+    sync_metafile(&metafile, "reset_clip.emf");
+
+    stat = GdipGetHemfFromMetafile(metafile, &hemf);
+    expect(Ok, stat);
+
+    check_emfplus(hemf, reset_clip_records, "reset clip");
+    DeleteEnhMetaFile(hemf);
+
+    stat = GdipDisposeImage((GpImage*)metafile);
+    expect(Ok, stat);
+}
+
+static void test_setclippath(void)
+{
+    static const GpRectF frame = { 0.0f, 0.0f, 100.0f, 100.0f };
+    static const emfplus_record set_clip_path_records[] =
+    {
+       { EMR_HEADER },
+       { EmfPlusRecordTypeHeader },
+       { EmfPlusRecordTypeObject, ObjectTypePath << 8 },
+       { EmfPlusRecordTypeSetClipPath, 0x100 },
+       { EmfPlusRecordTypeEndOfFile },
+       { EMR_EOF },
+       { 0 },
+    };
+
+    GpMetafile *metafile;
+    GpGraphics *graphics;
+    HENHMETAFILE hemf;
+    GpStatus stat;
+    GpPath *path;
+    HDC hdc;
+
+    hdc = CreateCompatibleDC(0);
+    stat = GdipRecordMetafile(hdc, EmfTypeEmfPlusOnly, &frame, MetafileFrameUnitPixel, description, &metafile);
+    expect(Ok, stat);
+    DeleteDC(hdc);
+
+    stat = GdipGetImageGraphicsContext((GpImage *)metafile, &graphics);
+    expect(Ok, stat);
+
+    stat = GdipCreatePath(FillModeAlternate, &path);
+    expect(Ok, stat);
+    stat = GdipAddPathLine(path, 5, 5, 30, 30);
+    expect(Ok, stat);
+    stat = GdipAddPathLine(path, 30, 30, 5, 30);
+    expect(Ok, stat);
+
+    stat = GdipSetClipPath(graphics, path, CombineModeIntersect);
+    expect(Ok, stat);
+
+    stat = GdipDeletePath(path);
+    expect(Ok, stat);
+
+    stat = GdipDeleteGraphics(graphics);
+    expect(Ok, stat);
+    sync_metafile(&metafile, "set_clip_path.emf");
+
+    stat = GdipGetHemfFromMetafile(metafile, &hemf);
+    expect(Ok, stat);
+
+    check_emfplus(hemf, set_clip_path_records, "set clip path");
+    DeleteEnhMetaFile(hemf);
+
+    stat = GdipDisposeImage((GpImage*)metafile);
+    expect(Ok, stat);
+}
+
 START_TEST(metafile)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -3510,6 +3927,13 @@ START_TEST(metafile)
     test_unknownfontdecode();
     test_fillregion();
     test_lineargradient();
+    test_printer_dc();
+    test_drawellipse();
+    test_fillellipse();
+    test_drawrectangle();
+    test_offsetclip();
+    test_resetclip();
+    test_setclippath();
 
     GdiplusShutdown(gdiplusToken);
 }

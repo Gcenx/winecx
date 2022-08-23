@@ -23,7 +23,7 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "wingdi.h"
+#include "ntgdi.h"
 #include "winuser.h"
 #include "winnls.h"
 #include "usp10.h"
@@ -632,11 +632,11 @@ static VOID *load_CMAP_format12_table(HDC hdc, ScriptCache *psc)
 
     if (!psc->CMAP_Table)
     {
-        length = GetFontData(hdc, CMAP_TAG , 0, NULL, 0);
+        length = NtGdiGetFontData(hdc, CMAP_TAG , 0, NULL, 0);
         if (length != GDI_ERROR)
         {
             psc->CMAP_Table = heap_alloc(length);
-            GetFontData(hdc, CMAP_TAG , 0, psc->CMAP_Table, length);
+            NtGdiGetFontData(hdc, CMAP_TAG , 0, psc->CMAP_Table, length);
             TRACE("Loaded cmap table of %i bytes\n",length);
         }
         else
@@ -676,7 +676,7 @@ DWORD OpenType_CMAP_GetGlyphIndex(HDC hdc, ScriptCache *psc, DWORD utf32c, WORD 
     if (utf32c < 0x10000)
     {
         WCHAR ch = utf32c;
-        return GetGlyphIndicesW(hdc, &ch, 1, glyph_index, flags);
+        return NtGdiGetGlyphIndicesW(hdc, &ch, 1, glyph_index, flags);
     }
 
     if (!psc->CMAP_format12_Table)
@@ -1638,7 +1638,7 @@ static void GPOS_convert_design_units_to_device(const OUTLINETEXTMETRICW *otm, c
 {
     int emHeight = otm->otmTextMetrics.tmAscent + otm->otmTextMetrics.tmDescent - otm->otmTextMetrics.tmInternalLeading;
 
-    TRACE("emHeight %i lfWidth %i\n",emHeight, logfont->lfWidth);
+    TRACE("emHeight %i lfWidth %li\n",emHeight, logfont->lfWidth);
     *devX = (desX * emHeight) / (double)otm->otmEMSquare;
     *devY = (desY * emHeight) / (double)otm->otmEMSquare;
     if (logfont->lfWidth)
@@ -2607,7 +2607,7 @@ static void usp10_script_cache_add_script_list(ScriptCache *script_cache,
     if (!(count = GET_BE_WORD(list->ScriptCount)))
         return;
 
-    TRACE("Adding %lu scripts.\n", count);
+    TRACE("Adding %Iu scripts.\n", count);
 
     initial_count = script_cache->script_count;
     for (i = 0; i < count; ++i)
@@ -2725,7 +2725,7 @@ static void usp10_script_add_language_list(LoadedScript *script,
     if (!(count = GET_BE_WORD(list->LangSysCount)))
         return;
 
-    TRACE("Adding %lu languages.\n", count);
+    TRACE("Adding %Iu languages.\n", count);
 
     initial_count = script->language_count;
     for (i = 0; i < count; ++i)

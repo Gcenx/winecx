@@ -1,25 +1,28 @@
 PROGRAMS = wrc
-MANPAGES = wrc.man.in
+EXTRALIBS = $(GETTEXTPO_LIBS)
 
 C_SRCS = \
-	dumpres.c \
 	genres.c \
 	newstruc.c \
 	po.c \
-	translation.c \
 	utils.c \
-	wrc.c \
-	writeres.c
+	wpp.c \
+	wrc.c
 
-LEX_SRCS   = parser.l
-BISON_SRCS = parser.y
+LEX_SRCS = \
+	parser.l \
+	ppl.l
+
+BISON_SRCS = \
+	parser.y \
+	ppy.y
+
+MANPAGES = wrc.man.in
 
 wrc_EXTRADEFS = \
 	-DNLSDIR="\"${nlsdir}\"" \
 	-DINCLUDEDIR="\"${includedir}\"" \
 	-DBIN_TO_NLSDIR=\"`${MAKEDEP} -R ${bindir} ${nlsdir}`\" \
 	-DBIN_TO_INCLUDEDIR=\"`${MAKEDEP} -R ${bindir} ${includedir}`\"
-
-EXTRALIBS = $(GETTEXTPO_LIBS) -lwpp
 
 INSTALL_DEV = $(PROGRAMS)

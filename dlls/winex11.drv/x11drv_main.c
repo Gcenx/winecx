@@ -20,19 +20,15 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef HAVE_SYS_TIME_H
-# include <sys/time.h>
-#endif
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+#include <sys/time.h>
+#include <unistd.h>
+#include <dlfcn.h>
 #include <X11/cursorfont.h>
 #include <X11/Xlib.h>
 #ifdef HAVE_XKB
@@ -85,7 +81,6 @@ BOOL client_side_with_render = TRUE;
 BOOL shape_layered_windows = TRUE;
 int copy_default_colors = 128;
 int alloc_system_colors = 256;
-DWORD thread_data_tls_index = TLS_OUT_OF_INDEXES;
 int xrender_error_base = 0;
 HMODULE x11drv_module = 0;
 char *process_name = NULL;
@@ -97,25 +92,10 @@ static int err_callback_result;              /* error callback result */
 static unsigned long err_serial;             /* serial number of first request */
 static int (*old_error_handler)( Display *, XErrorEvent * );
 static BOOL use_xim = TRUE;
-static char input_style[20];
+static WCHAR input_style[20];
 
-static CRITICAL_SECTION x11drv_section;
-static CRITICAL_SECTION_DEBUG critsect_debug =
-{
-    0, 0, &x11drv_section,
-    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
-    0, 0, { (DWORD_PTR)(__FILE__ ": x11drv_section") }
-};
-static CRITICAL_SECTION x11drv_section = { &critsect_debug, -1, 0, 0, 0, 0 };
-
-static CRITICAL_SECTION x11drv_error_section;
-static CRITICAL_SECTION_DEBUG x11drv_error_section_debug =
-{
-    0, 0, &x11drv_error_section,
-    { &x11drv_error_section_debug.ProcessLocksList, &x11drv_error_section_debug.ProcessLocksList },
-    0, 0, { (DWORD_PTR)(__FILE__ ": x11drv_error_section") }
-};
-static CRITICAL_SECTION x11drv_error_section = { &x11drv_error_section_debug, -1, 0, 0, 0, 0 };
+static pthread_mutex_t d3dkmt_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t error_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 struct d3dkmt_vidpn_source
 {
@@ -221,9 +201,7 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "text/plain",
     "text/rtf",
     "text/richtext",
-    "text/uri-list",
-    "_CX_WORKAREA", /* CodeWeavers Hack bug 5752 */
-    "_CX_APPLEWM_TAG", /* CodeWeavers Hack bug 9517 */
+    "text/uri-list"
 };
 
 /***********************************************************************
@@ -268,7 +246,7 @@ static inline BOOL ignore_error( Display *display, XErrorEvent *event )
  */
 void X11DRV_expect_error( Display *display, x11drv_error_callback callback, void *arg )
 {
-    EnterCriticalSection( &x11drv_error_section );
+    pthread_mutex_lock( &error_mutex );
     err_callback         = callback;
     err_callback_display = display;
     err_callback_arg     = arg;
@@ -287,7 +265,7 @@ int X11DRV_check_error(void)
 {
     int res = err_callback_result;
     err_callback = NULL;
-    LeaveCriticalSection( &x11drv_error_section );
+    pthread_mutex_unlock( &error_mutex );
     return res;
 }
 
@@ -345,16 +323,98 @@ static void init_pixmap_formats( Display *display )
 }
 
 
+HKEY reg_open_key( HKEY root, const WCHAR *name, ULONG name_len )
+{
+    UNICODE_STRING nameW = { name_len, name_len, (WCHAR *)name };
+    OBJECT_ATTRIBUTES attr;
+    HANDLE ret;
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = root;
+    attr.ObjectName = &nameW;
+    attr.Attributes = 0;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    return NtOpenKeyEx( &ret, MAXIMUM_ALLOWED, &attr, 0 ) ? 0 : ret;
+}
+
+
+HKEY open_hkcu_key( const char *name )
+{
+    WCHAR bufferW[256];
+    static HKEY hkcu;
+
+    if (!hkcu)
+    {
+        char buffer[256];
+        DWORD_PTR sid_data[(sizeof(TOKEN_USER) + SECURITY_MAX_SID_SIZE) / sizeof(DWORD_PTR)];
+        DWORD i, len = sizeof(sid_data);
+        SID *sid;
+
+        if (NtQueryInformationToken( GetCurrentThreadEffectiveToken(), TokenUser, sid_data, len, &len ))
+            return 0;
+
+        sid = ((TOKEN_USER *)sid_data)->User.Sid;
+        len = sprintf( buffer, "\\Registry\\User\\S-%u-%u", sid->Revision,
+                       MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5],
+                                           sid->IdentifierAuthority.Value[4] ),
+                                 MAKEWORD( sid->IdentifierAuthority.Value[3],
+                                           sid->IdentifierAuthority.Value[2] )));
+        for (i = 0; i < sid->SubAuthorityCount; i++)
+            len += sprintf( buffer + len, "-%u", sid->SubAuthority[i] );
+
+        ascii_to_unicode( bufferW, buffer, len );
+        hkcu = reg_open_key( NULL, bufferW, len * sizeof(WCHAR) );
+    }
+
+    return reg_open_key( hkcu, bufferW, asciiz_to_unicode( bufferW, name ) - sizeof(WCHAR) );
+}
+
+
+ULONG query_reg_value( HKEY hkey, const WCHAR *name, KEY_VALUE_PARTIAL_INFORMATION *info, ULONG size )
+{
+    unsigned int name_size = name ? lstrlenW( name ) * sizeof(WCHAR) : 0;
+    UNICODE_STRING nameW = { name_size, name_size, (WCHAR *)name };
+
+    if (NtQueryValueKey( hkey, &nameW, KeyValuePartialInformation,
+                         info, size, &size ))
+        return 0;
+
+    return size - FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data);
+}
+
+
 /***********************************************************************
  *		get_config_key
  *
  * Get a config key from either the app-specific or the default config
  */
 static inline DWORD get_config_key( HKEY defkey, HKEY appkey, const char *name,
-                                    char *buffer, DWORD size )
+                                    WCHAR *buffer, DWORD size )
 {
-    if (appkey && !RegQueryValueExA( appkey, name, 0, NULL, (LPBYTE)buffer, &size )) return 0;
-    if (defkey && !RegQueryValueExA( defkey, name, 0, NULL, (LPBYTE)buffer, &size )) return 0;
+    WCHAR nameW[128];
+    char buf[2048];
+    KEY_VALUE_PARTIAL_INFORMATION *info = (void *)buf;
+
+    asciiz_to_unicode( nameW, name );
+
+    if (appkey && query_reg_value( appkey, nameW, info, sizeof(buf) ))
+    {
+        size = min( info->DataLength, size - sizeof(WCHAR) );
+        memcpy( buffer, info->Data, size );
+        buffer[size / sizeof(WCHAR)] = 0;
+        return 0;
+    }
+
+    if (defkey && query_reg_value( defkey, nameW, info, sizeof(buf) ))
+    {
+        size = min( info->DataLength, size - sizeof(WCHAR) );
+        memcpy( buffer, info->Data, size );
+        buffer[size / sizeof(WCHAR)] = 0;
+        return 0;
+    }
+
     return ERROR_FILE_NOT_FOUND;
 }
 
@@ -369,21 +429,20 @@ static void setup_options(void)
     static const WCHAR steamwebhelperW[] = {'s','t','e','a','m','w','e','b','h','e','l','p','e','r','.','e','x','e',0};
     static const WCHAR steamW[] = {'s','t','e','a','m','.','e','x','e',0};
     static const WCHAR x11driverW[] = {'\\','X','1','1',' ','D','r','i','v','e','r',0};
-    char buffer[64];
-    WCHAR bufferW[MAX_PATH+16];
+    WCHAR buffer[MAX_PATH+16];
     HKEY hkey, appkey = 0;
     DWORD len;
 
     /* @@ Wine registry key: HKCU\Software\Wine\X11 Driver */
-    if (RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\X11 Driver", &hkey )) hkey = 0;
+    hkey = open_hkcu_key( "Software\\Wine\\X11 Driver" );
 
     /* open the app-specific key */
 
-    len = (GetModuleFileNameW( 0, bufferW, MAX_PATH ));
+    len = GetModuleFileNameW( 0, buffer, MAX_PATH );
     if (len && len < MAX_PATH)
     {
         HKEY tmpkey;
-        WCHAR *p, *appname = bufferW;
+        WCHAR *p, *appname = buffer;
         if ((p = strrchrW( appname, '/' ))) appname = p + 1;
         if ((p = strrchrW( appname, '\\' ))) appname = p + 1;
         CharLowerW(appname);
@@ -392,10 +451,10 @@ static void setup_options(void)
             WideCharToMultiByte( CP_UNIXCP, 0, appname, -1, process_name, len, NULL, NULL );
         strcatW( appname, x11driverW );
         /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe\X11 Driver */
-        if (!RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\AppDefaults", &tmpkey ))
+        if ((tmpkey = open_hkcu_key( "Software\\Wine\\AppDefaults" )))
         {
-            if (RegOpenKeyW( tmpkey, appname, &appkey )) appkey = 0;
-            RegCloseKey( tmpkey );
+            appkey = reg_open_key( tmpkey, appname, lstrlenW( appname ) * sizeof(WCHAR) );
+            NtClose( tmpkey );
         }
 
         if (!lstrcmpW(appname, steamwebhelperW) || !strcmpW(appname, steamW))
@@ -433,7 +492,7 @@ static void setup_options(void)
         grab_fullscreen = IS_OPTION_TRUE( buffer[0] );
 
     if (!get_config_key( hkey, appkey, "ScreenDepth", buffer, sizeof(buffer) ))
-        default_visual.depth = atoi(buffer);
+        default_visual.depth = strtolW( buffer, NULL, 0 );
 
     if (!get_config_key( hkey, appkey, "ClientSideGraphics", buffer, sizeof(buffer) ))
         client_side_graphics = IS_OPTION_TRUE( buffer[0] );
@@ -451,13 +510,13 @@ static void setup_options(void)
         private_color_map = IS_OPTION_TRUE( buffer[0] );
 
     if (!get_config_key( hkey, appkey, "PrimaryMonitor", buffer, sizeof(buffer) ))
-        primary_monitor = atoi( buffer );
+        primary_monitor = strtolW( buffer, NULL, 0 );
 
     if (!get_config_key( hkey, appkey, "CopyDefaultColors", buffer, sizeof(buffer) ))
-        copy_default_colors = atoi(buffer);
+        copy_default_colors = strtolW( buffer, NULL, 0 );
 
     if (!get_config_key( hkey, appkey, "AllocSystemColors", buffer, sizeof(buffer) ))
-        alloc_system_colors = atoi(buffer);
+        alloc_system_colors = strtolW( buffer, NULL, 0 );
 
     get_config_key( hkey, appkey, "InputStyle", input_style, sizeof(input_style) );
 
@@ -470,8 +529,8 @@ static void setup_options(void)
         }
     }
 
-    if (appkey) RegCloseKey( appkey );
-    if (hkey) RegCloseKey( hkey );
+    NtClose( appkey );
+    NtClose( hkey );
 }
 
 #ifdef SONAME_LIBXCOMPOSITE
@@ -607,8 +666,6 @@ static BOOL process_attach(void)
 
     setup_options();
 
-    if ((thread_data_tls_index = TlsAlloc()) == TLS_OUT_OF_INDEXES) return FALSE;
-
     /* Open display */
 
     if (!XInitThreads()) ERR( "XInitThreads failed, trouble ahead\n" );
@@ -625,9 +682,7 @@ static BOOL process_attach(void)
 
     XInternAtoms( display, (char **)atom_names, NB_XATOMS - FIRST_XATOM, False, X11DRV_Atoms );
 
-    winContext = XUniqueContext();
-    win_data_context = XUniqueContext();
-    cursor_context = XUniqueContext();
+    init_win_context();
 
     if (TRACE_ON(synchronous)) XSynchronize( display, True );
 
@@ -650,6 +705,7 @@ static BOOL process_attach(void)
     X11DRV_InitKeyboard( gdi_display );
     if (use_xim) use_xim = X11DRV_InitXIM( input_style );
 
+    init_user_driver();
     X11DRV_DisplayDevices_Init(FALSE);
     return TRUE;
 }
@@ -658,18 +714,19 @@ static BOOL process_attach(void)
 /***********************************************************************
  *           ThreadDetach (X11DRV.@)
  */
-void CDECL X11DRV_ThreadDetach(void)
+void X11DRV_ThreadDetach(void)
 {
-    struct x11drv_thread_data *data = TlsGetValue( thread_data_tls_index );
+    struct x11drv_thread_data *data = x11drv_thread_data();
 
     if (data)
     {
+        vulkan_thread_detach();
         if (data->xim) XCloseIM( data->xim );
         if (data->font_set) XFreeFontSet( data->display, data->font_set );
         XCloseDisplay( data->display );
         HeapFree( GetProcessHeap(), 0, data );
         /* clear data in case we get re-entered from user32 before the thread is truly dead */
-        TlsSetValue( thread_data_tls_index, NULL );
+        NtUserGetThreadInfo()->driver_data = NULL;
     }
 }
 
@@ -730,7 +787,7 @@ struct x11drv_thread_data *x11drv_init_thread_data(void)
     if (TRACE_ON(synchronous)) XSynchronize( data->display, True );
 
     set_queue_display_fd( data->display );
-    TlsSetValue( thread_data_tls_index, data );
+    NtUserGetThreadInfo()->driver_data = data;
 
     if (use_xim) X11DRV_SetupXIM();
 
@@ -760,7 +817,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
 /***********************************************************************
  *              SystemParametersInfo (X11DRV.@)
  */
-BOOL CDECL X11DRV_SystemParametersInfo( UINT action, UINT int_param, void *ptr_param, UINT flags )
+BOOL X11DRV_SystemParametersInfo( UINT action, UINT int_param, void *ptr_param, UINT flags )
 {
     switch (action)
     {
@@ -805,7 +862,7 @@ NTSTATUS CDECL X11DRV_D3DKMTSetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNE
 
     TRACE("(%p)\n", desc);
 
-    EnterCriticalSection( &x11drv_section );
+    pthread_mutex_lock( &d3dkmt_mutex );
 
     /* Check parameters */
     for (i = 0; i < desc->VidPnSourceCount; ++i)
@@ -904,7 +961,7 @@ NTSTATUS CDECL X11DRV_D3DKMTSetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNE
     }
 
 done:
-    LeaveCriticalSection( &x11drv_section );
+    pthread_mutex_unlock( &d3dkmt_mutex );
     return status;
 }
 
@@ -920,15 +977,15 @@ NTSTATUS CDECL X11DRV_D3DKMTCheckVidPnExclusiveOwnership( const D3DKMT_CHECKVIDP
     if (!desc || !desc->hAdapter)
         return STATUS_INVALID_PARAMETER;
 
-    EnterCriticalSection( &x11drv_section );
+    pthread_mutex_lock( &d3dkmt_mutex );
     LIST_FOR_EACH_ENTRY( source, &d3dkmt_vidpn_sources, struct d3dkmt_vidpn_source, entry )
     {
         if (source->id == desc->VidPnSourceId && source->type == D3DKMT_VIDPNSOURCEOWNER_EXCLUSIVE)
         {
-            LeaveCriticalSection( &x11drv_section );
+            pthread_mutex_unlock( &d3dkmt_mutex );
             return STATUS_GRAPHICS_PRESENT_OCCLUDED;
         }
     }
-    LeaveCriticalSection( &x11drv_section );
+    pthread_mutex_unlock( &d3dkmt_mutex );
     return STATUS_SUCCESS;
 }

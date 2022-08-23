@@ -23,7 +23,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -35,7 +34,12 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
+
+#if defined(__APPLE__) && defined(__x86_64__)
+#include <sys/utsname.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -52,11 +56,26 @@
 struct notify
 {
     struct list       entry;    /* entry in list of notifications */
-    struct event     *event;    /* event to set when changing this key */
+    struct event    **events;   /* events to set when changing this key */
+    unsigned int      event_count; /* number of events */
     int               subtree;  /* true if subtree notification */
     unsigned int      filter;   /* which events to notify on */
     obj_handle_t      hkey;     /* hkey associated with this notification */
     struct process   *process;  /* process in which the hkey is valid */
+};
+
+static const WCHAR key_name[] = {'K','e','y'};
+
+struct type_descr key_type =
+{
+    { key_name, sizeof(key_name) },   /* name */
+    KEY_ALL_ACCESS | SYNCHRONIZE,     /* valid_access */
+    {                                 /* mapping */
+        STANDARD_RIGHTS_READ | KEY_NOTIFY | KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE,
+        STANDARD_RIGHTS_WRITE | KEY_CREATE_SUB_KEY | KEY_SET_VALUE,
+        STANDARD_RIGHTS_EXECUTE | KEY_CREATE_LINK | KEY_NOTIFY | KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE,
+        KEY_ALL_ACCESS
+    },
 };
 
 /* a registry key */
@@ -86,6 +105,7 @@ struct key
 #define KEY_SYMLINK  0x0008  /* key is a symbolic link */
 #define KEY_WOW64    0x0010  /* key contains a Wow6432Node subkey */
 #define KEY_WOWSHARE 0x0020  /* key is a Wow64 shared key (used for Software\Classes) */
+#define KEY_PREDEF   0x0040  /* key is marked as predefined */
 
 /* a key value */
 struct key_value
@@ -130,6 +150,10 @@ struct save_branch_info
 static int save_branch_count;
 static struct save_branch_info save_branch_info[MAX_SAVE_BRANCH_INFO];
 
+unsigned int supported_machines_count = 0;
+unsigned short supported_machines[8];
+unsigned short native_machine = 0;
+int wow64_using_32bit_prefix = 0;
 
 /* information about a file being loaded */
 struct file_load_info
@@ -145,7 +169,6 @@ struct file_load_info
 
 
 static void key_dump( struct object *obj, int verbose );
-static struct object_type *key_get_type( struct object *obj );
 static unsigned int key_map_access( struct object *obj, unsigned int access );
 static struct security_descriptor *key_get_sd( struct object *obj );
 static WCHAR *key_get_full_name( struct object *obj, data_size_t *len );
@@ -155,8 +178,8 @@ static void key_destroy( struct object *obj );
 static const struct object_ops key_ops =
 {
     sizeof(struct key),      /* size */
+    &key_type,               /* type */
     key_dump,                /* dump */
-    key_get_type,            /* get_type */
     no_add_queue,            /* add_queue */
     NULL,                    /* remove_queue */
     NULL,                    /* signaled */
@@ -305,22 +328,20 @@ static void key_dump( struct object *obj, int verbose )
     fprintf( stderr, "\n" );
 }
 
-static struct object_type *key_get_type( struct object *obj )
-{
-    static const WCHAR name[] = {'K','e','y'};
-    static const struct unicode_str str = { name, sizeof(name) };
-    return get_object_type( &str );
-}
-
 /* notify waiter and maybe delete the notification */
 static void do_notification( struct key *key, struct notify *notify, int del )
 {
-    if (notify->event)
+    unsigned int i;
+
+    for (i = 0; i < notify->event_count; ++i)
     {
-        set_event( notify->event );
-        release_object( notify->event );
-        notify->event = NULL;
+        set_event( notify->events[i] );
+        release_object( notify->events[i] );
     }
+    free( notify->events );
+    notify->events = NULL;
+    notify->event_count = 0;
+
     if (del)
     {
         list_remove( &notify->entry );
@@ -341,13 +362,9 @@ static inline struct notify *find_notify( struct key *key, struct process *proce
 
 static unsigned int key_map_access( struct object *obj, unsigned int access )
 {
-    if (access & GENERIC_READ)    access |= KEY_READ;
-    if (access & GENERIC_WRITE)   access |= KEY_WRITE;
-    if (access & GENERIC_EXECUTE) access |= KEY_EXECUTE;
-    if (access & GENERIC_ALL)     access |= KEY_ALL_ACCESS;
+    access = default_map_access( obj, access );
     /* filter the WOW64 masks, as they aren't real access bits */
-    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL |
-                      KEY_WOW64_64KEY | KEY_WOW64_32KEY);
+    return access & ~(KEY_WOW64_64KEY | KEY_WOW64_32KEY);
 }
 
 static struct security_descriptor *key_get_sd( struct object *obj )
@@ -358,12 +375,12 @@ static struct security_descriptor *key_get_sd( struct object *obj )
 
     if (!key_default_sd)
     {
-        size_t users_sid_len = security_sid_len( security_builtin_users_sid );
-        size_t admins_sid_len = security_sid_len( security_builtin_admins_sid );
-        size_t dacl_len = sizeof(ACL) + 2 * offsetof( ACCESS_ALLOWED_ACE, SidStart )
-                          + users_sid_len + admins_sid_len;
-        ACCESS_ALLOWED_ACE *aaa;
-        ACL *dacl;
+        struct acl *dacl;
+        struct ace *ace;
+        struct sid *sid;
+        size_t users_sid_len = sid_len( &builtin_users_sid );
+        size_t admins_sid_len = sid_len( &builtin_admins_sid );
+        size_t dacl_len = sizeof(*dacl) + 2 * sizeof(*ace) + users_sid_len + admins_sid_len;
 
         key_default_sd = mem_alloc( sizeof(*key_default_sd) + 2 * admins_sid_len + dacl_len );
         key_default_sd->control   = SE_DACL_PRESENT;
@@ -371,27 +388,19 @@ static struct security_descriptor *key_get_sd( struct object *obj )
         key_default_sd->group_len = admins_sid_len;
         key_default_sd->sacl_len  = 0;
         key_default_sd->dacl_len  = dacl_len;
-        memcpy( key_default_sd + 1, security_builtin_admins_sid, admins_sid_len );
-        memcpy( (char *)(key_default_sd + 1) + admins_sid_len, security_builtin_admins_sid, admins_sid_len );
+        sid = (struct sid *)(key_default_sd + 1);
+        sid = copy_sid( sid, &builtin_admins_sid );
+        sid = copy_sid( sid, &builtin_admins_sid );
 
-        dacl = (ACL *)((char *)(key_default_sd + 1) + 2 * admins_sid_len);
-        dacl->AclRevision = ACL_REVISION;
-        dacl->Sbz1 = 0;
-        dacl->AclSize = dacl_len;
-        dacl->AceCount = 2;
-        dacl->Sbz2 = 0;
-        aaa = (ACCESS_ALLOWED_ACE *)(dacl + 1);
-        aaa->Header.AceType = ACCESS_ALLOWED_ACE_TYPE;
-        aaa->Header.AceFlags = INHERIT_ONLY_ACE | CONTAINER_INHERIT_ACE;
-        aaa->Header.AceSize = offsetof( ACCESS_ALLOWED_ACE, SidStart ) + users_sid_len;
-        aaa->Mask = GENERIC_READ;
-        memcpy( &aaa->SidStart, security_builtin_users_sid, users_sid_len );
-        aaa = (ACCESS_ALLOWED_ACE *)((char *)aaa + aaa->Header.AceSize);
-        aaa->Header.AceType = ACCESS_ALLOWED_ACE_TYPE;
-        aaa->Header.AceFlags = 0;
-        aaa->Header.AceSize = offsetof( ACCESS_ALLOWED_ACE, SidStart ) + admins_sid_len;
-        aaa->Mask = KEY_ALL_ACCESS;
-        memcpy( &aaa->SidStart, security_builtin_admins_sid, admins_sid_len );
+        dacl = (struct acl *)((char *)(key_default_sd + 1) + 2 * admins_sid_len);
+        dacl->revision = ACL_REVISION;
+        dacl->pad1     = 0;
+        dacl->size     = dacl_len;
+        dacl->count    = 2;
+        dacl->pad2     = 0;
+        ace = set_ace( ace_first( dacl ), &builtin_users_sid, ACCESS_ALLOWED_ACE_TYPE,
+                       INHERIT_ONLY_ACE | CONTAINER_INHERIT_ACE, GENERIC_READ );
+        set_ace( ace_next( ace ), &builtin_admins_sid, ACCESS_ALLOWED_ACE_TYPE, 0, KEY_ALL_ACCESS );
     }
     return key_default_sd;
 }
@@ -402,6 +411,12 @@ static WCHAR *key_get_full_name( struct object *obj, data_size_t *ret_len )
     struct key *key = (struct key *) obj;
     data_size_t len = sizeof(root_name) - sizeof(WCHAR);
     char *ret;
+
+    if (key->flags & KEY_DELETED)
+    {
+        set_error( STATUS_KEY_DELETED );
+        return NULL;
+    }
 
     for (key = (struct key *)obj; key != root_key; key = key->parent) len += key->namelen + sizeof(WCHAR);
     if (!(ret = malloc( len ))) return NULL;
@@ -785,6 +800,7 @@ static struct key *open_key( struct key *key, const struct unicode_str *name, un
         return NULL;
     }
     if (debug_level > 1) dump_operation( key, NULL, "Open" );
+    if (key->flags & KEY_PREDEF) set_error( STATUS_PREDEFINED_HANDLE );
     grab_object( key );
     return key;
 }
@@ -815,6 +831,7 @@ static struct key *create_key( struct key *key, const struct unicode_str *name,
             return NULL;
         }
         if (debug_level > 1) dump_operation( key, NULL, "Open" );
+        if (key->flags & KEY_PREDEF) set_error( STATUS_PREDEFINED_HANDLE );
         grab_object( key );
         return key;
     }
@@ -908,6 +925,12 @@ static void enum_key( struct key *key, int index, int info_class, struct enum_ke
     data_size_t max_value = 0, max_data = 0;
     WCHAR *fullname = NULL;
     char *data;
+
+    if (key->flags & KEY_PREDEF)
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        return;
+    }
 
     if (index != -1)  /* -1 means use the specified key directly */
     {
@@ -1003,6 +1026,12 @@ static int delete_key( struct key *key, int recurse )
         return -1;
     }
     assert( parent );
+
+    if (key->flags & KEY_PREDEF)
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        return -1;
+    }
 
     while (recurse && (key->last_subkey>=0))
         if (0 > delete_key(key->subkeys[key->last_subkey], 1))
@@ -1110,6 +1139,12 @@ static void set_value( struct key *key, const struct unicode_str *name,
     void *ptr = NULL;
     int index;
 
+    if (key->flags & KEY_PREDEF)
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        return;
+    }
+
     if ((value = find_value( key, name, &index )))
     {
         /* check if the new value is identical to the existing one */
@@ -1156,6 +1191,12 @@ static void get_value( struct key *key, const struct unicode_str *name, int *typ
     struct key_value *value;
     int index;
 
+    if (key->flags & KEY_PREDEF)
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        return;
+    }
+
     if ((value = find_value( key, name, &index )))
     {
         *type = value->type;
@@ -1174,6 +1215,12 @@ static void get_value( struct key *key, const struct unicode_str *name, int *typ
 static void enum_value( struct key *key, int i, int info_class, struct enum_key_value_reply *reply )
 {
     struct key_value *value;
+
+    if (key->flags & KEY_PREDEF)
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        return;
+    }
 
     if (i < 0 || i > key->last_value) set_error( STATUS_NO_MORE_ENTRIES );
     else
@@ -1226,6 +1273,12 @@ static void delete_value( struct key *key, const struct unicode_str *name )
 {
     struct key_value *value;
     int i, index, nb_values;
+
+    if (key->flags & KEY_PREDEF)
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        return;
+    }
 
     if (!(value = find_value( key, name, &index )))
     {
@@ -1746,46 +1799,60 @@ static int load_init_registry_from_file( const char *filename, struct key *key )
     return (f != NULL);
 }
 
-static WCHAR *format_user_registry_path( const SID *sid, struct unicode_str *path )
+static WCHAR *format_user_registry_path( const struct sid *sid, struct unicode_str *path )
 {
-    char buffer[7 + 11 + 11 + 11 * SID_MAX_SUB_AUTHORITIES], *p = buffer;
+    char buffer[7 + 11 + 11 + 11 * ARRAY_SIZE(sid->sub_auth)], *p = buffer;
     unsigned int i;
 
-    p += sprintf( p, "User\\S-%u-%u", sid->Revision,
-                  MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5],
-                                      sid->IdentifierAuthority.Value[4] ),
-                            MAKEWORD( sid->IdentifierAuthority.Value[3],
-                                      sid->IdentifierAuthority.Value[2] )));
-    for (i = 0; i < sid->SubAuthorityCount; i++) p += sprintf( p, "-%u", sid->SubAuthority[i] );
+    p += sprintf( p, "User\\S-%u-%u", sid->revision,
+                  ((unsigned int)sid->id_auth[2] << 24) |
+                  ((unsigned int)sid->id_auth[3] << 16) |
+                  ((unsigned int)sid->id_auth[4] << 8) |
+                  ((unsigned int)sid->id_auth[5]) );
+    for (i = 0; i < sid->sub_count; i++) p += sprintf( p, "-%u", sid->sub_auth[i] );
     return ascii_to_unicode_str( buffer, path );
 }
 
-/* get the cpu architectures that can be supported in the current prefix */
-unsigned int get_prefix_cpu_mask(void)
+/* whether to use wow64 for i386 EXEs or launch a 32-bit wine */
+static int needs_wow64(void)
 {
-    /* Allowed server/client/prefix combinations:
-     *
-     *              prefix
-     *            32     64
-     *  server +------+------+ client
-     *         |  ok  | fail | 32
-     *      32 +------+------+---
-     *         | fail | fail | 64
-     *      ---+------+------+---
-     *         |  ok  |  ok  | 32
-     *      64 +------+------+---
-     *         | fail |  ok  | 64
-     *      ---+------+------+---
-     */
-    switch (prefix_type)
+#if defined(__APPLE__) && defined(__x86_64__)
+    struct utsname name;
+    unsigned major, minor;
+
+    return (uname(&name) == 0 &&
+            sscanf(name.release, "%u.%u", &major, &minor) == 2 &&
+            major >= 19 /* macOS 10.15 Catalina */);
+#else
+    return 0;
+#endif
+}
+
+static void init_supported_machines(void)
+{
+    unsigned int count = 0;
+#ifdef __i386__
+    if (prefix_type == PREFIX_32BIT) supported_machines[count++] = IMAGE_FILE_MACHINE_I386;
+#elif defined(__x86_64__)
+    if (prefix_type == PREFIX_64BIT || needs_wow64()) supported_machines[count++] = IMAGE_FILE_MACHINE_AMD64;
+    supported_machines[count++] = IMAGE_FILE_MACHINE_I386;
+
+    /* CX HACK 20810: detect when using a 32-bit prefix in Wow64 mode and disable various checks */
+    wow64_using_32bit_prefix = (prefix_type == PREFIX_32BIT) && needs_wow64();
+#elif defined(__arm__)
+    if (prefix_type == PREFIX_32BIT) supported_machines[count++] = IMAGE_FILE_MACHINE_ARMNT;
+#elif defined(__aarch64__)
+    if (prefix_type == PREFIX_64BIT)
     {
-    case PREFIX_64BIT:
-        /* 64-bit prefix requires 64-bit server */
-        return wine_is_64bit() ? ~0 : 0;
-    case PREFIX_32BIT:
-    default:
-        return ~CPU_64BIT_MASK;  /* only 32-bit cpus supported on 32-bit prefix */
+        supported_machines[count++] = IMAGE_FILE_MACHINE_ARM64;
+        supported_machines[count++] = IMAGE_FILE_MACHINE_I386;
     }
+    supported_machines[count++] = IMAGE_FILE_MACHINE_ARMNT;
+#else
+#error Unsupported machine
+#endif
+    supported_machines_count = count;
+    native_machine = supported_machines[0];
 }
 
 /* registry initialisation */
@@ -1793,17 +1860,33 @@ void init_registry(void)
 {
     static const WCHAR HKLM[] = { 'M','a','c','h','i','n','e' };
     static const WCHAR HKU_default[] = { 'U','s','e','r','\\','.','D','e','f','a','u','l','t' };
-    static const WCHAR classes[] = {'S','o','f','t','w','a','r','e','\\',
-                                    'C','l','a','s','s','e','s','\\',
-                                    'W','o','w','6','4','3','2','N','o','d','e'};
+    static const WCHAR classes_i386[] = {'S','o','f','t','w','a','r','e','\\',
+                                         'C','l','a','s','s','e','s','\\',
+                                         'W','o','w','6','4','3','2','N','o','d','e'};
+    static const WCHAR classes_amd64[] = {'S','o','f','t','w','a','r','e','\\',
+                                          'C','l','a','s','s','e','s','\\',
+                                          'W','o','w','6','4','6','4','N','o','d','e'};
+    static const WCHAR classes_arm[] = {'S','o','f','t','w','a','r','e','\\',
+                                        'C','l','a','s','s','e','s','\\',
+                                        'W','o','w','A','A','3','2','N','o','d','e'};
+    static const WCHAR classes_arm64[] = {'S','o','f','t','w','a','r','e','\\',
+                                          'C','l','a','s','s','e','s','\\',
+                                          'W','o','w','A','A','6','4','N','o','d','e'};
+    static const WCHAR perflib[] = {'S','o','f','t','w','a','r','e','\\',
+                                    'M','i','c','r','o','s','o','f','t','\\',
+                                    'W','i','n','d','o','w','s',' ','N','T','\\',
+                                    'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
+                                    'P','e','r','f','l','i','b','\\',
+                                    '0','0','9'};
     static const struct unicode_str root_name = { NULL, 0 };
     static const struct unicode_str HKLM_name = { HKLM, sizeof(HKLM) };
     static const struct unicode_str HKU_name = { HKU_default, sizeof(HKU_default) };
-    static const struct unicode_str classes_name = { classes, sizeof(classes) };
+    static const struct unicode_str perflib_name = { perflib, sizeof(perflib) };
 
     WCHAR *current_user_path;
     struct unicode_str current_user_str;
     struct key *key, *hklm, *hkcu;
+    unsigned int i;
     char *p;
 
     /* switch to the config dir */
@@ -1825,10 +1908,12 @@ void init_registry(void)
         if ((p = getenv( "WINEARCH" )) && !strcmp( p, "win32" ))
             prefix_type = PREFIX_32BIT;
         else
-            prefix_type = wine_is_64bit() ? PREFIX_64BIT : PREFIX_32BIT;
+            prefix_type = sizeof(void *) > sizeof(int) ? PREFIX_64BIT : PREFIX_32BIT;
     }
     else if (prefix_type == PREFIX_UNKNOWN)
         prefix_type = PREFIX_32BIT;
+
+    init_supported_machines();
 
     /* load userdef.reg into Registry\User\.Default */
 
@@ -1841,22 +1926,37 @@ void init_registry(void)
     /* load user.reg into HKEY_CURRENT_USER */
 
     /* FIXME: match default user in token.c. should get from process token instead */
-    current_user_path = format_user_registry_path( security_local_user_sid, &current_user_str );
+    current_user_path = format_user_registry_path( &local_user_sid, &current_user_str );
     if (!current_user_path ||
         !(hkcu = create_key_recursive( root_key, &current_user_str, current_time )))
         fatal_error( "could not create HKEY_CURRENT_USER registry key\n" );
     free( current_user_path );
     load_init_registry_from_file( "user.reg", hkcu );
 
-    /* set the shared flag on Software\Classes\Wow6432Node */
-    if (prefix_type == PREFIX_64BIT)
+    /* set the shared flag on Software\Classes\Wow6432Node for all platforms */
+    for (i = 1; i < supported_machines_count; i++)
     {
-        if ((key = create_key_recursive( hklm, &classes_name, current_time )))
+        struct unicode_str name;
+
+        switch (supported_machines[i])
+        {
+        case IMAGE_FILE_MACHINE_I386:  name.str = classes_i386;  name.len = sizeof(classes_i386);  break;
+        case IMAGE_FILE_MACHINE_ARMNT: name.str = classes_arm;   name.len = sizeof(classes_arm);   break;
+        case IMAGE_FILE_MACHINE_AMD64: name.str = classes_amd64; name.len = sizeof(classes_amd64); break;
+        case IMAGE_FILE_MACHINE_ARM64: name.str = classes_arm64; name.len = sizeof(classes_arm64); break;
+        }
+        if ((key = create_key_recursive( hklm, &name, current_time )))
         {
             key->flags |= KEY_WOWSHARE;
             release_object( key );
         }
         /* FIXME: handle HKCU too */
+    }
+
+    if ((key = create_key_recursive( hklm, &perflib_name, current_time )))
+    {
+        key->flags |= KEY_PREDEF;
+        release_object( key );
     }
 
     release_object( hklm );
@@ -1870,7 +1970,16 @@ void init_registry(void)
     if (!mkdir( "drive_c/windows", 0777 ))
     {
         mkdir( "drive_c/windows/system32", 0777 );
-        if (prefix_type == PREFIX_64BIT) mkdir( "drive_c/windows/syswow64", 0777 );
+        for (i = 1; i < supported_machines_count; i++)
+        {
+            switch (supported_machines[i])
+            {
+            case IMAGE_FILE_MACHINE_I386:  mkdir( "drive_c/windows/syswow64", 0777 ); break;
+            case IMAGE_FILE_MACHINE_ARMNT: mkdir( "drive_c/windows/sysarm32", 0777 ); break;
+            case IMAGE_FILE_MACHINE_AMD64: mkdir( "drive_c/windows/sysx8664", 0777 ); break;
+            case IMAGE_FILE_MACHINE_ARM64: mkdir( "drive_c/windows/sysarm64", 0777 ); break;
+            }
+        }
     }
 
     /* go back to the server dir */
@@ -2038,7 +2147,7 @@ void flush_registry(void)
 /* determine if the thread is wow64 (32-bit client running on 64-bit prefix) */
 static int is_wow64_thread( struct thread *thread )
 {
-    return (prefix_type == PREFIX_64BIT && !(CPU_FLAG(thread->process->cpu) & CPU_64BIT_MASK));
+    return (is_machine_64bit( native_machine ) && !is_machine_64bit( thread->process->machine ));
 }
 
 
@@ -2210,7 +2319,7 @@ DECL_HANDLER(load_registry)
 
     if (!objattr) return;
 
-    if (!thread_single_check_privilege( current, &SeRestorePrivilege ))
+    if (!thread_single_check_privilege( current, SeRestorePrivilege ))
     {
         set_error( STATUS_PRIVILEGE_NOT_HELD );
         return;
@@ -2237,18 +2346,30 @@ DECL_HANDLER(load_registry)
 
 DECL_HANDLER(unload_registry)
 {
-    struct key *key;
+    struct key *key, *parent;
+    struct unicode_str name;
+    unsigned int access = 0;
 
-    if (!thread_single_check_privilege( current, &SeRestorePrivilege ))
+    if (!thread_single_check_privilege( current, SeRestorePrivilege ))
     {
         set_error( STATUS_PRIVILEGE_NOT_HELD );
         return;
     }
 
-    if ((key = get_hkey_obj( req->hkey, 0 )))
+    if (!is_wow64_thread( current )) access = (access & ~KEY_WOW64_32KEY) | KEY_WOW64_64KEY;
+
+    if ((parent = get_parent_hkey_obj( req->parent )))
     {
-        delete_key( key, 1 );     /* FIXME */
-        release_object( key );
+        get_req_path( &name, !req->parent );
+        if ((key = open_key( parent, &name, access, req->attributes )))
+        {
+            if (key->obj.handle_count)
+                set_error( STATUS_CANNOT_DELETE );
+            else
+                delete_key( key, 1 );     /* FIXME */
+            release_object( key );
+        }
+        release_object( parent );
     }
 }
 
@@ -2257,7 +2378,7 @@ DECL_HANDLER(save_registry)
 {
     struct key *key;
 
-    if (!thread_single_check_privilege( current, &SeBackupPrivilege ))
+    if (!thread_single_check_privilege( current, SeBackupPrivilege ))
     {
         set_error( STATUS_PRIVILEGE_NOT_HELD );
         return;
@@ -2284,20 +2405,13 @@ DECL_HANDLER(set_registry_notification)
         if (event)
         {
             notify = find_notify( key, current->process, req->hkey );
-            if (notify)
-            {
-                if (notify->event)
-                    release_object( notify->event );
-                grab_object( event );
-                notify->event = event;
-            }
-            else
+            if (!notify)
             {
                 notify = mem_alloc( sizeof(*notify) );
                 if (notify)
                 {
-                    grab_object( event );
-                    notify->event   = event;
+                    notify->events  = NULL;
+                    notify->event_count = 0;
                     notify->subtree = req->subtree;
                     notify->filter  = req->filter;
                     notify->hkey    = req->hkey;
@@ -2307,8 +2421,16 @@ DECL_HANDLER(set_registry_notification)
             }
             if (notify)
             {
-                reset_event( event );
-                set_error( STATUS_PENDING );
+                struct event **new_array;
+
+                if ((new_array = realloc( notify->events, (notify->event_count + 1) * sizeof(*notify->events) )))
+                {
+                    notify->events = new_array;
+                    notify->events[notify->event_count++] = (struct event *)grab_object( event );
+                    reset_event( event );
+                    set_error( STATUS_PENDING );
+                }
+                else set_error( STATUS_NO_MEMORY );
             }
             release_object( event );
         }

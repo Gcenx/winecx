@@ -22,17 +22,19 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
+#include <stdarg.h>
 
-#include <string.h>
+#include "windef.h"
+#include "winbase.h"
+#include "winnls.h"
+#include "wingdi.h"
+#include "winuser.h"
+#include "prsht.h"
+#include "ddk/winddiui.h"
 
 #include "wine/debug.h"
-#include "psdrv.h"
 
-#include "winuser.h"
-#include "wine/wingdi16.h"
-#include "prsht.h"
+#include "psdrv.h"
 #include "psdlg.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
@@ -48,7 +50,7 @@ INPUTSLOT *find_slot( PPD *ppd, const PSDRV_DEVMODE *dm )
     INPUTSLOT *slot;
 
     LIST_FOR_EACH_ENTRY( slot, &ppd->InputSlots, INPUTSLOT, entry )
-        if (slot->WinBin == dm->dmPublic.u1.s1.dmDefaultSource)
+        if (slot->WinBin == dm->dmPublic.dmDefaultSource)
             return slot;
 
     return NULL;
@@ -59,7 +61,7 @@ PAGESIZE *find_pagesize( PPD *ppd, const PSDRV_DEVMODE *dm )
     PAGESIZE *page;
 
     LIST_FOR_EACH_ENTRY( page, &ppd->PageSizes, PAGESIZE, entry )
-        if (page->WinPage == dm->dmPublic.u1.s1.dmPaperSize)
+        if (page->WinPage == dm->dmPublic.dmPaperSize)
             return page;
 
     return NULL;
@@ -91,12 +93,12 @@ void PSDRV_MergeDevmodes( PSDRV_DEVMODE *dm1, const PSDRV_DEVMODE *dm2, PRINTERI
     /* some sanity checks here on dm2 */
 
     if(dm2->dmPublic.dmFields & DM_ORIENTATION) {
-        dm1->dmPublic.u1.s1.dmOrientation = dm2->dmPublic.u1.s1.dmOrientation;
+        dm1->dmPublic.dmOrientation = dm2->dmPublic.dmOrientation;
 	TRACE("Changing orientation to %d (%s)\n",
-	      dm1->dmPublic.u1.s1.dmOrientation,
-	      dm1->dmPublic.u1.s1.dmOrientation == DMORIENT_PORTRAIT ?
+	      dm1->dmPublic.dmOrientation,
+	      dm1->dmPublic.dmOrientation == DMORIENT_PORTRAIT ?
 	      "Portrait" :
-	      (dm1->dmPublic.u1.s1.dmOrientation == DMORIENT_LANDSCAPE ?
+	      (dm1->dmPublic.dmOrientation == DMORIENT_LANDSCAPE ?
 	       "Landscape" : "unknown"));
     }
 
@@ -107,13 +109,13 @@ void PSDRV_MergeDevmodes( PSDRV_DEVMODE *dm1, const PSDRV_DEVMODE *dm2, PRINTERI
 
         if (page)
         {
-	    dm1->dmPublic.u1.s1.dmPaperSize = dm2->dmPublic.u1.s1.dmPaperSize;
-	    dm1->dmPublic.u1.s1.dmPaperWidth  = paper_size_from_points( page->PaperDimension->x );
-	    dm1->dmPublic.u1.s1.dmPaperLength = paper_size_from_points( page->PaperDimension->y );
+	    dm1->dmPublic.dmPaperSize = dm2->dmPublic.dmPaperSize;
+	    dm1->dmPublic.dmPaperWidth  = paper_size_from_points( page->PaperDimension->x );
+	    dm1->dmPublic.dmPaperLength = paper_size_from_points( page->PaperDimension->y );
 	    dm1->dmPublic.dmFields |= DM_PAPERSIZE | DM_PAPERWIDTH | DM_PAPERLENGTH;
 	    TRACE("Changing page to %s %d x %d\n", page->FullName,
-		  dm1->dmPublic.u1.s1.dmPaperWidth,
-		  dm1->dmPublic.u1.s1.dmPaperLength );
+		  dm1->dmPublic.dmPaperWidth,
+		  dm1->dmPublic.dmPaperLength );
 
             if (dm1->dmPublic.dmSize >= FIELD_OFFSET(DEVMODEW, dmFormName) + CCHFORMNAME * sizeof(WCHAR))
             {
@@ -122,16 +124,16 @@ void PSDRV_MergeDevmodes( PSDRV_DEVMODE *dm1, const PSDRV_DEVMODE *dm2, PRINTERI
             }
 	}
         else
-            TRACE("Trying to change to unsupported pagesize %d\n", dm2->dmPublic.u1.s1.dmPaperSize);
+            TRACE("Trying to change to unsupported pagesize %d\n", dm2->dmPublic.dmPaperSize);
     }
 
     else if((dm2->dmPublic.dmFields & DM_PAPERLENGTH) &&
        (dm2->dmPublic.dmFields & DM_PAPERWIDTH)) {
-        dm1->dmPublic.u1.s1.dmPaperLength = dm2->dmPublic.u1.s1.dmPaperLength;
-        dm1->dmPublic.u1.s1.dmPaperWidth = dm2->dmPublic.u1.s1.dmPaperWidth;
+        dm1->dmPublic.dmPaperLength = dm2->dmPublic.dmPaperLength;
+        dm1->dmPublic.dmPaperWidth = dm2->dmPublic.dmPaperWidth;
 	TRACE("Changing PaperLength|Width to %dx%d\n",
-	      dm2->dmPublic.u1.s1.dmPaperLength,
-	      dm2->dmPublic.u1.s1.dmPaperWidth);
+	      dm2->dmPublic.dmPaperLength,
+	      dm2->dmPublic.dmPaperWidth);
 	dm1->dmPublic.dmFields &= ~DM_PAPERSIZE;
 	dm1->dmPublic.dmFields |= (DM_PAPERLENGTH | DM_PAPERWIDTH);
     } else if(dm2->dmPublic.dmFields & (DM_PAPERLENGTH | DM_PAPERWIDTH)) {
@@ -144,13 +146,13 @@ void PSDRV_MergeDevmodes( PSDRV_DEVMODE *dm1, const PSDRV_DEVMODE *dm2, PRINTERI
     }
 
     if(dm2->dmPublic.dmFields & DM_SCALE) {
-        dm1->dmPublic.u1.s1.dmScale = dm2->dmPublic.u1.s1.dmScale;
-	TRACE("Changing Scale to %d\n", dm2->dmPublic.u1.s1.dmScale);
+        dm1->dmPublic.dmScale = dm2->dmPublic.dmScale;
+        TRACE("Changing Scale to %d\n", dm2->dmPublic.dmScale);
     }
 
     if(dm2->dmPublic.dmFields & DM_COPIES) {
-        dm1->dmPublic.u1.s1.dmCopies = dm2->dmPublic.u1.s1.dmCopies;
-	TRACE("Changing Copies to %d\n", dm2->dmPublic.u1.s1.dmCopies);
+        dm1->dmPublic.dmCopies = dm2->dmPublic.dmCopies;
+        TRACE("Changing Copies to %d\n", dm2->dmPublic.dmCopies);
     }
 
     if (dm2->dmPublic.dmFields & DM_DEFAULTSOURCE)
@@ -159,17 +161,17 @@ void PSDRV_MergeDevmodes( PSDRV_DEVMODE *dm1, const PSDRV_DEVMODE *dm2, PRINTERI
 
         if (slot)
         {
-	    dm1->dmPublic.u1.s1.dmDefaultSource = dm2->dmPublic.u1.s1.dmDefaultSource;
+	    dm1->dmPublic.dmDefaultSource = dm2->dmPublic.dmDefaultSource;
 	    TRACE("Changing bin to '%s'\n", slot->FullName);
 	}
         else
-            TRACE("Trying to change to unsupported bin %d\n", dm2->dmPublic.u1.s1.dmDefaultSource);
+            TRACE("Trying to change to unsupported bin %d\n", dm2->dmPublic.dmDefaultSource);
     }
 
    if (dm2->dmPublic.dmFields & DM_DEFAULTSOURCE )
-       dm1->dmPublic.u1.s1.dmDefaultSource = dm2->dmPublic.u1.s1.dmDefaultSource;
+       dm1->dmPublic.dmDefaultSource = dm2->dmPublic.dmDefaultSource;
    if (dm2->dmPublic.dmFields & DM_PRINTQUALITY )
-       dm1->dmPublic.u1.s1.dmPrintQuality = dm2->dmPublic.u1.s1.dmPrintQuality;
+       dm1->dmPublic.dmPrintQuality = dm2->dmPublic.dmPrintQuality;
    if (dm2->dmPublic.dmFields & DM_COLOR )
        dm1->dmPublic.dmColor = dm2->dmPublic.dmColor;
    if (dm2->dmPublic.dmFields & DM_DUPLEX && pi->ppd->DefaultDuplex && pi->ppd->DefaultDuplex->WinDuplex != 0)
@@ -189,11 +191,11 @@ void PSDRV_MergeDevmodes( PSDRV_DEVMODE *dm1, const PSDRV_DEVMODE *dm2, PRINTERI
    if (dm2->dmPublic.dmFields & DM_PELSHEIGHT )
        dm1->dmPublic.dmPelsHeight = dm2->dmPublic.dmPelsHeight;
    if (dm2->dmPublic.dmFields & DM_DISPLAYFLAGS )
-       dm1->dmPublic.u2.dmDisplayFlags = dm2->dmPublic.u2.dmDisplayFlags;
+       dm1->dmPublic.dmDisplayFlags = dm2->dmPublic.dmDisplayFlags;
    if (dm2->dmPublic.dmFields & DM_DISPLAYFREQUENCY )
        dm1->dmPublic.dmDisplayFrequency = dm2->dmPublic.dmDisplayFrequency;
    if (dm2->dmPublic.dmFields & DM_POSITION )
-       dm1->dmPublic.u1.s2.dmPosition = dm2->dmPublic.u1.s2.dmPosition;
+       dm1->dmPublic.dmPosition = dm2->dmPublic.dmPosition;
    if (dm2->dmPublic.dmFields & DM_LOGPIXELS )
        dm1->dmPublic.dmLogPixels = dm2->dmPublic.dmLogPixels;
    if (dm2->dmPublic.dmFields & DM_ICMMETHOD )
@@ -242,14 +244,14 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
     LIST_FOR_EACH_ENTRY(ps, &di->pi->ppd->PageSizes, PAGESIZE, entry) {
       SendDlgItemMessageA(hwnd, IDD_PAPERS, LB_INSERTSTRING, i,
 			  (LPARAM)ps->FullName);
-      if(di->pi->Devmode->dmPublic.u1.s1.dmPaperSize == ps->WinPage)
+      if(di->pi->Devmode->dmPublic.dmPaperSize == ps->WinPage)
 	Cursel = i;
       i++;
     }
     SendDlgItemMessageA(hwnd, IDD_PAPERS, LB_SETCURSEL, Cursel, 0);
 
     CheckRadioButton(hwnd, IDD_ORIENT_PORTRAIT, IDD_ORIENT_LANDSCAPE,
-		     di->pi->Devmode->dmPublic.u1.s1.dmOrientation ==
+		     di->pi->Devmode->dmPublic.dmOrientation ==
 		     DMORIENT_PORTRAIT ? IDD_ORIENT_PORTRAIT :
 		     IDD_ORIENT_LANDSCAPE);
 
@@ -293,7 +295,7 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
         resx = resy = di->pi->ppd->DefaultResolution;
 
         if (di->pi->Devmode->dmPublic.dmFields & DM_PRINTQUALITY)
-            resx = resy = di->pi->Devmode->dmPublic.u1.s1.dmPrintQuality;
+            resx = resy = di->pi->Devmode->dmPublic.dmPrintQuality;
 
         if (di->pi->Devmode->dmPublic.dmFields & DM_YRESOLUTION)
             resy = di->pi->Devmode->dmPublic.dmYResolution;
@@ -337,11 +339,11 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
         }
         TRACE("Setting pagesize to item %d, WinPage %d (%s), PaperSize %.2fx%.2f\n", Cursel,
               ps->WinPage, ps->FullName, ps->PaperDimension->x, ps->PaperDimension->y);
-        di->dlgdm->dmPublic.u1.s1.dmPaperSize = ps->WinPage;
+        di->dlgdm->dmPublic.dmPaperSize = ps->WinPage;
         di->dlgdm->dmPublic.dmFields |= DM_PAPERSIZE;
 
-        di->dlgdm->dmPublic.u1.s1.dmPaperWidth  = paper_size_from_points(ps->PaperDimension->x);
-        di->dlgdm->dmPublic.u1.s1.dmPaperLength = paper_size_from_points(ps->PaperDimension->y);
+        di->dlgdm->dmPublic.dmPaperWidth  = paper_size_from_points(ps->PaperDimension->x);
+        di->dlgdm->dmPublic.dmPaperLength = paper_size_from_points(ps->PaperDimension->y);
         di->dlgdm->dmPublic.dmFields |= DM_PAPERLENGTH | DM_PAPERWIDTH;
 
         if (di->dlgdm->dmPublic.dmSize >= FIELD_OFFSET(DEVMODEW, dmFormName) + CCHFORMNAME * sizeof(WCHAR))
@@ -356,7 +358,7 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
     case IDD_ORIENT_LANDSCAPE:
       TRACE("Setting orientation to %s\n", wParam == IDD_ORIENT_PORTRAIT ?
             "portrait" : "landscape");
-      di->dlgdm->dmPublic.u1.s1.dmOrientation = wParam == IDD_ORIENT_PORTRAIT ?
+      di->dlgdm->dmPublic.dmOrientation = wParam == IDD_ORIENT_PORTRAIT ?
         DMORIENT_PORTRAIT : DMORIENT_LANDSCAPE;
       di->dlgdm->dmPublic.dmFields |= DM_ORIENTATION;
       SendMessageW(GetParent(hwnd), PSM_CHANGED, 0, 0);
@@ -390,7 +392,7 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
         resy = HIWORD(data);
         TRACE("Setting resolution to %dx%d\n", resx, resy);
 
-        di->dlgdm->dmPublic.u1.s1.dmPrintQuality = resx;
+        di->dlgdm->dmPublic.dmPrintQuality = resx;
         di->dlgdm->dmPublic.dmFields |= DM_PRINTQUALITY;
 
         di->dlgdm->dmPublic.dmYResolution = resy;
@@ -434,115 +436,44 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
 static HPROPSHEETPAGE (WINAPI *pCreatePropertySheetPage) (LPCPROPSHEETPAGEW);
 static int (WINAPI *pPropertySheet) (LPCPROPSHEETHEADERW);
 
-static PRINTERINFO *PSDRV_FindPrinterInfoA(LPCSTR name)
-{
-    int len = MultiByteToWideChar( CP_ACP, 0, name, -1, NULL, 0 );
-    WCHAR *nameW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
-    PRINTERINFO *pi;
-
-    MultiByteToWideChar( CP_ACP, 0, name, -1, nameW, len );
-    pi = PSDRV_FindPrinterInfo( nameW );
-    HeapFree( GetProcessHeap(), 0, nameW );
-
-    return pi;
-}
-
-/***********************************************************
- *      DEVMODEdupWtoA
- *
- * Creates an ascii copy of supplied devmode on the process heap
- *
- * Copied from dlls/winspool/info.c until full unicodification
- */
-static DEVMODEA *DEVMODEdupWtoA( const DEVMODEW *dmW )
-{
-    DEVMODEA *dmA;
-    DWORD size;
-    BOOL formname;
-    /* there is no pointer dereference here, if your code checking tool complains it's broken */
-    ptrdiff_t off_formname = (const char *)dmW->dmFormName - (const char *)dmW;
-
-    if (!dmW) return NULL;
-    formname = (dmW->dmSize > off_formname);
-    size = dmW->dmSize - CCHDEVICENAME - (formname ? CCHFORMNAME : 0);
-    dmA = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, size + dmW->dmDriverExtra );
-    WideCharToMultiByte( CP_ACP, 0, dmW->dmDeviceName, -1, (LPSTR)dmA->dmDeviceName,
-                         CCHDEVICENAME, NULL, NULL );
-    if (!formname)
-    {
-        memcpy( &dmA->dmSpecVersion, &dmW->dmSpecVersion,
-                dmW->dmSize - CCHDEVICENAME * sizeof(WCHAR) );
-    }
-    else
-    {
-        memcpy( &dmA->dmSpecVersion, &dmW->dmSpecVersion,
-               off_formname - CCHDEVICENAME * sizeof(WCHAR) );
-        WideCharToMultiByte( CP_ACP, 0, dmW->dmFormName, -1, (LPSTR)dmA->dmFormName,
-                             CCHFORMNAME, NULL, NULL );
-        memcpy( &dmA->dmLogPixels, &dmW->dmLogPixels, dmW->dmSize -
-                (off_formname + CCHFORMNAME * sizeof(WCHAR)) );
-    }
-    dmA->dmSize = size;
-    memcpy( (char *)dmA + dmA->dmSize, (const char *)dmW + dmW->dmSize,
-            dmW->dmDriverExtra );
-    return dmA;
-}
-
- /******************************************************************
- *         PSDRV_ExtDeviceMode
+/******************************************************************************
+ *           DrvDocumentProperties    (wineps.drv.@)
  *
  *  Retrieves or modifies device-initialization information for the PostScript
  *  driver, or displays a driver-supplied dialog box for configuring the driver.
- *
- * PARAMETERS
- *  lpszDriver  -- Driver name
- *  hwnd        -- Parent window for the dialog box
- *  lpdmOutput  -- Address of a DEVMODE structure for writing initialization information
- *  lpszDevice  -- Device name
- *  lpszPort    -- Port name
- *  lpdmInput   -- Address of a DEVMODE structure for reading initialization information
- *  lpProfile   -- Name of initialization file, defaults to WIN.INI if NULL
- *  wMode      -- Operation to perform.  Can be a combination if > 0.
- *      (0)             -- Returns number of bytes required by DEVMODE structure
- *      DM_UPDATE (1)   -- Write current settings to environment and initialization file
- *      DM_COPY (2)     -- Write current settings to lpdmOutput
- *      DM_PROMPT (4)   -- Presents the driver's modal dialog box (USER.240)
- *      DM_MODIFY (8)   -- Changes current settings according to lpdmInput before any other operation
  *
  * RETURNS
  *  Returns size of DEVMODE structure if wMode is 0.  Otherwise, IDOK is returned for success
  *  for both dialog and non-dialog operations.  IDCANCEL is returned if the dialog box was cancelled.
  *  A return value less than zero is returned if a non-dialog operation fails.
- *  
+ *
  * BUGS
  *
  * Just returns default devmode at the moment.  No use of initialization file.
  */
-INT CDECL PSDRV_ExtDeviceMode(LPSTR lpszDriver, HWND hwnd, LPDEVMODEA lpdmOutput,
-                              LPSTR lpszDevice, LPSTR lpszPort, LPDEVMODEA lpdmInput,
-                              LPSTR lpszProfile, DWORD dwMode)
+INT WINAPI DrvDocumentProperties(HWND hwnd, const WCHAR *device, DEVMODEW *output,
+                                 DEVMODEW *input, DWORD mode)
 {
-  PRINTERINFO *pi = PSDRV_FindPrinterInfoA(lpszDevice);
-  if(!pi) return -1;
+  PRINTERINFO *pi;
 
-  TRACE("(Driver=%s, hwnd=%p, devOut=%p, Device='%s', Port='%s', devIn=%p, Profile='%s', Mode=%04x)\n",
-  lpszDriver, hwnd, lpdmOutput, lpszDevice, lpszPort, lpdmInput, debugstr_a(lpszProfile), dwMode);
+  TRACE("(hwnd=%p, Device='%s', devOut=%p, devIn=%p, Mode=%04lx)\n",
+        hwnd, debugstr_w(device), output, input, mode);
 
-  /* If dwMode == 0, return size of DEVMODE structure */
-  if(!dwMode)
-      return pi->Devmode->dmPublic.dmSize + pi->Devmode->dmPublic.dmDriverExtra - CCHDEVICENAME - CCHFORMNAME;
+  if (!(pi = PSDRV_FindPrinterInfo(device))) return -1;
+
+  /* If mode == 0, return size of DEVMODE structure */
+  if (!mode)
+      return pi->Devmode->dmPublic.dmSize + pi->Devmode->dmPublic.dmDriverExtra;
 
   /* If DM_MODIFY is set, change settings in accordance with lpdmInput */
-  if((dwMode & DM_MODIFY) && lpdmInput)
+  if ((mode & DM_MODIFY) && input)
   {
-    DEVMODEW *dmW = GdiConvertToDevmodeW( lpdmInput );
-    TRACE("DM_MODIFY set. devIn->dmFields = %08x\n", lpdmInput->dmFields);
-    if (dmW) PSDRV_MergeDevmodes(pi->Devmode, (PSDRV_DEVMODE *)dmW, pi);
-    HeapFree( GetProcessHeap(), 0, dmW );
+    TRACE("DM_MODIFY set. devIn->dmFields = %08lx\n", input->dmFields);
+    PSDRV_MergeDevmodes(pi->Devmode, (PSDRV_DEVMODE *)input, pi);
   }
 
   /* If DM_PROMPT is set, present modal dialog box */
-  if(dwMode & DM_PROMPT) {
+  if (mode & DM_PROMPT) {
     HINSTANCE hinstComctl32;
     HPROPSHEETPAGE hpsp[1];
     PROPSHEETPAGEW psp;
@@ -562,8 +493,8 @@ INT CDECL PSDRV_ExtDeviceMode(LPSTR lpszDriver, HWND hwnd, LPDEVMODEA lpdmOutput
     di.dlgdm = &dlgdm;
     psp.dwSize = sizeof(psp);
     psp.hInstance = PSDRV_hInstance;
-    psp.u.pszTemplate = L"PAPER";
-    psp.u2.pszIcon = NULL;
+    psp.pszTemplate = L"PAPER";
+    psp.pszIcon = NULL;
     psp.pfnDlgProc = PSDRV_PaperDlgProc;
     psp.lParam = (LPARAM)&di;
     hpsp[0] = pCreatePropertySheetPage(&psp);
@@ -573,79 +504,56 @@ INT CDECL PSDRV_ExtDeviceMode(LPSTR lpszDriver, HWND hwnd, LPDEVMODEA lpdmOutput
     psh.pszCaption = SetupW;
     psh.nPages = 1;
     psh.hwndParent = hwnd;
-    psh.u3.phpage = hpsp;
+    psh.phpage = hpsp;
 
     pPropertySheet(&psh);
 
   }
-  
+
   /* If DM_UPDATE is set, should write settings to environment and initialization file */
-  if(dwMode & DM_UPDATE)
+  if (mode & DM_UPDATE)
     FIXME("Mode DM_UPDATE.  Just do the same as DM_COPY\n");
 
   /* If DM_COPY is set, should write settings to lpdmOutput */
-  if((dwMode & DM_COPY) || (dwMode & DM_UPDATE)) {
-    if (lpdmOutput)
-    {
-        DEVMODEA *dmA = DEVMODEdupWtoA( &pi->Devmode->dmPublic );
-        if (dmA) memcpy( lpdmOutput, dmA, dmA->dmSize + dmA->dmDriverExtra );
-        HeapFree( GetProcessHeap(), 0, dmA );
-    }
-    else
-        FIXME("lpdmOutput is NULL what should we do??\n");
-  }
+  if (output && (mode & (DM_COPY | DM_UPDATE)))
+    memcpy( output, &pi->Devmode->dmPublic,
+            pi->Devmode->dmPublic.dmSize + pi->Devmode->dmPublic.dmDriverExtra );
   return IDOK;
 }
-/***********************************************************************
- *	PSDRV_DeviceCapabilities	
- *
- *      Retrieves the capabilities of a printer device driver.
- *
- * Parameters
- *      lpszDriver -- printer driver name
- *      lpszDevice -- printer name
- *      lpszPort -- port name
- *      fwCapability -- device capability
- *      lpszOutput -- output buffer
- *      lpDevMode -- device data buffer
- *
- * Returns
- *      Result depends on the setting of fwCapability.  -1 indicates failure.
+
+/******************************************************************************
+ *           DrvDeviceCapabilities    (wineps.drv.@)
  */
-DWORD CDECL PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszPort,
-                                     WORD fwCapability, LPSTR lpszOutput, LPDEVMODEA lpDevMode)
+DWORD WINAPI DrvDeviceCapabilities(HANDLE printer, WCHAR *device_name, WORD capability,
+                                   void *output, DEVMODEW *devmode)
 {
   PRINTERINFO *pi;
   DEVMODEW *lpdm;
   DWORD ret;
-  pi = PSDRV_FindPrinterInfoA(lpszDevice);
 
-  TRACE("%s %s %s, %u, %p, %p\n", debugstr_a(lpszDriver), debugstr_a(lpszDevice),
-        debugstr_a(lpszPort), fwCapability, lpszOutput, lpDevMode);
+  TRACE("%s %u, %p, %p\n", debugstr_w(device_name), capability, output, devmode);
 
-  if (!pi) {
-      ERR("no printer info for %s %s, return 0!\n",
-          debugstr_a(lpszDriver), debugstr_a(lpszDevice));
+  if (!(pi = PSDRV_FindPrinterInfo(device_name))) {
+      ERR("no printer info for %s, return 0!\n", debugstr_w(device_name));
       return 0;
   }
 
   lpdm = &pi->Devmode->dmPublic;
-  if (lpDevMode) lpdm = GdiConvertToDevmodeW( lpDevMode );
+  if (devmode) lpdm = devmode;
 
-  switch(fwCapability) {
+  switch(capability) {
 
   case DC_PAPERS:
     {
       PAGESIZE *ps;
-      WORD *wp = (WORD *)lpszOutput;
+      WORD *wp = output;
       int i = 0;
 
       LIST_FOR_EACH_ENTRY(ps, &pi->ppd->PageSizes, PAGESIZE, entry)
       {
         TRACE("DC_PAPERS: %u\n", ps->WinPage);
         i++;
-	if(lpszOutput != NULL)
-	  *wp++ = ps->WinPage;
+        if (output != NULL) *wp++ = ps->WinPage;
       }
       ret = i;
       break;
@@ -654,14 +562,14 @@ DWORD CDECL PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR
   case DC_PAPERSIZE:
     {
       PAGESIZE *ps;
-      POINT16 *pt = (POINT16 *)lpszOutput;
+      POINT *pt = output;
       int i = 0;
 
       LIST_FOR_EACH_ENTRY(ps, &pi->ppd->PageSizes, PAGESIZE, entry)
       {
         TRACE("DC_PAPERSIZE: %f x %f\n", ps->PaperDimension->x, ps->PaperDimension->y);
         i++;
-	if(lpszOutput != NULL) {
+        if (output != NULL) {
           pt->x = paper_size_from_points( ps->PaperDimension->x );
           pt->y = paper_size_from_points( ps->PaperDimension->y );
 	  pt++;
@@ -674,15 +582,15 @@ DWORD CDECL PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR
   case DC_PAPERNAMES:
     {
       PAGESIZE *ps;
-      char *cp = lpszOutput;
+      WCHAR *cp = output;
       int i = 0;
 
       LIST_FOR_EACH_ENTRY(ps, &pi->ppd->PageSizes, PAGESIZE, entry)
       {
         TRACE("DC_PAPERNAMES: %s\n", debugstr_a(ps->FullName));
         i++;
-	if(lpszOutput != NULL) {
-	  lstrcpynA(cp, ps->FullName, 64);
+        if (output != NULL) {
+          MultiByteToWideChar(CP_ACP, 0, ps->FullName, -1, cp, 64);
 	  cp += 64;
 	}
       }
@@ -697,13 +605,13 @@ DWORD CDECL PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR
   case DC_BINS:
     {
       INPUTSLOT *slot;
-      WORD *wp = (WORD *)lpszOutput;
+      WORD *wp = output;
       int i = 0;
 
       LIST_FOR_EACH_ENTRY( slot, &pi->ppd->InputSlots, INPUTSLOT, entry )
       {
           i++;
-          if (lpszOutput != NULL)
+          if (output != NULL)
               *wp++ = slot->WinBin;
       }
       ret = i;
@@ -713,15 +621,15 @@ DWORD CDECL PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR
   case DC_BINNAMES:
     {
       INPUTSLOT *slot;
-      char *cp = lpszOutput;
+      WCHAR *cp = output;
       int i = 0;
 
       LIST_FOR_EACH_ENTRY( slot, &pi->ppd->InputSlots, INPUTSLOT, entry )
       {
           i++;
-          if (lpszOutput != NULL)
+          if (output != NULL)
           {
-              lstrcpynA( cp, slot->FullName, 24 );
+              MultiByteToWideChar(CP_ACP, 0, slot->FullName, -1, cp, 24);
               cp += 24;
           }
       }
@@ -737,13 +645,13 @@ DWORD CDECL PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR
   case DC_ENUMRESOLUTIONS:
     {
         RESOLUTION *res;
-        LONG *lp = (LONG *)lpszOutput;
+        LONG *lp = output;
         int i = 0;
 
         LIST_FOR_EACH_ENTRY(res, &pi->ppd->Resolutions, RESOLUTION, entry)
         {
             i++;
-            if (lpszOutput != NULL)
+            if (output != NULL)
             {
                 lp[0] = res->resx;
                 lp[1] = res->resy;
@@ -773,7 +681,7 @@ DWORD CDECL PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR
     ret = 0;
     if(pi->ppd->DefaultDuplex && pi->ppd->DefaultDuplex->WinDuplex != 0)
       ret = 1;
-    TRACE("DC_DUPLEX: returning %d\n", ret);
+    TRACE("DC_DUPLEX: returning %ld\n", ret);
     break;
 
   case DC_EMF_COMPLIANT:
@@ -903,7 +811,6 @@ DWORD CDECL PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR
    * languages supported by the printer, unless pOutput is NULL.  The return value is
    * number of array entries. (Win2k/XP only)
    */
-   
   case DC_PERSONALITY: /* WINVER >= 0x0500 */
     FIXME("DC_PERSONALITY: stub\n");
     ret = -1;
@@ -929,18 +836,17 @@ DWORD CDECL PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR
 
   /* Returns the printer rate unit used for DC_PRINTRATE, which is one of
    * PRINTRATEUNIT_{CPS,IPM,LPM,PPM} (Win2k/XP only)
-   */  
+   */
   case DC_PRINTRATEUNIT: /* WINVER >= 0x0500 */
     FIXME("DC_PRINTRATEUNIT: stub\n");
     ret = -1;
     break;
 
   default:
-    FIXME("Unsupported capability %d\n", fwCapability);
+    FIXME("Unsupported capability %d\n", capability);
     ret = -1;
   }
 
-  if (lpDevMode) HeapFree( GetProcessHeap(), 0, lpdm );
   return ret;
 }
 

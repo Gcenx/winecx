@@ -17,7 +17,6 @@
  */
 
 #include <stdarg.h>
-#include <assert.h>
 
 #define COBJMACROS
 
@@ -106,7 +105,7 @@ static HRESULT WINAPI HTMLScriptElement_put_src(IHTMLScriptElement *iface, BSTR 
     nsres = nsIDOMHTMLScriptElement_SetSrc(This->nsscript, &src_str);
     nsAString_Finish(&src_str);
     if(NS_FAILED(nsres)) {
-        ERR("SetSrc failed: %08x\n", nsres);
+        ERR("SetSrc failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -127,7 +126,7 @@ static HRESULT WINAPI HTMLScriptElement_put_src(IHTMLScriptElement *iface, BSTR 
         nsAString_GetData(&src_str, &src);
         hres = load_script(This, src, TRUE);
     }else {
-        ERR("SetSrc failed: %08x\n", nsres);
+        ERR("SetSrc failed: %08lx\n", nsres);
         hres = E_FAIL;
     }
     nsAString_Finish(&src_str);
@@ -192,7 +191,7 @@ static HRESULT WINAPI HTMLScriptElement_put_text(IHTMLScriptElement *iface, BSTR
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
     if(!This->element.node.doc || !This->element.node.doc->window) {
-        WARN("no windoow\n");
+        WARN("no window\n");
         return E_UNEXPECTED;
     }
 
@@ -202,7 +201,7 @@ static HRESULT WINAPI HTMLScriptElement_put_text(IHTMLScriptElement *iface, BSTR
     nsres = nsIDOMHTMLScriptElement_SetText(This->nsscript, &text_str);
     nsAString_Finish(&text_str);
     if(NS_FAILED(nsres)) {
-        ERR("SetSrc failed: %08x\n", nsres);
+        ERR("SetSrc failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -261,7 +260,7 @@ static HRESULT WINAPI HTMLScriptElement_get_defer(IHTMLScriptElement *iface, VAR
 
     nsres = nsIDOMHTMLScriptElement_GetDefer(This->nsscript, &defer);
     if(NS_FAILED(nsres)) {
-        ERR("GetSrc failed: %08x\n", nsres);
+        ERR("GetSrc failed: %08lx\n", nsres);
     }
 
     *p = variant_bool(defer);
@@ -306,7 +305,7 @@ static HRESULT WINAPI HTMLScriptElement_put_type(IHTMLScriptElement *iface, BSTR
     nsAString_Init(&nstype_str, v);
     nsres = nsIDOMHTMLScriptElement_SetType(This->nsscript, &nstype_str);
     if (NS_FAILED(nsres))
-        ERR("SetType failed: %08x\n", nsres);
+        ERR("SetType failed: %08lx\n", nsres);
     nsAString_Finish (&nstype_str);
 
     return S_OK;
@@ -480,6 +479,7 @@ static const tid_t HTMLScriptElement_iface_tids[] = {
 };
 
 static dispex_static_data_t HTMLScriptElement_dispex = {
+    L"HTMLScriptElement",
     NULL,
     DispHTMLScriptElement_tid,
     HTMLScriptElement_iface_tids,

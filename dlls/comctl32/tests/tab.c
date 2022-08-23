@@ -34,7 +34,12 @@
 #define PARENT_SEQ_INDEX   0
 #define TAB_SEQ_INDEX      1
 
-#define expect(expected, got) ok ( expected == got, "Expected %d, got %d\n", expected, got)
+#define expect(expected,got) expect_(__LINE__, expected, got)
+static inline void expect_(unsigned line, DWORD expected, DWORD got)
+{
+    ok_(__FILE__, line)(expected == got, "Expected %ld, got %ld\n", expected, got);
+}
+
 #define expect_str(expected, got)\
  ok ( strcmp(expected, got) == 0, "Expected '%s', got '%s'\n", expected, got)
 
@@ -51,14 +56,14 @@ static void CheckSize(HWND hwnd, INT width, INT height, const char *msg, int lin
 
     SendMessageA(hwnd, TCM_GETITEMRECT, 0, (LPARAM)&r);
     if (width >= 0 && height < 0)
-        ok_(__FILE__,line) (width == r.right - r.left, "%s: Expected width [%d] got [%d]\n",
+        ok_(__FILE__,line) (width == r.right - r.left, "%s: Expected width [%d] got [%ld]\n",
             msg, width, r.right - r.left);
     else if (height >= 0 && width < 0)
-        ok_(__FILE__,line) (height == r.bottom - r.top,  "%s: Expected height [%d] got [%d]\n",
+        ok_(__FILE__,line) (height == r.bottom - r.top,  "%s: Expected height [%d] got [%ld]\n",
             msg, height, r.bottom - r.top);
     else
         ok_(__FILE__,line) ((width  == r.right  - r.left) && (height == r.bottom - r.top ),
-	    "%s: Expected [%d,%d] got [%d,%d]\n", msg, width, height,
+	    "%s: Expected [%d,%d] got [%ld,%ld]\n", msg, width, height,
             r.right - r.left, r.bottom - r.top);
 }
 
@@ -456,7 +461,7 @@ static void test_tab(INT nMinTabWidth)
     dpi = GetDeviceCaps(hdc, LOGPIXELSX);
     hOldFont = SelectObject(hdc, (HFONT)SendMessageA(hwTab, WM_GETFONT, 0, 0));
     GetTextExtentPoint32A(hdc, "Tab 1", strlen("Tab 1"), &size);
-    trace("Tab1 text size: size.cx=%d size.cy=%d\n", size.cx, size.cy);
+    trace("Tab1 text size: size.cx=%ld size.cy=%ld\n", size.cx, size.cy);
     SelectObject(hdc, hOldFont);
     ReleaseDC(hwTab, hdc);
 
@@ -527,7 +532,7 @@ static void test_tab(INT nMinTabWidth)
     exp = max(size.cx +TAB_PADDING_X*2, (nMinTabWidth < 0) ? DEFAULT_MIN_TAB_WIDTH : nMinTabWidth);
     SendMessageA( hwTab, TCM_GETITEMRECT, 0, (LPARAM)&rTab );
     ok( rTab.right  - rTab.left == exp || broken(rTab.right  - rTab.left == DEFAULT_MIN_TAB_WIDTH),
-        "no icon, default width: Expected width [%d] got [%d]\n", exp, rTab.right - rTab.left );
+        "no icon, default width: Expected width [%d] got [%ld]\n", exp, rTab.right - rTab.left );
 
     for (i=0; i<8; i++)
     {
@@ -555,7 +560,7 @@ static void test_tab(INT nMinTabWidth)
     exp = (nMinTabWidth < 0) ? DEFAULT_MIN_TAB_WIDTH : nMinTabWidth;
     SendMessageA( hwTab, TCM_GETITEMRECT, 0, (LPARAM)&rTab );
     ok( rTab.right  - rTab.left == exp || broken(rTab.right  - rTab.left == DEFAULT_MIN_TAB_WIDTH),
-        "no icon, default width: Expected width [%d] got [%d]\n", exp, rTab.right - rTab.left );
+        "no icon, default width: Expected width [%d] got [%ld]\n", exp, rTab.right - rTab.left );
 
     for (i=0; i<8; i++)
     {
@@ -648,18 +653,18 @@ static void test_curfocus(void)
     ret = SendMessageA(hTab, TCM_SETCURFOCUS, -10, 0);
     ok(ret == 0, "Unexpected ret value %d.\n", ret);
     ret = SendMessageA(hTab, TCM_GETCURFOCUS, 0, 0);
-todo_wine
+    todo_wine
     ok(ret == nTabs - 1, "Unexpected focus index %d.\n", ret);
 
     /* Testing CurFocus with value larger than number of tabs */
     ret = SendMessageA(hTab, TCM_SETCURSEL, 1, 0);
-todo_wine
+    todo_wine
     ok(ret == 0, "Unexpected focus index %d.\n", ret);
 
     ret = SendMessageA(hTab, TCM_SETCURFOCUS, nTabs + 1, 0);
     ok(ret == 0, "Unexpected ret value %d.\n", ret);
     ret = SendMessageA(hTab, TCM_GETCURFOCUS, 0, 0);
-todo_wine
+    todo_wine
     ok(ret == nTabs - 1, "Unexpected focus index %d.\n", ret);
 
     ok_sequence(sequences, TAB_SEQ_INDEX, getset_cur_focus_seq, "TCS_BUTTONS: set focused tab sequence", FALSE);
@@ -825,14 +830,14 @@ static void test_getset_item(void)
     ok(GetParent(hTab) == NULL, "got %p, expected null parent\n", GetParent(hTab));
 
     ret = SendMessageA(hTab, TCM_SETITEMEXTRA, sizeof(LPARAM)-1, 0);
-    ok(ret == TRUE, "got %d\n", ret);
+    ok(ret == TRUE, "got %ld\n", ret);
 
     /* set some item data */
     tcItem.lParam = ~0;
     tcItem.mask = TCIF_PARAM;
 
     ret = SendMessageA(hTab, TCM_INSERTITEMA, 0, (LPARAM)&tcItem);
-    ok(ret == 0, "got %d\n", ret);
+    ok(ret == 0, "got %ld\n", ret);
 
     /* all sizeof(LPARAM) returned anyway when using sizeof(LPARAM)-1 size */
     memset(&lparam, 0xaa, sizeof(lparam));
@@ -842,7 +847,7 @@ static void test_getset_item(void)
     expect(TRUE, ret);
     /* everything higher specified size is preserved */
     memset(&lparam, 0xff, sizeof(lparam)-1);
-    ok(tcItem.lParam == lparam, "Expected 0x%lx, got 0x%lx\n", lparam, tcItem.lParam);
+    ok(tcItem.lParam == lparam, "Expected 0x%Ix, got 0x%Ix\n", lparam, tcItem.lParam);
 
     DestroyWindow(hTab);
 
@@ -857,7 +862,7 @@ static void test_getset_item(void)
     tcItem.mask = TCIF_PARAM;
     ret = SendMessageA(hTab, TCM_GETITEMA, 5, (LPARAM)&tcItem);
     expect(FALSE, ret);
-    ok(tcItem.lParam == 0, "Expected zero lParam, got %lu\n", tcItem.lParam);
+    ok(tcItem.lParam == 0, "Expected zero lParam, got %Iu\n", tcItem.lParam);
 
     memset(&tcItem, 0xcc, sizeof(tcItem));
     tcItem.mask = TCIF_IMAGE;
@@ -894,13 +899,13 @@ static void test_getset_item(void)
     tcItem.mask = TCIF_PARAM;
     ret = SendMessageA(hTab, TCM_GETITEMA, -1, (LPARAM)&tcItem);
     expect(FALSE, ret);
-    ok(tcItem.lParam == 0, "Expected zero lParam, got %lu\n", tcItem.lParam);
+    ok(tcItem.lParam == 0, "Expected zero lParam, got %Iu\n", tcItem.lParam);
 
     memset(&tcItem, 0xcc, sizeof(tcItem));
     tcItem.mask = TCIF_PARAM;
     ret = SendMessageA(hTab, TCM_GETITEMA, -2, (LPARAM)&tcItem);
     expect(FALSE, ret);
-    ok(tcItem.lParam == 0, "Expected zero lParam, got %lu\n", tcItem.lParam);
+    ok(tcItem.lParam == 0, "Expected zero lParam, got %Iu\n", tcItem.lParam);
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
@@ -1222,10 +1227,10 @@ static void test_TCM_SETITEMEXTRA(void)
     }
 
     ret = SendMessageA(hTab, TCM_SETITEMEXTRA, -1, 0);
-    ok(ret == FALSE, "got %d\n", ret);
+    ok(ret == FALSE, "got %ld\n", ret);
 
     ret = SendMessageA(hTab, TCM_SETITEMEXTRA, 2, 0);
-    ok(ret == TRUE, "got %d\n", ret);
+    ok(ret == TRUE, "got %ld\n", ret);
     DestroyWindow(hTab);
 
     /* it's not possible to change extra data size for control with tabs */
@@ -1233,7 +1238,7 @@ static void test_TCM_SETITEMEXTRA(void)
     ok(hTab != NULL, "Failed to create tab control\n");
 
     ret = SendMessageA(hTab, TCM_SETITEMEXTRA, 2, 0);
-    ok(ret == FALSE, "got %d\n", ret);
+    ok(ret == FALSE, "got %ld\n", ret);
     DestroyWindow(hTab);
 }
 
@@ -1265,7 +1270,7 @@ static void test_TCS_OWNERDRAWFIXED(void)
 
     itemdata = 0;
     memset(&itemdata, 0xde, 4);
-    ok(g_drawitem.itemData == itemdata, "got 0x%lx, expected 0x%lx\n", g_drawitem.itemData, itemdata);
+    ok(g_drawitem.itemData == itemdata, "got 0x%Ix, expected 0x%Ix\n", g_drawitem.itemData, itemdata);
 
     DestroyWindow(hTab);
 
@@ -1296,7 +1301,7 @@ static void test_TCS_OWNERDRAWFIXED(void)
     RedrawWindow(hTab, NULL, 0, RDW_UPDATENOW);
 
     memset(&itemdata, 0xde, sizeof(ULONG_PTR));
-    ok(*(ULONG_PTR*)g_drawitem.itemData == itemdata, "got 0x%lx, expected 0x%lx\n", g_drawitem.itemData, itemdata);
+    ok(*(ULONG_PTR*)g_drawitem.itemData == itemdata, "got 0x%Ix, expected 0x%Ix\n", g_drawitem.itemData, itemdata);
 
     DestroyWindow(hTab);
 
@@ -1329,7 +1334,7 @@ static void test_TCS_OWNERDRAWFIXED(void)
     memset(&itemdata, 0xde, 4);
     memset(&itemdata2, 0xde, sizeof(LPARAM)-1);
     ok(g_drawitem.itemData == itemdata || broken(g_drawitem.itemData == itemdata2) /* win98 */,
-        "got 0x%lx, expected 0x%lx\n", g_drawitem.itemData, itemdata);
+        "got 0x%Ix, expected 0x%Ix\n", g_drawitem.itemData, itemdata);
 
     DestroyWindow(hTab);
 }
@@ -1373,7 +1378,7 @@ static void test_create(void)
         hTab = CreateWindowA(WC_TABCONTROLA, "TestTab", ptr->style,
             10, 10, 300, 100, parent_wnd, NULL, NULL, 0);
         style = GetWindowLongA(hTab, GWL_STYLE);
-        ok(style == ptr->act_style, "expected style 0x%08x, got style 0x%08x\n", ptr->act_style, style);
+        ok(style == ptr->act_style, "expected style 0x%08lx, got style 0x%08lx\n", ptr->act_style, style);
 
         DestroyWindow(hTab);
         ptr++;
@@ -1437,10 +1442,10 @@ static void test_TCN_SELCHANGING(void)
     ok_sequence(sequences, PARENT_SEQ_INDEX, selchanging_parent_seq, "Focus change disallowed sequence", FALSE);
 
     ret = SendMessageA(hTab, TCM_GETCURFOCUS, 0, 0);
-todo_wine
+    todo_wine
     ok(ret == nTabs - 1, "Unexpected focused tab %d.\n", ret);
     ret = SendMessageA(hTab, TCM_GETCURSEL, 0, 0);
-todo_wine
+    todo_wine
     ok(ret == nTabs - 1, "Unexpected selected tab %d.\n", ret);
 
     /* Removing focus sends only TCN_SELCHANGE */

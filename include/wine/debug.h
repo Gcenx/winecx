@@ -22,9 +22,6 @@
 #define __WINE_WINE_DEBUG_H
 
 #include <stdarg.h>
-#ifndef _VA_LIST_T /* Clang's stdarg.h guards with _VA_LIST, while Xcode's uses _VA_LIST_T */
-#define _VA_LIST_T
-#endif
 #include <stdio.h>
 #include <windef.h>
 #include <winbase.h>
@@ -32,17 +29,13 @@
 #include <guiddef.h>
 #endif
 
-/* 32on64 FIXME: We need this for the inline version of IsBadStringPtr, but this is a
- * BIG change re included headers and it required at least a change in d3dcompiler to
- * avoid a name colission with the NT type STRING. */
-#include "winternl.h"
-#include "wine/exception.h"
-
-#include <wine/winheader_enter.h>
+#include "wine/asm.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <wine/winheader_enter.h>
 
 struct _GUID;
 
@@ -92,7 +85,7 @@ struct __wine_debug_channel
 
 #define __WINE_DPRINTF(dbcl,dbch) \
   do { if(__WINE_GET_DEBUGGING(dbcl,(dbch))) { \
-       struct __wine_debug_channel *const __dbch = (dbch); \
+       struct __wine_debug_channel * const __dbch = (dbch); \
        const enum __wine_debug_class __dbcl = __WINE_DBCL##dbcl; \
        __WINE_DBG_LOG
 
@@ -122,7 +115,7 @@ struct __wine_debug_channel
 
 #define __WINE_DPRINTF(dbcl,dbch) \
   do { if(__WINE_GET_DEBUGGING(dbcl,(dbch))) { \
-       struct __wine_debug_channel *const __dbch = (dbch); \
+       struct __wine_debug_channel * const __dbch = (dbch); \
        const enum __WINE_DEBUG_CLASS __dbcl = __WINE_DBCL##dbcl; \
        __WINE_DBG_LOG
 
@@ -154,17 +147,20 @@ struct __wine_debug_channel
 
 #endif  /* !__GNUC__ && !__SUNPRO_C */
 
+extern int WINAPI __wine_dbg_write( const char *str, unsigned int len );
 extern unsigned char __cdecl __wine_dbg_get_channel_flags( struct __wine_debug_channel *channel );
 extern const char * __cdecl __wine_dbg_strdup( const char *str );
 extern int __cdecl __wine_dbg_output( const char *str );
 extern int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_channel *channel,
                                       const char *function );
+
 #ifdef __i386_on_x86_64__
-extern unsigned char __cdecl __wine_dbg_get_channel_flags( struct __wine_debug_channel * HOSTPTR channel ) __attribute__((overloadable)) asm(__ASM_NAME("__wine_dbg_get_channel_flags_HOSTPTR"));
-extern const char * __cdecl __wine_dbg_strdup( const char * HOSTPTR str ) __attribute__((overloadable)) asm(__ASM_NAME("__wine_dbg_strdup_HOSTPTR"));
-extern int __cdecl __wine_dbg_output( const char * HOSTPTR str ) __attribute__((overloadable)) asm(__ASM_NAME("__wine_dbg_output_HOSTPTR"));
-extern int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_channel * HOSTPTR channel,
-                                      const char * HOSTPTR function ) __attribute__((overloadable)) asm(__ASM_NAME("__wine_dbg_header_HOSTPTR"));
+//extern unsigned char __cdecl __wine_dbg_get_channel_flags( struct __wine_debug_channel * HOSTPTR channel ) __attribute__((overloadable)) asm(__ASM_NAME(
+//__wine_dbg_get_channel_flags_HOSTPTR"));
+//extern const char * __cdecl __wine_dbg_strdup( const char * HOSTPTR str ) __attribute__((overloadable)) asm(__ASM_NAME("__wine_dbg_strdup_HOSTPTR"));
+//extern int __cdecl __wine_dbg_output( const char * HOSTPTR str ) __attribute__((overloadable)) asm(__ASM_NAME("__wine_dbg_output_HOSTPTR"));
+//extern int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_channel * HOSTPTR channel,
+//                                      const char * HOSTPTR function ) __attribute__((overloadable)) asm(__ASM_NAME("__wine_dbg_header_HOSTPTR"));
 #endif
 
 /*
@@ -217,11 +213,11 @@ static inline int __wine_dbg_cdecl wine_dbg_printf( const char * HOSTPTR format,
 }
 
 static int __wine_dbg_cdecl wine_dbg_log( enum __wine_debug_class cls,
-                                          struct __wine_debug_channel * HOSTPTR channel, const char * HOSTPTR func,
-                                          const char * HOSTPTR format, ... ) __WINE_PRINTF_ATTR(4,5);
+                                          struct __wine_debug_channel *channel, const char *func,
+                                          const char *format, ... ) __WINE_PRINTF_ATTR(4,5);
 static inline int __wine_dbg_cdecl wine_dbg_log( enum __wine_debug_class cls,
-                                                 struct __wine_debug_channel * HOSTPTR channel,
-                                                 const char * HOSTPTR function, const char * HOSTPTR format, ... )
+                                                 struct __wine_debug_channel *channel,
+                                                 const char *function, const char *format, ... )
 {
     char buffer[1024];
     __wine_dbg_va_list args;
@@ -241,69 +237,15 @@ static inline int __wine_dbg_cdecl wine_dbg_log( enum __wine_debug_class cls,
     return ret;
 }
 
-#ifdef __i386_on_x86_64__
-#ifndef WINE32ON64_HOSTSTACK
-static LONG WINAPI badptr_handler( EXCEPTION_POINTERS *eptr )
-{
-    EXCEPTION_RECORD *rec = eptr->ExceptionRecord;
-
-    if (rec->ExceptionCode == STATUS_ACCESS_VIOLATION) return EXCEPTION_EXECUTE_HANDLER;
-    if (rec->ExceptionCode == STATUS_STACK_OVERFLOW)
-    {
-        /* restore stack guard page */
-        /* 32on64 FIXME: Does this have a chance of working on host stacks? Will there even be
-         * a guard page? If yes, can we use mprotect? */
-        /* Page size hardcoded. It only matters for 32on64 */
-        void *addr = (char *)NtCurrentTeb()->DeallocationStack + 0x1000;
-        SIZE_T size = (char *)rec - (char *)addr;
-        ULONG old_prot;
-        NtProtectVirtualMemory( GetCurrentProcess(), &addr, &size, PAGE_GUARD|PAGE_READWRITE, &old_prot );
-        return EXCEPTION_EXECUTE_HANDLER;
-    }
-    return EXCEPTION_CONTINUE_SEARCH;
-}
-#endif
-
-static inline BOOL __wine_dbg_IsBadStringPtrA(const CHAR * HOSTPTR str,ULONGLONG max)
-{
-    if (!str) return TRUE;
-
-    /* 32on64 FIXME: Can't set up a 32 bit exception handler on a host stack */
-#ifndef WINE32ON64_HOSTSTACK
-    __TRY
-    {
-        volatile const char * HOSTPTR p = str;
-        while (p != str + max) if (!*p++) break;
-    }
-    __EXCEPT( badptr_handler )
-    {
-        return TRUE;
-    }
-    __ENDTRY
-#endif
-    return FALSE;
-}
-#else
-static inline BOOL __wine_dbg_IsBadStringPtrA(const CHAR * HOSTPTR str,ULONGLONG max)
-{
-    return IsBadStringPtrA(str, max);
-}
-#endif
-
 static inline const char *wine_dbgstr_an( const char * HOSTPTR str, int n )
 {
     static const char hex[16] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};
     char buffer[300], * HOSTPTR dst = buffer;
 
     if (!str) return "(null)";
-    /* 32on64 FIXME: The code below casts a 32 bit pointer to a 64 bit integer inside mingw
-     * and a 64 bit ptr to 64 bit in host-side hybrid clang. Maybe size_t successfully
-     * shuts up the warning...
-     * BKS: try ULONG_HOSTPTR instead, size_t causes build errors in strmbase
-     */
     if (!((ULONG_HOSTPTR)str >> 16)) return wine_dbg_sprintf( "#%04x", LOWORD(str) );
-#ifndef WINE_UNIX_LIB
-    if (__wine_dbg_IsBadStringPtrA( str, n )) return "(invalid)";
+#if (!defined(WINE_UNIX_LIB) && !defined(__i386_on_x86_64__))
+    if (IsBadStringPtrA( str, n )) return "(invalid)";
 #endif
     if (n == -1) for (n = 0; str[n]; n++) ;
     *dst++ = '"';
@@ -339,33 +281,6 @@ static inline const char *wine_dbgstr_an( const char * HOSTPTR str, int n )
     return __wine_dbg_strdup( buffer );
 }
 
-#ifdef __i386_on_x86_64__
-static inline BOOL __wine_dbg_IsBadStringPtrW(const WCHAR * HOSTPTR str,ULONGLONG max)
-{
-    if (!str) return TRUE;
-
-    /* 32on64 FIXME: Can't set up a 32 bit exception handler on a host stack */
-#ifndef WINE32ON64_HOSTSTACK
-    __TRY
-    {
-        volatile const WCHAR * HOSTPTR p = str;
-        while (p != str + max) if (!*p++) break;
-    }
-    __EXCEPT( badptr_handler )
-    {
-        return TRUE;
-    }
-    __ENDTRY
-#endif
-    return FALSE;
-}
-#else
-static inline BOOL __wine_dbg_IsBadStringPtrW(const WCHAR * HOSTPTR str,ULONGLONG max)
-{
-    return IsBadStringPtrW(str, max);
-}
-#endif
-
 static inline const char *wine_dbgstr_wn( const WCHAR * HOSTPTR str, int n )
 {
     static const char hex[16] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};
@@ -373,8 +288,8 @@ static inline const char *wine_dbgstr_wn( const WCHAR * HOSTPTR str, int n )
 
     if (!str) return "(null)";
     if (!((ULONG_HOSTPTR)str >> 16)) return wine_dbg_sprintf( "#%04x", LOWORD(str) );
-#ifndef WINE_UNIX_LIB
-    if (__wine_dbg_IsBadStringPtrW( str, n )) return "(invalid)";
+#if (!defined(WINE_UNIX_LIB) && !defined(__i386_on_x86_64__))
+    if (IsBadStringPtrW( str, n )) return "(invalid)";
 #endif
     if (n == -1) for (n = 0; str[n]; n++) ;
     *dst++ = 'L';
@@ -412,37 +327,37 @@ static inline const char *wine_dbgstr_wn( const WCHAR * HOSTPTR str, int n )
     return __wine_dbg_strdup( buffer );
 }
 
-static inline const char *wine_dbgstr_a( const char * HOSTPTR s )
+static inline const char *wine_dbgstr_a( const char *s )
 {
     return wine_dbgstr_an( s, -1 );
 }
 
-static inline const char *wine_dbgstr_w( const WCHAR * HOSTPTR s )
+static inline const char *wine_dbgstr_w( const WCHAR *s )
 {
     return wine_dbgstr_wn( s, -1 );
 }
 
-static inline const char *wine_dbgstr_guid( const GUID * HOSTPTR id )
+static inline const char *wine_dbgstr_guid( const GUID *id )
 {
     if (!id) return "(null)";
-    if (!((ULONG_HOSTPTR)id >> 16)) return wine_dbg_sprintf( "<guid-0x%04hx>", (WORD)(ULONG_HOSTPTR)id );
+    if (!((ULONG_PTR)id >> 16)) return wine_dbg_sprintf( "<guid-0x%04hx>", (WORD)(ULONG_PTR)id );
     return wine_dbg_sprintf( "{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
-                             id->Data1, id->Data2, id->Data3,
+                             (unsigned int)id->Data1, id->Data2, id->Data3,
                              id->Data4[0], id->Data4[1], id->Data4[2], id->Data4[3],
                              id->Data4[4], id->Data4[5], id->Data4[6], id->Data4[7] );
 }
 
-static inline const char *wine_dbgstr_point( const POINT * HOSTPTR pt )
+static inline const char *wine_dbgstr_point( const POINT *pt )
 {
     if (!pt) return "(null)";
-    return wine_dbg_sprintf( "(%d,%d)", pt->x, pt->y );
+    return wine_dbg_sprintf( "(%d,%d)", (int)pt->x, (int)pt->y );
 }
 
-static inline const char *wine_dbgstr_rect( const RECT * HOSTPTR rect )
+static inline const char *wine_dbgstr_rect( const RECT *rect )
 {
     if (!rect) return "(null)";
-    return wine_dbg_sprintf( "(%d,%d)-(%d,%d)", rect->left, rect->top,
-                             rect->right, rect->bottom );
+    return wine_dbg_sprintf( "(%d,%d)-(%d,%d)", (int)rect->left, (int)rect->top,
+                             (int)rect->right, (int)rect->bottom );
 }
 
 static inline const char *wine_dbgstr_longlong( ULONGLONG ll )
@@ -526,7 +441,7 @@ static inline const char *wine_dbgstr_variant( const VARIANT *v )
     case VT_I2:
         return wine_dbg_sprintf( "%p {VT_I2: %d}", v, V_I2(v) );
     case VT_I4:
-        return wine_dbg_sprintf( "%p {VT_I4: %d}", v, V_I4(v) );
+        return wine_dbg_sprintf( "%p {VT_I4: %d}", v, (int)V_I4(v) );
     case VT_R4:
         return wine_dbg_sprintf( "%p {VT_R4: %f}", v, V_R4(v) );
     case VT_R8:
@@ -536,7 +451,7 @@ static inline const char *wine_dbgstr_variant( const VARIANT *v )
     case VT_DATE:
         return wine_dbg_sprintf( "%p {VT_DATE: %lf}", v, V_DATE(v) );
     case VT_LPSTR:
-        return wine_dbg_sprintf( "%p {VT_LPSTR: %s}", v, wine_dbgstr_a((const char * HOSTPTR)V_BSTR(v)) );
+        return wine_dbg_sprintf( "%p {VT_LPSTR: %s}", v, wine_dbgstr_a((const char *)V_BSTR(v)) );
     case VT_LPWSTR:
         return wine_dbg_sprintf( "%p {VT_LPWSTR: %s}", v, wine_dbgstr_w(V_BSTR(v)) );
     case VT_BSTR:
@@ -544,7 +459,7 @@ static inline const char *wine_dbgstr_variant( const VARIANT *v )
     case VT_DISPATCH:
         return wine_dbg_sprintf( "%p {VT_DISPATCH: %p}", v, V_DISPATCH(v) );
     case VT_ERROR:
-        return wine_dbg_sprintf( "%p {VT_ERROR: %08x}", v, V_ERROR(v) );
+        return wine_dbg_sprintf( "%p {VT_ERROR: %08x}", v, (int)V_ERROR(v) );
     case VT_BOOL:
         return wine_dbg_sprintf( "%p {VT_BOOL: %x}", v, V_BOOL(v) );
     case VT_UNKNOWN:
@@ -554,9 +469,9 @@ static inline const char *wine_dbgstr_variant( const VARIANT *v )
     case VT_UI1:
         return wine_dbg_sprintf( "%p {VT_UI1: %u}", v, V_UI1(v) );
     case VT_UI2:
-        return wine_dbg_sprintf( "%p {VT_UI2: %d}", v, V_UI2(v) );
+        return wine_dbg_sprintf( "%p {VT_UI2: %u}", v, V_UI2(v) );
     case VT_UI4:
-        return wine_dbg_sprintf( "%p {VT_UI4: %d}", v, V_UI4(v) );
+        return wine_dbg_sprintf( "%p {VT_UI4: %u}", v, (unsigned int)V_UI4(v) );
     case VT_I8:
         return wine_dbg_sprintf( "%p {VT_I8: %s}", v, wine_dbgstr_longlong(V_I8(v)) );
     case VT_UI8:
@@ -602,18 +517,18 @@ static inline const char *wine_dbgstr_variant( const VARIANT *v )
     static struct __wine_debug_channel __wine_dbch_##ch = { 0xff, #ch }
 #define WINE_DEFAULT_DEBUG_CHANNEL(ch) \
     static struct __wine_debug_channel __wine_dbch_##ch = { 0xff, #ch }; \
-    static struct __wine_debug_channel *const __wine_dbch___default = &__wine_dbch_##ch
+    static struct __wine_debug_channel * const __wine_dbch___default = &__wine_dbch_##ch
 
 #define WINE_MESSAGE               wine_dbg_printf
 
 #ifdef __WINESRC__
 /* Wine uses shorter names that are very likely to conflict with other software */
 
-static inline const char *debugstr_an( const char * HOSTPTR s, int n ) { return wine_dbgstr_an( s, n ); }
+static inline const char *debugstr_an( const char * s, int n ) { return wine_dbgstr_an( s, n ); }
 static inline const char *debugstr_wn( const WCHAR * HOSTPTR s, int n ) { return wine_dbgstr_wn( s, n ); }
-static inline const char *debugstr_guid( const struct _GUID * HOSTPTR id ) { return wine_dbgstr_guid(id); }
+static inline const char *debugstr_guid( const struct _GUID *id ) { return wine_dbgstr_guid(id); }
 static inline const char *debugstr_a( const char * HOSTPTR s )  { return wine_dbgstr_an( s, -1 ); }
-static inline const char *debugstr_w( const WCHAR * HOSTPTR s ) { return wine_dbgstr_wn( s, -1 ); }
+static inline const char *debugstr_w( const WCHAR *s ) { return wine_dbgstr_wn( s, -1 ); }
 
 #if defined(__oaidl_h__) && defined(V_VT)
 static inline const char *debugstr_vt( VARTYPE vt ) { return wine_dbgstr_vt( vt ); }

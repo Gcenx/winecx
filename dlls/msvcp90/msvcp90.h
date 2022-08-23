@@ -19,30 +19,26 @@
 #include "stdbool.h"
 #include "stdlib.h"
 #include "windef.h"
+#include "winbase.h"
 #include "cxx.h"
 
 #define CXX_EXCEPTION       0xe06d7363
 #define ALIGNED_SIZE(size, alignment) (((size)+((alignment)-1))/(alignment)*(alignment))
 
-#define MSVCP_SIZE_T_MAX (~(size_t)0)
 #if _MSVCP_VER >= 100
 typedef __int64 DECLSPEC_ALIGN(8) streamoff;
 typedef __int64 DECLSPEC_ALIGN(8) streamsize;
-#define STREAMOFF_BITS 64
-#define STREAMSIZE_BITS 64
 #else
 typedef SSIZE_T streamoff;
 typedef SSIZE_T streamsize;
-#define STREAMOFF_BITS 32
-#define STREAMSIZE_BITS 32
 #endif
 
 void __cdecl _invalid_parameter_noinfo(void);
 BOOL __cdecl __uncaught_exception(void);
 int __cdecl _callnewh(size_t);
 
-extern void* (__cdecl *MSVCRT_operator_new)(size_t);
-extern void (__cdecl *MSVCRT_operator_delete)(void*);
+void* __cdecl operator_new(size_t);
+void __cdecl operator_delete(void*);
 extern void* (__cdecl *MSVCRT_set_new_handler)(void*);
 
 #if _MSVCP_VER >= 110
@@ -63,11 +59,41 @@ typedef struct
     void *tail;
 } critical_section;
 
-extern critical_section* (__thiscall *critical_section_ctor)(critical_section*);
-extern void (__thiscall *critical_section_dtor)(critical_section*);
-extern void (__thiscall *critical_section_lock)(critical_section*);
-extern void (__thiscall *critical_section_unlock)(critical_section*);
-extern bool (__thiscall *critical_section_trylock)(critical_section*);
+typedef union
+{
+    critical_section conc;
+    SRWLOCK win;
+} cs;
+
+typedef struct cv_queue {
+    struct cv_queue *next;
+    LONG expired;
+} cv_queue;
+
+typedef struct {
+    /* cv_queue structure is not binary compatible */
+    cv_queue *queue;
+    critical_section lock;
+} _Condition_variable;
+
+typedef union
+{
+    _Condition_variable conc;
+    CONDITION_VARIABLE win;
+} cv;
+
+extern void cs_init(cs*);
+extern void cs_destroy(cs*);
+extern void cs_lock(cs*);
+extern void cs_unlock(cs*);
+extern bool cs_trylock(cs*);
+
+extern void cv_init(cv*);
+extern void cv_destroy(cv*);
+extern void cv_wait(cv*, cs*);
+extern bool cv_wait_for(cv*, cs*, unsigned int);
+extern void cv_notify_one(cv*);
+extern void cv_notify_all(cv*);
 #endif
 
 #if _MSVCP_VER >= 100
@@ -380,7 +406,7 @@ typedef enum {
 typedef struct _iosarray {
     struct _iosarray *next;
     int index;
-    int long_val;
+    LONG long_val;
     void *ptr_val;
 } IOS_BASE_iosarray;
 
@@ -622,7 +648,12 @@ void init_exception(void*);
 void init_locale(void*);
 void init_io(void*);
 void free_io(void);
+
+#if _MSVCP_VER >= 100
+void init_concurrency_details(void*);
 void init_misc(void*);
+void free_misc(void);
+#endif
 
 /* class complex<float> */
 typedef struct {
@@ -659,4 +690,12 @@ static inline int mbstowcs_wrapper( size_t *ret, wchar_t *wcs, size_t size, cons
 #define hypotf( x, y ) ((float)hypot( (double)(x), (double)(y) ))
 #endif
 
-void free_misc(void);
+void WINAPI DECLSPEC_NORETURN _CxxThrowException(void*,const cxx_exception_type*);
+void __cdecl DECLSPEC_NORETURN _Xinvalid_argument(const char*);
+void __cdecl DECLSPEC_NORETURN _Xlength_error(const char*);
+void __cdecl DECLSPEC_NORETURN _Xmem(void);
+void __cdecl DECLSPEC_NORETURN _Xout_of_range(const char*);
+void __cdecl DECLSPEC_NORETURN _Xruntime_error(const char*);
+void DECLSPEC_NORETURN throw_exception(const char*);
+void DECLSPEC_NORETURN throw_failure(const char*);
+void DECLSPEC_NORETURN throw_range_error(const char*);

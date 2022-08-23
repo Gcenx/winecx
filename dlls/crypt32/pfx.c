@@ -18,6 +18,8 @@
 
 #include <stdarg.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "wincrypt.h"
@@ -25,17 +27,19 @@
 #include "crypt32_private.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(crypt);
 
-static HCRYPTPROV import_key( void *key, DWORD flags )
+static HCRYPTPROV import_key( cert_store_data_t data, DWORD flags )
 {
     HCRYPTPROV prov = 0;
     HCRYPTKEY cryptkey;
     DWORD size, acquire_flags;
+    void *key;
+    struct import_store_key_params params = { data, NULL, &size };
 
-    size = HeapSize( GetProcessHeap(), 0, key );
+    if (CRYPT32_CALL( import_store_key, &params ) != STATUS_BUFFER_TOO_SMALL) return 0;
+
     acquire_flags = (flags & CRYPT_MACHINE_KEYSET) | CRYPT_NEWKEYSET;
     if (!CryptAcquireContextW( &prov, NULL, MS_ENHANCED_PROV_W, PROV_RSA_FULL, acquire_flags ))
     {
@@ -44,18 +48,22 @@ static HCRYPTPROV import_key( void *key, DWORD flags )
         acquire_flags &= ~CRYPT_NEWKEYSET;
         if (!CryptAcquireContextW( &prov, NULL, MS_ENHANCED_PROV_W, PROV_RSA_FULL, acquire_flags ))
         {
-            WARN( "CryptAcquireContextW failed %08x\n", GetLastError() );
+            WARN( "CryptAcquireContextW failed %08lx\n", GetLastError() );
             return 0;
         }
     }
 
-    if (!CryptImportKey( prov, key, size, 0, flags & CRYPT_EXPORTABLE, &cryptkey ))
+    params.buf = key = CryptMemAlloc( size );
+    if (CRYPT32_CALL( import_store_key, &params ) ||
+        !CryptImportKey( prov, key, size, 0, flags & CRYPT_EXPORTABLE, &cryptkey ))
     {
-        WARN( "CryptImportKey failed %08x\n", GetLastError() );
+        WARN( "CryptImportKey failed %08lx\n", GetLastError() );
         CryptReleaseContext( prov, 0 );
+        CryptMemFree( key );
         return 0;
     }
     CryptDestroyKey( cryptkey );
+    CryptMemFree( key );
     return prov;
 }
 
@@ -132,10 +140,12 @@ static BOOL set_key_prov_info( const void *ctx, HCRYPTPROV prov )
 
 HCERTSTORE WINAPI PFXImportCertStore( CRYPT_DATA_BLOB *pfx, const WCHAR *password, DWORD flags )
 {
-    void *key, **chain;
-    DWORD i, chain_len = 0;
+    DWORD i = 0, size;
     HCERTSTORE store = NULL;
     HCRYPTPROV prov = 0;
+    cert_store_data_t data = 0;
+    struct open_cert_store_params open_params = { pfx, password, &data };
+    struct close_cert_store_params close_params;
 
     if (!pfx)
     {
@@ -144,76 +154,75 @@ HCERTSTORE WINAPI PFXImportCertStore( CRYPT_DATA_BLOB *pfx, const WCHAR *passwor
     }
     if (flags & ~(CRYPT_EXPORTABLE|CRYPT_USER_KEYSET|CRYPT_MACHINE_KEYSET|PKCS12_NO_PERSIST_KEY))
     {
-        FIXME( "flags %08x not supported\n", flags );
+        FIXME( "flags %08lx not supported\n", flags );
         return NULL;
     }
-    if (!unix_funcs->import_cert_store)
-    {
-        FIXME( "(%p, %p, %08x)\n", pfx, password, flags );
-        return NULL;
-    }
-    if (!unix_funcs->import_cert_store( pfx, password, flags, &key, &chain, &chain_len )) return NULL;
+    if (CRYPT32_CALL( open_cert_store, &open_params )) return NULL;
 
-    prov = import_key( key, flags );
-    heap_free( key );
+    prov = import_key( data, flags );
     if (!prov) goto error;
 
     if (!(store = CertOpenStore( CERT_STORE_PROV_MEMORY, 0, 0, 0, NULL )))
     {
-        WARN( "CertOpenStore failed %08x\n", GetLastError() );
+        WARN( "CertOpenStore failed %08lx\n", GetLastError() );
         goto error;
     }
 
-    if (chain_len > 1) FIXME( "handle certificate chain\n" );
-    for (i = 0; i < chain_len; i++)
+    for (;;)
     {
-        const void *ctx;
-        size_t size = HeapSize( GetProcessHeap(), 0, chain[i] );
+        const void *ctx = NULL;
+        void *cert;
+        struct import_store_cert_params import_params = { data, i, NULL, &size };
 
-        if (!(ctx = CertCreateContext( CERT_STORE_CERTIFICATE_CONTEXT, X509_ASN_ENCODING,
-                                       chain[i], size, 0, NULL )))
+        if (CRYPT32_CALL( import_store_cert, &import_params ) != STATUS_BUFFER_TOO_SMALL) break;
+        import_params.buf = cert = CryptMemAlloc( size );
+        if (!CRYPT32_CALL( import_store_cert, &import_params ))
+            ctx = CertCreateContext( CERT_STORE_CERTIFICATE_CONTEXT, X509_ASN_ENCODING, cert, size, 0, NULL );
+        CryptMemFree( cert );
+        if (!ctx)
         {
-            WARN( "CertCreateContext failed %08x\n", GetLastError() );
+            WARN( "CertCreateContext failed %08lx\n", GetLastError() );
             goto error;
         }
         if (flags & PKCS12_NO_PERSIST_KEY)
         {
             if (!set_key_context( ctx, prov ))
             {
-                WARN( "failed to set context property %08x\n", GetLastError() );
+                WARN( "failed to set context property %08lx\n", GetLastError() );
                 CertFreeCertificateContext( ctx );
                 goto error;
             }
         }
         else if (!set_key_prov_info( ctx, prov ))
         {
-            WARN( "failed to set provider info property %08x\n", GetLastError() );
+            WARN( "failed to set provider info property %08lx\n", GetLastError() );
             CertFreeCertificateContext( ctx );
             goto error;
         }
         if (!CertAddCertificateContextToStore( store, ctx, CERT_STORE_ADD_ALWAYS, NULL ))
         {
-            WARN( "CertAddCertificateContextToStore failed %08x\n", GetLastError() );
+            WARN( "CertAddCertificateContextToStore failed %08lx\n", GetLastError() );
             CertFreeCertificateContext( ctx );
             goto error;
         }
         CertFreeCertificateContext( ctx );
+        i++;
     }
-    while (chain_len) heap_free( chain[--chain_len] );
-    heap_free( chain );
+    close_params.data = data;
+    CRYPT32_CALL( close_cert_store, &close_params );
     return store;
 
 error:
     CryptReleaseContext( prov, 0 );
     CertCloseStore( store, 0 );
-    while (chain_len) heap_free( chain[--chain_len] );
-    heap_free( chain );
+    close_params.data = data;
+    CRYPT32_CALL( close_cert_store, &close_params );
     return NULL;
 }
 
 BOOL WINAPI PFXVerifyPassword( CRYPT_DATA_BLOB *pfx, const WCHAR *password, DWORD flags )
 {
-    FIXME( "(%p, %p, %08x): stub\n", pfx, password, flags );
+    FIXME( "(%p, %p, %08lx): stub\n", pfx, password, flags );
     return FALSE;
 }
 
@@ -225,6 +234,6 @@ BOOL WINAPI PFXExportCertStore( HCERTSTORE store, CRYPT_DATA_BLOB *pfx, const WC
 BOOL WINAPI PFXExportCertStoreEx( HCERTSTORE store, CRYPT_DATA_BLOB *pfx, const WCHAR *password, void *reserved,
                                   DWORD flags )
 {
-    FIXME( "(%p, %p, %p, %p, %08x): stub\n", store, pfx, password, reserved, flags );
+    FIXME( "(%p, %p, %p, %p, %08lx): stub\n", store, pfx, password, reserved, flags );
     return FALSE;
 }

@@ -18,6 +18,7 @@
 
 #include <assert.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <float.h>
 #include <math.h>
@@ -29,7 +30,6 @@
 #include "webservices.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wine/list.h"
 #include "webservices_private.h"
 
@@ -106,7 +106,7 @@ static struct writer *alloc_writer(void)
     struct writer *ret;
     ULONG size = sizeof(*ret) + prop_size( writer_props, count );
 
-    if (!(ret = heap_alloc_zero( size ))) return NULL;
+    if (!(ret = calloc( 1, size ))) return NULL;
 
     ret->magic      = WRITER_MAGIC;
     InitializeCriticalSection( &ret->cs );
@@ -122,11 +122,11 @@ static void free_writer( struct writer *writer )
     destroy_nodes( writer->root );
     free_xml_string( writer->current_ns );
     WsFreeHeap( writer->output_heap );
-    heap_free( writer->stream_buf );
+    free( writer->stream_buf );
 
     writer->cs.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection( &writer->cs );
-    heap_free( writer );
+    free( writer );
 }
 
 static void write_insert_eof( struct writer *writer, struct node *eof )
@@ -195,7 +195,7 @@ HRESULT WINAPI WsCreateWriter( const WS_XML_WRITER_PROPERTY *properties, ULONG c
     WS_CHARSET charset = WS_CHARSET_UTF8;
     HRESULT hr;
 
-    TRACE( "%p %u %p %p\n", properties, count, handle, error );
+    TRACE( "%p %lu %p %p\n", properties, count, handle, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!handle) return E_INVALIDARG;
@@ -220,15 +220,7 @@ HRESULT WINAPI WsCreateWriter( const WS_XML_WRITER_PROPERTY *properties, ULONG c
         }
     }
 
-    hr = prop_get( writer->prop, writer->prop_count, WS_XML_WRITER_PROPERTY_BUFFER_MAX_SIZE,
-                   &max_size, sizeof(max_size) );
-    if (hr != S_OK)
-    {
-        free_writer( writer );
-        return hr;
-    }
-
-    hr = WsCreateHeap( max_size, 0, NULL, 0, &writer->output_heap, NULL );
+    hr = WsCreateHeap( 1 << 20, 0, NULL, 0, &writer->output_heap, NULL );
     if (hr != S_OK)
     {
         free_writer( writer );
@@ -281,7 +273,7 @@ HRESULT WINAPI WsGetWriterProperty( WS_XML_WRITER *handle, WS_XML_WRITER_PROPERT
     struct writer *writer = (struct writer *)handle;
     HRESULT hr = S_OK;
 
-    TRACE( "%p %u %p %u %p\n", handle, id, buf, size, error );
+    TRACE( "%p %u %p %lu %p\n", handle, id, buf, size, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!writer) return E_INVALIDARG;
@@ -329,7 +321,7 @@ HRESULT WINAPI WsGetWriterProperty( WS_XML_WRITER *handle, WS_XML_WRITER_PROPERT
     }
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -367,7 +359,7 @@ HRESULT WINAPI WsSetOutput( WS_XML_WRITER *handle, const WS_XML_WRITER_ENCODING 
     HRESULT hr;
     ULONG i;
 
-    TRACE( "%p %p %p %p %u %p\n", handle, encoding, output, properties, count, error );
+    TRACE( "%p %p %p %p %lu %p\n", handle, encoding, output, properties, count, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!writer) return E_INVALIDARG;
@@ -438,7 +430,7 @@ HRESULT WINAPI WsSetOutput( WS_XML_WRITER *handle, const WS_XML_WRITER_ENCODING 
     case WS_XML_WRITER_OUTPUT_TYPE_STREAM:
     {
         const WS_XML_WRITER_STREAM_OUTPUT *stream = (const WS_XML_WRITER_STREAM_OUTPUT *)output;
-        if (!writer->stream_buf && !(writer->stream_buf = heap_alloc( STREAM_BUFSIZE )))
+        if (!writer->stream_buf && !(writer->stream_buf = malloc( STREAM_BUFSIZE )))
         {
             hr = E_OUTOFMEMORY;
             goto done;
@@ -458,7 +450,7 @@ HRESULT WINAPI WsSetOutput( WS_XML_WRITER *handle, const WS_XML_WRITER_ENCODING 
 
 done:
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -475,7 +467,7 @@ HRESULT WINAPI WsSetOutputToBuffer( WS_XML_WRITER *handle, WS_XML_BUFFER *buffer
     HRESULT hr;
     ULONG i;
 
-    TRACE( "%p %p %p %u %p\n", handle, buffer, properties, count, error );
+    TRACE( "%p %p %p %lu %p\n", handle, buffer, properties, count, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!writer || !xmlbuf) return E_INVALIDARG;
@@ -506,7 +498,7 @@ HRESULT WINAPI WsSetOutputToBuffer( WS_XML_WRITER *handle, WS_XML_BUFFER *buffer
 
 done:
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -533,7 +525,7 @@ HRESULT WINAPI WsFlushWriter( WS_XML_WRITER *handle, ULONG min_size, const WS_AS
     struct writer *writer = (struct writer *)handle;
     HRESULT hr;
 
-    TRACE( "%p %u %p %p\n", handle, min_size, ctx, error );
+    TRACE( "%p %lu %p %p\n", handle, min_size, ctx, error );
     if (error) FIXME( "ignoring error parameter\n" );
     if (ctx) FIXME( "ignoring ctx parameter\n" );
 
@@ -551,7 +543,7 @@ HRESULT WINAPI WsFlushWriter( WS_XML_WRITER *handle, ULONG min_size, const WS_AS
     else hr = flush_writer( writer, min_size, ctx, error );
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -1049,7 +1041,7 @@ static ULONG format_datetime( const WS_DATETIME *ptr, unsigned char *buf )
 
 static ULONG format_guid( const GUID *ptr, unsigned char *buf )
 {
-    static const char fmt[] = "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x";
+    static const char fmt[] = "%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x";
     return sprintf( (char *)buf, fmt, ptr->Data1, ptr->Data2, ptr->Data3,
                     ptr->Data4[0], ptr->Data4[1], ptr->Data4[2], ptr->Data4[3],
                     ptr->Data4[4], ptr->Data4[5], ptr->Data4[6], ptr->Data4[7] );
@@ -1057,7 +1049,7 @@ static ULONG format_guid( const GUID *ptr, unsigned char *buf )
 
 static ULONG format_urn( const GUID *ptr, unsigned char *buf )
 {
-    static const char fmt[] = "urn:uuid:%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x";
+    static const char fmt[] = "urn:uuid:%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x";
     return sprintf( (char *)buf, fmt, ptr->Data1, ptr->Data2, ptr->Data3,
                     ptr->Data4[0], ptr->Data4[1], ptr->Data4[2], ptr->Data4[3],
                     ptr->Data4[4], ptr->Data4[5], ptr->Data4[6], ptr->Data4[7] );
@@ -1291,12 +1283,12 @@ static HRESULT write_attribute_value_bin( struct writer *writer, const WS_XML_TE
         len = text_utf8->value.length;
         if ((hr = write_grow_buffer( writer, sizeof(len) + len )) != S_OK)
         {
-            heap_free( new );
+            free( new );
             return hr;
         }
         write_char( writer, len );
         write_bytes( writer, text_utf8->value.bytes, len );
-        heap_free( new );
+        free( new );
         return S_OK;
     }
     case RECORD_CHARS16_TEXT:
@@ -1314,12 +1306,12 @@ static HRESULT write_attribute_value_bin( struct writer *writer, const WS_XML_TE
         len = text_utf8->value.length;
         if ((hr = write_grow_buffer( writer, sizeof(len) + len )) != S_OK)
         {
-            heap_free( new );
+            free( new );
             return hr;
         }
         write_bytes( writer, (const BYTE *)&len, sizeof(len) );
         write_bytes( writer, text_utf8->value.bytes, len );
-        heap_free( new );
+        free( new );
         return S_OK;
     }
     case RECORD_BYTES8_TEXT:
@@ -1544,7 +1536,7 @@ HRESULT WINAPI WsGetPrefixFromNamespace( WS_XML_WRITER *handle, const WS_XML_STR
     }
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -1637,7 +1629,7 @@ static HRESULT add_namespace_attribute( struct writer *writer, const WS_XML_STRI
     WS_XML_ELEMENT_NODE *elem = &writer->current->hdr;
     HRESULT hr;
 
-    if (!(attr = heap_alloc_zero( sizeof(*attr) ))) return E_OUTOFMEMORY;
+    if (!(attr = calloc( 1, sizeof(*attr) ))) return E_OUTOFMEMORY;
 
     attr->singleQuote = !!single;
     attr->isXmlNs = 1;
@@ -1741,7 +1733,7 @@ HRESULT WINAPI WsWriteEndAttribute( WS_XML_WRITER *handle, WS_ERROR *error )
     writer->state = WRITER_STATE_STARTELEMENT;
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -1984,7 +1976,7 @@ HRESULT WINAPI WsWriteEndElement( WS_XML_WRITER *handle, WS_ERROR *error )
     hr = write_endelement_node( writer );
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -2040,7 +2032,7 @@ HRESULT WINAPI WsWriteEndStartElement( WS_XML_WRITER *handle, WS_ERROR *error )
 
 done:
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -2052,7 +2044,7 @@ static HRESULT write_add_attribute( struct writer *writer, const WS_XML_STRING *
     WS_XML_ELEMENT_NODE *elem = &writer->current->hdr;
     HRESULT hr;
 
-    if (!(attr = heap_alloc_zero( sizeof(*attr) ))) return E_OUTOFMEMORY;
+    if (!(attr = calloc( 1, sizeof(*attr) ))) return E_OUTOFMEMORY;
 
     if (!prefix && ns->length) prefix = elem->prefix;
 
@@ -2109,7 +2101,7 @@ HRESULT WINAPI WsWriteStartAttribute( WS_XML_WRITER *handle, const WS_XML_STRING
         writer->state = WRITER_STATE_STARTATTRIBUTE;
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -2188,7 +2180,7 @@ HRESULT WINAPI WsWriteStartCData( WS_XML_WRITER *handle, WS_ERROR *error )
     hr = write_cdata_node( writer );
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -2234,7 +2226,7 @@ HRESULT WINAPI WsWriteEndCData( WS_XML_WRITER *handle, WS_ERROR *error )
     else hr = write_endcdata_node( writer );
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -2321,7 +2313,7 @@ HRESULT WINAPI WsWriteStartElement( WS_XML_WRITER *handle, const WS_XML_STRING *
     hr = write_element_node( writer, prefix, localname, ns );
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -2485,7 +2477,7 @@ static HRESULT write_set_attribute_value( struct writer *writer, const WS_XML_TE
     {
         WS_XML_UTF8_TEXT *new, *old = (WS_XML_UTF8_TEXT *)elem->attributes[elem->attributeCount - 1]->value;
         if ((hr = text_to_utf8text( value, old, NULL, &new )) != S_OK) return hr;
-        heap_free( old );
+        free( old );
         elem->attributes[elem->attributeCount - 1]->value = &new->text;
         break;
     }
@@ -2493,7 +2485,7 @@ static HRESULT write_set_attribute_value( struct writer *writer, const WS_XML_TE
     {
         WS_XML_TEXT *new, *old = elem->attributes[elem->attributeCount - 1]->value;
         if ((hr = text_to_text( value, old, NULL, &new )) != S_OK) return hr;
-        heap_free( old );
+        free( old );
         elem->attributes[elem->attributeCount - 1]->value = new;
         break;
     }
@@ -2525,7 +2517,7 @@ static HRESULT write_add_text_node( struct writer *writer, const WS_XML_TEXT *va
         WS_XML_UTF8_TEXT *new;
         if ((hr = text_to_utf8text( value, NULL, NULL, &new )) != S_OK)
         {
-            heap_free( node );
+            free( node );
             return hr;
         }
         text->text = &new->text;
@@ -2536,7 +2528,7 @@ static HRESULT write_add_text_node( struct writer *writer, const WS_XML_TEXT *va
         WS_XML_TEXT *new;
         if ((hr = text_to_text( value, NULL, NULL, &new )) != S_OK)
         {
-            heap_free( node );
+            free( node );
             return hr;
         }
         text->text = new;
@@ -2544,7 +2536,7 @@ static HRESULT write_add_text_node( struct writer *writer, const WS_XML_TEXT *va
     }
     default:
         FIXME( "unhandled output encoding %u\n", writer->output_enc );
-        heap_free( node );
+        free( node );
         return E_NOTIMPL;
     }
 
@@ -2699,13 +2691,13 @@ static HRESULT write_text_bin( struct writer *writer, const WS_XML_TEXT *text, U
         len = text_utf8->value.length;
         if ((hr = write_grow_buffer( writer, 1 + sizeof(len) + len )) != S_OK)
         {
-            heap_free( new );
+            free( new );
             return hr;
         }
         write_char( writer, type );
         write_char( writer, len );
         write_bytes( writer, text_utf8->value.bytes, len );
-        heap_free( new );
+        free( new );
         return S_OK;
     }
     case RECORD_CHARS16_TEXT_WITH_ENDELEMENT:
@@ -2723,13 +2715,13 @@ static HRESULT write_text_bin( struct writer *writer, const WS_XML_TEXT *text, U
         len = text_utf8->value.length;
         if ((hr = write_grow_buffer( writer, 1 + sizeof(len) + len )) != S_OK)
         {
-            heap_free( new );
+            free( new );
             return hr;
         }
         write_char( writer, type );
         write_bytes( writer, (const BYTE *)&len, sizeof(len) );
         write_bytes( writer, text_utf8->value.bytes, len );
-        heap_free( new );
+        free( new );
         return S_OK;
     }
     case RECORD_BYTES8_TEXT:
@@ -2762,6 +2754,26 @@ static HRESULT write_text_bin( struct writer *writer, const WS_XML_TEXT *text, U
         {
             if ((hr = write_grow_buffer( writer, 1 + sizeof(len) + len )) != S_OK) return hr;
             write_char( writer, rem ? RECORD_BYTES16_TEXT : RECORD_BYTES16_TEXT_WITH_ENDELEMENT );
+            write_bytes( writer, (const BYTE *)&len, sizeof(len) );
+            write_bytes( writer, text_base64->bytes, len );
+        }
+        if (rem)
+        {
+            if ((hr = write_grow_buffer( writer, 3 )) != S_OK) return hr;
+            write_char( writer, RECORD_BYTES8_TEXT_WITH_ENDELEMENT );
+            write_char( writer, rem );
+            write_bytes( writer, (const BYTE *)text_base64->bytes + len, rem );
+        }
+        return S_OK;
+    }
+    case RECORD_BYTES32_TEXT:
+    {
+        const WS_XML_BASE64_TEXT *text_base64 = (const WS_XML_BASE64_TEXT *)text;
+        UINT32 rem = text_base64->length % 3, len = text_base64->length - rem;
+        if (len)
+        {
+            if ((hr = write_grow_buffer( writer, 1 + sizeof(len) + len )) != S_OK) return hr;
+            write_char( writer, rem ? RECORD_BYTES32_TEXT : RECORD_BYTES32_TEXT_WITH_ENDELEMENT );
             write_bytes( writer, (const BYTE *)&len, sizeof(len) );
             write_bytes( writer, text_base64->bytes, len );
         }
@@ -2908,7 +2920,7 @@ static HRESULT write_text_node( struct writer *writer, const WS_XML_TEXT *text )
             WS_XML_UTF8_TEXT *new, *old = (WS_XML_UTF8_TEXT *)node->text;
             offset = old->value.length;
             if ((hr = text_to_utf8text( text, old, &offset, &new )) != S_OK) return hr;
-            heap_free( old );
+            free( old );
             node->text = &new->text;
             break;
         }
@@ -2916,7 +2928,7 @@ static HRESULT write_text_node( struct writer *writer, const WS_XML_TEXT *text )
         {
             WS_XML_TEXT *new, *old = node->text;
             if ((hr = text_to_text( text, old, &offset, &new )) != S_OK) return hr;
-            heap_free( old );
+            free( old );
             node->text = new;
             break;
         }
@@ -2957,7 +2969,7 @@ HRESULT WINAPI WsWriteText( WS_XML_WRITER *handle, const WS_XML_TEXT *text, WS_E
     else hr = write_text_node( writer, text );
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -2970,7 +2982,7 @@ HRESULT WINAPI WsWriteBytes( WS_XML_WRITER *handle, const void *bytes, ULONG cou
     WS_XML_BASE64_TEXT base64;
     HRESULT hr;
 
-    TRACE( "%p %p %u %p\n", handle, bytes, count, error );
+    TRACE( "%p %p %lu %p\n", handle, bytes, count, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!writer) return E_INVALIDARG;
@@ -2995,7 +3007,7 @@ HRESULT WINAPI WsWriteBytes( WS_XML_WRITER *handle, const void *bytes, ULONG cou
     }
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -3008,7 +3020,7 @@ HRESULT WINAPI WsWriteChars( WS_XML_WRITER *handle, const WCHAR *chars, ULONG co
     WS_XML_UTF16_TEXT utf16;
     HRESULT hr;
 
-    TRACE( "%p %s %u %p\n", handle, debugstr_wn(chars, count), count, error );
+    TRACE( "%p %s %lu %p\n", handle, debugstr_wn(chars, count), count, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!writer) return E_INVALIDARG;
@@ -3033,7 +3045,7 @@ HRESULT WINAPI WsWriteChars( WS_XML_WRITER *handle, const WCHAR *chars, ULONG co
     }
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -3046,7 +3058,7 @@ HRESULT WINAPI WsWriteCharsUtf8( WS_XML_WRITER *handle, const BYTE *bytes, ULONG
     WS_XML_UTF8_TEXT utf8;
     HRESULT hr;
 
-    TRACE( "%p %s %u %p\n", handle, debugstr_an((const char *)bytes, count), count, error );
+    TRACE( "%p %s %lu %p\n", handle, debugstr_an((const char *)bytes, count), count, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!writer) return E_INVALIDARG;
@@ -3071,7 +3083,7 @@ HRESULT WINAPI WsWriteCharsUtf8( WS_XML_WRITER *handle, const BYTE *bytes, ULONG
     }
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -3756,7 +3768,7 @@ static HRESULT write_type_field( struct writer *writer, const WS_FIELD_DESCRIPTI
 
     if (field_options & ~(WS_FIELD_POINTER|WS_FIELD_OPTIONAL|WS_FIELD_NILLABLE|WS_FIELD_NILLABLE_ITEM))
     {
-        FIXME( "options 0x%x not supported\n", desc->options );
+        FIXME( "options %#lx not supported\n", desc->options );
         return E_NOTIMPL;
     }
 
@@ -3871,7 +3883,7 @@ static HRESULT write_type_struct( struct writer *writer, WS_TYPE_MAPPING mapping
     HRESULT hr;
 
     if (!desc) return E_INVALIDARG;
-    if (desc->structOptions) FIXME( "struct options 0x%x not supported\n", desc->structOptions );
+    if (desc->structOptions) FIXME( "struct options %#lx not supported\n", desc->structOptions );
 
     if ((hr = get_value_ptr( option, value, size, desc->size, &ptr )) != S_OK) return hr;
     if (option == WS_WRITE_NILLABLE_POINTER && !ptr) return write_add_nil_attribute( writer );
@@ -4010,7 +4022,7 @@ HRESULT WINAPI WsWriteAttribute( WS_XML_WRITER *handle, const WS_ATTRIBUTE_DESCR
     struct writer *writer = (struct writer *)handle;
     HRESULT hr;
 
-    TRACE( "%p %p %u %p %u %p\n", handle, desc, option, value, size, error );
+    TRACE( "%p %p %u %p %lu %p\n", handle, desc, option, value, size, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!writer || !desc || !desc->attributeLocalName || !desc->attributeNs || !value)
@@ -4032,7 +4044,7 @@ HRESULT WINAPI WsWriteAttribute( WS_XML_WRITER *handle, const WS_ATTRIBUTE_DESCR
     }
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -4046,7 +4058,7 @@ HRESULT WINAPI WsWriteElement( WS_XML_WRITER *handle, const WS_ELEMENT_DESCRIPTI
     struct writer *writer = (struct writer *)handle;
     HRESULT hr;
 
-    TRACE( "%p %p %u %p %u %p\n", handle, desc, option, value, size, error );
+    TRACE( "%p %p %u %p %lu %p\n", handle, desc, option, value, size, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!writer || !desc || !desc->elementLocalName || !desc->elementNs || !value)
@@ -4069,7 +4081,7 @@ HRESULT WINAPI WsWriteElement( WS_XML_WRITER *handle, const WS_ELEMENT_DESCRIPTI
 
 done:
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -4083,7 +4095,7 @@ HRESULT WINAPI WsWriteType( WS_XML_WRITER *handle, WS_TYPE_MAPPING mapping, WS_T
     struct writer *writer = (struct writer *)handle;
     HRESULT hr;
 
-    TRACE( "%p %u %u %p %u %p %u %p\n", handle, mapping, type, desc, option, value,
+    TRACE( "%p %u %u %p %u %p %lu %p\n", handle, mapping, type, desc, option, value,
            size, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
@@ -4116,7 +4128,7 @@ HRESULT WINAPI WsWriteType( WS_XML_WRITER *handle, WS_TYPE_MAPPING mapping, WS_T
     }
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -4156,7 +4168,7 @@ HRESULT WINAPI WsWriteValue( WS_XML_WRITER *handle, WS_VALUE_TYPE value_type, co
     HRESULT hr = S_OK;
     WS_TYPE type;
 
-    TRACE( "%p %u %p %u %p\n", handle, value_type, value, size, error );
+    TRACE( "%p %u %p %lu %p\n", handle, value_type, value, size, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!writer || !value || (type = map_value_type( value_type )) == ~0u) return E_INVALIDARG;
@@ -4186,7 +4198,7 @@ HRESULT WINAPI WsWriteValue( WS_XML_WRITER *handle, WS_VALUE_TYPE value_type, co
     if (hr == S_OK) hr = write_type( writer, mapping, type, NULL, WS_WRITE_REQUIRED_VALUE, value, size );
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -4202,7 +4214,7 @@ HRESULT WINAPI WsWriteArray( WS_XML_WRITER *handle, const WS_XML_STRING *localna
     ULONG type_size, i;
     HRESULT hr = S_OK;
 
-    TRACE( "%p %s %s %u %p %u %u %u %p\n", handle, debugstr_xmlstr(localname), debugstr_xmlstr(ns),
+    TRACE( "%p %s %s %u %p %lu %lu %lu %p\n", handle, debugstr_xmlstr(localname), debugstr_xmlstr(ns),
            value_type, array, size, offset, count, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
@@ -4246,7 +4258,7 @@ HRESULT WINAPI WsWriteArray( WS_XML_WRITER *handle, const WS_XML_STRING *localna
 
 done:
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -4285,7 +4297,7 @@ HRESULT WINAPI WsWriteXmlBuffer( WS_XML_WRITER *handle, WS_XML_BUFFER *buffer, W
 
 done:
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -4303,7 +4315,7 @@ HRESULT WINAPI WsWriteXmlBufferToBytes( WS_XML_WRITER *handle, WS_XML_BUFFER *bu
     char *buf;
     ULONG i;
 
-    TRACE( "%p %p %p %p %u %p %p %p %p\n", handle, buffer, encoding, properties, count, heap,
+    TRACE( "%p %p %p %p %lu %p %p %p %p\n", handle, buffer, encoding, properties, count, heap,
            bytes, size, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
@@ -4340,7 +4352,7 @@ HRESULT WINAPI WsWriteXmlBufferToBytes( WS_XML_WRITER *handle, WS_XML_BUFFER *bu
 
 done:
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -4372,7 +4384,7 @@ HRESULT WINAPI WsWriteXmlnsAttribute( WS_XML_WRITER *handle, const WS_XML_STRING
         hr = add_namespace_attribute( writer, prefix, ns, single );
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -4423,7 +4435,7 @@ HRESULT WINAPI WsWriteQualifiedName( WS_XML_WRITER *handle, const WS_XML_STRING 
     else hr = write_qualified_name( writer, prefix, localname, ns );
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -4523,7 +4535,7 @@ HRESULT WINAPI WsMoveWriter( WS_XML_WRITER *handle, WS_MOVE_TO move, BOOL *found
     else hr = write_move_to( writer, move, found );
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -4556,7 +4568,7 @@ HRESULT WINAPI WsGetWriterPosition( WS_XML_WRITER *handle, WS_XML_NODE_POSITION 
     }
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -4585,7 +4597,7 @@ HRESULT WINAPI WsSetWriterPosition( WS_XML_WRITER *handle, const WS_XML_NODE_POS
     else writer->current = pos->node;
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -4598,7 +4610,7 @@ static HRESULT write_add_comment_node( struct writer *writer, const WS_XML_STRIN
     if (!(node = alloc_node( WS_XML_NODE_TYPE_COMMENT ))) return E_OUTOFMEMORY;
     comment = (WS_XML_COMMENT_NODE *)node;
 
-    if (value->length && !(comment->value.bytes = heap_alloc( value->length )))
+    if (value->length && !(comment->value.bytes = malloc( value->length )))
     {
         free_node( node );
         return E_OUTOFMEMORY;
@@ -4745,7 +4757,7 @@ HRESULT WINAPI WsWriteNode( WS_XML_WRITER *handle, const WS_XML_NODE *node, WS_E
     else hr = write_node( writer, node );
 
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -4876,7 +4888,7 @@ HRESULT WINAPI WsCopyNode( WS_XML_WRITER *handle, WS_XML_READER *reader, WS_ERRO
 
 done:
     LeaveCriticalSection( &writer->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 

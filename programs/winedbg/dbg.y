@@ -1,7 +1,3 @@
-%code top{
-#define YYMALLOC heap_alloc
-#define YYFREE heap_free
-}
 %{
 /*
  * Parser for command lines in the Wine debugger
@@ -25,16 +21,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "debugger.h"
 #include "wine/exception.h"
-#include "wine/heap.h"
 #include "expr.h"
 
 int dbg_lex(void);
@@ -43,14 +35,17 @@ static void parser(const char*);
 
 %}
 
+%define api.prefix {dbg_}
+
 %union
 {
     struct dbg_lvalue   lvalue;
     char*               string;
-    INT_PTR             integer;
+    dbg_lgint_t         integer;
     IMAGEHLP_LINE64     listing;
     struct expr*        expression;
     struct type_expr_t  type;
+    struct list_string* strings;
 }
 
 %token tCONT tPASS tSTEP tLIST tNEXT tQUIT tHELP tBACKTRACE tALL tINFO tUP tDOWN
@@ -84,15 +79,16 @@ static void parser(const char*);
 %left '+' '-'
 %left '*' '/' '%'
 %left OP_SIGN '!' '~' OP_DEREF /* OP_INC OP_DEC OP_ADDR */
-%left '.' '[' OP_DRF OP_SCOPE
+%left '.' '[' OP_DRF
 %nonassoc ':'
 
 %type <expression> expr lvalue
 %type <lvalue> expr_lvalue lvalue_addr
 %type <integer> expr_rvalue
-%type <string> pathname identifier cpp_identifier
+%type <string> pathname identifier
 %type <listing> list_arg
 %type <type> type_expr
+%type <strings> list_of_words
 
 %%
 
@@ -168,16 +164,8 @@ pathname:
     | tPATH                     { $$ = $1; }
     ;
 
-cpp_identifier:
-      tIDENTIFIER               { $$ = $1; }
-    | identifier OP_SCOPE tIDENTIFIER { $$ = lexeme_alloc_size(strlen($1) + 2 + strlen($3) + 1);
-                                       sprintf($$, "%s::%s", $1, $3); }
-    ;
-
 identifier:
-      cpp_identifier            { $$ = $1; }
-    | tIDENTIFIER '!' cpp_identifier { $$ = lexeme_alloc_size(strlen($1) + 1 + strlen($3) + 1);
-                                       sprintf($$, "%s!%s", $1, $3); }
+      tIDENTIFIER              { $$ = $1; }
     ;
 
 list_arg:
@@ -191,8 +179,12 @@ list_arg:
     ;
 
 run_command:
-      tRUN                      { dbg_run_debuggee(NULL); }
-    | tRUN tSTRING              { dbg_run_debuggee($2); }
+      tRUN list_of_words        { dbg_run_debuggee($2); }
+    ;
+
+list_of_words:
+      %empty                    { $$ = NULL; }
+    | tSTRING list_of_words     { $$ = (struct list_string*)lexeme_alloc_size(sizeof(*$$)); $$->next = $2; $$->string = $1; }
     ;
 
 list_command:
@@ -288,9 +280,9 @@ info_command:
     | tINFO tCLASS              { info_win32_class(NULL, NULL); }
     | tINFO tCLASS tSTRING     	{ info_win32_class(NULL, $3); }
     | tINFO tWND                { info_win32_window(NULL, FALSE); }
-    | tINFO tWND expr_rvalue    { info_win32_window((HWND)$3, FALSE); }
+    | tINFO tWND expr_rvalue    { info_win32_window((HWND)(DWORD_PTR)$3, FALSE); }
     | tINFO '*' tWND            { info_win32_window(NULL, TRUE); }
-    | tINFO '*' tWND expr_rvalue { info_win32_window((HWND)$4, TRUE); }
+    | tINFO '*' tWND expr_rvalue { info_win32_window((HWND)(DWORD_PTR)$4, TRUE); }
     | tINFO tPROCESS            { info_win32_processes(); }
     | tINFO tTHREAD             { info_win32_threads(); }
     | tINFO tFRAME              { info_win32_frame_exceptions(dbg_curr_tid); }
@@ -453,17 +445,26 @@ static LONG WINAPI wine_dbg_cmd(EXCEPTION_POINTERS *eptr)
         dbg_interrupt_debuggee();
         return EXCEPTION_CONTINUE_EXECUTION;
     default:
-        dbg_printf("\nException %x\n", eptr->ExceptionRecord->ExceptionCode);
+        dbg_printf("\nException %lx\n", eptr->ExceptionRecord->ExceptionCode);
         break;
     }
 
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
-static HANDLE dbg_parser_input;
-static HANDLE dbg_parser_output;
+struct parser_context
+{
+    const char* filename;
+    HANDLE input;
+    HANDLE output;
+    unsigned line_no;
+    char*  last_line;
+    size_t last_line_idx;
+};
 
-int      input_fetch_entire_line(const char* pfx, char** line)
+static struct parser_context dbg_parser = {NULL, INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE, 0, NULL, 0};
+
+static int input_fetch_entire_line(const char* pfx, char** line)
 {
     char*       buffer;
     char        ch;
@@ -473,15 +474,16 @@ int      input_fetch_entire_line(const char* pfx, char** line)
     /* as of today, console handles can be file handles... so better use file APIs rather than
      * console's
      */
-    WriteFile(dbg_parser_output, pfx, strlen(pfx), &nread, NULL);
+    WriteFile(dbg_parser.output, pfx, strlen(pfx), &nread, NULL);
 
     buffer = HeapAlloc(GetProcessHeap(), 0, alloc = 16);
     assert(buffer != NULL);
 
+    dbg_parser.line_no++;
     len = 0;
     do
     {
-        if (!ReadFile(dbg_parser_input, &ch, 1, &nread, NULL) || nread == 0)
+        if (!ReadFile(dbg_parser.input, &ch, 1, &nread, NULL) || nread == 0)
         {
             HeapFree(GetProcessHeap(), 0, buffer);
             return -1;
@@ -498,6 +500,48 @@ int      input_fetch_entire_line(const char* pfx, char** line)
     buffer[len] = '\0';
 
     *line = buffer;
+    return len;
+}
+
+size_t input_lex_read_buffer(char* buf, int size)
+{
+    int len;
+
+    /* try first to fetch the remaining of an existing line */
+    if (dbg_parser.last_line_idx == 0)
+    {
+        char* tmp = NULL;
+        /* no remaining chars to be read from last line, grab a brand new line up to '\n' */
+        lexeme_flush();
+        len = input_fetch_entire_line("Wine-dbg>", &tmp);
+        if (len < 0) return 0;  /* eof */
+
+        /* remove carriage return in newline */
+        if (len >= 2 && tmp[len - 2] == '\r')
+        {
+            tmp[len - 2] = '\n';
+            tmp[len - 1] = '\0';
+            len--;
+        }
+
+        /* recall last command when empty input buffer and not parsing a file */
+        if (dbg_parser.last_line && (len == 0 || (len == 1 && tmp[0] == '\n')) &&
+            dbg_parser.output != INVALID_HANDLE_VALUE)
+        {
+            HeapFree(GetProcessHeap(), 0, tmp);
+        }
+        else
+        {
+            HeapFree(GetProcessHeap(), 0, dbg_parser.last_line);
+            dbg_parser.last_line = tmp;
+        }
+    }
+
+    len = min(strlen(dbg_parser.last_line + dbg_parser.last_line_idx), size - 1);
+    memcpy(buf, dbg_parser.last_line + dbg_parser.last_line_idx, len);
+    buf[len] = '\0';
+    if ((dbg_parser.last_line_idx += len) >= strlen(dbg_parser.last_line))
+        dbg_parser.last_line_idx = 0;
     return len;
 }
 
@@ -521,25 +565,27 @@ int input_read_line(const char* pfx, char* buf, int size)
  *
  * Debugger command line parser
  */
-void	parser_handle(HANDLE input)
+void	parser_handle(const char* filename, HANDLE input)
 {
-    BOOL 	        ret_ok;
-    HANDLE              in_copy  = dbg_parser_input;
-    HANDLE              out_copy = dbg_parser_output;
+    BOOL ret_ok;
+    struct parser_context prev = dbg_parser;
 
     ret_ok = FALSE;
 
     if (input != INVALID_HANDLE_VALUE)
     {
-        dbg_parser_output = INVALID_HANDLE_VALUE;
-        dbg_parser_input  = input;
+        dbg_parser.output = INVALID_HANDLE_VALUE;
+        dbg_parser.input  = input;
     }
     else
     {
-        dbg_parser_output = GetStdHandle(STD_OUTPUT_HANDLE);
-        dbg_parser_input  = GetStdHandle(STD_INPUT_HANDLE);
+        dbg_parser.output = GetStdHandle(STD_OUTPUT_HANDLE);
+        dbg_parser.input  = GetStdHandle(STD_INPUT_HANDLE);
     }
-
+    dbg_parser.line_no = 0;
+    dbg_parser.filename = filename;
+    dbg_parser.last_line = NULL;
+    dbg_parser.last_line_idx = 0;
     do
     {
        __TRY
@@ -555,8 +601,7 @@ void	parser_handle(HANDLE input)
        lexeme_flush();
     } while (!ret_ok);
 
-    dbg_parser_input  = in_copy;
-    dbg_parser_output = out_copy;
+    dbg_parser = prev;
 }
 
 static void parser(const char* filename)
@@ -564,18 +609,20 @@ static void parser(const char* filename)
     HANDLE h = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0L, 0);
     if (h != INVALID_HANDLE_VALUE)
     {
-        parser_handle(h);
+        parser_handle(filename, h);
         CloseHandle(h);
     }
 }
 
 static int dbg_error(const char* s)
 {
+    if (dbg_parser.filename)
+        dbg_printf("%s:%d:", dbg_parser.filename, dbg_parser.line_no);
     dbg_printf("%s\n", s);
     return 0;
 }
 
-HANDLE parser_generate_command_file(const char* pmt, ...)
+HANDLE WINAPIV parser_generate_command_file(const char* pmt, ...)
 {
     HANDLE      hFile;
     char        path[MAX_PATH], file[MAX_PATH];

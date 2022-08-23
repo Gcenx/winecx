@@ -1,9 +1,13 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE    = winemac.drv
-IMPORTS   = uuid setupapi rpcrt4 user32 gdi32 advapi32
+IMPORTS   = uuid rpcrt4 user32 gdi32 advapi32 win32u
 DELAYIMPORTS = ole32 shell32 imm32
-EXTRALIBS = -framework AppKit -framework Carbon -framework Security -framework OpenGL -framework IOKit -framework CoreVideo $(METAL_LIBS)
+EXTRALIBS = -framework AppKit -framework Carbon -framework Security -framework OpenGL -framework IOKit -framework CoreVideo -framework QuartzCore $(METAL_LIBS)
+
+EXTRADLLFLAGS = -mcygwin
 
 C_SRCS = \
+	32on64hack.c \
 	clipboard.c \
 	display.c \
 	dragdrop.c \
@@ -16,6 +20,7 @@ C_SRCS = \
 	mouse.c \
 	opengl.c \
 	surface.c \
+	surface_hoststack.c \
 	systray.c \
 	vulkan.c \
 	window.c
@@ -42,4 +47,4 @@ cocoa_main_EXTRADEFS = $(HOSTSTACK_CFLAGS)
 cocoa_opengl_EXTRADEFS = $(HOSTSTACK_CFLAGS)
 cocoa_status_item_EXTRADEFS = $(HOSTSTACK_CFLAGS)
 cocoa_window_EXTRADEFS = $(HOSTSTACK_CFLAGS)
-surface_EXTRADEFS = $(HOSTSTACK_CFLAGS)
+surface_hoststack_EXTRADEFS = $(HOSTSTACK_CFLAGS)

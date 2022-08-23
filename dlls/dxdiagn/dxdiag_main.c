@@ -42,7 +42,7 @@ LONG DXDIAGN_refCount = 0;
 /* At process attach */
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-  TRACE("%p,%x,%p\n", hInstDLL, fdwReason, lpvReserved);
+  TRACE("%p,%lx,%p\n", hInstDLL, fdwReason, lpvReserved);
   if (fdwReason == DLL_PROCESS_ATTACH) {
       dxdiagn_instance = hInstDLL;
       DisableThreadLibraryCalls(hInstDLL);
@@ -150,20 +150,4 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 
     FIXME("(%s,%s,%p): no interface found.\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
     return CLASS_E_CLASSNOTAVAILABLE;
-}
-
-/***********************************************************************
- *		DllRegisterServer (DXDIAGN.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( dxdiagn_instance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (DXDIAGN.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( dxdiagn_instance );
 }

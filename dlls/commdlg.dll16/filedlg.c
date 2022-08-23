@@ -218,7 +218,7 @@ static LRESULT call_hook16( WNDPROC16 hook, HWND hwnd, UINT msg, WPARAM wp, LPAR
     CONTEXT context;
     WORD params[5];
 
-    TRACE( "%p: %p %08x %lx %lx: stub\n", hook, hwnd, msg, wp, lp );
+    TRACE( "%p: %p %08x %x %lx: stub\n", hook, hwnd, msg, wp, lp );
 
     memset( &context, 0, sizeof(context) );
     context.SegDs = context.SegEs = CURRENT_SS;
@@ -482,6 +482,12 @@ static UINT_PTR CALLBACK call_hook_proc( WNDPROC16 hook, HWND hwnd, UINT msg, WP
     case WM_ACTIVATEAPP:
         ret = call_hook16( hook, hwnd, msg, wp, HTASK_16( lp ));
         break;
+    case WM_INITDIALOG:
+        {
+            OPENFILENAMEA *ofn = (OPENFILENAMEA *)lp;
+            ret = call_hook16( hook, hwnd, msg, wp, ofn->lCustData );
+            break;
+        }
     default:
         ret = call_hook16( hook, hwnd, msg, wp, lp );
         break;
@@ -591,7 +597,7 @@ BOOL16 WINAPI GetOpenFileName16( SEGPTR ofn ) /* [in/out] address of structure w
     ofn32.nFileOffset       = lpofn->nFileOffset;
     ofn32.nFileExtension    = lpofn->nFileExtension;
     ofn32.lpstrDefExt       = MapSL( lpofn->lpstrDefExt );
-    ofn32.lCustData         = lpofn->lCustData;
+    ofn32.lCustData         = ofn; /* See WM_INITDIALOG in the hook proc */
     ofn32.lpfnHook          = dummy_hook;  /* this is to force old 3.1 dialog style */
 
     if (lpofn->Flags & OFN_ENABLETEMPLATE)

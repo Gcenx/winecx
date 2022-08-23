@@ -19,6 +19,246 @@
 var compat_version;
 var tests = [];
 
+sync_test("builtin_toString", function() {
+    var tags = [
+        [ "abbr",            "Phrase" ],
+        [ "acronym",         "Phrase" ],
+        [ "address",         "Block" ],
+     // [ "applet",          "Applet" ],  // makes Windows pop up a dialog box
+        [ "article",         "" ],
+        [ "aside",           "" ],
+        [ "audio",           "Audio" ],
+        [ "b",               "Phrase" ],
+        [ "base",            "Base" ],
+        [ "basefont",        "BaseFont" ],
+        [ "bdi",             "Unknown" ],
+        [ "bdo",             "Phrase" ],
+        [ "big",             "Phrase" ],
+        [ "blockquote",      "Block" ],
+        [ "body",            "Body" ],
+        [ "br",              "BR" ],
+        [ "button",          "Button" ],
+        [ "canvas",          "Canvas" ],
+        [ "caption",         "TableCaption" ],
+        [ "center",          "Block" ],
+        [ "cite",            "Phrase" ],
+        [ "code",            "Phrase" ],
+        [ "col",             "TableCol" ],
+        [ "colgroup",        "TableCol" ],
+        [ "data",            "Unknown" ],
+        [ "datalist",        "DataList", 10 ],
+        [ "dd",              "DD" ],
+        [ "del",             "Mod" ],
+        [ "details",         "Unknown" ],
+        [ "dfn",             "Phrase" ],
+        [ "dialog",          "Unknown" ],
+        [ "dir",             "Directory" ],
+        [ "div",             "Div" ],
+        [ "dl",              "DList" ],
+        [ "dt",              "DT" ],
+        [ "em",              "Phrase" ],
+        [ "embed",           "Embed" ],
+        [ "fieldset",        "FieldSet" ],
+        [ "figcaption",      "" ],
+        [ "figure",          "" ],
+        [ "font",            "Font" ],
+        [ "footer",          "" ],
+        [ "form",            "Form" ],
+        [ "frame",           "Frame" ],
+        [ "frameset",        "FrameSet" ],
+        [ "h1",              "Heading" ],
+        [ "h2",              "Heading" ],
+        [ "h3",              "Heading" ],
+        [ "h4",              "Heading" ],
+        [ "h5",              "Heading" ],
+        [ "h6",              "Heading" ],
+        [ "h7",              "Unknown" ],
+        [ "head",            "Head" ],
+        [ "header",          "" ],
+        [ "hr",              "HR" ],
+        [ "html",            "Html" ],
+        [ "i",               "Phrase" ],
+        [ "iframe",          "IFrame" ],
+        [ "img",             "Image" ],
+        [ "input",           "Input" ],
+        [ "ins",             "Mod" ],
+        [ "kbd",             "Phrase" ],
+        [ "label",           "Label" ],
+        [ "legend",          "Legend" ],
+        [ "li",              "LI" ],
+        [ "link",            "Link" ],
+        [ "main",            "Unknown" ],
+        [ "map",             "Map" ],
+        [ "mark",            "" ],
+        [ "meta",            "Meta" ],
+        [ "meter",           "Unknown" ],
+        [ "nav",             "" ],
+        [ "noframes",        "" ],
+        [ "noscript",        "" ],
+        [ "object",          "Object" ],
+        [ "ol",              "OList" ],
+        [ "optgroup",        "OptGroup" ],
+        [ "option",          "Option" ],
+        [ "output",          "Unknown" ],
+        [ "p",               "Paragraph" ],
+        [ "param",           "Param" ],
+        [ "picture",         "Unknown" ],
+        [ "pre",             "Pre" ],
+        [ "progress",        "Progress", 10 ],
+        [ "q",               "Quote" ],
+        [ "rp",              "Phrase" ],
+        [ "rt",              "Phrase" ],
+        [ "ruby",            "Phrase" ],
+        [ "s",               "Phrase" ],
+        [ "samp",            "Phrase" ],
+        [ "script",          "Script" ],
+        [ "section",         "" ],
+        [ "select",          "Select" ],
+        [ "small",           "Phrase" ],
+        [ "source",          "Source" ],
+        [ "span",            "Span" ],
+        [ "strike",          "Phrase" ],
+        [ "strong",          "Phrase" ],
+        [ "style",           "Style" ],
+        [ "sub",             "Phrase" ],
+        [ "summary",         "Unknown" ],
+        [ "sup",             "Phrase" ],
+        [ "svg",             "Unknown" ],
+        [ "table",           "Table" ],
+        [ "tbody",           "TableSection" ],
+        [ "td",              "TableDataCell" ],
+        [ "template",        "Unknown" ],
+        [ "textarea",        "TextArea" ],
+        [ "tfoot",           "TableSection" ],
+        [ "th",              "TableHeaderCell" ],
+        [ "thead",           "TableSection" ],
+        [ "time",            "Unknown" ],
+        [ "title",           "Title" ],
+        [ "tr",              "TableRow" ],
+        [ "track",           "Track", 10 ],
+        [ "tt",              "Phrase" ],
+        [ "u",               "Phrase" ],
+        [ "ul",              "UList" ],
+        [ "var",             "Phrase" ],
+        [ "video",           "Video" ],
+        [ "wbr",             "" ],
+        [ "winetest",        "Unknown" ]
+    ];
+    var v = document.documentMode, e;
+
+    function test(msg, obj, name, tostr) {
+        var s;
+        if(obj.toString) {
+            s = obj.toString();
+            todo_wine_if(name !== "HTMLElement" && s === "[object HTMLElement]").
+            ok(s === (tostr ? tostr : (v < 9 ? "[object]" : "[object " + name + "]")), msg + " toString returned " + s);
+        }
+        s = Object.prototype.toString.call(obj);
+        todo_wine_if(v >= 9 && name != "Object").
+        ok(s === (v < 9 ? "[object Object]" : "[object " + name + "]"), msg + " Object.toString returned " + s);
+    }
+
+    for(var i = 0; i < tags.length; i++)
+        if(tags[i].length < 3 || v >= tags[i][2])
+            test("tag '" + tags[i][0] + "'", document.createElement(tags[i][0]), "HTML" + tags[i][1] + "Element");
+
+    e = document.createElement("a");
+    ok(e.toString() === "", "tag 'a' (without href) toString returned " + e.toString());
+    e.href = "https://www.winehq.org/";
+    test("tag 'a'", e, "HTMLAnchorElement", "https://www.winehq.org/");
+
+    e = document.createElement("area");
+    ok(e.toString() === "", "tag 'area' (without href) toString returned " + e.toString());
+    e.href = "https://www.winehq.org/";
+    test("tag 'area'", e, "HTMLAreaElement", "https://www.winehq.org/");
+
+    e = document.createElement("style");
+    document.body.appendChild(e);
+    var sheet = v >= 9 ? e.sheet : e.styleSheet;
+    if(v >= 9)
+        sheet.insertRule("div { border: none }", 0);
+    else
+        sheet.addRule("div", "border: none", 0);
+
+    e = document.createElement("p");
+    e.className = "testclass    another ";
+    e.textContent = "Test content";
+    e.style.border = "1px solid black";
+    document.body.appendChild(e);
+
+    var txtRange = document.body.createTextRange();
+    txtRange.moveToElementText(e);
+
+    var clientRects = e.getClientRects();
+    if(!clientRects) win_skip("getClientRects() is buggy and not available, skipping");
+
+    var currentStyle = e.currentStyle;
+    if(!currentStyle) win_skip("currentStyle is buggy and not available, skipping");
+
+    // w10pro64 testbot VM throws WININET_E_INTERNAL_ERROR for some reason
+    var localStorage;
+    try {
+        localStorage = window.localStorage;
+    }catch(e) {
+        ok(e.number === 0x72ee4 - 0x80000000, "localStorage threw " + e.number + ": " + e);
+    }
+    if(!localStorage) win_skip("localStorage is buggy and not available, skipping");
+
+    test("attribute", document.createAttribute("class"), "Attr");
+    if(false /* todo_wine */) test("attributes", e.attributes, "NamedNodeMap");
+    test("childNodes", document.body.childNodes, "NodeList");
+    if(clientRects) test("clientRect", clientRects[0], "ClientRect");
+    if(clientRects) test("clientRects", clientRects, "ClientRectList");
+    if(currentStyle) test("currentStyle", currentStyle, "MSCurrentStyleCSSProperties");
+    if(v >= 11 /* todo_wine */) test("document", document, v < 11 ? "Document" : "HTMLDocument");
+    test("elements", document.getElementsByTagName("body"), "HTMLCollection");
+    test("history", window.history, "History");
+    test("implementation", document.implementation, "DOMImplementation");
+    if(localStorage) test("localStorage", localStorage, "Storage");
+    test("location", window.location, "Object", window.location.href);
+    if(v >= 11 /* todo_wine */) test("mimeTypes", window.navigator.mimeTypes, v < 11 ? "MSMimeTypesCollection" : "MimeTypeArray");
+    test("navigator", window.navigator, "Navigator");
+    test("performance", window.performance, "Performance");
+    test("performanceNavigation", window.performance.navigation, "PerformanceNavigation");
+    test("performanceTiming", window.performance.timing, "PerformanceTiming");
+    if(v >= 11 /* todo_wine */) test("plugins", window.navigator.plugins, v < 11 ? "MSPluginsCollection" : "PluginArray");
+    test("screen", window.screen, "Screen");
+    test("sessionStorage", window.sessionStorage, "Storage");
+    test("style", document.body.style, "MSStyleCSSProperties");
+    test("styleSheet", sheet, "CSSStyleSheet");
+    test("styleSheetRule", sheet.rules[0], "CSSStyleRule");
+    test("styleSheetRules", sheet.rules, "MSCSSRuleList");
+    test("styleSheets", document.styleSheets, "StyleSheetList");
+    test("textNode", document.createTextNode("testNode"), "Text", v < 9 ? "testNode" : null);
+    test("textRange", txtRange, "TextRange");
+    test("window", window, "Window", "[object Window]");
+    test("xmlHttpRequest", new XMLHttpRequest(), "XMLHttpRequest");
+    if(v < 10) {
+        test("namespaces", document.namespaces, "MSNamespaceInfoCollection");
+    }
+    if(v < 11) {
+        test("eventObject", document.createEventObject(), "MSEventObj");
+        test("selection", document.selection, "MSSelection");
+    }
+    if(v >= 9) {
+        test("computedStyle", window.getComputedStyle(e), "CSSStyleDeclaration");
+
+        test("Event", document.createEvent("Event"), "Event");
+        test("CustomEvent", document.createEvent("CustomEvent"), "CustomEvent");
+        test("KeyboardEvent", document.createEvent("KeyboardEvent"), "KeyboardEvent");
+        test("MouseEvent", document.createEvent("MouseEvent"), "MouseEvent");
+        test("UIEvent", document.createEvent("UIEvent"), "UIEvent");
+    }
+    if(v >= 10) {
+        test("classList", e.classList, "DOMTokenList", "testclass    another ");
+        test("console", window.console, "Console");
+    }
+    if(v >= 9) {
+        document.body.innerHTML = "<!--...-->";
+        test("comment", document.body.firstChild, "Comment");
+    }
+});
+
 sync_test("elem_props", function() {
     var elem = document.documentElement;
 
@@ -57,6 +297,7 @@ sync_test("elem_props", function() {
     test_exposed("sheet", v >= 9);
     test_exposed("readyState", v < 11);
     test_exposed("styleSheet", v < 11);
+    test_exposed("classList", v >= 10);
 });
 
 sync_test("doc_props", function() {
@@ -119,8 +360,8 @@ sync_test("window_props", function() {
     test_exposed("requestAnimationFrame", v >= 10);
     test_exposed("Map", v >= 11);
     test_exposed("Set", v >= 11);
-    if(v >= 9) /* FIXME: native exposes it in all compat modes */
-        test_exposed("performance", true);
+    test_exposed("performance", true);
+    test_exposed("console", v >= 10);
 });
 
 sync_test("xhr_props", function() {
@@ -244,6 +485,67 @@ sync_test("style_props", function() {
         test_exposed("removeProperty", v >= 9);
         test_exposed("background-clip", v >= 9);
         test_exposed("transform", v >= 10);
+    }
+});
+
+sync_test("createElement_inline_attr", function() {
+    var v = document.documentMode, e, s;
+
+    if(v < 9) {
+        s = document.createElement("<div>").tagName;
+        ok(s === "DIV", "<div>.tagName returned " + s);
+        s = document.createElement("<div >").tagName;
+        ok(s === "DIV", "<div >.tagName returned " + s);
+        s = document.createElement("<div/>").tagName;
+        ok(s === "DIV", "<div/>.tagName returned " + s);
+        e = 0;
+        try {
+            document.createElement("<div");
+        }catch(ex) {
+            e = ex.number;
+        }
+        ok(e === 0x4005 - 0x80000000, "<div e = " + e);
+        e = 0;
+        try {
+            document.createElement("<div test=1");
+        }catch(ex) {
+            e = ex.number;
+        }
+        ok(e === 0x4005 - 0x80000000, "<div test=1 e = " + e);
+
+        var tags = [ "div", "head", "body", "title", "html" ];
+
+        for(var i = 0; i < tags.length; i++) {
+            e = document.createElement("<" + tags[i] + " test='a\"' abcd=\"&quot;b&#34;\">");
+            ok(e.tagName === tags[i].toUpperCase(), "<" + tags[i] + " test=\"a\" abcd=\"b\">.tagName returned " + e.tagName);
+            ok(e.test === "a\"", "<" + tags[i] + " test='a\"' abcd=\"&quot;b&#34;\">.test returned " + e.test);
+            ok(e.abcd === "\"b\"", "<" + tags[i] + " test='a\"' abcd=\"&quot;b&#34;\">.abcd returned " + e.abcd);
+        }
+    }else {
+        s = "";
+        e = 0;
+        try {
+            document.createElement("<div>");
+        }catch(ex) {
+            s = ex.toString();
+            e = ex.number;
+        }
+        todo_wine.
+        ok(e === undefined, "<div> e = " + e);
+        todo_wine.
+        ok(s === "InvalidCharacterError", "<div> s = " + s);
+        s = "";
+        e = 0;
+        try {
+            document.createElement("<div test=\"a\">");
+        }catch(ex) {
+            s = ex.toString();
+            e = ex.number;
+        }
+        todo_wine.
+        ok(e === undefined, "<div test=\"a\"> e = " + e);
+        todo_wine.
+        ok(s === "InvalidCharacterError", "<div test=\"a\"> s = " + s);
     }
 });
 
@@ -610,6 +912,12 @@ sync_test("set_obj", function() {
 
     function test_length(name, len) {
         ok(Set.prototype[name].length === len, "Set.prototype." + name + " = " + Set.prototype[name].length);
+        try {
+            Set.prototype[name].call({}, 0);
+            ok(false, "expected exception calling Set.prototype." + name + "(object)");
+        }catch(e) {
+            ok(e.number === 0xa13fc - 0x80000000, "Set.prototype." + name + "(object) threw " + e.number);
+        }
     }
     test_length("add", 1);
     test_length("clear", 0);
@@ -622,6 +930,65 @@ sync_test("set_obj", function() {
 
     r = Object.prototype.toString.call(s);
     ok(r === "[object Object]", "toString returned " + r);
+
+    r = s.has(-0);
+    ok(r === false, "has(-0) returned " + r);
+    ok(s.size === 0, "size = " + s.size);
+
+    r = s.add(42);
+    ok(r === undefined, "add(42) returned " + r);
+    r = s.add(42);
+    ok(r === undefined, "add(42) returned " + r);
+    r = s.add(0);
+    ok(r === undefined, "add(0) returned " + r);
+    r = s.has(-0);
+    ok(r === false, "has(-0) returned " + r);
+    r = s.add(-0);
+    ok(r === undefined, "add(-0) returned " + r);
+    r = s.has(-0);
+    ok(r === true, "has(-0) after add returned " + r);
+    r = s.add("test");
+    ok(r === undefined, "add(test) returned " + r);
+    r = s.add(13);
+    ok(r === undefined, "add(13) returned " + r);
+    r = s.add(s);
+    ok(r === undefined, "add(s) returned " + r);
+
+    r = s["delete"]("test"); /* using s.delete() would break parsing in quirks mode */
+    ok(r === true, "delete(test) returned " + r);
+    r = s["delete"]("test");
+    ok(r === false, "delete(test) returned " + r);
+
+    ok(s.size === 5, "size = " + s.size);
+    s.size = 100;
+    ok(s.size === 5, "size (after set) = " + s.size);
+
+    var a = [];
+    r = s.forEach(function(value, key, obj) {
+        var t = s["delete"](key);
+        ok(t === true, "delete(" + key + ") returned " + r);
+        ok(value === key, "value = " + value + ", key = " + key);
+        ok(obj === s, "set = " + obj);
+        ok(this === a, "this = " + this);
+        a.push(value);
+    }, a);
+    ok(r === undefined, "forEach returned " + r);
+    ok(a.length === 5, "a.length = " + a.length);
+    for(var i = 0; i < a.length; i++)
+        ok(a[i] === [42, 0, -0, 13, s][i], "a[" + i + "] = " + a[i]);
+    ok(s.size === 0, "size = " + s.size);
+
+    s = new Set();
+    ok(s.size === 0, "size = " + s.size);
+    s.add(1);
+    s.add(2);
+    ok(s.size === 2, "size = " + s.size);
+    r = s.clear();
+    ok(r === undefined, "clear returned " + r);
+    ok(s.size === 0, "size = " + s.size);
+
+    s = new Set([1, 2, 3]);
+    ok(s.size === 0, "size = " + s.size);
 });
 
 sync_test("map_obj", function() {
@@ -693,7 +1060,7 @@ sync_test("map_obj", function() {
 
     var calls = [];
     i = 0;
-    r = s.forEach(function(value, key) {
+    r = s.forEach(function(value, key, map) {
         if(isNaN(test_keys[i])) {
             ok(isNaN(key), "key = " + key + " expected NaN");
             ok(isNaN(value), "value = " + value + " expected NaN");
@@ -701,8 +1068,10 @@ sync_test("map_obj", function() {
             ok(key === test_keys[i], "key = " + key + " expected " + test_keys[i]);
             ok(value === key + 1, "value = " + value);
         }
+        ok(map === s, "map = " + map);
+        ok(this === test_keys, "this = " + this);
         i++;
-    });
+    }, test_keys);
     ok(i === test_keys.length, "i = " + i);
     ok(r === undefined, "forEach returned " + r);
 
@@ -747,6 +1116,15 @@ sync_test("map_obj", function() {
     });
     ok(i === 66, "i = " + i);
 
+    s = new Map();
+    s.set(0,  10);
+    s.set(-0, 20);
+    ok(s.size === 2, "size = " + s.size + " expected 2");
+    r = s.get(-0);
+    ok(r === 20, "get(-0) returned " + r);
+    r = s.get(0);
+    ok(r === 10, "get(0) returned " + r);
+
     try {
         Map.prototype.set.call({}, 1, 2);
         ok(false, "expected exception");
@@ -758,6 +1136,13 @@ sync_test("map_obj", function() {
 sync_test("elem_attr", function() {
     var v = document.documentMode;
     var elem = document.createElement("div"), r;
+
+    function test_exposed(prop, expect) {
+        if(expect)
+            ok(prop in elem, prop + " is not exposed from elem");
+        else
+            ok(!(prop in elem), prop + " is exposed from elem");
+    }
 
     r = elem.getAttribute("class");
     ok(r === null, "class attr = " + r);
@@ -783,4 +1168,618 @@ sync_test("elem_attr", function() {
     ok(r === "cls2", "class attr = " + r);
     r = elem.getAttribute("className");
     ok(r === "cls3", "className attr = " + r);
+
+    elem.htmlFor = "for";
+    r = elem.getAttribute("for");
+    ok(r === null, "for attr = " + r);
+    r = elem.getAttribute("htmlFor");
+    ok(r === (v < 9 ? "for" : null), "htmlFor attr = " + r);
+
+    elem.setAttribute("for", "for2");
+    ok(elem.htmlFor === "for", "elem.htmlFor = " + elem.htmlFor);
+    r = elem.getAttribute("for");
+    ok(r === "for2", "for attr = " + r);
+    r = elem.getAttribute("htmlFor");
+    ok(r === (v < 9 ? "for" : null), "htmlFor attr = " + r);
+
+    elem.setAttribute("htmlFor", "for3");
+    ok(elem.htmlFor === (v < 9 ? "for3" : "for"), "elem.htmlFor = " + elem.htmlFor);
+    r = elem.getAttribute("for");
+    ok(r === "for2", "for attr = " + r);
+    r = elem.getAttribute("htmlFor");
+    ok(r === "for3", "htmlFor attr = " + r);
+
+    elem.setAttribute("testattr", "test", 0, "extra arg", 0xdeadbeef);
+    test_exposed("class", v < 8);
+    test_exposed("className", true);
+    test_exposed("for", v < 9);
+    test_exposed("htmlFor", true);
+    test_exposed("testattr", v < 9);
+
+    var arr = [3];
+    elem.setAttribute("testattr", arr);
+    r = elem.getAttribute("testattr");
+    ok(r === (v < 8 ? arr : "3"), "testattr = " + r);
+    ok(elem.testattr === (v < 9 ? arr : undefined), "elem.testattr = " + elem.testattr);
+    r = elem.removeAttribute("testattr");
+    ok(r === (v < 9 ? true : undefined), "testattr removeAttribute returned " + r);
+    ok(elem.testattr === undefined, "removed testattr = " + elem.testattr);
+
+    arr[0] = 9;
+    elem.setAttribute("testattr", "string");
+    elem.testattr = arr;
+    r = elem.getAttribute("testattr");
+    ok(r === (v < 8 ? arr : (v < 9 ? "9" : "string")), "testattr = " + r);
+    ok(elem.testattr === arr, "elem.testattr = " + elem.testattr);
+    arr[0] = 3;
+    r = elem.getAttribute("testattr");
+    ok(r === (v < 8 ? arr : (v < 9 ? "3" : "string")), "testattr = " + r);
+    ok(elem.testattr === arr, "elem.testattr = " + elem.testattr);
+    r = elem.removeAttribute("testattr");
+    ok(r === (v < 9 ? true : undefined), "testattr removeAttribute returned " + r);
+    ok(elem.testattr === (v < 9 ? undefined : arr), "removed testattr = " + elem.testattr);
+
+    arr.toString = function() { return 42; }
+    elem.testattr = arr;
+    r = elem.getAttribute("testattr");
+    ok(r === (v < 8 ? arr : (v < 9 ? "42" : null)), "testattr with custom toString = " + r);
+    elem.setAttribute("testattr", arr);
+    r = elem.getAttribute("testattr");
+    ok(r === (v < 8 ? arr : "42"), "testattr after setAttribute with custom toString = " + r);
+    ok(elem.testattr === arr, "elem.testattr after setAttribute with custom toString = " + elem.testattr);
+    r = elem.removeAttribute("testattr");
+    ok(r === (v < 9 ? true : undefined), "testattr removeAttribute with custom toString returned " + r);
+    ok(elem.testattr === (v < 9 ? undefined : arr), "removed testattr with custom toString = " + elem.testattr);
+
+    arr.valueOf = function() { return "arrval"; }
+    elem.testattr = arr;
+    r = elem.getAttribute("testattr");
+    ok(r === (v < 8 ? arr : (v < 9 ? "arrval" : null)), "testattr with custom valueOf = " + r);
+    elem.setAttribute("testattr", arr);
+    r = elem.getAttribute("testattr");
+    ok(r === (v < 8 ? arr : (v < 10 ? "arrval" : "42")), "testattr after setAttribute with custom valueOf = " + r);
+    ok(elem.testattr === arr, "elem.testattr after setAttribute with custom valueOf = " + elem.testattr);
+    r = elem.removeAttribute("testattr");
+    ok(r === (v < 9 ? true : undefined), "testattr removeAttribute with custom valueOf returned " + r);
+    ok(elem.testattr === (v < 9 ? undefined : arr), "removed testattr with custom valueOf = " + elem.testattr);
+
+    var func = elem.setAttribute;
+    try {
+        func("testattr", arr);
+        todo_wine_if(v >= 9).
+        ok(v < 9, "expected exception setting testattr via func");
+    }catch(ex) {
+        ok(v >= 9, "did not expect exception setting testattr via func");
+        elem.setAttribute("testattr", arr);
+    }
+    r = elem.getAttribute("testattr");
+    ok(r === (v < 8 ? arr : (v < 10 ? "arrval" : "42")), "testattr after setAttribute (as func) = " + r);
+    delete arr.valueOf;
+    delete arr.toString;
+
+    elem.setAttribute("id", arr);
+    r = elem.getAttribute("id");
+    todo_wine_if(v >= 8 && v < 10).
+    ok(r === (v < 8 || v >= 10 ? "3" : "[object]"), "id = " + r);
+    r = elem.removeAttribute("id");
+    ok(r === (v < 9 ? true : undefined), "id removeAttribute returned " + r);
+    ok(elem.id === "", "removed id = " + elem.id);
+
+    func = function() { };
+    elem.onclick = func;
+    ok(elem.onclick === func, "onclick = " + elem.onclick);
+    r = elem.getAttribute("onclick");
+    todo_wine_if(v === 8).
+    ok(r === (v < 8 ? func : null), "onclick attr = " + r);
+    r = elem.removeAttribute("onclick");
+    ok(r === (v < 9 ? false : undefined), "removeAttribute returned " + r);
+    todo_wine_if(v === 8).
+    ok(elem.onclick === (v != 8 ? func : null), "removed onclick = " + elem.onclick);
+
+    elem.onclick_test = func;
+    ok(elem.onclick_test === func, "onclick_test = " + elem.onclick_test);
+    r = elem.getAttribute("onclick_test");
+    ok(r === (v < 8 ? func : (v < 9 ? func.toString() : null)), "onclick_test attr = " + r);
+
+    elem.setAttribute("onclick", "test");
+    r = elem.getAttribute("onclick");
+    ok(r === "test", "onclick attr after setAttribute = " + r);
+    r = elem.removeAttribute("onclick");
+    ok(r === (v < 9 ? true : undefined), "removeAttribute after setAttribute returned " + r);
+
+    /* IE11 returns an empty function, which we can't check directly */
+    todo_wine_if(v >= 9).
+    ok((v < 11) ? (elem.onclick === null) : (elem.onclick !== func), "removed onclick after setAttribute = " + elem.onclick);
+
+    r = Object.prototype.toString.call(elem.onclick);
+    todo_wine_if(v >= 9 && v < 11).
+    ok(r === (v < 9 ? "[object Object]" : (v < 11 ? "[object Null]" : "[object Function]")),
+        "removed onclick after setAttribute Object.toString returned " + r);
+
+    elem.setAttribute("onclick", "string");
+    r = elem.getAttribute("onclick");
+    ok(r === "string", "onclick attr after setAttribute = " + r);
+    elem.onclick = func;
+    ok(elem.onclick === func, "onclick = " + elem.onclick);
+    r = elem.getAttribute("onclick");
+    todo_wine_if(v === 8).
+    ok(r === (v < 8 ? func : (v < 9 ? null : "string")), "onclick attr = " + r);
+    elem.onclick = "test";
+    r = elem.getAttribute("onclick");
+    ok(r === (v < 9 ? "test" : "string"), "onclick attr = " + r);
+    r = elem.removeAttribute("onclick");
+    ok(r === (v < 9 ? true : undefined), "removeAttribute returned " + r);
+    todo_wine_if(v >= 9).
+    ok(elem.onclick === null, "removed onclick = " + elem.onclick);
+
+    elem.setAttribute("ondblclick", arr);
+    r = elem.getAttribute("ondblclick");
+    todo_wine_if(v >= 8 && v < 10).
+    ok(r === (v < 8 ? arr : (v < 10 ? "[object]" : "3")), "ondblclick = " + r);
+    r = elem.removeAttribute("ondblclick");
+    ok(r === (v < 8 ? false : (v < 9 ? true : undefined)), "ondblclick removeAttribute returned " + r);
+    r = Object.prototype.toString.call(elem.ondblclick);
+    todo_wine_if(v >= 11).
+    ok(r === (v < 8 ? "[object Array]" : (v < 9 ? "[object Object]" : (v < 11 ? "[object Null]" : "[object Function]"))),
+        "removed ondblclick Object.toString returned " + r);
+
+    elem.setAttribute("ondblclick", "string");
+    r = elem.getAttribute("ondblclick");
+    ok(r === "string", "ondblclick string = " + r);
+    r = elem.removeAttribute("ondblclick");
+    ok(r === (v < 9 ? true : undefined), "ondblclick string removeAttribute returned " + r);
+    ok(elem.ondblclick === null, "removed ondblclick string = " + elem.ondblclick);
+
+    if(v < 9) {
+        /* style is a special case */
+        try {
+            elem.style = "opacity: 1.0";
+            ok(false, "expected exception setting elem.style");
+        }catch(ex) { }
+
+        var style = elem.style;
+        r = elem.getAttribute("style");
+        ok(r === (v < 8 ? style : null), "style attr = " + r);
+        r = elem.removeAttribute("style");
+        ok(r === true, "removeAttribute('style') returned " + r);
+        r = elem.style;
+        ok(r === style, "removed elem.style = " + r);
+        r = elem.getAttribute("style");
+        ok(r === (v < 8 ? style : null), "style attr after removal = " + r);
+        elem.setAttribute("style", "opacity: 1.0");
+        r = elem.getAttribute("style");
+        ok(r === (v < 8 ? style : "opacity: 1.0"), "style attr after setAttribute = " + r);
+        r = elem.style;
+        ok(r === style, "elem.style after setAttribute = " + r);
+    }
+});
+
+sync_test("builtins_diffs", function() {
+    var v = document.documentMode;
+
+    /* despite what spec says for ES6, IE still throws */
+    var props = [
+        "freeze",
+        "getPrototypeOf",
+        "isExtensible",
+        "isFrozen",
+        "isSealed",
+        "keys",
+        "preventExtensions",
+        "seal"
+    ];
+    for(var i = 0; i < props.length; i++) {
+        try {
+            Object[props[i]]("test");
+            ok(false, "Object." + props[i] + " with non-object: expected exception");
+        }catch(e) {
+            ok(e.number === (v < 9 ? 0xa01b6 : 0xa138f) - 0x80000000, "Object." + props[i] + " with non-object: exception = " + e.number);
+        }
+    }
+
+    try {
+        RegExp.prototype.toString.call({source: "foo", flags: "g"});
+        ok(false, "RegExp.toString with non-regexp: expected exception");
+    }catch(e) {
+        ok(e.number === 0xa1398 - 0x80000000, "RegExp.toString with non-regexp: exception = " + e.number);
+    }
+
+    try {
+        /a/.lastIndex();
+        ok(false, "/a/.lastIndex(): expected exception");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "/a/.lastIndex(): exception = " + e.number);
+    }
+    try {
+        "a".length();
+        ok(false, "\"a\".length(): expected exception");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "\"a\".length(): exception = " + e.number);
+    }
+});
+
+sync_test("nullDisp", function() {
+    var v = document.documentMode, nullDisp = external.nullDisp, r;
+
+    ok(external.getVT(nullDisp) === "VT_NULL", "getVT(nullDisp) is not VT_NULL");
+    ok(typeof(nullDisp) === "object", "typeof(nullDisp) = " + typeof(nullDisp));
+    ok(nullDisp === nullDisp, "nullDisp !== nullDisp");
+    ok(nullDisp === null, "nullDisp === null");
+    ok(nullDisp == null, "nullDisp == null");
+    ok(!nullDisp === true, "!nullDisp = " + !nullDisp);
+    ok(String(nullDisp) === "null", "String(nullDisp) = " + String(nullDisp));
+    ok(+nullDisp === 0, "+nullDisp !== 0");
+    ok(''+nullDisp === "null", "''+nullDisp !== null");
+    ok(nullDisp != new Object(), "nullDisp == new Object()");
+    ok(new Object() != nullDisp, "new Object() == nullDisp");
+    ok((typeof Object(nullDisp)) === "object", "typeof Object(nullDisp) !== 'object'");
+    r = Object(nullDisp).toString();
+    ok(r === "[object Object]", "Object(nullDisp).toString() = " + r);
+    ok(Object(nullDisp) != nullDisp, "Object(nullDisp) == nullDisp");
+    ok(new Object(nullDisp) != nullDisp, "new Object(nullDisp) == nullDisp");
+    r = (nullDisp instanceof Object);
+    ok(r === false, "nullDisp instance of Object");
+
+    if(v >= 8) {
+        r = JSON.stringify.call(null, nullDisp);
+        ok(r === "null", "JSON.stringify(nullDisp) returned " + r);
+    }
+
+    try {
+        (new Object()) instanceof nullDisp;
+        ok(false, "expected exception on (new Object()) instanceof nullDisp");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "(new Object()) instanceof nullDisp threw " + e.number);
+    }
+
+    try {
+        Function.prototype.apply.call(nullDisp, Object, []);
+        ok(false, "expected exception calling Function.apply on nullDisp");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "Function.apply on nullDisp threw " + e.number);
+    }
+    try {
+        Function.prototype.call.call(nullDisp, Object);
+        ok(false, "expected exception calling Function.call on nullDisp");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "Function.call on nullDisp threw " + e.number);
+    }
+
+    try {
+        new nullDisp;
+        ok(false, "expected exception for new nullDisp");
+    }catch(e) {
+        ok(e.number === 0xa138f - 0x80000000, "new nullDisp threw " + e.number);
+    }
+});
+
+sync_test("__proto__", function() {
+    var v = document.documentMode;
+    var r, x = 42;
+
+    if(v < 11) {
+        ok(x.__proto__ === undefined, "x.__proto__ = " + x.__proto__);
+        ok(!("__proto__" in Object), "Object.__proto__ = " + Object.__proto__);
+        return;
+    }
+
+    ok(x.__proto__ === Number.prototype, "x.__proto__ = " + x.__proto__);
+    ok(Object.__proto__ === Function.prototype, "Object.__proto__ = " + Object.__proto__);
+    ok(Object.prototype.__proto__ === null, "Object.prototype.__proto__ = " + Object.prototype.__proto__);
+    ok(Object.prototype.hasOwnProperty("__proto__"), "__proto__ is not a property of Object.prototype");
+    ok(!Object.prototype.hasOwnProperty.call(x, "__proto__"), "__proto__ is a property of x");
+
+    x.__proto__ = Object.prototype;
+    ok(x.__proto__ === Number.prototype, "x.__proto__ set to Object.prototype = " + x.__proto__);
+    ok(!Object.prototype.hasOwnProperty.call(x, "__proto__"), "__proto__ is a property of x after set to Object.prototype");
+    x = {};
+    x.__proto__ = null;
+    r = Object.getPrototypeOf(x);
+    ok(x.__proto__ === undefined, "x.__proto__ after set to null = " + x.__proto__);
+    ok(r === null, "getPrototypeOf(x) after set to null = " + r);
+
+    function check(expect, msg) {
+        var r = Object.getPrototypeOf(x);
+        ok(x.__proto__ === expect, "x.__proto__ " + msg + " = " + x.__proto__);
+        ok(r === expect, "getPrototypeOf(x) " + msg + " = " + r);
+        ok(!Object.prototype.hasOwnProperty.call(x, "__proto__"), "__proto__ is a property of x " + msg);
+    }
+
+    x = {};
+    check(Object.prototype, "after x set to {}");
+    x.__proto__ = Number.prototype;
+    check(Number.prototype, "after set to Number.prototype");
+    x.__proto__ = Object.prototype;
+    check(Object.prototype, "after re-set to Object.prototype");
+
+    function ctor() { }
+    var obj = new ctor();
+    x.__proto__ = obj;
+    check(obj, "after set to obj");
+    x.__proto__ = ctor.prototype;
+    check(obj.__proto__, "after set to ctor.prototype");
+    ok(obj.__proto__ === ctor.prototype, "obj.__proto__ !== ctor.prototype");
+
+    r = (delete x.__proto__);
+    ok(r, "delete x.__proto__ returned " + r);
+    ok(Object.prototype.hasOwnProperty("__proto__"), "__proto__ is not a property of Object.prototype after delete");
+    r = Object.getPrototypeOf(x);
+    ok(r === ctor.prototype, "x.__proto__ after delete = " + r);
+
+    var desc = Object.getOwnPropertyDescriptor(Object.prototype, "__proto__");
+    ok(desc.value === undefined, "__proto__ value = " + desc.value);
+    ok(Object.getPrototypeOf(desc.get) === Function.prototype, "__proto__ getter not a function");
+    ok(Object.getPrototypeOf(desc.set) === Function.prototype, "__proto__ setter not a function");
+    ok(desc.get.length === 0, "__proto__ getter length = " + desc.get.length);
+    ok(desc.set.length === 1, "__proto__ setter length = " + desc.set.length);
+
+    r = desc.get.call(x, 1, 2, 3, 4);
+    ok(r === x.__proto__, "calling __proto__ getter on x returned " + r);
+
+    r = desc.set.call(x, obj);
+    ok(r === obj, "calling __proto__ setter(obj) on x returned " + r);
+    check(obj, "after set to obj via calling setter");
+    r = desc.set.call(x, 42);
+    ok(r === 42, "calling __proto__ setter(42) on x returned " + r);
+    check(obj, "after set to obj via calling setter(42)");
+    r = desc.set.call(x, "foo");
+    ok(r === "foo", "calling __proto__ setter('foo') on x returned " + r);
+    check(obj, "after set to obj via calling setter('foo')");
+    r = desc.set.call(x);
+    ok(r === undefined, "calling __proto__ setter() on x returned " + r);
+    r = desc.set.call(true, obj);
+    ok(r === obj, "calling __proto__ setter(obj) on true value returned " + r);
+    x = true;
+    r = desc.set.call(x, obj);
+    ok(r === obj, "calling __proto__ setter(obj) on x set to true returned " + r);
+    ok(x.__proto__ === Boolean.prototype, "true value __proto__ after set to obj = " + x.__proto__);
+    x = new Boolean(true);
+    r = desc.set.call(x, obj);
+    ok(r === obj, "calling __proto__ setter(obj) on x set to Boolean(true) returned " + r);
+    ok(x.__proto__ === obj, "Boolean(true) __proto__ after set to obj = " + x.__proto__);
+
+    r = desc.get.call(13);
+    ok(r === Number.prototype, "calling __proto__ getter on 13 returned " + r);
+    try {
+        r = desc.get.call(undefined);
+        ok(false, "expected exception calling __proto__ getter on undefined");
+    }catch(e) {
+        ok(e.number === 0xa138f - 0x80000000, "calling __proto__ getter on undefined threw exception " + e.number);
+    }
+    try {
+        r = desc.get.call(null);
+        ok(false, "expected exception calling __proto__ getter on null");
+    }catch(e) {
+        ok(e.number === 0xa138f - 0x80000000, "calling __proto__ getter on null threw exception " + e.number);
+    }
+
+    try {
+        r = desc.set.call(undefined, obj);
+        ok(false, "expected exception calling __proto__ setter on undefined");
+    }catch(e) {
+        ok(e.number === 0xa138f - 0x80000000, "calling __proto__ setter on undefined threw exception " + e.number);
+    }
+    try {
+        r = desc.set.call(null, obj);
+        ok(false, "expected exception calling __proto__ setter on null");
+    }catch(e) {
+        ok(e.number === 0xa138f - 0x80000000, "calling __proto__ setter on null threw exception " + e.number);
+    }
+
+    x = {};
+    r = Object.create(x);
+    ok(r.__proto__ === x, "r.__proto__ = " + r.__proto__);
+    r = Object.create(r);
+    ok(r.__proto__.__proto__ === x, "r.__proto__.__proto__ = " + r.__proto__.__proto__);
+    try {
+        x.__proto__ = r;
+        ok(false, "expected exception setting circular proto chain");
+    }catch(e) {
+        ok(e.number === 0xa13b0 - 0x80000000 && e.name === "TypeError",
+            "setting circular proto chain threw exception " + e.number + " (" + e.name + ")");
+    }
+
+    Object.preventExtensions(x);
+    x.__proto__ = Object.prototype;  /* same prototype */
+    try {
+        x.__proto__ = Number.prototype;
+        ok(false, "expected exception changing __proto__ on non-extensible object");
+    }catch(e) {
+        ok(e.number === 0xa13b6 - 0x80000000 && e.name === "TypeError",
+            "changing __proto__ on non-extensible object threw exception " + e.number + " (" + e.name + ")");
+    }
+});
+
+sync_test("__defineGetter__", function() {
+    var v = document.documentMode;
+    var r, x = 42;
+
+    if(v < 11) {
+        ok(x.__defineGetter__ === undefined, "x.__defineGetter__ = " + x.__defineGetter__);
+        ok(!("__defineGetter__" in Object), "Object.__defineGetter__ = " + Object.__defineGetter__);
+        return;
+    }
+    ok(Object.prototype.hasOwnProperty("__defineGetter__"), "__defineGetter__ is not a property of Object.prototype");
+    ok(Object.prototype.__defineGetter__.length === 2, "__defineGetter__.length = " + Object.prototype.__defineGetter__.length);
+
+    function getter() { return "wine"; }
+    function setter(val) { }
+
+    r = x.__defineGetter__("foo", getter);
+    ok(r === undefined, "__defineGetter__ on 42 returned " + r);
+    ok(x.foo === undefined, "42.foo = " + x.foo);
+
+    x = {};
+    r = x.__defineGetter__("foo", getter);
+    ok(r === undefined, "__defineGetter__ returned " + r);
+    ok(x.foo === "wine", "x.foo = " + x.foo);
+    r = Object.getOwnPropertyDescriptor(x, "foo");
+    ok(r.value === undefined, "x.foo value = " + r.value);
+    ok(r.get === getter, "x.foo get = " + r.get);
+    ok(r.set === undefined, "x.foo set = " + r.set);
+    ok(r.writable === undefined, "x.foo writable = " + r.writable);
+    ok(r.enumerable === true, "x.foo enumerable = " + r.enumerable);
+    ok(r.configurable === true, "x.foo configurable = " + r.configurable);
+
+    Object.defineProperty(x, "foo", { get: undefined, set: setter, configurable: false });
+    r = Object.getOwnPropertyDescriptor(x, "foo");
+    ok(r.value === undefined, "x.foo setter value = " + r.value);
+    ok(r.get === undefined, "x.foo setter get = " + r.get);
+    ok(r.set === setter, "x.foo setter set = " + r.set);
+    ok(r.writable === undefined, "x.foo setter writable = " + r.writable);
+    ok(r.enumerable === true, "x.foo setter enumerable = " + r.enumerable);
+    ok(r.configurable === false, "x.foo setter configurable = " + r.configurable);
+    try {
+        x.__defineGetter__("foo", getter);
+        ok(false, "expected exception calling __defineGetter__ on non-configurable property");
+    }catch(e) {
+        ok(e.number === 0xa13d6 - 0x80000000, "__defineGetter__ on non-configurable property threw exception " + e.number);
+    }
+
+    r = Object.prototype.__defineGetter__.call(undefined, "bar", getter);
+    ok(r === undefined, "__defineGetter__ on undefined returned " + r);
+    r = Object.prototype.__defineGetter__.call(null, "bar", getter);
+    ok(r === undefined, "__defineGetter__ on null returned " + r);
+    r = x.__defineGetter__(undefined, getter);
+    ok(r === undefined, "__defineGetter__ undefined prop returned " + r);
+    ok(x["undefined"] === "wine", "x.undefined = " + x["undefined"]);
+    r = x.__defineGetter__(false, getter);
+    ok(r === undefined, "__defineGetter__ undefined prop returned " + r);
+    ok(x["false"] === "wine", "x.false = " + x["false"]);
+
+    try {
+        x.__defineGetter__("bar", "string");
+        ok(false, "expected exception calling __defineGetter__ with string");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineGetter__ with string threw exception " + e.number);
+    }
+    try {
+        x.__defineGetter__("bar", undefined);
+        ok(false, "expected exception calling __defineGetter__ with undefined");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineGetter__ with undefined threw exception " + e.number);
+    }
+    try {
+        x.__defineGetter__("bar", null);
+        ok(false, "expected exception calling __defineGetter__ with null");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineGetter__ with null threw exception " + e.number);
+    }
+    try {
+        Object.prototype.__defineGetter__.call(x, "bar");
+        ok(false, "expected exception calling __defineGetter__ with only one arg");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineGetter__ with only one arg threw exception " + e.number);
+    }
+
+    x.bar = "test";
+    ok(x.bar === "test", "x.bar = " + x.bar);
+    x.__defineGetter__("bar", getter);
+    ok(x.bar === "wine", "x.bar with getter = " + x.bar);
+});
+
+sync_test("__defineSetter__", function() {
+    var v = document.documentMode;
+    var r, x = 42;
+
+    if(v < 11) {
+        ok(x.__defineSetter__ === undefined, "x.__defineSetter__ = " + x.__defineSetter__);
+        ok(!("__defineSetter__" in Object), "Object.__defineSetter__ = " + Object.__defineSetter__);
+        return;
+    }
+    ok(Object.prototype.hasOwnProperty("__defineSetter__"), "__defineSetter__ is not a property of Object.prototype");
+    ok(Object.prototype.__defineSetter__.length === 2, "__defineSetter__.length = " + Object.prototype.__defineSetter__.length);
+
+    function getter() { return "wine"; }
+    function setter(val) { this.setterVal = val - 1; }
+
+    r = x.__defineSetter__("foo", setter);
+    ok(r === undefined, "__defineSetter__ on 42 returned " + r);
+    ok(x.foo === undefined, "42.foo = " + x.foo);
+
+    x = {};
+    r = x.__defineSetter__("foo", setter);
+    ok(r === undefined, "__defineSetter__ returned " + r);
+    ok(x.setterVal === undefined, "x.setterVal = " + x.setterVal);
+    x.foo = 13;
+    ok(x.setterVal === 12, "x.setterVal = " + x.setterVal);
+    r = Object.getOwnPropertyDescriptor(x, "foo");
+    ok(r.value === undefined, "x.foo value = " + r.value);
+    ok(r.get === undefined, "x.foo get = " + r.get);
+    ok(r.set === setter, "x.foo set = " + r.set);
+    ok(r.writable === undefined, "x.foo writable = " + r.writable);
+    ok(r.enumerable === true, "x.foo enumerable = " + r.enumerable);
+    ok(r.configurable === true, "x.foo configurable = " + r.configurable);
+
+    Object.defineProperty(x, "foo", { get: getter, set: undefined, configurable: false });
+    r = Object.getOwnPropertyDescriptor(x, "foo");
+    ok(r.value === undefined, "x.foo getter value = " + r.value);
+    ok(r.get === getter, "x.foo getter get = " + r.get);
+    ok(r.set === undefined, "x.foo getter set = " + r.set);
+    ok(r.writable === undefined, "x.foo getter writable = " + r.writable);
+    ok(r.enumerable === true, "x.foo getter enumerable = " + r.enumerable);
+    ok(r.configurable === false, "x.foo getter configurable = " + r.configurable);
+    try {
+        x.__defineSetter__("foo", setter);
+        ok(false, "expected exception calling __defineSetter__ on non-configurable property");
+    }catch(e) {
+        ok(e.number === 0xa13d6 - 0x80000000, "__defineSetter__ on non-configurable property threw exception " + e.number);
+    }
+
+    r = Object.prototype.__defineSetter__.call(undefined, "bar", setter);
+    ok(r === undefined, "__defineSetter__ on undefined returned " + r);
+    r = Object.prototype.__defineSetter__.call(null, "bar", setter);
+    ok(r === undefined, "__defineSetter__ on null returned " + r);
+    r = x.__defineSetter__(null, setter);
+    ok(r === undefined, "__defineSetter__ null prop returned " + r);
+    x["null"] = 100;
+    ok(x.setterVal === 99, "x.setterVal after setting x.null = " + x.setterVal);
+    r = x.__defineSetter__(50, setter);
+    ok(r === undefined, "__defineSetter__ 50 prop returned " + r);
+    x["50"] = 33;
+    ok(x.setterVal === 32, "x.setterVal after setting x.50 = " + x.setterVal);
+
+    try {
+        x.__defineSetter__("bar", true);
+        ok(false, "expected exception calling __defineSetter__ with bool");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineSetter__ with bool threw exception " + e.number);
+    }
+    try {
+        x.__defineSetter__("bar", undefined);
+        ok(false, "expected exception calling __defineSetter__ with undefined");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineSetter__ with undefined threw exception " + e.number);
+    }
+    try {
+        x.__defineSetter__("bar", null);
+        ok(false, "expected exception calling __defineSetter__ with null");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineSetter__ with null threw exception " + e.number);
+    }
+    try {
+        Object.prototype.__defineSetter__.call(x, "bar");
+        ok(false, "expected exception calling __defineSetter__ with only one arg");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineSetter__ with only one arg threw exception " + e.number);
+    }
+
+    x.bar = "test";
+    ok(x.bar === "test", "x.bar = " + x.bar);
+    x.__defineSetter__("bar", setter);
+    ok(x.bar === undefined, "x.bar with setter = " + x.bar);
+    x.bar = 10;
+    ok(x.bar === undefined, "x.bar with setter = " + x.bar);
+    ok(x.setterVal === 9, "x.setterVal after setting bar = " + x.setterVal);
+});
+
+async_test("postMessage", function() {
+    var v = document.documentMode;
+    var onmessage_called = false;
+    window.onmessage = function() {
+        onmessage_called = true;
+        next_test();
+    }
+    window.postMessage("test", "*");
+    ok(onmessage_called == (v < 9 ? true : false), "onmessage not called");
 });

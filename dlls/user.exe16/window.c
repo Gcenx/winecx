@@ -23,7 +23,6 @@
 #include "user_private.h"
 #include "wine/list.h"
 #include "wine/server.h"
-#include "wine/gdi_driver.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
@@ -112,7 +111,7 @@ UINT16 WINAPI SetTimer16( HWND16 hwnd, UINT16 id, UINT16 timeout, TIMERPROC16 pr
 UINT16 WINAPI SetSystemTimer16( HWND16 hwnd, UINT16 id, UINT16 timeout, TIMERPROC16 proc )
 {
     TIMERPROC proc32 = (TIMERPROC)WINPROC_AllocProc16( (WNDPROC16)proc );
-    return SetSystemTimer( WIN_Handle32(hwnd), id, timeout, proc32 );
+    return SetTimer( WIN_Handle32(hwnd), (UINT_PTR)id | SYSTEM_TIMER_FLAG, timeout, proc32 );
 }
 
 
@@ -676,7 +675,7 @@ HDC16 WINAPI GetWindowDC16( HWND16 hwnd )
 INT16 WINAPI ReleaseDC16( HWND16 hwnd, HDC16 hdc )
 {
     INT16 ret = (INT16)ReleaseDC( WIN_Handle32(hwnd), HDC_32(hdc) );
-    SetHookFlags( HDC_32(hdc), DCHF_ENABLEDC );
+    NtUserEnableDC( HDC_32(hdc) );
     return ret;
 }
 
@@ -1088,7 +1087,7 @@ void WINAPI SwitchToThisWindow16( HWND16 hwnd, BOOL16 restore )
  */
 BOOL16 WINAPI KillSystemTimer16( HWND16 hwnd, UINT16 id )
 {
-    return KillSystemTimer( WIN_Handle32(hwnd), id );
+    return KillTimer( WIN_Handle32(hwnd), (UINT_PTR)id | SYSTEM_TIMER_FLAG );
 }
 
 

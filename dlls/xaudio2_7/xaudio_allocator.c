@@ -16,8 +16,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
 #define NONAMELESSUNION
@@ -25,17 +23,17 @@
 
 #include "ole2.h"
 
-void * HOSTPTR XAudio_Internal_Malloc(size_t size)
+void* XAudio_Internal_Malloc(size_t size)
 {
     return CoTaskMemAlloc(size);
 }
 
-void XAudio_Internal_Free(void * HOSTPTR ptr)
+void XAudio_Internal_Free(void* ptr)
 {
-    return CoTaskMemFree(ADDRSPACECAST(void *, ptr));
+    return CoTaskMemFree(ptr);
 }
 
-void * HOSTPTR XAudio_Internal_Realloc(void * HOSTPTR ptr, size_t size)
+void* XAudio_Internal_Realloc(void* ptr, size_t size)
 {
-    return CoTaskMemRealloc(ADDRSPACECAST(void *, ptr), size);
+    return CoTaskMemRealloc(ptr, size);
 }

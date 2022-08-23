@@ -22,38 +22,7 @@
 #define __WINE_CONTROLS_H
 
 #include "winuser.h"
-
-/* Built-in class names (see _Undocumented_Windows_ p.418) */
-#define POPUPMENU_CLASS_ATOM MAKEINTATOM(32768)  /* PopupMenu */
-#define DESKTOP_CLASS_ATOM   MAKEINTATOM(32769)  /* Desktop */
-#define DIALOG_CLASS_ATOM    MAKEINTATOM(32770)  /* Dialog */
-#define WINSWITCH_CLASS_ATOM MAKEINTATOM(32771)  /* WinSwitch */
-#define ICONTITLE_CLASS_ATOM MAKEINTATOM(32772)  /* IconTitle */
-
-enum builtin_winprocs
-{
-    /* dual A/W procs */
-    WINPROC_BUTTON = 0,
-    WINPROC_COMBO,
-    WINPROC_DEFWND,
-    WINPROC_DIALOG,
-    WINPROC_EDIT,
-    WINPROC_LISTBOX,
-    WINPROC_MDICLIENT,
-    WINPROC_SCROLLBAR,
-    WINPROC_STATIC,
-    WINPROC_IME,
-    /* unicode-only procs */
-    WINPROC_DESKTOP,
-    WINPROC_ICONTITLE,
-    WINPROC_MENU,
-    WINPROC_MESSAGE,
-    NB_BUILTIN_WINPROCS,
-    NB_BUILTIN_AW_WINPROCS = WINPROC_DESKTOP
-};
-
-#define WINPROC_HANDLE (~0u >> 16)
-#define BUILTIN_WINPROC(index) ((WNDPROC)(ULONG_PTR)((index) | (WINPROC_HANDLE << 16)))
+#include "../win32u/ntuser_private.h"
 
 /* Built-in class descriptor */
 struct builtin_class_descr
@@ -100,11 +69,9 @@ struct wow_handlers16
     LRESULT (*mdiclient_proc)(HWND,UINT,WPARAM,LPARAM,BOOL);
     LRESULT (*scrollbar_proc)(HWND,UINT,WPARAM,LPARAM,BOOL);
     LRESULT (*static_proc)(HWND,UINT,WPARAM,LPARAM,BOOL);
-    DWORD   (*wait_message)(DWORD,const HANDLE*,DWORD,DWORD,DWORD);
     HWND    (*create_window)(CREATESTRUCTW*,LPCWSTR,HINSTANCE,BOOL);
     LRESULT (*call_window_proc)(HWND,UINT,WPARAM,LPARAM,LRESULT*,void*);
     LRESULT (*call_dialog_proc)(HWND,UINT,WPARAM,LPARAM,LRESULT*,void*);
-    void    (*free_icon_param)(ULONG_PTR);
 };
 
 struct wow_handlers32
@@ -116,14 +83,11 @@ struct wow_handlers32
     LRESULT (*mdiclient_proc)(HWND,UINT,WPARAM,LPARAM,BOOL);
     LRESULT (*scrollbar_proc)(HWND,UINT,WPARAM,LPARAM,BOOL);
     LRESULT (*static_proc)(HWND,UINT,WPARAM,LPARAM,BOOL);
-    DWORD   (*wait_message)(DWORD,const HANDLE*,DWORD,DWORD,DWORD);
     HWND    (*create_window)(CREATESTRUCTW*,LPCWSTR,HINSTANCE,BOOL);
     HWND    (*get_win_handle)(HWND);
     WNDPROC (*alloc_winproc)(WNDPROC,BOOL);
     struct tagDIALOGINFO *(*get_dialog_info)(HWND,BOOL);
     INT     (*dialog_box_loop)(HWND,HWND);
-    ULONG_PTR (*get_icon_param)(HICON);
-    ULONG_PTR (*set_icon_param)(HICON,ULONG_PTR);
 };
 
 extern struct wow_handlers16 wow_handlers DECLSPEC_HIDDEN;
@@ -136,18 +100,12 @@ extern LRESULT MDIClientWndProc_common(HWND,UINT,WPARAM,LPARAM,BOOL) DECLSPEC_HI
 extern LRESULT ScrollBarWndProc_common(HWND,UINT,WPARAM,LPARAM,BOOL) DECLSPEC_HIDDEN;
 extern LRESULT StaticWndProc_common(HWND,UINT,WPARAM,LPARAM,BOOL) DECLSPEC_HIDDEN;
 
-extern ULONG_PTR get_icon_param( HICON handle ) DECLSPEC_HIDDEN;
-extern ULONG_PTR set_icon_param( HICON handle, ULONG_PTR param ) DECLSPEC_HIDDEN;
-
 /* Class functions */
 struct tagCLASS;  /* opaque structure */
 struct tagWND;
-extern ATOM get_int_atom_value( LPCWSTR name ) DECLSPEC_HIDDEN;
+extern ATOM get_int_atom_value( UNICODE_STRING *name ) DECLSPEC_HIDDEN;
 extern void register_builtin_classes(void) DECLSPEC_HIDDEN;
 extern void register_desktop_class(void) DECLSPEC_HIDDEN;
-extern WNDPROC get_class_winproc( struct tagCLASS *class ) DECLSPEC_HIDDEN;
-extern struct dce *get_class_dce( struct tagCLASS *class ) DECLSPEC_HIDDEN;
-extern struct dce *set_class_dce( struct tagCLASS *class, struct dce *dce ) DECLSPEC_HIDDEN;
 
 /* defwnd proc */
 extern HBRUSH DEFWND_ControlColor( HDC hDC, UINT ctlType ) DECLSPEC_HIDDEN;
@@ -159,18 +117,20 @@ extern BOOL update_wallpaper( const WCHAR *wallpaper, const WCHAR *pattern ) DEC
 extern HWND MENU_IsMenuActive(void) DECLSPEC_HIDDEN;
 extern UINT MENU_GetMenuBarHeight( HWND hwnd, UINT menubarWidth,
                                      INT orgX, INT orgY ) DECLSPEC_HIDDEN;
-extern BOOL MENU_SetMenu(HWND, HMENU) DECLSPEC_HIDDEN;
 extern void MENU_TrackMouseMenuBar( HWND hwnd, INT ht, POINT pt ) DECLSPEC_HIDDEN;
 extern void MENU_TrackKbdMenuBar( HWND hwnd, UINT wParam, WCHAR wChar ) DECLSPEC_HIDDEN;
 extern UINT MENU_DrawMenuBar( HDC hDC, LPRECT lprect, HWND hwnd ) DECLSPEC_HIDDEN;
 extern void MENU_EndMenu(HWND) DECLSPEC_HIDDEN;
+extern void free_menu_items( void *ptr ) DECLSPEC_HIDDEN;
 
 /* nonclient area */
 extern LRESULT NC_HandleNCPaint( HWND hwnd , HRGN clip) DECLSPEC_HIDDEN;
 extern LRESULT NC_HandleNCActivate( HWND hwnd, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
-extern LRESULT NC_HandleNCCalcSize( HWND hwnd, WPARAM wParam, RECT *winRect ) DECLSPEC_HIDDEN;
+extern void NC_HandleNCCalcSize( HWND hwnd, WPARAM wParam, RECT *winRect ) DECLSPEC_HIDDEN;
 extern LRESULT NC_HandleNCHitTest( HWND hwnd, POINT pt ) DECLSPEC_HIDDEN;
 extern LRESULT NC_HandleNCLButtonDown( HWND hwnd, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
+extern LRESULT NC_HandleNCMouseMove( HWND hwnd, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
+extern LRESULT NC_HandleNCMouseLeave( HWND hwnd ) DECLSPEC_HIDDEN;
 extern LRESULT NC_HandleNCRButtonDown( HWND hwnd, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
 extern LRESULT NC_HandleNCLButtonDblClk( HWND hwnd, WPARAM wParam, LPARAM lParam) DECLSPEC_HIDDEN;
 extern LRESULT NC_HandleSysCommand( HWND hwnd, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
@@ -179,7 +139,12 @@ extern BOOL NC_DrawSysButton( HWND hwnd, HDC hdc, BOOL down ) DECLSPEC_HIDDEN;
 extern void NC_GetSysPopupPos( HWND hwnd, RECT* rect ) DECLSPEC_HIDDEN;
 
 /* scrollbar */
-extern void SCROLL_DrawScrollBar( HWND hwnd, HDC hdc, INT nBar, BOOL arrows, BOOL interior ) DECLSPEC_HIDDEN;
+
+extern void SCROLL_DrawNCScrollBar( HWND hwnd, HDC hdc, BOOL draw_horizontal, BOOL draw_vertical ) DECLSPEC_HIDDEN;
+extern void SCROLL_DrawScrollBar( HWND hwnd, HDC hdc, INT nBar, enum SCROLL_HITTEST hit_test,
+                                  const struct SCROLL_TRACKING_INFO *tracking_info, BOOL arrows,
+                                  BOOL interior ) DECLSPEC_HIDDEN;
+extern void SCROLL_HandleScrollEvent( HWND hwnd, INT nBar, UINT msg, POINT pt ) DECLSPEC_HIDDEN;
 extern void SCROLL_TrackScrollBar( HWND hwnd, INT scrollbar, POINT pt ) DECLSPEC_HIDDEN;
 
 /* combo box */

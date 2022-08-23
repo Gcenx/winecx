@@ -43,21 +43,6 @@ static WCHAR *heap_strdupW(const WCHAR *src)
     return dst;
 }
 
-BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
-{
-    TRACE("(%p, %d, %p)\n", hinst, reason, reserved);
-
-    switch(reason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE; /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(hinst);
-            break;
-    }
-    return TRUE;
-}
-
 HRESULT WINAPI PTReleaseMemory(PVOID mem)
 {
     heap_free(mem);
@@ -91,7 +76,7 @@ HRESULT WINAPI PTOpenProvider(PCWSTR printer, DWORD version, HPTPROVIDER *provid
 {
     DWORD used_version;
 
-    TRACE("%s, %d, %p\n", debugstr_w(printer), version, provider);
+    TRACE("%s, %ld, %p\n", debugstr_w(printer), version, provider);
 
     if (version != 1) return E_INVALIDARG;
 
@@ -102,7 +87,7 @@ HRESULT WINAPI PTOpenProviderEx(const WCHAR *printer, DWORD max_version, DWORD p
 {
     struct prn_provider *prov;
 
-    TRACE("%s, %d, %d, %p, %p\n", debugstr_w(printer), max_version, pref_version, provider, used_version);
+    TRACE("%s, %ld, %ld, %p, %p\n", debugstr_w(printer), max_version, pref_version, provider, used_version);
 
     if (!max_version || !provider || !used_version)
         return E_INVALIDARG;

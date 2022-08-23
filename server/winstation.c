@@ -19,10 +19,10 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <sys/types.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -39,28 +39,39 @@
 #include "file.h"
 #include "security.h"
 
+#define DESKTOP_ALL_ACCESS 0x01ff
 
 static struct list winstation_list = LIST_INIT(winstation_list);
 
 static void winstation_dump( struct object *obj, int verbose );
-static struct object_type *winstation_get_type( struct object *obj );
 static int winstation_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
 static struct object *winstation_lookup_name( struct object *obj, struct unicode_str *name,
                                               unsigned int attr, struct object *root );
 static void winstation_destroy( struct object *obj );
-static unsigned int winstation_map_access( struct object *obj, unsigned int access );
 static void desktop_dump( struct object *obj, int verbose );
-static struct object_type *desktop_get_type( struct object *obj );
 static int desktop_link_name( struct object *obj, struct object_name *name, struct object *parent );
 static int desktop_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
 static void desktop_destroy( struct object *obj );
-static unsigned int desktop_map_access( struct object *obj, unsigned int access );
+
+static const WCHAR winstation_name[] = {'W','i','n','d','o','w','S','t','a','t','i','o','n'};
+
+struct type_descr winstation_type =
+{
+    { winstation_name, sizeof(winstation_name) },   /* name */
+    STANDARD_RIGHTS_REQUIRED | WINSTA_ALL_ACCESS,   /* valid_access */
+    {                                               /* mapping */
+        STANDARD_RIGHTS_READ | WINSTA_READSCREEN | WINSTA_ENUMERATE | WINSTA_READATTRIBUTES | WINSTA_ENUMDESKTOPS,
+        STANDARD_RIGHTS_WRITE | WINSTA_WRITEATTRIBUTES | WINSTA_CREATEDESKTOP | WINSTA_ACCESSCLIPBOARD,
+        STANDARD_RIGHTS_EXECUTE | WINSTA_EXITWINDOWS | WINSTA_ACCESSGLOBALATOMS,
+        STANDARD_RIGHTS_REQUIRED | WINSTA_ALL_ACCESS
+    },
+};
 
 static const struct object_ops winstation_ops =
 {
     sizeof(struct winstation),    /* size */
+    &winstation_type,             /* type */
     winstation_dump,              /* dump */
-    winstation_get_type,          /* get_type */
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
@@ -68,7 +79,7 @@ static const struct object_ops winstation_ops =
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
-    winstation_map_access,        /* map_access */
+    default_map_access,           /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     default_get_full_name,        /* get_full_name */
@@ -82,11 +93,26 @@ static const struct object_ops winstation_ops =
 };
 
 
+static const WCHAR desktop_name[] = {'D','e','s','k','t','o','p'};
+
+struct type_descr desktop_type =
+{
+    { desktop_name, sizeof(desktop_name) },   /* name */
+    STANDARD_RIGHTS_REQUIRED | DESKTOP_ALL_ACCESS,  /* valid_access */
+    {                                         /* mapping */
+        STANDARD_RIGHTS_READ | DESKTOP_ENUMERATE | DESKTOP_READOBJECTS,
+        STANDARD_RIGHTS_WRITE | DESKTOP_WRITEOBJECTS | DESKTOP_JOURNALPLAYBACK | DESKTOP_JOURNALRECORD
+        | DESKTOP_HOOKCONTROL | DESKTOP_CREATEMENU | DESKTOP_CREATEWINDOW,
+        STANDARD_RIGHTS_EXECUTE | DESKTOP_SWITCHDESKTOP,
+        STANDARD_RIGHTS_REQUIRED | DESKTOP_ALL_ACCESS
+    },
+};
+
 static const struct object_ops desktop_ops =
 {
     sizeof(struct desktop),       /* size */
+    &desktop_type,                /* type */
     desktop_dump,                 /* dump */
-    desktop_get_type,             /* get_type */
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
@@ -94,7 +120,7 @@ static const struct object_ops desktop_ops =
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
-    desktop_map_access,           /* map_access */
+    default_map_access,           /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     default_get_full_name,        /* get_full_name */
@@ -106,8 +132,6 @@ static const struct object_ops desktop_ops =
     desktop_close_handle,         /* close_handle */
     desktop_destroy               /* destroy */
 };
-
-#define DESKTOP_ALL_ACCESS 0x01ff
 
 /* create a winstation object */
 static struct winstation *create_winstation( struct object *root, const struct unicode_str *name,
@@ -142,13 +166,6 @@ static void winstation_dump( struct object *obj, int verbose )
 
     fprintf( stderr, "Winstation flags=%x clipboard=%p atoms=%p\n",
              winstation->flags, winstation->clipboard, winstation->atom_table );
-}
-
-static struct object_type *winstation_get_type( struct object *obj )
-{
-    static const WCHAR name[] = {'W','i','n','d','o','w','S','t','a','t','i','o','n'};
-    static const struct unicode_str str = { name, sizeof(name) };
-    return get_object_type( &str );
 }
 
 static int winstation_close_handle( struct object *obj, struct process *process, obj_handle_t handle )
@@ -186,17 +203,6 @@ static void winstation_destroy( struct object *obj )
     if (winstation->clipboard) release_object( winstation->clipboard );
     if (winstation->atom_table) release_object( winstation->atom_table );
     free( winstation->desktop_names );
-}
-
-static unsigned int winstation_map_access( struct object *obj, unsigned int access )
-{
-    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ | WINSTA_ENUMDESKTOPS | WINSTA_READATTRIBUTES |
-                                            WINSTA_ENUMERATE | WINSTA_READSCREEN;
-    if (access & GENERIC_WRITE)   access |= STANDARD_RIGHTS_WRITE | WINSTA_ACCESSCLIPBOARD | WINSTA_CREATEDESKTOP |
-                                            WINSTA_WRITEATTRIBUTES;
-    if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE | WINSTA_ACCESSGLOBALATOMS | WINSTA_EXITWINDOWS;
-    if (access & GENERIC_ALL)     access |= STANDARD_RIGHTS_REQUIRED | WINSTA_ALL_ACCESS;
-    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
 /* retrieve the process window station, checking the handle access rights */
@@ -249,13 +255,6 @@ static void desktop_dump( struct object *obj, int verbose )
              desktop->flags, desktop->winstation, desktop->top_window, desktop->global_hooks );
 }
 
-static struct object_type *desktop_get_type( struct object *obj )
-{
-    static const WCHAR name[] = {'D','e','s','k','t','o','p'};
-    static const struct unicode_str str = { name, sizeof(name) };
-    return get_object_type( &str );
-}
-
 static int desktop_link_name( struct object *obj, struct object_name *name, struct object *parent )
 {
     struct winstation *winstation = (struct winstation *)parent;
@@ -290,23 +289,12 @@ static void desktop_destroy( struct object *obj )
     struct desktop *desktop = (struct desktop *)obj;
 
     free_hotkeys( desktop, 0 );
-    if (desktop->top_window) destroy_window( desktop->top_window );
-    if (desktop->msg_window) destroy_window( desktop->msg_window );
+    if (desktop->top_window) free_window_handle( desktop->top_window );
+    if (desktop->msg_window) free_window_handle( desktop->msg_window );
     if (desktop->global_hooks) release_object( desktop->global_hooks );
     if (desktop->close_timeout) remove_timeout_user( desktop->close_timeout );
     list_remove( &desktop->entry );
     release_object( desktop->winstation );
-}
-
-static unsigned int desktop_map_access( struct object *obj, unsigned int access )
-{
-    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ | DESKTOP_READOBJECTS | DESKTOP_ENUMERATE;
-    if (access & GENERIC_WRITE)   access |= STANDARD_RIGHTS_WRITE | DESKTOP_CREATEMENU | DESKTOP_CREATEWINDOW |
-                                            DESKTOP_HOOKCONTROL | DESKTOP_JOURNALRECORD | DESKTOP_JOURNALPLAYBACK |
-                                            DESKTOP_WRITEOBJECTS;
-    if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE | DESKTOP_SWITCHDESKTOP;
-    if (access & GENERIC_ALL)     access |= STANDARD_RIGHTS_REQUIRED | DESKTOP_ALL_ACCESS;
-    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
 /* retrieve the thread desktop, checking the handle access rights */
@@ -338,15 +326,22 @@ static void add_desktop_user( struct desktop *desktop )
 /* remove a user of the desktop and start the close timeout if necessary */
 static void remove_desktop_user( struct desktop *desktop )
 {
+    struct process *process;
     assert( desktop->users > 0 );
     desktop->users--;
 
     /* if we have one remaining user, it has to be the manager of the desktop window */
-    if (desktop->users == 1 && get_top_window_owner( desktop ))
-    {
-        assert( !desktop->close_timeout );
+    if ((process = get_top_window_owner( desktop )) && desktop->users == process->running_threads && !desktop->close_timeout)
         desktop->close_timeout = add_timeout_user( -TICKS_PER_SEC, close_desktop_timeout, desktop );
-    }
+}
+
+/* set the thread default desktop handle */
+void set_thread_default_desktop( struct thread *thread, struct desktop *desktop, obj_handle_t handle )
+{
+    if (thread->desktop) return;  /* nothing to do */
+
+    thread->desktop = handle;
+    if (!thread->process->is_system) add_desktop_user( desktop );
 }
 
 /* set the process default desktop handle */
@@ -354,24 +349,14 @@ void set_process_default_desktop( struct process *process, struct desktop *deskt
                                   obj_handle_t handle )
 {
     struct thread *thread;
-    struct desktop *old_desktop;
 
     if (process->desktop == handle) return;  /* nothing to do */
 
-    if (!(old_desktop = get_desktop_obj( process, process->desktop, 0 ))) clear_error();
     process->desktop = handle;
 
     /* set desktop for threads that don't have one yet */
     LIST_FOR_EACH_ENTRY( thread, &process->thread_list, struct thread, proc_entry )
-        if (!thread->desktop) thread->desktop = handle;
-
-    if (!process->is_system && desktop != old_desktop)
-    {
-        add_desktop_user( desktop );
-        if (old_desktop) remove_desktop_user( old_desktop );
-    }
-
-    if (old_desktop) release_object( old_desktop );
+        set_thread_default_desktop( thread, desktop, handle );
 }
 
 /* connect a process to its window station */
@@ -390,7 +375,7 @@ void connect_process_winstation( struct process *process, struct thread *parent_
     else if (parent_process->winstation)
     {
         handle = duplicate_handle( parent_process, parent_process->winstation,
-                                   process, 0, 0, DUP_HANDLE_SAME_ACCESS );
+                                   process, 0, 0, DUPLICATE_SAME_ACCESS );
         winstation = (struct winstation *)get_handle_obj( process, handle, 0, &winstation_ops );
     }
     if (!winstation) goto done;
@@ -414,7 +399,7 @@ void connect_process_winstation( struct process *process, struct thread *parent_
 
         if (!desktop || desktop->winstation != winstation) goto done;
 
-        handle = duplicate_handle( parent_process, handle, process, 0, 0, DUP_HANDLE_SAME_ACCESS );
+        handle = duplicate_handle( parent_process, handle, process, 0, 0, DUPLICATE_SAME_ACCESS );
     }
     if (handle) set_process_default_desktop( process, desktop, handle );
 
@@ -427,23 +412,37 @@ done:
 /* close the desktop of a given process */
 void close_process_desktop( struct process *process )
 {
-    struct desktop *desktop;
+    obj_handle_t handle;
 
-    if (process->desktop && (desktop = get_desktop_obj( process, process->desktop, 0 )))
-    {
-        remove_desktop_user( desktop );
-        release_object( desktop );
-    }
-    clear_error();  /* ignore errors */
+    if (!(handle = process->desktop)) return;
+
+    process->desktop = 0;
+    close_handle( process, handle );
 }
 
-/* close the desktop of a given thread */
-void close_thread_desktop( struct thread *thread )
+/* release (and eventually close) the desktop of a given thread */
+void release_thread_desktop( struct thread *thread, int close )
 {
-    obj_handle_t handle = thread->desktop;
+    struct desktop *desktop;
+    obj_handle_t handle;
 
-    thread->desktop = 0;
-    if (handle) close_handle( thread->process, handle );
+    if (!(handle = thread->desktop)) return;
+
+    if (!thread->process->is_system)
+    {
+        if (!(desktop = get_desktop_obj( thread->process, handle, 0 ))) clear_error();  /* ignore errors */
+        else
+        {
+            remove_desktop_user( desktop );
+            release_object( desktop );
+        }
+    }
+
+    if (close)
+    {
+        thread->desktop = 0;
+        close_handle( thread->process, handle );
+    }
 }
 
 /* create a window station */
@@ -638,7 +637,14 @@ DECL_HANDLER(set_thread_desktop)
     if (old_desktop != new_desktop && current->desktop_users > 0)
         set_error( STATUS_DEVICE_BUSY );
     else
+    {
         current->desktop = req->handle;  /* FIXME: should we close the old one? */
+        if (!current->process->is_system && old_desktop != new_desktop)
+        {
+            add_desktop_user( new_desktop );
+            if (old_desktop) remove_desktop_user( old_desktop );
+        }
+    }
 
     if (!current->process->desktop)
         set_process_default_desktop( current->process, new_desktop, req->handle );

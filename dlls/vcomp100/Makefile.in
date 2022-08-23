@@ -1,1 +1,5 @@
 MODULE = vcomp100.dll
+PARENTSRC = ../vcomp
+
+C_SRCS = \
+	main.c

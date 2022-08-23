@@ -257,7 +257,7 @@
 257 stdcall -noname SHCreateWorkerWindowA(ptr ptr long long ptr long)
 258 stub -noname SHRegisterWaitForSingleObject
 259 stub -noname SHUnregisterWait
-260 stdcall -noname SHQueueUserWorkItem(long long long long long long long)
+260 stdcall -noname SHQueueUserWorkItem(long long long long long str long)
 261 stub -noname SHCreateTimerQueue
 262 stub -noname SHDeleteTimerQueue
 263 stdcall -noname SHSetTimerQueueTimer(long ptr ptr long long str long)
@@ -288,11 +288,11 @@
 288 stub -noname IUnknown_CPContainerInvokeIndirect
 289 stdcall -noname PlaySoundWrapW(wstr long long)
 290 stub -noname SHMirrorIcon
-291 stdcall -noname SHMessageBoxCheckExA(ptr ptr ptr ptr ptr long str)
-292 stdcall -noname SHMessageBoxCheckExW(ptr ptr ptr ptr ptr long wstr)
+291 stdcall -noname SHMessageBoxCheckExA(ptr ptr str ptr ptr long str)
+292 stdcall -noname SHMessageBoxCheckExW(ptr ptr wstr ptr ptr long wstr)
 293 stub -noname SHCancelUserWorkItems
 294 stdcall -noname SHGetIniStringW(wstr wstr ptr long wstr)
-295 stdcall -noname SHSetIniStringW(wstr ptr wstr wstr)
+295 stdcall -noname SHSetIniStringW(wstr wstr wstr wstr)
 296 stub -noname CreateURLFileContentsW
 297 stub -noname CreateURLFileContentsA
 298 stdcall -noname WritePrivateProfileStringWrapW(wstr wstr wstr wstr) kernel32.WritePrivateProfileStringW
@@ -488,7 +488,7 @@
 488 stub -noname SHConvertGraphicsFile
 489 stdcall -noname GlobalAddAtomWrapW(wstr) kernel32.GlobalAddAtomW
 490 stdcall -noname GlobalFindAtomWrapW(wstr) kernel32.GlobalFindAtomW
-491 stdcall -noname SHGetShellKey(long long long)
+491 stdcall -noname SHGetShellKey(long wstr long)
 492 stub -noname PrettifyFileDescriptionW
 493 stub -noname SHPropertyBag_ReadType
 494 stub -noname SHPropertyBag_ReadStr
@@ -642,6 +642,8 @@
 @ stdcall PathMakeSystemFolderA(str)
 @ stdcall PathMakeSystemFolderW(wstr)
 @ stdcall -import PathMatchSpecA(str str)
+@ stdcall -import PathMatchSpecExA(str str long)
+@ stdcall -import PathMatchSpecExW(wstr wstr long)
 @ stdcall -import PathMatchSpecW(wstr wstr)
 @ stdcall -import PathParseIconLocationA(str)
 @ stdcall -import PathParseIconLocationW(wstr)
@@ -663,8 +665,8 @@
 @ stdcall -import PathRenameExtensionW(wstr wstr)
 @ stdcall -import PathSearchAndQualifyA(str ptr long)
 @ stdcall -import PathSearchAndQualifyW(wstr ptr long)
-@ stdcall PathSetDlgItemPathA (long long ptr)
-@ stdcall PathSetDlgItemPathW (long long ptr)
+@ stdcall PathSetDlgItemPathA(long long str)
+@ stdcall PathSetDlgItemPathW(long long wstr)
 @ stdcall -import PathSkipRootA(str)
 @ stdcall -import PathSkipRootW(wstr)
 @ stdcall -import PathStripPathA(str)

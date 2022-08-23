@@ -43,7 +43,7 @@ static void fetch_console_output_(unsigned int line)
                    sizeof(console_output) - console_output_count, NULL, &o);
     if (!ret)
     {
-        ok_(__FILE__,line)(GetLastError() == ERROR_IO_PENDING, "read failed: %u\n", GetLastError());
+        ok_(__FILE__,line)(GetLastError() == ERROR_IO_PENDING, "read failed: %lu\n", GetLastError());
         if (GetLastError() != ERROR_IO_PENDING) return;
         WaitForSingleObject(o.hEvent, 5000);
     }
@@ -51,7 +51,7 @@ static void fetch_console_output_(unsigned int line)
     if (!ret && GetLastError() == ERROR_IO_INCOMPLETE)
         CancelIoEx(console_pipe, &o);
 
-    ok_(__FILE__,line)(ret, "Read file failed: %u\n", GetLastError());
+    ok_(__FILE__,line)(ret, "Read file failed: %lu\n", GetLastError());
     CloseHandle(o.hEvent);
     if (ret) console_output_count += count;
 }
@@ -63,8 +63,8 @@ static void expect_empty_output_(unsigned int line)
     BOOL ret;
 
     ret = PeekNamedPipe(console_pipe, NULL, 0, NULL, &avail, NULL);
-    ok_(__FILE__,line)(ret, "PeekNamedPipe failed: %u\n", GetLastError());
-    ok_(__FILE__,line)(!avail, "avail = %u\n", avail);
+    ok_(__FILE__,line)(ret, "PeekNamedPipe failed: %lu\n", GetLastError());
+    ok_(__FILE__,line)(!avail, "avail = %lu\n", avail);
     if (avail) fetch_console_output_(line);
     ok_(__FILE__,line)(!console_output_count, "expected empty buffer, got %s\n",
                        wine_dbgstr_an(console_output, console_output_count));
@@ -149,9 +149,11 @@ enum req_type
     REQ_CREATE_SCREEN_BUFFER,
     REQ_FILL_CHAR,
     REQ_GET_INPUT,
+    REQ_GET_SB_INFO,
     REQ_READ_CONSOLE,
     REQ_READ_CONSOLE_A,
     REQ_READ_CONSOLE_FILE,
+    REQ_READ_CONSOLE_CONTROL,
     REQ_SCROLL,
     REQ_SET_ACTIVE,
     REQ_SET_CURSOR,
@@ -200,6 +202,12 @@ struct pseudoconsole_req
             DWORD count;
             COORD coord;
         } fill;
+        struct
+        {
+            size_t size;
+            DWORD mask;
+            WCHAR initial[1];
+        } control;
     } u;
 };
 
@@ -215,7 +223,7 @@ static void child_string_request(enum req_type type, const WCHAR *title)
     memcpy(req->u.string, title, len * sizeof(WCHAR));
     ret = WriteFile(child_pipe, req, FIELD_OFFSET(struct pseudoconsole_req, u.string[len]),
                     &count, NULL);
-    ok(ret, "WriteFile failed: %u\n", GetLastError());
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
 }
 
 static void child_write_characters(const WCHAR *buf, unsigned int x, unsigned int y)
@@ -233,7 +241,7 @@ static void child_write_characters(const WCHAR *buf, unsigned int x, unsigned in
     memcpy(req->u.write_characters.buf, buf, len * sizeof(WCHAR));
     ret = WriteFile(child_pipe, req, FIELD_OFFSET(struct pseudoconsole_req, u.write_characters.buf[len + 1]),
                     &count, NULL);
-    ok(ret, "WriteFile failed: %u\n", GetLastError());
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
 }
 
 static void child_set_cursor(const unsigned int x, unsigned int y)
@@ -246,7 +254,7 @@ static void child_set_cursor(const unsigned int x, unsigned int y)
     req.u.coord.X = x;
     req.u.coord.Y = y;
     ret = WriteFile(child_pipe, &req, sizeof(req), &count, NULL);
-    ok(ret, "WriteFile failed: %u\n", GetLastError());
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
 }
 
 static HANDLE child_create_screen_buffer(void)
@@ -258,9 +266,9 @@ static HANDLE child_create_screen_buffer(void)
 
     req.type = REQ_CREATE_SCREEN_BUFFER;
     ret = WriteFile(child_pipe, &req, sizeof(req), &count, NULL);
-    ok(ret, "WriteFile failed: %u\n", GetLastError());
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
     ret = ReadFile(child_pipe, &handle, sizeof(handle), &count, NULL);
-    ok(ret, "ReadFile failed: %u\n", GetLastError());
+    ok(ret, "ReadFile failed: %lu\n", GetLastError());
     return handle;
 }
 
@@ -273,7 +281,7 @@ static void child_set_active(HANDLE handle)
     req.type = REQ_SET_ACTIVE;
     req.u.handle = handle;
     ret = WriteFile(child_pipe, &req, sizeof(req), &count, NULL);
-    ok(ret, "WriteFile failed: %u\n", GetLastError());
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
 }
 
 #define child_write_output(a,b,c,d,e,f,g,h,j,k,l,m,n) child_write_output_(__LINE__,a,b,c,d,e,f,g,h,j,k,l,m,n)
@@ -299,9 +307,9 @@ static void child_write_output_(unsigned int line, CHAR_INFO *buf, unsigned int 
     req->u.write_output.region.Bottom = bottom;
     memcpy(req->u.write_output.buf, buf, size_x * size_y * sizeof(*buf));
     ret = WriteFile(child_pipe, req, FIELD_OFFSET(struct pseudoconsole_req, u.write_output.buf[size_x * size_y]), &count, NULL);
-    ok_(__FILE__,line)(ret, "WriteFile failed: %u\n", GetLastError());
+    ok_(__FILE__,line)(ret, "WriteFile failed: %lu\n", GetLastError());
     ret = ReadFile(child_pipe, &region, sizeof(region), &count, NULL);
-    ok_(__FILE__,line)(ret, "WriteFile failed: %u\n", GetLastError());
+    ok_(__FILE__,line)(ret, "WriteFile failed: %lu\n", GetLastError());
     ok_(__FILE__,line)(region.Left == out_left, "Left = %u\n", region.Left);
     ok_(__FILE__,line)(region.Top == out_top, "Top = %u\n", region.Top);
     ok_(__FILE__,line)(region.Right == out_right, "Right = %u\n", region.Right);
@@ -325,7 +333,7 @@ static void child_scroll(unsigned int src_left, unsigned int src_top, unsigned i
     req.u.scroll.fill.Char.UnicodeChar = fill;
     req.u.scroll.fill.Attributes = 0;
     ret = WriteFile(child_pipe, &req, sizeof(req), &count, NULL);
-    ok(ret, "WriteFile failed: %u\n", GetLastError());
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
 }
 
 static void child_fill_character(WCHAR ch, DWORD count, int x, int y)
@@ -339,7 +347,7 @@ static void child_fill_character(WCHAR ch, DWORD count, int x, int y)
     req.u.fill.coord.X = x;
     req.u.fill.coord.Y = y;
     ret = WriteFile(child_pipe, &req, sizeof(req), &count, NULL);
-    ok(ret, "WriteFile failed: %u\n", GetLastError());
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
 }
 
 static void child_set_input_mode(HANDLE pipe, DWORD mode)
@@ -351,7 +359,7 @@ static void child_set_input_mode(HANDLE pipe, DWORD mode)
     req.type = REQ_SET_INPUT_MODE;
     req.u.mode = mode;
     ret = WriteFile(pipe, &req, sizeof(req), &count, NULL);
-    ok(ret, "WriteFile failed: %u\n", GetLastError());
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
 }
 
 static void child_set_output_mode(DWORD mode)
@@ -363,7 +371,7 @@ static void child_set_output_mode(DWORD mode)
     req.type = REQ_SET_OUTPUT_MODE;
     req.u.mode = mode;
     ret = WriteFile(child_pipe, &req, sizeof(req), &count, NULL);
-    ok(ret, "WriteFile failed: %u\n", GetLastError());
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
 }
 
 static void child_set_input_cp(int cp)
@@ -375,7 +383,7 @@ static void child_set_input_cp(int cp)
     req.type = REQ_SET_INPUT_CP;
     req.u.cp = cp;
     ret = WriteFile(child_pipe, &req, sizeof(req), &count, NULL);
-    ok(ret, "WriteFile failed: %u\n", GetLastError());
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
 }
 
 static void child_read_console(HANDLE pipe, size_t size)
@@ -387,7 +395,7 @@ static void child_read_console(HANDLE pipe, size_t size)
     req.type = REQ_READ_CONSOLE;
     req.u.size = size;
     ret = WriteFile(pipe, &req, sizeof(req), &count, NULL);
-    ok(ret, "WriteFile failed: %u\n", GetLastError());
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
 }
 
 static void child_read_console_a(HANDLE pipe, size_t size)
@@ -399,7 +407,7 @@ static void child_read_console_a(HANDLE pipe, size_t size)
     req.type = REQ_READ_CONSOLE_A;
     req.u.size = size;
     ret = WriteFile(pipe, &req, sizeof(req), &count, NULL);
-    ok(ret, "WriteFile failed: %u\n", GetLastError());
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
 }
 
 static void child_read_console_file(HANDLE pipe, size_t size)
@@ -411,7 +419,22 @@ static void child_read_console_file(HANDLE pipe, size_t size)
     req.type = REQ_READ_CONSOLE_FILE;
     req.u.size = size;
     ret = WriteFile(pipe, &req, sizeof(req), &count, NULL);
-    ok(ret, "WriteFile failed: %u\n", GetLastError());
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
+}
+
+static void child_read_console_control(HANDLE pipe, size_t size, DWORD control, const WCHAR* recall)
+{
+    char tmp[4096];
+    struct pseudoconsole_req *req = (void *)tmp;
+    DWORD count;
+    BOOL ret;
+
+    req->type = REQ_READ_CONSOLE_CONTROL;
+    req->u.control.size = size;
+    req->u.control.mask = control;
+    wcscpy(req->u.control.initial, recall);
+    ret = WriteFile(pipe, req, sizeof(*req) + wcslen(recall) * sizeof(WCHAR), &count, NULL);
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
 }
 
 #define child_expect_read_result(a,b) child_expect_read_result_(__LINE__,a,b)
@@ -423,11 +446,30 @@ static void child_expect_read_result_(unsigned int line, HANDLE pipe, const WCHA
     BOOL ret;
 
     ret = ReadFile(pipe, buf, sizeof(buf), &count, NULL);
-    ok_(__FILE__,line)(ret, "ReadFile failed: %u\n", GetLastError());
-    ok_(__FILE__,line)(count == exlen * sizeof(WCHAR), "got %u, expected %u\n",
+    ok_(__FILE__,line)(ret, "ReadFile failed: %lu\n", GetLastError());
+    ok_(__FILE__,line)(count == exlen * sizeof(WCHAR), "got %lu, expected %Iu\n",
                        count, exlen * sizeof(WCHAR));
     buf[count / sizeof(WCHAR)] = 0;
     ok_(__FILE__,line)(!memcmp(expect, buf, count), "unexpected data %s\n", wine_dbgstr_w(buf));
+}
+
+#define child_expect_read_control_result(a,b,c) child_expect_read_control_result_(__LINE__,a,b,c)
+static void child_expect_read_control_result_(unsigned int line, HANDLE pipe, const WCHAR *expect, DWORD state)
+{
+    size_t exlen = wcslen(expect);
+    WCHAR buf[4096];
+    WCHAR *ptr = (void *)((char *)buf + sizeof(DWORD));
+    DWORD count;
+    BOOL ret;
+
+    ret = ReadFile(pipe, buf, sizeof(buf), &count, NULL);
+    ok_(__FILE__,line)(ret, "ReadFile failed: %lu\n", GetLastError());
+    ok_(__FILE__,line)(count == sizeof(DWORD) + exlen * sizeof(WCHAR), "got %lu, expected %Iu\n",
+                       count, sizeof(DWORD) + exlen * sizeof(WCHAR));
+    buf[count / sizeof(WCHAR)] = 0;
+    todo_wine_if(*(DWORD *)buf != state && *(DWORD *)buf == 0)
+    ok_(__FILE__,line)(*(DWORD *)buf == state, "keyboard state: got %lx, expected %lx\n", *(DWORD *)buf, state);
+    ok_(__FILE__,line)(!memcmp(expect, ptr, count - sizeof(DWORD)), "unexpected data %s %s\n", wine_dbgstr_w(ptr), wine_dbgstr_w(expect));
 }
 
 #define child_expect_read_result_a(a,b) child_expect_read_result_a_(__LINE__,a,b)
@@ -439,9 +481,9 @@ static void child_expect_read_result_a_(unsigned int line, HANDLE pipe, const ch
     BOOL ret;
 
     ret = ReadFile(pipe, buf, sizeof(buf), &count, NULL);
-    ok_(__FILE__,line)(ret, "ReadFile failed: %u\n", GetLastError());
+    ok_(__FILE__,line)(ret, "ReadFile failed: %lu\n", GetLastError());
     todo_wine_if(exlen && expect[exlen - 1] == '\xcc')
-    ok_(__FILE__,line)(count == exlen, "got %u, expected %u\n", count, exlen);
+    ok_(__FILE__,line)(count == exlen, "got %lu, expected %Iu\n", count, exlen);
     buf[count] = 0;
     ok_(__FILE__,line)(!memcmp(expect, buf, count), "unexpected data %s\n", wine_dbgstr_a(buf));
 }
@@ -454,10 +496,10 @@ static void expect_input(unsigned int event_type, INPUT_RECORD *record)
     BOOL ret;
 
     ret = WriteFile(child_pipe, &req, sizeof(req), &read, NULL);
-    ok(ret, "WriteFile failed: %u\n", GetLastError());
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
 
     ret = ReadFile(child_pipe, &input, sizeof(input), &read, NULL);
-    ok(ret, "ReadFile failed: %u\n", GetLastError());
+    ok(ret, "ReadFile failed: %lu\n", GetLastError());
 
     ok(input.EventType == event_type, "EventType = %u, expected %u\n", input.EventType, event_type);
     if (record) *record = input;
@@ -501,7 +543,7 @@ static void expect_key_input_(unsigned int line, unsigned int ctx, WCHAR ch, uns
                        "%x: wVirtualScanCode = %x expected %x\n", ctx,
                        record.Event.KeyEvent.wVirtualScanCode, vs);
     ok_(__FILE__,line)(record.Event.KeyEvent.dwControlKeyState == ctrl_state,
-                       "%x: dwControlKeyState = %x\n", ctx, record.Event.KeyEvent.dwControlKeyState);
+                       "%x: dwControlKeyState = %lx\n", ctx, record.Event.KeyEvent.dwControlKeyState);
 }
 
 #define get_input_key_vt() get_input_key_vt_(__LINE__)
@@ -551,8 +593,36 @@ static void expect_char_key_(unsigned int line, WCHAR ch)
     expect_key_pressed_(line, ch, ch, vk, ctrl);
 }
 
+static void fetch_child_sb_info(CONSOLE_SCREEN_BUFFER_INFO *info)
+{
+    struct pseudoconsole_req req = { REQ_GET_SB_INFO };
+    DWORD read;
+    BOOL ret;
+
+    ret = WriteFile(child_pipe, &req, sizeof(req), &read, NULL);
+    ok(ret, "WriteFile failed: %lu\n", GetLastError());
+
+    ret = ReadFile(child_pipe, info, sizeof(*info), &read, NULL);
+    ok(ret, "ReadFile failed: %lu\n", GetLastError());
+}
+
+#define test_cursor_pos(a,b) _test_cursor_pos(__LINE__,a,b)
+static void _test_cursor_pos(unsigned line, int expect_x, int expect_y)
+{
+    CONSOLE_SCREEN_BUFFER_INFO info;
+
+    fetch_child_sb_info(&info);
+
+    ok_(__FILE__,line)(info.dwCursorPosition.X == expect_x, "dwCursorPosition.X = %u, expected %u\n",
+                       info.dwCursorPosition.X, expect_x);
+    ok_(__FILE__,line)(info.dwCursorPosition.Y == expect_y, "dwCursorPosition.Y = %u, expected %u\n",
+                       info.dwCursorPosition.Y, expect_y);
+}
+
 static void test_write_console(void)
 {
+    child_set_output_mode(ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+
     child_string_request(REQ_WRITE_CONSOLE, L"abc");
     skip_hide_cursor();
     expect_output_sequence("abc");
@@ -631,7 +701,7 @@ static void test_write_console(void)
     child_string_request(REQ_WRITE_CONSOLE, L"xy");
     skip_hide_cursor();
     expect_output_sequence("xy");
-    if (!skip_sequence("\b")) expect_output_sequence("\r\n");
+    if (!skip_sequence("\b")) skip_sequence("\r\n");
     skip_sequence("\x1b[?25h");              /* show cursor */
     expect_empty_output();
 
@@ -689,10 +759,9 @@ static void test_write_console(void)
     expect_output_sequence("XY");
     skip_sequence("\x1b[40;29H");             /* set cursor */
     if (skip_sequence("\x1b[?25h"))           /* show cursor */
-        expect_output_sequence("\x1b[?25l");  /* hide cursor */
-    if (!skip_sequence("\b"))
+        skip_sequence("\x1b[?25l");           /* hide cursor */
+    if (!skip_sequence("\b") && skip_sequence("\r\n"))
     {
-        expect_output_sequence("\r\n");
         expect_output_sequence("\x1b[30X");   /* erase the line */
         expect_output_sequence("\x1b[30C");   /* move cursor to the end of the line */
         expect_output_sequence("\r");         /* set cursor */
@@ -760,7 +829,129 @@ static void test_write_console(void)
     skip_sequence("\x1b[?25h");               /* show cursor */
     expect_empty_output();
 
+    child_set_output_mode(ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+
+    child_set_cursor(28, 12);
+    skip_hide_cursor();
+    expect_output_sequence("\x1b[28C");       /* move cursor to the end of the line */
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+
+    child_string_request(REQ_WRITE_CONSOLE, L"ab");
+    skip_hide_cursor();
+    expect_output_sequence("ab");
+    skip_sequence("\b");
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+    test_cursor_pos(29, 12);
+
+    child_string_request(REQ_WRITE_CONSOLE, L"c");
+    skip_hide_cursor();
+    expect_output_sequence("\r\n");
+    expect_output_sequence("c");
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+    test_cursor_pos(1, 13);
+
+    child_set_cursor(28, 14);
+    skip_hide_cursor();
+    expect_output_sequence("\x1b[15;29H");    /* set cursor */
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+
+    child_string_request(REQ_WRITE_CONSOLE, L"x");
+    skip_hide_cursor();
+    expect_output_sequence("x");
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+    test_cursor_pos(29, 14);
+
+    child_string_request(REQ_WRITE_CONSOLE, L"y");
+    skip_hide_cursor();
+    expect_output_sequence("y");
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+    test_cursor_pos(29, 14);
+
+    child_string_request(REQ_WRITE_CONSOLE, L"\b");
+    skip_hide_cursor();
+    expect_output_sequence("\b");
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+    test_cursor_pos(28, 14);
+
+    child_string_request(REQ_WRITE_CONSOLE, L"z");
+    skip_hide_cursor();
+    expect_output_sequence("z");
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+    test_cursor_pos(29, 14);
+
+    child_string_request(REQ_WRITE_CONSOLE, L"w");
+    skip_hide_cursor();
+    expect_output_sequence("w");
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+    test_cursor_pos(29, 14);
+
+    child_string_request(REQ_WRITE_CONSOLE, L"X");
+    skip_hide_cursor();
+    expect_output_sequence("\r\n");
+    expect_output_sequence("X");
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+    test_cursor_pos(1, 15);
+
     child_set_output_mode(ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL_OUTPUT);
+
+    child_set_cursor(28, 20);
+    skip_hide_cursor();
+    expect_output_sequence("\x1b[21;29H");    /* set cursor */
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+
+    child_string_request(REQ_WRITE_CONSOLE, L"ab");
+    skip_hide_cursor();
+    expect_output_sequence("ab");
+    expect_output_sequence("\r\n");
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+    test_cursor_pos(0, 21);
+
+    child_string_request(REQ_WRITE_CONSOLE, L"c");
+    skip_hide_cursor();
+    expect_output_sequence("c");
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+    test_cursor_pos(1, 21);
+
+    child_set_cursor(28, 22);
+    skip_hide_cursor();
+    expect_output_sequence("\x1b[23;29H");    /* set cursor */
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+
+    child_string_request(REQ_WRITE_CONSOLE, L"x");
+    skip_hide_cursor();
+    expect_output_sequence("x");
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+    test_cursor_pos(29, 22);
+
+    child_string_request(REQ_WRITE_CONSOLE, L"y");
+    skip_hide_cursor();
+    expect_output_sequence("y");
+    expect_output_sequence("\r\n");
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+    test_cursor_pos(0, 23);
+
+    child_string_request(REQ_WRITE_CONSOLE, L"z");
+    skip_hide_cursor();
+    expect_output_sequence("z");
+    skip_sequence("\x1b[?25h");               /* show cursor */
+    expect_empty_output();
+    test_cursor_pos(1, 23);
 }
 
 static void test_tty_output(void)
@@ -1051,7 +1242,7 @@ static void write_console_pipe(const char *buf)
     DWORD written;
     BOOL res;
     res = WriteFile(console_pipe, buf, strlen(buf), &written, NULL);
-    ok(res, "WriteFile failed: %u\n", GetLastError());
+    ok(res, "WriteFile failed: %lu\n", GetLastError());
 }
 
 static void test_read_console(void)
@@ -1132,6 +1323,108 @@ static void test_read_console(void)
     expect_empty_output();
 }
 
+static void test_read_console_control(void)
+{
+    CONSOLE_SCREEN_BUFFER_INFO info1, info2;
+    char ctrl;
+    char buf[16];
+    WCHAR bufw[16];
+
+    child_set_input_mode(child_pipe, ENABLE_PROCESSED_INPUT | ENABLE_LINE_INPUT |
+                         ENABLE_ECHO_INPUT | ENABLE_MOUSE_INPUT | ENABLE_INSERT_MODE |
+                         ENABLE_QUICK_EDIT_MODE | ENABLE_EXTENDED_FLAGS | ENABLE_AUTO_POSITION);
+
+    /* test simple behavior */
+    for (ctrl = 0; ctrl < ' '; ctrl++)
+    {
+        /* don't play with fire */
+        if (ctrl == 0 || ctrl == 3 || ctrl == '\n' || ctrl == 27) continue;
+
+        /* Simulate initial characters
+         * Note: as ReadConsole with CONTROL structure will need to back up the cursor
+         * up to the length of the initial characters, all the following tests ensure that
+         * this backup doesn't imply backing up to the previous line.
+         * This is the "regular" behavior when using completion.
+         */
+        child_string_request(REQ_WRITE_CONSOLE, L"\rabc");
+        skip_sequence("\x1b[25l");  /* broken hide cursor */
+        skip_sequence("\x1b[?25l"); /* hide cursor */
+        skip_sequence("\x1b[H");
+        skip_sequence("\r");
+        expect_output_sequence("abc");
+        skip_sequence("\x1b[?25h"); /* show cursor */
+
+        fetch_child_sb_info(&info1);
+        child_read_console_control(child_pipe, 100, 1ul << ctrl, L"abc");
+        strcpy(buf, "def."); buf[3] = ctrl;
+        write_console_pipe(buf);
+        wcscpy(bufw, L"abcdef."); bufw[6] = (WCHAR)ctrl;
+        child_expect_read_control_result(child_pipe, bufw,
+                                         (ctrl == '\t' || ctrl == '\r') ? 0
+                                         : ((ctrl == 30 || ctrl == 31) ? (LEFT_CTRL_PRESSED | SHIFT_PRESSED)
+                                            : LEFT_CTRL_PRESSED));
+        skip_sequence("\x1b[?25l"); /* hide cursor */
+        expect_output_sequence("def");
+        skip_sequence("\x1b[?25h"); /* show cursor */
+        fetch_child_sb_info(&info2);
+        ok(info1.dwCursorPosition.X + 3 == info2.dwCursorPosition.X,
+           "Bad x-position: expected %u => %u but got => %u instead\n",
+           info1.dwCursorPosition.X, info1.dwCursorPosition.X + 3, info2.dwCursorPosition.X);
+        ok(info1.dwCursorPosition.Y == info2.dwCursorPosition.Y, "Cursor shouldn't have changed line\n");
+    }
+
+    /* test two different control characters in input */
+    fetch_child_sb_info(&info1);
+    child_read_console_control(child_pipe, 100, 1ul << '\x01', L"abc");
+    write_console_pipe("d\x02""ef\x01");
+    child_expect_read_control_result(child_pipe, L"abcd\x02""ef\x01", LEFT_CTRL_PRESSED);
+    skip_sequence("\x1b[?25l"); /* hide cursor */
+    expect_output_sequence("d^Bef");
+    skip_sequence("\x1b[?25h"); /* show cursor */
+    fetch_child_sb_info(&info2);
+    ok(info1.dwCursorPosition.X + 5 == info2.dwCursorPosition.X,
+       "Bad x-position: expected %u => %u but got => %u instead\n",
+       info1.dwCursorPosition.X, info1.dwCursorPosition.X + 5, info2.dwCursorPosition.X);
+    ok(info1.dwCursorPosition.Y == info2.dwCursorPosition.Y, "Cursor shouldn't have changed line\n");
+
+    /* test that ctrl character not in mask is handled as without ctrl mask */
+    child_read_console_control(child_pipe, 100, 1ul << '\x01', L"abc");
+    write_console_pipe("d\ref\x01");
+    child_expect_read_control_result(child_pipe, L"abcd\r\n", 0);
+    skip_sequence("\x1b[?25l"); /* hide cursor */
+    expect_output_sequence("d\r\n");
+    skip_sequence("\x1b[?25h"); /* show cursor */
+    expect_empty_output();
+    /* see note above... ditto */
+    child_string_request(REQ_WRITE_CONSOLE, L"abc");
+    skip_sequence("\x1b[?25l"); /* hide cursor */
+    expect_output_sequence("abc");
+    skip_sequence("\x1b[?25h"); /* show cursor */
+
+    child_read_console_control(child_pipe, 100, 1ul << '\x01', L"abc");
+    child_expect_read_control_result(child_pipe, L"abcef\x01", LEFT_CTRL_PRESSED);
+    skip_sequence("\x1b[?25l"); /* hide cursor */
+    expect_output_sequence("ef");
+    skip_sequence("\x1b[?25h"); /* show cursor */
+
+    /* test when output buffer becomes full before control event */
+    child_read_console_control(child_pipe, 4, 1ul << '\x01', L"abc");
+    write_console_pipe("def\x01");
+    child_expect_read_control_result(child_pipe, L"abcd", LEFT_CTRL_PRESSED);
+    skip_sequence("\x1b[?25l"); /* hide cursor */
+    expect_output_sequence("def");
+    skip_sequence("\x1b[?25h"); /* show cursor */
+    expect_empty_output();
+    child_read_console_control(child_pipe, 20, 1ul << '\x01', L"abc");
+    child_expect_read_control_result(child_pipe, L"ef\x01", 0);
+
+    /* TODO: add tests:
+     * - when initial characters go back to previous line
+     * - edition inside initial characters can occur
+     */
+    expect_empty_output();
+}
+
 static void test_tty_input(void)
 {
     INPUT_RECORD ir;
@@ -1151,6 +1444,7 @@ static void test_tty_input(void)
         { "\x1b[D",          0,      VK_LEFT,     0 },
         { "\x1b[H",          0,      VK_HOME,     0 },
         { "\x1b[F",          0,      VK_END,      0 },
+        { "\x1b[Z",          0x9,    VK_TAB,      SHIFT_PRESSED },
         { "\x1b[2~",         0,      VK_INSERT,   0 },
         { "\x1b[3~",         0,      VK_DELETE,   0 },
         { "\x1b[5~",         0,      VK_PRIOR,    0 },
@@ -1160,8 +1454,8 @@ static void test_tty_input(void)
         { "\x1b[18~",        0,      VK_F7,       0 },
         { "\x1b[19~",        0,      VK_F8,       0 },
         { "\x1b[20~",        0,      VK_F9,       0 },
-        { "\x1b[21~",        0,      VK_F10,      0 },
         /* 0x10 */
+        { "\x1b[21~",        0,      VK_F10,      0 },
         { "\x1b[23~",        0,      VK_F11,      0 },
         { "\x1b[24~",        0,      VK_F12,      0 },
         { "\x1bOP",          0,      VK_F1,       0 },
@@ -1177,8 +1471,8 @@ static void test_tty_input(void)
         { "\x1b[1;7A",       0,      VK_UP,       LEFT_ALT_PRESSED  | LEFT_CTRL_PRESSED },
         { "\x1b[1;8A",       0,      VK_UP,       SHIFT_PRESSED | LEFT_ALT_PRESSED  | LEFT_CTRL_PRESSED },
         { "\x1b[1;9A",       0,      VK_UP,       0 },
-        { "\x1b[1;10A",      0,      VK_UP,       SHIFT_PRESSED },
         /* 0x20 */
+        { "\x1b[1;10A",      0,      VK_UP,       SHIFT_PRESSED },
         { "\x1b[1;11A",      0,      VK_UP,       LEFT_ALT_PRESSED },
         { "\x1b[1;12A",      0,      VK_UP,       SHIFT_PRESSED | LEFT_ALT_PRESSED },
         { "\x1b[1;13A",      0,      VK_UP,       LEFT_CTRL_PRESSED },
@@ -1194,6 +1488,7 @@ static void test_tty_input(void)
         { "\x1b""1",         '1',    '1',         LEFT_ALT_PRESSED },
         { "\x1b""x",         'x',    'X',         LEFT_ALT_PRESSED },
         { "\x1b""[",         '[',    VK_OEM_4,    LEFT_ALT_PRESSED },
+        /* 0x30 */
         { "\x7f",            '\b',   VK_BACK,     0 },
     };
 
@@ -1283,9 +1578,9 @@ static void child_process(HANDLE pipe)
                 handle = CreateConsoleScreenBuffer(GENERIC_READ | GENERIC_WRITE,
                                                    FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                                                    CONSOLE_TEXTMODE_BUFFER, NULL);
-                ok(handle != INVALID_HANDLE_VALUE, "CreateConsoleScreenBuffer failed: %u\n", GetLastError());
+                ok(handle != INVALID_HANDLE_VALUE, "CreateConsoleScreenBuffer failed: %lu\n", GetLastError());
                 ret = WriteFile(pipe, &handle, sizeof(handle), &count, NULL);
-                ok(ret, "WriteFile failed: %u\n", GetLastError());
+                ok(ret, "WriteFile failed: %lu\n", GetLastError());
                 break;
             }
 
@@ -1293,99 +1588,130 @@ static void child_process(HANDLE pipe)
             {
                 INPUT_RECORD record;
                 ret = ReadConsoleInputW(input, &record, 1, &count);
-                ok(ret, "ReadConsoleInputW failed: %u\n", GetLastError());
-                ok(count == 1, "count = %u\n", count);
+                ok(ret, "ReadConsoleInputW failed: %lu\n", GetLastError());
+                ok(count == 1, "count = %lu\n", count);
                 ret = WriteFile(pipe, &record, sizeof(record), &count, NULL);
-                ok(ret, "WriteFile failed: %u\n", GetLastError());
+                ok(ret, "WriteFile failed: %lu\n", GetLastError());
+                break;
+            }
+
+        case REQ_GET_SB_INFO:
+            {
+                CONSOLE_SCREEN_BUFFER_INFO info;
+                ret = GetConsoleScreenBufferInfo(output, &info);
+                ok(ret, "GetConsoleScreenBufferInfo failed: %lu\n", GetLastError());
+                ret = WriteFile(pipe, &info, sizeof(info), &count, NULL);
+                ok(ret, "WriteFile failed: %lu\n", GetLastError());
                 break;
             }
 
         case REQ_READ_CONSOLE:
             ret = ReadConsoleW(input, buf, req->u.size, &count, NULL );
-            ok(ret, "ReadConsoleW failed: %u\n", GetLastError());
+            ok(ret, "ReadConsoleW failed: %lu\n", GetLastError());
             ret = WriteFile(pipe, buf, count * sizeof(WCHAR), NULL, NULL);
-            ok(ret, "WriteFile failed: %u\n", GetLastError());
+            ok(ret, "WriteFile failed: %lu\n", GetLastError());
             break;
 
         case REQ_READ_CONSOLE_A:
             count = req->u.size;
             memset(buf, 0xcc, sizeof(buf));
             ret = ReadConsoleA(input, buf, count, &count, NULL );
-            ok(ret, "ReadConsoleA failed: %u\n", GetLastError());
+            ok(ret, "ReadConsoleA failed: %lu\n", GetLastError());
             ret = WriteFile(pipe, buf, count, NULL, NULL);
-            ok(ret, "WriteFile failed: %u\n", GetLastError());
+            ok(ret, "WriteFile failed: %lu\n", GetLastError());
             break;
 
         case REQ_READ_CONSOLE_FILE:
             count = req->u.size;
             memset(buf, 0xcc, sizeof(buf));
             ret = ReadFile(input, buf, count, &count, NULL );
-            ok(ret, "ReadFile failed: %u\n", GetLastError());
+            ok(ret, "ReadFile failed: %lu\n", GetLastError());
             ret = WriteFile(pipe, buf, count, NULL, NULL);
-            ok(ret, "WriteFile failed: %u\n", GetLastError());
+            ok(ret, "WriteFile failed: %lu\n", GetLastError());
+            break;
+
+        case REQ_READ_CONSOLE_CONTROL:
+            {
+                CONSOLE_READCONSOLE_CONTROL crc;
+                WCHAR result[1024];
+                WCHAR *ptr = (void *)((char *)result + sizeof(DWORD));
+
+                count = req->u.control.size;
+                memset(result, 0xcc, sizeof(result));
+                crc.nLength = sizeof(crc);
+                crc.dwCtrlWakeupMask = req->u.control.mask;
+                crc.nInitialChars = wcslen(req->u.control.initial);
+                crc.dwConsoleKeyState = 0xa5;
+                memcpy(ptr, req->u.control.initial, crc.nInitialChars * sizeof(WCHAR));
+                ret = ReadConsoleW(input, ptr, count, &count, &crc);
+                ok(ret, "ReadConsoleW failed: %lu\n", GetLastError());
+                *(DWORD *)result = crc.dwConsoleKeyState;
+                ret = WriteFile(pipe, result, sizeof(DWORD) + count * sizeof(WCHAR), NULL, NULL);
+                ok(ret, "WriteFile failed: %lu\n", GetLastError());
+            }
             break;
 
         case REQ_SCROLL:
             ret = ScrollConsoleScreenBufferW(output, &req->u.scroll.rect, NULL, req->u.scroll.dst, &req->u.scroll.fill);
-            ok(ret, "ScrollConsoleScreenBuffer failed: %u\n", GetLastError());
+            ok(ret, "ScrollConsoleScreenBuffer failed: %lu\n", GetLastError());
             break;
 
         case REQ_FILL_CHAR:
             ret = FillConsoleOutputCharacterW(output, req->u.fill.ch, req->u.fill.count, req->u.fill.coord, &count);
-            ok(ret, "FillConsoleOutputCharacter failed: %u\n", GetLastError());
-            ok(count == req->u.fill.count, "count = %u, expected %u\n", count, req->u.fill.count);
+            ok(ret, "FillConsoleOutputCharacter failed: %lu\n", GetLastError());
+            ok(count == req->u.fill.count, "count = %lu, expected %lu\n", count, req->u.fill.count);
             break;
 
         case REQ_SET_ACTIVE:
             output = req->u.handle;
             ret = SetConsoleActiveScreenBuffer(output);
-            ok(ret, "SetConsoleActiveScreenBuffer failed: %u\n", GetLastError());
+            ok(ret, "SetConsoleActiveScreenBuffer failed: %lu\n", GetLastError());
             break;
 
         case REQ_SET_CURSOR:
             ret = SetConsoleCursorPosition(output, req->u.coord);
-            ok(ret, "SetConsoleCursorPosition failed: %u\n", GetLastError());
+            ok(ret, "SetConsoleCursorPosition failed: %lu\n", GetLastError());
             break;
 
         case REQ_SET_INPUT_CP:
             ret = SetConsoleCP(req->u.cp);
-            ok(ret, "SetConsoleCP failed: %u\n", GetLastError());
+            ok(ret, "SetConsoleCP failed: %lu\n", GetLastError());
             break;
 
         case REQ_SET_INPUT_MODE:
             ret = SetConsoleMode(input, req->u.mode);
-            ok(ret, "SetConsoleMode failed: %u\n", GetLastError());
+            ok(ret, "SetConsoleMode failed: %lu\n", GetLastError());
             break;
 
         case REQ_SET_OUTPUT_MODE:
             ret = SetConsoleMode(output, req->u.mode);
-            ok(ret, "SetConsoleMode failed: %u\n", GetLastError());
+            ok(ret, "SetConsoleMode failed: %lu\n", GetLastError());
             break;
 
         case REQ_SET_TITLE:
             ret = SetConsoleTitleW(req->u.string);
-            ok(ret, "SetConsoleTitleW failed: %u\n", GetLastError());
+            ok(ret, "SetConsoleTitleW failed: %lu\n", GetLastError());
             break;
 
         case REQ_WRITE_CHARACTERS:
             ret = WriteConsoleOutputCharacterW(output, req->u.write_characters.buf,
                                                req->u.write_characters.len,
                                                req->u.write_characters.coord, &count);
-            ok(ret, "WriteConsoleOutputCharacterW failed: %u\n", GetLastError());
+            ok(ret, "WriteConsoleOutputCharacterW failed: %lu\n", GetLastError());
             break;
 
         case REQ_WRITE_CONSOLE:
             ret = WriteConsoleW(output, req->u.string, lstrlenW(req->u.string), NULL, NULL);
-            ok(ret, "SetConsoleTitleW failed: %u\n", GetLastError());
+            ok(ret, "SetConsoleTitleW failed: %lu\n", GetLastError());
             break;
 
         case REQ_WRITE_OUTPUT:
             {
                 SMALL_RECT region = req->u.write_output.region;
                 ret = WriteConsoleOutputW(output, req->u.write_output.buf, req->u.write_output.size, req->u.write_output.coord, &region);
-                ok(ret, "WriteConsoleOutput failed: %u\n", GetLastError());
+                ok(ret, "WriteConsoleOutput failed: %lu\n", GetLastError());
                 ret = WriteFile(pipe, &region, sizeof(region), &count, NULL);
-                ok(ret, "WriteFile failed: %u\n", GetLastError());
+                ok(ret, "WriteFile failed: %lu\n", GetLastError());
                 break;
             }
 
@@ -1393,7 +1719,7 @@ static void child_process(HANDLE pipe)
             ok(0, "unexpected request type %u\n", req->type);
         };
     }
-    ok(GetLastError() == ERROR_BROKEN_PIPE, "ReadFile failed: %u\n", GetLastError());
+    ok(GetLastError() == ERROR_BROKEN_PIPE, "ReadFile failed: %lu\n", GetLastError());
     CloseHandle(output);
     CloseHandle(input);
 }
@@ -1416,7 +1742,7 @@ static HANDLE run_child(HANDLE console, HANDLE pipe)
     sprintf(cmdline, "\"%s\" %s child %p", argv[0], argv[1], pipe);
     ret = CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, EXTENDED_STARTUPINFO_PRESENT, NULL, NULL,
                          &startup.StartupInfo, &info);
-    ok(ret, "CreateProcessW failed: %u\n", GetLastError());
+    ok(ret, "CreateProcessW failed: %lu\n", GetLastError());
 
     CloseHandle(info.hThread);
     HeapFree(GetProcessHeap(), 0, startup.lpAttributeList);
@@ -1435,27 +1761,27 @@ static HPCON create_pseudo_console(HANDLE *console_pipe_end, HANDLE *child_proce
 
     console_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\pseudoconsoleconn", PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
                                     PIPE_WAIT | PIPE_TYPE_BYTE, 1, 4096, 4096, NMPWAIT_USE_DEFAULT_WAIT, NULL);
-    ok(console_pipe != INVALID_HANDLE_VALUE, "CreateNamedPipeW failed: %u\n", GetLastError());
+    ok(console_pipe != INVALID_HANDLE_VALUE, "CreateNamedPipeW failed: %lu\n", GetLastError());
 
     *console_pipe_end = CreateFileW(L"\\\\.\\pipe\\pseudoconsoleconn", GENERIC_READ | GENERIC_WRITE,
                                     0, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
-    ok(*console_pipe_end != INVALID_HANDLE_VALUE, "CreateFile failed: %u\n", GetLastError());
+    ok(*console_pipe_end != INVALID_HANDLE_VALUE, "CreateFile failed: %lu\n", GetLastError());
 
     child_pipe = CreateNamedPipeW(L"\\\\.\\pipe\\pseudoconsoleserver", PIPE_ACCESS_DUPLEX,
                                   PIPE_WAIT | PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE, 1, 5000, 6000,
                                   NMPWAIT_USE_DEFAULT_WAIT, NULL);
-    ok(child_pipe != INVALID_HANDLE_VALUE, "CreateNamedPipeW failed: %u\n", GetLastError());
+    ok(child_pipe != INVALID_HANDLE_VALUE, "CreateNamedPipeW failed: %lu\n", GetLastError());
 
     child_pipe_end = CreateFileW(L"\\\\.\\pipe\\pseudoconsoleserver", GENERIC_READ | GENERIC_WRITE, 0,
                                  &sec_attr, OPEN_EXISTING, 0, NULL);
-    ok(child_pipe_end != INVALID_HANDLE_VALUE, "CreateFile failed: %u\n", GetLastError());
+    ok(child_pipe_end != INVALID_HANDLE_VALUE, "CreateFile failed: %lu\n", GetLastError());
 
     read_mode = PIPE_READMODE_MESSAGE;
     r = SetNamedPipeHandleState(child_pipe_end, &read_mode, NULL, NULL);
-    ok(r, "SetNamedPipeHandleState failed: %u\n", GetLastError());
+    ok(r, "SetNamedPipeHandleState failed: %lu\n", GetLastError());
 
     hres = pCreatePseudoConsole(size, *console_pipe_end, *console_pipe_end, 0, &console);
-    ok(hres == S_OK, "CreatePseudoConsole failed: %08x\n", hres);
+    ok(hres == S_OK, "CreatePseudoConsole failed: %08lx\n", hres);
 
     *child_process = run_child(console, child_pipe_end);
     CloseHandle(child_pipe_end);
@@ -1485,6 +1811,7 @@ static void test_pseudoconsole(void)
     if (!broken_version)
     {
         test_tty_output();
+        test_read_console_control();
         test_read_console();
         test_tty_input();
     }

@@ -74,7 +74,7 @@ static ULONG WINAPI mqr_AddRef(IWICMetadataQueryReader *iface)
 {
     QueryReader *This = impl_from_IWICMetadataQueryReader(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p) refcount=%u\n", This, ref);
+    TRACE("(%p) refcount=%lu\n", This, ref);
     return ref;
 }
 
@@ -82,7 +82,7 @@ static ULONG WINAPI mqr_Release(IWICMetadataQueryReader *iface)
 {
     QueryReader *This = impl_from_IWICMetadataQueryReader(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
-    TRACE("(%p) refcount=%u\n", This, ref);
+    TRACE("(%p) refcount=%lu\n", This, ref);
     if (!ref)
     {
         IWICMetadataBlockReader_Release(This->block);
@@ -210,7 +210,7 @@ static HRESULT get_token(struct string_t *elem, PROPVARIANT *id, PROPVARIANT *sc
         hr = get_token(&next_elem, id, schema, idx);
         if (hr != S_OK)
         {
-            TRACE("get_token error %#x\n", hr);
+            TRACE("get_token error %#lx\n", hr);
             return hr;
         }
         elem->len = (end - start) + next_elem.len;
@@ -234,10 +234,10 @@ static HRESULT get_token(struct string_t *elem, PROPVARIANT *id, PROPVARIANT *sc
         if (vt == VT_ILLEGAL) return WINCODEC_ERR_WRONGSTATE;
 
         next_token.vt = VT_BSTR;
-        next_token.u.bstrVal = SysAllocStringLen(NULL, elem->len - (end - start) + 1);
-        if (!next_token.u.bstrVal) return E_OUTOFMEMORY;
+        next_token.bstrVal = SysAllocStringLen(NULL, elem->len - (end - start) + 1);
+        if (!next_token.bstrVal) return E_OUTOFMEMORY;
 
-        bstr = next_token.u.bstrVal;
+        bstr = next_token.bstrVal;
 
         end++;
         while (*end && *end != '}' && end - start < elem->len)
@@ -251,19 +251,19 @@ static HRESULT get_token(struct string_t *elem, PROPVARIANT *id, PROPVARIANT *sc
             return WINCODEC_ERR_INVALIDQUERYREQUEST;
         }
         *bstr = 0;
-        TRACE("schema/id %s\n", wine_dbgstr_w(next_token.u.bstrVal));
+        TRACE("schema/id %s\n", wine_dbgstr_w(next_token.bstrVal));
 
         if (vt == VT_CLSID)
         {
             id->vt = VT_CLSID;
-            id->u.puuid = CoTaskMemAlloc(sizeof(GUID));
-            if (!id->u.puuid)
+            id->puuid = CoTaskMemAlloc(sizeof(GUID));
+            if (!id->puuid)
             {
                 PropVariantClear(&next_token);
                 return E_OUTOFMEMORY;
             }
 
-            hr = UuidFromStringW(next_token.u.bstrVal, id->u.puuid);
+            hr = UuidFromStringW(next_token.bstrVal, id->puuid);
         }
         else
             hr = PropVariantChangeType(id, &next_token, 0, vt);
@@ -286,7 +286,7 @@ static HRESULT get_token(struct string_t *elem, PROPVARIANT *id, PROPVARIANT *sc
             hr = get_token(&next_elem, &next_id, &next_schema, &next_idx);
             if (hr != S_OK)
             {
-                TRACE("get_token error %#x\n", hr);
+                TRACE("get_token error %#lx\n", hr);
                 return hr;
             }
             elem->len = (end - start + 1) + next_elem.len;
@@ -325,10 +325,10 @@ static HRESULT get_token(struct string_t *elem, PROPVARIANT *id, PROPVARIANT *sc
         elem->len = end - start;
 
     id->vt = VT_BSTR;
-    id->u.bstrVal = SysAllocStringLen(NULL, elem->len + 1);
-    if (!id->u.bstrVal) return E_OUTOFMEMORY;
+    id->bstrVal = SysAllocStringLen(NULL, elem->len + 1);
+    if (!id->bstrVal) return E_OUTOFMEMORY;
 
-    bstr = id->u.bstrVal;
+    bstr = id->bstrVal;
     p = elem->str;
     while (p - elem->str < elem->len)
     {
@@ -346,7 +346,7 @@ static HRESULT get_token(struct string_t *elem, PROPVARIANT *id, PROPVARIANT *sc
         hr = get_token(&next_elem, &next_id, &next_schema, &next_idx);
         if (hr != S_OK)
         {
-            TRACE("get_token error %#x\n", hr);
+            TRACE("get_token error %#lx\n", hr);
             PropVariantClear(id);
             PropVariantClear(schema);
             return hr;
@@ -428,16 +428,16 @@ static HRESULT get_next_reader(IWICMetadataReader *reader, UINT index,
     if (index)
     {
         schema.vt = VT_UI2;
-        schema.u.uiVal = index;
+        schema.uiVal = index;
     }
 
     id.vt = VT_CLSID;
-    id.u.puuid = guid;
+    id.puuid = guid;
     hr = IWICMetadataReader_GetValue(reader, &schema, &id, &value);
     if (hr != S_OK) return hr;
 
     if (value.vt == VT_UNKNOWN)
-        hr = IUnknown_QueryInterface(value.u.punkVal, &IID_IWICMetadataReader, (void **)new_reader);
+        hr = IUnknown_QueryInterface(value.punkVal, &IID_IWICMetadataReader, (void **)new_reader);
     else
         hr = WINCODEC_ERR_UNEXPECTEDMETADATATYPE;
 
@@ -491,7 +491,7 @@ static HRESULT WINAPI mqr_GetMetadataByName(IWICMetadataQueryReader *iface, LPCW
         hr = get_token(&elem, &tk_id, &tk_schema, &index);
         if (hr != S_OK)
         {
-            WARN("get_token error %#x\n", hr);
+            WARN("get_token error %#lx\n", hr);
             break;
         }
         TRACE("parsed %d characters: %s, index %d\n", elem.len, wine_dbgstr_wn(elem.str, elem.len), index);
@@ -499,7 +499,7 @@ static HRESULT WINAPI mqr_GetMetadataByName(IWICMetadataQueryReader *iface, LPCW
 
         if (!elem.len) break;
 
-        if (tk_id.vt == VT_CLSID || (tk_id.vt == VT_BSTR && WICMapShortNameToGuid(tk_id.u.bstrVal, &guid) == S_OK))
+        if (tk_id.vt == VT_CLSID || (tk_id.vt == VT_BSTR && WICMapShortNameToGuid(tk_id.bstrVal, &guid) == S_OK))
         {
             WCHAR *root;
 
@@ -509,7 +509,7 @@ static HRESULT WINAPI mqr_GetMetadataByName(IWICMetadataQueryReader *iface, LPCW
                 PropVariantClear(&tk_schema);
             }
 
-            if (tk_id.vt == VT_CLSID) guid = *tk_id.u.puuid;
+            if (tk_id.vt == VT_CLSID) guid = *tk_id.puuid;
 
             if (reader)
             {
@@ -534,7 +534,7 @@ static HRESULT WINAPI mqr_GetMetadataByName(IWICMetadataQueryReader *iface, LPCW
 
             PropVariantClear(&new_value);
             new_value.vt = VT_UNKNOWN;
-            hr = MetadataQueryReader_CreateInstance(This->block, root, (IWICMetadataQueryReader **)&new_value.u.punkVal);
+            hr = MetadataQueryReader_CreateInstance(This->block, root, (IWICMetadataQueryReader **)&new_value.punkVal);
             SysFreeString(root);
             if (hr != S_OK) break;
         }
@@ -554,9 +554,9 @@ static HRESULT WINAPI mqr_GetMetadataByName(IWICMetadataQueryReader *iface, LPCW
                 if (hr != S_OK) break;
 
                 schema.vt = VT_LPWSTR;
-                schema.u.pwszVal = (LPWSTR)map_shortname_to_schema(&guid, tk_schema.u.bstrVal);
-                if (!schema.u.pwszVal)
-                    schema.u.pwszVal = tk_schema.u.bstrVal;
+                schema.pwszVal = (LPWSTR)map_shortname_to_schema(&guid, tk_schema.bstrVal);
+                if (!schema.pwszVal)
+                    schema.pwszVal = tk_schema.bstrVal;
             }
             else
                 schema = tk_schema;
@@ -564,7 +564,7 @@ static HRESULT WINAPI mqr_GetMetadataByName(IWICMetadataQueryReader *iface, LPCW
             if (tk_id.vt == VT_BSTR)
             {
                 id.vt = VT_LPWSTR;
-                id.u.pwszVal = tk_id.u.bstrVal;
+                id.pwszVal = tk_id.bstrVal;
             }
             else
                 id = tk_id;
@@ -596,12 +596,124 @@ static HRESULT WINAPI mqr_GetMetadataByName(IWICMetadataQueryReader *iface, LPCW
     return hr;
 }
 
-static HRESULT WINAPI mqr_GetEnumerator(IWICMetadataQueryReader *iface,
-        IEnumString **ppIEnumString)
+struct string_enumerator
 {
-    QueryReader *This = impl_from_IWICMetadataQueryReader(iface);
-    FIXME("(%p,%p)\n", This, ppIEnumString);
+    IEnumString IEnumString_iface;
+    LONG ref;
+};
+
+static struct string_enumerator *impl_from_IEnumString(IEnumString *iface)
+{
+    return CONTAINING_RECORD(iface, struct string_enumerator, IEnumString_iface);
+}
+
+static HRESULT WINAPI string_enumerator_QueryInterface(IEnumString *iface, REFIID riid, void **ppv)
+{
+    struct string_enumerator *this = impl_from_IEnumString(iface);
+
+    TRACE("iface %p, riid %s, ppv %p.\n", iface, debugstr_guid(riid), ppv);
+
+    if (IsEqualGUID(riid, &IID_IEnumString) || IsEqualGUID(riid, &IID_IUnknown))
+        *ppv = &this->IEnumString_iface;
+    else
+    {
+        WARN("Unknown riid %s.\n", debugstr_guid(riid));
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef(&this->IEnumString_iface);
+    return S_OK;
+}
+
+static ULONG WINAPI string_enumerator_AddRef(IEnumString *iface)
+{
+    struct string_enumerator *this = impl_from_IEnumString(iface);
+    ULONG ref = InterlockedIncrement(&this->ref);
+
+    TRACE("iface %p, ref %lu.\n", iface, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI string_enumerator_Release(IEnumString *iface)
+{
+    struct string_enumerator *this = impl_from_IEnumString(iface);
+    ULONG ref = InterlockedDecrement(&this->ref);
+
+    TRACE("iface %p, ref %lu.\n", iface, ref);
+
+    if (!ref)
+        free(this);
+
+    return ref;
+}
+
+static HRESULT WINAPI string_enumerator_Next(IEnumString *iface, ULONG count, LPOLESTR *strings, ULONG *ret)
+{
+    FIXME("iface %p, count %lu, strings %p, ret %p stub.\n", iface, count, strings, ret);
+
+    if (!strings || !ret)
+        return E_INVALIDARG;
+
+    *ret = 0;
+    return count ? S_FALSE : S_OK;
+}
+
+static HRESULT WINAPI string_enumerator_Reset(IEnumString *iface)
+{
+    TRACE("iface %p.\n", iface);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI string_enumerator_Skip(IEnumString *iface, ULONG count)
+{
+    FIXME("iface %p, count %lu stub.\n", iface, count);
+
+    return count ? S_FALSE : S_OK;
+}
+
+static HRESULT WINAPI string_enumerator_Clone(IEnumString *iface, IEnumString **out)
+{
+    FIXME("iface %p, out %p stub.\n", iface, out);
+
+    *out = NULL;
     return E_NOTIMPL;
+}
+
+static const IEnumStringVtbl string_enumerator_vtbl =
+{
+    string_enumerator_QueryInterface,
+    string_enumerator_AddRef,
+    string_enumerator_Release,
+    string_enumerator_Next,
+    string_enumerator_Skip,
+    string_enumerator_Reset,
+    string_enumerator_Clone
+};
+
+static HRESULT string_enumerator_create(IEnumString **enum_string)
+{
+    struct string_enumerator *object;
+
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    object->IEnumString_iface.lpVtbl = &string_enumerator_vtbl;
+    object->ref = 1;
+
+    *enum_string = &object->IEnumString_iface;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI mqr_GetEnumerator(IWICMetadataQueryReader *iface,
+        IEnumString **enum_string)
+{
+    TRACE("iface %p, enum_string %p.\n", iface, enum_string);
+
+    return string_enumerator_create(enum_string);
 }
 
 static IWICMetadataQueryReaderVtbl mqr_vtbl = {
@@ -631,6 +743,146 @@ HRESULT MetadataQueryReader_CreateInstance(IWICMetadataBlockReader *mbr, const W
     obj->root = root ? heap_strdupW(root) : NULL;
 
     *out = &obj->IWICMetadataQueryReader_iface;
+
+    return S_OK;
+}
+
+typedef struct
+{
+    IWICMetadataQueryWriter IWICMetadataQueryWriter_iface;
+    LONG ref;
+    IWICMetadataBlockWriter *block;
+    WCHAR *root;
+}
+QueryWriter;
+
+static inline QueryWriter *impl_from_IWICMetadataQueryWriter(IWICMetadataQueryWriter *iface)
+{
+    return CONTAINING_RECORD(iface, QueryWriter, IWICMetadataQueryWriter_iface);
+}
+
+static HRESULT WINAPI mqw_QueryInterface(IWICMetadataQueryWriter *iface, REFIID riid,
+        void **object)
+{
+    QueryWriter *writer = impl_from_IWICMetadataQueryWriter(iface);
+
+    TRACE("writer %p, riid %s, object %p.\n", writer, debugstr_guid(riid), object);
+
+    if (IsEqualGUID(riid, &IID_IUnknown)
+            || IsEqualGUID(riid, &IID_IWICMetadataQueryWriter)
+            || IsEqualGUID(riid, &IID_IWICMetadataQueryReader))
+        *object = &writer->IWICMetadataQueryWriter_iface;
+    else
+        *object = NULL;
+
+    if (*object)
+    {
+        IUnknown_AddRef((IUnknown *)*object);
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI mqw_AddRef(IWICMetadataQueryWriter *iface)
+{
+    QueryWriter *writer = impl_from_IWICMetadataQueryWriter(iface);
+    ULONG ref = InterlockedIncrement(&writer->ref);
+
+    TRACE("writer %p, refcount=%lu\n", writer, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI mqw_Release(IWICMetadataQueryWriter *iface)
+{
+    QueryWriter *writer = impl_from_IWICMetadataQueryWriter(iface);
+    ULONG ref = InterlockedDecrement(&writer->ref);
+
+    TRACE("writer %p, refcount=%lu.\n", writer, ref);
+
+    if (!ref)
+    {
+        IWICMetadataBlockWriter_Release(writer->block);
+        HeapFree(GetProcessHeap(), 0, writer->root);
+        HeapFree(GetProcessHeap(), 0, writer);
+    }
+    return ref;
+}
+
+static HRESULT WINAPI mqw_GetContainerFormat(IWICMetadataQueryWriter *iface, GUID *container_format)
+{
+    FIXME("iface %p, container_format %p stub.\n", iface, container_format);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mqw_GetEnumerator(IWICMetadataQueryWriter *iface, IEnumString **enum_string)
+{
+    TRACE("iface %p, enum_string %p.\n", iface, enum_string);
+
+    return string_enumerator_create(enum_string);
+}
+
+static HRESULT WINAPI mqw_GetLocation(IWICMetadataQueryWriter *iface, UINT max_length, WCHAR *namespace, UINT *actual_length)
+{
+    FIXME("iface %p, max_length %u, namespace %s, actual_length %p stub.\n",
+            iface, max_length, debugstr_w(namespace), actual_length);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mqw_GetMetadataByName(IWICMetadataQueryWriter *iface, LPCWSTR name, PROPVARIANT *value)
+{
+    FIXME("name %s, value %p stub.\n", debugstr_w(name), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mqw_SetMetadataByName(IWICMetadataQueryWriter *iface, LPCWSTR name, const PROPVARIANT *value)
+{
+    FIXME("iface %p, name %s, value %p stub.\n", iface, debugstr_w(name), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mqw_RemoveMetadataByName(IWICMetadataQueryWriter *iface, LPCWSTR name)
+{
+    FIXME("iface %p, name %s stub.\n", iface, debugstr_w(name));
+
+    return E_NOTIMPL;
+}
+
+static const IWICMetadataQueryWriterVtbl mqw_vtbl =
+{
+    mqw_QueryInterface,
+    mqw_AddRef,
+    mqw_Release,
+    mqw_GetContainerFormat,
+    mqw_GetLocation,
+    mqw_GetMetadataByName,
+    mqw_GetEnumerator,
+    mqw_SetMetadataByName,
+    mqw_RemoveMetadataByName,
+};
+
+HRESULT MetadataQueryWriter_CreateInstance(IWICMetadataBlockWriter *mbw, const WCHAR *root, IWICMetadataQueryWriter **out)
+{
+    QueryWriter *obj;
+
+    obj = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*obj));
+    if (!obj)
+        return E_OUTOFMEMORY;
+
+    obj->IWICMetadataQueryWriter_iface.lpVtbl = &mqw_vtbl;
+    obj->ref = 1;
+
+    IWICMetadataBlockWriter_AddRef(mbw);
+    obj->block = mbw;
+
+    obj->root = root ? heap_strdupW(root) : NULL;
+
+    *out = &obj->IWICMetadataQueryWriter_iface;
 
     return S_OK;
 }

@@ -97,7 +97,7 @@ static void CONTEXT_2_win32apieq(const CONTEXT *pCxt, struct win32apireq *pOut)
         /* FIXME: pOut->ar_pad ignored */
 }
 
-extern void __wine_call_int_handler( CONTEXT *context, BYTE intnum );
+extern void WINAPI __wine_call_int_handler16( BYTE intnum, CONTEXT *context );
 
 /***********************************************************************
  *           DeviceIoControl   (IFSMGR.VXD.@)
@@ -107,7 +107,7 @@ BOOL WINAPI IFSMGR_DeviceIoControl(DWORD dwIoControlCode, LPVOID lpvInBuffer, DW
                                   LPDWORD lpcbBytesReturned,
                                   LPOVERLAPPED lpOverlapped)
 {
-    TRACE("(%d,%p,%d,%p,%d,%p,%p): stub\n",
+    TRACE("(%ld,%p,%ld,%p,%ld,%p,%p): stub\n",
           dwIoControlCode, lpvInBuffer,cbInBuffer, lpvOutBuffer,cbOutBuffer,
           lpcbBytesReturned, lpOverlapped);
 
@@ -132,9 +132,9 @@ BOOL WINAPI IFSMGR_DeviceIoControl(DWORD dwIoControlCode, LPVOID lpvInBuffer, DW
             win32apieq_2_CONTEXT(pIn,&cxt);
 
             if(dwIoControlCode==IFS_IOCTL_21)
-                __wine_call_int_handler( &cxt, 0x21 );
+                __wine_call_int_handler16( 0x21, &cxt );
             else
-                __wine_call_int_handler( &cxt, 0x2f );
+                __wine_call_int_handler16( 0x2f, &cxt );
 
             CONTEXT_2_win32apieq(&cxt,pOut);
             return TRUE;
@@ -146,7 +146,7 @@ BOOL WINAPI IFSMGR_DeviceIoControl(DWORD dwIoControlCode, LPVOID lpvInBuffer, DW
         FIXME( "Control 'IFS_IOCTL_GET_NETPRO_NAME_A' not implemented\n");
         return FALSE;
     default:
-        FIXME( "Control %d not implemented\n", dwIoControlCode);
+        FIXME( "Control %ld not implemented\n", dwIoControlCode);
         return FALSE;
     }
 }

@@ -71,7 +71,7 @@ static ULONG WINAPI IDirectMusicSynth8Impl_AddRef(IDirectMusicSynth8 *iface)
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->(): new ref = %u\n", This, ref);
+    TRACE("(%p): new ref = %lu\n", This, ref);
 
     return ref;
 }
@@ -81,11 +81,11 @@ static ULONG WINAPI IDirectMusicSynth8Impl_Release(IDirectMusicSynth8 *iface)
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(): new ref = %u\n", This, ref);
+    TRACE("(%p): new ref = %lu\n", This, ref);
 
     if (!ref) {
-        if (This->pLatencyClock)
-            IReferenceClock_Release(This->pLatencyClock);
+        if (This->latency_clock)
+            IReferenceClock_Release(This->latency_clock);
         HeapFree(GetProcessHeap(), 0, This);
         DMSYNTH_UnlockModule();
     }
@@ -94,21 +94,102 @@ static ULONG WINAPI IDirectMusicSynth8Impl_Release(IDirectMusicSynth8 *iface)
 }
 
 /* IDirectMusicSynth8Impl IDirectMusicSynth part: */
-static HRESULT WINAPI IDirectMusicSynth8Impl_Open(IDirectMusicSynth8 *iface,
-        DMUS_PORTPARAMS *pPortParams)
+static HRESULT WINAPI IDirectMusicSynth8Impl_Open(IDirectMusicSynth8 *iface, DMUS_PORTPARAMS *params)
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
+    BOOL modified = FALSE;
+    const DMUS_PORTPARAMS def = {
+        .dwValidParams = DMUS_PORTPARAMS_VOICES|DMUS_PORTPARAMS_CHANNELGROUPS|
+                DMUS_PORTPARAMS_AUDIOCHANNELS|DMUS_PORTPARAMS_SAMPLERATE|DMUS_PORTPARAMS_EFFECTS|
+                DMUS_PORTPARAMS_SHARE|DMUS_PORTPARAMS_FEATURES,
+        .dwSize = sizeof(def), .dwVoices = 32, .dwChannelGroups = 2, .dwAudioChannels = 2,
+        .dwSampleRate = 22050, .dwEffectFlags = DMUS_EFFECT_REVERB
+    };
 
-    FIXME("(%p)->(%p): stub\n", This, pPortParams);
+    TRACE("(%p, %p)\n", This, params);
 
-    return S_OK;
+    if (This->open)
+        return DMUS_E_ALREADYOPEN;
+    if (params && params->dwSize < sizeof(DMUS_PORTPARAMS7))
+        return E_INVALIDARG;
+
+    This->open = TRUE;
+
+    if (!params) {
+        memcpy(&This->params, &def, sizeof(This->params));
+        return S_OK;
+    }
+
+    if (params->dwValidParams & DMUS_PORTPARAMS_VOICES && params->dwVoices) {
+        if (params->dwVoices > This->caps.dwMaxVoices) {
+            modified = TRUE;
+            params->dwVoices = This->caps.dwMaxVoices;
+        }
+    } else
+        params->dwVoices = def.dwVoices;
+
+    if (params->dwValidParams & DMUS_PORTPARAMS_CHANNELGROUPS && params->dwChannelGroups) {
+        if (params->dwChannelGroups > This->caps.dwMaxChannelGroups) {
+            modified = TRUE;
+            params->dwChannelGroups = This->caps.dwMaxChannelGroups;
+        }
+    } else
+        params->dwChannelGroups = def.dwChannelGroups;
+
+    if (params->dwValidParams & DMUS_PORTPARAMS_AUDIOCHANNELS && params->dwAudioChannels) {
+        if (params->dwAudioChannels > This->caps.dwMaxAudioChannels) {
+            modified = TRUE;
+            params->dwAudioChannels = This->caps.dwMaxAudioChannels;
+        }
+    } else
+        params->dwAudioChannels = def.dwAudioChannels;
+
+    if (params->dwValidParams & DMUS_PORTPARAMS_SAMPLERATE && params->dwSampleRate) {
+        if (params->dwSampleRate > 96000) {
+            modified = TRUE;
+            params->dwSampleRate = 96000;
+        } else if (params->dwSampleRate < 11025) {
+            modified = TRUE;
+            params->dwSampleRate = 11025;
+        }
+    } else
+        params->dwSampleRate = def.dwSampleRate;
+
+    if (params->dwValidParams & DMUS_PORTPARAMS_EFFECTS && params->dwEffectFlags != def.dwEffectFlags)
+        modified = TRUE;
+    params->dwEffectFlags = def.dwEffectFlags;
+
+    if (params->dwValidParams & DMUS_PORTPARAMS_SHARE && params->fShare)
+        modified = TRUE;
+    params->fShare = FALSE;
+
+    if (params->dwSize >= sizeof(params)) {
+        if (params->dwValidParams & DMUS_PORTPARAMS_FEATURES && params->dwFeatures) {
+            if (params->dwFeatures & ~(DMUS_PORT_FEATURE_AUDIOPATH|DMUS_PORT_FEATURE_STREAMING)) {
+                modified = TRUE;
+                params->dwFeatures &= DMUS_PORT_FEATURE_AUDIOPATH|DMUS_PORT_FEATURE_STREAMING;
+            }
+        } else
+            params->dwFeatures = def.dwFeatures;
+        params->dwValidParams = def.dwValidParams;
+    } else
+        params->dwValidParams = def.dwValidParams & ~DMUS_PORTPARAMS_FEATURES;
+
+    memcpy(&This->params, params, min(params->dwSize, sizeof(This->params)));
+
+    return modified ? S_FALSE : S_OK;
 }
 
 static HRESULT WINAPI IDirectMusicSynth8Impl_Close(IDirectMusicSynth8 *iface)
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
 
-    FIXME("(%p)->(): stub\n", This);
+    TRACE("(%p)\n", This);
+
+    if (!This->open)
+        return DMUS_E_ALREADYCLOSED;
+
+    This->open = FALSE;
 
     return S_OK;
 }
@@ -118,7 +199,7 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_SetNumChannelGroups(IDirectMusicSyn
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
 
-    FIXME("(%p)->(%d): stub\n", This, groups);
+    FIXME("(%p, %ld): stub\n", This, groups);
 
     return S_OK;
 }
@@ -142,10 +223,10 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_Download(IDirectMusicSynth8 *iface,
     if (TRACE_ON(dmsynth))
     {
         TRACE("Dump DMUS_DOWNLOADINFO struct:\n");
-        TRACE(" - dwDLType                = %u\n", info->dwDLType);
-        TRACE(" - dwDLId                  = %u\n", info->dwDLId);
-        TRACE(" - dwNumOffsetTableEntries = %u\n", info->dwNumOffsetTableEntries);
-        TRACE(" - cbSize                  = %u\n", info->cbSize);
+        TRACE(" - dwDLType                = %lu\n", info->dwDLType);
+        TRACE(" - dwDLId                  = %lu\n", info->dwDLId);
+        TRACE(" - dwNumOffsetTableEntries = %lu\n", info->dwNumOffsetTableEntries);
+        TRACE(" - cbSize                  = %lu\n", info->cbSize);
     }
 
     /* The struct should have at least one offset corresponding to the download object itself */
@@ -176,14 +257,14 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_Download(IDirectMusicSynth8 *iface,
         if (TRACE_ON(dmsynth))
         {
             TRACE("Dump DMUS_WAVE struct\n");
-            TRACE(" - ulFirstExtCkIdx   = %u\n", wave->ulFirstExtCkIdx);
-            TRACE(" - ulCopyrightIdx    = %u\n", wave->ulCopyrightIdx);
-            TRACE(" - ulWaveDataIdx     = %u\n", wave->ulWaveDataIdx);
+            TRACE(" - ulFirstExtCkIdx   = %lu\n", wave->ulFirstExtCkIdx);
+            TRACE(" - ulCopyrightIdx    = %lu\n", wave->ulCopyrightIdx);
+            TRACE(" - ulWaveDataIdx     = %lu\n", wave->ulWaveDataIdx);
             TRACE(" - WaveformatEx:\n");
             TRACE("   - wFormatTag      = %u\n", wave->WaveformatEx.wFormatTag);
             TRACE("   - nChannels       = %u\n", wave->WaveformatEx.nChannels);
-            TRACE("   - nSamplesPerSec  = %u\n", wave->WaveformatEx.nSamplesPerSec);
-            TRACE("   - nAvgBytesPerSec = %u\n", wave->WaveformatEx.nAvgBytesPerSec);
+            TRACE("   - nSamplesPerSec  = %lu\n", wave->WaveformatEx.nSamplesPerSec);
+            TRACE("   - nAvgBytesPerSec = %lu\n", wave->WaveformatEx.nAvgBytesPerSec);
             TRACE("   - nBlockAlign     = %u\n", wave->WaveformatEx.nBlockAlign);
             TRACE("   - wBitsPerSample  = %u\n", wave->WaveformatEx.wBitsPerSample);
             TRACE("   - cbSize          = %u\n", wave->WaveformatEx.cbSize);
@@ -195,7 +276,7 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_Download(IDirectMusicSynth8 *iface,
             }
 
             wave_data = (DMUS_WAVEDATA*)(buffer + offsets[wave->ulWaveDataIdx]);
-            TRACE("Found %u bytes of wave data\n", wave_data->cbSize);
+            TRACE("Found %lu bytes of wave data\n", wave_data->cbSize);
         }
     }
     else if (info->dwDLType == DMUS_DOWNLOADINFO_INSTRUMENT2)
@@ -208,12 +289,12 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_Download(IDirectMusicSynth8 *iface,
         if (TRACE_ON(dmsynth))
         {
             TRACE("Dump DMUS_INSTRUMENT struct\n");
-            TRACE(" - ulPatch          = %u\n", instrument->ulPatch);
-            TRACE(" - ulFirstRegionIdx = %u\n", instrument->ulFirstRegionIdx);
-            TRACE(" - ulGlobalArtIdx   = %u\n", instrument->ulGlobalArtIdx);
-            TRACE(" - ulFirstExtCkIdx  = %u\n", instrument->ulFirstExtCkIdx);
-            TRACE(" - ulCopyrightIdx   = %u\n", instrument->ulCopyrightIdx);
-            TRACE(" - ulFlags          = %u\n", instrument->ulFlags);
+            TRACE(" - ulPatch          = %lu\n", instrument->ulPatch);
+            TRACE(" - ulFirstRegionIdx = %lu\n", instrument->ulFirstRegionIdx);
+            TRACE(" - ulGlobalArtIdx   = %lu\n", instrument->ulGlobalArtIdx);
+            TRACE(" - ulFirstExtCkIdx  = %lu\n", instrument->ulFirstExtCkIdx);
+            TRACE(" - ulCopyrightIdx   = %lu\n", instrument->ulCopyrightIdx);
+            TRACE(" - ulFlags          = %lu\n", instrument->ulFlags);
 
             if (instrument->ulCopyrightIdx)
             {
@@ -235,7 +316,7 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_Download(IDirectMusicSynth8 *iface,
             }
         }
 
-        TRACE("Number of regions = %u\n", nb_regions);
+        TRACE("Number of regions = %lu\n", nb_regions);
     }
     else if (info->dwDLType == DMUS_DOWNLOADINFO_WAVEARTICULATION)
     {
@@ -251,7 +332,7 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_Download(IDirectMusicSynth8 *iface,
     }
     else
     {
-        WARN("Unknown download type %u\n", info->dwDLType);
+        WARN("Unknown download type %lu\n", info->dwDLType);
         return DMUS_E_UNKNOWNDOWNLOAD;
     }
 
@@ -273,7 +354,7 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_PlayBuffer(IDirectMusicSynth8 *ifac
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
 
-    FIXME("(%p)->(0x%s, %p, %u): stub\n", This, wine_dbgstr_longlong(rt), buffer, size);
+    FIXME("(%p, 0x%s, %p, %lu): stub\n", This, wine_dbgstr_longlong(rt), buffer, size);
 
     return S_OK;
 }
@@ -295,7 +376,10 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_GetPortCaps(IDirectMusicSynth8 *ifa
 
     TRACE("(%p)->(%p)\n", This, caps);
 
-    *caps = This->pCaps;
+    if (!caps || caps->dwSize < sizeof(*caps))
+        return E_INVALIDARG;
+
+    *caps = This->caps;
 
     return S_OK;
 }
@@ -305,9 +389,12 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_SetMasterClock(IDirectMusicSynth8 *
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
 
-    FIXME("(%p)->(%p): stub\n", This, clock);
+    TRACE("(%p)->(%p)\n", This, clock);
 
-    return S_OK;
+    if (!This->sink)
+        return DMUS_E_NOSYNTHSINK;
+
+    return IDirectMusicSynthSink_SetMasterClock(This->sink, clock);
 }
 
 static HRESULT WINAPI IDirectMusicSynth8Impl_GetLatencyClock(IDirectMusicSynth8 *iface,
@@ -320,11 +407,11 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_GetLatencyClock(IDirectMusicSynth8 
     if (!clock)
         return E_POINTER;
 
-    if (!This->synth_sink)
+    if (!This->sink)
         return DMUS_E_NOSYNTHSINK;
 
-    *clock = This->pLatencyClock;
-    IReferenceClock_AddRef(This->pLatencyClock);
+    *clock = This->latency_clock;
+    IReferenceClock_AddRef(This->latency_clock);
 
     return S_OK;
 }
@@ -332,27 +419,58 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_GetLatencyClock(IDirectMusicSynth8 
 static HRESULT WINAPI IDirectMusicSynth8Impl_Activate(IDirectMusicSynth8 *iface, BOOL enable)
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
+    HRESULT hr;
 
     TRACE("(%p)->(%d)\n", This, enable);
 
-    This->fActive = enable;
+    if (!This->sink)
+        return DMUS_E_NOSYNTHSINK;
+
+    if (enable == This->active) {
+        if (enable)
+            return DMUS_E_SYNTHACTIVE;
+        else
+            return S_FALSE;
+    }
+
+    if ((hr = IDirectMusicSynthSink_Activate(This->sink, enable)) != S_OK) {
+        if (hr == DMUS_E_SYNTHACTIVE || hr == S_FALSE)
+            WARN("Synth and sink active state out of sync. Fixing.\n");
+        else
+            return hr;
+    }
+
+    This->active = enable;
 
     return S_OK;
 }
 
 static HRESULT WINAPI IDirectMusicSynth8Impl_SetSynthSink(IDirectMusicSynth8 *iface,
-        IDirectMusicSynthSink *synth_sink)
+        IDirectMusicSynthSink *sink)
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
+    HRESULT hr;
 
-    TRACE("(%p)->(%p)\n", iface, synth_sink);
+    TRACE("(%p)->(%p)\n", iface, sink);
 
-    This->synth_sink = synth_sink;
+    if (sink == This->sink)
+        return S_OK;
 
-    if (synth_sink)
-        return IDirectMusicSynthSink_GetLatencyClock(synth_sink, &This->pLatencyClock);
+    if (!sink || This->sink) {
+        /* Disconnect the sink */
+        if (This->latency_clock)
+            IReferenceClock_Release(This->latency_clock);
+        IDirectMusicSynthSink_Release(This->sink);
+    }
 
-    return S_OK;
+    This->sink = sink;
+    if (!sink)
+        return S_OK;
+
+    IDirectMusicSynthSink_AddRef(This->sink);
+    if (FAILED(hr = IDirectMusicSynthSink_Init(sink, (IDirectMusicSynth *)iface)))
+        return hr;
+    return IDirectMusicSynthSink_GetLatencyClock(sink, &This->latency_clock);
 }
 
 static HRESULT WINAPI IDirectMusicSynth8Impl_Render(IDirectMusicSynth8 *iface, short *buffer,
@@ -360,7 +478,7 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_Render(IDirectMusicSynth8 *iface, s
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
 
-    FIXME("(%p)->(%p, %d, 0x%s): stub\n", This, buffer, length, wine_dbgstr_longlong(position));
+    FIXME("(%p, %p, %ld, 0x%s): stub\n", This, buffer, length, wine_dbgstr_longlong(position));
 
     return S_OK;
 }
@@ -381,17 +499,35 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_GetChannelPriority(IDirectMusicSynt
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
 
-    FIXME("(%p)->(%d, %d, %p): stub\n", This, channel_group, channel, priority);
+    FIXME("(%p, %ld, %ld, %p): stub\n", This, channel_group, channel, priority);
 
     return S_OK;
 }
 
 static HRESULT WINAPI IDirectMusicSynth8Impl_GetFormat(IDirectMusicSynth8 *iface,
-        WAVEFORMATEX *wave_format, DWORD *wave_format_size)
+        WAVEFORMATEX *format, DWORD *size)
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
+    WAVEFORMATEX fmt;
 
-    FIXME("(%p)->(%p, %p): stub\n", This, wave_format, wave_format_size);
+    TRACE("(%p, %p, %p)\n", This, format, size);
+
+    if (!size)
+        return E_POINTER;
+    if (!This->open)
+        return DMUS_E_SYNTHNOTCONFIGURED;
+
+    if (format) {
+        fmt.wFormatTag = WAVE_FORMAT_PCM;
+        fmt.nChannels = This->params.dwAudioChannels;
+        fmt.nSamplesPerSec = This->params.dwSampleRate;
+        fmt.wBitsPerSample = 16;
+        fmt.nBlockAlign = This->params.dwAudioChannels * fmt.wBitsPerSample / 8;
+        fmt.nAvgBytesPerSec = This->params.dwSampleRate * fmt.nBlockAlign;
+        fmt.cbSize = 0;
+        memcpy(format, &fmt, min(*size, sizeof(fmt)));
+    }
+    *size = sizeof(fmt);
 
     return S_OK;
 }
@@ -414,7 +550,7 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_PlayVoice(IDirectMusicSynth8 *iface
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
 
-    FIXME("(%p)->(0x%s, %d, %d, %d, %d, %i, %i,0x%s, 0x%s, 0x%s): stub\n",
+    FIXME("(%p, 0x%s, %ld, %ld, %ld, %ld, %li, %li, 0x%s, 0x%s, 0x%s): stub\n",
           This, wine_dbgstr_longlong(ref_time), voice_id, channel_group, channel, dwDLId, prPitch, vrVolume,
           wine_dbgstr_longlong(stVoiceStart), wine_dbgstr_longlong(stLoopStart), wine_dbgstr_longlong(stLoopEnd));
 
@@ -426,7 +562,7 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_StopVoice(IDirectMusicSynth8 *iface
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
 
-    FIXME("(%p)->(0x%s, %d): stub\n", This, wine_dbgstr_longlong(ref_time), voice_id);
+    FIXME("(%p, 0x%s, %ld): stub\n", This, wine_dbgstr_longlong(ref_time), voice_id);
 
     return S_OK;
 }
@@ -436,7 +572,7 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_GetVoiceState(IDirectMusicSynth8 *i
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
 
-    FIXME("(%p)->(%p, %d, %p): stub\n", This, dwVoice, cbVoice, dwVoiceState);
+    FIXME("(%p, %p, %ld, %p): stub\n", This, dwVoice, cbVoice, dwVoiceState);
 
     return S_OK;
 }
@@ -446,7 +582,7 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_Refresh(IDirectMusicSynth8 *iface, 
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
 
-    FIXME("(%p)->(%d, %d): stub\n", This, download_id, flags);
+    FIXME("(%p, %ld, %ld): stub\n", This, download_id, flags);
 
     return S_OK;
 }
@@ -456,7 +592,7 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_AssignChannelToBuses(IDirectMusicSy
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
 
-    FIXME("(%p)->(%d, %d, %p, %d): stub\n", This, channel_group, channel, pdwBuses, cBuses);
+    FIXME("(%p, %ld, %ld, %p, %ld): stub\n", This, channel_group, channel, pdwBuses, cBuses);
 
     return S_OK;
 }
@@ -518,13 +654,13 @@ static ULONG WINAPI DMSynthImpl_IKsControl_Release(IKsControl* iface)
 static HRESULT WINAPI DMSynthImpl_IKsControl_KsProperty(IKsControl* iface, PKSPROPERTY Property, ULONG PropertyLength, LPVOID PropertyData,
                                                         ULONG DataLength, ULONG* BytesReturned)
 {
-    TRACE("(%p)->(%p, %u, %p, %u, %p)\n", iface, Property, PropertyLength, PropertyData, DataLength, BytesReturned);
+    TRACE("(%p, %p, %lu, %p, %lu, %p)\n", iface, Property, PropertyLength, PropertyData, DataLength, BytesReturned);
 
-    TRACE("Property = %s - %u - %u\n", debugstr_guid(&Property->u.s.Set), Property->u.s.Id, Property->u.s.Flags);
+    TRACE("Property = %s - %lu - %lu\n", debugstr_guid(&Property->u.s.Set), Property->u.s.Id, Property->u.s.Flags);
 
     if (Property->u.s.Flags != KSPROPERTY_TYPE_GET)
     {
-        FIXME("Property flags %u not yet supported\n", Property->u.s.Flags);
+        FIXME("Property flags %lu not yet supported\n", Property->u.s.Flags);
         return S_FALSE;
     }
 
@@ -569,7 +705,7 @@ static HRESULT WINAPI DMSynthImpl_IKsControl_KsProperty(IKsControl* iface, PKSPR
 static HRESULT WINAPI DMSynthImpl_IKsControl_KsMethod(IKsControl* iface, PKSMETHOD Method, ULONG MethodLength, LPVOID MethodData,
                                                       ULONG DataLength, ULONG* BytesReturned)
 {
-    FIXME("(%p)->(%p, %u, %p, %u, %p): stub\n", iface, Method, MethodLength, MethodData, DataLength, BytesReturned);
+    FIXME("(%p, %p, %lu, %p, %lu, %p): stub\n", iface, Method, MethodLength, MethodData, DataLength, BytesReturned);
 
     return E_NOTIMPL;
 }
@@ -577,7 +713,7 @@ static HRESULT WINAPI DMSynthImpl_IKsControl_KsMethod(IKsControl* iface, PKSMETH
 static HRESULT WINAPI DMSynthImpl_IKsControl_KsEvent(IKsControl* iface, PKSEVENT Event, ULONG EventLength, LPVOID EventData,
                                                      ULONG DataLength, ULONG* BytesReturned)
 {
-    FIXME("(%p)->(%p, %u, %p, %u, %p): stub\n", iface, Event, EventLength, EventData, DataLength, BytesReturned);
+    FIXME("(%p, %p, %lu, %p, %lu, %p): stub\n", iface, Event, EventLength, EventData, DataLength, BytesReturned);
 
     return E_NOTIMPL;
 }
@@ -609,17 +745,17 @@ HRESULT WINAPI DMUSIC_CreateDirectMusicSynthImpl(REFIID riid, void **ppobj)
     obj->IKsControl_iface.lpVtbl = &DMSynthImpl_IKsControl_Vtbl;
     obj->ref = 1;
     /* fill in caps */
-    obj->pCaps.dwSize = sizeof(DMUS_PORTCAPS);
-    obj->pCaps.dwFlags = DMUS_PC_DLS | DMUS_PC_SOFTWARESYNTH | DMUS_PC_DIRECTSOUND | DMUS_PC_DLS2 | DMUS_PC_AUDIOPATH | DMUS_PC_WAVE;
-    obj->pCaps.guidPort = CLSID_DirectMusicSynth;
-    obj->pCaps.dwClass = DMUS_PC_OUTPUTCLASS;
-    obj->pCaps.dwType = DMUS_PORT_USER_MODE_SYNTH;
-    obj->pCaps.dwMemorySize = DMUS_PC_SYSTEMMEMORY;
-    obj->pCaps.dwMaxChannelGroups = 1000;
-    obj->pCaps.dwMaxVoices = 1000;
-    obj->pCaps.dwMaxAudioChannels = 2;
-    obj->pCaps.dwEffectFlags = DMUS_EFFECT_REVERB;
-    lstrcpyW(obj->pCaps.wszDescription, L"Microsoft Synthesizer");
+    obj->caps.dwSize = sizeof(DMUS_PORTCAPS);
+    obj->caps.dwFlags = DMUS_PC_DLS | DMUS_PC_SOFTWARESYNTH | DMUS_PC_DIRECTSOUND | DMUS_PC_DLS2 | DMUS_PC_AUDIOPATH | DMUS_PC_WAVE;
+    obj->caps.guidPort = CLSID_DirectMusicSynth;
+    obj->caps.dwClass = DMUS_PC_OUTPUTCLASS;
+    obj->caps.dwType = DMUS_PORT_USER_MODE_SYNTH;
+    obj->caps.dwMemorySize = DMUS_PC_SYSTEMMEMORY;
+    obj->caps.dwMaxChannelGroups = 1000;
+    obj->caps.dwMaxVoices = 1000;
+    obj->caps.dwMaxAudioChannels = 2;
+    obj->caps.dwEffectFlags = DMUS_EFFECT_REVERB;
+    lstrcpyW(obj->caps.wszDescription, L"Microsoft Synthesizer");
 
     DMSYNTH_LockModule();
     hr = IDirectMusicSynth8_QueryInterface(&obj->IDirectMusicSynth8_iface, riid, ppobj);

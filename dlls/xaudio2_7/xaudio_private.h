@@ -26,8 +26,6 @@
 #include <FAudio.h>
 #include <FAPO.h>
 
-#include <pthread.h>
-
 #if XAUDIO2_VER == 0
 #define COMPAT_E_INVALID_CALL E_INVALIDARG
 #define COMPAT_E_DEVICE_INVALIDATED XAUDIO20_E_DEVICE_INVALIDATED
@@ -97,10 +95,6 @@ typedef struct _XA2VoiceImpl {
         float *stream;
     } engine_params;
 
-    HANDLE engine_thread;
-    pthread_cond_t engine_done, engine_ready;
-    pthread_mutex_t engine_lock;
-
     struct list entry;
 } XA2VoiceImpl;
 
@@ -169,13 +163,13 @@ extern const IXAudio27Vtbl XAudio27_Vtbl DECLSPEC_HIDDEN;
 /* xaudio_dll.c */
 extern HRESULT xaudio2_initialize(IXAudio2Impl *This, UINT32 flags, XAUDIO2_PROCESSOR proc) DECLSPEC_HIDDEN;
 extern FAudioEffectChain *wrap_effect_chain(const XAUDIO2_EFFECT_CHAIN *pEffectChain) DECLSPEC_HIDDEN;
-extern void engine_cb(FAudioEngineCallEXT proc, FAudio *faudio, float * HOSTPTR stream, void * HOSTPTR user) DECLSPEC_HIDDEN;
+extern void engine_cb(FAudioEngineCallEXT proc, FAudio *faudio, float *stream, void *user) DECLSPEC_HIDDEN;
 extern DWORD WINAPI engine_thread(void *user) DECLSPEC_HIDDEN;
 
 /* xapo.c */
 extern HRESULT make_xapo_factory(REFCLSID clsid, REFIID riid, void **ppv) DECLSPEC_HIDDEN;
 
 /* xaudio_allocator.c */
-extern void * HOSTPTR XAudio_Internal_Malloc(size_t size) DECLSPEC_HIDDEN;
-extern void XAudio_Internal_Free(void * HOSTPTR ptr) DECLSPEC_HIDDEN;
-extern void * HOSTPTR XAudio_Internal_Realloc(void * HOSTPTR ptr, size_t size) DECLSPEC_HIDDEN;
+extern void* XAudio_Internal_Malloc(size_t size) DECLSPEC_HIDDEN;
+extern void XAudio_Internal_Free(void* ptr) DECLSPEC_HIDDEN;
+extern void* XAudio_Internal_Realloc(void* ptr, size_t size) DECLSPEC_HIDDEN;

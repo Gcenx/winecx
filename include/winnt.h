@@ -26,6 +26,7 @@
 #include <basetsd.h>
 #include <guiddef.h>
 #include <winapifamily.h>
+#include <specstrings.h>
 
 #ifndef RC_INVOKED
 #include <ctype.h>
@@ -34,11 +35,16 @@
 #endif
 
 
+#if defined(_MSC_VER) && (defined(__arm__) || defined(__aarch64__))
+#include <intrin.h>
+#endif
+
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#ifdef _NTSYSTEM_
+#if defined(_NTSYSTEM_) || defined(WINE_UNIX_LIB)
 #define NTSYSAPI
 #else
 #define NTSYSAPI DECLSPEC_IMPORT
@@ -112,16 +118,22 @@ extern "C" {
 #ifndef DECLSPEC_SELECTANY
 #if defined(_MSC_VER) && (_MSC_VER >= 1100)
 #define DECLSPEC_SELECTANY __declspec(selectany)
+#elif defined(__MINGW32__)
+#define DECLSPEC_SELECTANY __attribute__((selectany))
 #else
 #define DECLSPEC_SELECTANY
 #endif
 #endif
 
 #ifndef NOP_FUNCTION
-# if defined(_MSC_VER) && (_MSC_VER >= 1210)
-#  define NOP_FUNCTION __noop
+# if defined(_MSC_VER)
+#  if (_MSC_VER >= 1210)
+#   define NOP_FUNCTION __noop
+#  else
+#   define NOP_FUNCTION (void)0
+#  endif
 # else
-#  define NOP_FUNCTION (void)0
+#  define NOP_FUNCTION(...)
 # endif
 #endif
 
@@ -168,12 +180,14 @@ extern "C" {
 # define DECLSPEC_EXPORT
 #endif
 
-#if defined(_MSC_VER) || defined(__MINGW32__) || defined(__CYGWIN__) || defined(__sun)
-# define DECLSPEC_HIDDEN
-#elif defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 3)))
-# define DECLSPEC_HIDDEN __attribute__((visibility ("hidden")))
-#else
-# define DECLSPEC_HIDDEN
+#ifndef DECLSPEC_HIDDEN
+# if defined(_MSC_VER) || defined(__MINGW32__) || defined(__CYGWIN__) || defined(__sun)
+#  define DECLSPEC_HIDDEN
+# elif defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 3)))
+#  define DECLSPEC_HIDDEN __attribute__((visibility ("hidden")))
+# else
+#  define DECLSPEC_HIDDEN
+# endif
 #endif
 
 #ifndef __has_attribute
@@ -286,7 +300,7 @@ extern "C" {
 #undef __C89_NAMELESSUNIONNAME7
 #undef __C89_NAMELESSUNIONNAME8
 
-#if !defined(__WINESRC__) && !defined(WINE_NO_NAMELESS_EXTENSION)
+#if !defined(WINE_NO_NAMELESS_EXTENSION)
 # ifdef __GNUC__
    /* Anonymous structs support starts with gcc 2.96/g++ 2.95 */
 #  if (__GNUC__ > 2) || ((__GNUC__ == 2) && ((__GNUC_MINOR__ > 95) || ((__GNUC_MINOR__ == 95) && defined(__cplusplus))))
@@ -364,7 +378,7 @@ extern "C" {
 
 /* Alignment macros */
 
-#if defined(_WIN64) || (defined(_MSC_VER) && defined(_M_ALPHA)) || defined(__alpha__)
+#ifdef _WIN64
 #define MAX_NATURAL_ALIGNMENT sizeof(ULONGLONG)
 #define MEMORY_ALLOCATION_ALIGNMENT 16
 #else
@@ -455,7 +469,7 @@ typedef VOID           *PVOID64;
 typedef BYTE            BOOLEAN,    *PBOOLEAN;
 typedef char            CHAR,       *PCHAR;
 typedef short           SHORT,      *PSHORT;
-#ifdef WINE_USE_LONG
+#if !defined(__LP64__) && !defined(WINE_NO_LONG_TYPES)
 typedef long            LONG,       *PLONG;
 #else
 typedef int             LONG,       *PLONG;
@@ -592,7 +606,7 @@ typedef DWORD FLONG;
 
 /* Macro to deal with LP64 <=> LLP64 differences in numeric constants with 'l' modifier */
 #ifndef __MSABI_LONG
-# if defined(_MSC_VER) || defined(__MINGW32__) || defined(__CYGWIN__)
+#if !defined(__LP64__) && !defined(WINE_NO_LONG_TYPES)
 #  define __MSABI_LONG(x)         x ## l
 # else
 #  define __MSABI_LONG(x)         x
@@ -671,9 +685,6 @@ typedef DWORD FLONG;
 #define	DLL_PROCESS_ATTACH	1	/* attach process (load library) */
 #define	DLL_THREAD_ATTACH	2	/* attach new thread */
 #define	DLL_THREAD_DETACH	3	/* detach thread */
-#ifdef __WINESRC__
-#define DLL_WINE_PREATTACH      8       /* called before process attach for Wine builtins */
-#endif
 
 /* u.x.wProcessorArchitecture (NT) */
 #define PROCESSOR_ARCHITECTURE_INTEL	0
@@ -766,6 +777,12 @@ typedef struct DECLSPEC_ALIGN(8) MEM_EXTENDED_PARAMETER {
         DWORD ULong;
     } DUMMYUNIONNAME;
 } MEM_EXTENDED_PARAMETER, *PMEM_EXTENDED_PARAMETER;
+
+typedef struct _WIN32_MEMORY_RANGE_ENTRY
+{
+    PVOID  VirtualAddress;
+    SIZE_T NumberOfBytes;
+} WIN32_MEMORY_RANGE_ENTRY, *PWIN32_MEMORY_RANGE_ENTRY;
 
 #define	PAGE_NOACCESS		0x01
 #define	PAGE_READONLY		0x02
@@ -975,22 +992,13 @@ typedef enum _HEAP_INFORMATION_CLASS {
 
 #include <excpt.h>
 
-struct _CONTEXT;
-struct _EXCEPTION_POINTERS;
-struct _EXCEPTION_RECORD;
-
-typedef EXCEPTION_DISPOSITION WINAPI EXCEPTION_ROUTINE(struct _EXCEPTION_RECORD*,PVOID,
-                                                       struct _CONTEXT*,PVOID);
-typedef EXCEPTION_ROUTINE *PEXCEPTION_ROUTINE;
-
 /* The Win32 register context */
 
 /* i386 context definitions */
-#if defined(__i386__) || defined(__i386_on_x86_64__)
 
-#define SIZE_OF_80387_REGISTERS      80
+#define I386_SIZE_OF_80387_REGISTERS      80
 
-typedef struct _FLOATING_SAVE_AREA
+typedef struct _I386_FLOATING_SAVE_AREA
 {
     DWORD   ControlWord;
     DWORD   StatusWord;
@@ -999,13 +1007,14 @@ typedef struct _FLOATING_SAVE_AREA
     DWORD   ErrorSelector;
     DWORD   DataOffset;
     DWORD   DataSelector;
-    BYTE    RegisterArea[SIZE_OF_80387_REGISTERS];
+    BYTE    RegisterArea[I386_SIZE_OF_80387_REGISTERS];
     DWORD   Cr0NpxState;
-} FLOATING_SAVE_AREA, *PFLOATING_SAVE_AREA;
+} I386_FLOATING_SAVE_AREA, WOW64_FLOATING_SAVE_AREA, *PWOW64_FLOATING_SAVE_AREA;
 
-#define MAXIMUM_SUPPORTED_EXTENSION     512
+#define I386_MAXIMUM_SUPPORTED_EXTENSION     512
 
-typedef struct _CONTEXT
+#include "pshpack4.h"
+typedef struct _I386_CONTEXT
 {
     DWORD   ContextFlags;  /* 000 */
 
@@ -1018,7 +1027,7 @@ typedef struct _CONTEXT
     DWORD   Dr7;           /* 018 */
 
     /* These are selected by CONTEXT_FLOATING_POINT */
-    FLOATING_SAVE_AREA FloatSave; /* 01c */
+    I386_FLOATING_SAVE_AREA FloatSave; /* 01c */
 
     /* These are selected by CONTEXT_SEGMENTS */
     DWORD   SegGs;         /* 08c */
@@ -1042,27 +1051,39 @@ typedef struct _CONTEXT
     DWORD   Esp;           /* 0c4 */
     DWORD   SegSs;         /* 0c8 */
 
-    BYTE    ExtendedRegisters[MAXIMUM_SUPPORTED_EXTENSION];  /* 0xcc */
-} CONTEXT, *PCONTEXT;
+    BYTE    ExtendedRegisters[I386_MAXIMUM_SUPPORTED_EXTENSION];  /* 0xcc */
+} I386_CONTEXT, WOW64_CONTEXT, *PWOW64_CONTEXT;
+#include "poppack.h"
 
-#define CONTEXT_X86       0x00010000
-#define CONTEXT_i386      CONTEXT_X86
-#define CONTEXT_i486      CONTEXT_X86
+#define CONTEXT_i386      0x00010000
+#define CONTEXT_i486      0x00010000
 
-#define CONTEXT_CONTROL   (CONTEXT_i386 | 0x0001) /* SS:SP, CS:IP, FLAGS, BP */
-#define CONTEXT_INTEGER   (CONTEXT_i386 | 0x0002) /* AX, BX, CX, DX, SI, DI */
-#define CONTEXT_SEGMENTS  (CONTEXT_i386 | 0x0004) /* DS, ES, FS, GS */
-#define CONTEXT_FLOATING_POINT  (CONTEXT_i386 | 0x0008) /* 387 state */
-#define CONTEXT_DEBUG_REGISTERS (CONTEXT_i386 | 0x0010) /* DB 0-3,6,7 */
-#define CONTEXT_EXTENDED_REGISTERS (CONTEXT_i386 | 0x0020)
-#define CONTEXT_XSTATE             (CONTEXT_i386 | 0x0040)
-#define CONTEXT_FULL (CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS)
-#define CONTEXT_ALL (CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS | \
-        CONTEXT_FLOATING_POINT | CONTEXT_DEBUG_REGISTERS | CONTEXT_EXTENDED_REGISTERS)
+#define CONTEXT_I386_CONTROL   (CONTEXT_i386 | 0x0001) /* SS:SP, CS:IP, FLAGS, BP */
+#define CONTEXT_I386_INTEGER   (CONTEXT_i386 | 0x0002) /* AX, BX, CX, DX, SI, DI */
+#define CONTEXT_I386_SEGMENTS  (CONTEXT_i386 | 0x0004) /* DS, ES, FS, GS */
+#define CONTEXT_I386_FLOATING_POINT  (CONTEXT_i386 | 0x0008) /* 387 state */
+#define CONTEXT_I386_DEBUG_REGISTERS (CONTEXT_i386 | 0x0010) /* DB 0-3,6,7 */
+#define CONTEXT_I386_EXTENDED_REGISTERS (CONTEXT_i386 | 0x0020)
+#define CONTEXT_I386_XSTATE             (CONTEXT_i386 | 0x0040)
+#define CONTEXT_I386_FULL (CONTEXT_I386_CONTROL | CONTEXT_I386_INTEGER | CONTEXT_I386_SEGMENTS)
+#define CONTEXT_I386_ALL (CONTEXT_I386_FULL | CONTEXT_I386_FLOATING_POINT | CONTEXT_I386_DEBUG_REGISTERS | CONTEXT_I386_EXTENDED_REGISTERS)
 
-#define EXCEPTION_READ_FAULT    0
-#define EXCEPTION_WRITE_FAULT   1
-#define EXCEPTION_EXECUTE_FAULT 8
+#ifdef __i386__
+
+#define CONTEXT_CONTROL CONTEXT_I386_CONTROL
+#define CONTEXT_INTEGER CONTEXT_I386_INTEGER
+#define CONTEXT_SEGMENTS CONTEXT_I386_SEGMENTS
+#define CONTEXT_FLOATING_POINT CONTEXT_I386_FLOATING_POINT
+#define CONTEXT_DEBUG_REGISTERS CONTEXT_I386_DEBUG_REGISTERS
+#define CONTEXT_EXTENDED_REGISTERS CONTEXT_I386_EXTENDED_REGISTERS
+#define CONTEXT_XSTATE CONTEXT_I386_XSTATE
+#define CONTEXT_FULL CONTEXT_I386_FULL
+#define CONTEXT_ALL CONTEXT_I386_ALL
+#define SIZE_OF_80387_REGISTERS I386_SIZE_OF_80387_REGISTERS
+#define MAXIMUM_SUPPORTED_EXTENSION I386_MAXIMUM_SUPPORTED_EXTENSION
+
+typedef I386_FLOATING_SAVE_AREA FLOATING_SAVE_AREA, *PFLOATING_SAVE_AREA;
+typedef I386_CONTEXT CONTEXT, *PCONTEXT;
 
 #endif  /* __i386__ */
 
@@ -1116,28 +1137,28 @@ typedef struct _XSAVE_FORMAT {
 } XSAVE_FORMAT, *PXSAVE_FORMAT;
 
 /* x86-64 context definitions */
-#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
+
+typedef struct _AMD64_RUNTIME_FUNCTION
+{
+    DWORD BeginAddress;
+    DWORD EndAddress;
+    DWORD UnwindData;
+} AMD64_RUNTIME_FUNCTION;
 
 #define CONTEXT_AMD64   0x00100000
 
-#define CONTEXT_CONTROL   (CONTEXT_AMD64 | 0x0001)
-#define CONTEXT_INTEGER   (CONTEXT_AMD64 | 0x0002)
-#define CONTEXT_SEGMENTS  (CONTEXT_AMD64 | 0x0004)
-#define CONTEXT_FLOATING_POINT  (CONTEXT_AMD64 | 0x0008)
-#define CONTEXT_DEBUG_REGISTERS (CONTEXT_AMD64 | 0x0010)
-#define CONTEXT_XSTATE          (CONTEXT_AMD64 | 0x0040)
-#define CONTEXT_FULL (CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_FLOATING_POINT)
-#define CONTEXT_ALL (CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS | CONTEXT_FLOATING_POINT | CONTEXT_DEBUG_REGISTERS)
-
-#define EXCEPTION_READ_FAULT    0
-#define EXCEPTION_WRITE_FAULT   1
-#define EXCEPTION_EXECUTE_FAULT 8
-
-/* 32on64 FIXME: Are the preprocessor guards right? */
+#define CONTEXT_AMD64_CONTROL   (CONTEXT_AMD64 | 0x0001)
+#define CONTEXT_AMD64_INTEGER   (CONTEXT_AMD64 | 0x0002)
+#define CONTEXT_AMD64_SEGMENTS  (CONTEXT_AMD64 | 0x0004)
+#define CONTEXT_AMD64_FLOATING_POINT  (CONTEXT_AMD64 | 0x0008)
+#define CONTEXT_AMD64_DEBUG_REGISTERS (CONTEXT_AMD64 | 0x0010)
+#define CONTEXT_AMD64_XSTATE          (CONTEXT_AMD64 | 0x0040)
+#define CONTEXT_AMD64_FULL (CONTEXT_AMD64_CONTROL | CONTEXT_AMD64_INTEGER | CONTEXT_AMD64_FLOATING_POINT)
+#define CONTEXT_AMD64_ALL (CONTEXT_AMD64_CONTROL | CONTEXT_AMD64_INTEGER | CONTEXT_AMD64_SEGMENTS | CONTEXT_AMD64_FLOATING_POINT | CONTEXT_AMD64_DEBUG_REGISTERS)
 
 typedef XSAVE_FORMAT XMM_SAVE_AREA32, *PXMM_SAVE_AREA32;
 
-typedef struct DECLSPEC_ALIGN(16) _CONTEXT {
+typedef struct DECLSPEC_ALIGN(16) _AMD64_CONTEXT {
     DWORD64 P1Home;          /* 000 */
     DWORD64 P2Home;          /* 008 */
     DWORD64 P3Home;          /* 010 */
@@ -1222,35 +1243,21 @@ typedef struct DECLSPEC_ALIGN(16) _CONTEXT {
     DWORD64 LastBranchFromRip;    /* 4b8 */
     DWORD64 LastExceptionToRip;   /* 4c0 */
     DWORD64 LastExceptionFromRip; /* 4c8 */
-} CONTEXT, *PCONTEXT;
+} AMD64_CONTEXT;
 
-typedef struct _RUNTIME_FUNCTION
-{
-    DWORD BeginAddress;
-    DWORD EndAddress;
-    DWORD UnwindData;
-} RUNTIME_FUNCTION, *PRUNTIME_FUNCTION;
+#ifdef __x86_64__
 
-#define UNWIND_HISTORY_TABLE_SIZE 12
+#define CONTEXT_CONTROL CONTEXT_AMD64_CONTROL
+#define CONTEXT_INTEGER CONTEXT_AMD64_INTEGER
+#define CONTEXT_SEGMENTS CONTEXT_AMD64_SEGMENTS
+#define CONTEXT_FLOATING_POINT CONTEXT_AMD64_FLOATING_POINT
+#define CONTEXT_DEBUG_REGISTERS CONTEXT_AMD64_DEBUG_REGISTERS
+#define CONTEXT_XSTATE CONTEXT_AMD64_XSTATE
+#define CONTEXT_FULL CONTEXT_AMD64_FULL
+#define CONTEXT_ALL CONTEXT_AMD64_ALL
 
-typedef struct _UNWIND_HISTORY_TABLE_ENTRY
-{
-    ULONG64 ImageBase;
-    PRUNTIME_FUNCTION FunctionEntry;
-} UNWIND_HISTORY_TABLE_ENTRY, *PUNWIND_HISTORY_TABLE_ENTRY;
-
-#define UNWIND_HISTORY_TABLE_NONE 0
-#define UNWIND_HISTORY_TABLE_GLOBAL 1
-#define UNWIND_HISTORY_TABLE_LOCAL 2
-
-typedef struct _UNWIND_HISTORY_TABLE
-{
-    ULONG Count;
-    UCHAR Search;
-    ULONG64 LowAddress;
-    ULONG64 HighAddress;
-    UNWIND_HISTORY_TABLE_ENTRY Entry[UNWIND_HISTORY_TABLE_SIZE];
-} UNWIND_HISTORY_TABLE, *PUNWIND_HISTORY_TABLE;
+typedef AMD64_CONTEXT CONTEXT, *PCONTEXT;
+typedef AMD64_RUNTIME_FUNCTION RUNTIME_FUNCTION, *PRUNTIME_FUNCTION;
 
 typedef struct _KNONVOLATILE_CONTEXT_POINTERS
 {
@@ -1302,31 +1309,6 @@ typedef struct _KNONVOLATILE_CONTEXT_POINTERS
         } DUMMYSTRUCTNAME;
     } DUMMYUNIONNAME2;
 } KNONVOLATILE_CONTEXT_POINTERS, *PKNONVOLATILE_CONTEXT_POINTERS;
-
-typedef struct _DISPATCHER_CONTEXT
-{
-    ULONG64               ControlPc;
-    ULONG64               ImageBase;
-    PRUNTIME_FUNCTION     FunctionEntry;
-    ULONG64               EstablisherFrame;
-    ULONG64               TargetIp;
-    PCONTEXT              ContextRecord;
-    PEXCEPTION_ROUTINE    LanguageHandler;
-    PVOID                 HandlerData;
-    PUNWIND_HISTORY_TABLE HistoryTable;
-    DWORD                 ScopeIndex;
-    DWORD                 Fill0;
-} DISPATCHER_CONTEXT, *PDISPATCHER_CONTEXT;
-
-typedef LONG (CALLBACK *PEXCEPTION_FILTER)(struct _EXCEPTION_POINTERS*,PVOID);
-typedef void (CALLBACK *PTERMINATION_HANDLER)(BOOLEAN,PVOID);
-
-NTSYSAPI PVOID WINAPI RtlVirtualUnwind(ULONG,ULONG64,ULONG64,RUNTIME_FUNCTION*,CONTEXT*,PVOID*,ULONG64*,KNONVOLATILE_CONTEXT_POINTERS*);
-
-#define UNW_FLAG_NHANDLER  0
-#define UNW_FLAG_EHANDLER  1
-#define UNW_FLAG_UHANDLER  2
-#define UNW_FLAG_CHAININFO 4
 
 #endif /* __x86_64__ */
 
@@ -1416,440 +1398,18 @@ typedef struct _CONTEXT_EX
 #endif
 } CONTEXT_EX, *PCONTEXT_EX;
 
-/* IA64 context definitions */
-#ifdef __ia64__
-
-#define CONTEXT_IA64                  0x00080000
-#define CONTEXT_CONTROL               (CONTEXT_IA64 | 0x00000001)
-#define CONTEXT_LOWER_FLOATING_POINT  (CONTEXT_IA64 | 0x00000002)
-#define CONTEXT_HIGHER_FLOATING_POINT (CONTEXT_IA64 | 0x00000004)
-#define CONTEXT_INTEGER               (CONTEXT_IA64 | 0x00000008)
-#define CONTEXT_DEBUG                 (CONTEXT_IA64 | 0x00000010)
-#define CONTEXT_IA32_CONTROL          (CONTEXT_IA64 | 0x00000020)
-#define CONTEXT_FLOATING_POINT        (CONTEXT_LOWER_FLOATING_POINT | CONTEXT_HIGHER_FLOATING_POINT)
-#define CONTEXT_FULL                  (CONTEXT_CONTROL | CONTEXT_FLOATING_POINT | CONTEXT_INTEGER | CONTEXT_IA32_CONTROL)
-#define CONTEXT_ALL                   (CONTEXT_CONTROL | CONTEXT_FLOATING_POINT | CONTEXT_INTEGER | CONTEXT_DEBUG | CONTEXT_IA32_CONTROL)
-
-#define CONTEXT_EXCEPTION_ACTIVE      0x8000000
-#define CONTEXT_SERVICE_ACTIVE        0x10000000
-#define CONTEXT_EXCEPTION_REQUEST     0x40000000
-#define CONTEXT_EXCEPTION_REPORTING   0x80000000
-
-typedef struct _CONTEXT
-{
-    DWORD ContextFlags;
-    DWORD Fill1[3];
-    ULONGLONG DbI0;
-    ULONGLONG DbI1;
-    ULONGLONG DbI2;
-    ULONGLONG DbI3;
-    ULONGLONG DbI4;
-    ULONGLONG DbI5;
-    ULONGLONG DbI6;
-    ULONGLONG DbI7;
-    ULONGLONG DbD0;
-    ULONGLONG DbD1;
-    ULONGLONG DbD2;
-    ULONGLONG DbD3;
-    ULONGLONG DbD4;
-    ULONGLONG DbD5;
-    ULONGLONG DbD6;
-    ULONGLONG DbD7;
-    FLOAT128 FltS0;
-    FLOAT128 FltS1;
-    FLOAT128 FltS2;
-    FLOAT128 FltS3;
-    FLOAT128 FltT0;
-    FLOAT128 FltT1;
-    FLOAT128 FltT2;
-    FLOAT128 FltT3;
-    FLOAT128 FltT4;
-    FLOAT128 FltT5;
-    FLOAT128 FltT6;
-    FLOAT128 FltT7;
-    FLOAT128 FltT8;
-    FLOAT128 FltT9;
-    FLOAT128 FltS4;
-    FLOAT128 FltS5;
-    FLOAT128 FltS6;
-    FLOAT128 FltS7;
-    FLOAT128 FltS8;
-    FLOAT128 FltS9;
-    FLOAT128 FltS10;
-    FLOAT128 FltS11;
-    FLOAT128 FltS12;
-    FLOAT128 FltS13;
-    FLOAT128 FltS14;
-    FLOAT128 FltS15;
-    FLOAT128 FltS16;
-    FLOAT128 FltS17;
-    FLOAT128 FltS18;
-    FLOAT128 FltS19;
-    FLOAT128 FltF32;
-    FLOAT128 FltF33;
-    FLOAT128 FltF34;
-    FLOAT128 FltF35;
-    FLOAT128 FltF36;
-    FLOAT128 FltF37;
-    FLOAT128 FltF38;
-    FLOAT128 FltF39;
-    FLOAT128 FltF40;
-    FLOAT128 FltF41;
-    FLOAT128 FltF42;
-    FLOAT128 FltF43;
-    FLOAT128 FltF44;
-    FLOAT128 FltF45;
-    FLOAT128 FltF46;
-    FLOAT128 FltF47;
-    FLOAT128 FltF48;
-    FLOAT128 FltF49;
-    FLOAT128 FltF50;
-    FLOAT128 FltF51;
-    FLOAT128 FltF52;
-    FLOAT128 FltF53;
-    FLOAT128 FltF54;
-    FLOAT128 FltF55;
-    FLOAT128 FltF56;
-    FLOAT128 FltF57;
-    FLOAT128 FltF58;
-    FLOAT128 FltF59;
-    FLOAT128 FltF60;
-    FLOAT128 FltF61;
-    FLOAT128 FltF62;
-    FLOAT128 FltF63;
-    FLOAT128 FltF64;
-    FLOAT128 FltF65;
-    FLOAT128 FltF66;
-    FLOAT128 FltF67;
-    FLOAT128 FltF68;
-    FLOAT128 FltF69;
-    FLOAT128 FltF70;
-    FLOAT128 FltF71;
-    FLOAT128 FltF72;
-    FLOAT128 FltF73;
-    FLOAT128 FltF74;
-    FLOAT128 FltF75;
-    FLOAT128 FltF76;
-    FLOAT128 FltF77;
-    FLOAT128 FltF78;
-    FLOAT128 FltF79;
-    FLOAT128 FltF80;
-    FLOAT128 FltF81;
-    FLOAT128 FltF82;
-    FLOAT128 FltF83;
-    FLOAT128 FltF84;
-    FLOAT128 FltF85;
-    FLOAT128 FltF86;
-    FLOAT128 FltF87;
-    FLOAT128 FltF88;
-    FLOAT128 FltF89;
-    FLOAT128 FltF90;
-    FLOAT128 FltF91;
-    FLOAT128 FltF92;
-    FLOAT128 FltF93;
-    FLOAT128 FltF94;
-    FLOAT128 FltF95;
-    FLOAT128 FltF96;
-    FLOAT128 FltF97;
-    FLOAT128 FltF98;
-    FLOAT128 FltF99;
-    FLOAT128 FltF100;
-    FLOAT128 FltF101;
-    FLOAT128 FltF102;
-    FLOAT128 FltF103;
-    FLOAT128 FltF104;
-    FLOAT128 FltF105;
-    FLOAT128 FltF106;
-    FLOAT128 FltF107;
-    FLOAT128 FltF108;
-    FLOAT128 FltF109;
-    FLOAT128 FltF110;
-    FLOAT128 FltF111;
-    FLOAT128 FltF112;
-    FLOAT128 FltF113;
-    FLOAT128 FltF114;
-    FLOAT128 FltF115;
-    FLOAT128 FltF116;
-    FLOAT128 FltF117;
-    FLOAT128 FltF118;
-    FLOAT128 FltF119;
-    FLOAT128 FltF120;
-    FLOAT128 FltF121;
-    FLOAT128 FltF122;
-    FLOAT128 FltF123;
-    FLOAT128 FltF124;
-    FLOAT128 FltF125;
-    FLOAT128 FltF126;
-    FLOAT128 FltF127;
-    ULONGLONG StFPSR;
-    ULONGLONG IntGp;
-    ULONGLONG IntT0;
-    ULONGLONG IntT1;
-    ULONGLONG IntS0;
-    ULONGLONG IntS1;
-    ULONGLONG IntS2;
-    ULONGLONG IntS3;
-    ULONGLONG IntV0;
-    ULONGLONG IntT2;
-    ULONGLONG IntT3;
-    ULONGLONG IntT4;
-    ULONGLONG IntSp;
-    ULONGLONG IntTeb;
-    ULONGLONG IntT5;
-    ULONGLONG IntT6;
-    ULONGLONG IntT7;
-    ULONGLONG IntT8;
-    ULONGLONG IntT9;
-    ULONGLONG IntT10;
-    ULONGLONG IntT11;
-    ULONGLONG IntT12;
-    ULONGLONG IntT13;
-    ULONGLONG IntT14;
-    ULONGLONG IntT15;
-    ULONGLONG IntT16;
-    ULONGLONG IntT17;
-    ULONGLONG IntT18;
-    ULONGLONG IntT19;
-    ULONGLONG IntT20;
-    ULONGLONG IntT21;
-    ULONGLONG IntT22;
-    ULONGLONG IntNats;
-    ULONGLONG Preds;
-    ULONGLONG BrRp;
-    ULONGLONG BrS0;
-    ULONGLONG BrS1;
-    ULONGLONG BrS2;
-    ULONGLONG BrS3;
-    ULONGLONG BrS4;
-    ULONGLONG BrT0;
-    ULONGLONG BrT1;
-    ULONGLONG ApUNAT;
-    ULONGLONG ApLC;
-    ULONGLONG ApEC;
-    ULONGLONG ApCCV;
-    ULONGLONG ApDCR;
-    ULONGLONG RsPFS;
-    ULONGLONG RsBSP;
-    ULONGLONG RsBSPSTORE;
-    ULONGLONG RsRSC;
-    ULONGLONG RsRNAT;
-    ULONGLONG StIPSR;
-    ULONGLONG StIIP;
-    ULONGLONG StIFS;
-    ULONGLONG StFCR;
-    ULONGLONG Eflag;
-    ULONGLONG SegCSD;
-    ULONGLONG SegSSD;
-    ULONGLONG Cflag;
-    ULONGLONG StFSR;
-    ULONGLONG StFIR;
-    ULONGLONG StFDR;
-    ULONGLONG UNUSEDPACK;
-} CONTEXT, *PCONTEXT;
-
-typedef struct _RUNTIME_FUNCTION
-{
-    ULONG BeginAddress;
-    ULONG EndAddress;
-    ULONG UnwindInfoAddress;
-} RUNTIME_FUNCTION, *PRUNTIME_FUNCTION;
-
-typedef struct _FRAME_POINTERS {
-  ULONGLONG MemoryStackFp;
-  ULONGLONG BackingStoreFp;
-} FRAME_POINTERS, *PFRAME_POINTERS;
-
-#define UNWIND_HISTORY_TABLE_SIZE 12
-
-typedef struct _UNWIND_HISTORY_TABLE_ENTRY {
-  ULONG64 ImageBase;
-  ULONG64 Gp;
-  PRUNTIME_FUNCTION FunctionEntry;
-} UNWIND_HISTORY_TABLE_ENTRY, *PUNWIND_HISTORY_TABLE_ENTRY;
-
-typedef struct _UNWIND_HISTORY_TABLE {
-  ULONG Count;
-  UCHAR Search;
-  ULONG64 LowAddress;
-  ULONG64 HighAddress;
-  UNWIND_HISTORY_TABLE_ENTRY Entry[UNWIND_HISTORY_TABLE_SIZE];
-} UNWIND_HISTORY_TABLE, *PUNWIND_HISTORY_TABLE;
-
-typedef struct _KNONVOLATILE_CONTEXT_POINTERS
-{
-    PFLOAT128  FltS0;
-    PFLOAT128  FltS1;
-    PFLOAT128  FltS2;
-    PFLOAT128  FltS3;
-    PFLOAT128  HighFloatingContext[10];
-    PFLOAT128  FltS4;
-    PFLOAT128  FltS5;
-    PFLOAT128  FltS6;
-    PFLOAT128  FltS7;
-    PFLOAT128  FltS8;
-    PFLOAT128  FltS9;
-    PFLOAT128  FltS10;
-    PFLOAT128  FltS11;
-    PFLOAT128  FltS12;
-    PFLOAT128  FltS13;
-    PFLOAT128  FltS14;
-    PFLOAT128  FltS15;
-    PFLOAT128  FltS16;
-    PFLOAT128  FltS17;
-    PFLOAT128  FltS18;
-    PFLOAT128  FltS19;
-    PULONGLONG IntS0;
-    PULONGLONG IntS1;
-    PULONGLONG IntS2;
-    PULONGLONG IntS3;
-    PULONGLONG IntSp;
-    PULONGLONG IntS0Nat;
-    PULONGLONG IntS1Nat;
-    PULONGLONG IntS2Nat;
-    PULONGLONG IntS3Nat;
-    PULONGLONG IntSpNat;
-    PULONGLONG Preds;
-    PULONGLONG BrRp;
-    PULONGLONG BrS0;
-    PULONGLONG BrS1;
-    PULONGLONG BrS2;
-    PULONGLONG BrS3;
-    PULONGLONG BrS4;
-    PULONGLONG ApUNAT;
-    PULONGLONG ApLC;
-    PULONGLONG ApEC;
-    PULONGLONG RsPFS;
-    PULONGLONG StFSR;
-    PULONGLONG StFIR;
-    PULONGLONG StFDR;
-    PULONGLONG Cflag;
-} KNONVOLATILE_CONTEXT_POINTERS, *PKNONVOLATILE_CONTEXT_POINTERS;
-
-NTSYSAPI ULONGLONG WINAPI RtlVirtualUnwind(ULONGLONG,ULONGLONG,RUNTIME_FUNCTION*,CONTEXT*,BOOLEAN*,FRAME_POINTERS*,KNONVOLATILE_CONTEXT_POINTERS*);
-
-#endif /* __ia64__ */
-
-/* Alpha context definitions */
-#if defined(_ALPHA_) || defined(__ALPHA__) || defined(__alpha__)
-
-#define CONTEXT_ALPHA   0x00020000
-
-#define CONTEXT_CONTROL         (CONTEXT_ALPHA | 0x00000001)
-#define CONTEXT_FLOATING_POINT  (CONTEXT_ALPHA | 0x00000002)
-#define CONTEXT_INTEGER         (CONTEXT_ALPHA | 0x00000004)
-#define CONTEXT_FULL  (CONTEXT_CONTROL | CONTEXT_FLOATING_POINT | CONTEXT_INTEGER)
-
-#define EXCEPTION_READ_FAULT    0
-#define EXCEPTION_WRITE_FAULT   1
-#define EXCEPTION_EXECUTE_FAULT 8
-
-typedef struct _CONTEXT
-{
-    /* selected by CONTEXT_FLOATING_POINT */
-    ULONGLONG FltF0;
-    ULONGLONG FltF1;
-    ULONGLONG FltF2;
-    ULONGLONG FltF3;
-    ULONGLONG FltF4;
-    ULONGLONG FltF5;
-    ULONGLONG FltF6;
-    ULONGLONG FltF7;
-    ULONGLONG FltF8;
-    ULONGLONG FltF9;
-    ULONGLONG FltF10;
-    ULONGLONG FltF11;
-    ULONGLONG FltF12;
-    ULONGLONG FltF13;
-    ULONGLONG FltF14;
-    ULONGLONG FltF15;
-    ULONGLONG FltF16;
-    ULONGLONG FltF17;
-    ULONGLONG FltF18;
-    ULONGLONG FltF19;
-    ULONGLONG FltF20;
-    ULONGLONG FltF21;
-    ULONGLONG FltF22;
-    ULONGLONG FltF23;
-    ULONGLONG FltF24;
-    ULONGLONG FltF25;
-    ULONGLONG FltF26;
-    ULONGLONG FltF27;
-    ULONGLONG FltF28;
-    ULONGLONG FltF29;
-    ULONGLONG FltF30;
-    ULONGLONG FltF31;
-
-    /* selected by CONTEXT_INTEGER */
-    ULONGLONG IntV0;
-    ULONGLONG IntT0;
-    ULONGLONG IntT1;
-    ULONGLONG IntT2;
-    ULONGLONG IntT3;
-    ULONGLONG IntT4;
-    ULONGLONG IntT5;
-    ULONGLONG IntT6;
-    ULONGLONG IntT7;
-    ULONGLONG IntS0;
-    ULONGLONG IntS1;
-    ULONGLONG IntS2;
-    ULONGLONG IntS3;
-    ULONGLONG IntS4;
-    ULONGLONG IntS5;
-    ULONGLONG IntFp;
-    ULONGLONG IntA0;
-    ULONGLONG IntA1;
-    ULONGLONG IntA2;
-    ULONGLONG IntA3;
-    ULONGLONG IntA4;
-    ULONGLONG IntA5;
-    ULONGLONG IntT8;
-    ULONGLONG IntT9;
-    ULONGLONG IntT10;
-    ULONGLONG IntT11;
-    ULONGLONG IntRa;
-    ULONGLONG IntT12;
-    ULONGLONG IntAt;
-    ULONGLONG IntGp;
-    ULONGLONG IntSp;
-    ULONGLONG IntZero;
-
-    /* selected by CONTEXT_FLOATING_POINT */
-    ULONGLONG Fpcr;
-    ULONGLONG SoftFpcr;
-
-    /* selected by CONTEXT_CONTROL */
-    ULONGLONG Fir;
-    DWORD Psr;
-    DWORD ContextFlags;
-    DWORD Fill[4];
-} CONTEXT, *PCONTEXT;
-
-#define _QUAD_PSR_OFFSET   HighSoftFpcr
-#define _QUAD_FLAGS_OFFSET HighFir
-
-#endif  /* _ALPHA_ */
-
-#ifdef __arm__
-
-/* The following flags control the contents of the CONTEXT structure. */
-
 #define CONTEXT_ARM    0x0200000
-#define CONTEXT_CONTROL         (CONTEXT_ARM | 0x00000001)
-#define CONTEXT_INTEGER         (CONTEXT_ARM | 0x00000002)
-#define CONTEXT_FLOATING_POINT  (CONTEXT_ARM | 0x00000004)
-#define CONTEXT_DEBUG_REGISTERS (CONTEXT_ARM | 0x00000008)
-
-#define CONTEXT_FULL (CONTEXT_CONTROL | CONTEXT_INTEGER)
-#define CONTEXT_ALL  (CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_FLOATING_POINT | CONTEXT_DEBUG_REGISTERS)
-
-#define EXCEPTION_READ_FAULT    0
-#define EXCEPTION_WRITE_FAULT   1
-#define EXCEPTION_EXECUTE_FAULT 8
+#define CONTEXT_ARM_CONTROL         (CONTEXT_ARM | 0x00000001)
+#define CONTEXT_ARM_INTEGER         (CONTEXT_ARM | 0x00000002)
+#define CONTEXT_ARM_FLOATING_POINT  (CONTEXT_ARM | 0x00000004)
+#define CONTEXT_ARM_DEBUG_REGISTERS (CONTEXT_ARM | 0x00000008)
+#define CONTEXT_ARM_FULL (CONTEXT_ARM_CONTROL | CONTEXT_ARM_INTEGER)
+#define CONTEXT_ARM_ALL  (CONTEXT_ARM_FULL | CONTEXT_ARM_FLOATING_POINT | CONTEXT_ARM_DEBUG_REGISTERS)
 
 #define ARM_MAX_BREAKPOINTS     8
 #define ARM_MAX_WATCHPOINTS     1
 
-typedef struct _RUNTIME_FUNCTION
+typedef struct _IMAGE_ARM_RUNTIME_FUNCTION
 {
     DWORD BeginAddress;
     union {
@@ -1866,35 +1426,15 @@ typedef struct _RUNTIME_FUNCTION
             DWORD StackAdjust : 10;
         } DUMMYSTRUCTNAME;
     } DUMMYUNIONNAME;
-} RUNTIME_FUNCTION, *PRUNTIME_FUNCTION;
+} IMAGE_ARM_RUNTIME_FUNCTION_ENTRY, *PIMAGE_ARM_RUNTIME_FUNCTION_ENTRY;
 
-#define UNWIND_HISTORY_TABLE_SIZE 12
-
-typedef struct _UNWIND_HISTORY_TABLE_ENTRY
-{
-    DWORD ImageBase;
-    PRUNTIME_FUNCTION FunctionEntry;
-} UNWIND_HISTORY_TABLE_ENTRY, *PUNWIND_HISTORY_TABLE_ENTRY;
-
-typedef struct _UNWIND_HISTORY_TABLE
-{
-    DWORD Count;
-    BYTE  LocalHint;
-    BYTE  GlobalHint;
-    BYTE  Search;
-    BYTE  Once;
-    DWORD LowAddress;
-    DWORD HighAddress;
-    UNWIND_HISTORY_TABLE_ENTRY Entry[UNWIND_HISTORY_TABLE_SIZE];
-} UNWIND_HISTORY_TABLE, *PUNWIND_HISTORY_TABLE;
-
-typedef struct _NEON128
+typedef struct _ARM_NEON128
 {
     ULONGLONG Low;
     LONGLONG High;
-} NEON128, *PNEON128;
+} ARM_NEON128;
 
-typedef struct _CONTEXT
+typedef struct _ARM_CONTEXT
 {
     ULONG ContextFlags;             /* 000 */
     /* CONTEXT_INTEGER */
@@ -1921,7 +1461,7 @@ typedef struct _CONTEXT
     ULONG Padding;                  /* 04c */
     union
     {
-        NEON128 Q[16];
+        ARM_NEON128 Q[16];
         ULONGLONG D[32];
         ULONG S[32];
     } DUMMYUNIONNAME;               /* 050 */
@@ -1931,7 +1471,20 @@ typedef struct _CONTEXT
     ULONG Wvr[ARM_MAX_WATCHPOINTS]; /* 190 */
     ULONG Wcr[ARM_MAX_WATCHPOINTS]; /* 194 */
     ULONG Padding2[2];              /* 198 */
-} CONTEXT, *PCONTEXT;
+} ARM_CONTEXT;
+
+#ifdef __arm__
+
+#define CONTEXT_CONTROL CONTEXT_ARM_CONTROL
+#define CONTEXT_INTEGER CONTEXT_ARM_INTEGER
+#define CONTEXT_FLOATING_POINT CONTEXT_ARM_FLOATING_POINT
+#define CONTEXT_DEBUG_REGISTERS CONTEXT_ARM_DEBUG_REGISTERS
+#define CONTEXT_FULL CONTEXT_ARM_FULL
+#define CONTEXT_ALL CONTEXT_ARM_ALL
+
+typedef IMAGE_ARM_RUNTIME_FUNCTION_ENTRY RUNTIME_FUNCTION, *PRUNTIME_FUNCTION;
+typedef ARM_NEON128 NEON128, *PNEON128;
+typedef ARM_CONTEXT CONTEXT, *PCONTEXT;
 
 typedef struct _KNONVOLATILE_CONTEXT_POINTERS
 {
@@ -1954,56 +1507,23 @@ typedef struct _KNONVOLATILE_CONTEXT_POINTERS
     PULONGLONG D15;
 } KNONVOLATILE_CONTEXT_POINTERS, *PKNONVOLATILE_CONTEXT_POINTERS;
 
-typedef struct _DISPATCHER_CONTEXT
-{
-    DWORD                 ControlPc;
-    DWORD                 ImageBase;
-    PRUNTIME_FUNCTION     FunctionEntry;
-    DWORD                 EstablisherFrame;
-    DWORD                 TargetPc;
-    PCONTEXT              ContextRecord;
-    PEXCEPTION_ROUTINE    LanguageHandler;
-    PVOID                 HandlerData;
-    PUNWIND_HISTORY_TABLE HistoryTable;
-    DWORD                 ScopeIndex;
-    BOOLEAN               ControlPcIsUnwound;
-    PBYTE                 NonVolatileRegisters;
-    DWORD                 Reserved;
-} DISPATCHER_CONTEXT, *PDISPATCHER_CONTEXT;
-
-typedef LONG (CALLBACK *PEXCEPTION_FILTER)(struct _EXCEPTION_POINTERS*,DWORD);
-typedef void (CALLBACK *PTERMINATION_HANDLER)(BOOLEAN,DWORD);
-
-NTSYSAPI PVOID WINAPI RtlVirtualUnwind(DWORD,DWORD,DWORD,RUNTIME_FUNCTION*,CONTEXT*,PVOID*,DWORD*,KNONVOLATILE_CONTEXT_POINTERS*);
-
-#define UNW_FLAG_NHANDLER  0
-#define UNW_FLAG_EHANDLER  1
-#define UNW_FLAG_UHANDLER  2
-
 #endif /* __arm__ */
 
-#ifdef __aarch64__
-
 #define CONTEXT_ARM64           0x400000
-#define CONTEXT_CONTROL         (CONTEXT_ARM64 | 0x00000001)
-#define CONTEXT_INTEGER         (CONTEXT_ARM64 | 0x00000002)
-#define CONTEXT_FLOATING_POINT  (CONTEXT_ARM64 | 0x00000004)
-#define CONTEXT_DEBUG_REGISTERS (CONTEXT_ARM64 | 0x00000008)
+#define CONTEXT_ARM64_CONTROL         (CONTEXT_ARM64 | 0x00000001)
+#define CONTEXT_ARM64_INTEGER         (CONTEXT_ARM64 | 0x00000002)
+#define CONTEXT_ARM64_FLOATING_POINT  (CONTEXT_ARM64 | 0x00000004)
+#define CONTEXT_ARM64_DEBUG_REGISTERS (CONTEXT_ARM64 | 0x00000008)
 #define CONTEXT_ARM64_X18       (CONTEXT_ARM64 | 0x00000010)
+#define CONTEXT_ARM64_FULL (CONTEXT_ARM64_CONTROL | CONTEXT_ARM64_INTEGER | CONTEXT_ARM64_FLOATING_POINT)
+#define CONTEXT_ARM64_ALL  (CONTEXT_ARM64_FULL | CONTEXT_ARM64_DEBUG_REGISTERS | CONTEXT_ARM64_X18)
 
 #define CONTEXT_UNWOUND_TO_CALL 0x20000000
-
-#define CONTEXT_FULL (CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_FLOATING_POINT)
-#define CONTEXT_ALL  (CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_FLOATING_POINT | CONTEXT_DEBUG_REGISTERS | CONTEXT_ARM64_X18)
-
-#define EXCEPTION_READ_FAULT    0
-#define EXCEPTION_WRITE_FAULT   1
-#define EXCEPTION_EXECUTE_FAULT 8
 
 #define ARM64_MAX_BREAKPOINTS   8
 #define ARM64_MAX_WATCHPOINTS   2
 
-typedef struct _RUNTIME_FUNCTION
+typedef struct _IMAGE_ARM64_RUNTIME_FUNCTION_ENTRY
 {
     DWORD BeginAddress;
     union
@@ -2020,29 +1540,11 @@ typedef struct _RUNTIME_FUNCTION
             DWORD FrameSize : 9;
         } DUMMYSTRUCTNAME;
     } DUMMYUNIONNAME;
-} RUNTIME_FUNCTION, *PRUNTIME_FUNCTION;
+} IMAGE_ARM64_RUNTIME_FUNCTION_ENTRY, *PIMAGE_ARM64_RUNTIME_FUNCTION_ENTRY;
 
-#define UNWIND_HISTORY_TABLE_SIZE 12
+typedef IMAGE_ARM64_RUNTIME_FUNCTION_ENTRY ARM64_RUNTIME_FUNCTION, *PARM64_RUNTIME_FUNCTION;
 
-typedef struct _UNWIND_HISTORY_TABLE_ENTRY
-{
-    DWORD64 ImageBase;
-    PRUNTIME_FUNCTION FunctionEntry;
-} UNWIND_HISTORY_TABLE_ENTRY, *PUNWIND_HISTORY_TABLE_ENTRY;
-
-typedef struct _UNWIND_HISTORY_TABLE
-{
-    DWORD   Count;
-    BYTE    LocalHint;
-    BYTE    GlobalHint;
-    BYTE    Search;
-    BYTE    Once;
-    DWORD64 LowAddress;
-    DWORD64 HighAddress;
-    UNWIND_HISTORY_TABLE_ENTRY Entry[UNWIND_HISTORY_TABLE_SIZE];
-} UNWIND_HISTORY_TABLE, *PUNWIND_HISTORY_TABLE;
-
-typedef union _NEON128
+typedef union _ARM64_NT_NEON128
 {
     struct
     {
@@ -2053,9 +1555,9 @@ typedef union _NEON128
     float S[4];
     WORD  H[8];
     BYTE  B[16];
-} NEON128, *PNEON128;
+} ARM64_NT_NEON128, *PARM64_NT_NEON128;
 
-typedef struct _CONTEXT
+typedef struct DECLSPEC_ALIGN(16) _ARM64_NT_CONTEXT
 {
     ULONG ContextFlags;                 /* 000 */
     /* CONTEXT_INTEGER */
@@ -2102,7 +1604,7 @@ typedef struct _CONTEXT
     DWORD64 Sp;                         /* 100 */
     DWORD64 Pc;                         /* 108 */
     /* CONTEXT_FLOATING_POINT */
-    NEON128 V[32];                      /* 110 */
+    ARM64_NT_NEON128 V[32];             /* 110 */
     DWORD Fpcr;                         /* 310 */
     DWORD Fpsr;                         /* 314 */
     /* CONTEXT_DEBUG_REGISTERS */
@@ -2110,7 +1612,20 @@ typedef struct _CONTEXT
     DWORD64 Bvr[ARM64_MAX_BREAKPOINTS]; /* 338 */
     DWORD Wcr[ARM64_MAX_WATCHPOINTS];   /* 378 */
     DWORD64 Wvr[ARM64_MAX_WATCHPOINTS]; /* 380 */
-} CONTEXT, *PCONTEXT;
+} ARM64_NT_CONTEXT, *PARM64_NT_CONTEXT;
+
+#ifdef __aarch64__
+
+#define CONTEXT_CONTROL CONTEXT_ARM64_CONTROL
+#define CONTEXT_INTEGER CONTEXT_ARM64_INTEGER
+#define CONTEXT_FLOATING_POINT CONTEXT_ARM64_FLOATING_POINT
+#define CONTEXT_DEBUG_REGISTERS CONTEXT_ARM64_DEBUG_REGISTERS
+#define CONTEXT_FULL CONTEXT_ARM64_FULL
+#define CONTEXT_ALL CONTEXT_ARM64_ALL
+
+typedef IMAGE_ARM64_RUNTIME_FUNCTION_ENTRY RUNTIME_FUNCTION, *PRUNTIME_FUNCTION;
+typedef ARM64_NT_NEON128 NEON128, *PNEON128;
+typedef ARM64_NT_CONTEXT CONTEXT, *PCONTEXT;
 
 typedef struct _KNONVOLATILE_CONTEXT_POINTERS
 {
@@ -2136,265 +1651,7 @@ typedef struct _KNONVOLATILE_CONTEXT_POINTERS
     PDWORD64 D15;
 } KNONVOLATILE_CONTEXT_POINTERS, *PKNONVOLATILE_CONTEXT_POINTERS;
 
-typedef struct _DISPATCHER_CONTEXT
-{
-    ULONG_PTR             ControlPc;
-    ULONG_PTR             ImageBase;
-    PRUNTIME_FUNCTION     FunctionEntry;
-    ULONG_PTR             EstablisherFrame;
-    ULONG_PTR             TargetPc;
-    PCONTEXT              ContextRecord;
-    PEXCEPTION_ROUTINE    LanguageHandler;
-    PVOID                 HandlerData;
-    PUNWIND_HISTORY_TABLE HistoryTable;
-    DWORD                 ScopeIndex;
-    BOOLEAN               ControlPcIsUnwound;
-    PBYTE                 NonVolatileRegisters;
-} DISPATCHER_CONTEXT, *PDISPATCHER_CONTEXT;
-
-typedef LONG (CALLBACK *PEXCEPTION_FILTER)(struct _EXCEPTION_POINTERS*,DWORD64);
-typedef void (CALLBACK *PTERMINATION_HANDLER)(BOOLEAN,DWORD64);
-
-NTSYSAPI PVOID WINAPI RtlVirtualUnwind(DWORD,ULONG_PTR,ULONG_PTR,RUNTIME_FUNCTION*,CONTEXT*,PVOID*,ULONG_PTR*,KNONVOLATILE_CONTEXT_POINTERS*);
-
-#define UNW_FLAG_NHANDLER  0
-#define UNW_FLAG_EHANDLER  1
-#define UNW_FLAG_UHANDLER  2
-
 #endif /* __aarch64__ */
-
-
-/* Mips context definitions */
-#if defined(_MIPS_) || defined(__MIPS__) || defined(__mips__)
-
-#define CONTEXT_R4000   0x00010000
-
-#define CONTEXT_CONTROL         (CONTEXT_R4000 | 0x00000001)
-#define CONTEXT_FLOATING_POINT  (CONTEXT_R4000 | 0x00000002)
-#define CONTEXT_INTEGER         (CONTEXT_R4000 | 0x00000004)
-
-#define CONTEXT_FULL (CONTEXT_CONTROL | CONTEXT_FLOATING_POINT | CONTEXT_INTEGER)
-
-#define EXCEPTION_READ_FAULT    0
-#define EXCEPTION_WRITE_FAULT   1
-#define EXCEPTION_EXECUTE_FAULT 8
-
-typedef struct _CONTEXT
-{
-    DWORD Argument[4];
-    /* These are selected by CONTEXT_FLOATING_POINT */
-    DWORD FltF0;
-    DWORD FltF1;
-    DWORD FltF2;
-    DWORD FltF3;
-    DWORD FltF4;
-    DWORD FltF5;
-    DWORD FltF6;
-    DWORD FltF7;
-    DWORD FltF8;
-    DWORD FltF9;
-    DWORD FltF10;
-    DWORD FltF11;
-    DWORD FltF12;
-    DWORD FltF13;
-    DWORD FltF14;
-    DWORD FltF15;
-    DWORD FltF16;
-    DWORD FltF17;
-    DWORD FltF18;
-    DWORD FltF19;
-    DWORD FltF20;
-    DWORD FltF21;
-    DWORD FltF22;
-    DWORD FltF23;
-    DWORD FltF24;
-    DWORD FltF25;
-    DWORD FltF26;
-    DWORD FltF27;
-    DWORD FltF28;
-    DWORD FltF29;
-    DWORD FltF30;
-    DWORD FltF31;
-
-    /* These are selected by CONTEXT_INTEGER */
-    DWORD IntZero;
-    DWORD IntAt;
-    DWORD IntV0;
-    DWORD IntV1;
-    DWORD IntA0;
-    DWORD IntA1;
-    DWORD IntA2;
-    DWORD IntA3;
-    DWORD IntT0;
-    DWORD IntT1;
-    DWORD IntT2;
-    DWORD IntT3;
-    DWORD IntT4;
-    DWORD IntT5;
-    DWORD IntT6;
-    DWORD IntT7;
-    DWORD IntS0;
-    DWORD IntS1;
-    DWORD IntS2;
-    DWORD IntS3;
-    DWORD IntS4;
-    DWORD IntS5;
-    DWORD IntS6;
-    DWORD IntS7;
-    DWORD IntT8;
-    DWORD IntT9;
-    DWORD IntK0;
-    DWORD IntK1;
-    DWORD IntGp;
-    DWORD IntSp;
-    DWORD IntS8;
-    DWORD IntRa;
-    DWORD IntLo;
-    DWORD IntHi;
-
-    /* These are selected by CONTEXT_FLOATING_POINT */
-    DWORD Fsr;
-
-    /* These are selected by CONTEXT_CONTROL */
-    DWORD Fir;
-    DWORD Psr;
-
-    DWORD ContextFlags;
-    DWORD Fill[2];
-} CONTEXT, *PCONTEXT;
-
-#endif  /* _MIPS_ */
-
-/* PowerPC context definitions */
-#ifdef __powerpc__
-
-#define CONTEXT_CONTROL         0x0001
-#define CONTEXT_FLOATING_POINT  0x0002
-#define CONTEXT_INTEGER         0x0004
-#define CONTEXT_DEBUG_REGISTERS 0x0008
-#define CONTEXT_FULL (CONTEXT_CONTROL | CONTEXT_FLOATING_POINT | CONTEXT_INTEGER)
-
-#define EXCEPTION_READ_FAULT    0
-#define EXCEPTION_WRITE_FAULT   1
-#define EXCEPTION_EXECUTE_FAULT 8
-
-typedef struct
-{
-    /* These are selected by CONTEXT_FLOATING_POINT */
-    double Fpr0;
-    double Fpr1;
-    double Fpr2;
-    double Fpr3;
-    double Fpr4;
-    double Fpr5;
-    double Fpr6;
-    double Fpr7;
-    double Fpr8;
-    double Fpr9;
-    double Fpr10;
-    double Fpr11;
-    double Fpr12;
-    double Fpr13;
-    double Fpr14;
-    double Fpr15;
-    double Fpr16;
-    double Fpr17;
-    double Fpr18;
-    double Fpr19;
-    double Fpr20;
-    double Fpr21;
-    double Fpr22;
-    double Fpr23;
-    double Fpr24;
-    double Fpr25;
-    double Fpr26;
-    double Fpr27;
-    double Fpr28;
-    double Fpr29;
-    double Fpr30;
-    double Fpr31;
-    double Fpscr;
-
-    /* These are selected by CONTEXT_INTEGER */
-    DWORD Gpr0;
-    DWORD Gpr1;
-    DWORD Gpr2;
-    DWORD Gpr3;
-    DWORD Gpr4;
-    DWORD Gpr5;
-    DWORD Gpr6;
-    DWORD Gpr7;
-    DWORD Gpr8;
-    DWORD Gpr9;
-    DWORD Gpr10;
-    DWORD Gpr11;
-    DWORD Gpr12;
-    DWORD Gpr13;
-    DWORD Gpr14;
-    DWORD Gpr15;
-    DWORD Gpr16;
-    DWORD Gpr17;
-    DWORD Gpr18;
-    DWORD Gpr19;
-    DWORD Gpr20;
-    DWORD Gpr21;
-    DWORD Gpr22;
-    DWORD Gpr23;
-    DWORD Gpr24;
-    DWORD Gpr25;
-    DWORD Gpr26;
-    DWORD Gpr27;
-    DWORD Gpr28;
-    DWORD Gpr29;
-    DWORD Gpr30;
-    DWORD Gpr31;
-
-    DWORD Cr;
-    DWORD Xer;
-
-    /* These are selected by CONTEXT_CONTROL */
-    DWORD Msr;
-    DWORD Iar; /* Instruction Address Register , aka PC ... */
-    DWORD Lr;
-    DWORD Ctr;
-
-    DWORD ContextFlags;
-    
-    DWORD Dar;   /* Fault registers for coredump */
-    DWORD Dsisr; 
-    DWORD Trap;  /* number of powerpc exception taken */
-
-    /* These are selected by CONTEXT_DEBUG_REGISTERS */
-    DWORD Dr0;
-    DWORD Dr1;
-    DWORD Dr2;
-    DWORD Dr3;
-    DWORD Dr4;
-    DWORD Dr5;
-    DWORD Dr6;
-    DWORD Dr7;
-} CONTEXT, *PCONTEXT;
-
-typedef struct _STACK_FRAME_HEADER
-{
-    DWORD BackChain;
-    DWORD GlueSaved1;
-    DWORD GlueSaved2;
-    DWORD Reserved1;
-    DWORD Spare1;
-    DWORD Spare2;
-
-    DWORD Parameter0;
-    DWORD Parameter1;
-    DWORD Parameter2;
-    DWORD Parameter3;
-    DWORD Parameter4;
-    DWORD Parameter5;
-    DWORD Parameter6;
-    DWORD Parameter7;
-} STACK_FRAME_HEADER,*PSTACK_FRAME_HEADER;
-
-#endif  /* __powerpc__ */
 
 #if !defined(CONTEXT_FULL) && !defined(RC_INVOKED)
 #error You need to define a CONTEXT for your CPU
@@ -2416,8 +1673,6 @@ NTSYSAPI void WINAPI RtlCaptureContext(CONTEXT*);
                            WOW64_CONTEXT_SEGMENTS | WOW64_CONTEXT_FLOATING_POINT | \
                            WOW64_CONTEXT_DEBUG_REGISTERS | WOW64_CONTEXT_EXTENDED_REGISTERS)
 
-#define WOW64_CONTEXT_XSTATE (WOW64_CONTEXT_i386 | __MSABI_LONG(0x00000040))
-
 #define WOW64_CONTEXT_EXCEPTION_ACTIVE      0x08000000
 #define WOW64_CONTEXT_SERVICE_ACTIVE        0x10000000
 #define WOW64_CONTEXT_EXCEPTION_REQUEST     0x40000000
@@ -2426,51 +1681,158 @@ NTSYSAPI void WINAPI RtlCaptureContext(CONTEXT*);
 #define WOW64_SIZE_OF_80387_REGISTERS 80
 #define WOW64_MAXIMUM_SUPPORTED_EXTENSION 512
 
-typedef struct _WOW64_FLOATING_SAVE_AREA
-{
-    DWORD   ControlWord;
-    DWORD   StatusWord;
-    DWORD   TagWord;
-    DWORD   ErrorOffset;
-    DWORD   ErrorSelector;
-    DWORD   DataOffset;
-    DWORD   DataSelector;
-    BYTE    RegisterArea[WOW64_SIZE_OF_80387_REGISTERS];
-    DWORD   Cr0NpxState;
-} WOW64_FLOATING_SAVE_AREA, *PWOW64_FLOATING_SAVE_AREA;
+/* Exception definitions */
 
-#include "pshpack4.h"
-typedef struct _WOW64_CONTEXT
-{
-    DWORD ContextFlags;
-    DWORD Dr0;
-    DWORD Dr1;
-    DWORD Dr2;
-    DWORD Dr3;
-    DWORD Dr6;
-    DWORD Dr7;
-    WOW64_FLOATING_SAVE_AREA FloatSave;
-    DWORD SegGs;
-    DWORD SegFs;
-    DWORD SegEs;
-    DWORD SegDs;
-    DWORD Edi;
-    DWORD Esi;
-    DWORD Ebx;
-    DWORD Edx;
-    DWORD Ecx;
-    DWORD Eax;
-    DWORD Ebp;
-    DWORD Eip;
-    DWORD SegCs;
-    DWORD EFlags;
-    DWORD Esp;
-    DWORD SegSs;
-    BYTE ExtendedRegisters[WOW64_MAXIMUM_SUPPORTED_EXTENSION];
-} WOW64_CONTEXT, *PWOW64_CONTEXT;
-#include "poppack.h"
+#define EXCEPTION_READ_FAULT    0
+#define EXCEPTION_WRITE_FAULT   1
+#define EXCEPTION_EXECUTE_FAULT 8
 
-#if (defined(__x86_64__) && !defined(__i386_on_x86_64__)) || defined(__arm__) || defined(__aarch64__)
+struct _EXCEPTION_POINTERS;
+struct _EXCEPTION_RECORD;
+
+typedef EXCEPTION_DISPOSITION WINAPI EXCEPTION_ROUTINE(struct _EXCEPTION_RECORD*,PVOID,CONTEXT*,PVOID);
+typedef EXCEPTION_ROUTINE *PEXCEPTION_ROUTINE;
+
+#ifdef __x86_64__
+
+#define UNWIND_HISTORY_TABLE_SIZE 12
+
+typedef struct _UNWIND_HISTORY_TABLE_ENTRY
+{
+    ULONG64 ImageBase;
+    PRUNTIME_FUNCTION FunctionEntry;
+} UNWIND_HISTORY_TABLE_ENTRY, *PUNWIND_HISTORY_TABLE_ENTRY;
+
+#define UNWIND_HISTORY_TABLE_NONE 0
+#define UNWIND_HISTORY_TABLE_GLOBAL 1
+#define UNWIND_HISTORY_TABLE_LOCAL 2
+
+typedef struct _UNWIND_HISTORY_TABLE
+{
+    ULONG Count;
+    UCHAR Search;
+    ULONG64 LowAddress;
+    ULONG64 HighAddress;
+    UNWIND_HISTORY_TABLE_ENTRY Entry[UNWIND_HISTORY_TABLE_SIZE];
+} UNWIND_HISTORY_TABLE, *PUNWIND_HISTORY_TABLE;
+
+typedef struct _DISPATCHER_CONTEXT
+{
+    ULONG64               ControlPc;
+    ULONG64               ImageBase;
+    PRUNTIME_FUNCTION     FunctionEntry;
+    ULONG64               EstablisherFrame;
+    ULONG64               TargetIp;
+    PCONTEXT              ContextRecord;
+    PEXCEPTION_ROUTINE    LanguageHandler;
+    PVOID                 HandlerData;
+    PUNWIND_HISTORY_TABLE HistoryTable;
+    DWORD                 ScopeIndex;
+    DWORD                 Fill0;
+} DISPATCHER_CONTEXT, *PDISPATCHER_CONTEXT;
+
+typedef LONG (CALLBACK *PEXCEPTION_FILTER)(struct _EXCEPTION_POINTERS*,PVOID);
+typedef void (CALLBACK *PTERMINATION_HANDLER)(BOOLEAN,PVOID);
+
+#define UNW_FLAG_NHANDLER  0
+#define UNW_FLAG_EHANDLER  1
+#define UNW_FLAG_UHANDLER  2
+#define UNW_FLAG_CHAININFO 4
+
+#elif defined(__arm__)
+
+#define UNWIND_HISTORY_TABLE_SIZE 12
+
+typedef struct _UNWIND_HISTORY_TABLE_ENTRY
+{
+    DWORD ImageBase;
+    PRUNTIME_FUNCTION FunctionEntry;
+} UNWIND_HISTORY_TABLE_ENTRY, *PUNWIND_HISTORY_TABLE_ENTRY;
+
+typedef struct _UNWIND_HISTORY_TABLE
+{
+    DWORD Count;
+    BYTE  LocalHint;
+    BYTE  GlobalHint;
+    BYTE  Search;
+    BYTE  Once;
+    DWORD LowAddress;
+    DWORD HighAddress;
+    UNWIND_HISTORY_TABLE_ENTRY Entry[UNWIND_HISTORY_TABLE_SIZE];
+} UNWIND_HISTORY_TABLE, *PUNWIND_HISTORY_TABLE;
+
+typedef struct _DISPATCHER_CONTEXT
+{
+    DWORD                 ControlPc;
+    DWORD                 ImageBase;
+    PRUNTIME_FUNCTION     FunctionEntry;
+    DWORD                 EstablisherFrame;
+    DWORD                 TargetPc;
+    PCONTEXT              ContextRecord;
+    PEXCEPTION_ROUTINE    LanguageHandler;
+    PVOID                 HandlerData;
+    PUNWIND_HISTORY_TABLE HistoryTable;
+    DWORD                 ScopeIndex;
+    BOOLEAN               ControlPcIsUnwound;
+    PBYTE                 NonVolatileRegisters;
+    DWORD                 Reserved;
+} DISPATCHER_CONTEXT, *PDISPATCHER_CONTEXT;
+
+typedef LONG (CALLBACK *PEXCEPTION_FILTER)(struct _EXCEPTION_POINTERS*,DWORD);
+typedef void (CALLBACK *PTERMINATION_HANDLER)(BOOLEAN,DWORD);
+
+#define UNW_FLAG_NHANDLER  0
+#define UNW_FLAG_EHANDLER  1
+#define UNW_FLAG_UHANDLER  2
+
+#elif defined(__aarch64__)
+
+#define UNWIND_HISTORY_TABLE_SIZE 12
+
+typedef struct _UNWIND_HISTORY_TABLE_ENTRY
+{
+    DWORD64 ImageBase;
+    PRUNTIME_FUNCTION FunctionEntry;
+} UNWIND_HISTORY_TABLE_ENTRY, *PUNWIND_HISTORY_TABLE_ENTRY;
+
+typedef struct _UNWIND_HISTORY_TABLE
+{
+    DWORD   Count;
+    BYTE    LocalHint;
+    BYTE    GlobalHint;
+    BYTE    Search;
+    BYTE    Once;
+    DWORD64 LowAddress;
+    DWORD64 HighAddress;
+    UNWIND_HISTORY_TABLE_ENTRY Entry[UNWIND_HISTORY_TABLE_SIZE];
+} UNWIND_HISTORY_TABLE, *PUNWIND_HISTORY_TABLE;
+
+typedef struct _DISPATCHER_CONTEXT
+{
+    ULONG_PTR             ControlPc;
+    ULONG_PTR             ImageBase;
+    PRUNTIME_FUNCTION     FunctionEntry;
+    ULONG_PTR             EstablisherFrame;
+    ULONG_PTR             TargetPc;
+    PCONTEXT              ContextRecord;
+    PEXCEPTION_ROUTINE    LanguageHandler;
+    PVOID                 HandlerData;
+    PUNWIND_HISTORY_TABLE HistoryTable;
+    DWORD                 ScopeIndex;
+    BOOLEAN               ControlPcIsUnwound;
+    PBYTE                 NonVolatileRegisters;
+} DISPATCHER_CONTEXT, *PDISPATCHER_CONTEXT;
+
+typedef LONG (CALLBACK *PEXCEPTION_FILTER)(struct _EXCEPTION_POINTERS*,DWORD64);
+typedef void (CALLBACK *PTERMINATION_HANDLER)(BOOLEAN,DWORD64);
+
+#define UNW_FLAG_NHANDLER  0
+#define UNW_FLAG_EHANDLER  1
+#define UNW_FLAG_UHANDLER  2
+
+#endif /* __aarch64__ */
+
+#if defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
 
 typedef PRUNTIME_FUNCTION (CALLBACK *PGET_RUNTIME_FUNCTION_CALLBACK)(DWORD_PTR,PVOID);
 
@@ -2482,6 +1844,8 @@ NTSYSAPI void    WINAPI RtlGrowFunctionTable(void*,DWORD);
 NTSYSAPI BOOLEAN CDECL  RtlInstallFunctionTableCallback(DWORD_PTR,DWORD_PTR,DWORD,PGET_RUNTIME_FUNCTION_CALLBACK,PVOID,PCWSTR);
 NTSYSAPI PRUNTIME_FUNCTION WINAPI RtlLookupFunctionEntry(DWORD_PTR,DWORD_PTR*,UNWIND_HISTORY_TABLE*);
 NTSYSAPI void    WINAPI RtlUnwindEx(PVOID,PVOID,struct _EXCEPTION_RECORD*,PVOID,CONTEXT*,UNWIND_HISTORY_TABLE*);
+NTSYSAPI PVOID   WINAPI RtlVirtualUnwind(DWORD,ULONG_PTR,ULONG_PTR,RUNTIME_FUNCTION*,CONTEXT*,PVOID*,ULONG_PTR*,KNONVOLATILE_CONTEXT_POINTERS*);
+
 #endif
 
 /*
@@ -2776,7 +2140,7 @@ typedef struct _NT_TIB
 
 struct _TEB;
 
-#if (defined(__i386__) || defined(__i386_on_x86_64__)) && defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 2)))
+#if (defined(__i386__) || defined(__i386_on_x86_64__))  && defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 2)))
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
     struct _TEB *teb;
@@ -2811,6 +2175,12 @@ static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
     struct _TEB *teb;
     __asm__("mrc p15, 0, %0, c13, c0, 2" : "=r" (teb));
     return teb;
+}
+#elif defined(__arm__) && defined(_MSC_VER)
+#pragma intrinsic(_MoveFromCoprocessor)
+static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
+{
+    return (struct _TEB *)(ULONG_PTR)_MoveFromCoprocessor(15, 0, 13, 0, 2);
 }
 #else
 extern struct _TEB * WINAPI NtCurrentTeb(void);
@@ -3139,13 +2509,16 @@ typedef struct _IMAGE_VXD_HEADER {
 #define	IMAGE_SUBSYSTEM_WINDOWS_BOOT_APPLICATION	16
 
 /* DLL Characteristics */
+#define IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA       0x0020
 #define IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE          0x0040
 #define IMAGE_DLLCHARACTERISTICS_FORCE_INTEGRITY       0x0080
 #define IMAGE_DLLCHARACTERISTICS_NX_COMPAT             0x0100
 #define IMAGE_DLLCHARACTERISTICS_NO_ISOLATION          0x0200
 #define IMAGE_DLLCHARACTERISTICS_NO_SEH                0x0400
 #define IMAGE_DLLCHARACTERISTICS_NO_BIND               0x0800
+#define IMAGE_DLLCHARACTERISTICS_APPCONTAINER          0x1000
 #define IMAGE_DLLCHARACTERISTICS_WDM_DRIVER            0x2000
+#define IMAGE_DLLCHARACTERISTICS_GUARD_CF              0x4000
 #define IMAGE_DLLCHARACTERISTICS_TERMINAL_SERVER_AWARE 0x8000
 
 typedef struct _IMAGE_FILE_HEADER {
@@ -3283,25 +2656,9 @@ typedef struct _IMAGE_SECTION_HEADER {
 
 #define	IMAGE_SIZEOF_SECTION_HEADER 40
 
-#ifdef __i386_on_x86_64__
-static inline PIMAGE_SECTION_HEADER IMAGE_FIRST_SECTION(const void * ntheader)
-{
-    const IMAGE_NT_HEADERS* hdr = ntheader;
-    return ((PIMAGE_SECTION_HEADER)(ULONG_PTR)((const BYTE *)&hdr->OptionalHeader + \
-                           hdr->FileHeader.SizeOfOptionalHeader));
-}
-
-static inline IMAGE_SECTION_HEADER* HOSTPTR IMAGE_FIRST_SECTION(const void * HOSTPTR ntheader) __attribute__((overloadable))
-{
-    const IMAGE_NT_HEADERS* HOSTPTR hdr = ntheader;
-    return ((IMAGE_SECTION_HEADER* HOSTPTR)(ULONG_HOSTPTR)((const BYTE * HOSTPTR)&hdr->OptionalHeader + \
-                           hdr->FileHeader.SizeOfOptionalHeader));
-}
-#else
 #define IMAGE_FIRST_SECTION(ntheader) \
   ((PIMAGE_SECTION_HEADER)(ULONG_PTR)((const BYTE *)&((const IMAGE_NT_HEADERS *)(ntheader))->OptionalHeader + \
                            ((const IMAGE_NT_HEADERS *)(ntheader))->FileHeader.SizeOfOptionalHeader))
-#endif
 
 /* These defines are for the Characteristics bitfield. */
 /* #define IMAGE_SCN_TYPE_REG			0x00000000 - Reserved */
@@ -4338,17 +3695,16 @@ typedef enum _TOKEN_INFORMATION_CLASS {
 #define LUA_TOKEN                    0x4
 #define WRITE_RESTRICTED             0x8
 
-#define TOKEN_TOKEN_ADJUST_DEFAULT   0x0080
-#define TOKEN_ADJUST_GROUPS          0x0040
-#define TOKEN_ADJUST_PRIVILEGES      0x0020
-#define TOKEN_ADJUST_SESSIONID       0x0100
 #define TOKEN_ASSIGN_PRIMARY         0x0001
 #define TOKEN_DUPLICATE              0x0002
-#define TOKEN_EXECUTE                STANDARD_RIGHTS_EXECUTE
 #define TOKEN_IMPERSONATE            0x0004
 #define TOKEN_QUERY                  0x0008
 #define TOKEN_QUERY_SOURCE           0x0010
+#define TOKEN_ADJUST_PRIVILEGES      0x0020
+#define TOKEN_ADJUST_GROUPS          0x0040
 #define TOKEN_ADJUST_DEFAULT         0x0080
+#define TOKEN_ADJUST_SESSIONID       0x0100
+#define TOKEN_EXECUTE                STANDARD_RIGHTS_EXECUTE
 #define TOKEN_READ                   (STANDARD_RIGHTS_READ|TOKEN_QUERY)
 #define TOKEN_WRITE                  (STANDARD_RIGHTS_WRITE     | \
 					TOKEN_ADJUST_PRIVILEGES | \
@@ -4393,6 +3749,8 @@ typedef struct _SID {
     DWORD SubAuthority[1];
 } SID,*PISID;
 #endif /* !defined(SID_DEFINED) */
+
+#define CREATE_BOUNDARY_DESCRIPTOR_ADD_APPCONTAINER_SID 0x01
 
 #define	SID_REVISION			(1)	/* Current revision */
 #define	SID_MAX_SUB_AUTHORITIES		(15)	/* current max subauths */
@@ -5431,7 +4789,8 @@ typedef enum tagSID_NAME_USE {
 #define JOB_OBJECT_QUERY                    0x0004
 #define JOB_OBJECT_TERMINATE                0x0008
 #define JOB_OBJECT_SET_SECURITY_ATTRIBUTES  0x0010
-#define JOB_OBJECT_ALL_ACCESS               (STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE|0x1f)
+#define JOB_OBJECT_IMPERSONATE              0x0020
+#define JOB_OBJECT_ALL_ACCESS               (STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE|0x3f)
 
 #define TIMER_QUERY_STATE          0x0001
 #define TIMER_MODIFY_STATE         0x0002
@@ -5546,6 +4905,9 @@ typedef struct _QUOTA_LIMITS_EX {
 
 #define DUPLICATE_CLOSE_SOURCE     0x00000001
 #define DUPLICATE_SAME_ACCESS      0x00000002
+#ifdef __WINESRC__
+#define DUPLICATE_MAKE_GLOBAL      0x80000000  /* Not a Windows flag */
+#endif
 
 /* File attribute flags */
 #define FILE_SHARE_READ                    0x00000001
@@ -6446,6 +5808,7 @@ typedef enum {
 typedef struct _COMPATIBILITY_CONTEXT_ELEMENT {
     GUID Id;
     ACTCTX_COMPATIBILITY_ELEMENT_TYPE Type;
+    ULONGLONG MaxVersionTested;
 } COMPATIBILITY_CONTEXT_ELEMENT, *PCOMPATIBILITY_CONTEXT_ELEMENT;
 
 #if !defined(__WINESRC__) && (defined(_MSC_EXTENSIONS) || ((defined(__GNUC__) && __GNUC__ >= 3)))
@@ -6500,6 +5863,7 @@ typedef enum _ACTIVATION_CONTEXT_INFO_CLASS {
 #define ACTIVATION_CONTEXT_SECTION_CLR_SURROGATES                9
 #define ACTIVATION_CONTEXT_SECTION_APPLICATION_SETTINGS          10
 #define ACTIVATION_CONTEXT_SECTION_COMPATIBILITY_INFO            11
+#define ACTIVATION_CONTEXT_SECTION_WINRT_ACTIVATABLE_CLASSES     12
 
 typedef enum _JOBOBJECTINFOCLASS
 {
@@ -6730,6 +6094,47 @@ typedef struct _SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX
     } DUMMYUNIONNAME;
 } SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX, *PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
 
+typedef enum _CPU_SET_INFORMATION_TYPE
+{
+    CpuSetInformation,
+} CPU_SET_INFORMATION_TYPE, *PCPU_SET_INFORMATION_TYPE;
+
+typedef struct _SYSTEM_CPU_SET_INFORMATION
+{
+    DWORD Size;
+    CPU_SET_INFORMATION_TYPE Type;
+    union
+    {
+        struct
+        {
+            DWORD Id;
+            WORD Group;
+            BYTE LogicalProcessorIndex;
+            BYTE CoreIndex;
+            BYTE LastLevelCacheIndex;
+            BYTE NumaNodeIndex;
+            BYTE EfficiencyClass;
+            union
+            {
+                BYTE AllFlags;
+                struct
+                {
+                    BYTE Parked : 1;
+                    BYTE Allocated : 1;
+                    BYTE AllocatedToTargetProcess : 1;
+                    BYTE RealTime : 1;
+                    BYTE ReservedFlags : 4;
+                } DUMMYSTRUCTNAME;
+            } DUMMYUNIONNAME2;
+            union {
+            DWORD Reserved;
+            BYTE  SchedulingClass;
+            };
+            DWORD64 AllocationTag;
+        } CpuSet;
+    } DUMMYUNIONNAME;
+} SYSTEM_CPU_SET_INFORMATION, *PSYSTEM_CPU_SET_INFORMATION;
+
 /* Threadpool things */
 typedef DWORD TP_VERSION,*PTP_VERSION;
 
@@ -6860,70 +6265,252 @@ typedef enum _PROCESS_MITIGATION_POLICY
     MaxProcessMitigationPolicy
 } PROCESS_MITIGATION_POLICY, *PPROCESS_MITIGATION_POLICY;
 
-#ifdef _MSC_VER
 
-BOOLEAN _BitScanForward(unsigned long*,unsigned long);
-BOOLEAN _BitScanReverse(unsigned long*,unsigned long);
+/* Intrinsic functions */
+
+#define BitScanForward _BitScanForward
+#define BitScanReverse _BitScanReverse
+#define InterlockedAdd _InlineInterlockedAdd
+#define InterlockedAnd _InterlockedAnd
+#define InterlockedCompareExchange _InterlockedCompareExchange
+#define InterlockedCompareExchange64 _InterlockedCompareExchange64
+#define InterlockedCompareExchangePointer _InterlockedCompareExchangePointer
+#define InterlockedDecrement _InterlockedDecrement
+#define InterlockedDecrement16 _InterlockedDecrement16
+#define InterlockedExchange _InterlockedExchange
+#define InterlockedExchangeAdd _InterlockedExchangeAdd
+#define InterlockedExchangeAdd64 _InterlockedExchangeAdd64
+#define InterlockedExchangePointer _InterlockedExchangePointer
+#define InterlockedIncrement _InterlockedIncrement
+#define InterlockedIncrement16 _InterlockedIncrement16
+#define InterlockedOr _InterlockedOr
+#define InterlockedXor _InterlockedXor
+
+#ifdef _MSC_VER
 
 #pragma intrinsic(_BitScanForward)
 #pragma intrinsic(_BitScanReverse)
+#pragma intrinsic(_InterlockedAnd)
+#pragma intrinsic(_InterlockedCompareExchange)
+#pragma intrinsic(_InterlockedCompareExchange64)
+#pragma intrinsic(_InterlockedExchange)
+#pragma intrinsic(_InterlockedExchangeAdd)
+#pragma intrinsic(_InterlockedIncrement)
+#pragma intrinsic(_InterlockedIncrement16)
+#pragma intrinsic(_InterlockedDecrement)
+#pragma intrinsic(_InterlockedDecrement16)
+#pragma intrinsic(_InterlockedOr)
+#pragma intrinsic(_InterlockedXor)
 
-static inline BOOLEAN BitScanForward(DWORD *index, DWORD mask)
+BOOLEAN   _BitScanForward(unsigned long*,unsigned long);
+BOOLEAN   _BitScanReverse(unsigned long*,unsigned long);
+long      _InterlockedAnd(long volatile *,long);
+long      _InterlockedCompareExchange(long volatile*,long,long);
+long long _InterlockedCompareExchange64(long long volatile*,long long,long long);
+long      _InterlockedDecrement(long volatile*);
+short     _InterlockedDecrement16(short volatile*);
+long      _InterlockedExchange(long volatile*,long);
+long      _InterlockedExchangeAdd(long volatile*,long);
+long      _InterlockedIncrement(long volatile*);
+short     _InterlockedIncrement16(short volatile*);
+long      _InterlockedOr(long volatile *,long);
+long      _InterlockedXor(long volatile *,long);
+
+static FORCEINLINE long InterlockedAdd( long volatile *dest, long val )
 {
-    return _BitScanForward((unsigned long*)index, mask);
+    return InterlockedExchangeAdd( dest, val ) + val;
 }
 
-static inline BOOLEAN BitScanReverse(DWORD *index, DWORD mask)
-{
-    return _BitScanReverse((unsigned long*)index, mask);
-}
+#if !defined(__i386__) || _MSC_VER >= 1600
 
-#elif defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 3)))
+#pragma intrinsic(_InterlockedCompareExchangePointer)
+#pragma intrinsic(_InterlockedExchangePointer)
 
-static inline BOOLEAN BitScanForward(DWORD *index, DWORD mask)
-{
-    *index = __builtin_ctz(mask);
-    return mask != 0;
-}
-
-static inline BOOLEAN BitScanReverse(DWORD *index, DWORD mask)
-{
-    *index = 31 - __builtin_clz(mask);
-    return mask != 0;
-}
+void *_InterlockedCompareExchangePointer(void *volatile*,void*,void*);
+void *_InterlockedExchangePointer(void *volatile*,void*);
 
 #else
 
-static inline BOOLEAN BitScanForward(DWORD *index, DWORD mask)
+static FORCEINLINE void * WINAPI InterlockedCompareExchangePointer( void *volatile *dest, void *xchg, void *compare )
 {
-    unsigned int r = 0;
-    while (r < 31 && !(mask & (1 << r))) r++;
-    *index = r;
-    return mask != 0;
+    return (void *)_InterlockedCompareExchange( (long volatile*)dest, (long)xchg, (long)compare );
 }
 
-static inline BOOLEAN BitScanReverse(DWORD *index, DWORD mask)
+static FORCEINLINE void * WINAPI InterlockedExchangePointer( void *volatile *dest, void *val )
 {
-    unsigned int r = 31;
-    while (r > 0 && !(mask & (1 << r))) r--;
-    *index = r;
-    return mask != 0;
+    return (void *)_InterlockedExchange( (long volatile*)dest, (long)val );
 }
 
-#endif
+#endif /* __i386__ */
 
-#ifdef _WIN64
+#ifdef __i386__
 
-#if defined(_MSC_VER)
-
-#define InterlockedCompareExchange128 _InterlockedCompareExchange128
-unsigned char _InterlockedCompareExchange128(volatile __int64 *dest, __int64 xchg_high, __int64 xchg_low, __int64 *compare);
-#pragma intrinsic(_InterlockedCompareExchange128)
+static FORCEINLINE void MemoryBarrier(void)
+{
+    LONG dummy;
+    InterlockedOr(&dummy, 0);
+}
 
 #elif defined(__x86_64__)
 
-static inline unsigned char InterlockedCompareExchange128(__int64 *dest, __int64 xchg_high, __int64 xchg_low, __int64 *compare)
+#pragma intrinsic(_InterlockedExchangeAdd64)
+#pragma intrinsic(__faststorefence)
+
+long long _InterlockedExchangeAdd64(long long volatile *, long long);
+void __faststorefence(void);
+
+static FORCEINLINE void MemoryBarrier(void)
 {
+    __faststorefence();
+}
+
+#elif defined(__arm__)
+
+static FORCEINLINE void MemoryBarrier(void)
+{
+    __dmb(_ARM_BARRIER_SY);
+}
+
+#elif defined(__aarch64__)
+
+static FORCEINLINE void MemoryBarrier(void)
+{
+    __dmb(_ARM64_BARRIER_SY);
+}
+
+#endif /* __i386__ */
+
+#elif defined(__GNUC__)
+
+static FORCEINLINE BOOLEAN WINAPI BitScanForward(DWORD *index, DWORD mask)
+{
+    *index = __builtin_ctz( mask );
+    return mask != 0;
+}
+
+static FORCEINLINE BOOLEAN WINAPI BitScanReverse(DWORD *index, DWORD mask)
+{
+    *index = 31 - __builtin_clz( mask );
+    return mask != 0;
+}
+
+static FORCEINLINE LONG WINAPI InterlockedAdd( LONG volatile *dest, LONG val )
+{
+    return __sync_add_and_fetch( dest, val );
+}
+
+static FORCEINLINE LONG WINAPI InterlockedAnd( LONG volatile *dest, LONG val )
+{
+    return __sync_fetch_and_and( dest, val );
+}
+
+static FORCEINLINE LONG WINAPI InterlockedCompareExchange( LONG volatile *dest, LONG xchg, LONG compare )
+{
+    return __sync_val_compare_and_swap( dest, compare, xchg );
+}
+
+static FORCEINLINE void * WINAPI InterlockedCompareExchangePointer( void *volatile *dest, void *xchg, void *compare )
+{
+    return __sync_val_compare_and_swap( dest, compare, xchg );
+}
+
+static FORCEINLINE LONGLONG WINAPI InterlockedCompareExchange64( LONGLONG volatile *dest, LONGLONG xchg, LONGLONG compare )
+{
+    return __sync_val_compare_and_swap( dest, compare, xchg );
+}
+
+static FORCEINLINE LONG WINAPI InterlockedExchange( LONG volatile *dest, LONG val )
+{
+    LONG ret;
+#if (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 7))
+    ret = __atomic_exchange_n( dest, val, __ATOMIC_SEQ_CST );
+#elif defined(__i386__) || defined(__x86_64__)
+    __asm__ __volatile__( "lock; xchgl %0,(%1)"
+                          : "=r" (ret) :"r" (dest), "0" (val) : "memory" );
+#else
+    do ret = *dest; while (!__sync_bool_compare_and_swap( dest, ret, val ));
+#endif
+    return ret;
+}
+
+static FORCEINLINE LONG WINAPI InterlockedExchangeAdd( LONG volatile *dest, LONG incr )
+{
+    return __sync_fetch_and_add( dest, incr );
+}
+
+static FORCEINLINE LONGLONG WINAPI InterlockedExchangeAdd64( LONGLONG volatile *dest, LONGLONG incr )
+{
+    return __sync_fetch_and_add( dest, incr );
+}
+
+static FORCEINLINE LONG WINAPI InterlockedIncrement( LONG volatile * HOSTPTR dest )
+{
+    return __sync_add_and_fetch( dest, 1 );
+}
+
+static FORCEINLINE short WINAPI InterlockedIncrement16( short volatile *dest )
+{
+    return __sync_add_and_fetch( dest, 1 );
+}
+
+static FORCEINLINE LONG WINAPI InterlockedDecrement( LONG volatile * HOSTPTR dest )
+{
+    return __sync_add_and_fetch( dest, -1 );
+}
+
+static FORCEINLINE short WINAPI InterlockedDecrement16( short volatile *dest )
+{
+    return __sync_add_and_fetch( dest, -1 );
+}
+
+static FORCEINLINE void * WINAPI InterlockedExchangePointer( void *volatile *dest, void *val )
+{
+    void *ret;
+#if (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 7))
+    ret = __atomic_exchange_n( dest, val, __ATOMIC_SEQ_CST );
+#elif defined(__i386_on_x86_64__)
+    __asm__ __volatile__( "lock; xchgl %0,(%1)" : "=r" (ret) :"r" (dest), "0" (val) : "memory" );
+#elif defined(__x86_64__)
+    __asm__ __volatile__( "lock; xchgq %0,(%1)" : "=r" (ret) :"r" (dest), "0" (val) : "memory" );
+#elif defined(__i386__)
+    __asm__ __volatile__( "lock; xchgl %0,(%1)" : "=r" (ret) :"r" (dest), "0" (val) : "memory" );
+#else
+    do ret = *dest; while (!__sync_bool_compare_and_swap( dest, ret, val ));
+#endif
+    return ret;
+}
+
+static FORCEINLINE LONG WINAPI InterlockedOr( LONG volatile *dest, LONG val )
+{
+    return __sync_fetch_and_or( dest, val );
+}
+
+static FORCEINLINE LONG WINAPI InterlockedXor( LONG volatile *dest, LONG val )
+{
+    return __sync_fetch_and_xor( dest, val );
+}
+
+static FORCEINLINE void MemoryBarrier(void)
+{
+    __sync_synchronize();
+}
+
+#endif  /* __GNUC__ */
+
+#ifdef _WIN64
+
+#define InterlockedCompareExchange128 _InterlockedCompareExchange128
+
+#if defined(_MSC_VER) && !defined(__clang__)
+
+#pragma intrinsic(_InterlockedCompareExchange128)
+unsigned char _InterlockedCompareExchange128(volatile __int64 *, __int64, __int64, __int64 *);
+
+#else
+
+static FORCEINLINE unsigned char InterlockedCompareExchange128( volatile __int64 *dest, __int64 xchg_high, __int64 xchg_low, __int64 *compare )
+{
+#ifdef __x86_64__
     unsigned char ret;
     __asm__ __volatile__( "lock cmpxchg16b %0; setz %b2"
                           : "=m" (dest[0]), "=m" (dest[1]), "=r" (ret),
@@ -6931,18 +6518,33 @@ static inline unsigned char InterlockedCompareExchange128(__int64 *dest, __int64
                           : "m" (dest[0]), "m" (dest[1]), "3" (compare[0]), "4" (compare[1]),
                             "c" (xchg_high), "b" (xchg_low) );
     return ret;
-}
-
-#elif defined(__GNUC__)
-
-static inline unsigned char InterlockedCompareExchange128(__int64 *dest, __int64 xchg_high, __int64 xchg_low, __int64 *compare)
-{
+#else
     return __sync_bool_compare_and_swap( (__int128 *)dest, *(__int128 *)compare, ((__int128)xchg_high << 64) | xchg_low );
+#endif
 }
 
 #endif
 
+#define InterlockedExchangeAddSizeT(a, b) InterlockedExchangeAdd64((LONGLONG *)(a), (b))
+
+#else /* _WIN64 */
+
+#define InterlockedExchangeAddSizeT(a, b) InterlockedExchangeAdd((LONG *)(a), (b))
+
 #endif /* _WIN64 */
+
+static FORCEINLINE void YieldProcessor(void)
+{
+#ifdef __GNUC__
+#if defined(__i386__) || defined(__x86_64__)
+    __asm__ __volatile__( "rep; nop" : : : "memory" );
+#elif defined(__arm__) || defined(__aarch64__)
+    __asm__ __volatile__( "dmb ishst\n\tyield" : : : "memory" );
+#else
+    __asm__ __volatile__( "" : : : "memory" );
+#endif
+#endif
+}
 
 #ifdef __cplusplus
 }

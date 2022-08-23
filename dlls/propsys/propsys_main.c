@@ -34,35 +34,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(propsys);
 
-static HINSTANCE propsys_hInstance;
-
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
-{
-    TRACE("(0x%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
-
-    switch (fdwReason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            propsys_hInstance = hinstDLL;
-            DisableThreadLibraryCalls(hinstDLL);
-            break;
-    }
-
-    return TRUE;
-}
-
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( propsys_hInstance );
-}
-
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( propsys_hInstance );
-}
-
 static HRESULT WINAPI ClassFactory_QueryInterface(IClassFactory *iface, REFIID riid, void **ppv)
 {
     *ppv = NULL;
@@ -132,11 +103,6 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
     return CLASS_E_CLASSNOTAVAILABLE;
 }
 
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
-}
-
 static HRESULT WINAPI propsys_QueryInterface(IPropertySystem *iface, REFIID riid, void **obj)
 {
     *obj = NULL;
@@ -191,7 +157,7 @@ static HRESULT WINAPI propsys_FormatForDisplay(IPropertySystem *iface,
     REFPROPERTYKEY key, REFPROPVARIANT propvar, PROPDESC_FORMAT_FLAGS flags,
     LPWSTR dest, DWORD destlen)
 {
-    FIXME("%p %p %x %p %d: stub\n", key, propvar, flags, dest, destlen);
+    FIXME("%p %p %x %p %ld: stub\n", key, propvar, flags, dest, destlen);
     return E_NOTIMPL;
 }
 

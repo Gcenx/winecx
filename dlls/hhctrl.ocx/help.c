@@ -201,7 +201,7 @@ static HRESULT navigate_url(HHInfo *info, LPCWSTR surl)
     VariantClear(&url);
 
     if(FAILED(hres))
-        TRACE("Navigation failed: %08x\n", hres);
+        TRACE("Navigation failed: %08lx\n", hres);
 
     return hres;
 }
@@ -242,7 +242,7 @@ static BOOL AppendFullPathURL(LPCWSTR file, LPWSTR buf, LPCWSTR index)
     TRACE("%s %p %s\n", debugstr_w(file), buf, debugstr_w(index));
 
     if (!GetFullPathNameW(file, ARRAY_SIZE(full_path), full_path, NULL)) {
-        WARN("GetFullPathName failed: %u\n", GetLastError());
+        WARN("GetFullPathName failed: %lu\n", GetLastError());
         return FALSE;
     }
 
@@ -272,7 +272,7 @@ static void DoSync(HHInfo *info)
 
     if (FAILED(hres))
     {
-        WARN("get_LocationURL failed: %08x\n", hres);
+        WARN("get_LocationURL failed: %08lx\n", hres);
         return;
     }
 
@@ -954,7 +954,7 @@ static void TB_AddButtonsFromFlags(HHInfo *pHHInfo, TBBUTTON *pButtons, DWORD dw
         HHWIN_BUTTON_FAVORITES | HHWIN_BUTTON_JUMP1 | HHWIN_BUTTON_JUMP2 |
         HHWIN_BUTTON_ZOOM | HHWIN_BUTTON_TOC_NEXT | HHWIN_BUTTON_TOC_PREV);
     if (unsupported)
-        FIXME("got asked for unsupported buttons: %06x\n", unsupported);
+        FIXME("got asked for unsupported buttons: %06lx\n", unsupported);
 
     if (dwButtonFlags & HHWIN_BUTTON_EXPAND)
     {
@@ -1898,14 +1898,14 @@ WCHAR *decode_html(const char *html_fragment, int html_fragment_len, UINT code_p
     while(1)
     {
         symbol = 0;
-        amp = strchr(h, '&');
+        amp = memchr(h, '&', html_fragment + html_fragment_len - h);
         if(!amp) break;
         len = amp-h;
         /* Copy the characters prior to the HTML encoded character */
         memcpy(&tmp[tmp_len], h, len);
         tmp_len += len;
         amp++; /* skip ampersand */
-        sem = strchr(amp, ';');
+        sem = memchr(amp, ';', html_fragment + html_fragment_len - amp);
         /* Require a semicolon after the ampersand */
         if(!sem)
         {

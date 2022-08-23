@@ -1431,6 +1431,7 @@ bar\baz removed
 @pwd@
 ------------ Testing attrib ------------
 A@spaces@@drive@@path@foobar\foo@or_broken@A       I@spaces@@drive@@path@foobar\foo
+A@spaces@@drive@@path@foobar\foo@or_broken@A       I@spaces@@drive@@path@foobar\foo
 --- read-only attribute
 A    R@spaces@@drive@@path@foobar\foo@or_broken@A    R  I@spaces@@drive@@path@foobar\foo
 foo
@@ -1686,6 +1687,10 @@ Normal+space+garbage
 Quoted should fail
 Normal+tab
 Normal+tab+garbage
+------------ Testing length wrt. MAX_PATH ------------
+@todo_wine@21
+Success
+@todo_wine@Success
 ------------ Testing combined CALLs/GOTOs ------------
 world
 cheball

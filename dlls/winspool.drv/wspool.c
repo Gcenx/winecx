@@ -18,19 +18,17 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-
-
-#include "config.h"
 #include <stdarg.h>
 
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
 #include "winspool.h"
-
 #include "winreg.h"
+#include "winternl.h"
 #include "ddk/winsplp.h"
 #include "wine/debug.h"
+#include "wine/unixlib.h"
 
 #include "wspool.h"
 
@@ -50,11 +48,11 @@ static CRITICAL_SECTION backend_cs = { &backend_cs_debug, -1, 0, 0, 0, 0 };
 /* ############################### */
 
 HINSTANCE WINSPOOL_hInstance = NULL;
+unixlib_handle_t winspool_handle = 0;
 
-static HMODULE hlocalspl = NULL;
+static HMODULE hlocalspl;
 static BOOL (WINAPI *pInitializePrintProvidor)(LPPRINTPROVIDOR, DWORD, LPWSTR);
-
-PRINTPROVIDOR * backend = NULL;
+PRINTPROVIDOR *backend = NULL;
 
 /******************************************************************************
  * load_backend [internal]
@@ -110,28 +108,30 @@ BOOL load_backend(void)
  * Winspool entry point.
  *
  */
-BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD reason, LPVOID lpReserved)
+BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, void *reserved )
 {
-  static HMODULE hWineps;
+    static HMODULE hWineps;
 
-  switch (reason)
-  {
-    case DLL_PROCESS_ATTACH: {
-      /* Hack to avoid loading/unloading wineps many times */
-      hWineps = LoadLibraryA("WINEPS.DRV");
-      WINSPOOL_hInstance = hInstance;
+    switch (reason)
+    {
+    case DLL_PROCESS_ATTACH:
+        /* Hack to avoid loading/unloading wineps many times */
+        hWineps = LoadLibraryA("WINEPS.DRV");
+        WINSPOOL_hInstance = instance;
+        DisableThreadLibraryCalls( instance );
+        if (!NtQueryVirtualMemory( GetCurrentProcess(), instance, MemoryWineUnixFuncs,
+                                   &winspool_handle, sizeof(winspool_handle), NULL ))
+            UNIX_CALL( process_attach, NULL );
+        WINSPOOL_LoadSystemPrinters();
+        break;
 
-      DisableThreadLibraryCalls(hInstance);
-      WINSPOOL_LoadSystemPrinters();
-      break;
-    }
     case DLL_PROCESS_DETACH:
-      if (lpReserved) break;
-      DeleteCriticalSection(&backend_cs);
-      FreeLibrary(hlocalspl);
-      if(hWineps) FreeLibrary(hWineps);
-      break;
-  }
+        if (reserved) break;
+        DeleteCriticalSection(&backend_cs);
+        FreeLibrary(hlocalspl);
+        if(hWineps) FreeLibrary(hWineps);
+        break;
+    }
 
-  return TRUE;
+    return TRUE;
 }

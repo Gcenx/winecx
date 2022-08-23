@@ -54,16 +54,152 @@ DEFINE_VTBL_WRAPPER(56);
 
 #endif
 
-void* (__cdecl *MSVCRT_operator_new)(size_t);
-void (__cdecl *MSVCRT_operator_delete)(void*);
 void* (__cdecl *MSVCRT_set_new_handler)(void*);
 
-#if _MSVCP_VER >= 110
-critical_section* (__thiscall *critical_section_ctor)(critical_section*);
-void (__thiscall *critical_section_dtor)(critical_section*);
-void (__thiscall *critical_section_lock)(critical_section*);
-void (__thiscall *critical_section_unlock)(critical_section*);
-bool (__thiscall *critical_section_trylock)(critical_section*);
+#if _MSVCP_VER >= 110 && _MSVCP_VER <= 120
+#ifdef __ASM_USE_THISCALL_WRAPPER
+
+extern void *call_thiscall_func;
+__ASM_GLOBAL_FUNC(call_thiscall_func,
+        "popl %eax\n\t"
+        "popl %edx\n\t"
+        "popl %ecx\n\t"
+        "pushl %eax\n\t"
+        "jmp *%edx\n\t")
+
+#define call_func1(func,this) ((void* (WINAPI*)(void*,void*))&call_thiscall_func)(func,this)
+#define call_func2(func,this,a) ((void* (WINAPI*)(void*,void*,void*))&call_thiscall_func)(func,this,a)
+#define call_func3(func,this,a,b) ((void* (WINAPI*)(void*,void*,void*,unsigned int))&call_thiscall_func)(func,this,a,b)
+
+#else /* __i386__ */
+
+#define call_func1(func,this) func(this)
+#define call_func2(func,this,a) func(this,a)
+#define call_func3(func,this,a,b) func(this,a,b)
+
+#endif /* __i386__ */
+
+static critical_section* (__thiscall *critical_section_ctor)(critical_section*);
+static void (__thiscall *critical_section_dtor)(critical_section*);
+static void (__thiscall *critical_section_lock)(critical_section*);
+static void (__thiscall *critical_section_unlock)(critical_section*);
+static bool (__thiscall *critical_section_trylock)(critical_section*);
+
+static _Condition_variable* (__thiscall *_Condition_variable_ctor)(_Condition_variable*);
+static void (__thiscall *_Condition_variable_dtor)(_Condition_variable*);
+static void (__thiscall *_Condition_variable_wait)(_Condition_variable*, critical_section*);
+bool (__thiscall *_Condition_variable_wait_for)(_Condition_variable*,
+        critical_section*, unsigned int);
+void (__thiscall *_Condition_variable_notify_one)(_Condition_variable*);
+void (__thiscall *_Condition_variable_notify_all)(_Condition_variable*);
+
+void cs_init(cs *cs)
+{
+    call_func1(critical_section_ctor, &cs->conc);
+}
+
+void cs_destroy(cs *cs)
+{
+    call_func1(critical_section_dtor, &cs->conc);
+}
+
+void cs_lock(cs *cs)
+{
+    call_func1(critical_section_lock, &cs->conc);
+}
+
+void cs_unlock(cs *cs)
+{
+    call_func1(critical_section_unlock, &cs->conc);
+}
+
+bool cs_trylock(cs *cs)
+{
+    return call_func1(critical_section_trylock, &cs->conc);
+}
+
+void cv_init(cv *cv)
+{
+    call_func1(_Condition_variable_ctor, &cv->conc);
+}
+
+void cv_destroy(cv *cv)
+{
+    call_func1(_Condition_variable_dtor, &cv->conc);
+}
+
+void cv_wait(cv *cv, cs *cs)
+{
+    call_func2(_Condition_variable_wait, &cv->conc, &cs->conc);
+}
+
+bool cv_wait_for(cv *cv, cs *cs, unsigned int timeout)
+{
+    return call_func3(_Condition_variable_wait_for, &cv->conc, &cs->conc, timeout);
+}
+
+void cv_notify_one(cv *cv)
+{
+    call_func1(_Condition_variable_notify_one, &cv->conc);
+}
+
+void cv_notify_all(cv *cv)
+{
+    call_func1(_Condition_variable_notify_all, &cv->conc);
+}
+#elif _MSVCP_VER >= 140
+void cs_init(cs *cs)
+{
+    InitializeSRWLock(&cs->win);
+}
+
+void cs_destroy(cs *cs)
+{
+}
+
+void cs_lock(cs *cs)
+{
+    AcquireSRWLockExclusive(&cs->win);
+}
+
+void cs_unlock(cs *cs)
+{
+    ReleaseSRWLockExclusive(&cs->win);
+}
+
+bool cs_trylock(cs *cs)
+{
+    return TryAcquireSRWLockExclusive(&cs->win);
+}
+
+void cv_init(cv *cv)
+{
+    InitializeConditionVariable(&cv->win);
+}
+
+void cv_destroy(cv *cv)
+{
+}
+
+void cv_wait(cv *cv, cs *cs)
+{
+    SleepConditionVariableSRW(&cv->win, &cs->win, INFINITE, 0);
+}
+
+bool cv_wait_for(cv *cv, cs *cs, unsigned int timeout)
+{
+    return SleepConditionVariableSRW(&cv->win, &cs->win, timeout, 0);
+}
+
+void cv_notify_one(cv *cv)
+{
+    WakeConditionVariable(&cv->win);
+}
+
+void cv_notify_all(cv *cv)
+{
+    WakeAllConditionVariable(&cv->win);
+}
 #endif
 
 #if _MSVCP_VER >= 100
@@ -79,7 +215,7 @@ bool (__cdecl *Context_IsCurrentTaskCollectionCanceling)(void);
 #endif
 
 #if _MSVCP_VER >= 140
-static void* __cdecl operator_new(size_t size)
+void* __cdecl operator_new(size_t size)
 {
     void *retval;
     int freed;
@@ -96,11 +232,10 @@ static void* __cdecl operator_new(size_t size)
     } while (freed);
 
     TRACE("(%Iu) out of memory\n", size);
-    throw_exception(EXCEPTION_BAD_ALLOC, "bad allocation");
-    return NULL;
+    _Xmem();
 }
 
-static void __cdecl operator_delete(void *mem)
+void __cdecl operator_delete(void *mem)
 {
     TRACE("(%p)\n", mem);
     free(mem);
@@ -109,6 +244,23 @@ static void __cdecl operator_delete(void *mem)
 void __cdecl _invalid_parameter(const wchar_t *expr, const wchar_t *func, const wchar_t *file, unsigned int line, uintptr_t arg)
 {
    _invalid_parameter_noinfo();
+}
+#else
+static void* (__cdecl *MSVCRT_operator_new)(size_t);
+static void (__cdecl *MSVCRT_operator_delete)(void*);
+
+void* __cdecl operator_new(size_t size)
+{
+    void *ret = MSVCRT_operator_new(size);
+#if _MSVCP_VER < 80
+    if (!ret) _Xmem();
+#endif
+    return ret;
+}
+
+void __cdecl operator_delete(void *mem)
+{
+    MSVCRT_operator_delete(mem);
 }
 #endif
 
@@ -122,8 +274,6 @@ static void init_cxx_funcs(void)
     if (!hmod) FIXME( "%s not loaded\n", MSVCRT_NAME(_MSVCP_VER) );
 
 #if _MSVCP_VER >= 140
-    MSVCRT_operator_new = operator_new;
-    MSVCRT_operator_delete = operator_delete;
     MSVCRT_set_new_handler = (void*)GetProcAddress(hmod, "_set_new_handler");
 
     hcon = LoadLibraryA( CONCRT_NAME(_MSVCP_VER) );
@@ -143,7 +293,7 @@ static void init_cxx_funcs(void)
     }
 #endif
 
-#if _MSVCP_VER >= 110
+#if _MSVCP_VER >= 110 && _MSVCP_VER <= 120
     if (sizeof(void *) > sizeof(int))  /* 64-bit has different names */
     {
         critical_section_ctor = (void*)GetProcAddress(hcon, "??0critical_section@Concurrency@@QEAA@XZ");
@@ -151,6 +301,16 @@ static void init_cxx_funcs(void)
         critical_section_lock = (void*)GetProcAddress(hcon, "?lock@critical_section@Concurrency@@QEAAXXZ");
         critical_section_unlock = (void*)GetProcAddress(hcon, "?unlock@critical_section@Concurrency@@QEAAXXZ");
         critical_section_trylock = (void*)GetProcAddress(hcon, "?try_lock@critical_section@Concurrency@@QEAA_NXZ");
+        _Condition_variable_ctor = (void*)GetProcAddress(hcon, "??0_Condition_variable@details@Concurrency@@QEAA@XZ");
+        _Condition_variable_dtor = (void*)GetProcAddress(hcon, "??1_Condition_variable@details@Concurrency@@QEAA@XZ");
+        _Condition_variable_wait = (void*)GetProcAddress(hcon,
+                "?wait@_Condition_variable@details@Concurrency@@QEAAXAEAVcritical_section@3@@Z");
+        _Condition_variable_wait_for = (void*)GetProcAddress(hcon,
+                "?wait_for@_Condition_variable@details@Concurrency@@QEAA_NAEAVcritical_section@3@I@Z");
+        _Condition_variable_notify_one = (void*)GetProcAddress(hcon,
+                "?notify_one@_Condition_variable@details@Concurrency@@QEAAXXZ");
+        _Condition_variable_notify_all = (void*)GetProcAddress(hcon,
+                "?notify_all@_Condition_variable@details@Concurrency@@QEAAXXZ");
     }
     else
     {
@@ -160,12 +320,32 @@ static void init_cxx_funcs(void)
         critical_section_lock = (void*)GetProcAddress(hcon, "?lock@critical_section@Concurrency@@QAAXXZ");
         critical_section_unlock = (void*)GetProcAddress(hcon, "?unlock@critical_section@Concurrency@@QAAXXZ");
         critical_section_trylock = (void*)GetProcAddress(hcon, "?try_lock@critical_section@Concurrency@@QAA_NXZ");
+        _Condition_variable_ctor = (void*)GetProcAddress(hcon, "??0_Condition_variable@details@Concurrency@@QAA@XZ");
+        _Condition_variable_dtor = (void*)GetProcAddress(hcon, "??1_Condition_variable@details@Concurrency@@QAA@XZ");
+        _Condition_variable_wait = (void*)GetProcAddress(hcon,
+                "?wait@_Condition_variable@details@Concurrency@@QAAXAAVcritical_section@3@@Z");
+        _Condition_variable_wait_for = (void*)GetProcAddress(hcon,
+                "?wait_for@_Condition_variable@details@Concurrency@@QAA_NAAVcritical_section@3@I@Z");
+        _Condition_variable_notify_one = (void*)GetProcAddress(hcon,
+                "?notify_one@_Condition_variable@details@Concurrency@@QAAXXZ");
+        _Condition_variable_notify_all = (void*)GetProcAddress(hcon,
+                "?notify_all@_Condition_variable@details@Concurrency@@QAAXXZ");
 #else
         critical_section_ctor = (void*)GetProcAddress(hcon, "??0critical_section@Concurrency@@QAE@XZ");
         critical_section_dtor = (void*)GetProcAddress(hcon, "??1critical_section@Concurrency@@QAE@XZ");
         critical_section_lock = (void*)GetProcAddress(hcon, "?lock@critical_section@Concurrency@@QAEXXZ");
         critical_section_unlock = (void*)GetProcAddress(hcon, "?unlock@critical_section@Concurrency@@QAEXXZ");
         critical_section_trylock = (void*)GetProcAddress(hcon, "?try_lock@critical_section@Concurrency@@QAE_NXZ");
+        _Condition_variable_ctor = (void*)GetProcAddress(hcon, "??0_Condition_variable@details@Concurrency@@QAE@XZ");
+        _Condition_variable_dtor = (void*)GetProcAddress(hcon, "??1_Condition_variable@details@Concurrency@@QAE@XZ");
+        _Condition_variable_wait = (void*)GetProcAddress(hcon,
+                "?wait@_Condition_variable@details@Concurrency@@QAEXAAVcritical_section@3@@Z");
+        _Condition_variable_wait_for = (void*)GetProcAddress(hcon,
+                "?wait_for@_Condition_variable@details@Concurrency@@QAE_NAAVcritical_section@3@I@Z");
+        _Condition_variable_notify_one = (void*)GetProcAddress(hcon,
+                "?notify_one@_Condition_variable@details@Concurrency@@QAEXXZ");
+        _Condition_variable_notify_all = (void*)GetProcAddress(hcon,
+                "?notify_all@_Condition_variable@details@Concurrency@@QAEXXZ");
 #endif
     }
 #endif /* _MSVCP_VER >= 110 */
@@ -177,7 +357,7 @@ static void init_cxx_funcs(void)
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-    TRACE("(0x%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
+    TRACE("(0x%p, %ld, %p)\n", hinstDLL, fdwReason, lpvReserved);
 
     switch (fdwReason)
     {
@@ -189,6 +369,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
             init_io(hinstDLL);
 #if _MSVCP_VER >= 100
             init_misc(hinstDLL);
+            init_concurrency_details(hinstDLL);
 #endif
             break;
         case DLL_PROCESS_DETACH:

@@ -84,7 +84,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateRemoteThreadEx( HANDLE process, SECURITY_A
     else stack_commit = stack;
 
     if (!set_ntstatus( RtlCreateUserThread( process, sa ? sa->lpSecurityDescriptor : NULL, TRUE,
-                                            NULL, stack_reserve, stack_commit,
+                                            0, stack_reserve, stack_commit,
                                             (PRTL_THREAD_START_ROUTINE)start, param, &handle, &client_id )))
         return 0;
 
@@ -417,7 +417,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetThreadContext( HANDLE thread, const CONTEXT *co
  */
 HRESULT WINAPI DECLSPEC_HOTPATCH SetThreadDescription( HANDLE thread, PCWSTR description )
 {
-    THREAD_DESCRIPTION_INFORMATION info;
+    THREAD_NAME_INFORMATION info;
     int length;
 
     TRACE( "(%p, %s)\n", thread, debugstr_w( description ));
@@ -427,10 +427,10 @@ HRESULT WINAPI DECLSPEC_HOTPATCH SetThreadDescription( HANDLE thread, PCWSTR des
     if (length > USHRT_MAX)
         return HRESULT_FROM_NT(STATUS_INVALID_PARAMETER);
 
-    info.Description.Length = info.Description.MaximumLength = length;
-    info.Description.Buffer = (WCHAR *)description;
+    info.ThreadName.Length = info.ThreadName.MaximumLength = length;
+    info.ThreadName.Buffer = (WCHAR *)description;
 
-    return HRESULT_FROM_NT(NtSetInformationThread( thread, ThreadDescription, &info, sizeof(info) ));
+    return HRESULT_FROM_NT(NtSetInformationThread( thread, ThreadNameInformation, &info, sizeof(info) ));
 }
 
 /***********************************************************************
@@ -438,7 +438,7 @@ HRESULT WINAPI DECLSPEC_HOTPATCH SetThreadDescription( HANDLE thread, PCWSTR des
  */
 HRESULT WINAPI DECLSPEC_HOTPATCH GetThreadDescription( HANDLE thread, WCHAR **description )
 {
-    THREAD_DESCRIPTION_INFORMATION *info;
+    THREAD_NAME_INFORMATION *info;
     NTSTATUS status;
     ULONG length;
 
@@ -447,23 +447,23 @@ HRESULT WINAPI DECLSPEC_HOTPATCH GetThreadDescription( HANDLE thread, WCHAR **de
     *description = NULL;
 
     length = 0;
-    status = NtQueryInformationThread( thread, ThreadDescription, NULL, 0, &length );
+    status = NtQueryInformationThread( thread, ThreadNameInformation, NULL, 0, &length );
     if (status != STATUS_BUFFER_TOO_SMALL)
         return HRESULT_FROM_NT(status);
 
     if (!(info = heap_alloc( length )))
         return HRESULT_FROM_NT(STATUS_NO_MEMORY);
 
-    status = NtQueryInformationThread( thread, ThreadDescription, info, length, &length );
+    status = NtQueryInformationThread( thread, ThreadNameInformation, info, length, &length );
     if (!status)
     {
-        if (!(*description = LocalAlloc( 0, info->Description.Length + sizeof(WCHAR))))
+        if (!(*description = LocalAlloc( 0, info->ThreadName.Length + sizeof(WCHAR))))
             status = STATUS_NO_MEMORY;
         else
         {
-            if (info->Description.Length)
-                memcpy(*description, info->Description.Buffer, info->Description.Length);
-            (*description)[info->Description.Length / sizeof(WCHAR)] = 0;
+            if (info->ThreadName.Length)
+                memcpy(*description, info->ThreadName.Buffer, info->ThreadName.Length);
+            (*description)[info->ThreadName.Length / sizeof(WCHAR)] = 0;
         }
     }
 
@@ -512,7 +512,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetThreadGroupAffinity( HANDLE thread, const GROUP
  */
 DWORD WINAPI DECLSPEC_HOTPATCH SetThreadIdealProcessor( HANDLE thread, DWORD proc )
 {
-    FIXME( "(%p %u): stub\n", thread, proc );
+    FIXME( "(%p %lu): stub\n", thread, proc );
     if (proc > MAXIMUM_PROCESSORS)
     {
         SetLastError( ERROR_INVALID_PARAMETER );
@@ -989,6 +989,31 @@ LPVOID WINAPI DECLSPEC_HOTPATCH ConvertThreadToFiber( LPVOID param )
 LPVOID WINAPI DECLSPEC_HOTPATCH ConvertThreadToFiberEx( LPVOID param, DWORD flags )
 {
     struct fiber_data *fiber;
+
+    if (NtCurrentTeb()->Tib.u.FiberData)
+    {
+        /* CrossOver hack for bug 20987 */
+        static int is_halo_mcc = -1;
+
+        if (is_halo_mcc == -1)
+        {
+            static const WCHAR mcc[] = {'M','C','C','-','W','i','n','6','4','-',
+                'S','h','i','p','p','i','n','g','.','e','x','e',0};
+            WCHAR path[MAX_PATH];
+            DWORD len = ARRAY_SIZE(mcc) - 1, len2 = GetModuleFileNameW( NULL, path, MAX_PATH );
+
+            is_halo_mcc = len <= len2 && !lstrcmpiW( path + len2 - len, mcc );
+        }
+
+        if (is_halo_mcc)
+        {
+            TRACE("CrossOver hack: faking success\n");
+            return NtCurrentTeb()->Tib.u.FiberData;
+        }
+
+        SetLastError( ERROR_ALREADY_FIBER );
+        return NULL;
+    }
 
     if (!(fiber = HeapAlloc( GetProcessHeap(), 0, sizeof(*fiber) )))
     {

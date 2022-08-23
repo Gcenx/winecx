@@ -91,8 +91,12 @@ static int   (CDECL   *p_vcomp_for_dynamic_next)(unsigned int *begin, unsigned i
 static void  (CDECL   *p_vcomp_for_static_end)(void);
 static void  (CDECL   *p_vcomp_for_static_init)(int first, int last, int step, int chunksize, unsigned int *loops,
                                                 int *begin, int *end, int *next, int *lastchunk);
+static void  (CDECL   *p_vcomp_for_static_init_i8)(LONG64 first, LONG64 last, LONG64 step, LONG64 chunksize, ULONG64 *loops,
+                                                LONG64 *begin, LONG64 *end, LONG64 *next, LONG64 *lastchunk);
 static void  (CDECL   *p_vcomp_for_static_simple_init)(unsigned int first, unsigned int last, int step,
                                                        BOOL increment, unsigned int *begin, unsigned int *end);
+static void  (CDECL   *p_vcomp_for_static_simple_init_i8)(ULONG64 first, ULONG64 last, LONG64 step,
+                                                       BOOL increment, ULONG64 *begin, ULONG64 *end);
 static void  (WINAPIV *p_vcomp_fork)(BOOL ifval, int nargs, void *wrapper, ...);
 static int   (CDECL   *p_vcomp_get_thread_num)(void);
 static void  (CDECL   *p_vcomp_leave_critsect)(CRITICAL_SECTION *critsect);
@@ -117,6 +121,7 @@ static void  (CDECL   *pomp_destroy_lock)(omp_lock_t *lock);
 static void  (CDECL   *pomp_destroy_nest_lock)(omp_nest_lock_t *lock);
 static int   (CDECL   *pomp_get_max_threads)(void);
 static int   (CDECL   *pomp_get_nested)(void);
+static int   (CDECL   *pomp_get_num_procs)(void);
 static int   (CDECL   *pomp_get_num_threads)(void);
 static int   (CDECL   *pomp_get_thread_num)(void);
 static int   (CDECL   *pomp_in_parallel)(void);
@@ -327,7 +332,9 @@ static BOOL init_vcomp(void)
     VCOMP_GET_PROC(_vcomp_for_dynamic_next);
     VCOMP_GET_PROC(_vcomp_for_static_end);
     VCOMP_GET_PROC(_vcomp_for_static_init);
+    VCOMP_GET_PROC(_vcomp_for_static_init_i8);
     VCOMP_GET_PROC(_vcomp_for_static_simple_init);
+    VCOMP_GET_PROC(_vcomp_for_static_simple_init_i8);
     VCOMP_GET_PROC(_vcomp_fork);
     VCOMP_GET_PROC(_vcomp_get_thread_num);
     VCOMP_GET_PROC(_vcomp_leave_critsect);
@@ -352,6 +359,7 @@ static BOOL init_vcomp(void)
     VCOMP_GET_PROC(omp_destroy_nest_lock);
     VCOMP_GET_PROC(omp_get_max_threads);
     VCOMP_GET_PROC(omp_get_nested);
+    VCOMP_GET_PROC(omp_get_num_procs);
     VCOMP_GET_PROC(omp_get_num_threads);
     VCOMP_GET_PROC(omp_get_thread_num);
     VCOMP_GET_PROC(omp_in_parallel);
@@ -388,7 +396,7 @@ static void CDECL num_threads_cb(BOOL nested, int parallel, int nested_threads, 
     p_vcomp_barrier();
 
     num_threads = pomp_get_num_threads();
-    ok(num_threads == *count, "expected num_threads == %d, got %d\n", *count, num_threads);
+    ok(num_threads == *count, "expected num_threads == %ld, got %d\n", *count, num_threads);
     thread_num = pomp_get_thread_num();
     ok(thread_num >= 0 && thread_num < num_threads,
        "expected thread_num in range [0, %d], got %d\n", num_threads - 1, thread_num);
@@ -401,16 +409,16 @@ static void CDECL num_threads_cb(BOOL nested, int parallel, int nested_threads, 
     thread_count = 0;
     p_vcomp_fork(TRUE, 2, num_threads_cb2, TRUE, &thread_count);
     if (nested)
-        ok(thread_count == nested_threads, "expected %d threads, got %d\n", nested_threads, thread_count);
+        ok(thread_count == nested_threads, "expected %d threads, got %ld\n", nested_threads, thread_count);
     else
-        ok(thread_count == 1, "expected 1 thread, got %d\n", thread_count);
+        ok(thread_count == 1, "expected 1 thread, got %ld\n", thread_count);
 
     is_parallel = pomp_in_parallel();
     ok(is_parallel == parallel, "expected %d, got %d\n", parallel, is_parallel);
 
     thread_count = 0;
     p_vcomp_fork(FALSE, 2, num_threads_cb2, parallel, &thread_count);
-    ok(thread_count == 1, "expected 1 thread, got %d\n", thread_count);
+    ok(thread_count == 1, "expected 1 thread, got %ld\n", thread_count);
 
     is_parallel = pomp_in_parallel();
     ok(is_parallel == parallel, "expected %d, got %d\n", parallel, is_parallel);
@@ -419,9 +427,9 @@ static void CDECL num_threads_cb(BOOL nested, int parallel, int nested_threads, 
     thread_count = 0;
     p_vcomp_fork(TRUE, 2, num_threads_cb2, TRUE, &thread_count);
     if (nested)
-        ok(thread_count == 4, "expected 4 threads, got %d\n", thread_count);
+        ok(thread_count == 4, "expected 4 threads, got %ld\n", thread_count);
     else
-        ok(thread_count == 1, "expected 1 thread, got %d\n", thread_count);
+        ok(thread_count == 1, "expected 1 thread, got %ld\n", thread_count);
 
     is_parallel = pomp_in_parallel();
     ok(is_parallel == parallel, "expected %d, got %d\n", parallel, is_parallel);
@@ -451,7 +459,7 @@ static void test_omp_get_num_threads(BOOL nested)
     ok(num_threads == 1, "expected num_threads == 1, got %d\n", num_threads);
     thread_count = 0;
     p_vcomp_fork(TRUE, 4, num_threads_cb, nested, TRUE, max_threads, &thread_count);
-    ok(thread_count == max_threads, "expected %d threads, got %d\n", max_threads, thread_count);
+    ok(thread_count == max_threads, "expected %d threads, got %ld\n", max_threads, thread_count);
 
     is_parallel = pomp_in_parallel();
     ok(is_parallel == FALSE, "expected FALSE, got %d\n", is_parallel);
@@ -460,7 +468,7 @@ static void test_omp_get_num_threads(BOOL nested)
     ok(num_threads == 1, "expected num_threads == 1, got %d\n", num_threads);
     thread_count = 0;
     p_vcomp_fork(FALSE, 4, num_threads_cb, TRUE, FALSE, max_threads, &thread_count);
-    ok(thread_count == 1, "expected 1 thread, got %d\n", thread_count);
+    ok(thread_count == 1, "expected 1 thread, got %ld\n", thread_count);
 
     is_parallel = pomp_in_parallel();
     ok(is_parallel == FALSE, "expected FALSE, got %d\n", is_parallel);
@@ -470,7 +478,7 @@ static void test_omp_get_num_threads(BOOL nested)
     ok(num_threads == 1, "expected num_threads == 1, got %d\n", num_threads);
     thread_count = 0;
     p_vcomp_fork(TRUE, 4, num_threads_cb, nested, TRUE, 1, &thread_count);
-    ok(thread_count == 1, "expected 1 thread, got %d\n", thread_count);
+    ok(thread_count == 1, "expected 1 thread, got %ld\n", thread_count);
 
     is_parallel = pomp_in_parallel();
     ok(is_parallel == FALSE, "expected FALSE, got %d\n", is_parallel);
@@ -480,38 +488,38 @@ static void test_omp_get_num_threads(BOOL nested)
     ok(num_threads == 1, "expected num_threads == 1, got %d\n", num_threads);
     thread_count = 0;
     p_vcomp_fork(TRUE, 4, num_threads_cb, nested, TRUE, 2, &thread_count);
-    ok(thread_count == 2, "expected 2 threads, got %d\n", thread_count);
+    ok(thread_count == 2, "expected 2 threads, got %ld\n", thread_count);
 
     pomp_set_num_threads(4);
     num_threads = pomp_get_num_threads();
     ok(num_threads == 1, "expected num_threads == 1, got %d\n", num_threads);
     thread_count = 0;
     p_vcomp_fork(TRUE, 4, num_threads_cb, nested, TRUE, 4, &thread_count);
-    ok(thread_count == 4, "expected 4 threads, got %d\n", thread_count);
+    ok(thread_count == 4, "expected 4 threads, got %ld\n", thread_count);
 
     p_vcomp_set_num_threads(8);
     num_threads = pomp_get_num_threads();
     ok(num_threads == 1, "expected num_threads == 1, got %d\n", num_threads);
     thread_count = 0;
     p_vcomp_fork(TRUE, 4, num_threads_cb, nested, TRUE, 4, &thread_count);
-    ok(thread_count == 8, "expected 8 threads, got %d\n", thread_count);
+    ok(thread_count == 8, "expected 8 threads, got %ld\n", thread_count);
     thread_count = 0;
     p_vcomp_fork(TRUE, 4, num_threads_cb, nested, TRUE, 4, &thread_count);
-    ok(thread_count == 4, "expected 4 threads, got %d\n", thread_count);
+    ok(thread_count == 4, "expected 4 threads, got %ld\n", thread_count);
 
     p_vcomp_set_num_threads(0);
     num_threads = pomp_get_num_threads();
     ok(num_threads == 1, "expected num_threads == 1, got %d\n", num_threads);
     thread_count = 0;
     p_vcomp_fork(TRUE, 4, num_threads_cb, nested, TRUE, 4, &thread_count);
-    ok(thread_count == 4, "expected 4 threads, got %d\n", thread_count);
+    ok(thread_count == 4, "expected 4 threads, got %ld\n", thread_count);
 
     pomp_set_num_threads(0);
     num_threads = pomp_get_num_threads();
     ok(num_threads == 1, "expected num_threads == 1, got %d\n", num_threads);
     thread_count = 0;
     p_vcomp_fork(TRUE, 4, num_threads_cb, nested, TRUE, 4, &thread_count);
-    ok(thread_count == 4, "expected 4 threads, got %d\n", thread_count);
+    ok(thread_count == 4, "expected 4 threads, got %ld\n", thread_count);
 
     pomp_set_num_threads(max_threads);
     pomp_set_nested(FALSE);
@@ -562,19 +570,19 @@ static void test_vcomp_fork(void)
 
     a = 0; b = 1; c = 2; d = 3; e = 4;
     p_vcomp_fork(FALSE, 5, fork_ptr_cb, &a, &b, &c, &d, &e);
-    ok(a == 1, "expected a == 1, got %d\n", a);
-    ok(b == 2, "expected b == 2, got %d\n", b);
-    ok(c == 3, "expected c == 3, got %d\n", c);
-    ok(d == 4, "expected d == 4, got %d\n", d);
-    ok(e == 5, "expected e == 5, got %d\n", e);
+    ok(a == 1, "expected a == 1, got %ld\n", a);
+    ok(b == 2, "expected b == 2, got %ld\n", b);
+    ok(c == 3, "expected c == 3, got %ld\n", c);
+    ok(d == 4, "expected d == 4, got %ld\n", d);
+    ok(e == 5, "expected e == 5, got %ld\n", e);
 
     a = 0; b = 1; c = 2; d = 3; e = 4;
     p_vcomp_fork(TRUE, 5, fork_ptr_cb, &a, &b, &c, &d, &e);
-    ok(a == 4, "expected a == 4, got %d\n", a);
-    ok(b == 5, "expected b == 5, got %d\n", b);
-    ok(c == 6, "expected c == 6, got %d\n", c);
-    ok(d == 7, "expected d == 7, got %d\n", d);
-    ok(e == 8, "expected e == 8, got %d\n", e);
+    ok(a == 4, "expected a == 4, got %ld\n", a);
+    ok(b == 5, "expected b == 5, got %ld\n", b);
+    ok(c == 6, "expected c == 6, got %ld\n", c);
+    ok(d == 7, "expected d == 7, got %ld\n", d);
+    ok(e == 8, "expected e == 8, got %ld\n", e);
 
     p_vcomp_fork(TRUE, 11, fork_uintptr_cb, (UINT_PTR)1, (UINT_PTR)(MAXUINT_PTR - 2),
         (UINT_PTR)3, (UINT_PTR)(MAXUINT_PTR - 4), (UINT_PTR)5,
@@ -635,9 +643,9 @@ if (0)
 
     a = b = c = 0;
     section_cb(&a, &b, &c);
-    ok(a == 20, "expected a == 20, got %d\n", a);
-    ok(b == 30, "expected b == 30, got %d\n", b);
-    ok(c == 40, "expected c == 40, got %d\n", c);
+    ok(a == 20, "expected a == 20, got %ld\n", a);
+    ok(b == 30, "expected b == 30, got %ld\n", b);
+    ok(c == 40, "expected c == 40, got %ld\n", c);
 
     for (i = 1; i <= 4; i++)
     {
@@ -645,15 +653,15 @@ if (0)
 
         a = b = c = 0;
         p_vcomp_fork(TRUE, 3, section_cb, &a, &b, &c);
-        ok(a == 20, "expected a == 20, got %d\n", a);
-        ok(b == 30, "expected b == 30, got %d\n", b);
-        ok(c == 40, "expected c == 40, got %d\n", c);
+        ok(a == 20, "expected a == 20, got %ld\n", a);
+        ok(b == 30, "expected b == 30, got %ld\n", b);
+        ok(c == 40, "expected c == 40, got %ld\n", c);
 
         a = b = c = 0;
         p_vcomp_fork(FALSE, 3, section_cb, &a, &b, &c);
-        ok(a == 20, "expected a == 20, got %d\n", a);
-        ok(b == 30, "expected b == 30, got %d\n", b);
-        ok(c == 40, "expected c == 40, got %d\n", c);
+        ok(a == 20, "expected a == 20, got %ld\n", a);
+        ok(b == 30, "expected b == 30, got %ld\n", b);
+        ok(c == 40, "expected c == 40, got %ld\n", c);
     }
 
     pomp_set_num_threads(max_threads);
@@ -706,6 +714,52 @@ static void my_for_static_simple_init(BOOL dynamic, unsigned int first, unsigned
     *end   = *begin + (per_thread - 1) * step;
 }
 
+static void my_for_static_simple_init_i8(BOOL dynamic, ULONG64 first, ULONG64 last, LONG64 step,
+                                      BOOL increment, ULONG64 *begin, ULONG64 *end)
+{
+    ULONG64 iterations, per_thread, remaining;
+    int num_threads = pomp_get_num_threads();
+    int thread_num = pomp_get_thread_num();
+
+    if (!dynamic && num_threads == 1)
+    {
+        *begin = first;
+        *end   = last;
+        return;
+    }
+
+    if (step <= 0)
+    {
+        *begin = 0;
+        *end   = increment ? -1 : 1;
+        return;
+    }
+
+    if (increment)
+        iterations = 1 + (last - first) / step;
+    else
+    {
+        iterations = 1 + (first - last) / step;
+        step *= -1;
+    }
+
+    per_thread = iterations / num_threads;
+    remaining  = iterations - per_thread * num_threads;
+
+    if (thread_num < remaining)
+        per_thread++;
+    else if (per_thread)
+        first += remaining * step;
+    else
+    {
+        *begin = first;
+        *end   = first - step;
+        return;
+    }
+
+    *begin = first + per_thread * thread_num * step;
+    *end   = *begin + (per_thread - 1) * step;
+}
 
 static void CDECL for_static_simple_cb(void)
 {
@@ -809,18 +863,123 @@ static void CDECL for_static_simple_cb(void)
     }
 }
 
+static void CDECL for_static_simple_i8_cb(void)
+{
+    static const struct
+    {
+        ULONG64 first;
+        ULONG64 last;
+        LONG64 step;
+    }
+    tests[] =
+    {
+        {          0,          0,   1 }, /* 0 */
+        {          0,          1,   1 },
+        {          0,          2,   1 },
+        {          0,          3,   1 },
+        {          0,        100,   0 },
+        {          0,        100,   1 },
+        {          0,        100,   2 },
+        {          0,        100,   3 },
+        {          0,        100,  -1 },
+        {          0,        100,  -2 },
+        {          0,        100,  -3 }, /* 10 */
+        {          0,        100,  10 },
+        {          0,        100,  50 },
+        {          0,        100, 100 },
+        {          0,        100, 150 },
+        {          0, 0x80000000,   1 },
+        {          0, 0xfffffffe,   1 },
+        {          0, 0xffffffff,   1 },
+        {         50,         50,   0 },
+        {         50,         50,   1 },
+        {         50,         50,   2 }, /* 20 */
+        {         50,         50,   3 },
+        {         50,         50,  -1 },
+        {         50,         50,  -2 },
+        {         50,         50,  -3 },
+        {        100,        200,   1 },
+        {        100,        200,   5 },
+        {        100,        200,  10 },
+        {        100,        200,  50 },
+        {        100,        200, 100 },
+        {        100,        200, 150 }, /* 30 */
+    };
+    int num_threads = pomp_get_num_threads();
+    int thread_num = pomp_get_thread_num();
+    int i;
+
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
+    {
+        ULONG64 my_begin, my_end, begin, end;
+
+        begin = end = -0xdeadbeef;
+        my_for_static_simple_init_i8(FALSE, tests[i].first, tests[i].last, tests[i].step, FALSE, &my_begin, &my_end);
+        p_vcomp_for_static_simple_init_i8(tests[i].first, tests[i].last, tests[i].step, FALSE, &begin, &end);
+
+        ok(begin == my_begin, "test %d, thread %d/%d: expected begin == %s, got %s\n",
+           i, thread_num, num_threads, wine_dbgstr_longlong(my_begin), wine_dbgstr_longlong(begin));
+        ok(end == my_end, "test %d, thread %d/%d: expected end == %s, got %s\n",
+           i, thread_num, num_threads, wine_dbgstr_longlong(my_end), wine_dbgstr_longlong(end));
+
+        p_vcomp_for_static_end();
+        p_vcomp_barrier();
+
+        begin = end = -0xdeadbeef;
+        my_for_static_simple_init_i8(FALSE, tests[i].first, tests[i].last, tests[i].step, TRUE, &my_begin, &my_end);
+        p_vcomp_for_static_simple_init_i8(tests[i].first, tests[i].last, tests[i].step, TRUE, &begin, &end);
+
+        ok(begin == my_begin, "test %d, thread %d/%d: expected begin == %s, got %s\n",
+           i, thread_num, num_threads, wine_dbgstr_longlong(my_begin), wine_dbgstr_longlong(begin));
+        ok(end == my_end, "test %d, thread %d/%d: expected end == %s, got %s\n",
+           i, thread_num, num_threads, wine_dbgstr_longlong(my_end), wine_dbgstr_longlong(end));
+
+        p_vcomp_for_static_end();
+        p_vcomp_barrier();
+
+        if (tests[i].first == tests[i].last) continue;
+
+        begin = end = -0xdeadbeef;
+        my_for_static_simple_init_i8(FALSE, tests[i].last, tests[i].first, tests[i].step, FALSE, &my_begin, &my_end);
+        p_vcomp_for_static_simple_init_i8(tests[i].last, tests[i].first, tests[i].step, FALSE, &begin, &end);
+
+        ok(begin == my_begin, "test %d, thread %d/%d: expected begin == %s, got %s\n",
+           i, thread_num, num_threads, wine_dbgstr_longlong(my_begin), wine_dbgstr_longlong(begin));
+        ok(end == my_end, "test %d, thread %d/%d: expected end == %s, got %s\n",
+           i, thread_num, num_threads, wine_dbgstr_longlong(my_end), wine_dbgstr_longlong(end));
+
+        p_vcomp_for_static_end();
+        p_vcomp_barrier();
+
+        begin = end = -0xdeadbeef;
+        my_for_static_simple_init_i8(FALSE, tests[i].last, tests[i].first, tests[i].step, TRUE, &my_begin, &my_end);
+        p_vcomp_for_static_simple_init_i8(tests[i].last, tests[i].first, tests[i].step, TRUE, &begin, &end);
+
+        ok(begin == my_begin, "test %d, thread %d/%d: expected begin == %s, got %s\n",
+           i, thread_num, num_threads, wine_dbgstr_longlong(my_begin), wine_dbgstr_longlong(begin));
+        ok(end == my_end, "test %d, thread %d/%d: expected end == %s, got %s\n",
+           i, thread_num, num_threads, wine_dbgstr_longlong(my_end), wine_dbgstr_longlong(end));
+
+        p_vcomp_for_static_end();
+        p_vcomp_barrier();
+    }
+}
+
 static void test_vcomp_for_static_simple_init(void)
 {
     int max_threads = pomp_get_max_threads();
     int i;
 
     for_static_simple_cb();
+    for_static_simple_i8_cb();
 
     for (i = 1; i <= 4; i++)
     {
         pomp_set_num_threads(i);
         p_vcomp_fork(TRUE, 0, for_static_simple_cb);
         p_vcomp_fork(FALSE, 0, for_static_simple_cb);
+        p_vcomp_fork(TRUE, 0, for_static_simple_i8_cb);
+        p_vcomp_fork(FALSE, 0, for_static_simple_i8_cb);
     }
 
     pomp_set_num_threads(max_threads);
@@ -882,6 +1041,71 @@ static DWORD CDECL my_for_static_init(int first, int last, int step, int chunksi
         chunksize = 1;
 
     num_chunks  = ((DWORD64)iterations + chunksize - 1) / chunksize;
+    per_thread  = num_chunks / num_threads;
+    remaining   = num_chunks - per_thread * num_threads;
+
+    *loops      = per_thread + (thread_num < remaining);
+    *begin      = first + thread_num * chunksize * step;
+    *end        = *begin + (chunksize - 1) * step;
+    *next       = chunksize * num_threads * step;
+    *lastchunk  = first + (num_chunks - 1) * chunksize * step;
+    return 0;
+}
+
+static DWORD CDECL my_for_static_init_i8(LONG64 first, LONG64 last, LONG64 step, LONG64 chunksize, ULONG64 *loops,
+                               LONG64 *begin, LONG64 *end, LONG64 *next, LONG64 *lastchunk)
+{
+    ULONG64 iterations, num_chunks, per_thread, remaining;
+    int num_threads = pomp_get_num_threads();
+    int thread_num = pomp_get_thread_num();
+
+    if (num_threads == 1 && chunksize != 1)
+    {
+        *loops      = 1;
+        *begin      = first;
+        *end        = last;
+        *next       = 0;
+        *lastchunk  = first;
+        return 0;
+    }
+
+    if (first == last)
+    {
+        *loops = !thread_num;
+        if (!thread_num)
+        {
+            /* The value in *next on Windows is either uninitialized, or contains
+             * garbage. The value shouldn't matter for *loops <= 1, so no need to
+             * reproduce that. */
+            *begin      = first;
+            *end        = last;
+            *next       = 0;
+            *lastchunk  = first;
+        }
+        return thread_num ? 0 : VCOMP_FOR_STATIC_BROKEN_NEXT;
+    }
+
+    if (step <= 0)
+    {
+        /* The total number of iterations depends on the number of threads here,
+         * which doesn't make any sense. This is most likely a bug in the Windows
+         * implementation. */
+        return VCOMP_FOR_STATIC_BROKEN_LOOP;
+    }
+
+    if (first < last)
+        iterations = 1 + (last - first) / step;
+    else
+    {
+        iterations = 1 + (first - last) / step;
+        step *= -1;
+    }
+
+    if (chunksize < 1)
+        chunksize = 1;
+
+    num_chunks  = iterations / chunksize;
+    if (iterations % chunksize) num_chunks++;
     per_thread  = num_chunks / num_threads;
     remaining   = num_chunks - per_thread * num_threads;
 
@@ -1070,6 +1294,189 @@ static void CDECL for_static_cb(void)
     }
 }
 
+static void CDECL for_static_i8_cb(void)
+{
+    static const struct
+    {
+        LONG64 first;
+        LONG64 last;
+        LONG64 step;
+        LONG64 chunksize;
+    }
+    tests[] =
+    {
+        {           0,           0,           1,      1 }, /* 0 */
+        {           0,           1,           1,      1 },
+        {           0,           2,           1,      1 },
+        {           0,           3,           1,      1 },
+        {           0,         100,           1,      0 },
+        {           0,         100,           1,      1 },
+        {           0,         100,           1,      5 },
+        {           0,         100,           1,     10 },
+        {           0,         100,           1,     50 },
+        {           0,         100,           1,    100 },
+        {           0,         100,           1,    150 }, /* 10 */
+        {           0,         100,           3,      0 },
+        {           0,         100,           3,      1 },
+        {           0,         100,           3,      5 },
+        {           0,         100,           3,     10 },
+        {           0,         100,           3,     50 },
+        {           0,         100,           3,    100 },
+        {           0,         100,           3,    150 },
+        {           0,         100,           5,      1 },
+        {           0,         100,          -3,      0 },
+        {           0,         100,          -3,      1 }, /* 20 */
+        {           0,         100,          -3,      5 },
+        {           0,         100,          -3,     10 },
+        {           0,         100,          -3,     50 },
+        {           0,         100,          -3,    100 },
+        {           0,         100,          -3,    150 },
+        {           0,         100,          10,      1 },
+        {           0,         100,          50,      1 },
+        {           0,         100,         100,      1 },
+        {           0,         100,         150,      1 },
+        {           0,  0x10000000,           1,    123 }, /* 30 */
+        {           0,  0x20000000,           1,    123 },
+        {           0,  0x40000000,           1,    123 },
+        {           0, -0x80000000,           1,    123 },
+        {          50,          50,           1,      1 },
+        {          50,          50,           1,      2 },
+        {          50,          50,           1,     -1 },
+        {          50,          50,           1,     -2 },
+        {          50,          50,           2,      1 },
+        {          50,          50,           3,      1 },
+        {         100,         200,           3,      1 }, /* 40 */
+        {         100,         200,           3,     -1 },
+        {  0x7ffffffe, -0x80000000,           1,    123 },
+        {  0x7fffffff, -0x80000000,           1,    123 },
+        {  0x7ffffffffffffffeLL, -0x8000000000000000LL, 1, 123 },
+        {  0x7fffffffffffffffLL, -0x8000000000000000LL, 1, 123 },
+    };
+    int num_threads = pomp_get_num_threads();
+    int thread_num = pomp_get_thread_num();
+    int i;
+
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
+    {
+        LONG64 my_begin, my_end, my_next, my_lastchunk;
+        LONG64 begin, end, next, lastchunk;
+        ULONG64 my_loops, loops;
+        DWORD broken_flags;
+
+        my_loops = my_begin = my_end = my_next = my_lastchunk = -0xdeadbeef;
+        loops = begin = end = next = lastchunk = -0xdeadbeef;
+        broken_flags = my_for_static_init_i8(tests[i].first, tests[i].last, tests[i].step, tests[i].chunksize,
+                                          &my_loops, &my_begin, &my_end, &my_next, &my_lastchunk);
+        p_vcomp_for_static_init_i8(tests[i].first, tests[i].last, tests[i].step, tests[i].chunksize,
+                                &loops, &begin, &end, &next, &lastchunk);
+
+        if (broken_flags & VCOMP_FOR_STATIC_BROKEN_LOOP)
+        {
+            ok(loops == 0 || loops == 1, "test %d, thread %d/%d: expected loops == 0 or 1, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(loops));
+        }
+        else
+        {
+            ok(loops == my_loops, "test %d, thread %d/%d: expected loops == %s, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(my_loops), wine_dbgstr_longlong(loops));
+            ok(begin == my_begin, "test %d, thread %d/%d: expected begin == %s, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(my_begin), wine_dbgstr_longlong(begin));
+            ok(end == my_end, "test %d, thread %d/%d: expected end == %s, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(my_end), wine_dbgstr_longlong(end));
+            ok(next == my_next || broken(broken_flags & VCOMP_FOR_STATIC_BROKEN_NEXT),
+               "test %d, thread %d/%d: expected next == %s, got %s\n", i, thread_num, num_threads,
+               wine_dbgstr_longlong(my_next), wine_dbgstr_longlong(next));
+            ok(lastchunk == my_lastchunk, "test %d, thread %d/%d: expected lastchunk == %s, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(my_lastchunk), wine_dbgstr_longlong(lastchunk));
+        }
+
+        p_vcomp_for_static_end();
+        p_vcomp_barrier();
+
+        loops = end = next = lastchunk = -0xdeadbeef;
+        p_vcomp_for_static_init_i8(tests[i].first, tests[i].last, tests[i].step, tests[i].chunksize,
+                                &loops, NULL, &end, &next, &lastchunk);
+
+        if (broken_flags & VCOMP_FOR_STATIC_BROKEN_LOOP)
+        {
+            ok(loops == 0 || loops == 1, "test %d, thread %d/%d: expected loops == 0 or 1, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(loops));
+        }
+        else
+        {
+            ok(loops == my_loops, "test %d, thread %d/%d: expected loops == %s, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(my_loops), wine_dbgstr_longlong(loops));
+            ok(end == my_end, "test %d, thread %d/%d: expected end == %s, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(my_end), wine_dbgstr_longlong(end));
+            ok(next == my_next || broken(broken_flags & VCOMP_FOR_STATIC_BROKEN_NEXT),
+               "test %d, thread %d/%d: expected next == %s, got %s\n", i, thread_num, num_threads,
+               wine_dbgstr_longlong(my_next), wine_dbgstr_longlong(next));
+            ok(lastchunk == -0xdeadbeef, "test %d, thread %d/%d: expected lastchunk == -0xdeadbeef, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(lastchunk));
+        }
+
+        p_vcomp_for_static_end();
+        p_vcomp_barrier();
+
+        if (tests[i].first == tests[i].last) continue;
+
+        my_loops = my_begin = my_end = my_next = my_lastchunk = -0xdeadbeef;
+        loops = begin = end = next = lastchunk = -0xdeadbeef;
+        broken_flags = my_for_static_init_i8(tests[i].last, tests[i].first, tests[i].step, tests[i].chunksize,
+                                          &my_loops, &my_begin, &my_end, &my_next, &my_lastchunk);
+        p_vcomp_for_static_init_i8(tests[i].last, tests[i].first, tests[i].step, tests[i].chunksize,
+                                &loops, &begin, &end, &next, &lastchunk);
+
+        if (broken_flags & VCOMP_FOR_STATIC_BROKEN_LOOP)
+        {
+            ok(loops == 0 || loops == 1, "test %d, thread %d/%d: expected loops == 0 or 1, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(loops));
+        }
+        else
+        {
+            ok(loops == my_loops, "test %d, thread %d/%d: expected loops == %s, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(my_loops), wine_dbgstr_longlong(loops));
+            ok(begin == my_begin, "test %d, thread %d/%d: expected begin == %s, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(my_begin), wine_dbgstr_longlong(begin));
+            ok(end == my_end, "test %d, thread %d/%d: expected end == %s, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(my_end), wine_dbgstr_longlong(end));
+            ok(next == my_next || broken(broken_flags & VCOMP_FOR_STATIC_BROKEN_NEXT),
+               "test %d, thread %d/%d: expected next == %s, got %s\n", i, thread_num, num_threads,
+               wine_dbgstr_longlong(my_next), wine_dbgstr_longlong(next));
+            ok(lastchunk == my_lastchunk, "test %d, thread %d/%d: expected lastchunk == %s, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(my_lastchunk), wine_dbgstr_longlong(lastchunk));
+        }
+
+        p_vcomp_for_static_end();
+        p_vcomp_barrier();
+
+        loops = end = next = lastchunk = -0xdeadbeef;
+        p_vcomp_for_static_init_i8(tests[i].last, tests[i].first, tests[i].step, tests[i].chunksize,
+                                &loops, NULL, &end, &next, &lastchunk);
+
+        if (broken_flags & VCOMP_FOR_STATIC_BROKEN_LOOP)
+        {
+            ok(loops == 0 || loops == 1, "test %d, thread %d/%d: expected loops == 0 or 1, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(loops));
+        }
+        else
+        {
+            ok(loops == my_loops, "test %d, thread %d/%d: expected loops == %s, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(my_loops), wine_dbgstr_longlong(loops));
+            ok(end == my_end, "test %d, thread %d/%d: expected end == %s, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(my_end), wine_dbgstr_longlong(end));
+            ok(next == my_next || broken(broken_flags & VCOMP_FOR_STATIC_BROKEN_NEXT),
+               "test %d, thread %d/%d: expected next == %s, got %s\n", i, thread_num, num_threads,
+               wine_dbgstr_longlong(my_next), wine_dbgstr_longlong(next));
+            ok(lastchunk == -0xdeadbeef, "test %d, thread %d/%d: expected lastchunk == -0xdeadbeef, got %s\n",
+               i, thread_num, num_threads, wine_dbgstr_longlong(lastchunk));
+        }
+
+        p_vcomp_for_static_end();
+        p_vcomp_barrier();
+    }
+}
+
 #undef VCOMP_FOR_STATIC_BROKEN_LOOP
 #undef VCOMP_FOR_STATIC_BROKEN_NEXT
 
@@ -1079,12 +1486,15 @@ static void test_vcomp_for_static_init(void)
     int i;
 
     for_static_cb();
+    for_static_i8_cb();
 
     for (i = 1; i <= 4; i++)
     {
         pomp_set_num_threads(i);
         p_vcomp_fork(TRUE, 0, for_static_cb);
         p_vcomp_fork(FALSE, 0, for_static_cb);
+        p_vcomp_fork(TRUE, 0, for_static_i8_cb);
+        p_vcomp_fork(FALSE, 0, for_static_i8_cb);
     }
 
     pomp_set_num_threads(max_threads);
@@ -1234,10 +1644,10 @@ static void test_vcomp_for_dynamic_init(void)
     /* test chunked scheduling */
     a = b = c = d = 0;
     for_dynamic_chunked_cb(&a, &b, &c, &d);
-    ok(a == 71071, "expected a == 71071, got %d\n", a);
-    ok(b == 71929, "expected b == 71929, got %d\n", b);
-    ok(c == 14210, "expected c == 14210, got %d\n", c);
-    ok(d == 14790, "expected d == 14790, got %d\n", d);
+    ok(a == 71071, "expected a == 71071, got %ld\n", a);
+    ok(b == 71929, "expected b == 71929, got %ld\n", b);
+    ok(c == 14210, "expected c == 14210, got %ld\n", c);
+    ok(d == 14790, "expected d == 14790, got %ld\n", d);
 
     for (i = 1; i <= 4; i++)
     {
@@ -1245,26 +1655,26 @@ static void test_vcomp_for_dynamic_init(void)
 
         a = b = c = d = 0;
         p_vcomp_fork(TRUE, 4, for_dynamic_chunked_cb, &a, &b, &c, &d);
-        ok(a == 71071, "expected a == 71071, got %d\n", a);
-        ok(b == 71929, "expected b == 71929, got %d\n", b);
-        ok(c == 14210, "expected c == 14210, got %d\n", c);
-        ok(d == 14790, "expected d == 14790, got %d\n", d);
+        ok(a == 71071, "expected a == 71071, got %ld\n", a);
+        ok(b == 71929, "expected b == 71929, got %ld\n", b);
+        ok(c == 14210, "expected c == 14210, got %ld\n", c);
+        ok(d == 14790, "expected d == 14790, got %ld\n", d);
 
         a = b = c = d = 0;
         p_vcomp_fork(FALSE, 4, for_dynamic_chunked_cb, &a, &b, &c, &d);
-        ok(a == 71071, "expected a == 71071, got %d\n", a);
-        ok(b == 71929, "expected b == 71929, got %d\n", b);
-        ok(c == 14210, "expected c == 14210, got %d\n", c);
-        ok(d == 14790, "expected d == 14790, got %d\n", d);
+        ok(a == 71071, "expected a == 71071, got %ld\n", a);
+        ok(b == 71929, "expected b == 71929, got %ld\n", b);
+        ok(c == 14210, "expected c == 14210, got %ld\n", c);
+        ok(d == 14790, "expected d == 14790, got %ld\n", d);
     }
 
     /* test guided scheduling */
     a = b = c = d = 0;
     for_dynamic_guided_cb(VCOMP_DYNAMIC_FLAGS_GUIDED, &a, &b, &c, &d);
-    ok(a == guided_a[0], "expected a == %d, got %d\n", guided_a[0], a);
-    ok(b == guided_b[0], "expected b == %d, got %d\n", guided_b[0], b);
-    ok(c == guided_c[0], "expected c == %d, got %d\n", guided_c[0], c);
-    ok(d == guided_d[0], "expected d == %d, got %d\n", guided_d[0], d);
+    ok(a == guided_a[0], "expected a == %d, got %ld\n", guided_a[0], a);
+    ok(b == guided_b[0], "expected b == %d, got %ld\n", guided_b[0], b);
+    ok(c == guided_c[0], "expected c == %d, got %ld\n", guided_c[0], c);
+    ok(d == guided_d[0], "expected d == %d, got %ld\n", guided_d[0], d);
 
     for (i = 1; i <= 4; i++)
     {
@@ -1272,26 +1682,26 @@ static void test_vcomp_for_dynamic_init(void)
 
         a = b = c = d = 0;
         p_vcomp_fork(TRUE, 5, for_dynamic_guided_cb, VCOMP_DYNAMIC_FLAGS_GUIDED, &a, &b, &c, &d);
-        ok(a == guided_a[i - 1], "expected a == %d, got %d\n", guided_a[i - 1], a);
-        ok(b == guided_b[i - 1], "expected b == %d, got %d\n", guided_b[i - 1], b);
-        ok(c == guided_c[i - 1], "expected c == %d, got %d\n", guided_c[i - 1], c);
-        ok(d == guided_d[i - 1], "expected d == %d, got %d\n", guided_d[i - 1], d);
+        ok(a == guided_a[i - 1], "expected a == %d, got %ld\n", guided_a[i - 1], a);
+        ok(b == guided_b[i - 1], "expected b == %d, got %ld\n", guided_b[i - 1], b);
+        ok(c == guided_c[i - 1], "expected c == %d, got %ld\n", guided_c[i - 1], c);
+        ok(d == guided_d[i - 1], "expected d == %d, got %ld\n", guided_d[i - 1], d);
 
         a = b = c = d = 0;
         p_vcomp_fork(FALSE, 5, for_dynamic_guided_cb, VCOMP_DYNAMIC_FLAGS_GUIDED, &a, &b, &c, &d);
-        ok(a == guided_a[0], "expected a == %d, got %d\n", guided_a[0], a);
-        ok(b == guided_b[0], "expected b == %d, got %d\n", guided_b[0], b);
-        ok(c == guided_c[0], "expected c == %d, got %d\n", guided_c[0], c);
-        ok(d == guided_d[0], "expected d == %d, got %d\n", guided_d[0], d);
+        ok(a == guided_a[0], "expected a == %d, got %ld\n", guided_a[0], a);
+        ok(b == guided_b[0], "expected b == %d, got %ld\n", guided_b[0], b);
+        ok(c == guided_c[0], "expected c == %d, got %ld\n", guided_c[0], c);
+        ok(d == guided_d[0], "expected d == %d, got %ld\n", guided_d[0], d);
     }
 
     /* test with empty flags */
     a = b = c = d = 0;
     for_dynamic_guided_cb(0, &a, &b, &c, &d);
-    ok(a == guided_a[0], "expected a == %d, got %d\n", guided_a[0], a);
-    ok(b == guided_b[0], "expected b == %d, got %d\n", guided_b[0], b);
-    ok(c == guided_c[0], "expected c == %d, got %d\n", guided_c[0], c);
-    ok(d == guided_d[0], "expected d == %d, got %d\n", guided_d[0], d);
+    ok(a == guided_a[0], "expected a == %d, got %ld\n", guided_a[0], a);
+    ok(b == guided_b[0], "expected b == %d, got %ld\n", guided_b[0], b);
+    ok(c == guided_c[0], "expected c == %d, got %ld\n", guided_c[0], c);
+    ok(d == guided_d[0], "expected d == %d, got %ld\n", guided_d[0], d);
 
     for (i = 1; i <= 4; i++)
     {
@@ -1299,17 +1709,17 @@ static void test_vcomp_for_dynamic_init(void)
 
         a = b = c = d = 0;
         p_vcomp_fork(TRUE, 5, for_dynamic_guided_cb, 0, &a, &b, &c, &d);
-        ok(a == guided_a[i - 1], "expected a == %d, got %d\n", guided_a[i - 1], a);
-        ok(b == guided_b[i - 1], "expected b == %d, got %d\n", guided_b[i - 1], b);
-        ok(c == guided_c[i - 1], "expected c == %d, got %d\n", guided_c[i - 1], c);
-        ok(d == guided_d[i - 1], "expected d == %d, got %d\n", guided_d[i - 1], d);
+        ok(a == guided_a[i - 1], "expected a == %d, got %ld\n", guided_a[i - 1], a);
+        ok(b == guided_b[i - 1], "expected b == %d, got %ld\n", guided_b[i - 1], b);
+        ok(c == guided_c[i - 1], "expected c == %d, got %ld\n", guided_c[i - 1], c);
+        ok(d == guided_d[i - 1], "expected d == %d, got %ld\n", guided_d[i - 1], d);
 
         a = b = c = d = 0;
         p_vcomp_fork(FALSE, 5, for_dynamic_guided_cb, 0, &a, &b, &c, &d);
-        ok(a == guided_a[0], "expected a == %d, got %d\n", guided_a[0], a);
-        ok(b == guided_b[0], "expected b == %d, got %d\n", guided_b[0], b);
-        ok(c == guided_c[0], "expected c == %d, got %d\n", guided_c[0], c);
-        ok(d == guided_d[0], "expected d == %d, got %d\n", guided_d[0], d);
+        ok(a == guided_a[0], "expected a == %d, got %ld\n", guided_a[0], a);
+        ok(b == guided_b[0], "expected b == %d, got %ld\n", guided_b[0], b);
+        ok(c == guided_c[0], "expected c == %d, got %ld\n", guided_c[0], c);
+        ok(d == guided_d[0], "expected d == %d, got %ld\n", guided_d[0], d);
     }
 
     pomp_set_num_threads(max_threads);
@@ -1326,7 +1736,7 @@ static void CDECL master_cb(HANDLE semaphore)
         if (num_threads >= 2)
         {
             DWORD result = WaitForSingleObject(semaphore, 1000);
-            ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", result);
+            ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %lu\n", result);
         }
         p_vcomp_master_end();
     }
@@ -1342,7 +1752,7 @@ static void test_vcomp_master_begin(void)
     int i;
 
     semaphore = CreateSemaphoreA(NULL, 0, 1, NULL);
-    ok(semaphore != NULL, "CreateSemaphoreA failed %u\n", GetLastError());
+    ok(semaphore != NULL, "CreateSemaphoreA failed %lu\n", GetLastError());
 
     master_cb(semaphore);
 
@@ -1366,7 +1776,7 @@ static void CDECL single_cb(int flags, HANDLE semaphore)
         if (num_threads >= 2)
         {
             DWORD result = WaitForSingleObject(semaphore, 1000);
-            ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", result);
+            ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %lu\n", result);
         }
     }
     p_vcomp_single_end();
@@ -1386,7 +1796,7 @@ static void test_vcomp_single_begin(void)
     int i;
 
     semaphore = CreateSemaphoreA(NULL, 0, 1, NULL);
-    ok(semaphore != NULL, "CreateSemaphoreA failed %u\n", GetLastError());
+    ok(semaphore != NULL, "CreateSemaphoreA failed %lu\n", GetLastError());
 
     single_cb(0, semaphore);
     single_cb(1, semaphore);
@@ -1432,7 +1842,7 @@ static void test_vcomp_enter_critsect(void)
 
     a = 0;
     critsect_cb(&a);
-    ok(a == 2, "expected a == 2, got %d\n", a);
+    ok(a == 2, "expected a == 2, got %ld\n", a);
 
     for (i = 1; i <= 4; i++)
     {
@@ -1440,11 +1850,11 @@ static void test_vcomp_enter_critsect(void)
 
         a = 0;
         p_vcomp_fork(TRUE, 1, critsect_cb, &a);
-        ok(a == 2 * i, "expected a == %d, got %d\n", 2 * i, a);
+        ok(a == 2 * i, "expected a == %d, got %ld\n", 2 * i, a);
 
         a = 0;
         p_vcomp_fork(FALSE, 1, critsect_cb, &a);
-        ok(a == 2, "expected a == 2, got %d\n", a);
+        ok(a == 2, "expected a == 2, got %ld\n", a);
     }
 
     pomp_set_num_threads(max_threads);
@@ -2209,11 +2619,24 @@ static void test_reduction_float_double(void)
     }
 }
 
+static void test_omp_get_num_procs(void)
+{
+    SYSTEM_INFO sysinfo;
+    int num_procs;
+
+    num_procs = pomp_get_num_procs();
+    ok(num_procs > 0, "expected non-zero num_procs\n");
+    GetSystemInfo(&sysinfo);
+    ok(sysinfo.dwNumberOfProcessors > 0, "expected non-zero dwNumberOfProcessors\n");
+    ok(num_procs == sysinfo.dwNumberOfProcessors, "got dwNumberOfProcessors %ld num_procs %d\n", sysinfo.dwNumberOfProcessors, num_procs);
+}
+
 START_TEST(vcomp)
 {
     if (!init_vcomp())
         return;
 
+    test_omp_get_num_procs();
     test_omp_get_num_threads(FALSE);
     test_omp_get_num_threads(TRUE);
     test_vcomp_fork();

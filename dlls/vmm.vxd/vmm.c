@@ -144,7 +144,7 @@ DWORD WINAPI VMM_VxDCall( DWORD service, CONTEXT *context )
         ULONG npages = stack32_pop( context );
         ULONG flags  = stack32_pop( context );
 
-        TRACE("PageReserve: page: %08x, npages: %08x, flags: %08x partial stub!\n",
+        TRACE("PageReserve: page: %08lx, npages: %08lx, flags: %08lx partial stub!\n",
               page, npages, flags );
 
         if ( page == PR_SYSTEM ) {
@@ -156,13 +156,7 @@ DWORD WINAPI VMM_VxDCall( DWORD service, CONTEXT *context )
         if ( page == PR_PRIVATE || page == PR_SHARED ) page = 0;
         /* FIXME: Handle flags in some way */
         address = (LPVOID )(page * page_size);
-       if (flags & PR_STATIC)
-           /* FIXME: this isn't right, it's just a workaround for the stupid native wininet which
-            * thinks it's a good idea to allocate its own stack without committing it
-            */
-           ret = VirtualAlloc ( address, npages * page_size, MEM_COMMIT, PAGE_EXECUTE_READWRITE );
-       else
-           ret = VirtualAlloc ( address, npages * page_size, MEM_RESERVE, PAGE_EXECUTE_READWRITE );
+        ret = VirtualAlloc ( address, npages * page_size, MEM_RESERVE, PAGE_EXECUTE_READWRITE );
         TRACE("PageReserve: returning: %p\n", ret );
         if ( ret == NULL )
           return -1;
@@ -181,8 +175,8 @@ DWORD WINAPI VMM_VxDCall( DWORD service, CONTEXT *context )
         ULONG pagerdata   = stack32_pop( context );
         ULONG flags  = stack32_pop( context );
 
-        TRACE("PageCommit: page: %08x, npages: %08x, hpd: %08x pagerdata: "
-              "%08x, flags: %08x partial stub\n",
+        TRACE("PageCommit: page: %08lx, npages: %08lx, hpd: %08lx pagerdata: "
+              "%08lx, flags: %08lx partial stub\n",
               page, npages, hpd, pagerdata, flags );
 
         if ( flags & PC_USER )
@@ -208,7 +202,7 @@ DWORD WINAPI VMM_VxDCall( DWORD service, CONTEXT *context )
         ULONG npages = stack32_pop( context );
         ULONG flags = stack32_pop( context );
 
-        TRACE("PageDecommit: page: %08x, npages: %08x, flags: %08x partial stub\n",
+        TRACE("PageDecommit: page: %08lx, npages: %08lx, flags: %08lx partial stub\n",
               page, npages, flags );
         address = (LPVOID )( page * page_size );
         ret = VirtualFree ( address, npages * page_size, MEM_DECOMMIT );
@@ -229,7 +223,7 @@ DWORD WINAPI VMM_VxDCall( DWORD service, CONTEXT *context )
         ULONG permand = stack32_pop ( context );
         ULONG permor = stack32_pop ( context );
 
-        TRACE("PageModifyPermissions %08x %08x %08x %08x partial stub\n",
+        TRACE("PageModifyPermissions %08lx %08lx %08lx %08lx partial stub\n",
               page, npages, permand, permor );
         address = (LPVOID )( page * page_size );
 
@@ -270,7 +264,7 @@ DWORD WINAPI VMM_VxDCall( DWORD service, CONTEXT *context )
           ERR("Can't change page permissions for %p\n", address );
           return 0xffffffff;
         }
-        TRACE("Returning: %08x\n", pg_old_perm );
+        TRACE("Returning: %08lx\n", pg_old_perm );
         return pg_old_perm;
     }
 
@@ -280,7 +274,7 @@ DWORD WINAPI VMM_VxDCall( DWORD service, CONTEXT *context )
         LPVOID hmem = (LPVOID) stack32_pop( context );
         DWORD flags = stack32_pop( context );
 
-        TRACE("PageFree: hmem: %p, flags: %08x partial stub\n",
+        TRACE("PageFree: hmem: %p, flags: %08lx partial stub\n",
               hmem, flags );
 
         ret = VirtualFree ( hmem, 0, MEM_RELEASE );
@@ -419,7 +413,7 @@ DWORD WINAPI VMM_VxDCall( DWORD service, CONTEXT *context )
           * implementation of this.
           */
 
-         FIXME("GetDemandPageInfo(%08x %08x): stub!\n", dinfo, flags);
+         FIXME("GetDemandPageInfo(%08lx %08lx): stub!\n", dinfo, flags);
 
          return 0;
     }
@@ -468,10 +462,10 @@ DWORD WINAPI VMM_VxDCall( DWORD service, CONTEXT *context )
 
     default:
         if (LOWORD(service) < N_VMM_SERVICE)
-            FIXME( "Unimplemented service %s (%08x)\n",
+            FIXME( "Unimplemented service %s (%08lx)\n",
                    VMM_Service_Name[LOWORD(service)], service);
         else
-            FIXME( "Unknown service %08x\n", service);
+            FIXME( "Unknown service %08lx\n", service);
         return 0xffffffff;  /* FIXME */
     }
 }

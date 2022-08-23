@@ -58,6 +58,9 @@ Use old naming conventions.
 Generate a type library. The default output filename is
 \fIinfile\fB.tlb\fR.  If the output file name ends in \fB.res\fR, a
 binary resource file containing the type library is generated instead.
+.IP "\fB-L \fIpath\fR"
+Add a directory to the library search path for imported typelibs. The
+option can be specified multiple times.
 .PP
 .B UUID file options:
 .IP "\fB-u\fR"
@@ -102,7 +105,7 @@ names. The default output filename is \fBdlldata.c\fR.
 .PP
 .B Preprocessor options:
 .IP "\fB-I \fIpath\fR"
-Add a header search directory to path. Multiple search
+Add a directory to the include search path. Multiple include
 directories are allowed.
 .IP "\fB-D \fIid\fR[\fB=\fIval\fR]"
 Define preprocessor macro \fIid\fR with value \fIval\fR.

@@ -35,6 +35,7 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
+WINE_DECLARE_DEBUG_CHANNEL(threadname);
 
 struct x86_thread_data
 {
@@ -192,13 +193,34 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
                      rec->ExceptionAddress,
                      (char*)rec->ExceptionInformation[0], rec->ExceptionInformation[1] );
     }
+    else if (rec->ExceptionCode == EXCEPTION_WINE_NAME_THREAD && rec->ExceptionInformation[0] == 0x1000)
+    {
+        if ((DWORD)rec->ExceptionInformation[2] == -1)
+            WARN_(threadname)( "Thread renamed to %s\n", debugstr_a((char *)rec->ExceptionInformation[1]) );
+        else
+            WARN_(threadname)( "Thread ID %04x renamed to %s\n", (DWORD)rec->ExceptionInformation[2],
+                               debugstr_a((char *)rec->ExceptionInformation[1]) );
+    }
+    else if (rec->ExceptionCode == DBG_PRINTEXCEPTION_C)
+    {
+        WARN( "%s\n", debugstr_an((char *)rec->ExceptionInformation[1], rec->ExceptionInformation[0] - 1) );
+    }
+    else if (rec->ExceptionCode == DBG_PRINTEXCEPTION_WIDE_C)
+    {
+        WARN( "%s\n", debugstr_wn((WCHAR *)rec->ExceptionInformation[1], rec->ExceptionInformation[0] - 1) );
+    }
     else
     {
+        if (rec->ExceptionCode == STATUS_ASSERTION_FAILURE)
+            ERR( "%s exception (code=%x) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
+        else
+            WARN( "%s exception (code=%x) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
+
         TRACE(" eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x\n",
               context->Eax, context->Ebx, context->Ecx,
               context->Edx, context->Esi, context->Edi );
-        TRACE(" ebp=%08x esp=%08x cs=%04x ds=%04x es=%04x fs=%04x gs=%04x flags=%08x\n",
-              context->Ebp, context->Esp, context->SegCs, context->SegDs,
+        TRACE(" ebp=%08x esp=%08x cs=%04x ss=%04x ds=%04x es=%04x fs=%04x gs=%04x flags=%08x\n",
+              context->Ebp, context->Esp, context->SegCs, context->SegSs, context->SegDs,
               context->SegEs, context->SegFs, context->SegGs, context->EFlags );
     }
 
@@ -227,6 +249,17 @@ void WINAPI KiUserApcDispatcher( CONTEXT *context, ULONG_PTR ctx, ULONG_PTR arg1
 {
     func( ctx, arg1, arg2 );
     NtContinue( context, TRUE );
+}
+
+
+/*******************************************************************
+ *		KiUserCallbackDispatcher (NTDLL.@)
+ */
+void WINAPI KiUserCallbackDispatcher( ULONG id, void *args, ULONG len )
+{
+    NTSTATUS (WINAPI *func)(void *, ULONG) = ((void **)NtCurrentTeb()->Peb->KernelCallbackTable)[id];
+
+    RtlRaiseStatus( NtCallbackReturn( NULL, 0, func( args, len )));
 }
 
 
@@ -487,13 +520,12 @@ USHORT WINAPI RtlCaptureStackBackTrace( ULONG skip, ULONG count, PVOID *buffer, 
  */
 __ASM_GLOBAL_FUNC( signal_start_thread,
                    "movl 4(%esp),%esi\n\t"   /* context */
-                   "leal -12(%esi),%ecx\n\t"
+                   "leal -12(%esi),%edi\n\t"
                    /* clear the thread stack */
-                   "andl $~0xfff,%ecx\n\t"   /* round down to page size */
-                   "movl %fs:8,%edi\n\t"     /* NtCurrentTeb()->Tib.StackLimit */
-                   "addl $0x1000,%edi\n\t"
+                   "andl $~0xfff,%edi\n\t"   /* round down to page size */
+                   "movl $0xf0000,%ecx\n\t"
+                   "subl %ecx,%edi\n\t"
                    "movl %edi,%esp\n\t"
-                   "subl %edi,%ecx\n\t"
                    "xorl %eax,%eax\n\t"
                    "shrl $2,%ecx\n\t"
                    "rep; stosl\n\t"

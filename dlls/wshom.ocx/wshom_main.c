@@ -26,8 +26,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wshom);
 
-static HINSTANCE wshom_instance;
-
 static inline struct provideclassinfo *impl_from_IProvideClassInfo(IProvideClassInfo *iface)
 {
     return CONTAINING_RECORD(iface, struct provideclassinfo, IProvideClassInfo_iface);
@@ -55,7 +53,7 @@ static HRESULT load_typelib(void)
 
     hres = LoadRegTypeLib(&LIBID_IWshRuntimeLibrary, 1, 0, LOCALE_SYSTEM_DEFAULT, &tl);
     if(FAILED(hres)) {
-        ERR("LoadRegTypeLib failed: %08x\n", hres);
+        ERR("LoadRegTypeLib failed: %#lx.\n", hres);
         return hres;
     }
 
@@ -86,7 +84,7 @@ HRESULT get_typeinfo(tid_t tid, ITypeInfo **typeinfo)
 
         hres = ITypeLib_GetTypeInfoOfGuid(typelib, tid_ids[tid], &ti);
         if(FAILED(hres)) {
-            ERR("GetTypeInfoOfGuid(%s) failed: %08x\n", debugstr_guid(tid_ids[tid]), hres);
+            ERR("GetTypeInfoOfGuid(%s) failed: %#lx.\n", debugstr_guid(tid_ids[tid]), hres);
             return hres;
         }
 
@@ -218,15 +216,12 @@ static IClassFactory WshShellFactory = { &WshShellFactoryVtbl };
  */
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
 {
-    TRACE("(%p %d %p)\n", hInstDLL, fdwReason, lpv);
+    TRACE("%p, %ld, %p.\n", hInstDLL, fdwReason, lpv);
 
     switch(fdwReason)
     {
-    case DLL_WINE_PREATTACH:
-        return FALSE;  /* prefer native version */
     case DLL_PROCESS_ATTACH:
-        wshom_instance = hInstDLL;
-        DisableThreadLibraryCalls(wshom_instance);
+        DisableThreadLibraryCalls(hInstDLL);
         break;
     case DLL_PROCESS_DETACH:
         if (lpv) break;
@@ -249,30 +244,4 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 
     FIXME("%s %s %p\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
     return CLASS_E_CLASSNOTAVAILABLE;
-}
-
-/***********************************************************************
- *          DllCanUnloadNow (wshom.ocx.@)
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
-}
-
-/***********************************************************************
- *          DllRegisterServer (wshom.ocx.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    TRACE("()\n");
-    return __wine_register_resources(wshom_instance);
-}
-
-/***********************************************************************
- *          DllUnregisterServer (wshom.ocx.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    TRACE("()\n");
-    return __wine_unregister_resources(wshom_instance);
 }

@@ -19,11 +19,20 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <dlfcn.h>
+#include <limits.h>
+#ifdef HAVE_SYS_SYSCTL_H
+# include <sys/sysctl.h>
+#endif
 
 #ifdef __APPLE__ /* CrossOver Hack 13438 */
 #include <mach/mach.h>
@@ -85,8 +94,14 @@ static const char *get_self_exe( char *argv0 )
 #if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
     return "/proc/self/exe";
 #elif defined (__FreeBSD__) || defined(__DragonFly__)
-    return "/proc/curproc/file";
-#else
+    static int pathname[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
+    size_t path_size = PATH_MAX;
+    char *path = malloc( path_size );
+    if (path && !sysctl( pathname, sizeof(pathname)/sizeof(pathname[0]), path, &path_size, NULL, 0 ))
+        return path;
+    free( path );
+#endif
+
     if (!strchr( argv0, '/' )) /* search in PATH */
     {
         char *p, *path = getenv( "PATH" );
@@ -106,7 +121,6 @@ static const char *get_self_exe( char *argv0 )
         return NULL;
     }
     return argv0;
-#endif
 }
 
 static void *try_dlopen( const char *dir, const char *name )
@@ -119,6 +133,17 @@ static void *try_dlopen( const char *dir, const char *name )
 
 static void *load_ntdll( char *argv0 )
 {
+#ifdef __i386__
+#define SO_DIR "i386-unix/"
+#elif defined(__x86_64__)
+#define SO_DIR "x86_64-unix/"
+#elif defined(__arm__)
+#define SO_DIR "arm-unix/"
+#elif defined(__aarch64__)
+#define SO_DIR "aarch64-unix/"
+#else
+#define SO_DIR ""
+#endif
     const char *self = get_self_exe( argv0 );
     char *path, *p;
     void *handle = NULL;
@@ -130,7 +155,7 @@ static void *load_ntdll( char *argv0 )
             handle = try_dlopen( p, "dlls/ntdll/ntdll.so" );
             free( p );
         }
-        else handle = try_dlopen( path, BIN_TO_DLLDIR "/ntdll.so" );
+        else handle = try_dlopen( path, BIN_TO_DLLDIR "/" SO_DIR "ntdll.so" );
         free( path );
     }
 
@@ -139,13 +164,14 @@ static void *load_ntdll( char *argv0 )
         path = strdup( path );
         for (p = strtok( path, ":" ); p; p = strtok( NULL, ":" ))
         {
-            handle = try_dlopen( p, "ntdll.so" );
+            handle = try_dlopen( p, SO_DIR "ntdll.so" );
+            if (!handle) handle = try_dlopen( p, "ntdll.so" );
             if (handle) break;
         }
         free( path );
     }
 
-    if (!handle && !self) handle = try_dlopen( DLLDIR, "ntdll.so" );
+    if (!handle && !self) handle = try_dlopen( DLLDIR, SO_DIR "ntdll.so" );
 
     return handle;
 }

@@ -22,8 +22,8 @@
 
 #include "config.h"
 
-#include "macdrv.h"
 #define OEMRESOURCE
+#include "macdrv.h"
 #include "winuser.h"
 #include "winreg.h"
 #include "wine/server.h"
@@ -165,7 +165,7 @@ static void send_mouse_input(HWND hwnd, macdrv_window cocoa_window, UINT flags, 
     input.mi.time           = time;
     input.mi.dwExtraInfo    = 0;
 
-    __wine_send_input(top_level_hwnd, &input);
+    __wine_send_input(top_level_hwnd, &input, NULL);
 }
 
 
@@ -643,7 +643,7 @@ cleanup:
 /***********************************************************************
  *              DestroyCursorIcon (MACDRV.@)
  */
-void CDECL macdrv_DestroyCursorIcon(HCURSOR cursor)
+void macdrv_DestroyCursorIcon(HCURSOR cursor)
 {
     TRACE("cursor %p\n", cursor);
 
@@ -659,7 +659,7 @@ void CDECL macdrv_DestroyCursorIcon(HCURSOR cursor)
  *
  * Set the cursor clipping rectangle.
  */
-BOOL CDECL macdrv_ClipCursor(LPCRECT clip)
+BOOL macdrv_ClipCursor(LPCRECT clip)
 {
     CGRect rect;
 
@@ -683,7 +683,7 @@ BOOL CDECL macdrv_ClipCursor(LPCRECT clip)
 /***********************************************************************
  *              GetCursorPos (MACDRV.@)
  */
-BOOL CDECL macdrv_GetCursorPos(LPPOINT pos)
+BOOL macdrv_GetCursorPos(LPPOINT pos)
 {
     CGPoint pt;
     BOOL ret;
@@ -702,7 +702,7 @@ BOOL CDECL macdrv_GetCursorPos(LPPOINT pos)
 /***********************************************************************
  *              SetCapture (MACDRV.@)
  */
- void CDECL macdrv_SetCapture(HWND hwnd, UINT flags)
+ void macdrv_SetCapture(HWND hwnd, UINT flags)
 {
     struct macdrv_thread_data *thread_data = macdrv_thread_data();
     HWND top = GetAncestor(hwnd, GA_ROOT);
@@ -720,7 +720,7 @@ BOOL CDECL macdrv_GetCursorPos(LPPOINT pos)
 /***********************************************************************
  *              SetCursor (MACDRV.@)
  */
-void CDECL macdrv_SetCursor(HCURSOR cursor)
+void macdrv_SetCursor(HCURSOR cursor)
 {
     CFStringRef cursor_name = NULL;
     CFArrayRef cursor_frames = NULL;
@@ -813,7 +813,7 @@ done:
 /***********************************************************************
  *              SetCursorPos (MACDRV.@)
  */
-BOOL CDECL macdrv_SetCursorPos(INT x, INT y)
+BOOL macdrv_SetCursorPos(INT x, INT y)
 {
     BOOL ret = macdrv_set_cursor_position(CGPointMake(x, y));
     if (ret)

@@ -39,7 +39,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(openal32);
 
-#include "wine/hostptraddrspace_enter.h"
 static ALCboolean  (ALC_APIENTRY*alcSetThreadContext)(ALCcontext *context);
 static ALCcontext* (ALC_APIENTRY*alcGetThreadContext)(ALCvoid);
 
@@ -82,7 +81,6 @@ static ALvoid (AL_APIENTRY*alGetAuxiliaryEffectSlotiv)(ALuint sid, ALenum param,
 
 extern ALCvoid* CDECL wine_alcGetProcAddress(ALCdevice *, const ALCchar *);
 extern ALvoid*  CDECL wine_alGetProcAddress(const ALchar*);
-#include "wine/hostptraddrspace_exit.h"
 
 static CRITICAL_SECTION openal_cs;
 static CRITICAL_SECTION_DEBUG openal_cs_debug =
@@ -101,8 +99,6 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
 {
     switch(reason)
     {
-    case DLL_WINE_PREATTACH:
-        return FALSE;    /* prefer native version */
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hinst);
 #define LOADFUNC(x) x = alcGetProcAddress(NULL, #x)
@@ -993,7 +989,7 @@ static const struct FuncList ALFuncs[] = {
 
 ALCvoid* CDECL wine_alcGetProcAddress(ALCdevice *device, const ALCchar *funcname)
 {
-    void * HOSTPTR proc;
+    void *proc;
     int i;
 
     /* Make sure the host implementation has the requested function */
@@ -1013,7 +1009,7 @@ ALCvoid* CDECL wine_alcGetProcAddress(ALCdevice *device, const ALCchar *funcname
 
 ALvoid* CDECL wine_alGetProcAddress(const ALchar* funcname)
 {
-    void * HOSTPTR proc;
+    void *proc;
     int i;
 
     /* Make sure the host implementation has the requested function. This will

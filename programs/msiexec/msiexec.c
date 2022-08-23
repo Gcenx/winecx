@@ -22,6 +22,7 @@
 #define WIN32_LEAN_AND_MEAN
 
 #include <windows.h>
+#include <commctrl.h>
 #include <msi.h>
 #include <winsvc.h>
 #include <objbase.h>
@@ -60,13 +61,13 @@ static void ShowUsage(int ExitCode)
     *filename = 0;
     res = GetModuleFileNameW(hmsi, filename, ARRAY_SIZE(filename));
     if (!res)
-        WINE_ERR("GetModuleFileName failed: %d\n", GetLastError());
+        WINE_ERR("GetModuleFileName failed: %ld\n", GetLastError());
 
     len = ARRAY_SIZE(msiexec_version);
     *msiexec_version = 0;
     res = MsiGetFileVersionW(filename, msiexec_version, &len, NULL, NULL);
     if (res)
-        WINE_ERR("MsiGetFileVersion failed with %d\n", res);
+        WINE_ERR("MsiGetFileVersion failed with %ld\n", res);
 
     /* Return the length of the resource.
        No typo: The LPWSTR parameter must be a LPWSTR * for this mode */
@@ -412,7 +413,7 @@ static int custom_action_server(const WCHAR *arg)
     pipe = CreateFileW(buffer, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
     if (pipe == INVALID_HANDLE_VALUE)
     {
-        ERR("Failed to create custom action server pipe: %u\n", GetLastError());
+        ERR("Failed to create custom action server pipe: %lu\n", GetLastError());
         return GetLastError();
     }
 
@@ -437,12 +438,12 @@ static int custom_action_server(const WCHAR *arg)
         thread64 = (DWORD_PTR)thread;
         if (!WriteFile(pipe, &thread64, sizeof(thread64), &size, NULL) || size != sizeof(thread64))
         {
-            ERR("Failed to write to custom action server pipe: %u\n", GetLastError());
+            ERR("Failed to write to custom action server pipe: %lu\n", GetLastError());
             CoUninitialize();
             return GetLastError();
         }
     }
-    ERR("Failed to read from custom action server pipe: %u\n", GetLastError());
+    ERR("Failed to read from custom action server pipe: %lu\n", GetLastError());
     CoUninitialize();
     return GetLastError();
 }
@@ -587,6 +588,31 @@ static BOOL process_args_from_reg( const WCHAR *ident, int *pargc, WCHAR ***parg
 	return ret;
 }
 
+static WCHAR *get_path_with_extension(const WCHAR *package_name)
+{
+    static const WCHAR ext[] = L".msi";
+    unsigned int p;
+    WCHAR *path;
+
+    if (!(path = heap_alloc(lstrlenW(package_name) * sizeof(WCHAR) + sizeof(ext))))
+    {
+        WINE_ERR("No memory.\n");
+        return NULL;
+    }
+
+    lstrcpyW(path, package_name);
+    p = lstrlenW(path);
+    while (p && path[p] != '.' && path[p] != L'\\' && path[p] != '/')
+        --p;
+    if (path[p] == '.')
+    {
+        heap_free(path);
+        return NULL;
+    }
+    lstrcatW(path, ext);
+    return path;
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
 	int i;
@@ -625,6 +651,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	DWORD ReturnCode;
 	int argc;
 	LPWSTR *argvW = NULL;
+	WCHAR *path;
+
+        InitCommonControls();
 
 	/* parse the command line */
 	process_args( GetCommandLineW(), &argc, &argvW );
@@ -919,7 +948,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 			LogFileName = argvW[i];
 			if(MsiEnableLogW(LogMode, LogFileName, LogAttributes) != ERROR_SUCCESS)
 			{
-				fprintf(stderr, "Logging in %s (0x%08x, %u) failed\n",
+				fprintf(stderr, "Logging in %s (0x%08lx, %lu) failed\n",
 					 wine_dbgstr_w(LogFileName), LogMode, LogAttributes);
 				ExitProcess(1);
 			}
@@ -1037,14 +1066,28 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		if(IsProductCode(PackageName))
 			ReturnCode = MsiConfigureProductExW(PackageName, 0, INSTALLSTATE_DEFAULT, Properties);
 		else
-			ReturnCode = MsiInstallProductW(PackageName, Properties);
+		{
+			if ((ReturnCode = MsiInstallProductW(PackageName, Properties)) == ERROR_FILE_NOT_FOUND
+					&& (path = get_path_with_extension(PackageName)))
+			{
+				ReturnCode = MsiInstallProductW(path, Properties);
+				heap_free(path);
+			}
+		}
 	}
 	else if(FunctionRepair)
 	{
 		if(IsProductCode(PackageName))
 			WINE_FIXME("Product code treatment not implemented yet\n");
 		else
-			ReturnCode = MsiReinstallProductW(PackageName, RepairMode);
+		{
+			if ((ReturnCode = MsiReinstallProductW(PackageName, RepairMode)) == ERROR_FILE_NOT_FOUND
+					&& (path = get_path_with_extension(PackageName)))
+			{
+				ReturnCode = MsiReinstallProductW(path, RepairMode);
+				heap_free(path);
+			}
+		}
 	}
 	else if(FunctionAdvertise)
 	{

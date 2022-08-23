@@ -35,20 +35,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3dx);
 
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
-{
-    switch (fdwReason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(hinstDLL);
-            break;
-    }
-
-   return TRUE;
-}
-
 /***********************************************************************
  * D3DX10CheckVersion
  *
@@ -67,7 +53,7 @@ HRESULT WINAPI D3DX10CreateEffectPoolFromMemory(const void *data, SIZE_T datasiz
         UINT fxflags, ID3D10Device *device, ID3DX10ThreadPump *pump, ID3D10EffectPool **effectpool,
         ID3D10Blob **errors, HRESULT *hresult)
 {
-    FIXME("data %p, datasize %lu, filename %s, defines %p, include %p, profile %s, hlslflags %#x, fxflags %#x, "
+    FIXME("data %p, datasize %Iu, filename %s, defines %p, include %p, profile %s, hlslflags %#x, fxflags %#x, "
             "device %p, pump %p, effectpool %p, errors %p, hresult %p.\n",
             data, datasize, debugstr_a(filename), defines, include, debugstr_a(profile), hlslflags, fxflags, device,
             pump, effectpool, errors, hresult);

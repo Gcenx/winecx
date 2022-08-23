@@ -137,8 +137,8 @@ static HRESULT WINAPI property_bag_Read(IPropertyBag *iface,
         }
         else if (!wcscmp(name, L"FilterData"))
         {
-            unsigned int count = 1, input_count, output_count, i;
             DMO_PARTIAL_MEDIATYPE *types = NULL, *new_array;
+            ULONG count = 1, input_count, output_count, i;
             REGFILTERPINS2 reg_pins[2] = {{0}};
             REGFILTER2 reg_filter = {0};
             REGPINTYPES *reg_types;
@@ -186,7 +186,7 @@ static HRESULT WINAPI property_bag_Read(IPropertyBag *iface,
             reg_pins[1].nMediaTypes = output_count;
             reg_pins[1].lpMediaType = reg_types + count;
             reg_filter.dwVersion = 2;
-            reg_filter.dwMerit = MERIT_NORMAL + 0x800,
+            reg_filter.dwMerit = MERIT_NORMAL + 0x800;
             reg_filter.cPins2 = 2;
             reg_filter.rgPins2 = reg_pins;
 
@@ -287,7 +287,7 @@ static HRESULT WINAPI property_bag_Read(IPropertyBag *iface,
         return S_OK;
     }
     default:
-        FIXME("Unhandled type %#x.\n", type);
+        FIXME("Unhandled type %#lx.\n", type);
         free(data);
         return E_NOTIMPL;
     }
@@ -396,27 +396,27 @@ static HRESULT WINAPI moniker_QueryInterface(IMoniker *iface, REFIID riid, void 
 
 static ULONG WINAPI moniker_AddRef(IMoniker *iface)
 {
-    struct moniker *This = impl_from_IMoniker(iface);
-    ULONG ref = InterlockedIncrement(&This->ref);
+    struct moniker *moniker = impl_from_IMoniker(iface);
+    ULONG refcount = InterlockedIncrement(&moniker->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("%p increasing refcount to %lu.\n", moniker, refcount);
 
-    return ref;
+    return refcount;
 }
 
 static ULONG WINAPI moniker_Release(IMoniker *iface)
 {
     struct moniker *This = impl_from_IMoniker(iface);
-    ULONG ref = InterlockedDecrement(&This->ref);
+    ULONG refcount = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("%p decreasing refcount to %lu.\n", This, refcount);
 
-    if (ref == 0) {
+    if (!refcount)
+    {
         free(This->name);
         free(This);
-        DEVENUM_UnlockModule();
     }
-    return ref;
+    return refcount;
 }
 
 static HRESULT WINAPI moniker_GetClassID(IMoniker *iface, CLSID *pClassID)
@@ -559,7 +559,10 @@ static HRESULT WINAPI moniker_BindToStorage(IMoniker *iface, IBindCtx *pbc,
 static HRESULT WINAPI moniker_Reduce(IMoniker *iface, IBindCtx *pbc,
         DWORD dwReduceHowFar, IMoniker **ppmkToLeft, IMoniker **ppmkReduced)
 {
-    TRACE("(%p)->(%p, %d, %p, %p)\n", iface, pbc, dwReduceHowFar, ppmkToLeft, ppmkReduced);
+    struct moniker *moniker = impl_from_IMoniker(iface);
+
+    TRACE("moniker %p, bind_ctx %p, how_far %#lx, left %p, reduced %p.\n",
+            moniker, pbc, dwReduceHowFar, ppmkToLeft, ppmkReduced);
 
     if (ppmkToLeft)
         *ppmkToLeft = NULL;
@@ -783,8 +786,6 @@ struct moniker *filter_moniker_create(const GUID *class, const WCHAR *name)
     object->has_class = !!class;
     object->name = wcsdup(name);
 
-    DEVENUM_LockModule();
-
     return object;
 }
 
@@ -804,8 +805,6 @@ struct moniker *codec_moniker_create(const GUID *class, const WCHAR *name)
     object->has_class = !!class;
     object->name = wcsdup(name);
 
-    DEVENUM_LockModule();
-
     return object;
 }
 
@@ -822,8 +821,6 @@ struct moniker *dmo_moniker_create(const GUID class, const GUID clsid)
     object->type = DEVICE_DMO;
     object->class = class;
     object->clsid = clsid;
-
-    DEVENUM_LockModule();
 
     return object;
 }
@@ -855,22 +852,22 @@ static HRESULT WINAPI enum_moniker_QueryInterface(IEnumMoniker *iface, REFIID ri
 
 static ULONG WINAPI enum_moniker_AddRef(IEnumMoniker *iface)
 {
-    EnumMonikerImpl *This = impl_from_IEnumMoniker(iface);
-    ULONG ref = InterlockedIncrement(&This->ref);
+    EnumMonikerImpl *enumerator = impl_from_IEnumMoniker(iface);
+    ULONG refcount = InterlockedIncrement(&enumerator->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("%p increasing refcount to %lu.\n", enumerator, refcount);
 
-    return ref;
+    return refcount;
 }
 
 static ULONG WINAPI enum_moniker_Release(IEnumMoniker *iface)
 {
     EnumMonikerImpl *This = impl_from_IEnumMoniker(iface);
-    ULONG ref = InterlockedDecrement(&This->ref);
+    ULONG refcount = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("%p decreasing refcount to %lu.\n", This, refcount);
 
-    if (!ref)
+    if (!refcount)
     {
         if (This->dmo_enum)
             IEnumDMO_Release(This->dmo_enum);
@@ -879,10 +876,9 @@ static ULONG WINAPI enum_moniker_Release(IEnumMoniker *iface)
         RegCloseKey(This->sw_key);
         RegCloseKey(This->cm_key);
         free(This);
-        DEVENUM_UnlockModule();
         return 0;
     }
-    return ref;
+    return refcount;
 }
 
 static struct moniker *get_dmo_moniker(EnumMonikerImpl *enum_moniker)
@@ -915,7 +911,7 @@ static HRESULT WINAPI enum_moniker_Next(IEnumMoniker *iface, ULONG celt, IMonike
     ULONG fetched = 0;
     HKEY hkey;
 
-    TRACE("(%p)->(%d, %p, %p)\n", iface, celt, rgelt, pceltFetched);
+    TRACE("enumerator %p, count %lu, monikers %p, ret_count %p.\n", This, celt, rgelt, pceltFetched);
 
     while (fetched < celt)
     {
@@ -952,7 +948,7 @@ static HRESULT WINAPI enum_moniker_Next(IEnumMoniker *iface, ULONG celt, IMonike
         rgelt[fetched++] = &moniker->IMoniker_iface;
     }
 
-    TRACE("-- fetched %d\n", fetched);
+    TRACE("Returning %lu monikers.\n", fetched);
 
     if (pceltFetched)
         *pceltFetched = fetched;
@@ -967,7 +963,7 @@ static HRESULT WINAPI enum_moniker_Skip(IEnumMoniker *iface, ULONG celt)
 {
     EnumMonikerImpl *This = impl_from_IEnumMoniker(iface);
 
-    TRACE("(%p)->(%d)\n", iface, celt);
+    TRACE("enumerator %p, count %lu.\n", This, celt);
 
     while (celt--)
     {
@@ -1069,8 +1065,6 @@ HRESULT enum_moniker_create(REFCLSID class, IEnumMoniker **out)
     }
 
     *out = &object->IEnumMoniker_iface;
-
-    DEVENUM_LockModule();
 
     return S_OK;
 }

@@ -44,7 +44,7 @@ struct edit_params
     DWORD        size;
 };
 
-static int vmessagebox(HWND hwnd, int buttons, int titleId, int resId, __ms_va_list va_args)
+static int vmessagebox(HWND hwnd, int buttons, int titleId, int resId, va_list va_args)
 {
     WCHAR title[256];
     WCHAR fmt[1024];
@@ -64,36 +64,33 @@ static int vmessagebox(HWND hwnd, int buttons, int titleId, int resId, __ms_va_l
 
 int WINAPIV messagebox(HWND hwnd, int buttons, int titleId, int resId, ...)
 {
-    __ms_va_list ap;
+    va_list ap;
     INT result;
 
-    __ms_va_start(ap, resId);
+    va_start(ap, resId);
     result = vmessagebox(hwnd, buttons, titleId, resId, ap);
-    __ms_va_end(ap);
+    va_end(ap);
 
     return result;
 }
 
 static void WINAPIV error_code_messagebox(HWND hwnd, unsigned int msg_id, ...)
 {
-    __ms_va_list ap;
+    va_list ap;
 
-    __ms_va_start(ap, msg_id);
+    va_start(ap, msg_id);
     vmessagebox(hwnd, MB_OK|MB_ICONERROR, IDS_ERROR, msg_id, ap);
-    __ms_va_end(ap);
+    va_end(ap);
 }
 
 static BOOL change_dword_base(HWND hwndDlg, BOOL toHex)
 {
-    static const WCHAR percent_u[] = {'%','u',0};
-    static const WCHAR percent_x[] = {'%','x',0};
-
     WCHAR buf[128];
     DWORD val;
 
     if (!GetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, buf, ARRAY_SIZE(buf))) return FALSE;
-    if (!swscanf(buf, toHex ? percent_u : percent_x, &val)) return FALSE;
-    wsprintfW(buf, toHex ? percent_x : percent_u, val);
+    if (!swscanf(buf, toHex ? L"%u" : L"%x", &val)) return FALSE;
+    wsprintfW(buf, toHex ? L"%x" : L"%u", val);
     return SetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, buf);
 }
 
@@ -281,14 +278,13 @@ BOOL ModifyValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName)
             else error_code_messagebox(hwnd, IDS_SET_VALUE_FAILED);
         }
     } else if ( type == REG_DWORD ) {
-        static const WCHAR x[] = {'%','x',0};
         DWORD value = *((DWORD*)stringValueData);
         stringValueData = heap_xrealloc(stringValueData, 64);
-        wsprintfW(stringValueData, x, value);
+        wsprintfW(stringValueData, L"%x", value);
 	if (DialogBoxW(0, MAKEINTRESOURCEW(IDD_EDIT_DWORD), hwnd, modify_dlgproc) == IDOK) {
 	    DWORD val;
 	    CHAR* valueA = GetMultiByteString(stringValueData);
-	    if (sscanf(valueA, isDecimal ? "%u" : "%x", &val)) {
+	    if (sscanf(valueA, isDecimal ? "%lu" : "%lx", &val)) {
 		lRet = RegSetValueExW(hKey, valueName, 0, type, (BYTE*)&val, sizeof(val));
 		if (lRet == ERROR_SUCCESS) result = TRUE;
                 else error_code_messagebox(hwnd, IDS_SET_VALUE_FAILED);

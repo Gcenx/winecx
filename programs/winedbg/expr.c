@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
@@ -37,12 +35,12 @@ struct expr
     {
         struct
         {
-            long int            value;
+            dbg_lgint_t         value;
         } s_const;
 
         struct
         {
-            long unsigned int   value;
+            dbg_lguint_t        value;
         } u_const;
 
         struct
@@ -64,7 +62,7 @@ struct expr
         {
             int                 unop_type;
             struct expr*        exp1;
-            long int            result;
+            dbg_lgint_t         result;
         } unop;
 
         struct
@@ -72,7 +70,7 @@ struct expr
             int                 binop_type;
             struct expr*        exp1;
             struct expr*        exp2;
-            long int            result;
+            dbg_lgint_t         result;
         } binop;
 
         struct
@@ -85,7 +83,6 @@ struct expr
         {
             struct expr*        exp1;
             const char*         element_name;
-            long int            result;
         } structure;
 
         struct
@@ -93,7 +90,7 @@ struct expr
             const char*         funcname;
             int	                nargs;
             struct expr*        arg[5];
-            long int            result;
+            dbg_lguint_t        result;
         } call;
 
     } un;
@@ -165,7 +162,7 @@ struct expr* expr_alloc_symbol(const char* name)
     return ex;
 }
 
-struct expr* expr_alloc_sconstant(long int value)
+struct expr* expr_alloc_sconstant(dbg_lgint_t value)
 {
     struct expr*        ex;
 
@@ -176,7 +173,7 @@ struct expr* expr_alloc_sconstant(long int value)
     return ex;
 }
 
-struct expr* expr_alloc_uconstant(long unsigned int value)
+struct expr* expr_alloc_uconstant(dbg_lguint_t value)
 {
     struct expr*        ex;
 
@@ -247,7 +244,7 @@ struct expr* expr_alloc_pstruct(struct expr* exp, const char* element)
     return ex;
 }
 
-struct expr* expr_alloc_func_call(const char* funcname, int nargs, ...)
+struct expr* WINAPIV expr_alloc_func_call(const char* funcname, int nargs, ...)
 {
     struct expr*        ex;
     va_list             ap;
@@ -283,12 +280,7 @@ struct dbg_lvalue expr_eval(struct expr* exp)
     DWORD                               tag;
     const struct dbg_internal_var*      div;
 
-    rtn.cookie       = 0;
-    rtn.type.id      = dbg_itype_none;
-    rtn.type.module  = 0;
-    rtn.addr.Mode    = AddrModeFlat;
-    rtn.addr.Offset  = 0;
-    rtn.addr.Segment = 0;
+    init_lvalue_in_debugger(&rtn, dbg_itype_none, NULL);
 
     switch (exp->type)
     {
@@ -342,22 +334,13 @@ struct dbg_lvalue expr_eval(struct expr* exp)
         }
         break;
     case EXPR_TYPE_STRING:
-        rtn.cookie      = DLV_HOST;
-        rtn.type.id     = dbg_itype_astring;
-        rtn.type.module = 0;
-        rtn.addr.Offset = (ULONG_PTR)&exp->un.string.str;
+        init_lvalue_in_debugger(&rtn, dbg_itype_astring, &exp->un.string.str);
         break;
     case EXPR_TYPE_U_CONST:
-        rtn.cookie      = DLV_HOST;
-        rtn.type.id     = dbg_itype_unsigned_long_int;
-        rtn.type.module = 0;
-        rtn.addr.Offset = (ULONG_PTR)&exp->un.u_const.value;
+        init_lvalue_in_debugger(&rtn, dbg_itype_lguint, &exp->un.u_const.value);
         break;
     case EXPR_TYPE_S_CONST:
-        rtn.cookie      = DLV_HOST;
-        rtn.type.id     = dbg_itype_signed_long_int;
-        rtn.type.module = 0;
-        rtn.addr.Offset = (ULONG_PTR)&exp->un.s_const.value;
+        init_lvalue_in_debugger(&rtn, dbg_itype_lgint, &exp->un.s_const.value);
         break;
     case EXPR_TYPE_SYMBOL:
         switch (symbol_get_lvalue(exp->un.symbol.name, -1, &rtn, FALSE))
@@ -377,8 +360,7 @@ struct dbg_lvalue expr_eval(struct expr* exp)
         if (exp1.type.id == dbg_itype_none || !types_array_index(&exp1, 0, &rtn) ||
             rtn.type.id == dbg_itype_none)
             RaiseException(DEBUG_STATUS_BAD_TYPE, 0, 0, NULL);
-        if (!types_udt_find_element(&rtn, exp->un.structure.element_name,
-                                    &exp->un.structure.result))
+        if (!types_udt_find_element(&rtn, exp->un.structure.element_name))
         {
             dbg_printf("%s\n", exp->un.structure.element_name);
             RaiseException(DEBUG_STATUS_NO_FIELD, 0, 0, NULL);
@@ -388,8 +370,7 @@ struct dbg_lvalue expr_eval(struct expr* exp)
         exp1 = expr_eval(exp->un.structure.exp1);
         if (exp1.type.id == dbg_itype_none) RaiseException(DEBUG_STATUS_BAD_TYPE, 0, 0, NULL);
         rtn = exp1;
-        if (!types_udt_find_element(&rtn, exp->un.structure.element_name,
-                                    &exp->un.structure.result))
+        if (!types_udt_find_element(&rtn, exp->un.structure.element_name))
         {
             dbg_printf("%s\n", exp->un.structure.element_name);
             RaiseException(DEBUG_STATUS_NO_FIELD, 0, 0, NULL);
@@ -459,28 +440,22 @@ struct dbg_lvalue expr_eval(struct expr* exp)
          */
         exp->un.call.result = 0;
 #endif
-        rtn.cookie = DLV_HOST;
-        /* get return type from function signature tupe */
+        init_lvalue_in_debugger(&rtn, dbg_itype_none, &exp->un.call.result);
+        /* get return type from function signature type */
+        /* FIXME rtn.type.module should be set to function's module... */
         types_get_info(&rtn.type, TI_GET_TYPE, &rtn.type.id);
-        rtn.addr.Offset = (ULONG_PTR)&exp->un.call.result;
         break;
     case EXPR_TYPE_INTVAR:
-        rtn.cookie = DLV_HOST;
         if (!(div = dbg_get_internal_var(exp->un.intvar.name)))
             RaiseException(DEBUG_STATUS_NO_SYMBOL, 0, 0, NULL);
-        rtn.type.id     = div->typeid;
-        rtn.type.module = 0;
-        rtn.addr.Offset = (ULONG_PTR)div->pval;
+        init_lvalue_in_debugger(&rtn, div->typeid, div->pval);
         break;
     case EXPR_TYPE_BINOP:
-        rtn.cookie = DLV_HOST;
         exp1 = expr_eval(exp->un.binop.exp1);
         exp2 = expr_eval(exp->un.binop.exp2);
         if (exp1.type.id == dbg_itype_none || exp2.type.id == dbg_itype_none)
             RaiseException(DEBUG_STATUS_BAD_TYPE, 0, 0, NULL);
-        rtn.type.id = dbg_itype_signed_int;
-        rtn.type.module = 0;
-        rtn.addr.Offset = (ULONG_PTR)&exp->un.binop.result;
+        init_lvalue_in_debugger(&rtn, dbg_itype_lgint, &exp->un.binop.result);
         type1 = exp1.type;
         type2 = exp2.type;
         switch (exp->un.binop.binop_type)
@@ -508,8 +483,8 @@ struct dbg_lvalue expr_eval(struct expr* exp)
                 types_get_info(&type2, TI_GET_LENGTH, &scale1);
                 rtn.type = exp2.type;
 	    }
-            exp->un.binop.result = types_extract_as_integer(&exp1) * (DWORD)scale1 +
-                (DWORD)scale2 * types_extract_as_integer(&exp2);
+            exp->un.binop.result = types_extract_as_integer(&exp1) * (dbg_lguint_t)scale1 +
+                (dbg_lguint_t)scale2 * types_extract_as_integer(&exp2);
             break;
 	case EXP_OP_SUB:
             if (!types_get_info(&exp1.type, TI_GET_SYMTAG, &tag) ||
@@ -540,8 +515,8 @@ struct dbg_lvalue expr_eval(struct expr* exp)
                 types_get_info(&type2, TI_GET_LENGTH, &scale1);
                 rtn.type = exp2.type;
 	    }
-            exp->un.binop.result = (types_extract_as_integer(&exp1) * (DWORD)scale1 - 
-                                    types_extract_as_integer(&exp2) * (DWORD)scale2) / (DWORD)scale3;
+            exp->un.binop.result = (types_extract_as_integer(&exp1) * (dbg_lguint_t)scale1 -
+                                    types_extract_as_integer(&exp2) * (dbg_lguint_t)scale2) / (dbg_lguint_t)scale3;
             break;
 	case EXP_OP_SEG:
             rtn.type.id = dbg_itype_segptr;
@@ -583,10 +558,10 @@ struct dbg_lvalue expr_eval(struct expr* exp)
             exp->un.binop.result = (types_extract_as_integer(&exp1) != types_extract_as_integer(&exp2));
             break;
 	case EXP_OP_SHL:
-            exp->un.binop.result = ((unsigned long)types_extract_as_integer(&exp1) << types_extract_as_integer(&exp2));
+            exp->un.binop.result = types_extract_as_integer(&exp1) << types_extract_as_integer(&exp2);
             break;
 	case EXP_OP_SHR:
-            exp->un.binop.result = ((unsigned long)types_extract_as_integer(&exp1) >> types_extract_as_integer(&exp2));
+            exp->un.binop.result = types_extract_as_integer(&exp1) >> types_extract_as_integer(&exp2);
             break;
 	case EXP_OP_MUL:
             exp->un.binop.result = (types_extract_as_integer(&exp1) * types_extract_as_integer(&exp2));
@@ -607,12 +582,9 @@ struct dbg_lvalue expr_eval(struct expr* exp)
 	}
         break;
     case EXPR_TYPE_UNOP:
-        rtn.cookie = DLV_HOST;
         exp1 = expr_eval(exp->un.unop.exp1);
         if (exp1.type.id == dbg_itype_none) RaiseException(DEBUG_STATUS_BAD_TYPE, 0, 0, NULL);
-        rtn.addr.Offset = (ULONG_PTR)&exp->un.unop.result;
-        rtn.type.id     = dbg_itype_signed_int;
-        rtn.type.module = 0;
+        init_lvalue_in_debugger(&rtn, dbg_itype_lgint, &exp->un.unop.result);
         switch (exp->un.unop.unop_type)
 	{
 	case EXP_OP_NEG:
@@ -630,7 +602,7 @@ struct dbg_lvalue expr_eval(struct expr* exp)
             break;
 	case EXP_OP_FORCE_DEREF:
             rtn = exp1;
-            if (exp1.cookie == DLV_TARGET)
+            if (exp1.in_debuggee)
                 dbg_read_memory(memory_to_linear_addr(&exp1.addr), &rtn.addr.Offset, sizeof(rtn.addr.Offset));
             break;
 	case EXP_OP_ADDR:
@@ -689,10 +661,10 @@ BOOL expr_print(const struct expr* exp)
         dbg_printf("$%s", exp->un.intvar.name);
         break;
     case EXPR_TYPE_U_CONST:
-        dbg_printf("%lu", exp->un.u_const.value);
+        dbg_printf("%I64u", exp->un.u_const.value);
         break;
     case EXPR_TYPE_S_CONST:
-        dbg_printf("%ld", exp->un.s_const.value);
+        dbg_printf("%I64d", exp->un.s_const.value);
         break;
     case EXPR_TYPE_STRING:
         dbg_printf("\"%s\"", exp->un.string.str);

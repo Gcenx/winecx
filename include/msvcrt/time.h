@@ -39,7 +39,7 @@ typedef __msvcrt_long clock_t;
 extern "C" {
 #endif
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 #define _daylight (*__p__daylight())
 #define _dstbias (*__p__dstbias())
 #define _timezone (*__p__timezone())

@@ -30,7 +30,7 @@
 #include "qedit_private.h"
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(qedit);
+WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
 struct sample_grabber
 {
@@ -140,7 +140,7 @@ static void SampleGrabber_callback(struct sample_grabber *This, IMediaSample *sa
         if (size >= 0 && SUCCEEDED(IMediaSample_GetPointer(sample, &data))) {
             if (!data)
                 size = 0;
-            EnterCriticalSection(&This->filter.csFilter);
+            EnterCriticalSection(&This->filter.filter_cs);
             if (This->bufferLen != size) {
                 CoTaskMemFree(This->bufferData);
                 This->bufferData = size ? CoTaskMemAlloc(size) : NULL;
@@ -148,7 +148,7 @@ static void SampleGrabber_callback(struct sample_grabber *This, IMediaSample *sa
             }
             if (size)
                 CopyMemory(This->bufferData, data, size);
-            LeaveCriticalSection(&This->filter.csFilter);
+            LeaveCriticalSection(&This->filter.filter_cs);
         }
     }
     if (!This->grabberIface)
@@ -163,7 +163,7 @@ static void SampleGrabber_callback(struct sample_grabber *This, IMediaSample *sa
 		ref = IMediaSample_Release(sample) + 1 - ref;
 		if (ref)
 		{
-		    ERR("(%p) Callback referenced sample %p by %u\n", This, sample, ref);
+		    ERR("(%p) Callback referenced sample %p by %lu\n", This, sample, ref);
 		    /* ugly as hell but some apps are sooo buggy */
 		    while (ref--)
 			IMediaSample_Release(sample);
@@ -181,7 +181,7 @@ static void SampleGrabber_callback(struct sample_grabber *This, IMediaSample *sa
         case -1:
             break;
         default:
-            FIXME("unsupported method %d\n", This->grabberMethod);
+            FIXME("Unknown method %ld.\n", This->grabberMethod);
             /* do not bother us again */
             This->grabberMethod = -1;
     }
@@ -261,14 +261,14 @@ SampleGrabber_ISampleGrabber_SetBufferSamples(ISampleGrabber *iface, BOOL buffer
 {
     struct sample_grabber *This = impl_from_ISampleGrabber(iface);
     TRACE("(%p)->(%u)\n", This, bufferEm);
-    EnterCriticalSection(&This->filter.csFilter);
+    EnterCriticalSection(&This->filter.filter_cs);
     if (bufferEm) {
         if (This->bufferLen < 0)
             This->bufferLen = 0;
     }
     else
         This->bufferLen = -1;
-    LeaveCriticalSection(&This->filter.csFilter);
+    LeaveCriticalSection(&This->filter.filter_cs);
     return S_OK;
 }
 
@@ -281,7 +281,7 @@ SampleGrabber_ISampleGrabber_GetCurrentBuffer(ISampleGrabber *iface, LONG *bufSi
     TRACE("(%p)->(%p, %p)\n", This, bufSize, buffer);
     if (!bufSize)
         return E_POINTER;
-    EnterCriticalSection(&This->filter.csFilter);
+    EnterCriticalSection(&This->filter.filter_cs);
     if (!This->sink.pin.peer)
         ret = VFW_E_NOT_CONNECTED;
     else if (This->bufferLen < 0)
@@ -297,7 +297,7 @@ SampleGrabber_ISampleGrabber_GetCurrentBuffer(ISampleGrabber *iface, LONG *bufSi
         }
         *bufSize = This->bufferLen;
     }
-    LeaveCriticalSection(&This->filter.csFilter);
+    LeaveCriticalSection(&This->filter.filter_cs);
     return ret;
 }
 
@@ -315,7 +315,9 @@ static HRESULT WINAPI
 SampleGrabber_ISampleGrabber_SetCallback(ISampleGrabber *iface, ISampleGrabberCB *cb, LONG whichMethod)
 {
     struct sample_grabber *This = impl_from_ISampleGrabber(iface);
-    TRACE("(%p)->(%p, %u)\n", This, cb, whichMethod);
+
+    TRACE("filter %p, callback %p, method %ld.\n", This, cb, whichMethod);
+
     if (This->grabberIface)
         ISampleGrabberCB_Release(This->grabberIface);
     This->grabberIface = cb;
@@ -413,7 +415,9 @@ SampleGrabber_IMemInputPin_ReceiveMultiple(IMemInputPin *iface, IMediaSample **s
 {
     struct sample_grabber *This = impl_from_IMemInputPin(iface);
     LONG idx;
-    TRACE("(%p)->(%p, %u, %p) output = %p, grabber = %p\n", This, samples, nSamples, nProcessed, This->source.pMemInputPin, This->grabberIface);
+
+    TRACE("filter %p, samples %p, count %lu, ret_count %p.\n", This, samples, nSamples, nProcessed);
+
     if (!samples || !nProcessed)
         return E_POINTER;
     if ((This->filter.state != State_Running) || (This->oneShot == OneShot_Past))
@@ -615,7 +619,7 @@ static HRESULT WINAPI sample_grabber_source_DecideAllocator(struct strmbase_sour
         if (FAILED(hr = IFilterGraph_QueryInterface(filter->filter.graph,
                 &IID_IFilterGraph2, (void **)&graph)))
         {
-            ERR("Failed to get IFilterGraph2 interface, hr %#x.\n", hr);
+            ERR("Failed to get IFilterGraph2 interface, hr %#lx.\n", hr);
             return hr;
         }
 
@@ -648,8 +652,11 @@ HRESULT sample_grabber_create(IUnknown *outer, IUnknown **out)
     object->IMemInputPin_iface.lpVtbl = &IMemInputPin_VTable;
 
     strmbase_sink_init(&object->sink, &object->filter, L"In", &sink_ops, NULL);
+    wcscpy(object->sink.pin.name, L"Input");
 
     strmbase_source_init(&object->source, &object->filter, L"Out", &source_ops);
+    wcscpy(object->source.pin.name, L"Output");
+
     strmbase_passthrough_init(&object->passthrough, (IUnknown *)&object->source.pin.IPin_iface);
     ISeekingPassThru_Init(&object->passthrough.ISeekingPassThru_iface, FALSE,
             &object->sink.pin.IPin_iface);

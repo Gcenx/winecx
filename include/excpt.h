@@ -45,7 +45,7 @@ typedef enum _EXCEPTION_DISPOSITION
 #define GetExceptionInformation (struct _EXCEPTION_POINTERS *)_exception_info
 #define AbnormalTermination _abnormal_termination
 
-unsigned __int3264 __cdecl _exception_code(void);
+unsigned long __cdecl _exception_code(void);
 void * __cdecl _exception_info(void);
 int __cdecl _abnormal_termination(void);
 #endif /* defined(_MSC_VER) && defined(USE_COMPILER_EXCEPTIONS) */

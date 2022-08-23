@@ -28,16 +28,20 @@
 #define __WINE_USE_MSVCRT
 #endif
 
-#ifdef __WINE_WINE_PORT_H
-# error You cannot use both wine/port.h and msvcrt headers
+#ifdef __WINE_CONFIG_H
+# error You cannot use config.h with msvcrt
 #endif
 
-#if ((defined(__x86_64__) && !defined(__i386_on_x86_64__)) || defined(__powerpc64__) || defined(__aarch64__)) && !defined(_WIN64)
+#ifndef _WIN32
+# define _WIN32
+#endif
+
+#ifndef WIN32
+# define WIN32
+#endif
+
+#if ((defined(__x86_64__) && !defined(__i386_on_x86_64__)) || defined(__aarch64__)) && !defined(_WIN64)
 #define _WIN64
-#endif
-
-#if !defined(_MSC_VER) && !defined(__int32)
-# define __int32 int
 #endif
 
 #ifndef _MSVCR_VER
@@ -48,20 +52,25 @@
 # define _UCRT
 #endif
 
-#if !defined(_MSC_VER) && !defined(__int64)
-# if (defined(_WIN64) || defined(__i386_on_x86_64__)) && !defined(__MINGW64__)
-#   define __int64 long
-# else
-#   define __int64 long long
-# endif
-#endif
+#include <sal.h>
 
-#if !defined(_MSC_VER) && !defined(__int3264)
-# if defined(_WIN64)
-#  define __int3264 __int64
-# else
-#  define __int3264 __int32
-# endif
+#ifndef _MSC_VER
+#  ifndef __int8
+#    define __int8  char
+#  endif
+#  ifndef __int16
+#    define __int16 short
+#  endif
+#  ifndef __int32
+#    define __int32 int
+#  endif
+#  ifndef __int64
+#    if defined(_WIN64) && !defined(__MINGW64__)
+#      define __int64 long
+#    else
+#      define __int64 long long
+#    endif
+#  endif
 #endif
 
 #ifndef NULL
@@ -96,7 +105,7 @@
 #  else
 #   define __stdcall __attribute__((ms_abi))
 #  endif
-# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(_WIN32)
+# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(__MINGW32__) && !defined(__CYGWIN__)
 #   define __stdcall __attribute__((pcs("aapcs-vfp")))
 # elif defined(__aarch64__) && defined (__GNUC__) && __has_attribute(ms_abi)
 #  define __stdcall __attribute__((ms_abi))
@@ -120,31 +129,31 @@
 # endif
 #endif
 
-#ifndef __ms_va_list
-# if defined(__i386_on_x86_64__)
-#  define __ms_va_list __builtin_va_list32
-#  define __ms_va_start(list,arg) __builtin_va_start32(list,arg)
-#  define __ms_va_end(list) __builtin_va_end32(list)
-#  define __ms_va_copy(dest,src) __builtin_va_copy32(dest,src)
-# elif (defined(__x86_64__) || (defined(__aarch64__) && __has_attribute(ms_abi))) && defined (__GNUC__)
-#  define __ms_va_list __builtin_ms_va_list
-#  define __ms_va_start(list,arg) __builtin_ms_va_start(list,arg)
-#  define __ms_va_end(list) __builtin_ms_va_end(list)
-#  define __ms_va_copy(dest,src) __builtin_ms_va_copy(dest,src)
-# else
-#  define __ms_va_list va_list
-#  define __ms_va_start(list,arg) va_start(list,arg)
-#  define __ms_va_end(list) va_end(list)
-#  ifdef va_copy
-#   define __ms_va_copy(dest,src) va_copy(dest,src)
-#  else
-#   define __ms_va_copy(dest,src) ((dest) = (src))
-#  endif
-# endif
+
+#if defined(__i386_on_x86_64__)
+# include <stdarg.h>
+# undef va_list
+# undef va_start
+# undef va_end
+# undef va_copy
+# define va_list __builtin_va_list32
+# define va_start(list,arg) __builtin_va_start32(list,arg)
+# define va_end(list) __builtin_va_end32(list)
+# define va_copy(dest,src) __builtin_va_copy32(dest,src)
+#elif (defined(__x86_64__) || (defined(__aarch64__) && __has_attribute(ms_abi))) && defined (__GNUC__)
+# include <stdarg.h>
+# undef va_list
+# undef va_start
+# undef va_end
+# undef va_copy
+# define va_list __builtin_ms_va_list
+# define va_start(list,arg) __builtin_ms_va_start(list,arg)
+# define va_end(list) __builtin_ms_va_end(list)
+# define va_copy(dest,src) __builtin_ms_va_copy(dest,src)
 #endif
 
 #ifndef WINAPIV
-# if defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(_WIN32)
+# if defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(__MINGW32__) && !defined(__CYGWIN__)
 #  define WINAPIV __attribute__((pcs("aapcs")))
 # else
 #  define WINAPIV __cdecl
@@ -341,6 +350,14 @@ typedef struct threadlocaleinfostruct {
 #endif
 } threadlocinfo;
 #define _THREADLOCALEINFO
+#endif
+
+#if !defined(__WINE_USE_MSVCRT) || defined(__MINGW32__)
+#define __WINE_CRT_PRINTF_ATTR(fmt,args) __attribute__((format (printf,fmt,args)))
+#define __WINE_CRT_SCANF_ATTR(fmt,args)  __attribute__((format (scanf,fmt,args)))
+#else
+#define __WINE_CRT_PRINTF_ATTR(fmt,args)
+#define __WINE_CRT_SCANF_ATTR(fmt,args)
 #endif
 
 #endif /* __WINE_CORECRT_H */

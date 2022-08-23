@@ -17,8 +17,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
 #define NONAMELESSUNION
@@ -35,21 +33,6 @@
 #if XAUDIO2_VER >= 8 || defined XAPOFX1_VER
 WINE_DEFAULT_DEBUG_CHANNEL(xaudio2);
 #endif
-
-#ifdef XAPOFX1_VER
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
-{
-    TRACE("(%p, %d, %p)\n", hinstDLL, reason, pReserved);
-
-    switch (reason)
-    {
-    case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls( hinstDLL );
-        break;
-    }
-    return TRUE;
-}
-#endif /* XAPOFX1_VER */
 
 #if XAUDIO2_VER >= 8
 HRESULT CDECL CreateFX(REFCLSID clsid, IUnknown **out, void *initdata, UINT32 initdata_bytes)
@@ -86,7 +69,7 @@ HRESULT CDECL CreateFX(REFCLSID clsid, IUnknown **out, void *initdata, UINT32 in
     }else{
         hr = CoCreateInstance(clsid, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void**)&obj);
         if(FAILED(hr)){
-            WARN("CoCreateInstance failed: %08x\n", hr);
+            WARN("CoCreateInstance failed: %08lx\n", hr);
             return hr;
         }
     }
@@ -101,7 +84,7 @@ HRESULT CDECL CreateFX(REFCLSID clsid, IUnknown **out, void *initdata, UINT32 in
             IXAPO_Release(xapo);
 
             if(FAILED(hr)){
-                WARN("Initialize failed: %08x\n", hr);
+                WARN("Initialize failed: %08lx\n", hr);
                 IUnknown_Release(obj);
                 return hr;
             }
@@ -151,7 +134,7 @@ HRESULT CDECL CreateFX(REFCLSID clsid, IUnknown **out)
     }else{
         hr = CoCreateInstance(clsid, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void**)&obj);
         if(FAILED(hr)){
-            WARN("CoCreateInstance failed: %08x\n", hr);
+            WARN("CoCreateInstance failed: %08lx\n", hr);
             return hr;
         }
     }

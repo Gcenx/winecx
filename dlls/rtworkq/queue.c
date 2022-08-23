@@ -24,7 +24,6 @@
 #include "initguid.h"
 #include "rtworkq.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
@@ -58,6 +57,7 @@ static struct queue_handle user_queues[MAX_USER_QUEUE_HANDLES];
 static struct queue_handle *next_free_user_queue;
 static struct queue_handle *next_unused_user_queue = user_queues;
 static WORD queue_generation;
+static DWORD shared_mt_queue;
 
 static CRITICAL_SECTION queues_section;
 static CRITICAL_SECTION_DEBUG queues_critsect_debug =
@@ -217,8 +217,9 @@ static HRESULT unlock_user_queue(DWORD queue)
     {
         if (--entry->refcount == 0)
         {
+            if (shared_mt_queue == queue) shared_mt_queue = 0;
             shutdown_queue((struct queue *)entry->obj);
-            heap_free(entry->obj);
+            free(entry->obj);
             entry->obj = next_free_user_queue;
             next_free_user_queue = entry;
         }
@@ -425,7 +426,7 @@ static void CALLBACK serial_queue_finalization_callback(PTP_CALLBACK_INSTANCE in
         if (SUCCEEDED(hr = grab_queue(queue->target_queue, &target_queue)))
             target_queue->ops->submit(target_queue, next_item);
         else
-            WARN("Failed to grab queue for id %#x, hr %#x.\n", queue->target_queue, hr);
+            WARN("Failed to grab queue for id %#lx, hr %#lx.\n", queue->target_queue, hr);
     }
 
     LeaveCriticalSection(&queue->cs);
@@ -477,7 +478,7 @@ static void serial_queue_submit(struct queue *queue, struct work_item *item)
     if (item->flags & RTWQ_REPLY_CALLBACK)
     {
         if (FAILED(hr = RtwqCreateAsyncResult(NULL, &queue->IRtwqAsyncCallback_iface, NULL, &item->reply_result)))
-            WARN("Failed to create reply object, hr %#x.\n", hr);
+            WARN("Failed to create reply object, hr %#lx.\n", hr);
     }
     else
         item->finalization_callback = queue->finalization_callback;
@@ -511,7 +512,7 @@ static void serial_queue_submit(struct queue *queue, struct work_item *item)
         if (SUCCEEDED(hr = grab_queue(queue->target_queue, &target_queue)))
             target_queue->ops->submit(target_queue, next_item);
         else
-            WARN("Failed to grab queue for id %#x, hr %#x.\n", queue->target_queue, hr);
+            WARN("Failed to grab queue for id %#lx, hr %#lx.\n", queue->target_queue, hr);
     }
 
     LeaveCriticalSection(&queue->cs);
@@ -553,7 +554,7 @@ static ULONG WINAPI work_item_Release(IUnknown *iface)
         if (item->reply_result)
             IRtwqAsyncResult_Release(item->reply_result);
         IRtwqAsyncResult_Release(item->result);
-        heap_free(item);
+        free(item);
     }
 
     return refcount;
@@ -572,7 +573,7 @@ static struct work_item * alloc_work_item(struct queue *queue, LONG priority, IR
     DWORD flags = 0, queue_id = 0;
     struct work_item *item;
 
-    item = heap_alloc_zero(sizeof(*item));
+    item = calloc(1, sizeof(*item));
 
     item->IUnknown_iface.lpVtbl = &work_item_vtbl;
     item->result = result;
@@ -874,7 +875,7 @@ static HRESULT queue_cancel_item(struct queue *queue, RTWQWORKITEM_KEY key)
             else if ((key & SCHEDULED_ITEM_KEY_MASK) == SCHEDULED_ITEM_KEY_MASK)
                 CloseThreadpoolTimer(item->u.timer_object);
             else
-                WARN("Unknown item key mask %#x.\n", (DWORD)key);
+                WARN("Unknown item key mask %#I64x.\n", key);
             queue_release_pending_item(item);
             hr = S_OK;
             break;
@@ -896,8 +897,7 @@ static HRESULT alloc_user_queue(const struct queue_desc *desc, DWORD *queue_id)
     if (platform_lock <= 0)
         return RTWQ_E_SHUTDOWN;
 
-    queue = heap_alloc_zero(sizeof(*queue));
-    if (!queue)
+    if (!(queue = calloc(1, sizeof(*queue))))
         return E_OUTOFMEMORY;
 
     init_work_queue(desc, queue);
@@ -912,7 +912,7 @@ static HRESULT alloc_user_queue(const struct queue_desc *desc, DWORD *queue_id)
     else
     {
         LeaveCriticalSection(&queues_section);
-        heap_free(queue);
+        free(queue);
         WARN("Out of user queue handles.\n");
         return E_OUTOFMEMORY;
     }
@@ -964,7 +964,7 @@ static ULONG WINAPI async_result_AddRef(IRtwqAsyncResult *iface)
     struct async_result *result = impl_from_IRtwqAsyncResult(iface);
     ULONG refcount = InterlockedIncrement(&result->refcount);
 
-    TRACE("%p, %u.\n", iface, refcount);
+    TRACE("%p, %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -974,7 +974,7 @@ static ULONG WINAPI async_result_Release(IRtwqAsyncResult *iface)
     struct async_result *result = impl_from_IRtwqAsyncResult(iface);
     ULONG refcount = InterlockedDecrement(&result->refcount);
 
-    TRACE("%p, %u.\n", iface, refcount);
+    TRACE("%p, %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -986,7 +986,7 @@ static ULONG WINAPI async_result_Release(IRtwqAsyncResult *iface)
             IUnknown_Release(result->state);
         if (result->result.hEvent)
             CloseHandle(result->result.hEvent);
-        heap_free(result);
+        free(result);
 
         RtwqUnlockPlatform();
     }
@@ -1022,7 +1022,7 @@ static HRESULT WINAPI async_result_SetStatus(IRtwqAsyncResult *iface, HRESULT st
 {
     struct async_result *result = impl_from_IRtwqAsyncResult(iface);
 
-    TRACE("%p, %#x.\n", iface, status);
+    TRACE("%p, %#lx.\n", iface, status);
 
     result->result.hrStatusResult = status;
 
@@ -1072,8 +1072,7 @@ static HRESULT create_async_result(IUnknown *object, IRtwqAsyncCallback *callbac
     if (!out)
         return E_INVALIDARG;
 
-    result = heap_alloc_zero(sizeof(*result));
-    if (!result)
+    if (!(result = calloc(1, sizeof(*result))))
         return E_OUTOFMEMORY;
 
     RtwqLockPlatform();
@@ -1135,7 +1134,7 @@ static void init_system_queues(void)
     }
 
     if (FAILED(hr = CoIncrementMTAUsage(&mta_cookie)))
-        WARN("Failed to initialize MTA, hr %#x.\n", hr);
+        WARN("Failed to initialize MTA, hr %#lx.\n", hr);
 
     desc.queue_type = RTWQ_STANDARD_WORKQUEUE;
     desc.ops = &pool_queue_ops;
@@ -1168,7 +1167,7 @@ static void shutdown_system_queues(void)
     }
 
     if (FAILED(hr = CoDecrementMTAUsage(mta_cookie)))
-        WARN("Failed to uninitialize MTA, hr %#x.\n", hr);
+        WARN("Failed to uninitialize MTA, hr %#lx.\n", hr);
 
     LeaveCriticalSection(&queues_section);
 }
@@ -1191,7 +1190,7 @@ HRESULT WINAPI RtwqPutWaitingWorkItem(HANDLE event, LONG priority, IRtwqAsyncRes
     struct queue *queue;
     HRESULT hr;
 
-    TRACE("%p, %d, %p, %p.\n", event, priority, result, key);
+    TRACE("%p, %ld, %p, %p.\n", event, priority, result, key);
 
     if (FAILED(hr = grab_queue(RTWQ_CALLBACK_QUEUE_TIMER, &queue)))
         return hr;
@@ -1252,7 +1251,7 @@ static ULONG WINAPI periodic_callback_AddRef(IRtwqAsyncCallback *iface)
     struct periodic_callback *callback = impl_from_IRtwqAsyncCallback(iface);
     ULONG refcount = InterlockedIncrement(&callback->refcount);
 
-    TRACE("%p, %u.\n", iface, refcount);
+    TRACE("%p, %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -1262,10 +1261,10 @@ static ULONG WINAPI periodic_callback_Release(IRtwqAsyncCallback *iface)
     struct periodic_callback *callback = impl_from_IRtwqAsyncCallback(iface);
     ULONG refcount = InterlockedDecrement(&callback->refcount);
 
-    TRACE("%p, %u.\n", iface, refcount);
+    TRACE("%p, %lu.\n", iface, refcount);
 
     if (!refcount)
-        heap_free(callback);
+        free(callback);
 
     return refcount;
 }
@@ -1304,8 +1303,7 @@ static HRESULT create_periodic_callback_obj(RTWQPERIODICCALLBACK callback, IRtwq
 {
     struct periodic_callback *object;
 
-    object = heap_alloc(sizeof(*object));
-    if (!object)
+    if (!(object = calloc(1, sizeof(*object))))
         return E_OUTOFMEMORY;
 
     object->IRtwqAsyncCallback_iface.lpVtbl = &periodic_callback_vtbl;
@@ -1354,7 +1352,7 @@ HRESULT WINAPI RtwqRemovePeriodicCallback(DWORD key)
     struct queue *queue;
     HRESULT hr;
 
-    TRACE("%#x.\n", key);
+    TRACE("%#lx.\n", key);
 
     if (FAILED(hr = grab_queue(RTWQ_CALLBACK_QUEUE_TIMER, &queue)))
         return hr;
@@ -1384,7 +1382,7 @@ HRESULT WINAPI RtwqInvokeCallback(IRtwqAsyncResult *result)
 
 HRESULT WINAPI RtwqPutWorkItem(DWORD queue, LONG priority, IRtwqAsyncResult *result)
 {
-    TRACE("%#x, %d, %p.\n", queue, priority, result);
+    TRACE("%#lx, %ld, %p.\n", queue, priority, result);
 
     return queue_put_work_item(queue, priority, result);
 }
@@ -1403,14 +1401,14 @@ HRESULT WINAPI RtwqAllocateWorkQueue(RTWQ_WORKQUEUE_TYPE queue_type, DWORD *queu
 
 HRESULT WINAPI RtwqLockWorkQueue(DWORD queue)
 {
-    TRACE("%#x.\n", queue);
+    TRACE("%#lx.\n", queue);
 
     return lock_user_queue(queue);
 }
 
 HRESULT WINAPI RtwqUnlockWorkQueue(DWORD queue)
 {
-    TRACE("%#x.\n", queue);
+    TRACE("%#lx.\n", queue);
 
     return unlock_user_queue(queue);
 }
@@ -1421,7 +1419,7 @@ HRESULT WINAPI RtwqSetLongRunning(DWORD queue_id, BOOL enable)
     HRESULT hr;
     int i;
 
-    TRACE("%#x, %d.\n", queue_id, enable);
+    TRACE("%#lx, %d.\n", queue_id, enable);
 
     lock_user_queue(queue_id);
 
@@ -1438,21 +1436,49 @@ HRESULT WINAPI RtwqSetLongRunning(DWORD queue_id, BOOL enable)
 
 HRESULT WINAPI RtwqLockSharedWorkQueue(const WCHAR *usageclass, LONG priority, DWORD *taskid, DWORD *queue)
 {
-    FIXME("%s, %d, %p, %p.\n", debugstr_w(usageclass), priority, taskid, queue);
+    struct queue_desc desc;
+    HRESULT hr;
 
-    return RtwqAllocateWorkQueue(RTWQ_STANDARD_WORKQUEUE, queue);
+    TRACE("%s, %ld, %p, %p.\n", debugstr_w(usageclass), priority, taskid, queue);
+
+    if (!usageclass)
+        return E_POINTER;
+
+    if (!*usageclass && taskid)
+        return E_INVALIDARG;
+
+    if (*usageclass)
+        FIXME("Class name is ignored.\n");
+
+    EnterCriticalSection(&queues_section);
+
+    if (shared_mt_queue)
+        hr = lock_user_queue(shared_mt_queue);
+    else
+    {
+        desc.queue_type = RTWQ_MULTITHREADED_WORKQUEUE;
+        desc.ops = &pool_queue_ops;
+        desc.target_queue = 0;
+        hr = alloc_user_queue(&desc, &shared_mt_queue);
+    }
+
+    *queue = shared_mt_queue;
+
+    LeaveCriticalSection(&queues_section);
+
+    return hr;
 }
 
 HRESULT WINAPI RtwqSetDeadline(DWORD queue_id, LONGLONG deadline, HANDLE *request)
 {
-    FIXME("%#x, %s, %p.\n", queue_id, wine_dbgstr_longlong(deadline), request);
+    FIXME("%#lx, %s, %p.\n", queue_id, wine_dbgstr_longlong(deadline), request);
 
     return E_NOTIMPL;
 }
 
 HRESULT WINAPI RtwqSetDeadline2(DWORD queue_id, LONGLONG deadline, LONGLONG predeadline, HANDLE *request)
 {
-    FIXME("%#x, %s, %s, %p.\n", queue_id, wine_dbgstr_longlong(deadline), wine_dbgstr_longlong(predeadline), request);
+    FIXME("%#lx, %s, %s, %p.\n", queue_id, wine_dbgstr_longlong(deadline), wine_dbgstr_longlong(predeadline), request);
 
     return E_NOTIMPL;
 }
@@ -1468,7 +1494,7 @@ HRESULT WINAPI RtwqAllocateSerialWorkQueue(DWORD target_queue, DWORD *queue)
 {
     struct queue_desc desc;
 
-    TRACE("%#x, %p.\n", target_queue, queue);
+    TRACE("%#lx, %p.\n", target_queue, queue);
 
     desc.queue_type = RTWQ_STANDARD_WORKQUEUE;
     desc.ops = &serial_queue_ops;
@@ -1478,42 +1504,42 @@ HRESULT WINAPI RtwqAllocateSerialWorkQueue(DWORD target_queue, DWORD *queue)
 
 HRESULT WINAPI RtwqJoinWorkQueue(DWORD queue, HANDLE hFile, HANDLE *cookie)
 {
-    FIXME("%#x, %p, %p.\n", queue, hFile, cookie);
+    FIXME("%#lx, %p, %p.\n", queue, hFile, cookie);
 
     return E_NOTIMPL;
 }
 
 HRESULT WINAPI RtwqUnjoinWorkQueue(DWORD queue, HANDLE cookie)
 {
-    FIXME("%#x, %p.\n", queue, cookie);
+    FIXME("%#lx, %p.\n", queue, cookie);
 
     return E_NOTIMPL;
 }
 
 HRESULT WINAPI RtwqGetWorkQueueMMCSSClass(DWORD queue, WCHAR *class, DWORD *length)
 {
-    FIXME("%#x, %p, %p.\n", queue, class, length);
+    FIXME("%#lx, %p, %p.\n", queue, class, length);
 
     return E_NOTIMPL;
 }
 
 HRESULT WINAPI RtwqGetWorkQueueMMCSSTaskId(DWORD queue, DWORD *taskid)
 {
-    FIXME("%#x, %p.\n", queue, taskid);
+    FIXME("%#lx, %p.\n", queue, taskid);
 
     return E_NOTIMPL;
 }
 
 HRESULT WINAPI RtwqGetWorkQueueMMCSSPriority(DWORD queue, LONG *priority)
 {
-    FIXME("%#x, %p.\n", queue, priority);
+    FIXME("%#lx, %p.\n", queue, priority);
 
     return E_NOTIMPL;
 }
 
 HRESULT WINAPI RtwqRegisterPlatformWithMMCSS(const WCHAR *class, DWORD *taskid, LONG priority)
 {
-    FIXME("%s, %p, %d.\n", debugstr_w(class), taskid, priority);
+    FIXME("%s, %p, %ld.\n", debugstr_w(class), taskid, priority);
 
     return E_NOTIMPL;
 }
@@ -1528,7 +1554,7 @@ HRESULT WINAPI RtwqUnregisterPlatformFromMMCSS(void)
 HRESULT WINAPI RtwqBeginRegisterWorkQueueWithMMCSS(DWORD queue, const WCHAR *class, DWORD taskid, LONG priority,
         IRtwqAsyncCallback *callback, IUnknown *state)
 {
-    FIXME("%#x, %s, %u, %d, %p, %p.\n", queue, debugstr_w(class), taskid, priority, callback, state);
+    FIXME("%#lx, %s, %lu, %ld, %p, %p.\n", queue, debugstr_w(class), taskid, priority, callback, state);
 
     return E_NOTIMPL;
 }
@@ -1542,7 +1568,7 @@ HRESULT WINAPI RtwqEndRegisterWorkQueueWithMMCSS(IRtwqAsyncResult *result, DWORD
 
 HRESULT WINAPI RtwqBeginUnregisterWorkQueueWithMMCSS(DWORD queue, IRtwqAsyncCallback *callback, IUnknown *state)
 {
-    FIXME("%#x, %p, %p.\n", queue, callback, state);
+    FIXME("%#lx, %p, %p.\n", queue, callback, state);
 
     return E_NOTIMPL;
 }

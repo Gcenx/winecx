@@ -1,14 +1,16 @@
 MODULE    = mf.dll
 IMPORTLIB = mf
 IMPORTS   = advapi32 mfplat ole32 uuid mfuuid strmiids
-DELAYIMPORTS = evr
+DELAYIMPORTS = evr user32
 
-EXTRADLLFLAGS = -mno-cygwin
+EXTRADLLFLAGS = -Wb,--prefer-native
 
 C_SRCS = \
+	clock.c \
 	copier.c \
 	evr.c \
 	main.c \
+	quality.c \
 	samplegrabber.c \
 	sar.c \
 	session.c \

@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -30,13 +28,13 @@
 
 static struct be_process_io be_process_module_io;
 
-static BOOL tgt_process_module_read(HANDLE hProcess, const void* HOSTPTR addr,
-                                    void* buffer, SIZE_T len, SIZE_T* HOSTPTR rlen)
+static BOOL tgt_process_module_read(HANDLE hProcess, const void* addr,
+                                    void* buffer, SIZE_T len, SIZE_T* rlen)
 {
     return FALSE;
 }
 
-static BOOL tgt_process_module_write(HANDLE hProcess, void* HOSTPTR addr,
+static BOOL tgt_process_module_write(HANDLE hProcess, void* addr,
                                      const void* buffer, SIZE_T len, SIZE_T* wlen)
 {
     return FALSE;

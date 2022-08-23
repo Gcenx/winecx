@@ -34,16 +34,9 @@ WCHAR g_pszDefaultValueName[64];
 
 BOOL ProcessCmdLine(WCHAR *cmdline);
 
-static const WCHAR hkey_local_machine[] = {'H','K','E','Y','_','L','O','C','A','L','_','M','A','C','H','I','N','E',0};
-static const WCHAR hkey_users[] = {'H','K','E','Y','_','U','S','E','R','S',0};
-static const WCHAR hkey_classes_root[] = {'H','K','E','Y','_','C','L','A','S','S','E','S','_','R','O','O','T',0};
-static const WCHAR hkey_current_config[] = {'H','K','E','Y','_','C','U','R','R','E','N','T','_','C','O','N','F','I','G',0};
-static const WCHAR hkey_current_user[] = {'H','K','E','Y','_','C','U','R','R','E','N','T','_','U','S','E','R',0};
-static const WCHAR hkey_dyn_data[] = {'H','K','E','Y','_','D','Y','N','_','D','A','T','A',0};
-
-const WCHAR *reg_class_namesW[] = {hkey_local_machine, hkey_users,
-                                   hkey_classes_root, hkey_current_config,
-                                   hkey_current_user, hkey_dyn_data
+const WCHAR *reg_class_namesW[] = {L"HKEY_LOCAL_MACHINE", L"HKEY_USERS",
+                                   L"HKEY_CLASSES_ROOT", L"HKEY_CURRENT_CONFIG",
+                                   L"HKEY_CURRENT_USER", L"HKEY_DYN_DATA"
                                   };
 
 /*******************************************************************************
@@ -56,13 +49,11 @@ HWND hStatusBar;
 HMENU hMenuFrame;
 HMENU hPopupMenus = 0;
 UINT nClipboardFormat;
-const WCHAR strClipboardFormat[] = {'T','O','D','O',':',' ','S','E','T',' ','C','O','R','R','E','C','T',' ','F','O','R','M','A','T',0};
-
 
 #define MAX_LOADSTRING  100
-WCHAR szTitle[MAX_LOADSTRING];
-const WCHAR szFrameClass[] = {'R','e','g','E','d','i','t','_','R','e','g','E','d','i','t',0};
-const WCHAR szChildClass[] = {'R','E','G','E','D','I','T',0};
+static WCHAR szTitle[MAX_LOADSTRING];
+const WCHAR szChildClass[] = L"REGEDIT";
+static const WCHAR szFrameClass[] = L"RegEdit_RegEdit";
 
 static BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
@@ -96,7 +87,7 @@ static BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     /* register our hex editor control */
     HexEdit_Register();
 
-    nClipboardFormat = RegisterClipboardFormatW(strClipboardFormat);
+    nClipboardFormat = RegisterClipboardFormatW(L"TODO: Set correct format");
 
     hFrameWnd = CreateWindowExW(0, szFrameClass, szTitle,
                                 WS_OVERLAPPEDWINDOW | WS_EX_CLIENTEDGE,
@@ -142,21 +133,22 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
     HACCEL hAccel;
     BOOL is_wow64;
 
+    InitCommonControls();
+
     if (ProcessCmdLine(GetCommandLineW())) {
         return 0;
     }
 
     if (IsWow64Process( GetCurrentProcess(), &is_wow64 ) && is_wow64)
     {
+        static const WCHAR filename[] = L"C:\\windows\\regedit.exe";
         STARTUPINFOW si;
         PROCESS_INFORMATION pi;
-        WCHAR filename[MAX_PATH];
         void *redir;
         DWORD exit_code;
 
         memset( &si, 0, sizeof(si) );
         si.cb = sizeof(si);
-        GetModuleFileNameW( 0, filename, MAX_PATH );
 
         Wow64DisableWow64FsRedirection( &redir );
         if (CreateProcessW( filename, GetCommandLineW(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi ))
@@ -166,7 +158,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
             GetExitCodeProcess( pi.hProcess, &exit_code );
             ExitProcess( exit_code );
         }
-        else WINE_ERR( "failed to restart 64-bit %s, err %d\n", wine_dbgstr_w(filename), GetLastError() );
+        else WINE_ERR( "failed to restart 64-bit %s, err %ld\n", wine_dbgstr_w(filename), GetLastError() );
         Wow64RevertWow64FsRedirection( redir );
     }
 

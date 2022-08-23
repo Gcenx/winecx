@@ -33,7 +33,6 @@
 
 #include "wine/list.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 #include "explorerframe_main.h"
 
@@ -68,7 +67,7 @@ typedef struct {
 } NSTC2Impl;
 
 static const DWORD unsupported_styles =
-    NSTCS_SINGLECLICKEXPAND | NSTCS_NOREPLACEOPEN | NSTCS_NOORDERSTREAM | NSTCS_FAVORITESMODE |
+    NSTCS_NOREPLACEOPEN | NSTCS_NOORDERSTREAM | NSTCS_FAVORITESMODE |
     NSTCS_EMPTYTEXT | NSTCS_ALLOWJUNCTIONS | NSTCS_SHOWTABSBUTTON | NSTCS_SHOWDELETEBUTTON |
     NSTCS_SHOWREFRESHBUTTON | NSTCS_SPRINGEXPAND | NSTCS_RICHTOOLTIP | NSTCS_NOINDENTCHECKS;
 static const DWORD unsupported_styles2 =
@@ -192,7 +191,7 @@ static DWORD treeview_style_from_nstcs(NSTC2Impl *This, NSTCSTYLE nstcs,
                                        NSTCSTYLE nstcs_mask, DWORD *new_style)
 {
     DWORD old_style, tv_mask = 0;
-    TRACE("%p, %x, %x, %p\n", This, nstcs, nstcs_mask, new_style);
+    TRACE("%p, %lx, %lx, %p\n", This, nstcs, nstcs_mask, new_style);
 
     if(This->hwnd_tv)
         old_style = GetWindowLongPtrW(This->hwnd_tv, GWL_STYLE);
@@ -213,6 +212,7 @@ static DWORD treeview_style_from_nstcs(NSTC2Impl *This, NSTCSTYLE nstcs,
     if(nstcs_mask & NSTCS_DISABLEDRAGDROP)     tv_mask |= TVS_DISABLEDRAGDROP;
     if(nstcs_mask & NSTCS_NOEDITLABELS)        tv_mask |= TVS_EDITLABELS;
     if(nstcs_mask & NSTCS_CHECKBOXES)          tv_mask |= TVS_CHECKBOXES;
+    if(nstcs_mask & NSTCS_SINGLECLICKEXPAND)   tv_mask |= TVS_SINGLEEXPAND;
 
     *new_style = 0;
 
@@ -227,10 +227,11 @@ static DWORD treeview_style_from_nstcs(NSTC2Impl *This, NSTCSTYLE nstcs,
     if(nstcs & NSTCS_DISABLEDRAGDROP)     *new_style |= TVS_DISABLEDRAGDROP;
     if(!(nstcs & NSTCS_NOEDITLABELS))     *new_style |= TVS_EDITLABELS;
     if(nstcs & NSTCS_CHECKBOXES)          *new_style |= TVS_CHECKBOXES;
+    if(nstcs & NSTCS_SINGLECLICKEXPAND)   *new_style |= TVS_SINGLEEXPAND;
 
     *new_style = (old_style & ~tv_mask) | (*new_style & tv_mask);
 
-    TRACE("old: %08x, new: %08x\n", old_style, *new_style);
+    TRACE("old: %08lx, new: %08lx\n", old_style, *new_style);
 
     return old_style^*new_style;
 }
@@ -395,22 +396,22 @@ static UINT fill_sublevel(NSTC2Impl *This, HTREEITEM hitem)
                         IShellItem_Release(psi);
                     }
                     else
-                        ERR("SHCreateShellItem failed with 0x%08x\n", hr);
+                        ERR("SHCreateShellItem failed with 0x%08lx\n", hr);
                 }
                 IEnumIDList_Release(peidl);
             }
             else
-                ERR("EnumObjects failed with 0x%08x\n", hr);
+                ERR("EnumObjects failed with 0x%08lx\n", hr);
 
             IShellFolder_Release(psf);
         }
         else
-            ERR("BindToHandler failed with 0x%08x\n", hr);
+            ERR("BindToHandler failed with 0x%08lx\n", hr);
 
         ILFree(pidl_parent);
     }
     else
-        ERR("SHGetIDListFromObject failed with 0x%08x\n", hr);
+        ERR("SHGetIDListFromObject failed with 0x%08lx\n", hr);
 
     return added;
 }
@@ -588,7 +589,7 @@ static LRESULT on_tvn_getdispinfow(NSTC2Impl *This, LPARAM lParam)
                 ILFree(pidl);
             }
             else
-                ERR("Failed to get IDList (%08x).\n", hr);
+                ERR("Failed to get IDList (%08lx).\n", hr);
         }
     }
 
@@ -604,7 +605,7 @@ static LRESULT on_tvn_getdispinfow(NSTC2Impl *This, LPARAM lParam)
             CoTaskMemFree(display_name);
         }
         else
-            ERR("Failed to get display name (%08x).\n", hr);
+            ERR("Failed to get display name (%08lx).\n", hr);
     }
 
     return TRUE;
@@ -698,7 +699,7 @@ static LRESULT on_wm_mbuttonup(NSTC2Impl *This, WPARAM wParam, LPARAM lParam)
     TVHITTESTINFO tvhit;
     IShellItem *psi;
     HRESULT hr;
-    TRACE("%p (%lx, %lx)\n", This, wParam, lParam);
+    TRACE("%p (%Ix, %Ix)\n", This, wParam, lParam);
 
     tvhit.pt.x = (int)(short)LOWORD(lParam);
     tvhit.pt.y = (int)(short)HIWORD(lParam);
@@ -722,7 +723,7 @@ static LRESULT on_kbd_event(NSTC2Impl *This, UINT uMsg, WPARAM wParam, LPARAM lP
 {
     IShellItem *psi;
     HTREEITEM hitem;
-    TRACE("%p : %d, %lx, %lx\n", This, uMsg, wParam, lParam);
+    TRACE("%p : %d, %Ix, %Ix\n", This, uMsg, wParam, lParam);
 
     /* Handled by the client? */
     if(FAILED(events_OnKeyboardInput(This, uMsg, wParam, lParam)))
@@ -835,7 +836,7 @@ static ULONG WINAPI NSTC2_fnAddRef(INameSpaceTreeControl2* iface)
     NSTC2Impl *This = impl_from_INameSpaceTreeControl2(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("%p - ref %d\n", This, ref);
+    TRACE("%p - ref %ld\n", This, ref);
 
     return ref;
 }
@@ -845,12 +846,12 @@ static ULONG WINAPI NSTC2_fnRelease(INameSpaceTreeControl2* iface)
     NSTC2Impl *This = impl_from_INameSpaceTreeControl2(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("%p - ref: %d\n", This, ref);
+    TRACE("%p - ref: %ld\n", This, ref);
 
     if(!ref)
     {
         TRACE("Freeing.\n");
-        heap_free(This);
+        free(This);
         EFRAME_UnlockModule();
     }
 
@@ -869,10 +870,10 @@ static HRESULT WINAPI NSTC2_fnInitialize(INameSpaceTreeControl2* iface,
     RECT rc;
     static const WCHAR NSTC2_CLASS_NAME[] = L"NamespaceTreeControl";
 
-    TRACE("%p (%p, %p, %x)\n", This, hwndParent, prc, nstcsFlags);
+    TRACE("%p (%p, %p, %lx)\n", This, hwndParent, prc, nstcsFlags);
 
     if(nstcsFlags & unsupported_styles)
-        FIXME("0x%08x contains the unsupported style(s) 0x%08x\n",
+        FIXME("0x%08lx contains the unsupported style(s) 0x%08lx\n",
               nstcsFlags, nstcsFlags & unsupported_styles);
 
     This->style = nstcsFlags;
@@ -947,7 +948,7 @@ static HRESULT WINAPI NSTC2_fnTreeUnadvise(INameSpaceTreeControl2* iface, DWORD 
 {
     NSTC2Impl *This = impl_from_INameSpaceTreeControl2(iface);
 
-    TRACE("%p (%x)\n", This, cookie);
+    TRACE("%p (%lx)\n", This, cookie);
 
     /* The cookie is ignored. */
 
@@ -985,9 +986,9 @@ static HRESULT WINAPI NSTC2_fnInsertRoot(INameSpaceTreeControl2* iface,
     HTREEITEM add_after_hitem;
     int i;
 
-    TRACE("%p, %d, %p, %x, %x, %p\n", This, iIndex, psiRoot, grfEnumFlags, grfRootStyle, pif);
+    TRACE("%p, %d, %p, %lx, %lx, %p\n", This, iIndex, psiRoot, grfEnumFlags, grfRootStyle, pif);
 
-    new_root = heap_alloc(sizeof(*new_root));
+    new_root = malloc(sizeof(*new_root));
     if(!new_root)
         return E_OUTOFMEMORY;
 
@@ -1011,7 +1012,7 @@ static HRESULT WINAPI NSTC2_fnInsertRoot(INameSpaceTreeControl2* iface,
     if(!new_root->htreeitem)
     {
         WARN("Failed to add the root.\n");
-        heap_free(new_root);
+        free(new_root);
         return E_FAIL;
     }
 
@@ -1043,7 +1044,7 @@ static HRESULT WINAPI NSTC2_fnAppendRoot(INameSpaceTreeControl2* iface,
 {
     NSTC2Impl *This = impl_from_INameSpaceTreeControl2(iface);
     UINT root_count;
-    TRACE("%p, %p, %x, %x, %p\n",
+    TRACE("%p, %p, %lx, %lx, %p\n",
           This, psiRoot, grfEnumFlags, grfRootStyle, pif);
 
     root_count = list_count(&This->roots);
@@ -1079,7 +1080,7 @@ static HRESULT WINAPI NSTC2_fnRemoveRoot(INameSpaceTreeControl2* iface,
         events_OnItemDeleted(This, root->psi, TRUE);
         SendMessageW(This->hwnd_tv, TVM_DELETEITEM, 0, (LPARAM)root->htreeitem);
         list_remove(&root->entry);
-        heap_free(root);
+        free(root);
         return S_OK;
     }
     else
@@ -1121,7 +1122,7 @@ static HRESULT WINAPI NSTC2_fnGetRootItems(INameSpaceTreeControl2* iface,
     if(!count)
         return E_INVALIDARG;
 
-    array = heap_alloc(sizeof(LPITEMIDLIST)*count);
+    array = malloc(sizeof(LPITEMIDLIST)*count);
 
     i = 0;
     LIST_FOR_EACH_ENTRY(root, &This->roots, nstc_root, entry)
@@ -1135,7 +1136,7 @@ static HRESULT WINAPI NSTC2_fnGetRootItems(INameSpaceTreeControl2* iface,
     for(i = 0; i < count; i++)
         ILFree(array[i]);
 
-    heap_free(array);
+    free(array);
 
     return hr;
 }
@@ -1149,7 +1150,7 @@ static HRESULT WINAPI NSTC2_fnSetItemState(INameSpaceTreeControl2* iface,
     TVITEMEXW tvi;
     HTREEITEM hitem;
 
-    TRACE("%p (%p, %x, %x)\n", This, psi, nstcisMask, nstcisFlags);
+    TRACE("%p (%p, %lx, %lx)\n", This, psi, nstcisMask, nstcisFlags);
 
     hitem = treeitem_from_shellitem(This, psi);
     if(!hitem) return E_INVALIDARG;
@@ -1211,7 +1212,7 @@ static HRESULT WINAPI NSTC2_fnGetItemState(INameSpaceTreeControl2* iface,
     NSTC2Impl *This = impl_from_INameSpaceTreeControl2(iface);
     HTREEITEM hitem;
     TVITEMEXW tvi;
-    TRACE("%p (%p, %x, %p)\n", This, psi, nstcisMask, pnstcisFlags);
+    TRACE("%p (%p, %lx, %p)\n", This, psi, nstcisMask, pnstcisFlags);
 
     hitem = treeitem_from_shellitem(This, psi);
     if(!hitem)
@@ -1423,7 +1424,7 @@ static HRESULT WINAPI NSTC2_fnSetControlStyle(INameSpaceTreeControl2* iface,
         NSTCS_SINGLECLICKEXPAND | NSTCS_NOREPLACEOPEN | NSTCS_NOORDERSTREAM |
         NSTCS_FAVORITESMODE | NSTCS_EMPTYTEXT | NSTCS_ALLOWJUNCTIONS |
         NSTCS_SHOWTABSBUTTON | NSTCS_SHOWDELETEBUTTON | NSTCS_SHOWREFRESHBUTTON;
-    TRACE("%p (%x, %x)\n", This, nstcsMask, nstcsStyle);
+    TRACE("%p (%lx, %lx)\n", This, nstcsMask, nstcsStyle);
 
     /* Fail if there is an attempt to set an unknown style. */
     if(nstcsMask & ~(tv_style_flags | host_style_flags | nstc_flags))
@@ -1453,7 +1454,7 @@ static HRESULT WINAPI NSTC2_fnSetControlStyle(INameSpaceTreeControl2* iface,
     }
 
     if((nstcsStyle & nstcsMask) & unsupported_styles)
-        FIXME("mask & style (0x%08x) contains unsupported style(s): 0x%08x\n",
+        FIXME("mask & style (0x%08lx) contains unsupported style(s): 0x%08lx\n",
               (nstcsStyle & nstcsMask),
               (nstcsStyle & nstcsMask) & unsupported_styles);
 
@@ -1468,7 +1469,7 @@ static HRESULT WINAPI NSTC2_fnGetControlStyle(INameSpaceTreeControl2* iface,
                                               NSTCSTYLE *pnstcsStyle)
 {
     NSTC2Impl *This = impl_from_INameSpaceTreeControl2(iface);
-    TRACE("%p (%x, %p)\n", This, nstcsMask, pnstcsStyle);
+    TRACE("%p (%lx, %p)\n", This, nstcsMask, pnstcsStyle);
 
     *pnstcsStyle = (This->style & nstcsMask);
 
@@ -1483,7 +1484,7 @@ static HRESULT WINAPI NSTC2_fnSetControlStyle2(INameSpaceTreeControl2* iface,
     TRACE("%p (%x, %x)\n", This, nstcsMask, nstcsStyle);
 
     if((nstcsStyle & nstcsMask) & unsupported_styles2)
-        FIXME("mask & style (0x%08x) contains unsupported style(s): 0x%08x\n",
+        FIXME("mask & style (0x%08x) contains unsupported style(s): 0x%08lx\n",
               (nstcsStyle & nstcsMask),
               (nstcsStyle & nstcsMask) & unsupported_styles2);
 
@@ -1596,7 +1597,7 @@ HRESULT NamespaceTreeControl_Constructor(IUnknown *pUnkOuter, REFIID riid, void 
 
     EFRAME_LockModule();
 
-    nstc = heap_alloc_zero(sizeof(*nstc));
+    nstc = calloc(1, sizeof(*nstc));
     if (!nstc)
         return E_OUTOFMEMORY;
 

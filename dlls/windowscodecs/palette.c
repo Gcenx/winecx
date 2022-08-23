@@ -74,7 +74,7 @@ static ULONG WINAPI PaletteImpl_AddRef(IWICPalette *iface)
     PaletteImpl *This = impl_from_IWICPalette(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     return ref;
 }
@@ -84,7 +84,7 @@ static ULONG WINAPI PaletteImpl_Release(IWICPalette *iface)
     PaletteImpl *This = impl_from_IWICPalette(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     if (ref == 0)
     {
@@ -679,7 +679,7 @@ static HRESULT WINAPI PaletteImpl_InitializeFromBitmap(IWICPalette *palette,
     else
         rgb24_source = source;
 
-    hr = ImagingFactory_CreateInstance(&IID_IWICImagingFactory, (void **)&factory);
+    hr = create_instance(&CLSID_WICImagingFactory, &IID_IWICImagingFactory, (void **)&factory);
     if (hr != S_OK) goto fail;
 
     hr = IWICImagingFactory_CreateBitmapFromSource(factory, rgb24_source, WICBitmapCacheOnLoad, &rgb24_bitmap);

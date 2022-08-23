@@ -143,7 +143,7 @@ BOOL WINAPI CopyFileExA(LPCSTR sourceFilename, LPCSTR destFilename,
  */
 BOOL WINAPI MoveFileTransactedA(const char *source, const char *dest, LPPROGRESS_ROUTINE progress, void *data, DWORD flags, HANDLE handle)
 {
-    FIXME("(%s, %s, %p, %p, %d, %p)\n", debugstr_a(source), debugstr_a(dest), progress, data, flags, handle);
+    FIXME("(%s, %s, %p, %p, %ld, %p)\n", debugstr_a(source), debugstr_a(dest), progress, data, flags, handle);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
@@ -153,7 +153,7 @@ BOOL WINAPI MoveFileTransactedA(const char *source, const char *dest, LPPROGRESS
  */
 BOOL WINAPI MoveFileTransactedW(const WCHAR *source, const WCHAR *dest, LPPROGRESS_ROUTINE progress, void *data, DWORD flags, HANDLE handle)
 {
-    FIXME("(%s, %s, %p, %p, %d, %p)\n", debugstr_w(source), debugstr_w(dest), progress, data, flags, handle);
+    FIXME("(%s, %s, %p, %p, %ld, %p)\n", debugstr_w(source), debugstr_w(dest), progress, data, flags, handle);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
@@ -275,11 +275,13 @@ DWORD /*BOOLEAN*/ WINAPI KERNEL32_Wow64EnableWow64FsRedirection( BOOLEAN enable 
 char * CDECL wine_get_unix_file_name( LPCWSTR dosW )
 {
     UNICODE_STRING nt_name;
+    OBJECT_ATTRIBUTES attr;
     NTSTATUS status;
-    SIZE_T size = 256;
+    ULONG size = 256;
     char *buffer;
 
     if (!RtlDosPathNameToNtPathName_U( dosW, &nt_name, NULL, NULL )) return NULL;
+    InitializeObjectAttributes( &attr, &nt_name, 0, 0, NULL );
     for (;;)
     {
         if (!(buffer = HeapAlloc( GetProcessHeap(), 0, size )))
@@ -287,7 +289,7 @@ char * CDECL wine_get_unix_file_name( LPCWSTR dosW )
             RtlFreeUnicodeString( &nt_name );
             return NULL;
         }
-        status = wine_nt_to_unix_file_name( &nt_name, buffer, &size, FILE_OPEN_IF );
+        status = wine_nt_to_unix_file_name( &attr, buffer, &size, FILE_OPEN_IF );
         if (status != STATUS_BUFFER_TOO_SMALL) break;
         HeapFree( GetProcessHeap(), 0, buffer );
     }
@@ -313,7 +315,7 @@ WCHAR * CDECL wine_get_dos_file_name( LPCSTR str )
     UNICODE_STRING nt_name;
     NTSTATUS status;
     WCHAR *buffer;
-    SIZE_T len = strlen(str) + 1;
+    ULONG len = strlen(str) + 1;
 
     if (str[0] != '/')  /* relative path name */
     {
@@ -350,7 +352,7 @@ WCHAR * CDECL wine_get_dos_file_name( LPCSTR str )
  */
 BOOLEAN WINAPI CreateSymbolicLinkA(LPCSTR link, LPCSTR target, DWORD flags)
 {
-    FIXME("(%s %s %d): stub\n", debugstr_a(link), debugstr_a(target), flags);
+    FIXME("(%s %s %ld): stub\n", debugstr_a(link), debugstr_a(target), flags);
     return TRUE;
 }
 
@@ -382,7 +384,7 @@ BOOL WINAPI CheckNameLegalDOS8Dot3A(const char *name, char *oemname, DWORD oemna
 {
     WCHAR *nameW;
 
-    TRACE("(%s %p %u %p %p)\n", name, oemname,
+    TRACE("(%s %p %lu %p %p)\n", name, oemname,
             oemname_len, contains_spaces, is_legal);
 
     if (!name || !is_legal)
@@ -403,7 +405,7 @@ BOOL WINAPI CheckNameLegalDOS8Dot3W(const WCHAR *name, char *oemname, DWORD oemn
     UNICODE_STRING nameW;
     BOOLEAN contains_spaces;
 
-    TRACE("(%s %p %u %p %p)\n", wine_dbgstr_w(name), oemname,
+    TRACE("(%s %p %lu %p %p)\n", wine_dbgstr_w(name), oemname,
           oemname_len, contains_spaces_ret, is_legal);
 
     if (!name || !is_legal)

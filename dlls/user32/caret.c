@@ -26,7 +26,8 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "winuser.h"
+#include "ntuser.h"
+#include "user_private.h"
 #include "wine/server.h"
 #include "wine/debug.h"
 
@@ -40,8 +41,6 @@ typedef struct
 
 static CARET Caret = { 0, 500 };
 
-#define TIMERID 0xffff  /* system timer id for the caret */
-
 
 /*****************************************************************
  *               CARET_DisplayCaret
@@ -52,7 +51,7 @@ static void CARET_DisplayCaret( HWND hwnd, const RECT *r )
     HDC hCompDC;
 
     /* do not use DCX_CACHE here, for x,y,width,height are in logical units */
-    if (!(hdc = GetDCEx( hwnd, 0, DCX_USESTYLE /*| DCX_CACHE*/ ))) return;
+    if (!(hdc = NtUserGetDCEx( hwnd, 0, DCX_USESTYLE /*| DCX_CACHE*/ ))) return;
     hCompDC = CreateCompatibleDC(hdc);
     if (hCompDC)
     {
@@ -63,14 +62,11 @@ static void CARET_DisplayCaret( HWND hwnd, const RECT *r )
 	SelectObject(hCompDC, hPrevBmp);
 	DeleteDC(hCompDC);
     }
-    ReleaseDC( hwnd, hdc );
+    NtUserReleaseDC( hwnd, hdc );
 }
 
 
-/*****************************************************************
- *               CARET_Callback
- */
-static void CALLBACK CARET_Callback( HWND hwnd, UINT msg, UINT_PTR id, DWORD ctime)
+void CDECL toggle_caret( HWND hwnd )
 {
     BOOL ret;
     RECT r;
@@ -156,7 +152,7 @@ BOOL WINAPI CreateCaret( HWND hwnd, HBITMAP bitmap, INT width, INT height )
 		}
 		DeleteDC(hMemDC);
 	    }
-	    ReleaseDC(hwnd, hdc);
+	    NtUserReleaseDC(hwnd, hdc);
 	}
     }
     if (!hBmp) return FALSE;
@@ -183,7 +179,7 @@ BOOL WINAPI CreateCaret( HWND hwnd, HBITMAP bitmap, INT width, INT height )
     if (prev && !hidden)  /* hide the previous one */
     {
         /* FIXME: won't work if prev belongs to a different process */
-        KillSystemTimer( prev, TIMERID );
+        KillSystemTimer( prev, SYSTEM_TIMER_CARET );
         if (old_state) CARET_DisplayCaret( prev, &r );
     }
 
@@ -226,7 +222,7 @@ BOOL WINAPI DestroyCaret(void)
     if (ret && prev && !hidden)
     {
         /* FIXME: won't work if prev belongs to a different process */
-        KillSystemTimer( prev, TIMERID );
+        KillSystemTimer( prev, SYSTEM_TIMER_CARET );
         if (old_state) CARET_DisplayCaret( prev, &r );
     }
     if (Caret.hBmp) DeleteObject( Caret.hBmp );
@@ -274,7 +270,7 @@ BOOL WINAPI SetCaretPos( INT x, INT y )
         r.left = x;
         r.top = y;
         CARET_DisplayCaret( hwnd, &r );
-        SetSystemTimer( hwnd, TIMERID, Caret.timeout, CARET_Callback );
+        NtUserSetSystemTimer( hwnd, SYSTEM_TIMER_CARET, Caret.timeout );
     }
     return ret;
 }
@@ -314,7 +310,7 @@ BOOL WINAPI HideCaret( HWND hwnd )
     if (ret && !hidden)
     {
         if (old_state) CARET_DisplayCaret( hwnd, &r );
-        KillSystemTimer( hwnd, TIMERID );
+        KillSystemTimer( hwnd, SYSTEM_TIMER_CARET );
     }
     return ret;
 }
@@ -352,7 +348,7 @@ BOOL WINAPI ShowCaret( HWND hwnd )
     if (ret && (hidden == 1))  /* hidden was 1 so it's now 0 */
     {
         CARET_DisplayCaret( hwnd, &r );
-        SetSystemTimer( hwnd, TIMERID, Caret.timeout, CARET_Callback );
+        NtUserSetSystemTimer( hwnd, SYSTEM_TIMER_CARET, Caret.timeout );
     }
     return ret;
 }

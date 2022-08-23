@@ -643,43 +643,43 @@
 @ cdecl -arch=win64 ??Bid@locale@std@@QEAA_KXZ(ptr) locale_id_operator_size_t
 @ thiscall -arch=win32 ??Bios_base@std@@QBEPAXXZ(ptr) ios_base_op_fail
 @ cdecl -arch=win64 ??Bios_base@std@@QEBAPEAXXZ(ptr) ios_base_op_fail
-@ extern ??_7?$basic_ios@DU?$char_traits@D@std@@@std@@6B@ MSVCP_basic_ios_char_vtable
-@ extern ??_7?$basic_ios@GU?$char_traits@G@std@@@std@@6B@ MSVCP_basic_ios_short_vtable
-@ extern ??_7?$basic_ios@_WU?$char_traits@_W@std@@@std@@6B@ MSVCP_basic_ios_wchar_vtable
-@ extern ??_7?$basic_iostream@DU?$char_traits@D@std@@@std@@6B@ MSVCP_basic_iostream_char_vtable
-@ extern ??_7?$basic_iostream@GU?$char_traits@G@std@@@std@@6B@ MSVCP_basic_iostream_short_vtable
-@ extern ??_7?$basic_iostream@_WU?$char_traits@_W@std@@@std@@6B@ MSVCP_basic_iostream_wchar_vtable
-@ extern ??_7?$basic_istream@DU?$char_traits@D@std@@@std@@6B@ MSVCP_basic_istream_char_vtable
-@ extern ??_7?$basic_istream@GU?$char_traits@G@std@@@std@@6B@ MSVCP_basic_istream_short_vtable
-@ extern ??_7?$basic_istream@_WU?$char_traits@_W@std@@@std@@6B@ MSVCP_basic_istream_wchar_vtable
-@ extern ??_7?$basic_ostream@DU?$char_traits@D@std@@@std@@6B@ MSVCP_basic_ostream_char_vtable
-@ extern ??_7?$basic_ostream@GU?$char_traits@G@std@@@std@@6B@ MSVCP_basic_ostream_short_vtable
-@ extern ??_7?$basic_ostream@_WU?$char_traits@_W@std@@@std@@6B@ MSVCP_basic_ostream_wchar_vtable
-@ extern ??_7?$basic_streambuf@DU?$char_traits@D@std@@@std@@6B@ MSVCP_basic_streambuf_char_vtable
-@ extern ??_7?$basic_streambuf@GU?$char_traits@G@std@@@std@@6B@ MSVCP_basic_streambuf_short_vtable
-@ extern ??_7?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@6B@ MSVCP_basic_streambuf_wchar_vtable
-@ extern ??_7?$codecvt@DDH@std@@6B@ MSVCP_codecvt_char_vtable
-@ extern ??_7?$codecvt@GDH@std@@6B@ MSVCP_codecvt_short_vtable
-@ extern ??_7?$codecvt@_WDH@std@@6B@ MSVCP_codecvt_wchar_vtable
-@ extern ??_7?$ctype@D@std@@6B@ MSVCP_ctype_char_vtable
-@ extern ??_7?$ctype@G@std@@6B@ MSVCP_ctype_short_vtable
-@ extern ??_7?$ctype@_W@std@@6B@ MSVCP_ctype_wchar_vtable
-@ extern ??_7?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@6B@ MSVCP_num_get_char_vtable
-@ extern ??_7?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@6B@ MSVCP_num_get_short_vtable
-@ extern ??_7?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@6B@ MSVCP_num_get_wchar_vtable
-@ extern ??_7?$num_put@DV?$ostreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@6B@ MSVCP_num_put_char_vtable
-@ extern ??_7?$num_put@GV?$ostreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@6B@ MSVCP_num_put_short_vtable
-@ extern ??_7?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@6B@ MSVCP_num_put_wchar_vtable
-@ extern ??_7?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@6B@ MSVCP_time_get_char_vtable
+@ extern ??_7?$basic_ios@DU?$char_traits@D@std@@@std@@6B@ basic_ios_char_vtable
+@ extern ??_7?$basic_ios@GU?$char_traits@G@std@@@std@@6B@ basic_ios_short_vtable
+@ extern ??_7?$basic_ios@_WU?$char_traits@_W@std@@@std@@6B@ basic_ios_wchar_vtable
+@ extern ??_7?$basic_iostream@DU?$char_traits@D@std@@@std@@6B@ basic_iostream_char_vtable
+@ extern ??_7?$basic_iostream@GU?$char_traits@G@std@@@std@@6B@ basic_iostream_short_vtable
+@ extern ??_7?$basic_iostream@_WU?$char_traits@_W@std@@@std@@6B@ basic_iostream_wchar_vtable
+@ extern ??_7?$basic_istream@DU?$char_traits@D@std@@@std@@6B@ basic_istream_char_vtable
+@ extern ??_7?$basic_istream@GU?$char_traits@G@std@@@std@@6B@ basic_istream_short_vtable
+@ extern ??_7?$basic_istream@_WU?$char_traits@_W@std@@@std@@6B@ basic_istream_wchar_vtable
+@ extern ??_7?$basic_ostream@DU?$char_traits@D@std@@@std@@6B@ basic_ostream_char_vtable
+@ extern ??_7?$basic_ostream@GU?$char_traits@G@std@@@std@@6B@ basic_ostream_short_vtable
+@ extern ??_7?$basic_ostream@_WU?$char_traits@_W@std@@@std@@6B@ basic_ostream_wchar_vtable
+@ extern ??_7?$basic_streambuf@DU?$char_traits@D@std@@@std@@6B@ basic_streambuf_char_vtable
+@ extern ??_7?$basic_streambuf@GU?$char_traits@G@std@@@std@@6B@ basic_streambuf_short_vtable
+@ extern ??_7?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@6B@ basic_streambuf_wchar_vtable
+@ extern ??_7?$codecvt@DDH@std@@6B@ codecvt_char_vtable
+@ extern ??_7?$codecvt@GDH@std@@6B@ codecvt_short_vtable
+@ extern ??_7?$codecvt@_WDH@std@@6B@ codecvt_wchar_vtable
+@ extern ??_7?$ctype@D@std@@6B@ ctype_char_vtable
+@ extern ??_7?$ctype@G@std@@6B@ ctype_short_vtable
+@ extern ??_7?$ctype@_W@std@@6B@ ctype_wchar_vtable
+@ extern ??_7?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@6B@ num_get_char_vtable
+@ extern ??_7?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@6B@ num_get_short_vtable
+@ extern ??_7?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@6B@ num_get_wchar_vtable
+@ extern ??_7?$num_put@DV?$ostreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@6B@ num_put_char_vtable
+@ extern ??_7?$num_put@GV?$ostreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@6B@ num_put_short_vtable
+@ extern ??_7?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@6B@ num_put_wchar_vtable
+@ extern ??_7?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@6B@ time_get_char_vtable
 # extern ??_7?$time_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@6B@
-@ extern ??_7?$time_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@6B@ MSVCP_time_get_wchar_vtable
-@ extern ??_7?$time_put@DV?$ostreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@6B@ MSVCP_time_put_char_vtable
-@ extern ??_7?$time_put@GV?$ostreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@6B@ MSVCP_time_put_short_vtable
-@ extern ??_7?$time_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@6B@ MSVCP_time_put_wchar_vtable
-@ extern ??_7_Locimp@locale@std@@6B@ MSVCP_locale__Locimp_vtable
-@ extern ??_7codecvt_base@std@@6B@ MSVCP_codecvt_base_vtable
-@ extern ??_7ctype_base@std@@6B@ MSVCP_ctype_base_vtable
-@ extern ??_7ios_base@std@@6B@ MSVCP_ios_base_vtable
+@ extern ??_7?$time_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@6B@ time_get_wchar_vtable
+@ extern ??_7?$time_put@DV?$ostreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@6B@ time_put_char_vtable
+@ extern ??_7?$time_put@GV?$ostreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@6B@ time_put_short_vtable
+@ extern ??_7?$time_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@6B@ time_put_wchar_vtable
+@ extern ??_7_Locimp@locale@std@@6B@ locale__Locimp_vtable
+@ extern ??_7codecvt_base@std@@6B@ codecvt_base_vtable
+@ extern ??_7ctype_base@std@@6B@ ctype_base_vtable
+@ extern ??_7ios_base@std@@6B@ ios_base_vtable
 # extern ??_7time_base@std@@6B@
 @ extern ??_8?$basic_iostream@DU?$char_traits@D@std@@@std@@7B?$basic_istream@DU?$char_traits@D@std@@@1@@ basic_iostream_char_vbtable1
 @ extern ??_8?$basic_iostream@DU?$char_traits@D@std@@@std@@7B?$basic_ostream@DU?$char_traits@D@std@@@1@@ basic_iostream_char_vbtable2
@@ -2739,8 +2739,8 @@
 @ cdecl ?sync_with_stdio@ios_base@std@@SA_N_N@Z(long) ios_base_sync_with_stdio
 @ cdecl -arch=win32 ?system_category@std@@YAABVerror_category@1@XZ() std_system_category
 @ cdecl -arch=win64 ?system_category@std@@YAAEBVerror_category@1@XZ() std_system_category
-@ stub -arch=win32 ?table@?$ctype@D@std@@QBEPBFXZ
-@ stub -arch=win64 ?table@?$ctype@D@std@@QEBAPEBFXZ
+@ thiscall -arch=win32 ?table@?$ctype@D@std@@QBEPBFXZ(ptr) ctype_char_table
+@ cdecl -arch=win64 ?table@?$ctype@D@std@@QEBAPEBFXZ(ptr) ctype_char_table
 @ extern -arch=win32 ?table_size@?$ctype@D@std@@2IB ctype_char_table_size
 @ extern -arch=win64 ?table_size@?$ctype@D@std@@2_KB ctype_char_table_size
 @ thiscall -arch=win32 ?tellg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAE?AV?$fpos@H@2@XZ(ptr ptr) basic_istream_char_tellg
@@ -2915,9 +2915,9 @@
 @ extern _FSnan
 # extern _FXbig
 @ stub _GetLocaleForCP
-@ cdecl -ret64 _Getcoll()
-@ cdecl _Getctype(ptr)
-@ cdecl -ret64 _Getcvt()
+@ cdecl -norelay _Getcoll()
+@ cdecl -norelay _Getctype()
+@ cdecl -norelay _Getcvt()
 @ cdecl _Getdateorder()
 @ cdecl _Getwctype(long ptr)
 @ cdecl _Getwctypes(ptr ptr ptr ptr)

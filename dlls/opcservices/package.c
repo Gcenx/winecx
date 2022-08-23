@@ -170,8 +170,8 @@ static void opc_content_release(struct opc_content *content)
 
     if (!refcount)
     {
-        heap_free(content->data);
-        heap_free(content);
+        free(content->data);
+        free(content);
     }
 }
 
@@ -199,7 +199,7 @@ static ULONG WINAPI opc_part_enum_AddRef(IOpcPartEnumerator *iface)
     struct opc_part_enum *part_enum = impl_from_IOpcPartEnumerator(iface);
     ULONG refcount = InterlockedIncrement(&part_enum->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -209,12 +209,12 @@ static ULONG WINAPI opc_part_enum_Release(IOpcPartEnumerator *iface)
     struct opc_part_enum *part_enum = impl_from_IOpcPartEnumerator(iface);
     ULONG refcount = InterlockedDecrement(&part_enum->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
         IOpcPartSet_Release(&part_enum->part_set->IOpcPartSet_iface);
-        heap_free(part_enum);
+        free(part_enum);
     }
 
     return refcount;
@@ -321,7 +321,7 @@ static HRESULT opc_part_enum_create(struct opc_part_set *part_set, IOpcPartEnume
 {
     struct opc_part_enum *part_enum;
 
-    if (!(part_enum = heap_alloc_zero(sizeof(*part_enum))))
+    if (!(part_enum = calloc(1, sizeof(*part_enum))))
         return E_OUTOFMEMORY;
 
     part_enum->IOpcPartEnumerator_iface.lpVtbl = &opc_part_enum_vtbl;
@@ -360,7 +360,7 @@ static ULONG WINAPI opc_rel_enum_AddRef(IOpcRelationshipEnumerator *iface)
     struct opc_rel_enum *rel_enum = impl_from_IOpcRelationshipEnumerator(iface);
     ULONG refcount = InterlockedIncrement(&rel_enum->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -370,12 +370,12 @@ static ULONG WINAPI opc_rel_enum_Release(IOpcRelationshipEnumerator *iface)
     struct opc_rel_enum *rel_enum = impl_from_IOpcRelationshipEnumerator(iface);
     ULONG refcount = InterlockedDecrement(&rel_enum->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
         IOpcRelationshipSet_Release(&rel_enum->rel_set->IOpcRelationshipSet_iface);
-        heap_free(rel_enum);
+        free(rel_enum);
     }
 
     return refcount;
@@ -482,7 +482,7 @@ static HRESULT opc_rel_enum_create(struct opc_relationship_set *rel_set, IOpcRel
 {
     struct opc_rel_enum *rel_enum;
 
-    if (!(rel_enum = heap_alloc_zero(sizeof(*rel_enum))))
+    if (!(rel_enum = calloc(1, sizeof(*rel_enum))))
         return E_OUTOFMEMORY;
 
     rel_enum->IOpcRelationshipEnumerator_iface.lpVtbl = &opc_rel_enum_vtbl;
@@ -520,7 +520,7 @@ static ULONG WINAPI opc_content_stream_AddRef(IStream *iface)
     struct opc_content_stream *stream = impl_from_IStream(iface);
     ULONG refcount = InterlockedIncrement(&stream->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -530,12 +530,12 @@ static ULONG WINAPI opc_content_stream_Release(IStream *iface)
     struct opc_content_stream *stream = impl_from_IStream(iface);
     ULONG refcount = InterlockedDecrement(&stream->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
         opc_content_release(stream->content);
-        heap_free(stream);
+        free(stream);
     }
 
     return refcount;
@@ -546,7 +546,7 @@ static HRESULT WINAPI opc_content_stream_Read(IStream *iface, void *buff, ULONG 
     struct opc_content_stream *stream = impl_from_IStream(iface);
     DWORD read = 0;
 
-    TRACE("iface %p, buff %p, size %u, num_read %p.\n", iface, buff, size, num_read);
+    TRACE("%p, %p, %lu, %p.\n", iface, buff, size, num_read);
 
     if (!num_read)
         num_read = &read;
@@ -569,7 +569,7 @@ static HRESULT WINAPI opc_content_stream_Write(IStream *iface, const void *data,
     struct opc_content_stream *stream = impl_from_IStream(iface);
     DWORD written = 0;
 
-    TRACE("iface %p, data %p, size %u, num_written %p.\n", iface, data, size, num_written);
+    TRACE("%p, %p, %lu, %p.\n", iface, data, size, num_written);
 
     if (!num_written)
         num_written = &written;
@@ -578,7 +578,7 @@ static HRESULT WINAPI opc_content_stream_Write(IStream *iface, const void *data,
 
     if (size > stream->content->size.QuadPart - stream->pos.QuadPart)
     {
-        void *ptr = heap_realloc(stream->content->data, stream->pos.QuadPart + size);
+        void *ptr = realloc(stream->content->data, stream->pos.QuadPart + size);
         if (!ptr)
             return E_OUTOFMEMORY;
         stream->content->data = ptr;
@@ -597,7 +597,7 @@ static HRESULT WINAPI opc_content_stream_Seek(IStream *iface, LARGE_INTEGER move
     struct opc_content_stream *stream = impl_from_IStream(iface);
     ULARGE_INTEGER pos;
 
-    TRACE("iface %p, move %s, origin %d, newpos %p.\n", iface, wine_dbgstr_longlong(move.QuadPart), origin, newpos);
+    TRACE("%p, %s, %ld, %p.\n", iface, wine_dbgstr_longlong(move.QuadPart), origin, newpos);
 
     switch (origin)
     {
@@ -611,7 +611,7 @@ static HRESULT WINAPI opc_content_stream_Seek(IStream *iface, LARGE_INTEGER move
         pos.QuadPart = stream->content->size.QuadPart + move.QuadPart;
         break;
     default:
-        WARN("Unknown origin mode %d.\n", origin);
+        WARN("Unknown origin mode %ld.\n", origin);
         return E_INVALIDARG;
     }
 
@@ -641,7 +641,7 @@ static HRESULT WINAPI opc_content_stream_CopyTo(IStream *iface, IStream *dest, U
 
 static HRESULT WINAPI opc_content_stream_Commit(IStream *iface, DWORD flags)
 {
-    FIXME("iface %p, flags %#x stub!\n", iface, flags);
+    FIXME("iface %p, flags %#lx stub!\n", iface, flags);
 
     return E_NOTIMPL;
 }
@@ -656,7 +656,7 @@ static HRESULT WINAPI opc_content_stream_Revert(IStream *iface)
 static HRESULT WINAPI opc_content_stream_LockRegion(IStream *iface, ULARGE_INTEGER offset,
         ULARGE_INTEGER size, DWORD lock_type)
 {
-    FIXME("iface %p, offset %s, size %s, lock_type %d stub!\n", iface, wine_dbgstr_longlong(offset.QuadPart),
+    FIXME("iface %p, offset %s, size %s, lock_type %ld stub!\n", iface, wine_dbgstr_longlong(offset.QuadPart),
             wine_dbgstr_longlong(size.QuadPart), lock_type);
 
     return E_NOTIMPL;
@@ -665,7 +665,7 @@ static HRESULT WINAPI opc_content_stream_LockRegion(IStream *iface, ULARGE_INTEG
 static HRESULT WINAPI opc_content_stream_UnlockRegion(IStream *iface, ULARGE_INTEGER offset, ULARGE_INTEGER size,
         DWORD lock_type)
 {
-    FIXME("iface %p, offset %s, size %s, lock_type %d stub!\n", iface, wine_dbgstr_longlong(offset.QuadPart),
+    FIXME("iface %p, offset %s, size %s, lock_type %ld stub!\n", iface, wine_dbgstr_longlong(offset.QuadPart),
             wine_dbgstr_longlong(size.QuadPart), lock_type);
 
     return E_NOTIMPL;
@@ -673,7 +673,7 @@ static HRESULT WINAPI opc_content_stream_UnlockRegion(IStream *iface, ULARGE_INT
 
 static HRESULT WINAPI opc_content_stream_Stat(IStream *iface, STATSTG *statstg, DWORD flag)
 {
-    FIXME("iface %p, statstg %p, flag %d stub!\n", iface, statstg, flag);
+    FIXME("iface %p, statstg %p, flag %ld stub!\n", iface, statstg, flag);
 
     return E_NOTIMPL;
 }
@@ -707,7 +707,7 @@ static HRESULT opc_content_stream_create(struct opc_content *content, IStream **
 {
     struct opc_content_stream *stream;
 
-    if (!(stream = heap_alloc_zero(sizeof(*stream))))
+    if (!(stream = calloc(1, sizeof(*stream))))
         return E_OUTOFMEMORY;
 
     stream->IStream_iface.lpVtbl = &opc_content_stream_vtbl;
@@ -761,7 +761,7 @@ static ULONG WINAPI opc_part_AddRef(IOpcPart *iface)
     struct opc_part *part = impl_from_IOpcPart(iface);
     ULONG refcount = InterlockedIncrement(&part->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -771,7 +771,7 @@ static ULONG WINAPI opc_part_Release(IOpcPart *iface)
     struct opc_part *part = impl_from_IOpcPart(iface);
     ULONG refcount = InterlockedDecrement(&part->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -780,7 +780,7 @@ static ULONG WINAPI opc_part_Release(IOpcPart *iface)
         IOpcPartUri_Release(part->name);
         CoTaskMemFree(part->content_type);
         opc_content_release(part->content);
-        heap_free(part);
+        free(part);
     }
 
     return refcount;
@@ -866,7 +866,7 @@ static HRESULT opc_part_create(struct opc_part_set *set, IOpcPartUri *name, cons
     if (!opc_array_reserve((void **)&set->parts, &set->size, set->count + 1, sizeof(*set->parts)))
         return E_OUTOFMEMORY;
 
-    if (!(part = heap_alloc_zero(sizeof(*part))))
+    if (!(part = calloc(1, sizeof(*part))))
         return E_OUTOFMEMORY;
 
     part->IOpcPart_iface.lpVtbl = &opc_part_vtbl;
@@ -880,7 +880,7 @@ static HRESULT opc_part_create(struct opc_part_set *set, IOpcPartUri *name, cons
         return E_OUTOFMEMORY;
     }
 
-    part->content = heap_alloc_zero(sizeof(*part->content));
+    part->content = calloc(1, sizeof(*part->content));
     if (!part->content)
     {
         IOpcPart_Release(&part->IOpcPart_iface);
@@ -933,7 +933,7 @@ static ULONG WINAPI opc_part_set_AddRef(IOpcPartSet *iface)
     struct opc_part_set *part_set = impl_from_IOpcPartSet(iface);
     ULONG refcount = InterlockedIncrement(&part_set->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -943,7 +943,7 @@ static ULONG WINAPI opc_part_set_Release(IOpcPartSet *iface)
     struct opc_part_set *part_set = impl_from_IOpcPartSet(iface);
     ULONG refcount = InterlockedDecrement(&part_set->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -951,8 +951,8 @@ static ULONG WINAPI opc_part_set_Release(IOpcPartSet *iface)
 
         for (i = 0; i < part_set->count; ++i)
             IOpcPart_Release(&part_set->parts[i]->IOpcPart_iface);
-        heap_free(part_set->parts);
-        heap_free(part_set);
+        free(part_set->parts);
+        free(part_set);
     }
 
     return refcount;
@@ -1070,7 +1070,7 @@ static ULONG WINAPI opc_relationship_AddRef(IOpcRelationship *iface)
     struct opc_relationship *relationship = impl_from_IOpcRelationship(iface);
     ULONG refcount = InterlockedIncrement(&relationship->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -1080,7 +1080,7 @@ static ULONG WINAPI opc_relationship_Release(IOpcRelationship *iface)
     struct opc_relationship *relationship = impl_from_IOpcRelationship(iface);
     ULONG refcount = InterlockedDecrement(&relationship->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -1088,7 +1088,7 @@ static ULONG WINAPI opc_relationship_Release(IOpcRelationship *iface)
         CoTaskMemFree(relationship->type);
         IOpcUri_Release(relationship->source_uri);
         IUri_Release(relationship->target);
-        heap_free(relationship);
+        free(relationship);
     }
 
     return refcount;
@@ -1183,7 +1183,7 @@ static HRESULT opc_relationship_create(struct opc_relationship_set *set, const W
     if (!opc_array_reserve((void **)&set->relationships, &set->size, set->count + 1, sizeof(*set->relationships)))
         return E_OUTOFMEMORY;
 
-    if (!(relationship = heap_alloc_zero(sizeof(*relationship))))
+    if (!(relationship = calloc(1, sizeof(*relationship))))
         return E_OUTOFMEMORY;
 
     relationship->IOpcRelationship_iface.lpVtbl = &opc_relationship_vtbl;
@@ -1253,7 +1253,7 @@ static ULONG WINAPI opc_relationship_set_AddRef(IOpcRelationshipSet *iface)
     struct opc_relationship_set *relationship_set = impl_from_IOpcRelationshipSet(iface);
     ULONG refcount = InterlockedIncrement(&relationship_set->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -1263,7 +1263,7 @@ static ULONG WINAPI opc_relationship_set_Release(IOpcRelationshipSet *iface)
     struct opc_relationship_set *relationship_set = impl_from_IOpcRelationshipSet(iface);
     ULONG refcount = InterlockedDecrement(&relationship_set->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -1272,8 +1272,8 @@ static ULONG WINAPI opc_relationship_set_Release(IOpcRelationshipSet *iface)
         for (i = 0; i < relationship_set->count; ++i)
             IOpcRelationship_Release(&relationship_set->relationships[i]->IOpcRelationship_iface);
         IOpcUri_Release(relationship_set->source_uri);
-        heap_free(relationship_set->relationships);
-        heap_free(relationship_set);
+        free(relationship_set->relationships);
+        free(relationship_set);
     }
 
     return refcount;
@@ -1398,7 +1398,7 @@ static HRESULT opc_relationship_set_create(IOpcUri *source_uri, IOpcRelationship
 {
     struct opc_relationship_set *relationship_set;
 
-    if (!(relationship_set = heap_alloc_zero(sizeof(*relationship_set))))
+    if (!(relationship_set = calloc(1, sizeof(*relationship_set))))
         return E_OUTOFMEMORY;
 
     relationship_set->IOpcRelationshipSet_iface.lpVtbl = &opc_relationship_set_vtbl;
@@ -1432,7 +1432,7 @@ static ULONG WINAPI opc_package_AddRef(IOpcPackage *iface)
     struct opc_package *package = impl_from_IOpcPackage(iface);
     ULONG refcount = InterlockedIncrement(&package->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -1442,7 +1442,7 @@ static ULONG WINAPI opc_package_Release(IOpcPackage *iface)
     struct opc_package *package = impl_from_IOpcPackage(iface);
     ULONG refcount = InterlockedDecrement(&package->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -1452,7 +1452,7 @@ static ULONG WINAPI opc_package_Release(IOpcPackage *iface)
             IOpcRelationshipSet_Release(package->relationship_set);
         if (package->source_uri)
             IOpcUri_Release(package->source_uri);
-        heap_free(package);
+        free(package);
     }
 
     return refcount;
@@ -1466,7 +1466,7 @@ static HRESULT WINAPI opc_package_GetPartSet(IOpcPackage *iface, IOpcPartSet **p
 
     if (!package->part_set)
     {
-        struct opc_part_set *part_set = heap_alloc_zero(sizeof(*part_set));
+        struct opc_part_set *part_set = calloc(1, sizeof(*part_set));
         if (!part_set)
             return E_OUTOFMEMORY;
 
@@ -1515,7 +1515,7 @@ HRESULT opc_package_create(IOpcFactory *factory, IOpcPackage **out)
     struct opc_package *package;
     HRESULT hr;
 
-    if (!(package = heap_alloc_zero(sizeof(*package))))
+    if (!(package = calloc(1, sizeof(*package))))
         return E_OUTOFMEMORY;
 
     package->IOpcPackage_iface.lpVtbl = &opc_package_vtbl;
@@ -1523,7 +1523,7 @@ HRESULT opc_package_create(IOpcFactory *factory, IOpcPackage **out)
 
     if (FAILED(hr = IOpcFactory_CreatePackageRootUri(factory, &package->source_uri)))
     {
-        heap_free(package);
+        free(package);
         return hr;
     }
 
@@ -1566,7 +1566,7 @@ static HRESULT opc_package_add_override_content_type(struct content_types *types
 {
     struct content_type *type;
 
-    if (!(type = heap_alloc(sizeof(*type))))
+    if (!(type = malloc(sizeof(*type))))
         return E_OUTOFMEMORY;
 
     type->element = CONTENT_TYPE_OVERRIDE;
@@ -1583,7 +1583,7 @@ static HRESULT opc_package_add_default_content_type(struct content_types *types,
 {
     struct content_type *type;
 
-    if (!(type = heap_alloc(sizeof(*type))))
+    if (!(type = malloc(sizeof(*type))))
         return E_OUTOFMEMORY;
 
     type->element = CONTENT_TYPE_DEFAULT;
@@ -1593,7 +1593,7 @@ static HRESULT opc_package_add_default_content_type(struct content_types *types,
     {
         CoTaskMemFree(type->u.def.ext);
         CoTaskMemFree(type->u.def.type);
-        heap_free(type);
+        free(type);
         return E_OUTOFMEMORY;
     }
 
@@ -1810,7 +1810,7 @@ static HRESULT opc_package_write_contenttypes(IOpcPackage *package, struct zip_a
             hr = IXmlWriter_WriteEndElement(writer);
 
         list_remove(&content_type->entry);
-        heap_free(content_type);
+        free(content_type);
     }
 
     if (SUCCEEDED(hr))

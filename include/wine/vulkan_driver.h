@@ -3,7 +3,7 @@
  * This file is generated from Vulkan vk.xml file covered
  * by the following copyright and permission notice:
  *
- * Copyright (c) 2015-2020 The Khronos Group Inc.
+ * Copyright 2015-2022 The Khronos Group Inc.
  *
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  *
@@ -13,9 +13,7 @@
 #define __WINE_VULKAN_DRIVER_H
 
 /* Wine internal vulkan driver version, needs to be bumped upon vulkan_funcs changes. */
-#define WINE_VULKAN_DRIVER_VERSION 8
-
-#include "wine/winheader_enter.h"
+#define WINE_VULKAN_DRIVER_VERSION 10
 
 struct vulkan_funcs
 {
@@ -43,9 +41,12 @@ struct vulkan_funcs
     VkBool32 (*p_vkGetPhysicalDeviceWin32PresentationSupportKHR)(VkPhysicalDevice, uint32_t);
     VkResult (*p_vkGetSwapchainImagesKHR)(VkDevice, VkSwapchainKHR, uint32_t *, VkImage *);
     VkResult (*p_vkQueuePresentKHR)(VkQueue, const VkPresentInfoKHR *);
+
+    /* winevulkan specific functions */
+    VkSurfaceKHR (*p_wine_get_native_surface)(VkSurfaceKHR);
 };
 
-extern const struct vulkan_funcs * CDECL __wine_get_vulkan_driver(HDC hdc, UINT version);
+extern const struct vulkan_funcs * CDECL __wine_get_vulkan_driver(UINT version);
 
 static inline void *get_vulkan_driver_device_proc_addr(
         const struct vulkan_funcs *vulkan_funcs, const char *name)
@@ -113,7 +114,5 @@ static inline void *get_vulkan_driver_instance_proc_addr(
 
     return get_vulkan_driver_device_proc_addr(vulkan_funcs, name);
 }
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_VULKAN_DRIVER_H */

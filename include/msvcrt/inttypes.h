@@ -8,8 +8,6 @@
 #ifndef _INTTYPES_H_
 #define _INTTYPES_H_
 
-#include "wine/winheader_enter.h"
-
 #include <corecrt.h>
 #include <stdint.h>
 #define __need_wchar_t
@@ -239,7 +237,5 @@ typedef struct {
 #ifdef	__cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* ndef _INTTYPES_H */

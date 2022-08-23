@@ -21,13 +21,13 @@
 #ifndef __WINE_WINE_ASM_H
 #define __WINE_WINE_ASM_H
 
-#if defined(__APPLE__) || (defined(_WIN32) && (defined(__i386__) || defined(__i386_on_x86_64__)))
+#if defined(__APPLE__) || (defined(__WINE_PE_BUILD) && (defined(__i386__) || defined(__i386_on_x86_64__)))
 # define __ASM_NAME(name) "_" name
 #else
 # define __ASM_NAME(name) name
 #endif
 
-#if defined(_WIN32) && (defined(__i386__) || defined(__i386_on_x86_64__))
+#if defined(__WINE_PE_BUILD) && (defined(__i386__) || defined(__i386_on_x86_64__))
 # define __ASM_STDCALL(name,args)  "_" name "@" #args
 # define __ASM_FASTCALL(name,args) "@" name "@" #args
 #else
@@ -35,7 +35,7 @@
 # define __ASM_FASTCALL(name,args) __ASM_NAME("__fastcall_" name)
 #endif
 
-#if defined(__GCC_HAVE_DWARF2_CFI_ASM) || (defined(__clang__) && defined(__GNUC__) && !defined(__SEH__))
+#if defined(__GCC_HAVE_DWARF2_CFI_ASM) || ((defined(__APPLE__) || defined(__clang__)) && defined(__GNUC__) && !defined(__SEH__))
 # define __ASM_CFI(str) str
 #else
 # define __ASM_CFI(str)
@@ -55,7 +55,7 @@
 # define __ASM_SEH(str)
 #endif
 
-#ifdef _WIN32
+#ifdef __WINE_PE_BUILD
 # define __ASM_FUNC_TYPE(name) ".def " name "\n\t.scl 2\n\t.type 32\n\t.endef"
 #elif defined(__APPLE__)
 # define __ASM_FUNC_TYPE(name) ""
@@ -67,7 +67,7 @@
 # define __ASM_FUNC_TYPE(name) ".type " name ",@function"
 #endif
 
-#ifdef _WIN32
+#ifdef __WINE_PE_BUILD
 # define __ASM_FUNC_SIZE(name) ""
 #elif defined(__APPLE__)
 # define __ASM_FUNC_SIZE(name) ""
@@ -107,7 +107,7 @@
     __ASM_BLOCK_END
 #endif
 
-#ifdef _WIN32
+#ifdef __WINE_PE_BUILD
 #define __ASM_GLOBAL_IMPORT(name) __ASM_DEFINE_IMPORT(__ASM_NAME(#name))
 #define __ASM_STDCALL_IMPORT(name,args) __ASM_DEFINE_IMPORT(__ASM_STDCALL(#name,args))
 #else
@@ -117,8 +117,9 @@
 
 /* fastcall support */
 
-#if defined(__i386__) && !defined(_WIN32)
+#if defined(__i386__) && !defined(__WINE_PE_BUILD)
 
+# define __ASM_USE_FASTCALL_WRAPPER
 # define DEFINE_FASTCALL1_WRAPPER(func) \
     __ASM_FASTCALL_FUNC( func, 4, \
                         "popl %eax\n\t"  \
@@ -144,7 +145,7 @@
 
 #if defined(__i386__) && !defined(__MINGW32__) && (!defined(_MSC_VER) || !defined(__clang__))
 
-#define __ASM_USE_THISCALL_WRAPPER
+# define __ASM_USE_THISCALL_WRAPPER
 # ifdef _MSC_VER
 #  define DEFINE_THISCALL_WRAPPER(func,args) \
     __declspec(naked) void __thiscall_##func(void) \
@@ -175,59 +176,7 @@
 
 #endif  /* __i386__ */
 
-/* 32-to-64 thunk support */
-
-#ifdef __i386_on_x86_64__
-
-#include <windef.h>
-
-#define __ASM_EXTRA_DIST "16"
-
-#define __ASM_STR__(name)    #name
-#define __ASM_STR(name)      __ASM_STR__(name)
-
-#define __ASM_THUNK_PREFIX                            wine
-#define __ASM_THUNK_MAKE_NAME__(thunk_prefix,name)    thunk_prefix##_thunk_##name
-#define __ASM_THUNK_MAKE_NAME(thunk_prefix,name)      __ASM_THUNK_MAKE_NAME__(thunk_prefix, name)
-#define __ASM_THUNK_NAME(name)                        __ASM_THUNK_MAKE_NAME(__ASM_THUNK_PREFIX, name)
-#define __ASM_THUNK_SYMBOL(name_str)                  __ASM_NAME(__ASM_STR(__ASM_THUNK_PREFIX) "_thunk_" name_str)
-#define __ASM_THUNK_STDCALL_SYMBOL(name_str,args)     __ASM_STDCALL(__ASM_STR(__ASM_THUNK_PREFIX) "_thunk_" name_str, args)
-#define __ASM_THUNK_MAGIC                             0x77496e4554683332
-#define __ASM_THUNK_TARGET(thunk_addr)                ((void *)(*((unsigned long *)thunk_addr - 2) + (unsigned long)thunk_addr + 12))
-
-#define __ASM_THUNK_DEFINE(name,code)                                                        \
-asm(".text\n\t"                                                                              \
-    ".balign 32\n\t"                                                                         \
-    ".quad " __ASM_NAME(name) " - (" __ASM_THUNK_SYMBOL(name) " + 12)\n\t"                   \
-    ".quad " __ASM_STR(__ASM_THUNK_MAGIC) "\n\t"                                             \
-    ".globl " __ASM_THUNK_SYMBOL(name) "\n\t"                                                \
-    __ASM_FUNC_TYPE(__ASM_THUNK_SYMBOL(name)) "\n"                                           \
-    __ASM_THUNK_SYMBOL(name) ":\n\t"                                                         \
-    ".cfi_startproc\n\t"                                                                     \
-    ".code32\n\t"                                                                            \
-    ".byte 0x8b, 0xff\n\t" /* movl %edi, %edi; hotpatch prolog */                            \
-    code "\n\t"                                                                              \
-    ".code64\n\t"                                                                            \
-    ".cfi_endproc\n\t"                                                                       \
-    ".previous");
-#define __ASM_THUNK_STDCALL(name,args,code)    __ASM_THUNK_DEFINE(#name,code)
-#define __ASM_THUNK_GLOBAL(name,code)          __ASM_THUNK_DEFINE(#name,code)
-#define __ASM_STDCALL_FUNC32(name,args,code)   __ASM_STDCALL_FUNC(name,args,".code32\n\t" code "\n\t.code64\n\t")
-#define __ASM_GLOBAL_FUNC32(name,code)         __ASM_GLOBAL_FUNC(name,".code32\n\t" code "\n\t.code64\n\t")
-
-#define WINE_CALL_IMPL32(name) ({ typeof(name) * volatile p_##name = name; p_##name; })
-
-static inline BOOL wine_is_thunk32to64(void *func)
-{
-    /* Function address must be an odd multiple of 16 bytes; function must begin with
-       hotpatchable prolog; function must be preceded by magic number. */
-    unsigned long *thunk_magic = (unsigned long *)func - 1;
-    return (((unsigned long)func & 0x1f) == 0x10 && *(WORD*)func == 0xff8b && *thunk_magic == __ASM_THUNK_MAGIC);
-}
-
-#endif /* __i386_on_x86_64__ */
-
-#if defined(__GNUC__) && !defined(_WIN32) && !defined(__APPLE__) && !defined(__ANDROID__)
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__)) && !defined(__WINE_PE_BUILD) && !defined(__APPLE__) && !defined(__ANDROID__)
 #define __ASM_OBSOLETE(func) __asm__( ".symver " #func "_obsolete," #func "@WINE_1.0" )
 #else
 #undef __ASM_OBSOLETE

@@ -35,21 +35,7 @@
 
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(amstream);
-
-static HINSTANCE instance;
-
-/* For the moment, do nothing here. */
-BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
-{
-    switch(fdwReason) {
-        case DLL_PROCESS_ATTACH:
-            instance = hInstDLL;
-            DisableThreadLibraryCalls(hInstDLL);
-	    break;
-    }
-    return TRUE;
-}
+WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
 /******************************************************************************
  * Multimedia Streams ClassFactory
@@ -107,7 +93,7 @@ static ULONG WINAPI AMCF_Release(IClassFactory *iface)
     ULONG ref = InterlockedDecrement(&This->ref);
 
     if (ref == 0)
-	HeapFree(GetProcessHeap(), 0, This);
+        free(This);
 
     return ref;
 }
@@ -187,8 +173,8 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 	return CLASS_E_CLASSNOTAVAILABLE;
     }
 
-    factory = HeapAlloc(GetProcessHeap(), 0, sizeof(*factory));
-    if (factory == NULL) return E_OUTOFMEMORY;
+    if (!(factory = calloc(1, sizeof(*factory))))
+        return E_OUTOFMEMORY;
 
     factory->IClassFactory_iface.lpVtbl = &DSCF_Vtbl;
     factory->ref = 1;
@@ -197,28 +183,4 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 
     *ppv = &factory->IClassFactory_iface;
     return S_OK;
-}
-
-/***********************************************************************
- *              DllCanUnloadNow (AMSTREAM.@)
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
-}
-
-/***********************************************************************
- *		DllRegisterServer (AMSTREAM.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( instance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (AMSTREAM.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( instance );
 }

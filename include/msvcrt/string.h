@@ -11,7 +11,7 @@
 #include "wine/winheader_enter.h"
 
 #include <corecrt_wstring.h>
-#include <wine/asm.h>
+#include "wine/asm.h"
 
 #ifndef _NLSCMP_DEFINED
 #define _NLSCMPERROR               ((unsigned int)0x7fffffff)
@@ -43,6 +43,7 @@ _ACRTIMP char* __cdecl _strrev(char*);
 _ACRTIMP char* __cdecl _strset(char*,int);
 _ACRTIMP char* __cdecl _strupr(char*);
 _ACRTIMP errno_t __cdecl _strupr_s(char *, size_t);
+_ACRTIMP size_t  __cdecl _strxfrm_l(char*,const char*,size_t,_locale_t);
 
 _ACRTIMP errno_t __cdecl memmove_s(void*,size_t,const void*,size_t);
 _ACRTIMP char*   __cdecl strcat(char*,const char*);

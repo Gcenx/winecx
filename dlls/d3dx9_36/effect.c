@@ -17,7 +17,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-
+#include <stdbool.h>
 #include <stdio.h>
 #include <assert.h>
 
@@ -199,6 +199,10 @@ struct d3dx_effect
 
     struct list parameter_block_list;
     struct d3dx_parameter_block *current_parameter_block;
+
+    char *source;
+    SIZE_T source_size;
+    char *skip_constants_string;
 };
 
 #define INITIAL_SHARED_DATA_SIZE 4
@@ -220,6 +224,9 @@ struct ID3DXEffectCompilerImpl
     LONG ref;
 };
 
+static HRESULT d3dx9_effect_init_from_dxbc(struct d3dx_effect *effect,
+        struct IDirect3DDevice9 *device, const char *data, SIZE_T data_size,
+        unsigned int flags, struct ID3DXEffectPool *pool, const char *skip_constants_string);
 static HRESULT d3dx_parse_state(struct d3dx_effect *effect, struct d3dx_state *state,
         const char *data, const char **ptr, struct d3dx_object *objects);
 static void free_parameter(struct d3dx_parameter *param, BOOL element, BOOL child);
@@ -819,7 +826,7 @@ static void get_matrix(struct d3dx_parameter *param, D3DXMATRIX *matrix, BOOL tr
     {
         for (k = 0; k < 4; ++k)
         {
-            FLOAT *tmp = transpose ? (FLOAT *)&matrix->u.m[k][i] : (FLOAT *)&matrix->u.m[i][k];
+            FLOAT *tmp = transpose ? (FLOAT *)&matrix->m[k][i] : (FLOAT *)&matrix->m[i][k];
 
             if ((i < param->rows) && (k < param->columns))
                 set_number(tmp, D3DXPT_FLOAT, (DWORD *)param->data + i * param->columns + k, param->type);
@@ -837,12 +844,12 @@ static void set_matrix(struct d3dx_parameter *param, const D3DXMATRIX *matrix, v
     {
         if (param->columns == 4)
         {
-            memcpy(dst_data, matrix->u.m, param->rows * 4 * sizeof(float));
+            memcpy(dst_data, matrix->m, param->rows * 4 * sizeof(float));
         }
         else
         {
             for (i = 0; i < param->rows; ++i)
-                memcpy((float *)dst_data + i * param->columns, matrix->u.m + i, param->columns * sizeof(float));
+                memcpy((float *)dst_data + i * param->columns, matrix->m + i, param->columns * sizeof(float));
         }
         return;
     }
@@ -851,7 +858,7 @@ static void set_matrix(struct d3dx_parameter *param, const D3DXMATRIX *matrix, v
     {
         for (k = 0; k < param->columns; ++k)
             set_number((FLOAT *)dst_data + i * param->columns + k, param->type,
-                    &matrix->u.m[i][k], D3DXPT_FLOAT);
+                    &matrix->m[i][k], D3DXPT_FLOAT);
     }
 }
 
@@ -864,7 +871,7 @@ static void set_matrix_transpose(struct d3dx_parameter *param, const D3DXMATRIX 
         for (k = 0; k < param->columns; ++k)
         {
             set_number((FLOAT *)dst_data + i * param->columns + k, param->type,
-                    &matrix->u.m[k][i], D3DXPT_FLOAT);
+                    &matrix->m[k][i], D3DXPT_FLOAT);
         }
     }
 }
@@ -1313,10 +1320,15 @@ static void *record_parameter(struct d3dx_effect *effect, struct d3dx_parameter 
 
 static void set_dirty(struct d3dx_parameter *param)
 {
-    struct d3dx_shared_data *shared_data;
     struct d3dx_top_level_parameter *top_param = param->top_level_param;
-    ULONG64 new_update_version = next_update_version(top_param->version_counter);
+    struct d3dx_shared_data *shared_data;
+    ULONG64 new_update_version;
 
+    /* This is true for annotations. */
+    if (!top_param)
+        return;
+
+    new_update_version = next_update_version(top_param->version_counter);
     if ((shared_data = top_param->shared_data))
         shared_data->update_version = new_update_version;
     else
@@ -4001,6 +4013,12 @@ static HRESULT WINAPI d3dx_effect_BeginPass(ID3DXEffect *iface, UINT pass)
 
     TRACE("iface %p, pass %u\n", effect, pass);
 
+    if (!effect->started)
+    {
+        WARN("Effect is not started, returning D3DERR_INVALIDCALL.\n");
+        return D3DERR_INVALIDCALL;
+    }
+
     if (technique && pass < technique->pass_count && !effect->active_pass)
     {
         HRESULT hr;
@@ -4293,23 +4311,127 @@ static HRESULT WINAPI d3dx_effect_DeleteParameterBlock(ID3DXEffect *iface, D3DXH
 }
 #endif
 
-static HRESULT WINAPI d3dx_effect_CloneEffect(ID3DXEffect *iface, IDirect3DDevice9 *device,
-        ID3DXEffect **new_effect)
+static bool copy_parameter(struct d3dx_effect *dst_effect, const struct d3dx_effect *src_effect,
+        struct d3dx_parameter *dst, const struct d3dx_parameter *src)
 {
-    struct d3dx_effect *effect = impl_from_ID3DXEffect(iface);
+    const char *src_string;
+    char *dst_string;
+    IUnknown *iface;
+    size_t len;
 
-    FIXME("iface %p, device %p, new_effect %p stub.\n", effect, device, new_effect);
+    if ((src->flags & PARAMETER_FLAG_SHARED) && dst_effect->pool)
+        return true;
 
-    if (!new_effect)
+    switch (src->type)
+    {
+        case D3DXPT_VOID:
+        case D3DXPT_BOOL:
+        case D3DXPT_INT:
+        case D3DXPT_FLOAT:
+            memcpy(dst->data, src->data, src->bytes);
+            break;
+
+        case D3DXPT_STRING:
+            src_string = *(char **)src->data;
+            len = strlen(src_string);
+            if (!(dst_string = heap_realloc(*(char **)dst->data, len + 1)))
+                return false;
+            *(char **)dst->data = dst_string;
+            memcpy(dst_string, src_string, len + 1);
+            break;
+
+        case D3DXPT_TEXTURE:
+        case D3DXPT_TEXTURE1D:
+        case D3DXPT_TEXTURE2D:
+        case D3DXPT_TEXTURE3D:
+        case D3DXPT_TEXTURECUBE:
+        case D3DXPT_PIXELSHADER:
+        case D3DXPT_VERTEXSHADER:
+            iface = *(IUnknown **)src->data;
+            if (src_effect->device == dst_effect->device && iface)
+            {
+                if (*(IUnknown **)dst->data)
+                    IUnknown_Release(*(IUnknown **)dst->data);
+                IUnknown_AddRef(iface);
+                *(IUnknown **)dst->data = iface;
+            }
+            break;
+
+        case D3DXPT_SAMPLER:
+        case D3DXPT_SAMPLER1D:
+        case D3DXPT_SAMPLER2D:
+        case D3DXPT_SAMPLER3D:
+        case D3DXPT_SAMPLERCUBE:
+            /* Nothing to do; these parameters are not mutable and cannot be
+             * retrieved using API calls. */
+            break;
+
+        default:
+            FIXME("Unhandled parameter type %#x.\n", src->type);
+    }
+
+    return true;
+}
+
+static HRESULT WINAPI d3dx_effect_CloneEffect(ID3DXEffect *iface, IDirect3DDevice9 *device, ID3DXEffect **out)
+{
+    struct d3dx_effect *src = impl_from_ID3DXEffect(iface);
+    struct d3dx_effect *dst;
+    unsigned int i, j, k;
+    HRESULT hr;
+
+    TRACE("iface %p, device %p, out %p.\n", iface, device, out);
+
+    if (!out)
         return D3DERR_INVALIDCALL;
 
-    if (effect->flags & D3DXFX_NOT_CLONEABLE)
+    if (src->flags & D3DXFX_NOT_CLONEABLE)
         return E_FAIL;
 
     if (!device)
         return D3DERR_INVALIDCALL;
 
-    return E_NOTIMPL;
+    if (!(dst = heap_alloc_zero(sizeof(*dst))))
+        return E_OUTOFMEMORY;
+
+    if (FAILED(hr = d3dx9_effect_init_from_dxbc(dst, device, src->source, src->source_size,
+            src->flags, &src->pool->ID3DXEffectPool_iface, src->skip_constants_string)))
+    {
+        heap_free(dst);
+        return hr;
+    }
+
+    for (i = 0; i < src->parameter_count; ++i)
+    {
+        const struct d3dx_top_level_parameter *src_param = &src->parameters[i];
+        struct d3dx_top_level_parameter *dst_param = &dst->parameters[i];
+
+        copy_parameter(dst, src, &dst_param->param, &src_param->param);
+        for (j = 0; j < src_param->annotation_count; ++j)
+            copy_parameter(dst, src, &dst_param->annotations[j], &src_param->annotations[j]);
+    }
+
+    for (i = 0; i < src->technique_count; ++i)
+    {
+        const struct d3dx_technique *src_technique = &src->techniques[i];
+        struct d3dx_technique *dst_technique = &dst->techniques[i];
+
+        for (j = 0; j < src_technique->annotation_count; ++j)
+            copy_parameter(dst, src, &dst_technique->annotations[j], &src_technique->annotations[j]);
+
+        for (j = 0; j < src_technique->pass_count; ++j)
+        {
+            const struct d3dx_pass *src_pass = &src_technique->passes[j];
+            struct d3dx_pass *dst_pass = &dst_technique->passes[j];
+
+            for (k = 0; k < src_pass->annotation_count; ++k)
+                copy_parameter(dst, src, &dst_pass->annotations[k], &src_pass->annotations[k]);
+        }
+    }
+
+    *out = &dst->ID3DXEffect_iface;
+    TRACE("Created effect %p.\n", dst);
+    return D3D_OK;
 }
 
 #if D3DX_SDK_VERSION >= 27
@@ -6385,16 +6507,10 @@ static const char **parse_skip_constants_string(char *skip_constants_string, uns
     return new_alloc;
 }
 
-static HRESULT d3dx9_effect_init(struct d3dx_effect *effect, struct IDirect3DDevice9 *device,
-        const char *data, SIZE_T data_size, const D3D_SHADER_MACRO *defines, ID3DInclude *include,
-        UINT eflags, ID3DBlob **errors, struct ID3DXEffectPool *pool, const char *skip_constants_string)
+static HRESULT d3dx9_effect_init_from_dxbc(struct d3dx_effect *effect,
+        struct IDirect3DDevice9 *device, const char *data, SIZE_T data_size,
+        unsigned int flags, struct ID3DXEffectPool *pool, const char *skip_constants_string)
 {
-#if D3DX_SDK_VERSION <= 36
-    UINT compile_flags = D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
-#else
-    UINT compile_flags = 0;
-#endif
-    ID3DBlob *bytecode = NULL, *temp_errors = NULL;
     unsigned int skip_constants_count = 0;
     char *skip_constants_buffer = NULL;
     const char **skip_constants = NULL;
@@ -6403,13 +6519,23 @@ static HRESULT d3dx9_effect_init(struct d3dx_effect *effect, struct IDirect3DDev
     unsigned int i, j;
     HRESULT hr;
 
-    TRACE("effect %p, device %p, data %p, data_size %lu, defines %p, include %p, eflags %#x, errors %p, "
-            "pool %p, skip_constants %s.\n",
-            effect, device, data, data_size, defines, include, eflags, errors, pool,
-            debugstr_a(skip_constants_string));
-
     effect->ID3DXEffect_iface.lpVtbl = &ID3DXEffect_Vtbl;
     effect->ref = 1;
+
+    effect->flags = flags;
+
+    list_init(&effect->parameter_block_list);
+
+    read_dword(&ptr, &tag);
+    TRACE("Tag: %x\n", tag);
+
+    if (!(flags & D3DXFX_NOT_CLONEABLE))
+    {
+        if (!(effect->source = malloc(data_size)))
+            return E_OUTOFMEMORY;
+        memcpy(effect->source, data, data_size);
+        effect->source_size = data_size;
+    }
 
     if (pool)
     {
@@ -6420,93 +6546,40 @@ static HRESULT d3dx9_effect_init(struct d3dx_effect *effect, struct IDirect3DDev
     IDirect3DDevice9_AddRef(device);
     effect->device = device;
 
-    effect->flags = eflags;
-
-    list_init(&effect->parameter_block_list);
-
-    read_dword(&ptr, &tag);
-    TRACE("Tag: %x\n", tag);
-
-    if (tag != d3dx9_effect_version(9, 1))
-    {
-        TRACE("HLSL ASCII effect, trying to compile it.\n");
-        hr = D3DCompile(data, data_size, NULL, defines, include,
-                NULL, "fx_2_0", compile_flags, eflags, &bytecode, &temp_errors);
-        if (FAILED(hr))
-        {
-            WARN("Failed to compile ASCII effect.\n");
-            if (bytecode)
-                ID3D10Blob_Release(bytecode);
-            if (temp_errors)
-            {
-                const char *error_string = ID3D10Blob_GetBufferPointer(temp_errors);
-                const char *string_ptr;
-
-                while (*error_string)
-                {
-                    string_ptr = error_string;
-                    while (*string_ptr && *string_ptr != '\n' && *string_ptr != '\r'
-                           && string_ptr - error_string < 80)
-                        ++string_ptr;
-                    TRACE("%s\n", debugstr_an(error_string, string_ptr - error_string));
-                    error_string = string_ptr;
-                    while (*error_string == '\n' || *error_string == '\r')
-                        ++error_string;
-                }
-            }
-            if (errors)
-                *errors = temp_errors;
-            else if (temp_errors)
-                ID3D10Blob_Release(temp_errors);
-            return hr;
-        }
-        if (!bytecode)
-        {
-            FIXME("No output from effect compilation.\n");
-            return D3DERR_INVALIDCALL;
-        }
-        if (errors)
-            *errors = temp_errors;
-        else if (temp_errors)
-            ID3D10Blob_Release(temp_errors);
-
-        ptr = ID3D10Blob_GetBufferPointer(bytecode);
-        read_dword(&ptr, &tag);
-        TRACE("Tag: %x\n", tag);
-    }
-
     if (skip_constants_string)
     {
+        if (!(flags & D3DXFX_NOT_CLONEABLE) && !(effect->skip_constants_string = strdup(skip_constants_string)))
+        {
+            hr = E_OUTOFMEMORY;
+            goto fail;
+        }
+
         skip_constants_buffer = HeapAlloc(GetProcessHeap(), 0,
                 sizeof(*skip_constants_buffer) * (strlen(skip_constants_string) + 1));
         if (!skip_constants_buffer)
         {
-            if (bytecode)
-                ID3D10Blob_Release(bytecode);
-            return E_OUTOFMEMORY;
+            hr = E_OUTOFMEMORY;
+            goto fail;
         }
         strcpy(skip_constants_buffer, skip_constants_string);
 
         if (!(skip_constants = parse_skip_constants_string(skip_constants_buffer, &skip_constants_count)))
         {
             HeapFree(GetProcessHeap(), 0, skip_constants_buffer);
-            if (bytecode)
-                ID3D10Blob_Release(bytecode);
-            return E_OUTOFMEMORY;
+            hr = E_OUTOFMEMORY;
+            goto fail;
         }
     }
     read_dword(&ptr, &offset);
     TRACE("Offset: %x\n", offset);
 
     hr = d3dx_parse_effect(effect, ptr, data_size, offset, skip_constants, skip_constants_count);
-    if (bytecode)
-        ID3D10Blob_Release(bytecode);
     if (hr != D3D_OK)
     {
         FIXME("Failed to parse effect.\n");
         HeapFree(GetProcessHeap(), 0, skip_constants_buffer);
         HeapFree(GetProcessHeap(), 0, skip_constants);
-        return hr;
+        goto fail;
     }
 
     for (i = 0; i < skip_constants_count; ++i)
@@ -6523,7 +6596,8 @@ static HRESULT d3dx9_effect_init(struct d3dx_effect *effect, struct IDirect3DDev
                             debugstr_a(skip_constants[i]), j);
                     HeapFree(GetProcessHeap(), 0, skip_constants_buffer);
                     HeapFree(GetProcessHeap(), 0, skip_constants);
-                    return D3DERR_INVALIDCALL;
+                    hr = D3DERR_INVALIDCALL;
+                    goto fail;
                 }
             }
         }
@@ -6545,6 +6619,107 @@ static HRESULT d3dx9_effect_init(struct d3dx_effect *effect, struct IDirect3DDev
     }
 
     return D3D_OK;
+
+fail:
+    if (effect->techniques)
+    {
+        for (i = 0; i < effect->technique_count; ++i)
+            free_technique(&effect->techniques[i]);
+        heap_free(effect->techniques);
+    }
+
+    if (effect->parameters)
+    {
+        for (i = 0; i < effect->parameter_count; ++i)
+            free_top_level_parameter(&effect->parameters[i]);
+        heap_free(effect->parameters);
+    }
+
+    if (effect->objects)
+    {
+        for (i = 0; i < effect->object_count; ++i)
+            free_object(&effect->objects[i]);
+        heap_free(effect->objects);
+    }
+
+    IDirect3DDevice9_Release(effect->device);
+    if (pool)
+        pool->lpVtbl->Release(pool);
+    free(effect->source);
+    free(effect->skip_constants_string);
+    return hr;
+}
+
+static HRESULT d3dx9_effect_init(struct d3dx_effect *effect, struct IDirect3DDevice9 *device,
+        const char *data, SIZE_T data_size, const D3D_SHADER_MACRO *defines, ID3DInclude *include,
+        UINT flags, ID3DBlob **errors, struct ID3DXEffectPool *pool, const char *skip_constants_string)
+{
+#if D3DX_SDK_VERSION <= 36
+    UINT compile_flags = D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
+#else
+    UINT compile_flags = 0;
+#endif
+    ID3DBlob *bytecode = NULL, *temp_errors = NULL;
+    const char *ptr = data;
+    HRESULT hr;
+    DWORD tag;
+
+    TRACE("effect %p, device %p, data %p, data_size %lu, defines %p, include %p, flags %#x, errors %p, "
+            "pool %p, skip_constants %s.\n",
+            effect, device, data, data_size, defines, include, flags, errors, pool,
+            debugstr_a(skip_constants_string));
+
+    read_dword(&ptr, &tag);
+
+    if (tag == d3dx9_effect_version(9, 1))
+        return d3dx9_effect_init_from_dxbc(effect, device, data, data_size, flags, pool, skip_constants_string);
+
+    TRACE("HLSL ASCII effect, trying to compile it.\n");
+    compile_flags |= flags & ~(D3DXFX_NOT_CLONEABLE | D3DXFX_LARGEADDRESSAWARE);
+    hr = D3DCompile(data, data_size, NULL, defines, include,
+            NULL, "fx_2_0", compile_flags, 0, &bytecode, &temp_errors);
+    if (FAILED(hr))
+    {
+        WARN("Failed to compile ASCII effect.\n");
+        if (bytecode)
+            ID3D10Blob_Release(bytecode);
+        if (temp_errors)
+        {
+            const char *error_string = ID3D10Blob_GetBufferPointer(temp_errors);
+            const char *string_ptr;
+
+            while (*error_string)
+            {
+                string_ptr = error_string;
+                while (*string_ptr && *string_ptr != '\n' && *string_ptr != '\r'
+                       && string_ptr - error_string < 80)
+                    ++string_ptr;
+                TRACE("%s\n", debugstr_an(error_string, string_ptr - error_string));
+                error_string = string_ptr;
+                while (*error_string == '\n' || *error_string == '\r')
+                    ++error_string;
+            }
+        }
+        if (errors)
+            *errors = temp_errors;
+        else if (temp_errors)
+            ID3D10Blob_Release(temp_errors);
+        return hr;
+    }
+    if (!bytecode)
+    {
+        FIXME("No output from effect compilation.\n");
+        return D3DERR_INVALIDCALL;
+    }
+    if (errors)
+        *errors = temp_errors;
+    else if (temp_errors)
+        ID3D10Blob_Release(temp_errors);
+
+    hr = d3dx9_effect_init_from_dxbc(effect, device, ID3D10Blob_GetBufferPointer(bytecode),
+            ID3D10Blob_GetBufferSize(bytecode), flags, pool, skip_constants_string);
+    ID3D10Blob_Release(bytecode);
+    return hr;
 }
 
 HRESULT WINAPI D3DXCreateEffectEx(struct IDirect3DDevice9 *device, const void *srcdata, UINT srcdatalen,
@@ -6581,7 +6756,6 @@ HRESULT WINAPI D3DXCreateEffectEx(struct IDirect3DDevice9 *device, const void *s
     if (FAILED(hr))
     {
         WARN("Failed to create effect object, hr %#x.\n", hr);
-        d3dx_effect_cleanup(object);
         return hr;
     }
 

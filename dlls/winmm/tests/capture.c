@@ -62,44 +62,39 @@ static void check_position(int device, HWAVEIN win, DWORD bytes,
     rc=waveInGetPosition(win, &mmtime, sizeof(mmtime));
     ok(rc==MMSYSERR_NOERROR,
        "waveInGetPosition(%s): rc=%s\n",dev_name(device),wave_in_error(rc));
-    if (mmtime.wType != TIME_BYTES && winetest_debug > 1)
-        trace("waveInGetPosition(%s): TIME_BYTES not supported, returned %s\n",
-              dev_name(device),wave_time_format(mmtime.wType));
+    ok(mmtime.wType == TIME_BYTES, "waveInGetPosition(%s): returned %s\n",
+       dev_name(device), wave_time_format(mmtime.wType));
     returned = time_to_bytes(&mmtime, pwfx);
-    ok(returned == bytes, "waveInGetPosition(%s): returned %d bytes, "
-       "should be %d\n", dev_name(device), returned, bytes);
+    ok(returned == bytes, "waveInGetPosition(%s): returned %ld bytes, "
+       "should be %ld\n", dev_name(device), returned, bytes);
 
     mmtime.wType = TIME_SAMPLES;
     rc=waveInGetPosition(win, &mmtime, sizeof(mmtime));
     ok(rc==MMSYSERR_NOERROR,
        "waveInGetPosition(%s): rc=%s\n",dev_name(device),wave_in_error(rc));
-    if (mmtime.wType != TIME_SAMPLES && winetest_debug > 1)
-        trace("waveInGetPosition(%s): TIME_SAMPLES not supported, "
-              "returned %s\n",dev_name(device),wave_time_format(mmtime.wType));
+    ok(mmtime.wType == TIME_SAMPLES, "waveInGetPosition(%s): returned %s\n",
+       dev_name(device), wave_time_format(mmtime.wType));
     returned = time_to_bytes(&mmtime, pwfx);
-    ok(returned == bytes, "waveInGetPosition(%s): returned %d samples, "
-       "should be %d\n", dev_name(device), bytes_to_samples(returned, pwfx),
+    ok(returned == bytes, "waveInGetPosition(%s): returned %ld samples, "
+       "should be %ld\n", dev_name(device), bytes_to_samples(returned, pwfx),
        bytes_to_samples(bytes, pwfx));
 
     mmtime.wType = TIME_MS;
     rc=waveInGetPosition(win, &mmtime, sizeof(mmtime));
     ok(rc==MMSYSERR_NOERROR,
        "waveInGetPosition(%s): rc=%s\n",dev_name(device),wave_in_error(rc));
-    if (mmtime.wType != TIME_MS && winetest_debug > 1)
-        trace("waveInGetPosition(%s): TIME_MS not supported, returned %s\n",
-              dev_name(device), wave_time_format(mmtime.wType));
+    ok(mmtime.wType == TIME_BYTES, "waveInGetPosition(%s): returned %s\n",
+       dev_name(device), wave_time_format(mmtime.wType));
     returned = time_to_bytes(&mmtime, pwfx);
-    ok(returned == bytes, "waveInGetPosition(%s): returned %d ms, "
-       "should be %d\n", dev_name(device), bytes_to_ms(returned, pwfx),
-       bytes_to_ms(bytes, pwfx));
+    ok(returned == bytes, "waveInGetPosition(%s): TIME_MS test failed\n",
+       dev_name(device));
 
     mmtime.wType = TIME_SMPTE;
     rc=waveInGetPosition(win, &mmtime, sizeof(mmtime));
     ok(rc==MMSYSERR_NOERROR,
        "waveInGetPosition(%s): rc=%s\n",dev_name(device),wave_in_error(rc));
-    if (mmtime.wType != TIME_SMPTE && winetest_debug > 1)
-        trace("waveInGetPosition(%s): TIME_SMPTE not supported, returned %s\n",
-              dev_name(device),wave_time_format(mmtime.wType));
+    ok(mmtime.wType == TIME_BYTES, "waveInGetPosition(%s): returned %s\n",
+       dev_name(device), wave_time_format(mmtime.wType));
     returned = time_to_bytes(&mmtime, pwfx);
     ok(returned == bytes, "waveInGetPosition(%s): SMPTE test failed\n",
        dev_name(device));
@@ -108,9 +103,8 @@ static void check_position(int device, HWAVEIN win, DWORD bytes,
     rc=waveInGetPosition(win, &mmtime, sizeof(mmtime));
     ok(rc==MMSYSERR_NOERROR,
        "waveInGetPosition(%s): rc=%s\n",dev_name(device),wave_in_error(rc));
-    if (mmtime.wType != TIME_MIDI && winetest_debug > 1)
-        trace("waveInGetPosition(%s): TIME_MIDI not supported, returned %s\n",
-              dev_name(device),wave_time_format(mmtime.wType));
+    ok(mmtime.wType == TIME_BYTES, "waveInGetPosition(%s): returned %s\n",
+       dev_name(device), wave_time_format(mmtime.wType));
     returned = time_to_bytes(&mmtime, pwfx);
     ok(returned == bytes, "waveInGetPosition(%s): MIDI test failed\n",
        dev_name(device));
@@ -119,9 +113,8 @@ static void check_position(int device, HWAVEIN win, DWORD bytes,
     rc=waveInGetPosition(win, &mmtime, sizeof(mmtime));
     ok(rc==MMSYSERR_NOERROR,
        "waveInGetPosition(%s): rc=%s\n",dev_name(device),wave_in_error(rc));
-    if (mmtime.wType != TIME_TICKS && winetest_debug > 1)
-        trace("waveInGetPosition(%s): TIME_TICKS not supported, returned %s\n",
-              dev_name(device),wave_time_format(mmtime.wType));
+    ok(mmtime.wType == TIME_BYTES, "waveInGetPosition(%s): returned %s\n",
+       dev_name(device), wave_time_format(mmtime.wType));
     returned = time_to_bytes(&mmtime, pwfx);
     ok(returned == bytes, "waveInGetPosition(%s): TICKS test failed\n",
        dev_name(device));
@@ -154,7 +147,7 @@ static void wave_in_test_deviceIn(int device, WAVEFORMATEX *pwfx, DWORD format, 
        (!(flags & WAVE_FORMAT_DIRECT) || (flags & WAVE_MAPPED)) &&
        !(pcaps->dwFormats & format)) ||
        (rc==MMSYSERR_INVALFLAG && (flags & WAVE_FORMAT_DIRECT)),
-       "waveInOpen(%s): format=%dx%2dx%d flags=%x(%s) rc=%s\n",
+       "waveInOpen(%s): format=%ldx%2dx%d flags=%lx(%s) rc=%s\n",
        dev_name(device),pwfx->nSamplesPerSec,pwfx->wBitsPerSample,
        pwfx->nChannels,flags,wave_open_flags(flags),wave_in_error(rc));
     if ((rc==WAVERR_BADFORMAT || rc==MMSYSERR_NOTSUPPORTED) &&
@@ -163,7 +156,7 @@ static void wave_in_test_deviceIn(int device, WAVEFORMATEX *pwfx, DWORD format, 
               "capabilities but opening it failed.\n");
     if ((rc==WAVERR_BADFORMAT || rc==MMSYSERR_NOTSUPPORTED) &&
        !(pcaps->dwFormats & format))
-        trace("waveInOpen(%s): format=%dx%2dx%d %s rc=%s failed but format "
+        trace("waveInOpen(%s): format=%ldx%2dx%d %s rc=%s failed but format "
               "not supported so OK.\n",dev_name(device),pwfx->nSamplesPerSec,
               pwfx->wBitsPerSample,pwfx->nChannels,
               flags & WAVE_FORMAT_DIRECT ? "flags=WAVE_FORMAT_DIRECT" :
@@ -178,7 +171,7 @@ static void wave_in_test_deviceIn(int device, WAVEFORMATEX *pwfx, DWORD format, 
     ok(pwfx->nChannels==nChannels &&
        pwfx->wBitsPerSample==wBitsPerSample &&
        pwfx->nSamplesPerSec==nSamplesPerSec,
-       "got the wrong format: %dx%2dx%d instead of %dx%2dx%d\n",
+       "got the wrong format: %ldx%2dx%d instead of %ldx%2dx%d\n",
        pwfx->nSamplesPerSec, pwfx->wBitsPerSample,
        pwfx->nChannels, nSamplesPerSec, wBitsPerSample, nChannels);
 
@@ -214,7 +207,7 @@ static void wave_in_test_deviceIn(int device, WAVEFORMATEX *pwfx, DWORD format, 
        "not set\n",dev_name(device));
 
     if (winetest_interactive && rc==MMSYSERR_NOERROR) {
-        trace("Recording for 1 second at %5dx%2dx%d %s %s\n",
+        trace("Recording for 1 second at %5ldx%2dx%d %s %s\n",
               pwfx->nSamplesPerSec, pwfx->wBitsPerSample,pwfx->nChannels,
               get_format_str(pwfx->wFormatTag),
               flags & WAVE_FORMAT_DIRECT ? "WAVE_FORMAT_DIRECT" :
@@ -234,7 +227,7 @@ static void wave_in_test_deviceIn(int device, WAVEFORMATEX *pwfx, DWORD format, 
         ok(res==WAIT_OBJECT_0,"WaitForSingleObject failed for header\n");
         ok(frag.dwFlags&WHDR_DONE,"WHDR_DONE not set in frag.dwFlags\n");
         ok(frag.dwBytesRecorded==pwfx->nAvgBytesPerSec,
-           "frag.dwBytesRecorded=%d, should=%d\n",
+           "frag.dwBytesRecorded=%ld, should=%ld\n",
            frag.dwBytesRecorded,pwfx->nAvgBytesPerSec);
 
         mmt.wType = TIME_BYTES;
@@ -242,7 +235,7 @@ static void wave_in_test_deviceIn(int device, WAVEFORMATEX *pwfx, DWORD format, 
         ok(rc==MMSYSERR_NOERROR,"waveInGetPosition(%s): rc=%s\n",
            dev_name(device),wave_in_error(rc));
         ok(mmt.wType == TIME_BYTES, "doesn't support TIME_BYTES: %u\n", mmt.wType);
-        ok(mmt.u.cb == frag.dwBytesRecorded, "Got wrong position: %u\n", mmt.u.cb);
+        ok(mmt.u.cb == frag.dwBytesRecorded, "Got wrong position: %lu\n", mmt.u.cb);
 
         /* stop playing on error */
         if (res!=WAIT_OBJECT_0) {
@@ -276,7 +269,7 @@ static void wave_in_test_deviceIn(int device, WAVEFORMATEX *pwfx, DWORD format, 
            rc==MMSYSERR_ALLOCATED ||
            ((rc==WAVERR_BADFORMAT || rc==MMSYSERR_NOTSUPPORTED) &&
             !(pcaps->dwFormats & format)),
-           "waveOutOpen(%s) format=%dx%2dx%d flags=CALLBACK_EVENT rc=%s\n",
+           "waveOutOpen(%s) format=%ldx%2dx%d flags=CALLBACK_EVENT rc=%s\n",
            dev_name(device),pwfx->nSamplesPerSec,pwfx->wBitsPerSample,
            pwfx->nChannels,wave_out_error(rc));
         if (rc==MMSYSERR_NOERROR)
@@ -392,7 +385,7 @@ static void wave_in_test_device(UINT_PTR device)
         ok(rc==MMSYSERR_NOERROR,"waveInMessage(%s): failed to get interface "
            "name: rc=%s\n",dev_name(device),wave_in_error(rc));
         ok(lstrlenW(nameW)+1==size/sizeof(WCHAR),
-           "got an incorrect size %d\n", size);
+           "got an incorrect size %ld\n", size);
         if (rc==MMSYSERR_NOERROR) {
             nameA = HeapAlloc(GetProcessHeap(), 0, size/sizeof(WCHAR));
             WideCharToMultiByte(CP_ACP, 0, nameW, size/sizeof(WCHAR),
@@ -407,7 +400,7 @@ static void wave_in_test_device(UINT_PTR device)
     trace("  %s: \"%s\" (%s) %d.%d (%d:%d)\n",dev_name(device),capsA.szPname,
           (nameA?nameA:"failed"),capsA.vDriverVersion >> 8,
           capsA.vDriverVersion & 0xff,capsA.wMid,capsA.wPid);
-    trace("     channels=%d formats=%05x\n",
+    trace("     channels=%d formats=%05lx\n",
           capsA.wChannels,capsA.dwFormats);
 
     HeapFree(GetProcessHeap(), 0, nameA);
@@ -673,7 +666,7 @@ static void wave_in_tests(void)
 
     if(rc != MMSYSERR_NOTSUPPORTED)
         ok((ndev == 0 && (preferred == -1 || broken(preferred != -1))) ||
-                preferred < ndev, "Got invalid preferred device: 0x%x\n", preferred);
+                preferred < ndev, "Got invalid preferred device: 0x%lx\n", preferred);
 
     rc = waveInMessage((HWAVEIN)WAVE_MAPPER, DRVM_MAPPER_PREFERRED_GET,
          (DWORD_PTR)-1  , 0);

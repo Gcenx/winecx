@@ -20,16 +20,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
 #include "debugger.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(winedbg);
 
@@ -40,7 +36,7 @@ void* be_cpu_linearize(HANDLE hThread, const ADDRESS64* addr)
 }
 
 BOOL be_cpu_build_addr(HANDLE hThread, const dbg_ctx_t *ctx, ADDRESS64* addr,
-                       unsigned seg, unsigned long offset)
+                       unsigned seg, DWORD64 offset)
 {
     addr->Mode    = AddrModeFlat;
     addr->Segment = 0; /* don't need segment */
@@ -88,7 +84,7 @@ BOOL memory_read_value(const struct dbg_lvalue* lvalue, DWORD size, void* result
 {
     BOOL ret = FALSE;
 
-    if (lvalue->cookie == DLV_TARGET)
+    if (lvalue->in_debuggee)
     {
         void*   linear = memory_to_linear_addr(&lvalue->addr);
         if (!(ret = dbg_read_memory(linear, result, size)))
@@ -118,13 +114,13 @@ BOOL memory_write_value(const struct dbg_lvalue* lvalue, DWORD size, void* value
     if (!types_get_info(&lvalue->type, TI_GET_LENGTH, &os)) return FALSE;
     if (size != os)
     {
-        dbg_printf("Size mismatch in memory_write_value, got %u from type while expecting %u\n",
-                   (DWORD)os, size);
+        dbg_printf("Size mismatch in memory_write_value, got %I64u from type while expecting %lu\n",
+                   os, size);
         return FALSE;
     }
 
     /* FIXME: only works on little endian systems */
-    if (lvalue->cookie == DLV_TARGET)
+    if (lvalue->in_debuggee)
     {
         void*       linear = memory_to_linear_addr(&lvalue->addr);
         if (!(ret = dbg_write_memory(linear, value, size)))
@@ -134,6 +130,37 @@ BOOL memory_write_value(const struct dbg_lvalue* lvalue, DWORD size, void* value
     {
         memcpy((void*)(DWORD_PTR)lvalue->addr.Offset, value, size);
     }
+    return ret;
+}
+
+/* transfer a block of memory
+ * the two lvalue:s are expected to be of same size
+ */
+BOOL memory_transfer_value(const struct dbg_lvalue* to, const struct dbg_lvalue* from)
+{
+    DWORD64 size_to, size_from;
+    BYTE tmp[256];
+    BYTE* ptr = tmp;
+    BOOL ret;
+
+    if (to->bitlen || from->bitlen) return FALSE;
+    if (!types_get_info(&to->type, TI_GET_LENGTH, &size_to) ||
+        !types_get_info(&from->type, TI_GET_LENGTH, &size_from) ||
+        size_from != size_to) return FALSE;
+    /* optimize debugger to debugger transfer */
+    if (!to->in_debuggee && !from->in_debuggee)
+    {
+        memcpy(memory_to_linear_addr(&to->addr), memory_to_linear_addr(&from->addr), size_from);
+        return TRUE;
+    }
+    if (size_to > sizeof(tmp))
+    {
+        ptr = malloc(size_from);
+        if (!ptr) return FALSE;
+    }
+    ret = memory_read_value(from, size_from, ptr) &&
+        memory_write_value(to, size_from, ptr);
+    if (size_to > sizeof(tmp)) free(ptr);
     return ret;
 }
 
@@ -184,7 +211,7 @@ void memory_examine(const struct dbg_lvalue *lvalue, int count, char format)
                 memory_report_invalid_addr(linear);
                 break;
             }
-            dbg_printf("{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}\n",
+            dbg_printf("{%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}\n",
                        guid.Data1, guid.Data2, guid.Data3,
                        guid.Data4[0], guid.Data4[1], guid.Data4[2], guid.Data4[3],
                        guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
@@ -223,16 +250,125 @@ void memory_examine(const struct dbg_lvalue *lvalue, int count, char format)
     case 'a':
         if (sizeof(DWORD_PTR) == 4)
         {
-            DO_DUMP(DWORD_PTR, 4, " %8.8lx");
+            DO_DUMP(DWORD_PTR, 4, " %8.8Ix");
         }
         else
         {
-            DO_DUMP(DWORD_PTR, 2, " %16.16lx");
+            DO_DUMP(DWORD_PTR, 2, " %16.16Ix");
         }
         break;
     case 'c': DO_DUMP2(char, 32, " %c", (_v < 0x20) ? ' ' : _v); break;
     case 'b': DO_DUMP2(char, 16, " %02x", (_v) & 0xff); break;
     }
+}
+
+BOOL memory_fetch_integer(const struct dbg_lvalue* lvalue, unsigned size,
+                          BOOL is_signed, dbg_lgint_t* ret)
+{
+    /* size must fit in ret and be a power of two */
+    if (size > sizeof(*ret) || (size & (size - 1))) return FALSE;
+
+    if (lvalue->bitlen)
+    {
+        struct dbg_lvalue alt_lvalue = *lvalue;
+        dbg_lguint_t mask;
+        DWORD bt;
+        /* FIXME: this test isn't sufficient, depending on start of bitfield
+         * (ie a 64 bit field can spread across 9 bytes)
+         */
+        if (lvalue->bitlen > 8 * sizeof(dbg_lgint_t)) return FALSE;
+        alt_lvalue.addr.Offset += lvalue->bitstart >> 3;
+        /*
+         * Bitfield operation.  We have to extract the field.
+         */
+        if (!memory_read_value(&alt_lvalue, sizeof(*ret), ret)) return FALSE;
+        mask = ~(dbg_lguint_t)0 << lvalue->bitlen;
+        *ret >>= lvalue->bitstart & 7;
+        *ret &= ~mask;
+
+        /*
+         * OK, now we have the correct part of the number.
+         * Check to see whether the basic type is signed or not, and if so,
+         * we need to sign extend the number.
+         */
+        if (types_get_info(&lvalue->type, TI_GET_BASETYPE, &bt) &&
+            (bt == btInt || bt == btLong) && (*ret & (1 << (lvalue->bitlen - 1))))
+        {
+            *ret |= mask;
+        }
+    }
+    else
+    {
+        /* we are on little endian CPU */
+        memset(ret, 0, sizeof(*ret)); /* clear unread bytes */
+        if (!memory_read_value(lvalue, size, ret)) return FALSE;
+
+        /* propagate sign information */
+        if (is_signed && size < 8 && (*ret >> (size * 8 - 1)) != 0)
+        {
+            dbg_lguint_t neg = -1;
+            *ret |= neg << (size * 8);
+        }
+    }
+    return TRUE;
+}
+
+BOOL memory_store_integer(const struct dbg_lvalue* lvalue, dbg_lgint_t val)
+{
+    DWORD64 size;
+    if (!types_get_info(&lvalue->type, TI_GET_LENGTH, &size)) return FALSE;
+    if (lvalue->bitlen)
+    {
+        struct dbg_lvalue alt_lvalue = *lvalue;
+        dbg_lguint_t mask, dst;
+
+        /* FIXME: this test isn't sufficient, depending on start of bitfield
+         * (ie a 64 bit field can spread across 9 bytes)
+         */
+        if (lvalue->bitlen > 8 * sizeof(dbg_lgint_t)) return FALSE;
+        /* mask is 1 where bitfield is present, 0 outside */
+        mask = (~(dbg_lguint_t)0 >> (sizeof(val) * 8 - lvalue->bitlen)) << (lvalue->bitstart & 7);
+        alt_lvalue.addr.Offset += lvalue->bitstart >> 3;
+        val <<= lvalue->bitstart & 7;
+        if (!memory_read_value(&alt_lvalue, (unsigned)size, &dst)) return FALSE;
+        val = (dst & ~mask) | (val & mask);
+        return memory_write_value(&alt_lvalue, (unsigned)size, &val);
+    }
+    /* this is simple if we're on a little endian CPU */
+    return memory_write_value(lvalue, (unsigned)size, &val);
+}
+
+BOOL memory_fetch_float(const struct dbg_lvalue* lvalue, double *ret)
+{
+    DWORD64 size;
+    if (!types_get_info(&lvalue->type, TI_GET_LENGTH, &size)) return FALSE;
+    /* FIXME: this assumes that debuggee and debugger use the same
+     * representation for reals
+     */
+    if (size > sizeof(*ret)) return FALSE;
+    if (!memory_read_value(lvalue, size, ret)) return FALSE;
+
+    if (size == sizeof(float)) *ret = *(float*)ret;
+    else if (size != sizeof(double)) return FALSE;
+
+    return TRUE;
+}
+
+BOOL memory_store_float(const struct dbg_lvalue* lvalue, double *ret)
+{
+    DWORD64 size;
+    if (!types_get_info(&lvalue->type, TI_GET_LENGTH, &size)) return FALSE;
+    /* FIXME: this assumes that debuggee and debugger use the same
+     * representation for reals
+     */
+    if (size > sizeof(*ret)) return FALSE;
+    if (size == sizeof(float))
+    {
+        float f = *ret;
+        return memory_write_value(lvalue, size, &f);
+    }
+    if (size != sizeof(double)) return FALSE;
+    return memory_write_value(lvalue, size, ret);
 }
 
 BOOL memory_get_string(struct dbg_process* pcs, void* addr, BOOL in_debuggee,
@@ -316,41 +452,30 @@ char* memory_offset_to_string(char *str, DWORD64 offset, unsigned mode)
     if (mode == 32)
         sprintf(str, "0x%08x", (unsigned int) offset);
     else
-        sprintf(str, "0x%08x%08x", (unsigned int)(offset >> 32),
-                (unsigned int)offset);
+        sprintf(str, "%#016I64x", offset);
 
     return str;
 }
 
-static void dbg_print_longlong(LONGLONG sv, BOOL is_signed)
+static void dbg_print_sdecimal(dbg_lgint_t sv)
 {
-    char      tmp[24], *ptr = tmp + sizeof(tmp) - 1;
-    ULONGLONG uv, div;
-    *ptr = '\0';
-    if (is_signed && sv < 0)    uv = -sv;
-    else                        { uv = sv; is_signed = FALSE; }
-    for (div = 10; uv; div *= 10, uv /= 10)
-        *--ptr = '0' + (uv % 10);
-    if (ptr == tmp + sizeof(tmp) - 1) *--ptr = '0';
-    if (is_signed) *--ptr = '-';
-    dbg_printf("%s", ptr);
+    dbg_printf("%I64d", sv);
 }
 
-static void dbg_print_hex(DWORD size, ULONGLONG sv)
+static void dbg_print_hex(DWORD size, dbg_lgint_t sv)
 {
     if (!sv)
         dbg_printf("0");
-    else if (size > 4 && (sv >> 32))
-        dbg_printf("0x%x%08x", (DWORD)(sv >> 32), (DWORD)sv);
     else
-        dbg_printf("0x%x", (DWORD)sv);
+        /* clear unneeded high bits, esp. sign extension */
+        dbg_printf("%#I64x", sv & (~(dbg_lguint_t)0 >> (8 * (sizeof(dbg_lgint_t) - size))));
 }
 
 static void print_typed_basic(const struct dbg_lvalue* lvalue)
 {
-    LONGLONG            val_int;
+    dbg_lgint_t         val_int;
     void*               val_ptr;
-    long double         val_real;
+    double              val_real;
     DWORD64             size64;
     DWORD               tag, size, count, bt;
     struct dbg_type     type = lvalue->type;
@@ -374,25 +499,25 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
         {
         case btInt:
         case btLong:
-            if (!dbg_curr_process->be_cpu->fetch_integer(lvalue, size, TRUE, &val_int)) return;
+            if (!memory_fetch_integer(lvalue, size, TRUE, &val_int)) return;
             if (size == 1) goto print_char;
             dbg_print_hex(size, val_int);
             break;
         case btUInt:
         case btULong:
-            if (!dbg_curr_process->be_cpu->fetch_integer(lvalue, size, FALSE, &val_int)) return;
+            if (!memory_fetch_integer(lvalue, size, FALSE, &val_int)) return;
             dbg_print_hex(size, val_int);
             break;
         case btFloat:
-            if (!dbg_curr_process->be_cpu->fetch_float(lvalue, size, &val_real)) return;
-            dbg_printf("%Lf", val_real);
+            if (!memory_fetch_float(lvalue, &val_real)) return;
+            dbg_printf("%f", val_real);
             break;
         case btChar:
         case btWChar:
             /* sometimes WCHAR is defined as btChar with size = 2, so discrimate
              * Ansi/Unicode based on size, not on basetype
              */
-            if (!dbg_curr_process->be_cpu->fetch_integer(lvalue, size, TRUE, &val_int)) return;
+            if (!memory_fetch_integer(lvalue, size, TRUE, &val_int)) return;
         print_char:
             if ((size == 1 && isprint((char)val_int)) ||
                  (size == 2 && val_int < 127 && isprint((char)val_int)))
@@ -401,11 +526,11 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
                 dbg_printf("%d", (int)val_int);
             break;
         case btBool:
-            if (!dbg_curr_process->be_cpu->fetch_integer(lvalue, size, TRUE, &val_int)) return;
+            if (!memory_fetch_integer(lvalue, size, TRUE, &val_int)) return;
             dbg_printf("%s", val_int ? "true" : "false");
             break;
         default:
-            WINE_FIXME("Unsupported basetype %u\n", bt);
+            WINE_FIXME("Unsupported basetype %lu\n", bt);
             break;
         }
         break;
@@ -426,7 +551,7 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
             if (!val_ptr) dbg_printf("0x0");
             else if (((bt == btChar || bt == btInt) && size64 == 1) || (bt == btUInt && size64 == 2))
             {
-                if (memory_get_string(dbg_curr_process, val_ptr, sub_lvalue.cookie == DLV_TARGET,
+                if (memory_get_string(dbg_curr_process, val_ptr, sub_lvalue.in_debuggee,
                                       size64 == 2, buffer, sizeof(buffer)))
                     dbg_printf("\"%s\"", buffer);
                 else
@@ -445,18 +570,14 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
         {
             BOOL        ok = FALSE;
 
-            /* FIXME: it depends on underlying type for enums 
-             * (not supported yet in dbghelp)
-             * Assuming 4 as for an int
-             */
-            if (!dbg_curr_process->be_cpu->fetch_integer(lvalue, 4, TRUE, &val_int)) return;
+            if (!types_get_info(&type, TI_GET_LENGTH, &size64) ||
+                !memory_fetch_integer(lvalue, size64, TRUE, &val_int)) return;
 
             if (types_get_info(&type, TI_GET_CHILDRENCOUNT, &count))
             {
                 char                    buffer[sizeof(TI_FINDCHILDREN_PARAMS) + 256 * sizeof(DWORD)];
                 TI_FINDCHILDREN_PARAMS* fcp = (TI_FINDCHILDREN_PARAMS*)buffer;
                 WCHAR*                  ptr;
-                char                    tmp[256];
                 VARIANT                 variant;
                 int                     i;
 
@@ -472,19 +593,18 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
                             sub_type.id = fcp->ChildId[i];
                             if (!types_get_info(&sub_type, TI_GET_VALUE, &variant)) 
                                 continue;
-                            switch (variant.n1.n2.vt)
+                            switch (V_VT(&variant))
                             {
-                            case VT_I4: ok = (val_int == variant.n1.n2.n3.lVal); break;
-                            default: WINE_FIXME("Unsupported variant type (%u)\n", variant.n1.n2.vt);
+                            case VT_I1: ok = (val_int == V_I1(&variant)); break;
+                            case VT_I2: ok = (val_int == V_I2(&variant)); break;
+                            case VT_I4: ok = (val_int == V_I4(&variant)); break;
+                            case VT_I8: ok = (val_int == V_I8(&variant)); break;
+                            default: WINE_FIXME("Unsupported variant type (%u)\n", V_VT(&variant));
                             }
-                            if (ok)
+                            if (ok && types_get_info(&sub_type, TI_GET_SYMNAME, &ptr) && ptr)
                             {
-                                ptr = NULL;
-                                types_get_info(&sub_type, TI_GET_SYMNAME, &ptr);
-                                if (!ptr) continue;
-                                WideCharToMultiByte(CP_ACP, 0, ptr, -1, tmp, sizeof(tmp), NULL, NULL);
+                                dbg_printf("%ls", ptr);
                                 HeapFree(GetProcessHeap(), 0, ptr);
-                                dbg_printf("%s", tmp);
                                 count = 0; /* so that we'll get away from outer loop */
                                 break;
                             }
@@ -494,11 +614,11 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
                     fcp->Start += 256;
                 }
             }
-            if (!ok) dbg_print_longlong(val_int, TRUE);
+            if (!ok) dbg_print_sdecimal(val_int);
         }
         break;
     default:
-        WINE_FIXME("Unsupported tag %u\n", tag);
+        WINE_FIXME("Unsupported tag %lu\n", tag);
         break;
     }
 }
@@ -519,17 +639,16 @@ void print_basic(const struct dbg_lvalue* lvalue, char format)
     if (format != 0)
     {
         unsigned size;
-        LONGLONG res = types_extract_as_longlong(lvalue, &size, NULL);
-        WCHAR wch;
+        dbg_lgint_t res = types_extract_as_lgint(lvalue, &size, NULL);
 
         switch (format)
         {
         case 'x':
-            dbg_print_hex(size, (ULONGLONG)res);
+            dbg_print_hex(size, res);
             return;
 
         case 'd':
-            dbg_print_longlong(res, TRUE);
+            dbg_print_sdecimal(res);
             return;
 
         case 'c':
@@ -537,10 +656,7 @@ void print_basic(const struct dbg_lvalue* lvalue, char format)
             return;
 
         case 'u':
-            wch = (WCHAR)(res & 0xFFFF);
-            dbg_printf("%d = '", wch);
-            dbg_outputW(&wch, 1);
-            dbg_printf("'");
+            dbg_printf("%d = '%lc'", (WCHAR)(res & 0xFFFF), (WCHAR)(res & 0xFFFF));
             return;
 
         case 'i':
@@ -552,7 +668,7 @@ void print_basic(const struct dbg_lvalue* lvalue, char format)
     }
     if (lvalue->type.id == dbg_itype_segptr)
     {
-        dbg_print_longlong(types_extract_as_longlong(lvalue, NULL, NULL), TRUE);
+        dbg_print_sdecimal(types_extract_as_lgint(lvalue, NULL, NULL));
     }
     else print_typed_basic(lvalue);
 }
@@ -589,28 +705,42 @@ void print_address(const ADDRESS64* addr, BOOLEAN with_line)
 {
     char                buffer[sizeof(SYMBOL_INFO) + 256];
     SYMBOL_INFO*        si = (SYMBOL_INFO*)buffer;
-    void*               lin = memory_to_linear_addr(addr);
+    DWORD_PTR           lin = (DWORD_PTR)memory_to_linear_addr(addr);
     DWORD64             disp64;
     DWORD               disp;
+    IMAGEHLP_MODULE     im;
 
     print_bare_address(addr);
 
     si->SizeOfStruct = sizeof(*si);
     si->MaxNameLen   = 256;
-    if (!SymFromAddr(dbg_curr_process->handle, (DWORD_PTR)lin, &disp64, si)) return;
-    dbg_printf(" %s", si->Name);
-    if (disp64) dbg_printf("+0x%lx", (DWORD_PTR)disp64);
+    im.SizeOfStruct  = 0;
+    if (SymFromAddr(dbg_curr_process->handle, lin, &disp64, si) && disp64 < si->Size)
+    {
+        dbg_printf(" %s", si->Name);
+        if (disp64) dbg_printf("+0x%I64x", disp64);
+    }
+    else
+    {
+        im.SizeOfStruct = sizeof(im);
+        if (!SymGetModuleInfo(dbg_curr_process->handle, lin, &im)) return;
+        dbg_printf(" %s", im.ModuleName);
+        if (lin > im.BaseOfImage)
+            dbg_printf("+0x%Ix", lin - im.BaseOfImage);
+    }
     if (with_line)
     {
         IMAGEHLP_LINE64             il;
-        IMAGEHLP_MODULE             im;
 
         il.SizeOfStruct = sizeof(il);
-        if (SymGetLineFromAddr64(dbg_curr_process->handle, (DWORD_PTR)lin, &disp, &il))
-            dbg_printf(" [%s:%u]", il.FileName, il.LineNumber);
-        im.SizeOfStruct = sizeof(im);
-        if (SymGetModuleInfo(dbg_curr_process->handle, (DWORD_PTR)lin, &im))
-            dbg_printf(" in %s", im.ModuleName);
+        if (SymGetLineFromAddr64(dbg_curr_process->handle, lin, &disp, &il))
+            dbg_printf(" [%s:%lu]", il.FileName, il.LineNumber);
+        if (im.SizeOfStruct == 0) /* don't display again module if address is in module+disp form */
+        {
+            im.SizeOfStruct = sizeof(im);
+            if (SymGetModuleInfo(dbg_curr_process->handle, lin, &im))
+                dbg_printf(" in %s", im.ModuleName);
+        }
     }
 }
 
@@ -634,7 +764,7 @@ void memory_disassemble(const struct dbg_lvalue* xstart,
                         const struct dbg_lvalue* xend, int instruction_count)
 {
     static ADDRESS64 last = {0,0,0};
-    int stop = 0;
+    dbg_lgint_t stop = 0;
     int i;
 
     if (!xstart && !xend) 
@@ -693,6 +823,6 @@ BOOL memory_get_register(DWORD regno, DWORD_PTR** value, char* buffer, int len)
             return TRUE;
         }
     }
-    if (buffer) snprintf(buffer, len, "<unknown register %u>", regno);
+    if (buffer) snprintf(buffer, len, "<unknown register %lu>", regno);
     return FALSE;
 }

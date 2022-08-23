@@ -16,6 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <wine/list.h>
+
 extern HRESULT MMDevEnum_Create(REFIID riid, void **ppv) DECLSPEC_HIDDEN;
 extern void MMDevEnum_Free(void) DECLSPEC_HIDDEN;
 
@@ -67,9 +69,15 @@ typedef struct MMDevice {
     DWORD state;
     GUID devguid;
     WCHAR *drv_id;
+
+    struct list entry;
 } MMDevice;
 
 extern HRESULT AudioClient_Create(MMDevice *parent, IAudioClient **ppv) DECLSPEC_HIDDEN;
 extern HRESULT AudioEndpointVolume_Create(MMDevice *parent, IAudioEndpointVolumeEx **ppv) DECLSPEC_HIDDEN;
+extern HRESULT SpatialAudioClient_Create(IMMDevice *device, ISpatialAudioClient **out) DECLSPEC_HIDDEN;
+
+extern HRESULT load_devices_from_reg(void) DECLSPEC_HIDDEN;
+extern HRESULT load_driver_devices(EDataFlow flow) DECLSPEC_HIDDEN;
 
 extern const WCHAR drv_keyW[] DECLSPEC_HIDDEN;

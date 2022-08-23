@@ -538,16 +538,19 @@ static void test_lldiv(void)
 
 static void test_isblank(void)
 {
-    int c;
+    int c, r;
 
     for(c = 0; c <= 0xff; c++) {
-        if(c == '\t' || c == ' ') {
-            if(c == '\t')
-                ok(!_isctype(c, _BLANK), "tab shouldn't be blank\n");
-            else
-                ok(_isctype(c, _BLANK), "space should be blank\n");
+        if(c == '\t') {
+            ok(!_isctype(c, _BLANK), "tab shouldn't be blank\n");
             ok(isblank(c), "%d should be blank\n", c);
-            ok(_isblank_l(c, NULL), "%d should be blank\n", c);
+            r = _isblank_l(c, NULL);
+            ok(!r || broken(r == _BLANK), "tab shouldn't be blank (got %x)\n", r);
+        } else if(c == ' ') {
+            ok(_isctype(c, _BLANK), "space should be blank\n");
+            ok(isblank(c), "%d should be blank\n", c);
+            r = _isblank_l(c, NULL);
+            ok(r == _BLANK, "space should be blank (got %x)\n", r);
         } else {
             ok(!_isctype(c, _BLANK), "%d shouldn't be blank\n", c);
             ok(!isblank(c), "%d shouldn't be blank\n", c);
@@ -796,7 +799,7 @@ static void test_math_errors(void)
         errno = -1;
         exception.type = -1;
         p_func3d(tests3d[i].a, tests3d[i].b, tests3d[i].c);
-        ok(errno == tests3d[i].error,
+        ok(errno == tests3d[i].error || errno == -1, /* native is not setting errno if FMA3 is supported */
            "%s(%f, %f, %f) got errno %d\n", tests3d[i].func, tests3d[i].a, tests3d[i].b, tests3d[i].c, errno);
         ok(exception.type == tests3d[i].exception,
            "%s(%f, %f, %f) got exception type %d\n", tests3d[i].func, tests3d[i].a, tests3d[i].b, tests3d[i].c, exception.type);
@@ -1165,17 +1168,17 @@ static void test_exit(const char *argv0)
     ret = WaitForSingleObject(proc.hProcess, INFINITE);
     ok(ret == WAIT_OBJECT_0, "child process wait failed\n");
     GetExitCodeProcess(proc.hProcess, &ret);
-    ok(ret == 1, "child process exited with code %d\n", ret);
+    ok(ret == 1, "child process exited with code %ld\n", ret);
     CloseHandle(proc.hProcess);
     CloseHandle(proc.hThread);
-    ok(!*failures, "%d tests failed in child process\n", *failures);
+    ok(!*failures, "%ld tests failed in child process\n", *failures);
     free_failures_counter(failures, failures_map);
 
 
     ret = WaitForSingleObject(exit_event, 0);
-    ok(ret == WAIT_OBJECT_0, "exit_event was not set (%x)\n", ret);
+    ok(ret == WAIT_OBJECT_0, "exit_event was not set (%lx)\n", ret);
     ret = WaitForSingleObject(quick_exit_event, 0);
-    ok(ret == WAIT_TIMEOUT, "quick_exit_event should not have be set (%x)\n", ret);
+    ok(ret == WAIT_TIMEOUT, "quick_exit_event should not have be set (%lx)\n", ret);
 
     CloseHandle(exit_event);
     CloseHandle(quick_exit_event);
@@ -1187,7 +1190,7 @@ static void CDECL at_exit_func1(void)
 {
     HANDLE exit_event = CreateEventA(NULL, FALSE, FALSE, "exit_event");
 
-    ok(exit_event != NULL, "CreateEvent failed: %d\n", GetLastError());
+    ok(exit_event != NULL, "CreateEvent failed: %ld\n", GetLastError());
     ok(atexit_called == 1, "atexit_called = %d\n", atexit_called);
     atexit_called++;
     SetEvent(exit_event);
@@ -1208,7 +1211,7 @@ static void CDECL at_quick_exit_func1(void)
 {
     HANDLE quick_exit_event = CreateEventA(NULL, FALSE, FALSE, "quick_exit_event");
 
-    ok(quick_exit_event != NULL, "CreateEvent failed: %d\n", GetLastError());
+    ok(quick_exit_event != NULL, "CreateEvent failed: %ld\n", GetLastError());
     ok(atquick_exit_called == 1, "atquick_exit_called = %d\n", atquick_exit_called);
     atquick_exit_called++;
     SetEvent(quick_exit_event);
@@ -1266,16 +1269,16 @@ static void test_quick_exit(const char *argv0)
     ret = WaitForSingleObject(proc.hProcess, INFINITE);
     ok(ret == WAIT_OBJECT_0, "child process wait failed\n");
     GetExitCodeProcess(proc.hProcess, &ret);
-    ok(ret == 2, "child process exited with code %d\n", ret);
+    ok(ret == 2, "child process exited with code %ld\n", ret);
     CloseHandle(proc.hProcess);
     CloseHandle(proc.hThread);
-    ok(!*failures, "%d tests failed in child process\n", *failures);
+    ok(!*failures, "%ld tests failed in child process\n", *failures);
     free_failures_counter(failures, failures_map);
 
     ret = WaitForSingleObject(quick_exit_event, 0);
-    ok(ret == WAIT_OBJECT_0, "quick_exit_event was not set (%x)\n", ret);
+    ok(ret == WAIT_OBJECT_0, "quick_exit_event was not set (%lx)\n", ret);
     ret = WaitForSingleObject(exit_event, 0);
-    ok(ret == WAIT_TIMEOUT, "exit_event should not have be set (%x)\n", ret);
+    ok(ret == WAIT_TIMEOUT, "exit_event should not have be set (%lx)\n", ret);
 
     CloseHandle(exit_event);
     CloseHandle(quick_exit_event);
@@ -1371,6 +1374,223 @@ static void test_thread_storage(void)
             "can't find se_translator in thread storage\n");
 }
 
+static unsigned long fenv_encode(unsigned int e)
+{
+    ok(!(e & ~FE_ALL_EXCEPT), "incorrect argument: %x\n", e);
+
+#if defined(__i386__)
+    return e<<24 | e<<16 | e;
+#elif defined(__x86_64__)
+    return e<<24 | e;
+#else
+    return e;
+#endif
+}
+
+static void test_fenv(void)
+{
+    static const int tests[] = {
+        0,
+        FE_INEXACT,
+        FE_UNDERFLOW,
+        FE_OVERFLOW,
+        FE_DIVBYZERO,
+        FE_INVALID,
+        FE_ALL_EXCEPT,
+    };
+    static const struct {
+        fexcept_t except;
+        unsigned int flag;
+        unsigned int get;
+        fexcept_t expect;
+    } tests2[] = {
+        /* except                   flag                     get             expect */
+        { 0,                        0,                       0,              0 },
+        { FE_ALL_EXCEPT,            FE_INEXACT,              0,              0 },
+        { FE_ALL_EXCEPT,            FE_INEXACT,              FE_ALL_EXCEPT,  FE_INEXACT },
+        { FE_ALL_EXCEPT,            FE_INEXACT,              FE_INEXACT,     FE_INEXACT },
+        { FE_ALL_EXCEPT,            FE_INEXACT,              FE_OVERFLOW,    0 },
+        { FE_ALL_EXCEPT,            FE_ALL_EXCEPT,           FE_ALL_EXCEPT,  FE_ALL_EXCEPT },
+        { FE_ALL_EXCEPT,            FE_ALL_EXCEPT,           FE_INEXACT,     FE_INEXACT },
+        { FE_ALL_EXCEPT,            FE_ALL_EXCEPT,           0,              0 },
+        { FE_ALL_EXCEPT,            FE_ALL_EXCEPT,           ~0,             FE_ALL_EXCEPT },
+        { FE_ALL_EXCEPT,            FE_ALL_EXCEPT,           ~FE_ALL_EXCEPT, 0 },
+        { FE_INEXACT,               FE_ALL_EXCEPT,           FE_ALL_EXCEPT,  FE_INEXACT },
+        { FE_INEXACT,               FE_UNDERFLOW,            FE_ALL_EXCEPT,  0 },
+        { FE_UNDERFLOW,             FE_INEXACT,              FE_ALL_EXCEPT,  0 },
+        { FE_INEXACT|FE_UNDERFLOW,  FE_UNDERFLOW,            FE_ALL_EXCEPT,  FE_UNDERFLOW },
+        { FE_UNDERFLOW,             FE_INEXACT|FE_UNDERFLOW, FE_ALL_EXCEPT,  FE_UNDERFLOW },
+    };
+    fenv_t env, env2;
+    fexcept_t except;
+    int i, ret, flags;
+
+    _clearfp();
+
+    ret = fegetenv(&env);
+    ok(!ret, "fegetenv returned %x\n", ret);
+#if defined(__i386__) || defined(__x86_64__)
+    if (env._Fe_ctl >> 24 != (env._Fe_ctl & 0xff))
+    {
+        win_skip("fenv_t format not supported (too old ucrtbase)\n");
+        return;
+    }
+#endif
+    fesetround(FE_UPWARD);
+    ok(!env._Fe_stat, "env._Fe_stat = %lx\n", env._Fe_stat);
+    ret = fegetenv(&env2);
+    ok(!ret, "fegetenv returned %x\n", ret);
+    ok(env._Fe_ctl != env2._Fe_ctl, "fesetround didn't change _Fe_ctl (%lx).\n", env._Fe_ctl);
+    ret = fesetenv(&env);
+    ok(!ret, "fesetenv returned %x\n", ret);
+    ret = fegetround();
+    ok(ret == FE_TONEAREST, "Got unexpected round mode %#x.\n", ret);
+
+    except = fenv_encode(FE_ALL_EXCEPT);
+    ret = fesetexceptflag(&except, FE_INEXACT|FE_UNDERFLOW);
+    ok(!ret, "fesetexceptflag returned %x\n", ret);
+    except = fetestexcept(FE_ALL_EXCEPT);
+    ok(except == (FE_INEXACT|FE_UNDERFLOW), "expected %x, got %lx\n", FE_INEXACT|FE_UNDERFLOW, except);
+
+    ret = feclearexcept(~FE_ALL_EXCEPT);
+    ok(!ret, "feclearexceptflag returned %x\n", ret);
+    except = fetestexcept(FE_ALL_EXCEPT);
+    ok(except == (FE_INEXACT|FE_UNDERFLOW), "expected %x, got %lx\n", FE_INEXACT|FE_UNDERFLOW, except);
+
+    /* no crash, but no-op */
+    ret = fesetexceptflag(NULL, 0);
+    ok(!ret, "fesetexceptflag returned %x\n", ret);
+    except = fetestexcept(FE_ALL_EXCEPT);
+    ok(except == (FE_INEXACT|FE_UNDERFLOW), "expected %x, got %lx\n", FE_INEXACT|FE_UNDERFLOW, except);
+
+    /* zero clears all */
+    except = 0;
+    ret = fesetexceptflag(&except, FE_ALL_EXCEPT);
+    ok(!ret, "fesetexceptflag returned %x\n", ret);
+    except = fetestexcept(FE_ALL_EXCEPT);
+    ok(!except, "expected 0, got %lx\n", except);
+
+    ret = fetestexcept(FE_ALL_EXCEPT);
+    ok(!ret, "fetestexcept returned %x\n", ret);
+
+    flags = 0;
+    /* adding bits with flags */
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
+        except = fenv_encode(FE_ALL_EXCEPT);
+        ret = fesetexceptflag(&except, tests[i]);
+        ok(!ret, "Test %d: fesetexceptflag returned %x\n", i, ret);
+
+        ret = fetestexcept(tests[i]);
+        ok(ret == tests[i], "Test %d: expected %x, got %x\n", i, tests[i], ret);
+
+        flags |= tests[i];
+        ret = fetestexcept(FE_ALL_EXCEPT);
+        ok(ret == flags, "Test %d: expected %x, got %x\n", i, flags, ret);
+
+        except = ~0;
+        ret = fegetexceptflag(&except, ~0);
+        ok(!ret, "Test %d: fegetexceptflag returned %x.\n", i, ret);
+        ok(except == fenv_encode(flags),
+                "Test %d: expected %lx, got %lx\n", i, fenv_encode(flags), except);
+
+        except = ~0;
+        ret = fegetexceptflag(&except, tests[i]);
+        ok(!ret, "Test %d: fegetexceptflag returned %x.\n", i, ret);
+        ok(except == fenv_encode(tests[i]),
+                "Test %d: expected %lx, got %lx\n", i, fenv_encode(tests[i]), except);
+    }
+
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
+        ret = feclearexcept(tests[i]);
+        ok(!ret, "Test %d: feclearexceptflag returned %x\n", i, ret);
+
+        flags &= ~tests[i];
+        except = fetestexcept(tests[i]);
+        ok(!except, "Test %d: expected %x, got %lx\n", i, flags, except);
+    }
+
+    except = fetestexcept(FE_ALL_EXCEPT);
+    ok(!except, "expected 0, got %lx\n", except);
+
+    /* setting bits with except */
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
+        except = fenv_encode(tests[i]);
+        ret = fesetexceptflag(&except, FE_ALL_EXCEPT);
+        ok(!ret, "Test %d: fesetexceptflag returned %x\n", i, ret);
+
+        ret = fetestexcept(tests[i]);
+        ok(ret == tests[i], "Test %d: expected %x, got %x\n", i, tests[i], ret);
+
+        ret = fetestexcept(FE_ALL_EXCEPT);
+        ok(ret == tests[i], "Test %d: expected %x, got %x\n", i, tests[i], ret);
+    }
+
+    for(i=0; i<ARRAY_SIZE(tests2); i++) {
+        _clearfp();
+
+        except = fenv_encode(tests2[i].except);
+        ret = fesetexceptflag(&except, tests2[i].flag);
+        ok(!ret, "Test %d: fesetexceptflag returned %x\n", i, ret);
+
+        ret = fetestexcept(tests2[i].get);
+        ok(ret == tests2[i].expect, "Test %d: expected %lx, got %x\n", i, tests2[i].expect, ret);
+    }
+
+    ret = feclearexcept(FE_ALL_EXCEPT);
+    ok(!ret, "feclearexceptflag returned %x\n", ret);
+    except = fetestexcept(FE_ALL_EXCEPT);
+    ok(!except, "expected 0, got %lx\n", except);
+}
+
+static void test_fopen_exclusive( void )
+{
+    char path[MAX_PATH*2];
+    DWORD len;
+    FILE *fp;
+
+    len = GetTempPathA(MAX_PATH, path);
+    ok(len, "GetTempPathA failed\n");
+    strcat(path, "\\fileexcl.tst");
+
+    SET_EXPECT(global_invalid_parameter_handler);
+    fp = fopen(path, "wx");
+    if(called_global_invalid_parameter_handler)
+    {
+        win_skip("skipping fopen x mode tests.\n");
+        return;
+    }
+    expect_global_invalid_parameter_handler = FALSE;
+    ok(fp != NULL, "creating file with mode wx failed\n");
+    fclose(fp);
+
+    fp = fopen(path, "wx");
+    ok(!fp, "overwrote existing file with mode wx\n");
+    unlink(path);
+
+    fp = fopen(path, "w+x");
+    ok(fp != NULL, "creating file with mode w+x failed\n");
+    fclose(fp);
+
+    fp = fopen(path, "w+x");
+    ok(!fp, "overwrote existing file with mode w+x\n");
+
+    SET_EXPECT(global_invalid_parameter_handler);
+    fp = fopen(path, "rx");
+    CHECK_CALLED(global_invalid_parameter_handler);
+    ok(!fp, "opening file with mode rx succeeded\n");
+    unlink(path);
+
+    SET_EXPECT(global_invalid_parameter_handler);
+    fp = fopen(path, "xw");
+    CHECK_CALLED(global_invalid_parameter_handler);
+    ok(!fp, "creating file with mode xw succeeded\n");
+
+    fp = fopen(path, "wbx");
+    ok(fp != NULL, "creating file with mode wbx failed\n");
+    fclose(fp);
+    unlink(path);
+}
+
 START_TEST(misc)
 {
     int arg_c;
@@ -1411,4 +1631,6 @@ START_TEST(misc)
     test__o_malloc();
     test_clock();
     test_thread_storage();
+    test_fenv();
+    test_fopen_exclusive();
 }

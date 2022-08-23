@@ -25,7 +25,6 @@
   - implement ACO_RTLREADING style
   - implement ACO_WORD_FILTER style
  */
-#include "config.h"
 
 #include <stdarg.h>
 #include <stdlib.h>
@@ -37,7 +36,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
-#include "undocshell.h"
 #include "shlwapi.h"
 #include "winerror.h"
 #include "objbase.h"
@@ -47,8 +45,6 @@
 #include "shldisp.h"
 #include "debughlp.h"
 #include "shell32_main.h"
-
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
@@ -90,9 +86,7 @@ enum prefix_filtering
     prefix_filtering_all        /* filter all common prefixes (protocol & www. ) */
 };
 
-static const WCHAR autocomplete_propertyW[] = {'W','i','n','e',' ','A','u','t','o',
-                                               'c','o','m','p','l','e','t','e',' ',
-                                               'c','o','n','t','r','o','l',0};
+static const WCHAR autocomplete_propertyW[] = L"Wine Autocomplete control";
 
 static inline IAutoCompleteImpl *impl_from_IAutoComplete2(IAutoComplete2 *iface)
 {
@@ -114,11 +108,9 @@ static void set_text_and_selection(IAutoCompleteImpl *ac, HWND hwnd, WCHAR *text
 
 static inline WCHAR *filter_protocol(WCHAR *str)
 {
-    static const WCHAR http[] = {'h','t','t','p'};
-
-    if (!strncmpW(str, http, ARRAY_SIZE(http)))
+    if (!wcsncmp(str, L"http", 4))
     {
-        str += ARRAY_SIZE(http);
+        str += 4;
         str += (*str == 's');    /* https */
         if (str[0] == ':' && str[1] == '/' && str[2] == '/')
             return str + 3;
@@ -128,10 +120,7 @@ static inline WCHAR *filter_protocol(WCHAR *str)
 
 static inline WCHAR *filter_www(WCHAR *str)
 {
-    static const WCHAR www[] = {'w','w','w','.'};
-
-    if (!strncmpW(str, www, ARRAY_SIZE(www)))
-        return str + ARRAY_SIZE(www);
+    if (!wcsncmp(str, L"www.", 4)) return str + 4;
     return NULL;
 }
 
@@ -147,7 +136,7 @@ static enum prefix_filtering get_text_prefix_filtering(const WCHAR *text)
     UINT i;
 
     for (i = 0; i < ARRAY_SIZE(buf) - 1 && text[i]; i++)
-        buf[i] = tolowerW(text[i]);
+        buf[i] = towlower(text[i]);
     buf[i] = '\0';
 
     if (filter_protocol(buf)) return prefix_filtering_none;
@@ -176,25 +165,25 @@ static inline int sort_strs_cmpfn_impl(WCHAR *a, WCHAR *b, enum prefix_filtering
 {
     WCHAR *str1 = filter_str_prefix(a, pfx_filter);
     WCHAR *str2 = filter_str_prefix(b, pfx_filter);
-    return strcmpiW(str1, str2);
+    return wcsicmp(str1, str2);
 }
 
-static int sort_strs_cmpfn_none(const void * HOSTPTR a, const void * HOSTPTR b)
+static int __cdecl sort_strs_cmpfn_none(const void *a, const void *b)
 {
-    return sort_strs_cmpfn_impl(*ADDRSPACECAST(WCHAR* const*, a), *ADDRSPACECAST(WCHAR* const*, b), prefix_filtering_none);
+    return sort_strs_cmpfn_impl(*(WCHAR* const*)a, *(WCHAR* const*)b, prefix_filtering_none);
 }
 
-static int sort_strs_cmpfn_protocol(const void * HOSTPTR a, const void * HOSTPTR b)
+static int __cdecl sort_strs_cmpfn_protocol(const void *a, const void *b)
 {
-    return sort_strs_cmpfn_impl(*ADDRSPACECAST(WCHAR* const*, a), *ADDRSPACECAST(WCHAR* const*, b), prefix_filtering_protocol);
+    return sort_strs_cmpfn_impl(*(WCHAR* const*)a, *(WCHAR* const*)b, prefix_filtering_protocol);
 }
 
-static int sort_strs_cmpfn_all(const void * HOSTPTR a, const void * HOSTPTR b)
+static int __cdecl sort_strs_cmpfn_all(const void *a, const void *b)
 {
-    return sort_strs_cmpfn_impl(*ADDRSPACECAST(WCHAR* const*, a), *ADDRSPACECAST(WCHAR* const*, b), prefix_filtering_all);
+    return sort_strs_cmpfn_impl(*(WCHAR* const*)a, *(WCHAR* const*)b, prefix_filtering_all);
 }
 
-static int (*const sort_strs_cmpfn[])(const void* HOSTPTR, const void* HOSTPTR) =
+static int (* __cdecl sort_strs_cmpfn[])(const void*, const void*) =
 {
     sort_strs_cmpfn_none,
     sort_strs_cmpfn_protocol,
@@ -259,7 +248,7 @@ static UINT find_matching_enum_str(IAutoCompleteImpl *ac, UINT start, WCHAR *tex
     while (a < b)
     {
         UINT i = (a + b - 1) / 2;
-        int cmp = strncmpiW(text, filter_str_prefix(strs[i], pfx_filter), len);
+        int cmp = wcsnicmp(text, filter_str_prefix(strs[i], pfx_filter), len);
         if (cmp == 0)
         {
             index = i;
@@ -351,7 +340,7 @@ static BOOL draw_listbox_item(IAutoCompleteImpl *ac, DRAWITEMSTRUCT *info, UINT 
     str = ac->listbox_strs[info->itemID];
     ExtTextOutW(hdc, info->rcItem.left + 1, info->rcItem.top,
                 ETO_OPAQUE | ETO_CLIPPED, &info->rcItem, str,
-                strlenW(str), NULL);
+                lstrlenW(str), NULL);
 
     if (state & ODS_SELECTED)
     {
@@ -400,7 +389,7 @@ static BOOL select_item_with_return_key(IAutoCompleteImpl *ac, HWND hwnd)
         if (sel >= 0)
         {
             text = ac->listbox_strs[sel];
-            set_text_and_selection(ac, hwnd, text, 0, strlenW(text));
+            set_text_and_selection(ac, hwnd, text, 0, lstrlenW(text));
             hide_listbox(ac, hwndListBox, TRUE);
             ac->no_fwd_char = '\r';  /* RETURN char */
             return TRUE;
@@ -457,7 +446,7 @@ static LRESULT change_selection(IAutoCompleteImpl *ac, HWND hwnd, UINT key)
     SendMessageW(ac->hwndListBox, LB_SETCURSEL, sel, 0);
 
     msg = (sel >= 0) ? ac->listbox_strs[sel] : ac->txtbackup;
-    len = strlenW(msg);
+    len = lstrlenW(msg);
     set_text_and_selection(ac, hwnd, msg, len, len);
 
     return 0;
@@ -480,36 +469,32 @@ static BOOL aclist_expand(IAutoCompleteImpl *ac, WCHAR *txt)
 {
     /* call IACList::Expand only when needed, if the
        new txt and old_txt require different expansions */
-    static const WCHAR empty[] = { 0 };
 
     const WCHAR *old_txt = ac->txtbackup;
     WCHAR c, *p, *last_delim;
     size_t i = 0;
 
-    /* '/' is allowed as a delim for unix paths */
-    static const WCHAR delims[] = { '\\', '/', 0 };
-
     /* always expand if the enumerator was reset */
-    if (!ac->enum_strs) old_txt = empty;
+    if (!ac->enum_strs) old_txt = L"";
 
     /* skip the shared prefix */
-    while ((c = tolowerW(txt[i])) == tolowerW(old_txt[i]))
+    while ((c = towlower(txt[i])) == towlower(old_txt[i]))
     {
         if (c == '\0') return FALSE;
         i++;
     }
 
     /* they differ at this point, check for a delim further in txt */
-    for (last_delim = NULL, p = &txt[i]; (p = strpbrkW(p, delims)) != NULL; p++)
+    for (last_delim = NULL, p = &txt[i]; (p = wcspbrk(p, L"\\/")) != NULL; p++)
         last_delim = p;
     if (last_delim) return do_aclist_expand(ac, txt, last_delim);
 
     /* txt has no delim after i, check for a delim further in old_txt */
-    if (strpbrkW(&old_txt[i], delims))
+    if (wcspbrk(&old_txt[i], L"\\/"))
     {
         /* scan backwards to find the first delim before txt[i] (if any) */
         while (i--)
-            if (strchrW(delims, txt[i]))
+            if (wcschr(L"\\/", txt[i]))
                 return do_aclist_expand(ac, txt, &txt[i]);
 
         /* Windows doesn't expand without a delim, but it does reset */
@@ -532,7 +517,7 @@ static void autoappend_str(IAutoCompleteImpl *ac, WCHAR *text, UINT len, WCHAR *
 
     /* The character capitalization can be different,
        so merge text and str into a new string */
-    size = len + strlenW(&str[len]) + 1;
+    size = len + lstrlenW(&str[len]) + 1;
 
     if ((tmp = heap_alloc(size * sizeof(*tmp))))
     {
@@ -694,7 +679,7 @@ static LRESULT ACEditSubclassProc_KeyDown(IAutoCompleteImpl *ac, HWND hwnd, UINT
                 if (!(text = heap_alloc((len + 1) * sizeof(WCHAR))))
                     return 0;
                 len = SendMessageW(hwnd, WM_GETTEXT, len + 1, (LPARAM)text);
-                sz = strlenW(ac->quickComplete) + 1 + len;
+                sz = lstrlenW(ac->quickComplete) + 1 + len;
 
                 if ((buf = heap_alloc(sz * sizeof(WCHAR))))
                 {
@@ -860,7 +845,7 @@ static LRESULT APIENTRY ACLBoxSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
             if (sel < 0)
                 return 0;
             msg = This->listbox_strs[sel];
-            set_text_and_selection(This, This->hwndEdit, msg, 0, strlenW(msg));
+            set_text_and_selection(This, This->hwndEdit, msg, 0, lstrlenW(msg));
             hide_listbox(This, hwnd, TRUE);
             return 0;
     }
@@ -967,7 +952,7 @@ static ULONG WINAPI IAutoComplete2_fnAddRef(
     IAutoCompleteImpl *This = impl_from_IAutoComplete2(iface);
     ULONG refCount = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->(%u)\n", This, refCount - 1);
+    TRACE("(%p)->(%lu)\n", This, refCount - 1);
 
     return refCount;
 }
@@ -981,7 +966,7 @@ static ULONG WINAPI IAutoComplete2_fnRelease(
     IAutoCompleteImpl *This = impl_from_IAutoComplete2(iface);
     ULONG refCount = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(%u)\n", This, refCount + 1);
+    TRACE("(%p)->(%lu)\n", This, refCount + 1);
 
     if (!refCount) {
         TRACE("destroying IAutoComplete(%p)\n", This);
@@ -1091,7 +1076,7 @@ static HRESULT WINAPI IAutoComplete2_fnInit(
         UINT i;
 
         /* pwszRegKeyPath contains the key as well as the value, so split it */
-        value = strrchrW(pwzsRegKeyPath, '\\');
+        value = wcsrchr(pwzsRegKeyPath, '\\');
         len = value - pwzsRegKeyPath;
 
         if (value && (key = heap_alloc((len+1) * sizeof(*key))) != NULL)
@@ -1127,7 +1112,7 @@ static HRESULT WINAPI IAutoComplete2_fnInit(
 
     if (!This->quickComplete && pwszQuickComplete)
     {
-        size_t len = strlenW(pwszQuickComplete)+1;
+        size_t len = lstrlenW(pwszQuickComplete)+1;
         if ((This->quickComplete = heap_alloc(len * sizeof(WCHAR))) != NULL)
             memcpy(This->quickComplete, pwszQuickComplete, len * sizeof(WCHAR));
     }
@@ -1162,7 +1147,7 @@ static HRESULT WINAPI IAutoComplete2_fnSetOptions(
     DWORD changed = This->options ^ dwFlag;
     HRESULT hr = S_OK;
 
-    TRACE("(%p) -> (0x%x)\n", This, dwFlag);
+    TRACE("(%p) -> (0x%lx)\n", This, dwFlag);
 
     This->options = dwFlag;
 
@@ -1242,7 +1227,7 @@ static HRESULT WINAPI IAutoCompleteDropDown_fnGetDropDownStatus(
             if (sel >= 0)
             {
                 WCHAR *str = This->listbox_strs[sel];
-                size_t size = (strlenW(str) + 1) * sizeof(*str);
+                size_t size = (lstrlenW(str) + 1) * sizeof(*str);
 
                 if (!(*ppwszString = CoTaskMemAlloc(size)))
                     return E_OUTOFMEMORY;

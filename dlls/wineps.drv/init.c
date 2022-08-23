@@ -22,9 +22,6 @@
 #include <stdarg.h>
 #include <string.h>
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
-
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
@@ -111,7 +108,7 @@ static const struct gdi_dc_funcs psdrv_funcs;
  */
 BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
 {
-    TRACE("(%p, %d, %p)\n", hinst, reason, reserved);
+    TRACE("(%p, %ld, %p)\n", hinst, reason, reserved);
 
     switch(reason) {
 
@@ -190,7 +187,7 @@ while (0)
     CHECK_FIELD(DM_DITHERTYPE);
     CHECK_FIELD(DM_PANNINGWIDTH);
     CHECK_FIELD(DM_PANNINGHEIGHT);
-    if (fields) TRACE(" %#x", fields);
+    if (fields) TRACE(" %#lx", fields);
     TRACE("\n");
 #undef CHECK_FIELD
 }
@@ -208,16 +205,16 @@ static void dump_devmode(const DEVMODEW *dm)
     TRACE("dmDriverVersion: 0x%04x\n", dm->dmDriverVersion);
     TRACE("dmSize: 0x%04x\n", dm->dmSize);
     TRACE("dmDriverExtra: 0x%04x\n", dm->dmDriverExtra);
-    TRACE("dmFields: 0x%04x\n", dm->dmFields);
+    TRACE("dmFields: 0x%04lx\n", dm->dmFields);
     dump_fields(dm->dmFields);
-    TRACE("dmOrientation: %d\n", dm->u1.s1.dmOrientation);
-    TRACE("dmPaperSize: %d\n", dm->u1.s1.dmPaperSize);
-    TRACE("dmPaperLength: %d\n", dm->u1.s1.dmPaperLength);
-    TRACE("dmPaperWidth: %d\n", dm->u1.s1.dmPaperWidth);
-    TRACE("dmScale: %d\n", dm->u1.s1.dmScale);
-    TRACE("dmCopies: %d\n", dm->u1.s1.dmCopies);
-    TRACE("dmDefaultSource: %d\n", dm->u1.s1.dmDefaultSource);
-    TRACE("dmPrintQuality: %d\n", dm->u1.s1.dmPrintQuality);
+    TRACE("dmOrientation: %d\n", dm->dmOrientation);
+    TRACE("dmPaperSize: %d\n", dm->dmPaperSize);
+    TRACE("dmPaperLength: %d\n", dm->dmPaperLength);
+    TRACE("dmPaperWidth: %d\n", dm->dmPaperWidth);
+    TRACE("dmScale: %d\n", dm->dmScale);
+    TRACE("dmCopies: %d\n", dm->dmCopies);
+    TRACE("dmDefaultSource: %d\n", dm->dmDefaultSource);
+    TRACE("dmPrintQuality: %d\n", dm->dmPrintQuality);
     TRACE("dmColor: %d\n", dm->dmColor);
     TRACE("dmDuplex: %d\n", dm->dmDuplex);
     TRACE("dmYResolution: %d\n", dm->dmYResolution);
@@ -225,9 +222,9 @@ static void dump_devmode(const DEVMODEW *dm)
     TRACE("dmCollate: %d\n", dm->dmCollate);
     TRACE("dmFormName: %s\n", debugstr_w(dm->dmFormName));
     TRACE("dmLogPixels %u\n", dm->dmLogPixels);
-    TRACE("dmBitsPerPel %u\n", dm->dmBitsPerPel);
-    TRACE("dmPelsWidth %u\n", dm->dmPelsWidth);
-    TRACE("dmPelsHeight %u\n", dm->dmPelsHeight);
+    TRACE("dmBitsPerPel %lu\n", dm->dmBitsPerPel);
+    TRACE("dmPelsWidth %lu\n", dm->dmPelsWidth);
+    TRACE("dmPelsHeight %lu\n", dm->dmPelsHeight);
 }
 
 static void PSDRV_UpdateDevCaps( PSDRV_PDEVICE *physDev )
@@ -241,7 +238,7 @@ static void PSDRV_UpdateDevCaps( PSDRV_PDEVICE *physDev )
     if (physDev->Devmode->dmPublic.dmFields & (DM_PRINTQUALITY | DM_YRESOLUTION | DM_LOGPIXELS))
     {
         if (physDev->Devmode->dmPublic.dmFields & DM_PRINTQUALITY)
-            resx = resy = physDev->Devmode->dmPublic.u1.s1.dmPrintQuality;
+            resx = resy = physDev->Devmode->dmPublic.dmPrintQuality;
 
         if (physDev->Devmode->dmPublic.dmFields & DM_YRESOLUTION)
             resy = physDev->Devmode->dmPublic.dmYResolution;
@@ -275,7 +272,7 @@ static void PSDRV_UpdateDevCaps( PSDRV_PDEVICE *physDev )
 
     if(physDev->Devmode->dmPublic.dmFields & DM_PAPERSIZE) {
         LIST_FOR_EACH_ENTRY(page, &physDev->pi->ppd->PageSizes, PAGESIZE, entry) {
-	    if(page->WinPage == physDev->Devmode->dmPublic.u1.s1.dmPaperSize)
+	    if(page->WinPage == physDev->Devmode->dmPublic.dmPaperSize)
 	        break;
 	}
 
@@ -306,26 +303,24 @@ static void PSDRV_UpdateDevCaps( PSDRV_PDEVICE *physDev )
       /* physDev sizes in device units; Devmode sizes in 1/10 mm */
         physDev->ImageableArea.left = physDev->ImageableArea.bottom = 0;
 	physDev->ImageableArea.right = physDev->PageSize.cx =
-	  physDev->Devmode->dmPublic.u1.s1.dmPaperWidth *
-	  physDev->logPixelsX / 254;
+	  physDev->Devmode->dmPublic.dmPaperWidth * physDev->logPixelsX / 254;
 	physDev->ImageableArea.top = physDev->PageSize.cy =
-	  physDev->Devmode->dmPublic.u1.s1.dmPaperLength *
-	  physDev->logPixelsY / 254;
+	  physDev->Devmode->dmPublic.dmPaperLength * physDev->logPixelsY / 254;
     } else {
-        FIXME("Odd dmFields %x\n", physDev->Devmode->dmPublic.dmFields);
+        FIXME("Odd dmFields %lx\n", physDev->Devmode->dmPublic.dmFields);
         SetRectEmpty(&physDev->ImageableArea);
 	physDev->PageSize.cx = 0;
 	physDev->PageSize.cy = 0;
     }
 
-    TRACE("ImageableArea = %s: PageSize = %dx%d\n", wine_dbgstr_rect(&physDev->ImageableArea),
+    TRACE("ImageableArea = %s: PageSize = %ldx%ld\n", wine_dbgstr_rect(&physDev->ImageableArea),
 	  physDev->PageSize.cx, physDev->PageSize.cy);
 
     /* these are in device units */
     width = physDev->ImageableArea.right - physDev->ImageableArea.left;
     height = physDev->ImageableArea.top - physDev->ImageableArea.bottom;
 
-    if(physDev->Devmode->dmPublic.u1.s1.dmOrientation == DMORIENT_PORTRAIT) {
+    if(physDev->Devmode->dmPublic.dmOrientation == DMORIENT_PORTRAIT) {
         physDev->horzRes = width;
         physDev->vertRes = height;
     } else {
@@ -367,14 +362,13 @@ static PSDRV_PDEVICE *create_psdrv_physdev( PRINTERINFO *pi )
 /**********************************************************************
  *	     PSDRV_CreateDC
  */
-static BOOL CDECL PSDRV_CreateDC( PHYSDEV *pdev, LPCWSTR driver, LPCWSTR device,
-                                  LPCWSTR output, const DEVMODEW* initData )
+static BOOL CDECL PSDRV_CreateDC( PHYSDEV *pdev, LPCWSTR device, LPCWSTR output,
+                                  const DEVMODEW *initData )
 {
     PSDRV_PDEVICE *physDev;
     PRINTERINFO *pi;
 
-    TRACE("(%s %s %s %p)\n", debugstr_w(driver), debugstr_w(device),
-                             debugstr_w(output), initData);
+    TRACE("(%s %s %p)\n", debugstr_w(device), debugstr_w(output), initData);
 
     if (!device) return FALSE;
     pi = PSDRV_FindPrinterInfo( device );
@@ -448,7 +442,7 @@ static BOOL CDECL PSDRV_DeleteDC( PHYSDEV dev )
 /**********************************************************************
  *	     ResetDC   (WINEPS.@)
  */
-static HDC CDECL PSDRV_ResetDC( PHYSDEV dev, const DEVMODEW *lpInitData )
+static BOOL CDECL PSDRV_ResetDC( PHYSDEV dev, const DEVMODEW *lpInitData )
 {
     PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
 
@@ -457,7 +451,7 @@ static HDC CDECL PSDRV_ResetDC( PHYSDEV dev, const DEVMODEW *lpInitData )
         PSDRV_MergeDevmodes(physDev->Devmode, (const PSDRV_DEVMODE *)lpInitData, physDev->pi);
         PSDRV_UpdateDevCaps(physDev);
     }
-    return dev->hdc;
+    return TRUE;
 }
 
 /***********************************************************************
@@ -476,11 +470,9 @@ static INT CDECL PSDRV_GetDeviceCaps( PHYSDEV dev, INT cap )
     case TECHNOLOGY:
         return DT_RASPRINTER;
     case HORZSIZE:
-        return MulDiv(physDev->horzSize, 100,
-		      physDev->Devmode->dmPublic.u1.s1.dmScale);
+        return MulDiv(physDev->horzSize, 100, physDev->Devmode->dmPublic.dmScale);
     case VERTSIZE:
-        return MulDiv(physDev->vertSize, 100,
-		      physDev->Devmode->dmPublic.u1.s1.dmScale);
+        return MulDiv(physDev->vertSize, 100, physDev->Devmode->dmPublic.dmScale);
     case HORZRES:
         return physDev->horzRes;
     case VERTRES:
@@ -507,23 +499,21 @@ static INT CDECL PSDRV_GetDeviceCaps( PHYSDEV dev, INT cap )
     case ASPECTY:
         return physDev->logPixelsY;
     case LOGPIXELSX:
-        return MulDiv(physDev->logPixelsX,
-		      physDev->Devmode->dmPublic.u1.s1.dmScale, 100);
+        return MulDiv(physDev->logPixelsX, physDev->Devmode->dmPublic.dmScale, 100);
     case LOGPIXELSY:
-        return MulDiv(physDev->logPixelsY,
-		      physDev->Devmode->dmPublic.u1.s1.dmScale, 100);
+        return MulDiv(physDev->logPixelsY, physDev->Devmode->dmPublic.dmScale, 100);
     case NUMRESERVED:
         return 0;
     case COLORRES:
         return 0;
     case PHYSICALWIDTH:
-        return (physDev->Devmode->dmPublic.u1.s1.dmOrientation == DMORIENT_LANDSCAPE) ?
+        return (physDev->Devmode->dmPublic.dmOrientation == DMORIENT_LANDSCAPE) ?
 	  physDev->PageSize.cy : physDev->PageSize.cx;
     case PHYSICALHEIGHT:
-        return (physDev->Devmode->dmPublic.u1.s1.dmOrientation == DMORIENT_LANDSCAPE) ?
+        return (physDev->Devmode->dmPublic.dmOrientation == DMORIENT_LANDSCAPE) ?
 	  physDev->PageSize.cx : physDev->PageSize.cy;
     case PHYSICALOFFSETX:
-      if(physDev->Devmode->dmPublic.u1.s1.dmOrientation == DMORIENT_LANDSCAPE) {
+      if(physDev->Devmode->dmPublic.dmOrientation == DMORIENT_LANDSCAPE) {
           if(physDev->pi->ppd->LandscapeOrientation == -90)
 	      return physDev->PageSize.cy - physDev->ImageableArea.top;
 	  else
@@ -532,7 +522,7 @@ static INT CDECL PSDRV_GetDeviceCaps( PHYSDEV dev, INT cap )
       return physDev->ImageableArea.left;
 
     case PHYSICALOFFSETY:
-      if(physDev->Devmode->dmPublic.u1.s1.dmOrientation == DMORIENT_LANDSCAPE) {
+      if(physDev->Devmode->dmPublic.dmOrientation == DMORIENT_LANDSCAPE) {
           if(physDev->pi->ppd->LandscapeOrientation == -90)
 	      return physDev->PageSize.cx - physDev->ImageableArea.right;
 	  else
@@ -681,7 +671,7 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCWSTR name)
     lstrcpyW( pi->friendly_name, name );
 
     if (OpenPrinterW( pi->friendly_name, &hPrinter, NULL ) == 0) {
-        ERR ("OpenPrinter failed with code %i\n", GetLastError ());
+        ERR ("OpenPrinter failed with code %li\n", GetLastError ());
         goto fail;
     }
 
@@ -710,7 +700,7 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCWSTR name)
 	    PSDRV_DEVMODE dm;
 	    memset(&dm, 0, sizeof(dm));
 	    dm.dmPublic.dmFields = DM_PAPERSIZE;
-	    dm.dmPublic.u1.s1.dmPaperSize = papersize;
+	    dm.dmPublic.dmPaperSize = papersize;
 	    PSDRV_MergeDevmodes(pi->Devmode, &dm, pi);
 	}
     }
@@ -719,7 +709,7 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCWSTR name)
         PSDRV_DEVMODE dm;
         memset(&dm, 0, sizeof(dm));
         dm.dmPublic.dmFields = DM_PAPERSIZE;
-        dm.dmPublic.u1.s1.dmPaperSize = pi->ppd->DefaultPageSize->WinPage;
+        dm.dmPublic.dmPaperSize = pi->ppd->DefaultPageSize->WinPage;
         PSDRV_MergeDevmodes(pi->Devmode, &dm, pi);
     }
 
@@ -791,25 +781,18 @@ static const struct gdi_dc_funcs psdrv_funcs =
     PSDRV_CreateDC,                     /* pCreateDC */
     PSDRV_DeleteDC,                     /* pDeleteDC */
     NULL,                               /* pDeleteObject */
-    PSDRV_DeviceCapabilities,           /* pDeviceCapabilities */
     PSDRV_Ellipse,                      /* pEllipse */
     PSDRV_EndDoc,                       /* pEndDoc */
     PSDRV_EndPage,                      /* pEndPage */
     NULL,                               /* pEndPath */
     PSDRV_EnumFonts,                    /* pEnumFonts */
-    NULL,                               /* pEnumICMProfiles */
-    NULL,                               /* pExcludeClipRect */
-    PSDRV_ExtDeviceMode,                /* pExtDeviceMode */
     PSDRV_ExtEscape,                    /* pExtEscape */
     NULL,                               /* pExtFloodFill */
-    NULL,                               /* pExtSelectClipRgn */
     PSDRV_ExtTextOut,                   /* pExtTextOut */
     PSDRV_FillPath,                     /* pFillPath */
     NULL,                               /* pFillRgn */
-    NULL,                               /* pFlattenPath */
     NULL,                               /* pFontIsLinked */
     NULL,                               /* pFrameRgn */
-    NULL,                               /* pGdiComment */
     NULL,                               /* pGetBoundsRect */
     NULL,                               /* pGetCharABCWidths */
     NULL,                               /* pGetCharABCWidthsI */
@@ -835,14 +818,9 @@ static const struct gdi_dc_funcs psdrv_funcs =
     NULL,                               /* pGetTextFace */
     PSDRV_GetTextMetrics,               /* pGetTextMetrics */
     NULL,                               /* pGradientFill */
-    NULL,                               /* pIntersectClipRect */
     NULL,                               /* pInvertRgn */
     PSDRV_LineTo,                       /* pLineTo */
-    NULL,                               /* pModifyWorldTransform */
     NULL,                               /* pMoveTo */
-    NULL,                               /* pOffsetClipRgn */
-    NULL,                               /* pOffsetViewportOrg */
-    NULL,                               /* pOffsetWindowOrg */
     PSDRV_PaintRgn,                     /* pPaintRgn */
     PSDRV_PatBlt,                       /* pPatBlt */
     PSDRV_Pie,                          /* pPie */
@@ -851,51 +829,26 @@ static const struct gdi_dc_funcs psdrv_funcs =
     NULL,                               /* pPolyDraw */
     PSDRV_PolyPolygon,                  /* pPolyPolygon */
     PSDRV_PolyPolyline,                 /* pPolyPolyline */
-    NULL,                               /* pPolygon */
-    NULL,                               /* pPolyline */
     NULL,                               /* pPolylineTo */
     PSDRV_PutImage,                     /* pPutImage */
     NULL,                               /* pRealizeDefaultPalette */
     NULL,                               /* pRealizePalette */
     PSDRV_Rectangle,                    /* pRectangle */
     PSDRV_ResetDC,                      /* pResetDC */
-    NULL,                               /* pRestoreDC */
     PSDRV_RoundRect,                    /* pRoundRect */
-    NULL,                               /* pSaveDC */
-    NULL,                               /* pScaleViewportExt */
-    NULL,                               /* pScaleWindowExt */
     NULL,                               /* pSelectBitmap */
     PSDRV_SelectBrush,                  /* pSelectBrush */
-    NULL,                               /* pSelectClipPath */
     PSDRV_SelectFont,                   /* pSelectFont */
-    NULL,                               /* pSelectPalette */
     PSDRV_SelectPen,                    /* pSelectPen */
-    NULL,                               /* pSetArcDirection */
     PSDRV_SetBkColor,                   /* pSetBkColor */
-    NULL,                               /* pSetBkMode */
     NULL,                               /* pSetBoundsRect */
     PSDRV_SetDCBrushColor,              /* pSetDCBrushColor */
     PSDRV_SetDCPenColor,                /* pSetDCPenColor */
     NULL,                               /* pSetDIBitsToDevice */
     NULL,                               /* pSetDeviceClipping */
     NULL,                               /* pSetDeviceGammaRamp */
-    NULL,                               /* pSetLayout */
-    NULL,                               /* pSetMapMode */
-    NULL,                               /* pSetMapperFlags */
     PSDRV_SetPixel,                     /* pSetPixel */
-    NULL,                               /* pSetPolyFillMode */
-    NULL,                               /* pSetROP2 */
-    NULL,                               /* pSetRelAbs */
-    NULL,                               /* pSetStretchBltMode */
-    NULL,                               /* pSetTextAlign */
-    NULL,                               /* pSetTextCharacterExtra */
     PSDRV_SetTextColor,                 /* pSetTextColor */
-    NULL,                               /* pSetTextJustification */
-    NULL,                               /* pSetViewportExt */
-    NULL,                               /* pSetViewportOrg */
-    NULL,                               /* pSetWindowExt */
-    NULL,                               /* pSetWindowOrg */
-    NULL,                               /* pSetWorldTransform */
     PSDRV_StartDoc,                     /* pStartDoc */
     PSDRV_StartPage,                    /* pStartPage */
     NULL,                               /* pStretchBlt */
@@ -903,11 +856,8 @@ static const struct gdi_dc_funcs psdrv_funcs =
     PSDRV_StrokeAndFillPath,            /* pStrokeAndFillPath */
     PSDRV_StrokePath,                   /* pStrokePath */
     NULL,                               /* pUnrealizePalette */
-    NULL,                               /* pWidenPath */
     NULL,                               /* pD3DKMTCheckVidPnExclusiveOwnership */
     NULL,                               /* pD3DKMTSetVidPnSourceOwner */
-    NULL,                               /* wine_get_wgl_driver */
-    NULL,                               /* wine_get_vulkan_driver */
     GDI_PRIORITY_GRAPHICS_DRV           /* priority */
 };
 

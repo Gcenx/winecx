@@ -33,6 +33,33 @@
 #include <errno.h>
 #include "wine/test.h"
 
+#define WX_OPEN           0x01
+#define WX_ATEOF          0x02
+#define WX_READNL         0x04
+#define WX_PIPE           0x08
+#define WX_DONTINHERIT    0x10
+#define WX_APPEND         0x20
+#define WX_TTY            0x40
+#define WX_TEXT           0x80
+
+#define MSVCRT_FD_BLOCK_SIZE 32
+
+typedef struct {
+    HANDLE              handle;
+    unsigned char       wxflag;
+    char                lookahead[3];
+    int                 exflag;
+    CRITICAL_SECTION    crit;
+    char textmode : 7;
+    char unicode : 1;
+    char pipech2[2];
+    __int64 startpos;
+    BOOL utf8translations;
+    char dbcsBuffer;
+    BOOL dbcsBufferUsed;
+} ioinfo;
+static ioinfo **__pioinfo;
+
 #define DEFINE_EXPECT(func) \
     static BOOL expect_ ## func = FALSE, called_ ## func = FALSE
 
@@ -84,6 +111,9 @@ static int (__cdecl *p_controlfp_s)(unsigned int *, unsigned int, unsigned int);
 static int (__cdecl *p_tmpfile_s)(FILE**);
 static int (__cdecl *p_atoflt)(_CRT_FLOAT *, char *);
 static unsigned int (__cdecl *p_set_abort_behavior)(unsigned int, unsigned int);
+static int (__cdecl *p__open)(const char *, int, ...);
+static int (__cdecl *p__close)(int);
+static intptr_t (__cdecl *p__get_osfhandle)(int);
 static int (__cdecl *p_sopen_s)(int*, const char*, int, int, int);
 static int (__cdecl *p_wsopen_s)(int*, const wchar_t*, int, int, int);
 static void* (__cdecl *p_realloc_crt)(void*, size_t);
@@ -110,8 +140,8 @@ static int* (__cdecl *p_fpecode)(void);
 static int (__cdecl *p_configthreadlocale)(int);
 static void* (__cdecl *p_get_terminate)(void);
 static void* (__cdecl *p_get_unexpected)(void);
-static int (__cdecl *p__vswprintf_l)(wchar_t*, const wchar_t*, _locale_t, __ms_va_list);
-static int (__cdecl *p_vswprintf_l)(wchar_t*, const wchar_t*, _locale_t, __ms_va_list);
+static int (__cdecl *p__vswprintf_l)(wchar_t*, const wchar_t*, _locale_t, va_list);
+static int (__cdecl *p_vswprintf_l)(wchar_t*, const wchar_t*, _locale_t, va_list);
 static FILE* (__cdecl *p_fopen)(const char*, const char*);
 static int (__cdecl *p_fclose)(FILE*);
 static int (__cdecl *p_unlink)(const char*);
@@ -134,7 +164,7 @@ static int (__cdecl *p__setmbcp)(int);
 static int (__cdecl *p__fpieee_flt)(ULONG, EXCEPTION_POINTERS*, int (__cdecl *handler)(_FPIEEE_RECORD*));
 static int (__cdecl *p__memicmp)(const char*, const char*, size_t);
 static int (__cdecl *p__memicmp_l)(const char*, const char*, size_t, _locale_t);
-static int (__cdecl *p__vsnwprintf)(wchar_t *buffer,size_t count, const wchar_t *format, __ms_va_list valist);
+static int (__cdecl *p__vsnwprintf)(wchar_t *buffer,size_t count, const wchar_t *format, va_list valist);
 static size_t (__cdecl *p___strncnt)(const char *str, size_t count);
 static int (WINAPIV *p_swscanf)(const wchar_t *str, const wchar_t* format, ...);
 static int (__cdecl *p____mb_cur_max_l_func)(_locale_t locale);
@@ -339,7 +369,7 @@ static void __cdecl test_invalid_parameter_handler(const wchar_t *expression,
     ok(function == NULL, "function is not NULL\n");
     ok(file == NULL, "file is not NULL\n");
     ok(line == 0, "line = %u\n", line);
-    ok(arg == 0, "arg = %lx\n", (UINT_PTR)arg);
+    ok(arg == 0, "arg = %Ix\n", arg);
     ok(errno != 0xdeadbeef, "errno not set\n");
 }
 
@@ -353,7 +383,7 @@ static BOOL init(void)
     SetLastError(0xdeadbeef);
     hcrt = LoadLibraryA("msvcr90.dll");
     if (!hcrt) {
-        win_skip("msvcr90.dll not installed (got %d)\n", GetLastError());
+        win_skip("msvcr90.dll not installed (got %ld)\n", GetLastError());
         return FALSE;
     }
 
@@ -362,6 +392,7 @@ static BOOL init(void)
         ok(p_set_invalid_parameter_handler(test_invalid_parameter_handler) == NULL,
                 "Invalid parameter handler was already set\n");
 
+    SET(__pioinfo, "__pioinfo");
     SET(p_initterm_e, "_initterm_e");
     SET(p_encode_pointer, "_encode_pointer");
     SET(p_decode_pointer, "_decode_pointer");
@@ -382,6 +413,9 @@ static BOOL init(void)
     SET(p_set_abort_behavior, "_set_abort_behavior");
     SET(p_sopen_s, "_sopen_s");
     SET(p_wsopen_s, "_wsopen_s");
+    SET(p__open,"_open");
+    SET(p__close,"_close");
+    SET(p__get_osfhandle, "_get_osfhandle");
     SET(p_realloc_crt, "_realloc_crt");
     SET(p_malloc, "malloc");
     SET(p_free, "free");
@@ -1181,7 +1215,7 @@ static void test_getptd(void)
     int dec, sign;
     void *mbcinfo, *locinfo;
 
-    ok(ptd->tid == tid, "ptd->tid = %x, expected %x\n", ptd->tid, tid);
+    ok(ptd->tid == tid, "ptd->tid = %lx, expected %lx\n", ptd->tid, tid);
     ok(ptd->handle == INVALID_HANDLE_VALUE, "ptd->handle = %p\n", ptd->handle);
     ok(p_errno() == &ptd->thread_errno, "ptd->thread_errno is different then _errno()\n");
     ok(p_doserrno() == &ptd->thread_doserrno, "ptd->thread_doserrno is different then __doserrno()\n");
@@ -1220,10 +1254,10 @@ static int WINAPIV __vswprintf_l_wrapper(wchar_t *buf,
         const wchar_t *format, _locale_t locale, ...)
 {
     int ret;
-    __ms_va_list valist;
-    __ms_va_start(valist, locale);
+    va_list valist;
+    va_start(valist, locale);
     ret = p__vswprintf_l(buf, format, locale, valist);
-    __ms_va_end(valist);
+    va_end(valist);
     return ret;
 }
 
@@ -1231,10 +1265,10 @@ static int WINAPIV _vswprintf_l_wrapper(wchar_t *buf,
         const wchar_t *format, _locale_t locale, ...)
 {
     int ret;
-    __ms_va_list valist;
-    __ms_va_start(valist, locale);
+    va_list valist;
+    va_start(valist, locale);
     ret = p_vswprintf_l(buf, format, locale, valist);
-    __ms_va_end(valist);
+    va_end(valist);
     return ret;
 }
 
@@ -1258,7 +1292,7 @@ struct block_file_arg
     FILE *write;
     HANDLE init;
     HANDLE finish;
-    int deadlock_test;
+    LONG deadlock_test;
 };
 
 static DWORD WINAPI block_file(void *arg)
@@ -1898,10 +1932,10 @@ static void test__memicmp_l(void)
 static int WINAPIV _vsnwprintf_wrapper(wchar_t *str, size_t len, const wchar_t *format, ...)
 {
     int ret;
-    __ms_va_list valist;
-    __ms_va_start(valist, format);
+    va_list valist;
+    va_start(valist, format);
     ret = p__vsnwprintf(str, len, format, valist);
-    __ms_va_end(valist);
+    va_end(valist);
     return ret;
 }
 
@@ -2350,6 +2384,63 @@ static void test__get_current_locale(void)
     p_setlocale(LC_ALL, "C");
 }
 
+static void test_ioinfo_flags(void)
+{
+    HANDLE handle;
+    ioinfo *info;
+    char *tempf;
+    int tempfd;
+
+    tempf = _tempnam(".","wne");
+
+    tempfd = p__open(tempf, _O_CREAT|_O_TRUNC|_O_WRONLY|_O_WTEXT, _S_IWRITE);
+    ok(tempfd != -1, "_open failed with error: %d\n", errno);
+    handle = (HANDLE)p__get_osfhandle(tempfd);
+    info = &__pioinfo[tempfd / MSVCRT_FD_BLOCK_SIZE][tempfd % MSVCRT_FD_BLOCK_SIZE];
+    ok(!!info, "NULL info.\n");
+    ok(info->handle == handle, "Unexpected handle %p, expected %p.\n", info->handle, handle);
+    ok(info->exflag == 1, "Unexpected exflag %#x.\n", info->exflag);
+    ok(info->wxflag == (WX_TEXT | WX_OPEN), "Unexpected wxflag %#x.\n", info->wxflag);
+    ok(info->unicode, "Unicode is not set.\n");
+    ok(info->textmode == 2, "Unexpected textmode %d.\n", info->textmode);
+    p__close(tempfd);
+
+    ok(info->handle == INVALID_HANDLE_VALUE, "Unexpected handle %p.\n", info->handle);
+    ok(info->exflag == 1, "Unexpected exflag %#x.\n", info->exflag);
+    ok(info->unicode, "Unicode is not set.\n");
+    ok(!info->wxflag, "Unexpected wxflag %#x.\n", info->wxflag);
+    ok(info->textmode == 2, "Unexpected textmode %d.\n", info->textmode);
+
+    info = &__pioinfo[(tempfd + 4) / MSVCRT_FD_BLOCK_SIZE][(tempfd + 4) % MSVCRT_FD_BLOCK_SIZE];
+    ok(!!info, "NULL info.\n");
+    ok(info->handle == INVALID_HANDLE_VALUE, "Unexpected handle %p.\n", info->handle);
+    ok(!info->exflag, "Unexpected exflag %#x.\n", info->exflag);
+    ok(!info->textmode, "Unexpected textmode %d.\n", info->textmode);
+
+    tempfd = p__open(tempf, _O_CREAT|_O_TRUNC|_O_WRONLY|_O_TEXT, _S_IWRITE);
+    ok(tempfd != -1, "_open failed with error: %d\n", errno);
+    info = &__pioinfo[tempfd / MSVCRT_FD_BLOCK_SIZE][tempfd % MSVCRT_FD_BLOCK_SIZE];
+    ok(!!info, "NULL info.\n");
+    ok(info->exflag == 1, "Unexpected exflag %#x.\n", info->exflag);
+    ok(info->wxflag == (WX_TEXT | WX_OPEN), "Unexpected wxflag %#x.\n", info->wxflag);
+    ok(!info->unicode, "Unicode is not set.\n");
+    ok(!info->textmode, "Unexpected textmode %d.\n", info->textmode);
+    p__close(tempfd);
+
+    tempfd = p__open(tempf, _O_CREAT|_O_TRUNC|_O_WRONLY|_O_U8TEXT, _S_IWRITE);
+    ok(tempfd != -1, "_open failed with error: %d\n", errno);
+    info = &__pioinfo[tempfd / MSVCRT_FD_BLOCK_SIZE][tempfd % MSVCRT_FD_BLOCK_SIZE];
+    ok(!!info, "NULL info.\n");
+    ok(info->exflag == 1, "Unexpected exflag %#x.\n", info->exflag);
+    ok(info->wxflag == (WX_TEXT | WX_OPEN), "Unexpected wxflag %#x.\n", info->wxflag);
+    ok(!info->unicode, "Unicode is not set.\n");
+    ok(info->textmode == 1, "Unexpected textmode %d.\n", info->textmode);
+    p__close(tempfd);
+
+    unlink(tempf);
+    free(tempf);
+}
+
 START_TEST(msvcr90)
 {
     if(!init())
@@ -2391,4 +2482,5 @@ START_TEST(msvcr90)
     test_swscanf();
     test____mb_cur_max_l_func();
     test__get_current_locale();
+    test_ioinfo_flags();
 }

@@ -56,20 +56,6 @@ static inline void reset_bounds(RECT *bounds)
 }
 
 
-struct macdrv_window_surface
-{
-    struct window_surface   header;
-    macdrv_window           window;
-    RECT                    bounds;
-    HRGN                    region;
-    HRGN                    drawn;
-    BOOL                    use_alpha;
-    RGNDATA                *blit_data;
-    BYTE                   *bits;
-    pthread_mutex_t         mutex;
-    BITMAPINFO              info;   /* variable size, must be last */
-};
-
 static struct macdrv_window_surface *get_mac_surface(struct window_surface *surface);
 
 /***********************************************************************
@@ -96,7 +82,7 @@ static void update_blit_data(struct macdrv_window_surface *surface)
 /***********************************************************************
  *              macdrv_surface_lock
  */
-static void CDECL macdrv_surface_lock(struct window_surface *window_surface)
+static void macdrv_surface_lock(struct window_surface *window_surface)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
 
@@ -106,7 +92,7 @@ static void CDECL macdrv_surface_lock(struct window_surface *window_surface)
 /***********************************************************************
  *              macdrv_surface_unlock
  */
-static void CDECL macdrv_surface_unlock(struct window_surface *window_surface)
+static void macdrv_surface_unlock(struct window_surface *window_surface)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
 
@@ -116,7 +102,7 @@ static void CDECL macdrv_surface_unlock(struct window_surface *window_surface)
 /***********************************************************************
  *              macdrv_surface_get_bitmap_info
  */
-static void *CDECL macdrv_surface_get_bitmap_info(struct window_surface *window_surface,
+static void *macdrv_surface_get_bitmap_info(struct window_surface *window_surface,
                                                   BITMAPINFO *info)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
@@ -128,7 +114,7 @@ static void *CDECL macdrv_surface_get_bitmap_info(struct window_surface *window_
 /***********************************************************************
  *              macdrv_surface_get_bounds
  */
-static RECT *CDECL macdrv_surface_get_bounds(struct window_surface *window_surface)
+static RECT *macdrv_surface_get_bounds(struct window_surface *window_surface)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
 
@@ -138,7 +124,7 @@ static RECT *CDECL macdrv_surface_get_bounds(struct window_surface *window_surfa
 /***********************************************************************
  *              macdrv_surface_set_region
  */
-static void CDECL macdrv_surface_set_region(struct window_surface *window_surface, HRGN region)
+static void macdrv_surface_set_region(struct window_surface *window_surface, HRGN region)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
 
@@ -164,7 +150,7 @@ static void CDECL macdrv_surface_set_region(struct window_surface *window_surfac
 /***********************************************************************
  *              macdrv_surface_flush
  */
-static void CDECL macdrv_surface_flush(struct window_surface *window_surface)
+static void macdrv_surface_flush(struct window_surface *window_surface)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
     CGRect rect;
@@ -200,7 +186,7 @@ static void CDECL macdrv_surface_flush(struct window_surface *window_surface)
 /***********************************************************************
  *              macdrv_surface_destroy
  */
-static void CDECL macdrv_surface_destroy(struct window_surface *window_surface)
+static void macdrv_surface_destroy(struct window_surface *window_surface)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
 
@@ -213,7 +199,7 @@ static void CDECL macdrv_surface_destroy(struct window_surface *window_surface)
     HeapFree(GetProcessHeap(), 0, surface);
 }
 
-static const struct window_surface_funcs macdrv_surface_funcs =
+const struct window_surface_funcs macdrv_surface_funcs =
 {
     macdrv_surface_lock,
     macdrv_surface_unlock,
@@ -223,12 +209,6 @@ static const struct window_surface_funcs macdrv_surface_funcs =
     macdrv_surface_flush,
     macdrv_surface_destroy,
 };
-
-static struct macdrv_window_surface *get_mac_surface(struct window_surface *surface)
-{
-    if (!surface || surface->funcs != &macdrv_surface_funcs) return NULL;
-    return (struct macdrv_window_surface *)surface;
-}
 
 /***********************************************************************
  *              create_surface
@@ -354,67 +334,6 @@ int get_surface_blit_rects(void * WIN32PTR window_surface, const CGRect **rects,
     }
 
     return (surface->blit_data != NULL);
-}
-
-/***********************************************************************
- *              create_surface_image
- *
- * Caller must hold the surface lock.  On input, *rect is the requested
- * image rect, relative to the window whole_rect, a.k.a. visible_rect.
- * On output, it's been intersected with that part backed by the surface
- * and is the actual size of the returned image.  copy_data indicates if
- * the caller will keep the returned image beyond the point where the
- * surface bits can be guaranteed to remain valid and unchanged.  If so,
- * the bits are copied instead of merely referenced by the image.
- *
- * IMPORTANT: This function is called from non-Wine threads, so it
- *            must not use Win32 or Wine functions, including debug
- *            logging.
- */
-CGImageRef create_surface_image(void * WIN32PTR window_surface, CGRect *rect, int copy_data)
-{
-    CGImageRef cgimage = NULL;
-    struct macdrv_window_surface *surface = get_mac_surface(window_surface);
-    int width, height;
-
-    width  = surface->header.rect.right - surface->header.rect.left;
-    height = surface->header.rect.bottom - surface->header.rect.top;
-    *rect = CGRectIntersection(cgrect_from_rect(surface->header.rect), *rect);
-    if (!CGRectIsEmpty(*rect))
-    {
-        CGRect visrect;
-        CGColorSpaceRef colorspace;
-        CGDataProviderRef provider;
-        int bytes_per_row, offset, size;
-        CGImageAlphaInfo alphaInfo;
-
-        visrect = CGRectOffset(*rect, -surface->header.rect.left, -surface->header.rect.top);
-
-        colorspace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-        bytes_per_row = get_dib_stride(width, 32);
-        offset = CGRectGetMinX(visrect) * 4 + (height - CGRectGetMaxY(visrect)) * bytes_per_row;
-        size = min(CGRectGetHeight(visrect) * bytes_per_row,
-                   surface->info.bmiHeader.biSizeImage - offset);
-
-        if (copy_data)
-        {
-            CFDataRef data = CFDataCreate(NULL, (UInt8*)surface->bits + offset, size);
-            provider = CGDataProviderCreateWithCFData(data);
-            CFRelease(data);
-        }
-        else
-            provider = CGDataProviderCreateWithData(NULL, surface->bits + offset, size, NULL);
-
-        alphaInfo = surface->use_alpha ? kCGImageAlphaPremultipliedFirst : kCGImageAlphaNoneSkipFirst;
-        cgimage = CGImageCreate(CGRectGetWidth(visrect), CGRectGetHeight(visrect),
-                                8, 32, bytes_per_row, colorspace,
-                                alphaInfo | kCGBitmapByteOrder32Little,
-                                provider, NULL, retina_on, kCGRenderingIntentDefault);
-        CGDataProviderRelease(provider);
-        CGColorSpaceRelease(colorspace);
-    }
-
-    return cgimage;
 }
 
 /***********************************************************************

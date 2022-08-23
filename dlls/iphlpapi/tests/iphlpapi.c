@@ -28,7 +28,7 @@
  *
  * The Name field of the IP_ADAPTER_INDEX_MAP entries returned by
  * GetInterfaceInfo is declared as a wide string, but the bytes are actually
- * an ASCII string on some versions of the IP helper API under Win9x.  This was
+ * an ANSI string on some versions of the IP helper API under Win9x.  This was
  * apparently an MS bug, it's corrected in later versions.
  *
  * The DomainName field of FIXED_INFO isn't NULL-terminated on Win98.
@@ -38,6 +38,7 @@
 #include "winsock2.h"
 #include "windef.h"
 #include "winbase.h"
+#include "winternl.h"
 #include "ws2tcpip.h"
 #include "windns.h"
 #include "iphlpapi.h"
@@ -53,9 +54,6 @@
 static HMODULE hLibrary = NULL;
 
 static DWORD (WINAPI *pAllocateAndGetTcpExTableFromStack)(void**,BOOL,HANDLE,DWORD,DWORD);
-static DWORD (WINAPI *pGetIfEntry2)(PMIB_IF_ROW2);
-static DWORD (WINAPI *pGetIfTable2)(PMIB_IF_TABLE2*);
-static DWORD (WINAPI *pGetIfTable2Ex)(MIB_IF_TABLE_LEVEL,PMIB_IF_TABLE2*);
 static DWORD (WINAPI *pGetTcp6Table)(PMIB_TCP6TABLE,PDWORD,BOOL);
 static DWORD (WINAPI *pGetUdp6Table)(PMIB_UDP6TABLE,PDWORD,BOOL);
 static DWORD (WINAPI *pGetUnicastIpAddressEntry)(MIB_UNICASTIPADDRESS_ROW*);
@@ -64,32 +62,21 @@ static DWORD (WINAPI *pGetExtendedTcpTable)(PVOID,PDWORD,BOOL,ULONG,TCP_TABLE_CL
 static DWORD (WINAPI *pGetExtendedUdpTable)(PVOID,PDWORD,BOOL,ULONG,UDP_TABLE_CLASS,ULONG);
 static DWORD (WINAPI *pCreateSortedAddressPairs)(const PSOCKADDR_IN6,ULONG,const PSOCKADDR_IN6,ULONG,ULONG,
                                                  PSOCKADDR_IN6_PAIR*,ULONG*);
-static void (WINAPI *pFreeMibTable)(void*);
-static DWORD (WINAPI *pConvertInterfaceGuidToLuid)(const GUID*,NET_LUID*);
-static DWORD (WINAPI *pConvertInterfaceIndexToLuid)(NET_IFINDEX,NET_LUID*);
-static DWORD (WINAPI *pConvertInterfaceLuidToGuid)(const NET_LUID*,GUID*);
-static DWORD (WINAPI *pConvertInterfaceLuidToIndex)(const NET_LUID*,NET_IFINDEX*);
-static DWORD (WINAPI *pConvertInterfaceLuidToNameW)(const NET_LUID*,WCHAR*,SIZE_T);
-static DWORD (WINAPI *pConvertInterfaceLuidToNameA)(const NET_LUID*,char*,SIZE_T);
-static DWORD (WINAPI *pConvertInterfaceNameToLuidA)(const char*,NET_LUID*);
-static DWORD (WINAPI *pConvertInterfaceNameToLuidW)(const WCHAR*,NET_LUID*);
 static DWORD (WINAPI *pConvertLengthToIpv4Mask)(ULONG,ULONG*);
 static DWORD (WINAPI *pParseNetworkString)(const WCHAR*,DWORD,NET_ADDRESS_INFO*,USHORT*,BYTE*);
 static DWORD (WINAPI *pNotifyUnicastIpAddressChange)(ADDRESS_FAMILY, PUNICAST_IPADDRESS_CHANGE_CALLBACK,
                                                 PVOID, BOOLEAN, HANDLE *);
 static DWORD (WINAPI *pCancelMibChangeNotify2)(HANDLE);
 
-static PCHAR (WINAPI *pif_indextoname)(NET_IFINDEX,PCHAR);
-static NET_IFINDEX (WINAPI *pif_nametoindex)(const char*);
+DWORD WINAPI ConvertGuidToStringA( const GUID *, char *, DWORD );
+DWORD WINAPI ConvertGuidToStringW( const GUID *, WCHAR *, DWORD );
+DWORD WINAPI ConvertStringToGuidW( const WCHAR *, GUID * );
 
 static void loadIPHlpApi(void)
 {
   hLibrary = LoadLibraryA("iphlpapi.dll");
   if (hLibrary) {
     pAllocateAndGetTcpExTableFromStack = (void *)GetProcAddress(hLibrary, "AllocateAndGetTcpExTableFromStack");
-    pGetIfEntry2 = (void *)GetProcAddress(hLibrary, "GetIfEntry2");
-    pGetIfTable2 = (void *)GetProcAddress(hLibrary, "GetIfTable2");
-    pGetIfTable2Ex = (void *)GetProcAddress(hLibrary, "GetIfTable2Ex");
     pGetTcp6Table = (void *)GetProcAddress(hLibrary, "GetTcp6Table");
     pGetUdp6Table = (void *)GetProcAddress(hLibrary, "GetUdp6Table");
     pGetUnicastIpAddressEntry = (void *)GetProcAddress(hLibrary, "GetUnicastIpAddressEntry");
@@ -97,19 +84,8 @@ static void loadIPHlpApi(void)
     pGetExtendedTcpTable = (void *)GetProcAddress(hLibrary, "GetExtendedTcpTable");
     pGetExtendedUdpTable = (void *)GetProcAddress(hLibrary, "GetExtendedUdpTable");
     pCreateSortedAddressPairs = (void *)GetProcAddress(hLibrary, "CreateSortedAddressPairs");
-    pFreeMibTable = (void *)GetProcAddress(hLibrary, "FreeMibTable");
-    pConvertInterfaceGuidToLuid = (void *)GetProcAddress(hLibrary, "ConvertInterfaceGuidToLuid");
-    pConvertInterfaceIndexToLuid = (void *)GetProcAddress(hLibrary, "ConvertInterfaceIndexToLuid");
-    pConvertInterfaceLuidToGuid = (void *)GetProcAddress(hLibrary, "ConvertInterfaceLuidToGuid");
-    pConvertInterfaceLuidToIndex = (void *)GetProcAddress(hLibrary, "ConvertInterfaceLuidToIndex");
-    pConvertInterfaceLuidToNameA = (void *)GetProcAddress(hLibrary, "ConvertInterfaceLuidToNameA");
-    pConvertInterfaceLuidToNameW = (void *)GetProcAddress(hLibrary, "ConvertInterfaceLuidToNameW");
-    pConvertInterfaceNameToLuidA = (void *)GetProcAddress(hLibrary, "ConvertInterfaceNameToLuidA");
-    pConvertInterfaceNameToLuidW = (void *)GetProcAddress(hLibrary, "ConvertInterfaceNameToLuidW");
     pConvertLengthToIpv4Mask = (void *)GetProcAddress(hLibrary, "ConvertLengthToIpv4Mask");
     pParseNetworkString = (void *)GetProcAddress(hLibrary, "ParseNetworkString");
-    pif_indextoname = (void *)GetProcAddress(hLibrary, "if_indextoname");
-    pif_nametoindex = (void *)GetProcAddress(hLibrary, "if_nametoindex");
     pNotifyUnicastIpAddressChange = (void *)GetProcAddress(hLibrary, "NotifyUnicastIpAddressChange");
     pCancelMibChangeNotify2 = (void *)GetProcAddress(hLibrary, "CancelMibChangeNotify2");
   }
@@ -128,7 +104,7 @@ static const char *ntoa( DWORD ip )
 
     ip = htonl(ip);
     i = (i + 1) % ARRAY_SIZE(buffers);
-    sprintf( buffers[i], "%u.%u.%u.%u", (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff );
+    sprintf( buffers[i], "%lu.%lu.%lu.%lu", (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff );
     return buffers[i];
 }
 
@@ -162,17 +138,13 @@ static void testGetNumberOfInterfaces(void)
         if (apiReturn == ERROR_NOT_SUPPORTED)
             return;
         ok(apiReturn == ERROR_INVALID_PARAMETER,
-           "GetNumberOfInterfaces(NULL) returned %d, expected ERROR_INVALID_PARAMETER\n",
+           "GetNumberOfInterfaces(NULL) returned %ld, expected ERROR_INVALID_PARAMETER\n",
            apiReturn);
     }
 
     apiReturn = GetNumberOfInterfaces(&numInterfaces);
-    if (apiReturn == ERROR_NOT_SUPPORTED) {
-        skip("GetNumberOfInterfaces is not supported\n");
-        return;
-    }
     ok(apiReturn == NO_ERROR,
-       "GetNumberOfInterfaces returned %d, expected 0\n", apiReturn);
+       "GetNumberOfInterfaces returned %ld, expected 0\n", apiReturn);
 }
 
 static void testGetIfEntry(DWORD index)
@@ -187,18 +159,18 @@ static void testGetIfEntry(DWORD index)
       return;
     }
     ok(apiReturn == ERROR_INVALID_PARAMETER,
-     "GetIfEntry(NULL) returned %d, expected ERROR_INVALID_PARAMETER\n",
+     "GetIfEntry(NULL) returned %ld, expected ERROR_INVALID_PARAMETER\n",
      apiReturn);
     row.dwIndex = -1; /* hope that's always bogus! */
     apiReturn = GetIfEntry(&row);
     ok(apiReturn == ERROR_INVALID_DATA ||
      apiReturn == ERROR_FILE_NOT_FOUND /* Vista */,
-     "GetIfEntry(bogus row) returned %d, expected ERROR_INVALID_DATA or ERROR_FILE_NOT_FOUND\n",
+     "GetIfEntry(bogus row) returned %ld, expected ERROR_INVALID_DATA or ERROR_FILE_NOT_FOUND\n",
      apiReturn);
     row.dwIndex = index;
     apiReturn = GetIfEntry(&row);
     ok(apiReturn == NO_ERROR, 
-     "GetIfEntry returned %d, expected NO_ERROR\n", apiReturn);
+     "GetIfEntry returned %ld, expected NO_ERROR\n", apiReturn);
 }
 
 static void testGetIpAddrTable(void)
@@ -212,18 +184,18 @@ static void testGetIpAddrTable(void)
         return;
     }
     ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetIpAddrTable(NULL, NULL, FALSE) returned %d, expected ERROR_INVALID_PARAMETER\n",
+       "GetIpAddrTable(NULL, NULL, FALSE) returned %ld, expected ERROR_INVALID_PARAMETER\n",
        apiReturn);
     apiReturn = GetIpAddrTable(NULL, &dwSize, FALSE);
     ok(apiReturn == ERROR_INSUFFICIENT_BUFFER,
-       "GetIpAddrTable(NULL, &dwSize, FALSE) returned %d, expected ERROR_INSUFFICIENT_BUFFER\n",
+       "GetIpAddrTable(NULL, &dwSize, FALSE) returned %ld, expected ERROR_INSUFFICIENT_BUFFER\n",
        apiReturn);
     if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
         PMIB_IPADDRTABLE buf = HeapAlloc(GetProcessHeap(), 0, dwSize);
 
         apiReturn = GetIpAddrTable(buf, &dwSize, FALSE);
         ok(apiReturn == NO_ERROR,
-           "GetIpAddrTable(buf, &dwSize, FALSE) returned %d, expected NO_ERROR\n",
+           "GetIpAddrTable(buf, &dwSize, FALSE) returned %ld, expected NO_ERROR\n",
            apiReturn);
         if (apiReturn == NO_ERROR && buf->dwNumEntries)
         {
@@ -232,7 +204,9 @@ static void testGetIpAddrTable(void)
             for (i = 0; i < buf->dwNumEntries; i++)
             {
                 ok (buf->table[i].wType != 0, "Test[%d]: expected wType > 0\n", i);
-                trace("Entry[%d]: addr %s, dwIndex %u, wType 0x%x\n", i,
+                ok (buf->table[i].dwBCastAddr == 1, "Test[%d]: got %08lx\n", i, buf->table[i].dwBCastAddr);
+                ok (buf->table[i].dwReasmSize == 0xffff, "Test[%d]: got %08lx\n", i, buf->table[i].dwReasmSize);
+                trace("Entry[%d]: addr %s, dwIndex %lu, wType 0x%x\n", i,
                       ntoa(buf->table[i].dwAddr), buf->table[i].dwIndex, buf->table[i].wType);
             }
         }
@@ -251,41 +225,60 @@ static void testGetIfTable(void)
         return;
     }
     ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetIfTable(NULL, NULL, FALSE) returned %d, expected ERROR_INVALID_PARAMETER\n",
+       "GetIfTable(NULL, NULL, FALSE) returned %ld, expected ERROR_INVALID_PARAMETER\n",
        apiReturn);
     apiReturn = GetIfTable(NULL, &dwSize, FALSE);
     ok(apiReturn == ERROR_INSUFFICIENT_BUFFER,
-       "GetIfTable(NULL, &dwSize, FALSE) returned %d, expected ERROR_INSUFFICIENT_BUFFER\n",
+       "GetIfTable(NULL, &dwSize, FALSE) returned %ld, expected ERROR_INSUFFICIENT_BUFFER\n",
        apiReturn);
     if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
         PMIB_IFTABLE buf = HeapAlloc(GetProcessHeap(), 0, dwSize);
 
         apiReturn = GetIfTable(buf, &dwSize, FALSE);
         ok(apiReturn == NO_ERROR,
-           "GetIfTable(buf, &dwSize, FALSE) returned %d, expected NO_ERROR\n\n",
+           "GetIfTable(buf, &dwSize, FALSE) returned %ld, expected NO_ERROR\n\n",
            apiReturn);
 
-        if (apiReturn == NO_ERROR && winetest_debug > 1)
+        if (apiReturn == NO_ERROR)
         {
-            DWORD i, j;
-            char name[MAX_INTERFACE_NAME_LEN];
+            char descr[MAX_INTERFACE_NAME_LEN];
+            WCHAR name[MAX_INTERFACE_NAME_LEN];
+            DWORD i, index;
 
-            trace( "interface table: %u entries\n", buf->dwNumEntries );
+            if (winetest_debug > 1) trace( "interface table: %lu entries\n", buf->dwNumEntries );
             for (i = 0; i < buf->dwNumEntries; i++)
             {
                 MIB_IFROW *row = &buf->table[i];
-                WideCharToMultiByte( CP_ACP, 0, row->wszName, -1, name, MAX_INTERFACE_NAME_LEN, NULL, NULL );
-                trace( "%u: '%s' type %u mtu %u speed %u phys",
-                       row->dwIndex, name, row->dwType, row->dwMtu, row->dwSpeed );
-                for (j = 0; j < row->dwPhysAddrLen; j++)
-                    printf( " %02x", row->bPhysAddr[j] );
-                printf( "\n" );
-                trace( "        in: bytes %u upkts %u nupkts %u disc %u err %u unk %u\n",
-                       row->dwInOctets, row->dwInUcastPkts, row->dwInNUcastPkts,
-                       row->dwInDiscards, row->dwInErrors, row->dwInUnknownProtos );
-                trace( "        out: bytes %u upkts %u nupkts %u disc %u err %u\n",
-                       row->dwOutOctets, row->dwOutUcastPkts, row->dwOutNUcastPkts,
-                       row->dwOutDiscards, row->dwOutErrors );
+                MIB_IF_ROW2 row2;
+                GUID *guid;
+
+                if (winetest_debug > 1)
+                {
+                    trace( "%lu: '%s' type %lu mtu %lu speed %lu\n",
+                           row->dwIndex, debugstr_w(row->wszName), row->dwType, row->dwMtu, row->dwSpeed );
+                    trace( "        in: bytes %lu upkts %lu nupkts %lu disc %lu err %lu unk %lu\n",
+                           row->dwInOctets, row->dwInUcastPkts, row->dwInNUcastPkts,
+                           row->dwInDiscards, row->dwInErrors, row->dwInUnknownProtos );
+                    trace( "        out: bytes %lu upkts %lu nupkts %lu disc %lu err %lu\n",
+                           row->dwOutOctets, row->dwOutUcastPkts, row->dwOutNUcastPkts,
+                           row->dwOutDiscards, row->dwOutErrors );
+                }
+                apiReturn = GetAdapterIndex( row->wszName, &index );
+                ok( !apiReturn, "got %ld\n", apiReturn );
+                ok( index == row->dwIndex ||
+                    broken( index != row->dwIndex && index ), /* Win8 can have identical guids for two different ifaces */
+                    "got %ld vs %ld\n", index, row->dwIndex );
+                memset( &row2, 0, sizeof(row2) );
+                row2.InterfaceIndex = row->dwIndex;
+                GetIfEntry2( &row2 );
+                WideCharToMultiByte( CP_ACP, 0, row2.Description, -1, descr, sizeof(descr), NULL, NULL );
+                ok( !strcmp( (char *)row->bDescr, descr ), "got %s vs %s\n", row->bDescr, descr );
+                guid = &row2.InterfaceGuid;
+                swprintf( name, ARRAY_SIZE(name), L"\\DEVICE\\TCPIP_{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+                          guid->Data1, guid->Data2, guid->Data3, guid->Data4[0], guid->Data4[1],
+                          guid->Data4[2], guid->Data4[3], guid->Data4[4], guid->Data4[5],
+                          guid->Data4[6], guid->Data4[7]);
+                ok( !wcscmp( row->wszName, name ), "got %s vs %s\n", debugstr_w( row->wszName ), debugstr_w( name ) );
             }
         }
         HeapFree(GetProcessHeap(), 0, buf);
@@ -294,63 +287,83 @@ static void testGetIfTable(void)
 
 static void testGetIpForwardTable(void)
 {
-    DWORD apiReturn;
-    ULONG dwSize = 0;
+    DWORD err, i, j;
+    ULONG size = 0;
+    MIB_IPFORWARDTABLE *buf;
+    MIB_IPFORWARD_TABLE2 *table2;
+    MIB_UNICASTIPADDRESS_TABLE *unicast;
 
-    apiReturn = GetIpForwardTable(NULL, NULL, FALSE);
-    if (apiReturn == ERROR_NOT_SUPPORTED) {
-        skip("GetIpForwardTable is not supported\n");
-        return;
-    }
-    ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetIpForwardTable(NULL, NULL, FALSE) returned %d, expected ERROR_INVALID_PARAMETER\n",
-       apiReturn);
-    apiReturn = GetIpForwardTable(NULL, &dwSize, FALSE);
-    ok(apiReturn == ERROR_INSUFFICIENT_BUFFER,
-       "GetIpForwardTable(NULL, &dwSize, FALSE) returned %d, expected ERROR_INSUFFICIENT_BUFFER\n",
-       apiReturn);
-    if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
-        PMIB_IPFORWARDTABLE buf = HeapAlloc(GetProcessHeap(), 0, dwSize);
+    err = GetIpForwardTable( NULL, NULL, FALSE );
+    ok( err == ERROR_INVALID_PARAMETER, "got %ld\n", err );
 
-        apiReturn = GetIpForwardTable(buf, &dwSize, FALSE);
-        ok(apiReturn == NO_ERROR,
-           "GetIpForwardTable(buf, &dwSize, FALSE) returned %d, expected NO_ERROR\n",
-           apiReturn);
+    err = GetIpForwardTable( NULL, &size, FALSE );
+    ok( err == ERROR_INSUFFICIENT_BUFFER, "got %ld\n", err );
 
-        if (apiReturn == NO_ERROR)
+    buf = malloc( size );
+    err = GetIpForwardTable( buf, &size, FALSE );
+    ok( !err, "got %ld\n", err );
+
+    err = GetIpForwardTable2( AF_INET, &table2 );
+    ok( !err, "got %ld\n", err );
+    ok( buf->dwNumEntries == table2->NumEntries, "got %ld vs %ld\n",
+        buf->dwNumEntries, table2->NumEntries );
+
+    err = GetUnicastIpAddressTable( AF_INET, &unicast );
+    ok( !err, "got %ld\n", err );
+
+    trace( "IP forward table: %lu entries\n", buf->dwNumEntries );
+    for (i = 0; i < buf->dwNumEntries; i++)
+    {
+        MIB_IPFORWARDROW *row = buf->table + i;
+        MIB_IPFORWARD_ROW2 *row2 = table2->Table + i;
+        DWORD mask, next_hop;
+
+        winetest_push_context( "%ld", i );
+
+        trace( "dest %s mask %s gw %s if %lu type %lu proto %lu\n",
+               ntoa( row->dwForwardDest ), ntoa( row->dwForwardMask ),
+               ntoa( row->dwForwardNextHop ), row->dwForwardIfIndex,
+               row->dwForwardType, row->dwForwardProto );
+        ok( row->dwForwardDest == row2->DestinationPrefix.Prefix.Ipv4.sin_addr.s_addr,
+            "got %08lx vs %08lx\n", row->dwForwardDest, row2->DestinationPrefix.Prefix.Ipv4.sin_addr.s_addr );
+        ConvertLengthToIpv4Mask( row2->DestinationPrefix.PrefixLength, &mask );
+        ok( row->dwForwardMask == mask, "got %08lx vs %08lx\n", row->dwForwardMask, mask );
+        ok( row->dwForwardPolicy == 0, "got %ld\n", row->dwForwardPolicy );
+
+        next_hop = row2->NextHop.Ipv4.sin_addr.s_addr;
+        if (!next_hop) /* for direct addresses, dwForwardNextHop is set to the address of the appropriate interface */
         {
-            DWORD i;
-
-            trace( "IP forward table: %u entries\n", buf->dwNumEntries );
-            for (i = 0; i < buf->dwNumEntries; i++)
+            for (j = 0; j < unicast->NumEntries; j++)
             {
-                if (!U1(buf->table[i]).dwForwardDest) /* Default route */
+                if (unicast->Table[j].InterfaceLuid.Value == row2->InterfaceLuid.Value)
                 {
-                    todo_wine
-                    ok (U1(buf->table[i]).dwForwardProto == MIB_IPPROTO_NETMGMT,
-                            "Unexpected dwForwardProto %d\n", U1(buf->table[i]).dwForwardProto);
-                    ok (U1(buf->table[i]).dwForwardType == MIB_IPROUTE_TYPE_INDIRECT,
-                        "Unexpected dwForwardType %d\n",  U1(buf->table[i]).dwForwardType);
+                    next_hop = unicast->Table[j].Address.Ipv4.sin_addr.s_addr;
+                    break;
                 }
-                else
-                {
-                    /* In general we should get MIB_IPPROTO_LOCAL but does not work
-                     * for Vista, 2008 and 7. */
-                    ok (U1(buf->table[i]).dwForwardProto == MIB_IPPROTO_LOCAL ||
-                        broken(U1(buf->table[i]).dwForwardProto == MIB_IPPROTO_NETMGMT),
-                        "Unexpected dwForwardProto %d\n", U1(buf->table[i]).dwForwardProto);
-                    /* The forward type varies depending on the address and gateway
-                     * value so it is not worth testing in this case. */
-                }
-
-                trace( "%u: dest %s mask %s gw %s if %u type %u proto %u\n", i,
-                       ntoa( buf->table[i].dwForwardDest ), ntoa( buf->table[i].dwForwardMask ),
-                       ntoa( buf->table[i].dwForwardNextHop ), buf->table[i].dwForwardIfIndex,
-                       U1(buf->table[i]).dwForwardType, U1(buf->table[i]).dwForwardProto );
             }
         }
-        HeapFree(GetProcessHeap(), 0, buf);
+        ok( row->dwForwardNextHop == next_hop, "got %08lx vs %08lx\n", row->dwForwardNextHop, next_hop );
+
+        ok( row->dwForwardIfIndex == row2->InterfaceIndex, "got %ld vs %ld\n", row->dwForwardIfIndex, row2->InterfaceIndex );
+        if (!row2->NextHop.Ipv4.sin_addr.s_addr)
+            ok( buf->table[i].dwForwardType == MIB_IPROUTE_TYPE_DIRECT, "got %ld\n", buf->table[i].dwForwardType );
+        else
+            ok( buf->table[i].dwForwardType == MIB_IPROUTE_TYPE_INDIRECT, "got %ld\n", buf->table[i].dwForwardType );
+        ok( row->dwForwardProto == row2->Protocol, "got %ld vs %d\n", row->dwForwardProto, row2->Protocol );
+        ok( row->dwForwardAge == row2->Age, "got %ld vs %ld\n", row->dwForwardAge, row2->Age );
+        ok( row->dwForwardNextHopAS == 0, "got %08lx\n", row->dwForwardNextHopAS );
+        /* FIXME: need to add the interface's metric from GetIpInterfaceTable() */
+        ok( row->dwForwardMetric1 >= row2->Metric, "got %ld vs %ld\n", row->dwForwardMetric1, row2->Metric );
+        ok( row->dwForwardMetric2 == 0, "got %ld\n", row->dwForwardMetric2 );
+        ok( row->dwForwardMetric3 == 0, "got %ld\n", row->dwForwardMetric3 );
+        ok( row->dwForwardMetric4 == 0, "got %ld\n", row->dwForwardMetric4 );
+        ok( row->dwForwardMetric5 == 0, "got %ld\n", row->dwForwardMetric5 );
+
+        winetest_pop_context();
     }
+    FreeMibTable( unicast );
+    FreeMibTable( table2 );
+    free( buf );
 }
 
 static void testGetIpNetTable(void)
@@ -364,11 +377,11 @@ static void testGetIpNetTable(void)
         return;
     }
     ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetIpNetTable(NULL, NULL, FALSE) returned %d, expected ERROR_INVALID_PARAMETER\n",
+       "GetIpNetTable(NULL, NULL, FALSE) returned %ld, expected ERROR_INVALID_PARAMETER\n",
        apiReturn);
     apiReturn = GetIpNetTable(NULL, &dwSize, FALSE);
     ok(apiReturn == ERROR_NO_DATA || apiReturn == ERROR_INSUFFICIENT_BUFFER,
-       "GetIpNetTable(NULL, &dwSize, FALSE) returned %d, expected ERROR_NO_DATA or ERROR_INSUFFICIENT_BUFFER\n",
+       "GetIpNetTable(NULL, &dwSize, FALSE) returned %ld, expected ERROR_NO_DATA or ERROR_INSUFFICIENT_BUFFER\n",
        apiReturn);
     if (apiReturn == ERROR_NO_DATA)
         ; /* empty ARP table's okay */
@@ -378,17 +391,17 @@ static void testGetIpNetTable(void)
         apiReturn = GetIpNetTable(buf, &dwSize, FALSE);
         ok(apiReturn == NO_ERROR ||
            apiReturn == ERROR_NO_DATA, /* empty ARP table's okay */
-           "GetIpNetTable(buf, &dwSize, FALSE) returned %d, expected NO_ERROR\n",
+           "GetIpNetTable(buf, &dwSize, FALSE) returned %ld, expected NO_ERROR\n",
            apiReturn);
 
         if (apiReturn == NO_ERROR && winetest_debug > 1)
         {
             DWORD i, j;
 
-            trace( "IP net table: %u entries\n", buf->dwNumEntries );
+            trace( "IP net table: %lu entries\n", buf->dwNumEntries );
             for (i = 0; i < buf->dwNumEntries; i++)
             {
-                trace( "%u: idx %u type %u addr %s phys",
+                trace( "%lu: idx %lu type %lu addr %s phys",
                        i, buf->table[i].dwIndex, U(buf->table[i]).dwType, ntoa( buf->table[i].dwAddr ));
                 for (j = 0; j < buf->table[i].dwPhysAddrLen; j++)
                     printf( " %02x", buf->table[i].bPhysAddr[j] );
@@ -410,7 +423,7 @@ static void testGetIcmpStatistics(void)
         if (apiReturn == ERROR_NOT_SUPPORTED)
             return;
         ok(apiReturn == ERROR_INVALID_PARAMETER,
-           "GetIcmpStatistics(NULL) returned %d, expected ERROR_INVALID_PARAMETER\n",
+           "GetIcmpStatistics(NULL) returned %ld, expected ERROR_INVALID_PARAMETER\n",
            apiReturn);
     }
 
@@ -421,23 +434,23 @@ static void testGetIcmpStatistics(void)
         return;
     }
     ok(apiReturn == NO_ERROR,
-       "GetIcmpStatistics returned %d, expected NO_ERROR\n", apiReturn);
+       "GetIcmpStatistics returned %ld, expected NO_ERROR\n", apiReturn);
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "ICMP stats:          %8s %8s\n", "in", "out" );
-        trace( "    dwMsgs:          %8u %8u\n", stats.stats.icmpInStats.dwMsgs, stats.stats.icmpOutStats.dwMsgs );
-        trace( "    dwErrors:        %8u %8u\n", stats.stats.icmpInStats.dwErrors, stats.stats.icmpOutStats.dwErrors );
-        trace( "    dwDestUnreachs:  %8u %8u\n", stats.stats.icmpInStats.dwDestUnreachs, stats.stats.icmpOutStats.dwDestUnreachs );
-        trace( "    dwTimeExcds:     %8u %8u\n", stats.stats.icmpInStats.dwTimeExcds, stats.stats.icmpOutStats.dwTimeExcds );
-        trace( "    dwParmProbs:     %8u %8u\n", stats.stats.icmpInStats.dwParmProbs, stats.stats.icmpOutStats.dwParmProbs );
-        trace( "    dwSrcQuenchs:    %8u %8u\n", stats.stats.icmpInStats.dwSrcQuenchs, stats.stats.icmpOutStats.dwSrcQuenchs );
-        trace( "    dwRedirects:     %8u %8u\n", stats.stats.icmpInStats.dwRedirects, stats.stats.icmpOutStats.dwRedirects );
-        trace( "    dwEchos:         %8u %8u\n", stats.stats.icmpInStats.dwEchos, stats.stats.icmpOutStats.dwEchos );
-        trace( "    dwEchoReps:      %8u %8u\n", stats.stats.icmpInStats.dwEchoReps, stats.stats.icmpOutStats.dwEchoReps );
-        trace( "    dwTimestamps:    %8u %8u\n", stats.stats.icmpInStats.dwTimestamps, stats.stats.icmpOutStats.dwTimestamps );
-        trace( "    dwTimestampReps: %8u %8u\n", stats.stats.icmpInStats.dwTimestampReps, stats.stats.icmpOutStats.dwTimestampReps );
-        trace( "    dwAddrMasks:     %8u %8u\n", stats.stats.icmpInStats.dwAddrMasks, stats.stats.icmpOutStats.dwAddrMasks );
-        trace( "    dwAddrMaskReps:  %8u %8u\n", stats.stats.icmpInStats.dwAddrMaskReps, stats.stats.icmpOutStats.dwAddrMaskReps );
+        trace( "    dwMsgs:          %8lu %8lu\n", stats.stats.icmpInStats.dwMsgs, stats.stats.icmpOutStats.dwMsgs );
+        trace( "    dwErrors:        %8lu %8lu\n", stats.stats.icmpInStats.dwErrors, stats.stats.icmpOutStats.dwErrors );
+        trace( "    dwDestUnreachs:  %8lu %8lu\n", stats.stats.icmpInStats.dwDestUnreachs, stats.stats.icmpOutStats.dwDestUnreachs );
+        trace( "    dwTimeExcds:     %8lu %8lu\n", stats.stats.icmpInStats.dwTimeExcds, stats.stats.icmpOutStats.dwTimeExcds );
+        trace( "    dwParmProbs:     %8lu %8lu\n", stats.stats.icmpInStats.dwParmProbs, stats.stats.icmpOutStats.dwParmProbs );
+        trace( "    dwSrcQuenchs:    %8lu %8lu\n", stats.stats.icmpInStats.dwSrcQuenchs, stats.stats.icmpOutStats.dwSrcQuenchs );
+        trace( "    dwRedirects:     %8lu %8lu\n", stats.stats.icmpInStats.dwRedirects, stats.stats.icmpOutStats.dwRedirects );
+        trace( "    dwEchos:         %8lu %8lu\n", stats.stats.icmpInStats.dwEchos, stats.stats.icmpOutStats.dwEchos );
+        trace( "    dwEchoReps:      %8lu %8lu\n", stats.stats.icmpInStats.dwEchoReps, stats.stats.icmpOutStats.dwEchoReps );
+        trace( "    dwTimestamps:    %8lu %8lu\n", stats.stats.icmpInStats.dwTimestamps, stats.stats.icmpOutStats.dwTimestamps );
+        trace( "    dwTimestampReps: %8lu %8lu\n", stats.stats.icmpInStats.dwTimestampReps, stats.stats.icmpOutStats.dwTimestampReps );
+        trace( "    dwAddrMasks:     %8lu %8lu\n", stats.stats.icmpInStats.dwAddrMasks, stats.stats.icmpOutStats.dwAddrMasks );
+        trace( "    dwAddrMaskReps:  %8lu %8lu\n", stats.stats.icmpInStats.dwAddrMaskReps, stats.stats.icmpOutStats.dwAddrMaskReps );
     }
 }
 
@@ -452,37 +465,37 @@ static void testGetIpStatistics(void)
         return;
     }
     ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetIpStatistics(NULL) returned %d, expected ERROR_INVALID_PARAMETER\n",
+       "GetIpStatistics(NULL) returned %ld, expected ERROR_INVALID_PARAMETER\n",
        apiReturn);
     apiReturn = GetIpStatistics(&stats);
     ok(apiReturn == NO_ERROR,
-       "GetIpStatistics returned %d, expected NO_ERROR\n", apiReturn);
+       "GetIpStatistics returned %ld, expected NO_ERROR\n", apiReturn);
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "IP stats:\n" );
-        trace( "    dwForwarding:      %u\n", U(stats).dwForwarding );
-        trace( "    dwDefaultTTL:      %u\n", stats.dwDefaultTTL );
-        trace( "    dwInReceives:      %u\n", stats.dwInReceives );
-        trace( "    dwInHdrErrors:     %u\n", stats.dwInHdrErrors );
-        trace( "    dwInAddrErrors:    %u\n", stats.dwInAddrErrors );
-        trace( "    dwForwDatagrams:   %u\n", stats.dwForwDatagrams );
-        trace( "    dwInUnknownProtos: %u\n", stats.dwInUnknownProtos );
-        trace( "    dwInDiscards:      %u\n", stats.dwInDiscards );
-        trace( "    dwInDelivers:      %u\n", stats.dwInDelivers );
-        trace( "    dwOutRequests:     %u\n", stats.dwOutRequests );
-        trace( "    dwRoutingDiscards: %u\n", stats.dwRoutingDiscards );
-        trace( "    dwOutDiscards:     %u\n", stats.dwOutDiscards );
-        trace( "    dwOutNoRoutes:     %u\n", stats.dwOutNoRoutes );
-        trace( "    dwReasmTimeout:    %u\n", stats.dwReasmTimeout );
-        trace( "    dwReasmReqds:      %u\n", stats.dwReasmReqds );
-        trace( "    dwReasmOks:        %u\n", stats.dwReasmOks );
-        trace( "    dwReasmFails:      %u\n", stats.dwReasmFails );
-        trace( "    dwFragOks:         %u\n", stats.dwFragOks );
-        trace( "    dwFragFails:       %u\n", stats.dwFragFails );
-        trace( "    dwFragCreates:     %u\n", stats.dwFragCreates );
-        trace( "    dwNumIf:           %u\n", stats.dwNumIf );
-        trace( "    dwNumAddr:         %u\n", stats.dwNumAddr );
-        trace( "    dwNumRoutes:       %u\n", stats.dwNumRoutes );
+        trace( "    dwForwarding:      %lu\n", U(stats).dwForwarding );
+        trace( "    dwDefaultTTL:      %lu\n", stats.dwDefaultTTL );
+        trace( "    dwInReceives:      %lu\n", stats.dwInReceives );
+        trace( "    dwInHdrErrors:     %lu\n", stats.dwInHdrErrors );
+        trace( "    dwInAddrErrors:    %lu\n", stats.dwInAddrErrors );
+        trace( "    dwForwDatagrams:   %lu\n", stats.dwForwDatagrams );
+        trace( "    dwInUnknownProtos: %lu\n", stats.dwInUnknownProtos );
+        trace( "    dwInDiscards:      %lu\n", stats.dwInDiscards );
+        trace( "    dwInDelivers:      %lu\n", stats.dwInDelivers );
+        trace( "    dwOutRequests:     %lu\n", stats.dwOutRequests );
+        trace( "    dwRoutingDiscards: %lu\n", stats.dwRoutingDiscards );
+        trace( "    dwOutDiscards:     %lu\n", stats.dwOutDiscards );
+        trace( "    dwOutNoRoutes:     %lu\n", stats.dwOutNoRoutes );
+        trace( "    dwReasmTimeout:    %lu\n", stats.dwReasmTimeout );
+        trace( "    dwReasmReqds:      %lu\n", stats.dwReasmReqds );
+        trace( "    dwReasmOks:        %lu\n", stats.dwReasmOks );
+        trace( "    dwReasmFails:      %lu\n", stats.dwReasmFails );
+        trace( "    dwFragOks:         %lu\n", stats.dwFragOks );
+        trace( "    dwFragFails:       %lu\n", stats.dwFragFails );
+        trace( "    dwFragCreates:     %lu\n", stats.dwFragCreates );
+        trace( "    dwNumIf:           %lu\n", stats.dwNumIf );
+        trace( "    dwNumAddr:         %lu\n", stats.dwNumAddr );
+        trace( "    dwNumRoutes:       %lu\n", stats.dwNumRoutes );
     }
 }
 
@@ -497,29 +510,29 @@ static void testGetTcpStatistics(void)
         return;
     }
     ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetTcpStatistics(NULL) returned %d, expected ERROR_INVALID_PARAMETER\n",
+       "GetTcpStatistics(NULL) returned %ld, expected ERROR_INVALID_PARAMETER\n",
        apiReturn);
     apiReturn = GetTcpStatistics(&stats);
     ok(apiReturn == NO_ERROR,
-       "GetTcpStatistics returned %d, expected NO_ERROR\n", apiReturn);
+       "GetTcpStatistics returned %ld, expected NO_ERROR\n", apiReturn);
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "TCP stats:\n" );
-        trace( "    dwRtoAlgorithm: %u\n", U(stats).dwRtoAlgorithm );
-        trace( "    dwRtoMin:       %u\n", stats.dwRtoMin );
-        trace( "    dwRtoMax:       %u\n", stats.dwRtoMax );
-        trace( "    dwMaxConn:      %u\n", stats.dwMaxConn );
-        trace( "    dwActiveOpens:  %u\n", stats.dwActiveOpens );
-        trace( "    dwPassiveOpens: %u\n", stats.dwPassiveOpens );
-        trace( "    dwAttemptFails: %u\n", stats.dwAttemptFails );
-        trace( "    dwEstabResets:  %u\n", stats.dwEstabResets );
-        trace( "    dwCurrEstab:    %u\n", stats.dwCurrEstab );
-        trace( "    dwInSegs:       %u\n", stats.dwInSegs );
-        trace( "    dwOutSegs:      %u\n", stats.dwOutSegs );
-        trace( "    dwRetransSegs:  %u\n", stats.dwRetransSegs );
-        trace( "    dwInErrs:       %u\n", stats.dwInErrs );
-        trace( "    dwOutRsts:      %u\n", stats.dwOutRsts );
-        trace( "    dwNumConns:     %u\n", stats.dwNumConns );
+        trace( "    dwRtoAlgorithm: %lu\n", U(stats).dwRtoAlgorithm );
+        trace( "    dwRtoMin:       %lu\n", stats.dwRtoMin );
+        trace( "    dwRtoMax:       %lu\n", stats.dwRtoMax );
+        trace( "    dwMaxConn:      %lu\n", stats.dwMaxConn );
+        trace( "    dwActiveOpens:  %lu\n", stats.dwActiveOpens );
+        trace( "    dwPassiveOpens: %lu\n", stats.dwPassiveOpens );
+        trace( "    dwAttemptFails: %lu\n", stats.dwAttemptFails );
+        trace( "    dwEstabResets:  %lu\n", stats.dwEstabResets );
+        trace( "    dwCurrEstab:    %lu\n", stats.dwCurrEstab );
+        trace( "    dwInSegs:       %lu\n", stats.dwInSegs );
+        trace( "    dwOutSegs:      %lu\n", stats.dwOutSegs );
+        trace( "    dwRetransSegs:  %lu\n", stats.dwRetransSegs );
+        trace( "    dwInErrs:       %lu\n", stats.dwInErrs );
+        trace( "    dwOutRsts:      %lu\n", stats.dwOutRsts );
+        trace( "    dwNumConns:     %lu\n", stats.dwNumConns );
     }
 }
 
@@ -534,19 +547,19 @@ static void testGetUdpStatistics(void)
         return;
     }
     ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetUdpStatistics(NULL) returned %d, expected ERROR_INVALID_PARAMETER\n",
+       "GetUdpStatistics(NULL) returned %ld, expected ERROR_INVALID_PARAMETER\n",
        apiReturn);
     apiReturn = GetUdpStatistics(&stats);
     ok(apiReturn == NO_ERROR,
-       "GetUdpStatistics returned %d, expected NO_ERROR\n", apiReturn);
+       "GetUdpStatistics returned %ld, expected NO_ERROR\n", apiReturn);
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "UDP stats:\n" );
-        trace( "    dwInDatagrams:  %u\n", stats.dwInDatagrams );
-        trace( "    dwNoPorts:      %u\n", stats.dwNoPorts );
-        trace( "    dwInErrors:     %u\n", stats.dwInErrors );
-        trace( "    dwOutDatagrams: %u\n", stats.dwOutDatagrams );
-        trace( "    dwNumAddrs:     %u\n", stats.dwNumAddrs );
+        trace( "    dwInDatagrams:  %lu\n", stats.dwInDatagrams );
+        trace( "    dwNoPorts:      %lu\n", stats.dwNoPorts );
+        trace( "    dwInErrors:     %lu\n", stats.dwInErrors );
+        trace( "    dwOutDatagrams: %lu\n", stats.dwOutDatagrams );
+        trace( "    dwNumAddrs:     %lu\n", stats.dwNumAddrs );
     }
 }
 
@@ -559,36 +572,36 @@ static void testGetIcmpStatisticsEx(void)
     if (1) {
         apiReturn = GetIcmpStatisticsEx(NULL, AF_INET);
         ok(apiReturn == ERROR_INVALID_PARAMETER,
-         "GetIcmpStatisticsEx(NULL, AF_INET) returned %d, expected ERROR_INVALID_PARAMETER\n", apiReturn);
+         "GetIcmpStatisticsEx(NULL, AF_INET) returned %ld, expected ERROR_INVALID_PARAMETER\n", apiReturn);
     }
 
     apiReturn = GetIcmpStatisticsEx(&stats, AF_BAN);
     ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetIcmpStatisticsEx(&stats, AF_BAN) returned %d, expected ERROR_INVALID_PARAMETER\n", apiReturn);
+       "GetIcmpStatisticsEx(&stats, AF_BAN) returned %ld, expected ERROR_INVALID_PARAMETER\n", apiReturn);
 
     apiReturn = GetIcmpStatisticsEx(&stats, AF_INET);
-    ok(apiReturn == NO_ERROR, "GetIcmpStatisticsEx returned %d, expected NO_ERROR\n", apiReturn);
+    ok(apiReturn == NO_ERROR, "GetIcmpStatisticsEx returned %ld, expected NO_ERROR\n", apiReturn);
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         INT i;
         trace( "ICMP IPv4 Ex stats:           %8s %8s\n", "in", "out" );
-        trace( "    dwMsgs:              %8u %8u\n", stats.icmpInStats.dwMsgs, stats.icmpOutStats.dwMsgs );
-        trace( "    dwErrors:            %8u %8u\n", stats.icmpInStats.dwErrors, stats.icmpOutStats.dwErrors );
+        trace( "    dwMsgs:              %8lu %8lu\n", stats.icmpInStats.dwMsgs, stats.icmpOutStats.dwMsgs );
+        trace( "    dwErrors:            %8lu %8lu\n", stats.icmpInStats.dwErrors, stats.icmpOutStats.dwErrors );
         for (i = 0; i < 256; i++)
-            trace( "    rgdwTypeCount[%3i]: %8u %8u\n", i, stats.icmpInStats.rgdwTypeCount[i], stats.icmpOutStats.rgdwTypeCount[i] );
+            trace( "    rgdwTypeCount[%3i]: %8lu %8lu\n", i, stats.icmpInStats.rgdwTypeCount[i], stats.icmpOutStats.rgdwTypeCount[i] );
     }
 
     apiReturn = GetIcmpStatisticsEx(&stats, AF_INET6);
     ok(apiReturn == NO_ERROR || broken(apiReturn == ERROR_NOT_SUPPORTED),
-       "GetIcmpStatisticsEx returned %d, expected NO_ERROR\n", apiReturn);
+       "GetIcmpStatisticsEx returned %ld, expected NO_ERROR\n", apiReturn);
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         INT i;
         trace( "ICMP IPv6 Ex stats:           %8s %8s\n", "in", "out" );
-        trace( "    dwMsgs:              %8u %8u\n", stats.icmpInStats.dwMsgs, stats.icmpOutStats.dwMsgs );
-        trace( "    dwErrors:            %8u %8u\n", stats.icmpInStats.dwErrors, stats.icmpOutStats.dwErrors );
+        trace( "    dwMsgs:              %8lu %8lu\n", stats.icmpInStats.dwMsgs, stats.icmpOutStats.dwMsgs );
+        trace( "    dwErrors:            %8lu %8lu\n", stats.icmpInStats.dwErrors, stats.icmpOutStats.dwErrors );
         for (i = 0; i < 256; i++)
-            trace( "    rgdwTypeCount[%3i]: %8u %8u\n", i, stats.icmpInStats.rgdwTypeCount[i], stats.icmpOutStats.rgdwTypeCount[i] );
+            trace( "    rgdwTypeCount[%3i]: %8lu %8lu\n", i, stats.icmpInStats.rgdwTypeCount[i], stats.icmpOutStats.rgdwTypeCount[i] );
     }
 }
 
@@ -599,71 +612,71 @@ static void testGetIpStatisticsEx(void)
 
     apiReturn = GetIpStatisticsEx(NULL, AF_INET);
     ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetIpStatisticsEx(NULL, AF_INET) returned %d, expected ERROR_INVALID_PARAMETER\n", apiReturn);
+       "GetIpStatisticsEx(NULL, AF_INET) returned %ld, expected ERROR_INVALID_PARAMETER\n", apiReturn);
 
     apiReturn = GetIpStatisticsEx(&stats, AF_BAN);
     ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetIpStatisticsEx(&stats, AF_BAN) returned %d, expected ERROR_INVALID_PARAMETER\n", apiReturn);
+       "GetIpStatisticsEx(&stats, AF_BAN) returned %ld, expected ERROR_INVALID_PARAMETER\n", apiReturn);
 
     apiReturn = GetIpStatisticsEx(&stats, AF_INET);
-    ok(apiReturn == NO_ERROR, "GetIpStatisticsEx returned %d, expected NO_ERROR\n", apiReturn);
+    ok(apiReturn == NO_ERROR, "GetIpStatisticsEx returned %ld, expected NO_ERROR\n", apiReturn);
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "IP IPv4 Ex stats:\n" );
-        trace( "    dwForwarding:      %u\n", U(stats).dwForwarding );
-        trace( "    dwDefaultTTL:      %u\n", stats.dwDefaultTTL );
-        trace( "    dwInReceives:      %u\n", stats.dwInReceives );
-        trace( "    dwInHdrErrors:     %u\n", stats.dwInHdrErrors );
-        trace( "    dwInAddrErrors:    %u\n", stats.dwInAddrErrors );
-        trace( "    dwForwDatagrams:   %u\n", stats.dwForwDatagrams );
-        trace( "    dwInUnknownProtos: %u\n", stats.dwInUnknownProtos );
-        trace( "    dwInDiscards:      %u\n", stats.dwInDiscards );
-        trace( "    dwInDelivers:      %u\n", stats.dwInDelivers );
-        trace( "    dwOutRequests:     %u\n", stats.dwOutRequests );
-        trace( "    dwRoutingDiscards: %u\n", stats.dwRoutingDiscards );
-        trace( "    dwOutDiscards:     %u\n", stats.dwOutDiscards );
-        trace( "    dwOutNoRoutes:     %u\n", stats.dwOutNoRoutes );
-        trace( "    dwReasmTimeout:    %u\n", stats.dwReasmTimeout );
-        trace( "    dwReasmReqds:      %u\n", stats.dwReasmReqds );
-        trace( "    dwReasmOks:        %u\n", stats.dwReasmOks );
-        trace( "    dwReasmFails:      %u\n", stats.dwReasmFails );
-        trace( "    dwFragOks:         %u\n", stats.dwFragOks );
-        trace( "    dwFragFails:       %u\n", stats.dwFragFails );
-        trace( "    dwFragCreates:     %u\n", stats.dwFragCreates );
-        trace( "    dwNumIf:           %u\n", stats.dwNumIf );
-        trace( "    dwNumAddr:         %u\n", stats.dwNumAddr );
-        trace( "    dwNumRoutes:       %u\n", stats.dwNumRoutes );
+        trace( "    dwForwarding:      %lu\n", U(stats).dwForwarding );
+        trace( "    dwDefaultTTL:      %lu\n", stats.dwDefaultTTL );
+        trace( "    dwInReceives:      %lu\n", stats.dwInReceives );
+        trace( "    dwInHdrErrors:     %lu\n", stats.dwInHdrErrors );
+        trace( "    dwInAddrErrors:    %lu\n", stats.dwInAddrErrors );
+        trace( "    dwForwDatagrams:   %lu\n", stats.dwForwDatagrams );
+        trace( "    dwInUnknownProtos: %lu\n", stats.dwInUnknownProtos );
+        trace( "    dwInDiscards:      %lu\n", stats.dwInDiscards );
+        trace( "    dwInDelivers:      %lu\n", stats.dwInDelivers );
+        trace( "    dwOutRequests:     %lu\n", stats.dwOutRequests );
+        trace( "    dwRoutingDiscards: %lu\n", stats.dwRoutingDiscards );
+        trace( "    dwOutDiscards:     %lu\n", stats.dwOutDiscards );
+        trace( "    dwOutNoRoutes:     %lu\n", stats.dwOutNoRoutes );
+        trace( "    dwReasmTimeout:    %lu\n", stats.dwReasmTimeout );
+        trace( "    dwReasmReqds:      %lu\n", stats.dwReasmReqds );
+        trace( "    dwReasmOks:        %lu\n", stats.dwReasmOks );
+        trace( "    dwReasmFails:      %lu\n", stats.dwReasmFails );
+        trace( "    dwFragOks:         %lu\n", stats.dwFragOks );
+        trace( "    dwFragFails:       %lu\n", stats.dwFragFails );
+        trace( "    dwFragCreates:     %lu\n", stats.dwFragCreates );
+        trace( "    dwNumIf:           %lu\n", stats.dwNumIf );
+        trace( "    dwNumAddr:         %lu\n", stats.dwNumAddr );
+        trace( "    dwNumRoutes:       %lu\n", stats.dwNumRoutes );
     }
 
     apiReturn = GetIpStatisticsEx(&stats, AF_INET6);
     ok(apiReturn == NO_ERROR || broken(apiReturn == ERROR_NOT_SUPPORTED),
-       "GetIpStatisticsEx returned %d, expected NO_ERROR\n", apiReturn);
+       "GetIpStatisticsEx returned %ld, expected NO_ERROR\n", apiReturn);
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "IP IPv6 Ex stats:\n" );
-        trace( "    dwForwarding:      %u\n", U(stats).dwForwarding );
-        trace( "    dwDefaultTTL:      %u\n", stats.dwDefaultTTL );
-        trace( "    dwInReceives:      %u\n", stats.dwInReceives );
-        trace( "    dwInHdrErrors:     %u\n", stats.dwInHdrErrors );
-        trace( "    dwInAddrErrors:    %u\n", stats.dwInAddrErrors );
-        trace( "    dwForwDatagrams:   %u\n", stats.dwForwDatagrams );
-        trace( "    dwInUnknownProtos: %u\n", stats.dwInUnknownProtos );
-        trace( "    dwInDiscards:      %u\n", stats.dwInDiscards );
-        trace( "    dwInDelivers:      %u\n", stats.dwInDelivers );
-        trace( "    dwOutRequests:     %u\n", stats.dwOutRequests );
-        trace( "    dwRoutingDiscards: %u\n", stats.dwRoutingDiscards );
-        trace( "    dwOutDiscards:     %u\n", stats.dwOutDiscards );
-        trace( "    dwOutNoRoutes:     %u\n", stats.dwOutNoRoutes );
-        trace( "    dwReasmTimeout:    %u\n", stats.dwReasmTimeout );
-        trace( "    dwReasmReqds:      %u\n", stats.dwReasmReqds );
-        trace( "    dwReasmOks:        %u\n", stats.dwReasmOks );
-        trace( "    dwReasmFails:      %u\n", stats.dwReasmFails );
-        trace( "    dwFragOks:         %u\n", stats.dwFragOks );
-        trace( "    dwFragFails:       %u\n", stats.dwFragFails );
-        trace( "    dwFragCreates:     %u\n", stats.dwFragCreates );
-        trace( "    dwNumIf:           %u\n", stats.dwNumIf );
-        trace( "    dwNumAddr:         %u\n", stats.dwNumAddr );
-        trace( "    dwNumRoutes:       %u\n", stats.dwNumRoutes );
+        trace( "    dwForwarding:      %lu\n", U(stats).dwForwarding );
+        trace( "    dwDefaultTTL:      %lu\n", stats.dwDefaultTTL );
+        trace( "    dwInReceives:      %lu\n", stats.dwInReceives );
+        trace( "    dwInHdrErrors:     %lu\n", stats.dwInHdrErrors );
+        trace( "    dwInAddrErrors:    %lu\n", stats.dwInAddrErrors );
+        trace( "    dwForwDatagrams:   %lu\n", stats.dwForwDatagrams );
+        trace( "    dwInUnknownProtos: %lu\n", stats.dwInUnknownProtos );
+        trace( "    dwInDiscards:      %lu\n", stats.dwInDiscards );
+        trace( "    dwInDelivers:      %lu\n", stats.dwInDelivers );
+        trace( "    dwOutRequests:     %lu\n", stats.dwOutRequests );
+        trace( "    dwRoutingDiscards: %lu\n", stats.dwRoutingDiscards );
+        trace( "    dwOutDiscards:     %lu\n", stats.dwOutDiscards );
+        trace( "    dwOutNoRoutes:     %lu\n", stats.dwOutNoRoutes );
+        trace( "    dwReasmTimeout:    %lu\n", stats.dwReasmTimeout );
+        trace( "    dwReasmReqds:      %lu\n", stats.dwReasmReqds );
+        trace( "    dwReasmOks:        %lu\n", stats.dwReasmOks );
+        trace( "    dwReasmFails:      %lu\n", stats.dwReasmFails );
+        trace( "    dwFragOks:         %lu\n", stats.dwFragOks );
+        trace( "    dwFragFails:       %lu\n", stats.dwFragFails );
+        trace( "    dwFragCreates:     %lu\n", stats.dwFragCreates );
+        trace( "    dwNumIf:           %lu\n", stats.dwNumIf );
+        trace( "    dwNumAddr:         %lu\n", stats.dwNumAddr );
+        trace( "    dwNumRoutes:       %lu\n", stats.dwNumRoutes );
     }
 }
 
@@ -674,55 +687,55 @@ static void testGetTcpStatisticsEx(void)
 
     apiReturn = GetTcpStatisticsEx(NULL, AF_INET);
     ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetTcpStatisticsEx(NULL, AF_INET); returned %d, expected ERROR_INVALID_PARAMETER\n", apiReturn);
+       "GetTcpStatisticsEx(NULL, AF_INET); returned %ld, expected ERROR_INVALID_PARAMETER\n", apiReturn);
 
     apiReturn = GetTcpStatisticsEx(&stats, AF_BAN);
     ok(apiReturn == ERROR_INVALID_PARAMETER || apiReturn == ERROR_NOT_SUPPORTED,
-       "GetTcpStatisticsEx(&stats, AF_BAN) returned %d, expected ERROR_INVALID_PARAMETER\n", apiReturn);
+       "GetTcpStatisticsEx(&stats, AF_BAN) returned %ld, expected ERROR_INVALID_PARAMETER\n", apiReturn);
 
     apiReturn = GetTcpStatisticsEx(&stats, AF_INET);
-    ok(apiReturn == NO_ERROR, "GetTcpStatisticsEx returned %d, expected NO_ERROR\n", apiReturn);
+    ok(apiReturn == NO_ERROR, "GetTcpStatisticsEx returned %ld, expected NO_ERROR\n", apiReturn);
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "TCP IPv4 Ex stats:\n" );
-        trace( "    dwRtoAlgorithm: %u\n", U(stats).dwRtoAlgorithm );
-        trace( "    dwRtoMin:       %u\n", stats.dwRtoMin );
-        trace( "    dwRtoMax:       %u\n", stats.dwRtoMax );
-        trace( "    dwMaxConn:      %u\n", stats.dwMaxConn );
-        trace( "    dwActiveOpens:  %u\n", stats.dwActiveOpens );
-        trace( "    dwPassiveOpens: %u\n", stats.dwPassiveOpens );
-        trace( "    dwAttemptFails: %u\n", stats.dwAttemptFails );
-        trace( "    dwEstabResets:  %u\n", stats.dwEstabResets );
-        trace( "    dwCurrEstab:    %u\n", stats.dwCurrEstab );
-        trace( "    dwInSegs:       %u\n", stats.dwInSegs );
-        trace( "    dwOutSegs:      %u\n", stats.dwOutSegs );
-        trace( "    dwRetransSegs:  %u\n", stats.dwRetransSegs );
-        trace( "    dwInErrs:       %u\n", stats.dwInErrs );
-        trace( "    dwOutRsts:      %u\n", stats.dwOutRsts );
-        trace( "    dwNumConns:     %u\n", stats.dwNumConns );
+        trace( "    dwRtoAlgorithm: %lu\n", U(stats).dwRtoAlgorithm );
+        trace( "    dwRtoMin:       %lu\n", stats.dwRtoMin );
+        trace( "    dwRtoMax:       %lu\n", stats.dwRtoMax );
+        trace( "    dwMaxConn:      %lu\n", stats.dwMaxConn );
+        trace( "    dwActiveOpens:  %lu\n", stats.dwActiveOpens );
+        trace( "    dwPassiveOpens: %lu\n", stats.dwPassiveOpens );
+        trace( "    dwAttemptFails: %lu\n", stats.dwAttemptFails );
+        trace( "    dwEstabResets:  %lu\n", stats.dwEstabResets );
+        trace( "    dwCurrEstab:    %lu\n", stats.dwCurrEstab );
+        trace( "    dwInSegs:       %lu\n", stats.dwInSegs );
+        trace( "    dwOutSegs:      %lu\n", stats.dwOutSegs );
+        trace( "    dwRetransSegs:  %lu\n", stats.dwRetransSegs );
+        trace( "    dwInErrs:       %lu\n", stats.dwInErrs );
+        trace( "    dwOutRsts:      %lu\n", stats.dwOutRsts );
+        trace( "    dwNumConns:     %lu\n", stats.dwNumConns );
     }
 
     apiReturn = GetTcpStatisticsEx(&stats, AF_INET6);
-    todo_wine ok(apiReturn == NO_ERROR || broken(apiReturn == ERROR_NOT_SUPPORTED),
-                 "GetTcpStatisticsEx returned %d, expected NO_ERROR\n", apiReturn);
+    ok(apiReturn == NO_ERROR || broken(apiReturn == ERROR_NOT_SUPPORTED),
+       "GetTcpStatisticsEx returned %ld, expected NO_ERROR\n", apiReturn);
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "TCP IPv6 Ex stats:\n" );
-        trace( "    dwRtoAlgorithm: %u\n", U(stats).dwRtoAlgorithm );
-        trace( "    dwRtoMin:       %u\n", stats.dwRtoMin );
-        trace( "    dwRtoMax:       %u\n", stats.dwRtoMax );
-        trace( "    dwMaxConn:      %u\n", stats.dwMaxConn );
-        trace( "    dwActiveOpens:  %u\n", stats.dwActiveOpens );
-        trace( "    dwPassiveOpens: %u\n", stats.dwPassiveOpens );
-        trace( "    dwAttemptFails: %u\n", stats.dwAttemptFails );
-        trace( "    dwEstabResets:  %u\n", stats.dwEstabResets );
-        trace( "    dwCurrEstab:    %u\n", stats.dwCurrEstab );
-        trace( "    dwInSegs:       %u\n", stats.dwInSegs );
-        trace( "    dwOutSegs:      %u\n", stats.dwOutSegs );
-        trace( "    dwRetransSegs:  %u\n", stats.dwRetransSegs );
-        trace( "    dwInErrs:       %u\n", stats.dwInErrs );
-        trace( "    dwOutRsts:      %u\n", stats.dwOutRsts );
-        trace( "    dwNumConns:     %u\n", stats.dwNumConns );
+        trace( "    dwRtoAlgorithm: %lu\n", U(stats).dwRtoAlgorithm );
+        trace( "    dwRtoMin:       %lu\n", stats.dwRtoMin );
+        trace( "    dwRtoMax:       %lu\n", stats.dwRtoMax );
+        trace( "    dwMaxConn:      %lu\n", stats.dwMaxConn );
+        trace( "    dwActiveOpens:  %lu\n", stats.dwActiveOpens );
+        trace( "    dwPassiveOpens: %lu\n", stats.dwPassiveOpens );
+        trace( "    dwAttemptFails: %lu\n", stats.dwAttemptFails );
+        trace( "    dwEstabResets:  %lu\n", stats.dwEstabResets );
+        trace( "    dwCurrEstab:    %lu\n", stats.dwCurrEstab );
+        trace( "    dwInSegs:       %lu\n", stats.dwInSegs );
+        trace( "    dwOutSegs:      %lu\n", stats.dwOutSegs );
+        trace( "    dwRetransSegs:  %lu\n", stats.dwRetransSegs );
+        trace( "    dwInErrs:       %lu\n", stats.dwInErrs );
+        trace( "    dwOutRsts:      %lu\n", stats.dwOutRsts );
+        trace( "    dwNumConns:     %lu\n", stats.dwNumConns );
     }
 }
 
@@ -733,35 +746,35 @@ static void testGetUdpStatisticsEx(void)
 
     apiReturn = GetUdpStatisticsEx(NULL, AF_INET);
     ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetUdpStatisticsEx(NULL, AF_INET); returned %d, expected ERROR_INVALID_PARAMETER\n", apiReturn);
+       "GetUdpStatisticsEx(NULL, AF_INET); returned %ld, expected ERROR_INVALID_PARAMETER\n", apiReturn);
 
     apiReturn = GetUdpStatisticsEx(&stats, AF_BAN);
     ok(apiReturn == ERROR_INVALID_PARAMETER || apiReturn == ERROR_NOT_SUPPORTED,
-       "GetUdpStatisticsEx(&stats, AF_BAN) returned %d, expected ERROR_INVALID_PARAMETER\n", apiReturn);
+       "GetUdpStatisticsEx(&stats, AF_BAN) returned %ld, expected ERROR_INVALID_PARAMETER\n", apiReturn);
 
     apiReturn = GetUdpStatisticsEx(&stats, AF_INET);
-    ok(apiReturn == NO_ERROR, "GetUdpStatisticsEx returned %d, expected NO_ERROR\n", apiReturn);
+    ok(apiReturn == NO_ERROR, "GetUdpStatisticsEx returned %ld, expected NO_ERROR\n", apiReturn);
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "UDP IPv4 Ex stats:\n" );
-        trace( "    dwInDatagrams:  %u\n", stats.dwInDatagrams );
-        trace( "    dwNoPorts:      %u\n", stats.dwNoPorts );
-        trace( "    dwInErrors:     %u\n", stats.dwInErrors );
-        trace( "    dwOutDatagrams: %u\n", stats.dwOutDatagrams );
-        trace( "    dwNumAddrs:     %u\n", stats.dwNumAddrs );
+        trace( "    dwInDatagrams:  %lu\n", stats.dwInDatagrams );
+        trace( "    dwNoPorts:      %lu\n", stats.dwNoPorts );
+        trace( "    dwInErrors:     %lu\n", stats.dwInErrors );
+        trace( "    dwOutDatagrams: %lu\n", stats.dwOutDatagrams );
+        trace( "    dwNumAddrs:     %lu\n", stats.dwNumAddrs );
     }
 
     apiReturn = GetUdpStatisticsEx(&stats, AF_INET6);
     ok(apiReturn == NO_ERROR || broken(apiReturn == ERROR_NOT_SUPPORTED),
-       "GetUdpStatisticsEx returned %d, expected NO_ERROR\n", apiReturn);
+       "GetUdpStatisticsEx returned %ld, expected NO_ERROR\n", apiReturn);
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "UDP IPv6 Ex stats:\n" );
-        trace( "    dwInDatagrams:  %u\n", stats.dwInDatagrams );
-        trace( "    dwNoPorts:      %u\n", stats.dwNoPorts );
-        trace( "    dwInErrors:     %u\n", stats.dwInErrors );
-        trace( "    dwOutDatagrams: %u\n", stats.dwOutDatagrams );
-        trace( "    dwNumAddrs:     %u\n", stats.dwNumAddrs );
+        trace( "    dwInDatagrams:  %lu\n", stats.dwInDatagrams );
+        trace( "    dwNoPorts:      %lu\n", stats.dwNoPorts );
+        trace( "    dwInErrors:     %lu\n", stats.dwInErrors );
+        trace( "    dwOutDatagrams: %lu\n", stats.dwOutDatagrams );
+        trace( "    dwNumAddrs:     %lu\n", stats.dwNumAddrs );
     }
 }
 
@@ -776,23 +789,23 @@ static void testGetTcpTable(void)
         return;
     }
     ok(apiReturn == ERROR_INSUFFICIENT_BUFFER,
-       "GetTcpTable(NULL, &dwSize, FALSE) returned %d, expected ERROR_INSUFFICIENT_BUFFER\n",
+       "GetTcpTable(NULL, &dwSize, FALSE) returned %ld, expected ERROR_INSUFFICIENT_BUFFER\n",
        apiReturn);
     if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
         PMIB_TCPTABLE buf = HeapAlloc(GetProcessHeap(), 0, dwSize);
 
         apiReturn = GetTcpTable(buf, &dwSize, FALSE);
         ok(apiReturn == NO_ERROR,
-           "GetTcpTable(buf, &dwSize, FALSE) returned %d, expected NO_ERROR\n",
+           "GetTcpTable(buf, &dwSize, FALSE) returned %ld, expected NO_ERROR\n",
            apiReturn);
 
         if (apiReturn == NO_ERROR && winetest_debug > 1)
         {
             DWORD i;
-            trace( "TCP table: %u entries\n", buf->dwNumEntries );
+            trace( "TCP table: %lu entries\n", buf->dwNumEntries );
             for (i = 0; i < buf->dwNumEntries; i++)
             {
-                trace( "%u: local %s:%u remote %s:%u state %u\n", i,
+                trace( "%lu: local %s:%u remote %s:%u state %lu\n", i,
                        ntoa(buf->table[i].dwLocalAddr), ntohs(buf->table[i].dwLocalPort),
                        ntoa(buf->table[i].dwRemoteAddr), ntohs(buf->table[i].dwRemotePort),
                        U(buf->table[i]).dwState );
@@ -813,22 +826,22 @@ static void testGetUdpTable(void)
         return;
     }
     ok(apiReturn == ERROR_INSUFFICIENT_BUFFER,
-       "GetUdpTable(NULL, &dwSize, FALSE) returned %d, expected ERROR_INSUFFICIENT_BUFFER\n",
+       "GetUdpTable(NULL, &dwSize, FALSE) returned %ld, expected ERROR_INSUFFICIENT_BUFFER\n",
        apiReturn);
     if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
         PMIB_UDPTABLE buf = HeapAlloc(GetProcessHeap(), 0, dwSize);
 
         apiReturn = GetUdpTable(buf, &dwSize, FALSE);
         ok(apiReturn == NO_ERROR,
-           "GetUdpTable(buf, &dwSize, FALSE) returned %d, expected NO_ERROR\n",
+           "GetUdpTable(buf, &dwSize, FALSE) returned %ld, expected NO_ERROR\n",
            apiReturn);
 
         if (apiReturn == NO_ERROR && winetest_debug > 1)
         {
             DWORD i;
-            trace( "UDP table: %u entries\n", buf->dwNumEntries );
+            trace( "UDP table: %lu entries\n", buf->dwNumEntries );
             for (i = 0; i < buf->dwNumEntries; i++)
-                trace( "%u: %s:%u\n",
+                trace( "%lu: %s:%u\n",
                        i, ntoa( buf->table[i].dwLocalAddr ), ntohs(buf->table[i].dwLocalPort) );
         }
         HeapFree(GetProcessHeap(), 0, buf);
@@ -844,7 +857,7 @@ static void testSetTcpEntry(void)
     if(0) /* This test crashes in OS >= VISTA */
     {
         ret = SetTcpEntry(NULL);
-        ok( ret == ERROR_INVALID_PARAMETER, "got %u, expected %u\n", ret, ERROR_INVALID_PARAMETER);
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu, expected %u\n", ret, ERROR_INVALID_PARAMETER);
     }
 
     ret = SetTcpEntry(&row);
@@ -853,21 +866,43 @@ static void testSetTcpEntry(void)
         win_skip("SetTcpEntry failed with access error. Skipping test.\n");
         return;
     }
-    todo_wine ok( ret == ERROR_INVALID_PARAMETER, "got %u, expected %u\n", ret, ERROR_INVALID_PARAMETER);
+    todo_wine ok( ret == ERROR_INVALID_PARAMETER, "got %lu, expected %u\n", ret, ERROR_INVALID_PARAMETER);
 
     U(row).dwState = MIB_TCP_STATE_DELETE_TCB;
     ret = SetTcpEntry(&row);
     todo_wine ok( ret == ERROR_MR_MID_NOT_FOUND || broken(ret == ERROR_INVALID_PARAMETER),
-       "got %u, expected %u\n", ret, ERROR_MR_MID_NOT_FOUND);
+       "got %lu, expected %u\n", ret, ERROR_MR_MID_NOT_FOUND);
+}
+
+static BOOL icmp_send_echo_test_apc_expect;
+static void WINAPI icmp_send_echo_test_apc_xp(void *context)
+{
+    ok(icmp_send_echo_test_apc_expect, "Unexpected APC execution\n");
+    ok(context == (void*)0xdeadc0de, "Wrong context: %p\n", context);
+    icmp_send_echo_test_apc_expect = FALSE;
+}
+
+static void WINAPI icmp_send_echo_test_apc(void *context, IO_STATUS_BLOCK *io_status, ULONG reserved)
+{
+    icmp_send_echo_test_apc_xp(context);
+    ok(io_status->Status == 0, "Got IO Status 0x%08lx\n", io_status->Status);
+    ok(io_status->Information == sizeof(ICMP_ECHO_REPLY) + 32 /* sizeof(senddata) */,
+        "Got IO Information %Iu\n", io_status->Information);
 }
 
 static void testIcmpSendEcho(void)
 {
+    /* The APC's signature is different pre-Vista */
+    const PIO_APC_ROUTINE apc = broken(LOBYTE(LOWORD(GetVersion())) < 6)
+                                ? (PIO_APC_ROUTINE)icmp_send_echo_test_apc_xp
+                                : icmp_send_echo_test_apc;
     HANDLE icmp;
     char senddata[32], replydata[sizeof(senddata) + sizeof(ICMP_ECHO_REPLY)];
+    char replydata2[sizeof(replydata) + sizeof(IO_STATUS_BLOCK)];
     DWORD ret, error, replysz = sizeof(replydata);
     IPAddr address;
     ICMP_ECHO_REPLY *reply;
+    HANDLE event;
     INT i;
 
     memset(senddata, 0, sizeof(senddata));
@@ -879,19 +914,19 @@ static void testIcmpSendEcho(void)
     ok (!ret, "IcmpSendEcho succeeded unexpectedly\n");
     ok (error == ERROR_INVALID_PARAMETER
         || broken(error == ERROR_INVALID_HANDLE) /* <= 2003 */,
-        "expected 87, got %d\n", error);
+        "expected 87, got %ld\n", error);
+
+    address = htonl(INADDR_LOOPBACK);
+    SetLastError(0xdeadbeef);
+    ret = IcmpSendEcho2(INVALID_HANDLE_VALUE, NULL, NULL, NULL, address, senddata, sizeof(senddata), NULL, replydata, replysz, 1000);
+    error = GetLastError();
+    ok (!ret, "IcmpSendEcho2 succeeded unexpectedly\n");
+    ok (error == ERROR_INVALID_PARAMETER
+        || broken(error == ERROR_INVALID_HANDLE) /* <= 2003 */,
+        "expected 87, got %ld\n", error);
 
     icmp = IcmpCreateFile();
-    if (icmp == INVALID_HANDLE_VALUE)
-    {
-        error = GetLastError();
-        if (error == ERROR_ACCESS_DENIED)
-        {
-            skip ("ICMP is not available.\n");
-            return;
-        }
-    }
-    ok (icmp != INVALID_HANDLE_VALUE, "IcmpCreateFile failed unexpectedly with error %d\n", GetLastError());
+    ok (icmp != INVALID_HANDLE_VALUE, "IcmpCreateFile failed unexpectedly with error %ld\n", GetLastError());
 
     address = 0;
     SetLastError(0xdeadbeef);
@@ -900,7 +935,7 @@ static void testIcmpSendEcho(void)
     ok (!ret, "IcmpSendEcho succeeded unexpectedly\n");
     ok (error == ERROR_INVALID_NETNAME
         || broken(error == IP_BAD_DESTINATION) /* <= 2003 */,
-        "expected 1214, got %d\n", error);
+        "expected 1214, got %ld\n", error);
 
     address = htonl(INADDR_LOOPBACK);
     if (0) /* crashes in XP */
@@ -912,18 +947,23 @@ static void testIcmpSendEcho(void)
     SetLastError(0xdeadbeef);
     ret = IcmpSendEcho(icmp, address, senddata, 0, NULL, replydata, replysz, 1000);
     error = GetLastError();
-    ok (ret, "IcmpSendEcho failed unexpectedly with error %d\n", error);
+    if (!ret && error == ERROR_ACCESS_DENIED)
+    {
+        skip( "ICMP is not available.\n" );
+        return;
+    }
+    ok (ret, "IcmpSendEcho failed unexpectedly with error %ld\n", error);
 
     SetLastError(0xdeadbeef);
     ret = IcmpSendEcho(icmp, address, NULL, 0, NULL, replydata, replysz, 1000);
     error = GetLastError();
-    ok (ret, "IcmpSendEcho failed unexpectedly with error %d\n", error);
+    ok (ret, "IcmpSendEcho failed unexpectedly with error %ld\n", error);
 
     SetLastError(0xdeadbeef);
     ret = IcmpSendEcho(icmp, address, senddata, sizeof(senddata), NULL, NULL, replysz, 1000);
     error = GetLastError();
     ok (!ret, "IcmpSendEcho succeeded unexpectedly\n");
-    ok (error == ERROR_INVALID_PARAMETER, "expected 87, got %d\n", error);
+    ok (error == ERROR_INVALID_PARAMETER, "expected 87, got %ld\n", error);
 
     SetLastError(0xdeadbeef);
     ret = IcmpSendEcho(icmp, address, senddata, sizeof(senddata), NULL, replydata, 0, 1000);
@@ -931,7 +971,7 @@ static void testIcmpSendEcho(void)
     ok (!ret, "IcmpSendEcho succeeded unexpectedly\n");
     ok (error == ERROR_INVALID_PARAMETER
         || broken(error == ERROR_INSUFFICIENT_BUFFER) /* <= 2003 */,
-        "expected 87, got %d\n", error);
+        "expected 87, got %ld\n", error);
 
     SetLastError(0xdeadbeef);
     ret = IcmpSendEcho(icmp, address, senddata, sizeof(senddata), NULL, NULL, 0, 1000);
@@ -939,7 +979,7 @@ static void testIcmpSendEcho(void)
     ok (!ret, "IcmpSendEcho succeeded unexpectedly\n");
     ok (error == ERROR_INVALID_PARAMETER
         || broken(error == ERROR_INSUFFICIENT_BUFFER) /* <= 2003 */,
-        "expected 87, got %d\n", error);
+        "expected 87, got %ld\n", error);
 
     SetLastError(0xdeadbeef);
     replysz = sizeof(replydata) - 1;
@@ -948,19 +988,19 @@ static void testIcmpSendEcho(void)
     ok (!ret, "IcmpSendEcho succeeded unexpectedly\n");
     ok (error == IP_GENERAL_FAILURE
         || broken(error == IP_BUF_TOO_SMALL) /* <= 2003 */,
-        "expected 11050, got %d\n", error);
+        "expected 11050, got %ld\n", error);
 
     SetLastError(0xdeadbeef);
     replysz = sizeof(ICMP_ECHO_REPLY);
     ret = IcmpSendEcho(icmp, address, senddata, 0, NULL, replydata, replysz, 1000);
     error = GetLastError();
-    ok (ret, "IcmpSendEcho failed unexpectedly with error %d\n", error);
+    ok (ret, "IcmpSendEcho failed unexpectedly with error %ld\n", error);
 
     SetLastError(0xdeadbeef);
     replysz = sizeof(ICMP_ECHO_REPLY) + ICMP_MINLEN;
     ret = IcmpSendEcho(icmp, address, senddata, ICMP_MINLEN, NULL, replydata, replysz, 1000);
     error = GetLastError();
-    ok (ret, "IcmpSendEcho failed unexpectedly with error %d\n", error);
+    ok (ret, "IcmpSendEcho failed unexpectedly with error %ld\n", error);
 
     SetLastError(0xdeadbeef);
     replysz = sizeof(ICMP_ECHO_REPLY) + ICMP_MINLEN;
@@ -969,7 +1009,7 @@ static void testIcmpSendEcho(void)
     ok (!ret, "IcmpSendEcho succeeded unexpectedly\n");
     ok (error == IP_GENERAL_FAILURE
         || broken(error == IP_BUF_TOO_SMALL) /* <= 2003 */,
-        "expected 11050, got %d\n", error);
+        "expected 11050, got %ld\n", error);
 
     SetLastError(0xdeadbeef);
     ret = IcmpSendEcho(icmp, address, senddata, ICMP_MINLEN, NULL, replydata, replysz - 1, 1000);
@@ -977,19 +1017,19 @@ static void testIcmpSendEcho(void)
     ok (!ret, "IcmpSendEcho succeeded unexpectedly\n");
     ok (error == IP_GENERAL_FAILURE
         || broken(error == IP_BUF_TOO_SMALL) /* <= 2003 */,
-        "expected 11050, got %d\n", error);
+        "expected 11050, got %ld\n", error);
 
     /* in windows >= vista the timeout can't be invalid */
     SetLastError(0xdeadbeef);
     replysz = sizeof(replydata);
     ret = IcmpSendEcho(icmp, address, senddata, sizeof(senddata), NULL, replydata, replysz, 0);
     error = GetLastError();
-    if (!ret) ok(error == ERROR_INVALID_PARAMETER, "expected 87, got %d\n", error);
+    if (!ret) ok(error == ERROR_INVALID_PARAMETER, "expected 87, got %ld\n", error);
 
     SetLastError(0xdeadbeef);
     ret = IcmpSendEcho(icmp, address, senddata, sizeof(senddata), NULL, replydata, replysz, -1);
     error = GetLastError();
-    if (!ret) ok(error == ERROR_INVALID_PARAMETER, "expected 87, got %d\n", error);
+    if (!ret) ok(error == ERROR_INVALID_PARAMETER, "expected 87, got %ld\n", error);
 
     /* real ping test */
     SetLastError(0xdeadbeef);
@@ -998,16 +1038,16 @@ static void testIcmpSendEcho(void)
     error = GetLastError();
     if (!ret)
     {
-        skip ("Failed to ping with error %d, is lo interface down?.\n", error);
+        skip ("Failed to ping with error %ld, is lo interface down?.\n", error);
     }
     else if (winetest_debug > 1)
     {
         PICMP_ECHO_REPLY pong = (PICMP_ECHO_REPLY) replydata;
         trace ("send addr  : %s\n", ntoa(address));
         trace ("reply addr : %s\n", ntoa(pong->Address));
-        trace ("reply size : %u\n", replysz);
-        trace ("roundtrip  : %u ms\n", pong->RoundTripTime);
-        trace ("status     : %u\n", pong->Status);
+        trace ("reply size : %lu\n", replysz);
+        trace ("roundtrip  : %lu ms\n", pong->RoundTripTime);
+        trace ("status     : %lu\n", pong->Status);
         trace ("recv size  : %u\n", pong->DataSize);
         trace ("ttl        : %u\n", pong->Options.Ttl);
         trace ("flags      : 0x%x\n", pong->Options.Flags);
@@ -1021,30 +1061,266 @@ static void testIcmpSendEcho(void)
     error = GetLastError();
     reply = (ICMP_ECHO_REPLY *)replydata;
     ok(ret, "IcmpSendEcho failed unexpectedly\n");
-    ok(error == NO_ERROR, "Expect last error:0x%08x, got:0x%08x\n", NO_ERROR, error);
+    ok(error == NO_ERROR, "Expect last error:0x%08x, got:0x%08lx\n", NO_ERROR, error);
     ok(INADDR_LOOPBACK == ntohl(reply->Address), "Address mismatch, expect:%s, got: %s\n", ntoa(INADDR_LOOPBACK),
        ntoa(reply->Address));
-    ok(reply->Status == IP_SUCCESS, "Expect status:0x%08x, got:0x%08x\n", IP_SUCCESS, reply->Status);
+    ok(reply->Status == IP_SUCCESS, "Expect status:0x%08x, got:0x%08lx\n", IP_SUCCESS, reply->Status);
     ok(reply->DataSize == sizeof(senddata), "Got size:%d\n", reply->DataSize);
     ok(!memcmp(senddata, reply->Data, min(sizeof(senddata), reply->DataSize)), "Data mismatch\n");
+
+
+    /*
+     * IcmpSendEcho2
+    */
+    address = 0;
+    replysz = sizeof(replydata2);
+    memset(senddata, 0, sizeof(senddata));
+
+    SetLastError(0xdeadbeef);
+    ret = IcmpSendEcho2(icmp, NULL, NULL, NULL, address, senddata, sizeof(senddata), NULL, replydata2, replysz, 1000);
+    error = GetLastError();
+    ok(!ret, "IcmpSendEcho2 succeeded unexpectedly\n");
+    ok(error == ERROR_INVALID_NETNAME
+        || broken(error == IP_BAD_DESTINATION) /* <= 2003 */,
+        "expected 1214, got %ld\n", error);
+
+    event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    ok(event != NULL, "CreateEventW failed unexpectedly with error %ld\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = IcmpSendEcho2(icmp, event, NULL, NULL, address, senddata, sizeof(senddata), NULL, replydata2, replysz, 1000);
+    error = GetLastError();
+    ok(!ret, "IcmpSendEcho2 returned success unexpectedly\n");
+    ok(error == ERROR_INVALID_NETNAME
+        || broken(error == ERROR_IO_PENDING) /* <= 2003 */,
+        "Got last error: 0x%08lx\n", error);
+    if (error == ERROR_IO_PENDING)
+    {
+        ret = WaitForSingleObjectEx(event, 2000, TRUE);
+        ok(ret == WAIT_OBJECT_0, "WaitForSingleObjectEx failed unexpectedly with %lu\n", ret);
+    }
+
+    address = htonl(INADDR_LOOPBACK);
+    SetLastError(0xdeadbeef);
+    ret = IcmpSendEcho2(icmp, NULL, NULL, NULL, address, senddata, sizeof(senddata), NULL, NULL, replysz, 1000);
+    error = GetLastError();
+    ok(!ret, "IcmpSendEcho2 succeeded unexpectedly\n");
+    ok(error == ERROR_INVALID_PARAMETER
+        || broken(error == ERROR_NOACCESS) /* <= 2003 */,
+        "expected 87, got %ld\n", error);
+
+    SetLastError(0xdeadbeef);
+    ret = IcmpSendEcho2(icmp, event, NULL, NULL, address, senddata, sizeof(senddata), NULL, NULL, replysz, 1000);
+    error = GetLastError();
+    ok(!ret, "IcmpSendEcho2 succeeded unexpectedly\n");
+    ok(error == ERROR_INVALID_PARAMETER
+        || broken(error == ERROR_NOACCESS) /* <= 2003 */,
+        "expected 87, got %ld\n", error);
+    ok(WaitForSingleObjectEx(event, 0, TRUE) == WAIT_TIMEOUT, "Event was unexpectedly signalled.\n");
+
+    SetLastError(0xdeadbeef);
+    ret = IcmpSendEcho2(icmp, NULL, NULL, NULL, address, senddata, sizeof(senddata), NULL, replydata2, 0, 1000);
+    error = GetLastError();
+    ok(!ret, "IcmpSendEcho2 succeeded unexpectedly\n");
+    ok(error == ERROR_INVALID_PARAMETER
+        || broken(error == ERROR_INSUFFICIENT_BUFFER) /* <= 2003 */,
+        "expected 87, got %ld\n", error);
+
+    SetLastError(0xdeadbeef);
+    ret = IcmpSendEcho2(icmp, event, NULL, NULL, address, senddata, sizeof(senddata), NULL, replydata2, 0, 1000);
+    error = GetLastError();
+    ok(!ret, "IcmpSendEcho2 succeeded unexpectedly\n");
+    ok(error == ERROR_INVALID_PARAMETER
+        || broken(error == ERROR_INSUFFICIENT_BUFFER) /* <= 2003 */,
+        "expected 87, got %ld\n", error);
+    ok(WaitForSingleObjectEx(event, 0, TRUE) == WAIT_TIMEOUT, "Event was unexpectedly signalled.\n");
+
+    SetLastError(0xdeadbeef);
+    ret = IcmpSendEcho2(icmp, NULL, NULL, NULL, address, senddata, sizeof(senddata), NULL, NULL, 0, 1000);
+    error = GetLastError();
+    ok(!ret, "IcmpSendEcho2 succeeded unexpectedly\n");
+    ok(error == ERROR_INVALID_PARAMETER
+        || broken(error == ERROR_INSUFFICIENT_BUFFER) /* <= 2003 */,
+        "expected 87, got %ld\n", error);
+
+    SetLastError(0xdeadbeef);
+    ret = IcmpSendEcho2(icmp, event, NULL, NULL, address, senddata, sizeof(senddata), NULL, NULL, 0, 1000);
+    error = GetLastError();
+    ok(!ret, "IcmpSendEcho2 succeeded unexpectedly\n");
+    ok(error == ERROR_INVALID_PARAMETER
+        || broken(error == ERROR_INSUFFICIENT_BUFFER) /* <= 2003 */,
+        "expected 87, got %ld\n", error);
+    ok(WaitForSingleObjectEx(event, 0, TRUE) == WAIT_TIMEOUT, "Event was unexpectedly signalled.\n");
+
+    /* synchronous tests */
+    SetLastError(0xdeadbeef);
+    address = htonl(INADDR_LOOPBACK);
+    replysz = sizeof(ICMP_ECHO_REPLY) + sizeof(IO_STATUS_BLOCK);
+    ret = IcmpSendEcho2(icmp, NULL, NULL, NULL, address, senddata, 0, NULL, replydata2, replysz, 1000);
+    ok(ret, "IcmpSendEcho2 failed unexpectedly with error %ld\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = IcmpSendEcho2(icmp, NULL, NULL, NULL, address, NULL, 0, NULL, replydata2, replysz, 1000);
+    ok(ret, "IcmpSendEcho2 failed unexpectedly with error %ld\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = IcmpSendEcho2(icmp, NULL, NULL, NULL, address, senddata, 0, NULL, replydata2, replysz, 1000);
+    ok(ret, "IcmpSendEcho2 failed unexpectedly with error %ld\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    replysz = sizeof(ICMP_ECHO_REPLY) + sizeof(IO_STATUS_BLOCK) + ICMP_MINLEN;
+    ret = IcmpSendEcho2(icmp, NULL, NULL, NULL, address, senddata, ICMP_MINLEN, NULL, replydata2, replysz, 1000);
+    ok(ret, "IcmpSendEcho2 failed unexpectedly with error %ld\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    replysz = sizeof(replydata2);
+    ret = IcmpSendEcho2(icmp, NULL, NULL, NULL, address, senddata, sizeof(senddata), NULL, replydata2, replysz, 1000);
+    if (!ret)
+    {
+        error = GetLastError();
+        skip("Failed to ping with error %ld, is lo interface down?\n", error);
+    }
+    else if (winetest_debug > 1)
+    {
+        reply = (ICMP_ECHO_REPLY*)replydata2;
+        trace("send addr  : %s\n", ntoa(address));
+        trace("reply addr : %s\n", ntoa(reply->Address));
+        trace("reply size : %lu\n", replysz);
+        trace("roundtrip  : %lu ms\n", reply->RoundTripTime);
+        trace("status     : %lu\n", reply->Status);
+        trace("recv size  : %u\n", reply->DataSize);
+        trace("ttl        : %u\n", reply->Options.Ttl);
+        trace("flags      : 0x%x\n", reply->Options.Flags);
+    }
+
+    SetLastError(0xdeadbeef);
+    for (i = 0; i < ARRAY_SIZE(senddata); i++) senddata[i] = i & 0xff;
+    ret = IcmpSendEcho2(icmp, NULL, NULL, NULL, address, senddata, sizeof(senddata), NULL, replydata2, replysz, 1000);
+    error = GetLastError();
+    reply = (ICMP_ECHO_REPLY*)replydata2;
+    ok(ret, "IcmpSendEcho2 failed unexpectedly\n");
+    ok(error == NO_ERROR, "Expect last error: 0x%08x, got: 0x%08lx\n", NO_ERROR, error);
+    ok(ntohl(reply->Address) == INADDR_LOOPBACK, "Address mismatch, expect: %s, got: %s\n", ntoa(INADDR_LOOPBACK),
+       ntoa(reply->Address));
+    ok(reply->Status == IP_SUCCESS, "Expect status: 0x%08x, got: 0x%08lx\n", IP_SUCCESS, reply->Status);
+    ok(reply->DataSize == sizeof(senddata), "Got size: %d\n", reply->DataSize);
+    ok(!memcmp(senddata, reply->Data, min(sizeof(senddata), reply->DataSize)), "Data mismatch\n");
+
+    /* asynchronous tests with event */
+    SetLastError(0xdeadbeef);
+    replysz = sizeof(replydata2);
+    address = htonl(INADDR_LOOPBACK);
+    memset(senddata, 0, sizeof(senddata));
+    ret = IcmpSendEcho2(icmp, event, NULL, NULL, address, senddata, sizeof(senddata), NULL, replydata2, replysz, 1000);
+    error = GetLastError();
+    if (!ret && error != ERROR_IO_PENDING)
+    {
+        skip("Failed to ping with error %ld, is lo interface down?\n", error);
+    }
+    else
+    {
+        ok(!ret, "IcmpSendEcho2 returned success unexpectedly\n");
+        ok(error == ERROR_IO_PENDING, "Expect last error: 0x%08x, got: 0x%08lx\n", ERROR_IO_PENDING, error);
+        ret = WaitForSingleObjectEx(event, 2000, TRUE);
+        ok(ret == WAIT_OBJECT_0, "WaitForSingleObjectEx failed unexpectedly with %lu\n", ret);
+        reply = (ICMP_ECHO_REPLY*)replydata2;
+        ok(ntohl(reply->Address) == INADDR_LOOPBACK, "Address mismatch, expect: %s, got: %s\n", ntoa(INADDR_LOOPBACK),
+           ntoa(reply->Address));
+        ok(reply->Status == IP_SUCCESS, "Expect status: 0x%08x, got: 0x%08lx\n", IP_SUCCESS, reply->Status);
+        ok(reply->DataSize == sizeof(senddata), "Got size: %d\n", reply->DataSize);
+        if (winetest_debug > 1)
+        {
+            reply = (ICMP_ECHO_REPLY*)replydata2;
+            trace("send addr  : %s\n", ntoa(address));
+            trace("reply addr : %s\n", ntoa(reply->Address));
+            trace("reply size : %lu\n", replysz);
+            trace("roundtrip  : %lu ms\n", reply->RoundTripTime);
+            trace("status     : %lu\n", reply->Status);
+            trace("recv size  : %u\n", reply->DataSize);
+            trace("ttl        : %u\n", reply->Options.Ttl);
+            trace("flags      : 0x%x\n", reply->Options.Flags);
+        }
+    }
+
+    SetLastError(0xdeadbeef);
+    for (i = 0; i < ARRAY_SIZE(senddata); i++) senddata[i] = i & 0xff;
+    ret = IcmpSendEcho2(icmp, event, NULL, NULL, address, senddata, sizeof(senddata), NULL, replydata2, replysz, 1000);
+    error = GetLastError();
+    ok(!ret, "IcmpSendEcho2 returned success unexpectedly\n");
+    ok(error == ERROR_IO_PENDING, "Expect last error: 0x%08x, got: 0x%08lx\n", ERROR_IO_PENDING, error);
+    ret = WaitForSingleObjectEx(event, 2000, TRUE);
+    ok(ret == WAIT_OBJECT_0, "WaitForSingleObjectEx failed unexpectedly with %lu\n", ret);
+    reply = (ICMP_ECHO_REPLY*)replydata2;
+    ok(ntohl(reply->Address) == INADDR_LOOPBACK, "Address mismatch, expect: %s, got: %s\n", ntoa(INADDR_LOOPBACK),
+       ntoa(reply->Address));
+    ok(reply->Status == IP_SUCCESS, "Expect status: 0x%08x, got: 0x%08lx\n", IP_SUCCESS, reply->Status);
+    ok(reply->DataSize == sizeof(senddata), "Got size: %d\n", reply->DataSize);
+    /* pre-Vista, reply->Data is an offset; otherwise it's a pointer, so hardcode the offset */
+    ok(!memcmp(senddata, reply + 1, min(sizeof(senddata), reply->DataSize)), "Data mismatch\n");
+
+    CloseHandle(event);
+
+    /* asynchronous tests with APC */
+    SetLastError(0xdeadbeef);
+    replysz = sizeof(replydata2) + 10;
+    address = htonl(INADDR_LOOPBACK);
+    for (i = 0; i < ARRAY_SIZE(senddata); i++) senddata[i] = ~i & 0xff;
+    icmp_send_echo_test_apc_expect = TRUE;
+    /*
+       NOTE: Supplying both event and apc has varying behavior across Windows versions, so not tested.
+    */
+    ret = IcmpSendEcho2(icmp, NULL, apc, (void*)0xdeadc0de, address, senddata, sizeof(senddata), NULL, replydata2, replysz, 1000);
+    error = GetLastError();
+    ok(!ret, "IcmpSendEcho2 returned success unexpectedly\n");
+    ok(error == ERROR_IO_PENDING, "Expect last error: 0x%08x, got: 0x%08lx\n", ERROR_IO_PENDING, error);
+    SleepEx(200, TRUE);
+    SleepEx(0, TRUE);
+    ok(icmp_send_echo_test_apc_expect == FALSE, "APC was not executed!\n");
+    reply = (ICMP_ECHO_REPLY*)replydata2;
+    ok(ntohl(reply->Address) == INADDR_LOOPBACK, "Address mismatch, expect: %s, got: %s\n", ntoa(INADDR_LOOPBACK),
+       ntoa(reply->Address));
+    ok(reply->Status == IP_SUCCESS, "Expect status: 0x%08x, got: 0x%08lx\n", IP_SUCCESS, reply->Status);
+    ok(reply->DataSize == sizeof(senddata), "Got size: %d\n", reply->DataSize);
+    /* pre-Vista, reply->Data is an offset; otherwise it's a pointer, so hardcode the offset */
+    ok(!memcmp(senddata, reply + 1, min(sizeof(senddata), reply->DataSize)), "Data mismatch\n");
 
     IcmpCloseHandle(icmp);
 }
 
-/*
-still-to-be-tested NT4-onward functions:
-CreateIpForwardEntry
-DeleteIpForwardEntry
-CreateIpNetEntry
-DeleteIpNetEntry
-GetFriendlyIfIndex
-GetRTTAndHopCount
-SetIfEntry
-SetIpForwardEntry
-SetIpNetEntry
-SetIpStatistics
-SetIpTTL
-*/
+static void testIcmpParseReplies( void )
+{
+    ICMP_ECHO_REPLY reply = { 0 };
+    DWORD ret;
+
+    SetLastError( 0xdeadbeef );
+    ret = IcmpParseReplies( &reply, sizeof(reply) );
+    ok( ret == 0, "ret %ld\n", ret );
+    ok( GetLastError() == 0, "gle %ld\n", GetLastError() );
+
+    reply.Status = 12345;
+    SetLastError( 0xdeadbeef );
+    ret = IcmpParseReplies( &reply, sizeof(reply) );
+    ok( ret == 0, "ret %ld\n", ret );
+    ok( GetLastError() == 12345, "gle %ld\n", GetLastError() );
+    ok( reply.Status == 12345, "status %ld\n", reply.Status );
+
+    reply.Reserved = 1;
+    SetLastError( 0xdeadbeef );
+    ret = IcmpParseReplies( &reply, sizeof(reply) );
+    ok( ret == 1, "ret %ld\n", ret );
+    ok( GetLastError() == 0xdeadbeef, "gle %ld\n", GetLastError() );
+    ok( reply.Status == 12345, "status %ld\n", reply.Status );
+    ok( !reply.Reserved, "reserved %d\n", reply.Reserved );
+
+    reply.Reserved = 3;
+    SetLastError( 0xdeadbeef );
+    ret = IcmpParseReplies( &reply, sizeof(reply) );
+    ok( ret == 3, "ret %ld\n", ret );
+    ok( GetLastError() == 0xdeadbeef, "gle %ld\n", GetLastError() );
+    ok( reply.Status == 12345, "status %ld\n", reply.Status );
+    ok( !reply.Reserved, "reserved %d\n", reply.Reserved );
+}
+
 static void testWinNT4Functions(void)
 {
   testGetNumberOfInterfaces();
@@ -1064,12 +1340,13 @@ static void testWinNT4Functions(void)
   testGetUdpTable();
   testSetTcpEntry();
   testIcmpSendEcho();
+  testIcmpParseReplies();
 }
 
 static void testGetInterfaceInfo(void)
 {
     DWORD apiReturn;
-    ULONG len = 0;
+    ULONG len = 0, i;
 
     apiReturn = GetInterfaceInfo(NULL, NULL);
     if (apiReturn == ERROR_NOT_SUPPORTED) {
@@ -1077,62 +1354,78 @@ static void testGetInterfaceInfo(void)
         return;
     }
     ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetInterfaceInfo returned %d, expected ERROR_INVALID_PARAMETER\n",
+       "GetInterfaceInfo returned %ld, expected ERROR_INVALID_PARAMETER\n",
        apiReturn);
     apiReturn = GetInterfaceInfo(NULL, &len);
     ok(apiReturn == ERROR_INSUFFICIENT_BUFFER,
-       "GetInterfaceInfo returned %d, expected ERROR_INSUFFICIENT_BUFFER\n",
+       "GetInterfaceInfo returned %ld, expected ERROR_INSUFFICIENT_BUFFER\n",
        apiReturn);
     if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
         PIP_INTERFACE_INFO buf = HeapAlloc(GetProcessHeap(), 0, len);
 
         apiReturn = GetInterfaceInfo(buf, &len);
         ok(apiReturn == NO_ERROR,
-           "GetInterfaceInfo(buf, &dwSize) returned %d, expected NO_ERROR\n",
+           "GetInterfaceInfo(buf, &dwSize) returned %ld, expected NO_ERROR\n",
            apiReturn);
+
+        for (i = 0; i < buf->NumAdapters; i++)
+        {
+            MIB_IFROW row = { .dwIndex = buf->Adapter[i].Index };
+            GetIfEntry( &row );
+            ok( !wcscmp( buf->Adapter[i].Name, row.wszName ), "got %s vs %s\n",
+                debugstr_w( buf->Adapter[i].Name ), debugstr_w( row.wszName ) );
+            ok( row.dwType != IF_TYPE_SOFTWARE_LOOPBACK, "got loopback\n" );
+        }
         HeapFree(GetProcessHeap(), 0, buf);
     }
 }
 
 static void testGetAdaptersInfo(void)
 {
-    DWORD apiReturn;
+    IP_ADAPTER_INFO *ptr, *buf;
+    NET_LUID luid;
+    GUID guid;
+    char name[ARRAY_SIZE(ptr->AdapterName)];
+    DWORD err;
     ULONG len = 0;
+    MIB_IFROW row;
 
-    apiReturn = GetAdaptersInfo(NULL, NULL);
-    if (apiReturn == ERROR_NOT_SUPPORTED) {
-        skip("GetAdaptersInfo is not supported\n");
-        return;
-    }
-    ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetAdaptersInfo returned %d, expected ERROR_INVALID_PARAMETER\n",
-       apiReturn);
-    apiReturn = GetAdaptersInfo(NULL, &len);
-    ok(apiReturn == ERROR_NO_DATA || apiReturn == ERROR_BUFFER_OVERFLOW,
-       "GetAdaptersInfo returned %d, expected ERROR_NO_DATA or ERROR_BUFFER_OVERFLOW\n",
-       apiReturn);
-    if (apiReturn == ERROR_NO_DATA)
-        ; /* no adapter's, that's okay */
-    else if (apiReturn == ERROR_BUFFER_OVERFLOW) {
-        PIP_ADAPTER_INFO ptr, buf = HeapAlloc(GetProcessHeap(), 0, len);
+    err = GetAdaptersInfo( NULL, NULL );
+    ok( err == ERROR_INVALID_PARAMETER, "got %ld\n", err );
+    err = GetAdaptersInfo( NULL, &len );
+    ok( err == ERROR_NO_DATA || err == ERROR_BUFFER_OVERFLOW, "got %ld\n", err );
+    if (err == ERROR_NO_DATA) return;
 
-        apiReturn = GetAdaptersInfo(buf, &len);
-        ok(apiReturn == NO_ERROR,
-           "GetAdaptersInfo(buf, &dwSize) returned %d, expected NO_ERROR\n",
-           apiReturn);
-        ptr = buf;
-        while (ptr) {
-            ok(ptr->IpAddressList.IpAddress.String[0], "A valid IP address must be present\n");
-            ok(ptr->IpAddressList.IpMask.String[0], "A valid mask must be present\n");
-            ok(ptr->GatewayList.IpAddress.String[0], "A valid IP address must be present\n");
-            ok(ptr->GatewayList.IpMask.String[0], "A valid mask must be present\n");
-            trace("adapter '%s', address %s/%s gateway %s/%s\n", ptr->AdapterName,
-                  ptr->IpAddressList.IpAddress.String, ptr->IpAddressList.IpMask.String,
-                  ptr->GatewayList.IpAddress.String, ptr->GatewayList.IpMask.String);
-            ptr = ptr->Next;
-        }
-        HeapFree(GetProcessHeap(), 0, buf);
+    buf = malloc( len );
+    err = GetAdaptersInfo( buf, &len );
+    ok( !err, "got %ld\n", err );
+    ptr = buf;
+    while (ptr)
+    {
+        trace( "adapter '%s', address %s/%s gateway %s/%s\n", ptr->AdapterName,
+               ptr->IpAddressList.IpAddress.String, ptr->IpAddressList.IpMask.String,
+               ptr->GatewayList.IpAddress.String, ptr->GatewayList.IpMask.String );
+        row.dwIndex = ptr->Index;
+        GetIfEntry( &row );
+        ConvertInterfaceIndexToLuid( ptr->Index, &luid );
+        ConvertInterfaceLuidToGuid( &luid, &guid );
+        sprintf( name, "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+                 guid.Data1, guid.Data2, guid.Data3, guid.Data4[0], guid.Data4[1],
+                 guid.Data4[2], guid.Data4[3], guid.Data4[4], guid.Data4[5],
+                 guid.Data4[6], guid.Data4[7] );
+        ok( !strcmp( ptr->AdapterName, name ), "expected '%s' got '%s'\n", ptr->AdapterName, name );
+        ok( !strcmp( ptr->Description, (char *)row.bDescr ), "got %s vs %s\n", ptr->Description, (char *)row.bDescr );
+        ok( ptr->AddressLength == row.dwPhysAddrLen, "got %d vs %ld\n", ptr->AddressLength, row.dwPhysAddrLen );
+        ok( !memcmp(ptr->Address, row.bPhysAddr, ptr->AddressLength ), "mismatch\n" );
+        ok( ptr->Type == row.dwType, "got %d vs %ld\n", ptr->Type, row.dwType );
+        ok( ptr->Type != MIB_IF_TYPE_LOOPBACK, "shouldn't get loopback\n" );
+        ok( ptr->IpAddressList.IpAddress.String[0], "A valid IP address must be present\n" );
+        ok( ptr->IpAddressList.IpMask.String[0], "A valid mask must be present\n" );
+        ok( ptr->GatewayList.IpAddress.String[0], "A valid IP address must be present\n" );
+        ok( ptr->GatewayList.IpMask.String[0], "A valid mask must be present\n" );
+        ptr = ptr->Next;
     }
+    free( buf );
 }
 
 static void testGetNetworkParams(void)
@@ -1146,18 +1439,18 @@ static void testGetNetworkParams(void)
         return;
     }
     ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetNetworkParams returned %d, expected ERROR_INVALID_PARAMETER\n",
+       "GetNetworkParams returned %ld, expected ERROR_INVALID_PARAMETER\n",
        apiReturn);
     apiReturn = GetNetworkParams(NULL, &len);
     ok(apiReturn == ERROR_BUFFER_OVERFLOW,
-       "GetNetworkParams returned %d, expected ERROR_BUFFER_OVERFLOW\n",
+       "GetNetworkParams returned %ld, expected ERROR_BUFFER_OVERFLOW\n",
        apiReturn);
     if (apiReturn == ERROR_BUFFER_OVERFLOW) {
         PFIXED_INFO buf = HeapAlloc(GetProcessHeap(), 0, len);
 
         apiReturn = GetNetworkParams(buf, &len);
         ok(apiReturn == NO_ERROR,
-           "GetNetworkParams(buf, &dwSize) returned %d, expected NO_ERROR\n",
+           "GetNetworkParams(buf, &dwSize) returned %ld, expected NO_ERROR\n",
            apiReturn);
         HeapFree(GetProcessHeap(), 0, buf);
     }
@@ -1184,19 +1477,15 @@ static void testGetPerAdapterInfo(void)
     void *buffer;
 
     ret = GetPerAdapterInfo(1, NULL, NULL);
-    if (ret == ERROR_NOT_SUPPORTED) {
-      skip("GetPerAdapterInfo is not supported\n");
-      return;
-    }
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u instead of ERROR_INVALID_PARAMETER\n", ret );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu instead of ERROR_INVALID_PARAMETER\n", ret );
     needed = 0xdeadbeef;
     ret = GetPerAdapterInfo(1, NULL, &needed);
     if (ret == ERROR_NO_DATA) return;  /* no such adapter */
-    ok( ret == ERROR_BUFFER_OVERFLOW, "got %u instead of ERROR_BUFFER_OVERFLOW\n", ret );
+    ok( ret == ERROR_BUFFER_OVERFLOW, "got %lu instead of ERROR_BUFFER_OVERFLOW\n", ret );
     ok( needed != 0xdeadbeef, "needed not set\n" );
     buffer = HeapAlloc( GetProcessHeap(), 0, needed );
     ret = GetPerAdapterInfo(1, buffer, &needed);
-    ok( ret == NO_ERROR, "got %u instead of NO_ERROR\n", ret );
+    ok( ret == NO_ERROR, "got %lu instead of NO_ERROR\n", ret );
     HeapFree( GetProcessHeap(), 0, buffer );
 }
 
@@ -1210,9 +1499,9 @@ static void testNotifyAddrChange(void)
     handle = NULL;
     ZeroMemory(&overlapped, sizeof(overlapped));
     ret = NotifyAddrChange(&handle, &overlapped);
-    ok(ret == ERROR_IO_PENDING, "NotifyAddrChange returned %d, expected ERROR_IO_PENDING\n", ret);
+    ok(ret == ERROR_IO_PENDING, "NotifyAddrChange returned %ld, expected ERROR_IO_PENDING\n", ret);
     ret = GetLastError();
-    todo_wine ok(ret == ERROR_IO_PENDING, "GetLastError returned %d, expected ERROR_IO_PENDING\n", ret);
+    todo_wine ok(ret == ERROR_IO_PENDING, "GetLastError returned %ld, expected ERROR_IO_PENDING\n", ret);
     success = CancelIPChangeNotify(&overlapped);
     todo_wine ok(success == TRUE, "CancelIPChangeNotify returned FALSE, expected TRUE\n");
 
@@ -1224,12 +1513,12 @@ static void testNotifyAddrChange(void)
     ZeroMemory(&overlapped, sizeof(overlapped));
     overlapped.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
     ret = NotifyAddrChange(&handle, &overlapped);
-    ok(ret == ERROR_IO_PENDING, "NotifyAddrChange returned %d, expected ERROR_IO_PENDING\n", ret);
+    ok(ret == ERROR_IO_PENDING, "NotifyAddrChange returned %ld, expected ERROR_IO_PENDING\n", ret);
     todo_wine ok(handle != INVALID_HANDLE_VALUE, "NotifyAddrChange returned invalid file handle\n");
     success = GetOverlappedResult(handle, &overlapped, &bytes, FALSE);
     ok(success == FALSE, "GetOverlappedResult returned TRUE, expected FALSE\n");
     ret = GetLastError();
-    ok(ret == ERROR_IO_INCOMPLETE, "GetLastError returned %d, expected ERROR_IO_INCOMPLETE\n", ret);
+    ok(ret == ERROR_IO_INCOMPLETE, "GetLastError returned %ld, expected ERROR_IO_INCOMPLETE\n", ret);
     success = CancelIPChangeNotify(&overlapped);
     todo_wine ok(success == TRUE, "CancelIPChangeNotify returned FALSE, expected TRUE\n");
 
@@ -1241,7 +1530,7 @@ static void testNotifyAddrChange(void)
         trace("Testing asynchronous ipv4 address change notification. Please "
               "change the ipv4 address of one of your network interfaces\n");
         ret = NotifyAddrChange(&handle, &overlapped);
-        ok(ret == ERROR_IO_PENDING, "NotifyAddrChange returned %d, expected NO_ERROR\n", ret);
+        ok(ret == ERROR_IO_PENDING, "NotifyAddrChange returned %ld, expected NO_ERROR\n", ret);
         success = GetOverlappedResult(handle, &overlapped, &bytes, TRUE);
         ok(success == TRUE, "GetOverlappedResult returned FALSE, expected TRUE\n");
     }
@@ -1252,7 +1541,7 @@ static void testNotifyAddrChange(void)
         trace("Testing synchronous ipv4 address change notification. Please "
               "change the ipv4 address of one of your network interfaces\n");
         ret = NotifyAddrChange(NULL, NULL);
-        todo_wine ok(ret == NO_ERROR, "NotifyAddrChange returned %d, expected NO_ERROR\n", ret);
+        todo_wine ok(ret == NO_ERROR, "NotifyAddrChange returned %ld, expected NO_ERROR\n", ret);
     }
 }
 
@@ -1277,31 +1566,38 @@ static void testWin2KFunctions(void)
 
 static void test_GetAdaptersAddresses(void)
 {
+    BOOL dns_eligible_found = FALSE;
     ULONG ret, size, osize, i;
     IP_ADAPTER_ADDRESSES *aa, *ptr;
     IP_ADAPTER_UNICAST_ADDRESS *ua;
 
     ret = GetAdaptersAddresses(AF_UNSPEC, 0, NULL, NULL, NULL);
-    ok(ret == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER got %u\n", ret);
+    ok(ret == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER got %lu\n", ret);
 
     /* size should be ignored and overwritten if buffer is NULL */
     size = 0x7fffffff;
     ret = GetAdaptersAddresses(AF_UNSPEC, 0, NULL, NULL, &size);
-    ok(ret == ERROR_BUFFER_OVERFLOW, "expected ERROR_BUFFER_OVERFLOW, got %u\n", ret);
+    ok(ret == ERROR_BUFFER_OVERFLOW, "expected ERROR_BUFFER_OVERFLOW, got %lu\n", ret);
     if (ret != ERROR_BUFFER_OVERFLOW) return;
+
+    /* GAA_FLAG_SKIP_FRIENDLY_NAME is ignored */
+    osize = 0x7fffffff;
+    ret = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_SKIP_FRIENDLY_NAME, NULL, NULL, &osize);
+    ok(ret == ERROR_BUFFER_OVERFLOW, "expected ERROR_BUFFER_OVERFLOW, got %lu\n", ret);
+    ok(osize == size, "expected %ld, got %ld\n", size, osize);
 
     ptr = HeapAlloc(GetProcessHeap(), 0, size);
     ret = GetAdaptersAddresses(AF_UNSPEC, 0, NULL, ptr, &size);
-    ok(!ret, "expected ERROR_SUCCESS got %u\n", ret);
+    ok(!ret, "expected ERROR_SUCCESS got %lu\n", ret);
     HeapFree(GetProcessHeap(), 0, ptr);
 
     /* higher size must not be changed to lower size */
     size *= 2;
     osize = size;
     ptr = HeapAlloc(GetProcessHeap(), 0, osize);
-    ret = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_PREFIX, NULL, ptr, &osize);
-    ok(!ret, "expected ERROR_SUCCESS got %u\n", ret);
-    ok(osize == size, "expected %d, got %d\n", size, osize);
+    ret = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_PREFIX | GAA_FLAG_SKIP_FRIENDLY_NAME, NULL, ptr, &osize);
+    ok(!ret, "expected ERROR_SUCCESS got %lu\n", ret);
+    ok(osize == size, "expected %ld, got %ld\n", size, osize);
 
     for (aa = ptr; !ret && aa; aa = aa->Next)
     {
@@ -1312,7 +1608,7 @@ static void test_GetAdaptersAddresses(void)
 
         ok(S(U(*aa)).Length == sizeof(IP_ADAPTER_ADDRESSES_LH) ||
            S(U(*aa)).Length == sizeof(IP_ADAPTER_ADDRESSES_XP),
-           "Unknown structure size of %u bytes\n", S(U(*aa)).Length);
+           "Unknown structure size of %lu bytes\n", S(U(*aa)).Length);
         ok(aa->DnsSuffix != NULL, "DnsSuffix is not a valid pointer\n");
         ok(aa->Description != NULL, "Description is not a valid pointer\n");
         ok(aa->FriendlyName != NULL, "FriendlyName is not a valid pointer\n");
@@ -1320,7 +1616,7 @@ static void test_GetAdaptersAddresses(void)
         for (i = 0; i < aa->PhysicalAddressLength; i++)
             sprintf(temp + i * 3, "%02X-", aa->PhysicalAddress[i]);
         temp[i ? i * 3 - 1 : 0] = '\0';
-        trace("idx %u name %s %s dns %s descr %s phys %s mtu %u flags %08x type %u\n",
+        trace("idx %lu name %s %s dns %s descr %s phys %s mtu %lu flags %08lx type %lu\n",
               S(U(*aa)).IfIndex, aa->AdapterName,
               wine_dbgstr_w(aa->FriendlyName), wine_dbgstr_w(aa->DnsSuffix),
               wine_dbgstr_w(aa->Description), temp, aa->Mtu, aa->Flags, aa->IfType );
@@ -1329,7 +1625,7 @@ static void test_GetAdaptersAddresses(void)
         {
             ok(S(U(*ua)).Length == sizeof(IP_ADAPTER_UNICAST_ADDRESS_LH) ||
                S(U(*ua)).Length == sizeof(IP_ADAPTER_UNICAST_ADDRESS_XP),
-               "Unknown structure size of %u bytes\n", S(U(*ua)).Length);
+               "Unknown structure size of %lu bytes\n", S(U(*ua)).Length);
             ok(ua->PrefixOrigin != IpPrefixOriginOther,
                "bad address config value %d\n", ua->PrefixOrigin);
             ok(ua->SuffixOrigin != IpSuffixOriginOther,
@@ -1345,41 +1641,43 @@ static void test_GetAdaptersAddresses(void)
             /* Is the address ok in the network (not duplicated)? */
             ok(ua->DadState != IpDadStateInvalid && ua->DadState != IpDadStateDuplicate,
                "bad address duplication value %d\n", ua->DadState);
-            trace("  flags %08x origin %u/%u state %u lifetime %u/%u/%u prefix %u\n",
+            trace("  flags %08lx origin %u/%u state %u lifetime %lu/%lu/%lu prefix %u\n",
                   S(U(*ua)).Flags, ua->PrefixOrigin, ua->SuffixOrigin, ua->DadState,
                   ua->ValidLifetime, ua->PreferredLifetime, ua->LeaseLifetime,
                   S(U(*ua)).Length < sizeof(IP_ADAPTER_UNICAST_ADDRESS_LH) ? 0 : ua->OnLinkPrefixLength);
+
+            if (ua->Flags & IP_ADAPTER_ADDRESS_DNS_ELIGIBLE)
+                dns_eligible_found = TRUE;
+
             ua = ua->Next;
         }
         for (i = 0, temp[0] = '\0'; i < ARRAY_SIZE(aa->ZoneIndices); i++)
-            sprintf(temp + strlen(temp), "%d ", aa->ZoneIndices[i]);
-        trace("status %u index %u zone %s\n", aa->OperStatus, aa->Ipv6IfIndex, temp );
+            sprintf(temp + strlen(temp), "%ld ", aa->ZoneIndices[i]);
+        trace("status %u index %lu zone %s\n", aa->OperStatus, aa->Ipv6IfIndex, temp );
         prefix = aa->FirstPrefix;
         while (prefix)
         {
-            trace( "  prefix %u/%u flags %08x\n", prefix->Address.iSockaddrLength,
+            trace( "  prefix %u/%lu flags %08lx\n", prefix->Address.iSockaddrLength,
                    prefix->PrefixLength, S(U(*prefix)).Flags );
             prefix = prefix->Next;
         }
 
         if (S(U(*aa)).Length < sizeof(IP_ADAPTER_ADDRESSES_LH)) continue;
-        trace("speed %s/%s metrics %u/%u guid %s type %u/%u\n",
+        trace("speed %s/%s metrics %lu/%lu guid %s type %u/%u\n",
               wine_dbgstr_longlong(aa->TransmitLinkSpeed),
               wine_dbgstr_longlong(aa->ReceiveLinkSpeed),
               aa->Ipv4Metric, aa->Ipv6Metric, wine_dbgstr_guid((GUID*) &aa->NetworkGuid),
               aa->ConnectionType, aa->TunnelType);
 
-        if (pConvertInterfaceLuidToGuid)
-        {
-            status = pConvertInterfaceLuidToGuid(&aa->Luid, &guid);
-            ok(!status, "got %u\n", status);
-            sprintf(buf, "{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
-                    guid.Data1, guid.Data2, guid.Data3, guid.Data4[0], guid.Data4[1],
-                    guid.Data4[2], guid.Data4[3], guid.Data4[4], guid.Data4[5],
-                    guid.Data4[6], guid.Data4[7]);
-            ok(!strcasecmp(aa->AdapterName, buf), "expected '%s' got '%s'\n", aa->AdapterName, buf);
-        }
+        status = ConvertInterfaceLuidToGuid(&aa->Luid, &guid);
+        ok(!status, "got %lu\n", status);
+        sprintf(buf, "{%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
+                guid.Data1, guid.Data2, guid.Data3, guid.Data4[0], guid.Data4[1],
+                guid.Data4[2], guid.Data4[3], guid.Data4[4], guid.Data4[5],
+                guid.Data4[6], guid.Data4[7]);
+        ok(!strcasecmp(aa->AdapterName, buf), "expected '%s' got '%s'\n", aa->AdapterName, buf);
     }
+    ok(dns_eligible_found, "Did not find any dns eligible addresses.\n");
     HeapFree(GetProcessHeap(), 0, ptr);
 }
 
@@ -1396,60 +1694,60 @@ static void test_GetExtendedTcpTable(void)
         return;
     }
     ret = pGetExtendedTcpTable( NULL, NULL, TRUE, AF_INET, TCP_TABLE_BASIC_ALL, 0 );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
 
     size = 0;
     ret = pGetExtendedTcpTable( NULL, &size, TRUE, AF_INET, TCP_TABLE_BASIC_ALL, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %u\n", ret );
+    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
 
     table = HeapAlloc( GetProcessHeap(), 0, size );
     ret = pGetExtendedTcpTable( table, &size, TRUE, AF_INET, TCP_TABLE_BASIC_ALL, 0 );
-    ok( ret == ERROR_SUCCESS, "got %u\n", ret );
+    ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
     HeapFree( GetProcessHeap(), 0, table );
 
     size = 0;
     ret = pGetExtendedTcpTable( NULL, &size, TRUE, AF_INET, TCP_TABLE_BASIC_LISTENER, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %u\n", ret );
+    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
 
     table = HeapAlloc( GetProcessHeap(), 0, size );
     ret = pGetExtendedTcpTable( table, &size, TRUE, AF_INET, TCP_TABLE_BASIC_LISTENER, 0 );
-    ok( ret == ERROR_SUCCESS, "got %u\n", ret );
+    ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
     HeapFree( GetProcessHeap(), 0, table );
 
     size = 0;
     ret = pGetExtendedTcpTable( NULL, &size, TRUE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %u\n", ret );
+    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
 
     table_pid = HeapAlloc( GetProcessHeap(), 0, size );
     ret = pGetExtendedTcpTable( table_pid, &size, TRUE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0 );
-    ok( ret == ERROR_SUCCESS, "got %u\n", ret );
+    ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
     HeapFree( GetProcessHeap(), 0, table_pid );
 
     size = 0;
     ret = pGetExtendedTcpTable( NULL, &size, TRUE, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %u\n", ret );
+    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
 
     table_pid = HeapAlloc( GetProcessHeap(), 0, size );
     ret = pGetExtendedTcpTable( table_pid, &size, TRUE, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0 );
-    ok( ret == ERROR_SUCCESS, "got %u\n", ret );
+    ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
     HeapFree( GetProcessHeap(), 0, table_pid );
 
     size = 0;
     ret = pGetExtendedTcpTable( NULL, &size, TRUE, AF_INET, TCP_TABLE_OWNER_MODULE_ALL, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %u\n", ret );
+    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
 
     table_module = HeapAlloc( GetProcessHeap(), 0, size );
     ret = pGetExtendedTcpTable( table_module, &size, TRUE, AF_INET, TCP_TABLE_OWNER_MODULE_ALL, 0 );
-    ok( ret == ERROR_SUCCESS, "got %u\n", ret );
+    ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
     HeapFree( GetProcessHeap(), 0, table_module );
 
     size = 0;
     ret = pGetExtendedTcpTable( NULL, &size, TRUE, AF_INET, TCP_TABLE_OWNER_MODULE_LISTENER, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %u\n", ret );
+    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
 
     table_module = HeapAlloc( GetProcessHeap(), 0, size );
     ret = pGetExtendedTcpTable( table_module, &size, TRUE, AF_INET, TCP_TABLE_OWNER_MODULE_LISTENER, 0 );
-    ok( ret == ERROR_SUCCESS, "got %u\n", ret );
+    ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
     HeapFree( GetProcessHeap(), 0, table_module );
 }
 
@@ -1468,29 +1766,29 @@ static void test_AllocateAndGetTcpExTableFromStack(void)
     {
         /* crashes on native */
         ret = pAllocateAndGetTcpExTableFromStack( NULL, FALSE, INVALID_HANDLE_VALUE, 0, 0 );
-        ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
         ret = pAllocateAndGetTcpExTableFromStack( (void **)&table_ex, FALSE, INVALID_HANDLE_VALUE, 0, AF_INET );
-        ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
         ret = pAllocateAndGetTcpExTableFromStack( NULL, FALSE, GetProcessHeap(), 0, AF_INET );
-        ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
     }
 
     ret = pAllocateAndGetTcpExTableFromStack( (void **)&table_ex, FALSE, GetProcessHeap(), 0, 0 );
-    ok( ret == ERROR_INVALID_PARAMETER || broken(ret == ERROR_NOT_SUPPORTED) /* win2k */, "got %u\n", ret );
+    ok( ret == ERROR_INVALID_PARAMETER || broken(ret == ERROR_NOT_SUPPORTED) /* win2k */, "got %lu\n", ret );
 
     ret = pAllocateAndGetTcpExTableFromStack( (void **)&table_ex, FALSE, GetProcessHeap(), 0, AF_INET );
-    ok( ret == ERROR_SUCCESS, "got %u\n", ret );
+    ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
 
     if (ret == NO_ERROR && winetest_debug > 1)
     {
         DWORD i;
-        trace( "AllocateAndGetTcpExTableFromStack table: %u entries\n", table_ex->dwNumEntries );
+        trace( "AllocateAndGetTcpExTableFromStack table: %lu entries\n", table_ex->dwNumEntries );
         for (i = 0; i < table_ex->dwNumEntries; i++)
         {
           char remote_ip[16];
 
           strcpy(remote_ip, ntoa(table_ex->table[i].dwRemoteAddr));
-          trace( "%u: local %s:%u remote %s:%u state %u pid %u\n", i,
+          trace( "%lu: local %s:%u remote %s:%u state %lu pid %lu\n", i,
                  ntoa(table_ex->table[i].dwLocalAddr), ntohs(table_ex->table[i].dwLocalPort),
                  remote_ip, ntohs(table_ex->table[i].dwRemotePort),
                  U(table_ex->table[i]).dwState, table_ex->table[i].dwOwningPid );
@@ -1499,7 +1797,7 @@ static void test_AllocateAndGetTcpExTableFromStack(void)
     HeapFree(GetProcessHeap(), 0, table_ex);
 
     ret = pAllocateAndGetTcpExTableFromStack( (void **)&table_ex, FALSE, GetProcessHeap(), 0, AF_INET6 );
-    ok( ret == ERROR_NOT_SUPPORTED, "got %u\n", ret );
+    ok( ret == ERROR_NOT_SUPPORTED, "got %lu\n", ret );
 }
 
 static void test_GetExtendedUdpTable(void)
@@ -1515,33 +1813,33 @@ static void test_GetExtendedUdpTable(void)
         return;
     }
     ret = pGetExtendedUdpTable( NULL, NULL, TRUE, AF_INET, UDP_TABLE_BASIC, 0 );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
 
     size = 0;
     ret = pGetExtendedUdpTable( NULL, &size, TRUE, AF_INET, UDP_TABLE_BASIC, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %u\n", ret );
+    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
 
     table = HeapAlloc( GetProcessHeap(), 0, size );
     ret = pGetExtendedUdpTable( table, &size, TRUE, AF_INET, UDP_TABLE_BASIC, 0 );
-    ok( ret == ERROR_SUCCESS, "got %u\n", ret );
+    ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
     HeapFree( GetProcessHeap(), 0, table );
 
     size = 0;
     ret = pGetExtendedUdpTable( NULL, &size, TRUE, AF_INET, UDP_TABLE_OWNER_PID, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %u\n", ret );
+    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
 
     table_pid = HeapAlloc( GetProcessHeap(), 0, size );
     ret = pGetExtendedUdpTable( table_pid, &size, TRUE, AF_INET, UDP_TABLE_OWNER_PID, 0 );
-    ok( ret == ERROR_SUCCESS, "got %u\n", ret );
+    ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
     HeapFree( GetProcessHeap(), 0, table_pid );
 
     size = 0;
     ret = pGetExtendedUdpTable( NULL, &size, TRUE, AF_INET, UDP_TABLE_OWNER_MODULE, 0 );
-    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %u\n", ret );
+    ok( ret == ERROR_INSUFFICIENT_BUFFER, "got %lu\n", ret );
 
     table_module = HeapAlloc( GetProcessHeap(), 0, size );
     ret = pGetExtendedUdpTable( table_module, &size, TRUE, AF_INET, UDP_TABLE_OWNER_MODULE, 0 );
-    ok( ret == ERROR_SUCCESS, "got %u\n", ret );
+    ok( ret == ERROR_SUCCESS, "got %lu\n", ret );
     HeapFree( GetProcessHeap(), 0, table_module );
 }
 
@@ -1566,25 +1864,25 @@ static void test_CreateSortedAddressPairs(void)
 
     pair_count = 0xdeadbeef;
     ret = pCreateSortedAddressPairs( NULL, 0, dst, 1, 0, NULL, &pair_count );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-    ok( pair_count == 0xdeadbeef, "got %u\n", pair_count );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+    ok( pair_count == 0xdeadbeef, "got %lu\n", pair_count );
 
     pair = (SOCKADDR_IN6_PAIR *)0xdeadbeef;
     pair_count = 0xdeadbeef;
     ret = pCreateSortedAddressPairs( NULL, 0, NULL, 1, 0, &pair, &pair_count );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
     ok( pair == (SOCKADDR_IN6_PAIR *)0xdeadbeef, "got %p\n", pair );
-    ok( pair_count == 0xdeadbeef, "got %u\n", pair_count );
+    ok( pair_count == 0xdeadbeef, "got %lu\n", pair_count );
 
     pair = NULL;
     pair_count = 0xdeadbeef;
     ret = pCreateSortedAddressPairs( NULL, 0, dst, 1, 0, &pair, &pair_count );
-    ok( ret == NO_ERROR, "got %u\n", ret );
+    ok( ret == NO_ERROR, "got %lu\n", ret );
     ok( pair != NULL, "pair not set\n" );
-    ok( pair_count >= 1, "got %u\n", pair_count );
+    ok( pair_count >= 1, "got %lu\n", pair_count );
     ok( pair[0].SourceAddress != NULL, "src address not set\n" );
     ok( pair[0].DestinationAddress != NULL, "dst address not set\n" );
-    pFreeMibTable( pair );
+    FreeMibTable( pair );
 
     dst[1].sin6_family = AF_INET6;
     dst[1].sin6_addr.u.Word[5] = 0xffff;
@@ -1594,14 +1892,14 @@ static void test_CreateSortedAddressPairs(void)
     pair = NULL;
     pair_count = 0xdeadbeef;
     ret = pCreateSortedAddressPairs( NULL, 0, dst, 2, 0, &pair, &pair_count );
-    ok( ret == NO_ERROR, "got %u\n", ret );
+    ok( ret == NO_ERROR, "got %lu\n", ret );
     ok( pair != NULL, "pair not set\n" );
-    ok( pair_count >= 2, "got %u\n", pair_count );
+    ok( pair_count >= 2, "got %lu\n", pair_count );
     ok( pair[0].SourceAddress != NULL, "src address not set\n" );
     ok( pair[0].DestinationAddress != NULL, "dst address not set\n" );
     ok( pair[1].SourceAddress != NULL, "src address not set\n" );
     ok( pair[1].DestinationAddress != NULL, "dst address not set\n" );
-    pFreeMibTable( pair );
+    FreeMibTable( pair );
 }
 
 static DWORD get_interface_index(void)
@@ -1626,206 +1924,242 @@ static DWORD get_interface_index(void)
     return ret;
 }
 
+static void convert_luid_to_name( NET_LUID *luid, WCHAR *expect_nameW, int len )
+{
+    struct
+    {
+        const WCHAR *prefix;
+        DWORD type;
+    } prefixes[] =
+    {
+        { L"other", IF_TYPE_OTHER },
+        { L"ethernet", IF_TYPE_ETHERNET_CSMACD },
+        { L"tokenring", IF_TYPE_ISO88025_TOKENRING },
+        { L"ppp", IF_TYPE_PPP },
+        { L"loopback", IF_TYPE_SOFTWARE_LOOPBACK },
+        { L"atm", IF_TYPE_ATM },
+        { L"wireless", IF_TYPE_IEEE80211 },
+        { L"tunnel", IF_TYPE_TUNNEL },
+        { L"ieee1394", IF_TYPE_IEEE1394 }
+    };
+    DWORD i;
+    const WCHAR *prefix = NULL;
+
+    for (i = 0; i < ARRAY_SIZE(prefixes); i++)
+    {
+        if (prefixes[i].type == luid->Info.IfType)
+        {
+            prefix = prefixes[i].prefix;
+            break;
+        }
+    }
+    if (prefix)
+        swprintf( expect_nameW, len, L"%s_%d", prefix, luid->Info.NetLuidIndex );
+    else
+        swprintf( expect_nameW, len, L"iftype%d_%d", luid->Info.IfType, luid->Info.NetLuidIndex );
+}
+
 static void test_interface_identifier_conversion(void)
 {
-    DWORD ret;
+    DWORD ret, i;
     NET_LUID luid;
     GUID guid;
     SIZE_T len;
     WCHAR nameW[IF_MAX_STRING_SIZE + 1];
+    WCHAR alias[IF_MAX_STRING_SIZE + 1];
+    WCHAR expect_nameW[IF_MAX_STRING_SIZE + 1];
     char nameA[IF_MAX_STRING_SIZE + 1], *name;
-    NET_IFINDEX index, index2;
+    char expect_nameA[IF_MAX_STRING_SIZE + 1];
+    NET_IFINDEX index;
+    MIB_IF_TABLE2 *table;
 
-    if (!pConvertInterfaceIndexToLuid)
+    ret = GetIfTable2( &table );
+    ok( !ret, "got %ld\n", ret );
+
+    for (i = 0; i < table->NumEntries; i++)
     {
-        win_skip( "ConvertInterfaceIndexToLuid not available\n" );
-        return;
+        MIB_IF_ROW2 *row = table->Table + i;
+
+        /* ConvertInterfaceIndexToLuid */
+        ret = ConvertInterfaceIndexToLuid( 0, NULL );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        memset( &luid, 0xff, sizeof(luid) );
+        ret = ConvertInterfaceIndexToLuid( 0, &luid );
+        ok( ret == ERROR_FILE_NOT_FOUND, "got %lu\n", ret );
+        ok( !luid.Info.Reserved, "got %x\n", luid.Info.Reserved );
+        ok( !luid.Info.NetLuidIndex, "got %u\n", luid.Info.NetLuidIndex );
+        ok( !luid.Info.IfType, "got %u\n", luid.Info.IfType );
+
+        luid.Info.Reserved = luid.Info.NetLuidIndex = luid.Info.IfType = 0xdead;
+        ret = ConvertInterfaceIndexToLuid( row->InterfaceIndex, &luid );
+        ok( !ret, "got %lu\n", ret );
+        ok( luid.Value == row->InterfaceLuid.Value, "mismatch\n" );
+
+        /* ConvertInterfaceLuidToIndex */
+        ret = ConvertInterfaceLuidToIndex( NULL, NULL );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        ret = ConvertInterfaceLuidToIndex( NULL, &index );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        ret = ConvertInterfaceLuidToIndex( &luid, NULL );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        ret = ConvertInterfaceLuidToIndex( &luid, &index );
+        ok( !ret, "got %lu\n", ret );
+        ok( index == row->InterfaceIndex, "mismatch\n" );
+
+        /* ConvertInterfaceLuidToGuid */
+        ret = ConvertInterfaceLuidToGuid( NULL, NULL );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        memset( &guid, 0xff, sizeof(guid) );
+        ret = ConvertInterfaceLuidToGuid( NULL, &guid );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+        ok( guid.Data1 == 0xffffffff, "got %s\n", debugstr_guid(&guid) );
+
+        ret = ConvertInterfaceLuidToGuid( &luid, NULL );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        memset( &guid, 0, sizeof(guid) );
+        ret = ConvertInterfaceLuidToGuid( &luid, &guid );
+        ok( !ret, "got %lu\n", ret );
+        ok( IsEqualGUID( &guid, &row->InterfaceGuid ), "mismatch\n" );
+
+        /* ConvertInterfaceGuidToLuid */
+        ret = ConvertInterfaceGuidToLuid( NULL, NULL );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        luid.Info.NetLuidIndex = 1;
+        ret = ConvertInterfaceGuidToLuid( NULL, &luid );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+        ok( luid.Info.NetLuidIndex == 1, "got %u\n", luid.Info.NetLuidIndex );
+
+        ret = ConvertInterfaceGuidToLuid( &guid, NULL );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        luid.Info.Reserved = luid.Info.NetLuidIndex = luid.Info.IfType = 0xdead;
+        ret = ConvertInterfaceGuidToLuid( &guid, &luid );
+        ok( !ret, "got %lu\n", ret );
+        ok( luid.Value == row->InterfaceLuid.Value ||
+            broken( luid.Value != row->InterfaceLuid.Value), /* Win8 can have identical guids for two different ifaces */
+            "mismatch\n" );
+        if (luid.Value != row->InterfaceLuid.Value) continue;
+
+        /* ConvertInterfaceLuidToNameW */
+        ret = ConvertInterfaceLuidToNameW( NULL, NULL, 0 );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        ret = ConvertInterfaceLuidToNameW( &luid, NULL, 0 );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        ret = ConvertInterfaceLuidToNameW( NULL, nameW, 0 );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        ret = ConvertInterfaceLuidToNameW( &luid, nameW, 0 );
+        ok( ret == ERROR_NOT_ENOUGH_MEMORY, "got %lu\n", ret );
+
+        nameW[0] = 0;
+        len = ARRAY_SIZE(nameW);
+        ret = ConvertInterfaceLuidToNameW( &luid, nameW, len );
+        ok( !ret, "got %lu\n", ret );
+        convert_luid_to_name( &luid, expect_nameW, len );
+        ok( !wcscmp( nameW, expect_nameW ), "got %s vs %s\n", debugstr_w( nameW ), debugstr_w( expect_nameW ) );
+
+        /* ConvertInterfaceLuidToNameA */
+        ret = ConvertInterfaceLuidToNameA( NULL, NULL, 0 );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        ret = ConvertInterfaceLuidToNameA( &luid, NULL, 0 );
+        ok( ret == ERROR_NOT_ENOUGH_MEMORY, "got %lu\n", ret );
+
+        ret = ConvertInterfaceLuidToNameA( NULL, nameA, 0 );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        ret = ConvertInterfaceLuidToNameA( &luid, nameA, 0 );
+        ok( ret == ERROR_NOT_ENOUGH_MEMORY, "got %lu\n", ret );
+
+        nameA[0] = 0;
+        len = ARRAY_SIZE(nameA);
+        ret = ConvertInterfaceLuidToNameA( &luid, nameA, len );
+        ok( !ret, "got %lu\n", ret );
+        ok( nameA[0], "name not set\n" );
+
+        /* ConvertInterfaceNameToLuidW */
+        ret = ConvertInterfaceNameToLuidW( NULL, NULL );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        luid.Info.Reserved = luid.Info.NetLuidIndex = luid.Info.IfType = 0xdead;
+        ret = ConvertInterfaceNameToLuidW( NULL, &luid );
+        ok( ret == ERROR_INVALID_NAME, "got %lu\n", ret );
+        ok( !luid.Info.Reserved, "got %x\n", luid.Info.Reserved );
+        ok( luid.Info.NetLuidIndex != 0xdead, "index not set\n" );
+        ok( !luid.Info.IfType, "got %u\n", luid.Info.IfType );
+
+        ret = ConvertInterfaceNameToLuidW( nameW, NULL );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        luid.Info.Reserved = luid.Info.NetLuidIndex = luid.Info.IfType = 0xdead;
+        ret = ConvertInterfaceNameToLuidW( nameW, &luid );
+        ok( !ret, "got %lu\n", ret );
+        ok( luid.Value == row->InterfaceLuid.Value, "mismatch\n" );
+
+        /* ConvertInterfaceNameToLuidA */
+        ret = ConvertInterfaceNameToLuidA( NULL, NULL );
+        ok( ret == ERROR_INVALID_NAME, "got %lu\n", ret );
+
+        luid.Info.Reserved = luid.Info.NetLuidIndex = luid.Info.IfType = 0xdead;
+        ret = ConvertInterfaceNameToLuidA( NULL, &luid );
+        ok( ret == ERROR_INVALID_NAME, "got %lu\n", ret );
+        ok( luid.Info.Reserved == 0xdead, "reserved set\n" );
+        ok( luid.Info.NetLuidIndex == 0xdead, "index set\n" );
+        ok( luid.Info.IfType == 0xdead, "type set\n" );
+
+        ret = ConvertInterfaceNameToLuidA( nameA, NULL );
+        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+        luid.Info.Reserved = luid.Info.NetLuidIndex = luid.Info.IfType = 0xdead;
+        ret = ConvertInterfaceNameToLuidA( nameA, &luid );
+        ok( !ret, "got %lu\n", ret );
+        ok( luid.Value == row->InterfaceLuid.Value, "mismatch\n" );
+
+        /* ConvertInterfaceAliasToLuid */
+        ret = ConvertInterfaceAliasToLuid( row->Alias, &luid );
+        ok( !ret, "got %lu\n", ret );
+        ok( luid.Value == row->InterfaceLuid.Value, "mismatch\n" );
+
+        /* ConvertInterfaceLuidToAlias */
+        ret = ConvertInterfaceLuidToAlias( &row->InterfaceLuid, alias, ARRAY_SIZE(alias) );
+        ok( !ret, "got %lu\n", ret );
+        ok( !wcscmp( alias, row->Alias ), "got %s vs %s\n", wine_dbgstr_w( alias ), wine_dbgstr_w( row->Alias ) );
+
+        index = if_nametoindex( NULL );
+        ok( !index, "Got unexpected index %lu\n", index );
+        index = if_nametoindex( nameA );
+        ok( index == row->InterfaceIndex, "Got index %lu for %s, expected %lu\n", index, nameA, row->InterfaceIndex );
+        /* Wargaming.net Game Center passes a GUID-like string. */
+        index = if_nametoindex( "{00000001-0000-0000-0000-000000000000}" );
+        ok( !index, "Got unexpected index %lu\n", index );
+        index = if_nametoindex( wine_dbgstr_guid( &guid ) );
+        ok( !index, "Got unexpected index %lu for input %s\n", index, wine_dbgstr_guid( &guid ) );
+
+        name = if_indextoname( 0, NULL );
+        ok( name == NULL, "got %s\n", name );
+
+        name = if_indextoname( 0, nameA );
+        ok( name == NULL, "got %p\n", name );
+
+        name = if_indextoname( ~0u, nameA );
+        ok( name == NULL, "got %p\n", name );
+
+        nameA[0] = 0;
+        name = if_indextoname( row->InterfaceIndex, nameA );
+        ConvertInterfaceLuidToNameA( &row->InterfaceLuid, expect_nameA, ARRAY_SIZE(expect_nameA) );
+        ok( name == nameA, "mismatch\n" );
+        ok( !strcmp( nameA, expect_nameA ), "mismatch\n" );
     }
-    if (!(index = get_interface_index()))
-    {
-        skip( "no suitable interface found\n" );
-        return;
-    }
-
-    /* ConvertInterfaceIndexToLuid */
-    ret = pConvertInterfaceIndexToLuid( 0, NULL );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    memset( &luid, 0xff, sizeof(luid) );
-    ret = pConvertInterfaceIndexToLuid( 0, &luid );
-    ok( ret == ERROR_FILE_NOT_FOUND, "got %u\n", ret );
-    ok( !luid.Info.Reserved, "got %x\n", luid.Info.Reserved );
-    ok( !luid.Info.NetLuidIndex, "got %u\n", luid.Info.NetLuidIndex );
-    ok( !luid.Info.IfType, "got %u\n", luid.Info.IfType );
-
-    luid.Info.Reserved = luid.Info.NetLuidIndex = luid.Info.IfType = 0xdead;
-    ret = pConvertInterfaceIndexToLuid( index, &luid );
-    ok( !ret, "got %u\n", ret );
-    ok( !luid.Info.Reserved, "got %x\n", luid.Info.Reserved );
-    ok( luid.Info.NetLuidIndex != 0xdead, "index not set\n" );
-    ok( luid.Info.IfType == IF_TYPE_ETHERNET_CSMACD, "got %u\n", luid.Info.IfType );
-
-    /* ConvertInterfaceLuidToIndex */
-    ret = pConvertInterfaceLuidToIndex( NULL, NULL );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    ret = pConvertInterfaceLuidToIndex( NULL, &index );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    ret = pConvertInterfaceLuidToIndex( &luid, NULL );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    ret = pConvertInterfaceLuidToIndex( &luid, &index );
-    ok( !ret, "got %u\n", ret );
-
-    /* ConvertInterfaceLuidToGuid */
-    ret = pConvertInterfaceLuidToGuid( NULL, NULL );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    memset( &guid, 0xff, sizeof(guid) );
-    ret = pConvertInterfaceLuidToGuid( NULL, &guid );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-    ok( guid.Data1 == 0xffffffff, "got %x\n", guid.Data1 );
-
-    ret = pConvertInterfaceLuidToGuid( &luid, NULL );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    memset( &guid, 0, sizeof(guid) );
-    ret = pConvertInterfaceLuidToGuid( &luid, &guid );
-    ok( !ret, "got %u\n", ret );
-    ok( guid.Data1, "got %x\n", guid.Data1 );
-
-    /* ConvertInterfaceGuidToLuid */
-    ret = pConvertInterfaceGuidToLuid( NULL, NULL );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    luid.Info.NetLuidIndex = 1;
-    ret = pConvertInterfaceGuidToLuid( NULL, &luid );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-    ok( luid.Info.NetLuidIndex == 1, "got %u\n", luid.Info.NetLuidIndex );
-
-    ret = pConvertInterfaceGuidToLuid( &guid, NULL );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    luid.Info.Reserved = luid.Info.NetLuidIndex = luid.Info.IfType = 0xdead;
-    ret = pConvertInterfaceGuidToLuid( &guid, &luid );
-    ok( !ret, "got %u\n", ret );
-    ok( !luid.Info.Reserved, "got %x\n", luid.Info.Reserved );
-    ok( luid.Info.NetLuidIndex != 0xdead, "index not set\n" );
-    ok( luid.Info.IfType == IF_TYPE_ETHERNET_CSMACD, "got %u\n", luid.Info.IfType );
-
-    /* ConvertInterfaceLuidToNameW */
-    ret = pConvertInterfaceLuidToNameW( NULL, NULL, 0 );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    ret = pConvertInterfaceLuidToNameW( &luid, NULL, 0 );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    ret = pConvertInterfaceLuidToNameW( NULL, nameW, 0 );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    ret = pConvertInterfaceLuidToNameW( &luid, nameW, 0 );
-    ok( ret == ERROR_NOT_ENOUGH_MEMORY, "got %u\n", ret );
-
-    nameW[0] = 0;
-    len = ARRAY_SIZE(nameW);
-    ret = pConvertInterfaceLuidToNameW( &luid, nameW, len );
-    ok( !ret, "got %u\n", ret );
-    ok( nameW[0], "name not set\n" );
-
-    /* ConvertInterfaceLuidToNameA */
-    ret = pConvertInterfaceLuidToNameA( NULL, NULL, 0 );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    ret = pConvertInterfaceLuidToNameA( &luid, NULL, 0 );
-    ok( ret == ERROR_NOT_ENOUGH_MEMORY, "got %u\n", ret );
-
-    ret = pConvertInterfaceLuidToNameA( NULL, nameA, 0 );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    ret = pConvertInterfaceLuidToNameA( &luid, nameA, 0 );
-    ok( ret == ERROR_NOT_ENOUGH_MEMORY, "got %u\n", ret );
-
-    nameA[0] = 0;
-    len = ARRAY_SIZE(nameA);
-    ret = pConvertInterfaceLuidToNameA( &luid, nameA, len );
-    ok( !ret, "got %u\n", ret );
-    ok( nameA[0], "name not set\n" );
-
-    /* ConvertInterfaceNameToLuidW */
-    ret = pConvertInterfaceNameToLuidW( NULL, NULL );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    luid.Info.Reserved = luid.Info.NetLuidIndex = luid.Info.IfType = 0xdead;
-    ret = pConvertInterfaceNameToLuidW( NULL, &luid );
-    ok( ret == ERROR_INVALID_NAME, "got %u\n", ret );
-    ok( !luid.Info.Reserved, "got %x\n", luid.Info.Reserved );
-    ok( luid.Info.NetLuidIndex != 0xdead, "index not set\n" );
-    ok( !luid.Info.IfType, "got %u\n", luid.Info.IfType );
-
-    ret = pConvertInterfaceNameToLuidW( nameW, NULL );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    luid.Info.Reserved = luid.Info.NetLuidIndex = luid.Info.IfType = 0xdead;
-    ret = pConvertInterfaceNameToLuidW( nameW, &luid );
-    ok( !ret, "got %u\n", ret );
-    ok( !luid.Info.Reserved, "got %x\n", luid.Info.Reserved );
-    ok( luid.Info.NetLuidIndex != 0xdead, "index not set\n" );
-    ok( luid.Info.IfType == IF_TYPE_ETHERNET_CSMACD, "got %u\n", luid.Info.IfType );
-
-    /* ConvertInterfaceNameToLuidA */
-    ret = pConvertInterfaceNameToLuidA( NULL, NULL );
-    ok( ret == ERROR_INVALID_NAME, "got %u\n", ret );
-
-    luid.Info.Reserved = luid.Info.NetLuidIndex = luid.Info.IfType = 0xdead;
-    ret = pConvertInterfaceNameToLuidA( NULL, &luid );
-    ok( ret == ERROR_INVALID_NAME, "got %u\n", ret );
-    ok( luid.Info.Reserved == 0xdead, "reserved set\n" );
-    ok( luid.Info.NetLuidIndex == 0xdead, "index set\n" );
-    ok( luid.Info.IfType == 0xdead, "type set\n" );
-
-    ret = pConvertInterfaceNameToLuidA( nameA, NULL );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
-
-    luid.Info.Reserved = luid.Info.NetLuidIndex = luid.Info.IfType = 0xdead;
-    ret = pConvertInterfaceNameToLuidA( nameA, &luid );
-    ok( !ret, "got %u\n", ret );
-    ok( !luid.Info.Reserved, "got %x\n", luid.Info.Reserved );
-    ok( luid.Info.NetLuidIndex != 0xdead, "index not set\n" );
-    ok( luid.Info.IfType == IF_TYPE_ETHERNET_CSMACD, "got %u\n", luid.Info.IfType );
-
-    if (!pif_nametoindex || !pif_indextoname)
-    {
-        skip("if_nametoindex/if_indextoname not supported\n");
-        return;
-    }
-
-    index2 = pif_nametoindex( NULL );
-    ok( !index2, "Got unexpected index %u\n", index2 );
-    index2 = pif_nametoindex( nameA );
-    ok( index2 == index, "Got index %u for %s, expected %u\n", index2, nameA, index );
-    /* Wargaming.net Game Center passes a GUID-like string. */
-    index2 = pif_nametoindex( "{00000001-0000-0000-0000-000000000000}" );
-    ok( !index2, "Got unexpected index %u\n", index2 );
-    index2 = pif_nametoindex( wine_dbgstr_guid( &guid ) );
-    ok( !index2, "Got unexpected index %u for input %s\n", index2, wine_dbgstr_guid( &guid ) );
-
-    name = pif_indextoname( 0, NULL );
-    ok( name == NULL, "got %s\n", name );
-
-    name = pif_indextoname( 0, nameA );
-    ok( name == NULL, "got %p\n", name );
-
-    name = pif_indextoname( ~0u, nameA );
-    ok( name == NULL, "got %p\n", name );
-
-    nameA[0] = 0;
-    name = pif_indextoname( 1, nameA );
-    if (name != NULL)
-    {
-        ok( name[0], "empty name\n" );
-        ok( name == nameA, "got %p\n", name );
-    }
+    FreeMibTable( table );
 }
 
 static void test_GetIfEntry2(void)
@@ -1834,29 +2168,24 @@ static void test_GetIfEntry2(void)
     MIB_IF_ROW2 row;
     NET_IFINDEX index;
 
-    if (!pGetIfEntry2)
-    {
-        win_skip( "GetIfEntry2 not available\n" );
-        return;
-    }
     if (!(index = get_interface_index()))
     {
         skip( "no suitable interface found\n" );
         return;
     }
 
-    ret = pGetIfEntry2( NULL );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+    ret = GetIfEntry2( NULL );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
 
     memset( &row, 0, sizeof(row) );
-    ret = pGetIfEntry2( &row );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+    ret = GetIfEntry2( &row );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
 
     memset( &row, 0, sizeof(row) );
     row.InterfaceIndex = index;
-    ret = pGetIfEntry2( &row );
-    ok( ret == NO_ERROR, "got %u\n", ret );
-    ok( row.InterfaceIndex == index, "got %u\n", index );
+    ret = GetIfEntry2( &row );
+    ok( ret == NO_ERROR, "got %lu\n", ret );
+    ok( row.InterfaceIndex == index, "got %lu\n", index );
 }
 
 static void test_GetIfTable2(void)
@@ -1864,17 +2193,11 @@ static void test_GetIfTable2(void)
     DWORD ret;
     MIB_IF_TABLE2 *table;
 
-    if (!pGetIfTable2)
-    {
-        win_skip( "GetIfTable2 not available\n" );
-        return;
-    }
-
     table = NULL;
-    ret = pGetIfTable2( &table );
-    ok( ret == NO_ERROR, "got %u\n", ret );
+    ret = GetIfTable2( &table );
+    ok( ret == NO_ERROR, "got %lu\n", ret );
     ok( table != NULL, "table not set\n" );
-    pFreeMibTable( table );
+    FreeMibTable( table );
 }
 
 static void test_GetIfTable2Ex(void)
@@ -1882,35 +2205,29 @@ static void test_GetIfTable2Ex(void)
     DWORD ret;
     MIB_IF_TABLE2 *table;
 
-    if (!pGetIfTable2Ex)
-    {
-        win_skip( "GetIfTable2Ex not available\n" );
-        return;
-    }
-
     table = NULL;
-    ret = pGetIfTable2Ex( MibIfTableNormal, &table );
-    ok( ret == NO_ERROR, "got %u\n", ret );
+    ret = GetIfTable2Ex( MibIfTableNormal, &table );
+    ok( ret == NO_ERROR, "got %lu\n", ret );
     ok( table != NULL, "table not set\n" );
-    pFreeMibTable( table );
+    FreeMibTable( table );
 
     table = NULL;
-    ret = pGetIfTable2Ex( MibIfTableRaw, &table );
-    ok( ret == NO_ERROR, "got %u\n", ret );
+    ret = GetIfTable2Ex( MibIfTableRaw, &table );
+    ok( ret == NO_ERROR, "got %lu\n", ret );
     ok( table != NULL, "table not set\n" );
-    pFreeMibTable( table );
+    FreeMibTable( table );
 
     table = NULL;
-    ret = pGetIfTable2Ex( MibIfTableNormalWithoutStatistics, &table );
-    ok( ret == NO_ERROR || broken(ret == ERROR_INVALID_PARAMETER), "got %u\n", ret );
+    ret = GetIfTable2Ex( MibIfTableNormalWithoutStatistics, &table );
+    ok( ret == NO_ERROR || broken(ret == ERROR_INVALID_PARAMETER), "got %lu\n", ret );
     ok( table != NULL || broken(!table), "table not set\n" );
-    pFreeMibTable( table );
+    FreeMibTable( table );
 
     table = NULL;
-    ret = pGetIfTable2Ex( 3, &table );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+    ret = GetIfTable2Ex( 3, &table );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
     ok( !table, "table should not be set\n" );
-    pFreeMibTable( table );
+    FreeMibTable( table );
 }
 
 static void test_GetUnicastIpAddressEntry(void)
@@ -1926,23 +2243,23 @@ static void test_GetUnicastIpAddressEntry(void)
     }
 
     ret = pGetUnicastIpAddressEntry( NULL );
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
 
     memset( &row, 0, sizeof(row) );
     ret = pGetUnicastIpAddressEntry( &row );
-    todo_wine ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
 
     memset( &row, 0, sizeof(row) );
     row.Address.Ipv4.sin_family = AF_INET;
     row.Address.Ipv4.sin_port = 0;
     row.Address.Ipv4.sin_addr.S_un.S_addr = 0x01020304;
     ret = pGetUnicastIpAddressEntry( &row );
-    ok( ret == ERROR_FILE_NOT_FOUND, "got %u\n", ret );
+    ok( ret == ERROR_FILE_NOT_FOUND, "got %lu\n", ret );
 
     memset( &row, 0, sizeof(row) );
     row.InterfaceIndex = 123;
     ret = pGetUnicastIpAddressEntry( &row );
-    todo_wine ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
 
     memset( &row, 0, sizeof(row) );
     row.InterfaceIndex = get_interface_index();
@@ -1950,7 +2267,7 @@ static void test_GetUnicastIpAddressEntry(void)
     row.Address.Ipv4.sin_port = 0;
     row.Address.Ipv4.sin_addr.S_un.S_addr = 0x01020304;
     ret = pGetUnicastIpAddressEntry( &row );
-    ok( ret == ERROR_NOT_FOUND, "got %u\n", ret );
+    ok( ret == ERROR_NOT_FOUND, "got %lu\n", ret );
 
     memset( &row, 0, sizeof(row) );
     row.InterfaceIndex = 123;
@@ -1958,15 +2275,15 @@ static void test_GetUnicastIpAddressEntry(void)
     row.Address.Ipv4.sin_port = 0;
     row.Address.Ipv4.sin_addr.S_un.S_addr = 0x01020304;
     ret = pGetUnicastIpAddressEntry( &row );
-    ok( ret == ERROR_FILE_NOT_FOUND, "got %u\n", ret );
+    ok( ret == ERROR_FILE_NOT_FOUND, "got %lu\n", ret );
 
     ret = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_ALL_INTERFACES, NULL, NULL, &size);
-    ok(ret == ERROR_BUFFER_OVERFLOW, "expected ERROR_BUFFER_OVERFLOW, got %u\n", ret);
+    ok(ret == ERROR_BUFFER_OVERFLOW, "expected ERROR_BUFFER_OVERFLOW, got %lu\n", ret);
     if (ret != ERROR_BUFFER_OVERFLOW) return;
 
     ptr = HeapAlloc(GetProcessHeap(), 0, size);
     ret = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_ALL_INTERFACES, NULL, ptr, &size);
-    ok(!ret, "expected ERROR_SUCCESS got %u\n", ret);
+    ok(!ret, "expected ERROR_SUCCESS got %lu\n", ret);
 
     for (aa = ptr; !ret && aa; aa = aa->Next)
     {
@@ -1980,14 +2297,14 @@ static void test_GetUnicastIpAddressEntry(void)
             memcpy(&row.InterfaceLuid, &aa->Luid, sizeof(aa->Luid));
             memcpy(&row.Address, ua->Address.lpSockaddr, ua->Address.iSockaddrLength);
             ret = pGetUnicastIpAddressEntry( &row );
-            ok( ret == NO_ERROR, "got %u\n", ret );
+            ok( ret == NO_ERROR, "got %lu\n", ret );
 
             /* test with index */
             memset( &row, 0, sizeof(row) );
             row.InterfaceIndex = S(U(*aa)).IfIndex;
             memcpy(&row.Address, ua->Address.lpSockaddr, ua->Address.iSockaddrLength);
             ret = pGetUnicastIpAddressEntry( &row );
-            ok( ret == NO_ERROR, "got %u\n", ret );
+            ok( ret == NO_ERROR, "got %lu\n", ret );
             if (ret == NO_ERROR)
             {
                 ok(row.InterfaceLuid.Info.Reserved == aa->Luid.Info.Reserved, "Expected %d, got %d\n",
@@ -1996,22 +2313,22 @@ static void test_GetUnicastIpAddressEntry(void)
                     aa->Luid.Info.NetLuidIndex, row.InterfaceLuid.Info.NetLuidIndex);
                 ok(row.InterfaceLuid.Info.IfType == aa->Luid.Info.IfType, "Expected %d, got %d\n",
                     aa->Luid.Info.IfType, row.InterfaceLuid.Info.IfType);
-                ok(row.InterfaceIndex == S(U(*aa)).IfIndex, "Expected %d, got %d\n",
+                ok(row.InterfaceIndex == S(U(*aa)).IfIndex, "Expected %ld, got %ld\n",
                     S(U(*aa)).IfIndex, row.InterfaceIndex);
                 ok(row.PrefixOrigin == ua->PrefixOrigin, "Expected %d, got %d\n",
                     ua->PrefixOrigin, row.PrefixOrigin);
                 ok(row.SuffixOrigin == ua->SuffixOrigin, "Expected %d, got %d\n",
                     ua->SuffixOrigin, row.SuffixOrigin);
-                ok(row.ValidLifetime == ua->ValidLifetime, "Expected %d, got %d\n",
+                ok(row.ValidLifetime == ua->ValidLifetime, "Expected %ld, got %ld\n",
                     ua->ValidLifetime, row.ValidLifetime);
-                ok(row.PreferredLifetime == ua->PreferredLifetime, "Expected %d, got %d\n",
+                ok(row.PreferredLifetime == ua->PreferredLifetime, "Expected %ld, got %ld\n",
                     ua->PreferredLifetime, row.PreferredLifetime);
                 ok(row.OnLinkPrefixLength == ua->OnLinkPrefixLength, "Expected %d, got %d\n",
                     ua->OnLinkPrefixLength, row.OnLinkPrefixLength);
                 ok(row.SkipAsSource == 0, "Expected 0, got %d\n", row.SkipAsSource);
                 ok(row.DadState == ua->DadState, "Expected %d, got %d\n", ua->DadState, row.DadState);
                 if (row.Address.si_family == AF_INET6)
-                    ok(row.ScopeId.Value == row.Address.Ipv6.sin6_scope_id, "Expected %d, got %d\n",
+                    ok(row.ScopeId.Value == row.Address.Ipv6.sin6_scope_id, "Expected %ld, got %ld\n",
                         row.Address.Ipv6.sin6_scope_id, row.ScopeId.Value);
                 ok(row.CreationTimeStamp.QuadPart, "CreationTimeStamp is 0\n");
             }
@@ -2034,44 +2351,44 @@ static void test_GetUnicastIpAddressTable(void)
     }
 
     ret = pGetUnicastIpAddressTable(AF_UNSPEC, NULL);
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
 
     ret = pGetUnicastIpAddressTable(AF_BAN, &table);
-    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
 
     ret = pGetUnicastIpAddressTable(AF_INET, &table);
-    ok( ret == NO_ERROR, "got %u\n", ret );
-    trace("GetUnicastIpAddressTable(AF_INET): NumEntries %u\n", table->NumEntries);
-    pFreeMibTable(table);
+    ok( ret == NO_ERROR, "got %lu\n", ret );
+    trace("GetUnicastIpAddressTable(AF_INET): NumEntries %lu\n", table->NumEntries);
+    FreeMibTable( table );
 
     ret = pGetUnicastIpAddressTable(AF_INET6, &table);
-    ok( ret == NO_ERROR, "got %u\n", ret );
-    trace("GetUnicastIpAddressTable(AF_INET6): NumEntries %u\n", table->NumEntries);
-    pFreeMibTable(table);
+    ok( ret == NO_ERROR, "got %lu\n", ret );
+    trace("GetUnicastIpAddressTable(AF_INET6): NumEntries %lu\n", table->NumEntries);
+    FreeMibTable( table );
 
     ret = pGetUnicastIpAddressTable(AF_UNSPEC, &table);
-    ok( ret == NO_ERROR, "got %u\n", ret );
-    trace("GetUnicastIpAddressTable(AF_UNSPEC): NumEntries %u\n", table->NumEntries);
+    ok( ret == NO_ERROR, "got %lu\n", ret );
+    trace("GetUnicastIpAddressTable(AF_UNSPEC): NumEntries %lu\n", table->NumEntries);
     for (i = 0; i < table->NumEntries && winetest_debug > 1; i++)
     {
-        trace("Index %u:\n", i);
+        trace("Index %lu:\n", i);
         trace("Address.si_family:               %u\n", table->Table[i].Address.si_family);
         trace("InterfaceLuid.Info.Reserved:     %u\n", table->Table[i].InterfaceLuid.Info.Reserved);
         trace("InterfaceLuid.Info.NetLuidIndex: %u\n", table->Table[i].InterfaceLuid.Info.NetLuidIndex);
         trace("InterfaceLuid.Info.IfType:       %u\n", table->Table[i].InterfaceLuid.Info.IfType);
-        trace("InterfaceIndex:                  %u\n", table->Table[i].InterfaceIndex);
+        trace("InterfaceIndex:                  %lu\n", table->Table[i].InterfaceIndex);
         trace("PrefixOrigin:                    %u\n", table->Table[i].PrefixOrigin);
         trace("SuffixOrigin:                    %u\n", table->Table[i].SuffixOrigin);
-        trace("ValidLifetime:                   %u seconds\n", table->Table[i].ValidLifetime);
-        trace("PreferredLifetime:               %u seconds\n", table->Table[i].PreferredLifetime);
+        trace("ValidLifetime:                   %lu seconds\n", table->Table[i].ValidLifetime);
+        trace("PreferredLifetime:               %lu seconds\n", table->Table[i].PreferredLifetime);
         trace("OnLinkPrefixLength:              %u\n", table->Table[i].OnLinkPrefixLength);
         trace("SkipAsSource:                    %u\n", table->Table[i].SkipAsSource);
         trace("DadState:                        %u\n", table->Table[i].DadState);
-        trace("ScopeId.Value:                   %u\n", table->Table[i].ScopeId.Value);
-        trace("CreationTimeStamp:               %08x%08x\n", table->Table[i].CreationTimeStamp.HighPart, table->Table[i].CreationTimeStamp.LowPart);
+        trace("ScopeId.Value:                   %lu\n", table->Table[i].ScopeId.Value);
+        trace("CreationTimeStamp:               %08lx%08lx\n", table->Table[i].CreationTimeStamp.HighPart, table->Table[i].CreationTimeStamp.LowPart);
     }
 
-    pFreeMibTable(table);
+    FreeMibTable( table );
 }
 
 static void test_ConvertLengthToIpv4Mask(void)
@@ -2096,15 +2413,15 @@ static void test_ConvertLengthToIpv4Mask(void)
             expected = 0;
 
         ret = pConvertLengthToIpv4Mask( n, &mask );
-        ok( ret == NO_ERROR, "ConvertLengthToIpv4Mask returned 0x%08x, expected 0x%08x\n", ret, NO_ERROR );
-        ok( mask == expected, "ConvertLengthToIpv4Mask mask value 0x%08x, expected 0x%08x\n", mask, expected );
+        ok( ret == NO_ERROR, "ConvertLengthToIpv4Mask returned 0x%08lx, expected 0x%08x\n", ret, NO_ERROR );
+        ok( mask == expected, "ConvertLengthToIpv4Mask mask value 0x%08lx, expected 0x%08lx\n", mask, expected );
     }
 
     /* Testing for out of range. In this case both mask and return are changed to indicate error. */
     mask = 0xdeadbeef;
     ret = pConvertLengthToIpv4Mask( 33, &mask );
-    ok( ret == ERROR_INVALID_PARAMETER, "ConvertLengthToIpv4Mask returned 0x%08x, expected 0x%08x\n", ret, ERROR_INVALID_PARAMETER );
-    ok( mask == INADDR_NONE, "ConvertLengthToIpv4Mask mask value 0x%08x, expected 0x%08x\n", mask, INADDR_NONE );
+    ok( ret == ERROR_INVALID_PARAMETER, "ConvertLengthToIpv4Mask returned 0x%08lx, expected 0x%08x\n", ret, ERROR_INVALID_PARAMETER );
+    ok( mask == INADDR_NONE, "ConvertLengthToIpv4Mask mask value 0x%08lx, expected 0x%08x\n", mask, INADDR_NONE );
 }
 
 static void test_GetTcp6Table(void)
@@ -2126,22 +2443,22 @@ static void test_GetTcp6Table(void)
         return;
     }
     ok(ret == ERROR_INSUFFICIENT_BUFFER,
-       "GetTcp6Table(NULL, &size, FALSE) returned %d, expected ERROR_INSUFFICIENT_BUFFER\n", ret);
+       "GetTcp6Table(NULL, &size, FALSE) returned %ld, expected ERROR_INSUFFICIENT_BUFFER\n", ret);
     if (ret != ERROR_INSUFFICIENT_BUFFER) return;
 
     buf = HeapAlloc(GetProcessHeap(), 0, size);
 
     ret = pGetTcp6Table(buf, &size, FALSE);
     ok(ret == NO_ERROR,
-       "GetTcp6Table(buf, &size, FALSE) returned %d, expected NO_ERROR\n", ret);
+       "GetTcp6Table(buf, &size, FALSE) returned %ld, expected NO_ERROR\n", ret);
 
     if (ret == NO_ERROR && winetest_debug > 1)
     {
         DWORD i;
-        trace("TCP6 table: %u entries\n", buf->dwNumEntries);
+        trace("TCP6 table: %lu entries\n", buf->dwNumEntries);
         for (i = 0; i < buf->dwNumEntries; i++)
         {
-            trace("%u: local %s%%%u:%u remote %s%%%u:%u state %u\n", i,
+            trace("%lu: local %s%%%u:%u remote %s%%%u:%u state %u\n", i,
                   ntoa6(&buf->table[i].LocalAddr), ntohs(buf->table[i].dwLocalScopeId),
                   ntohs(buf->table[i].dwLocalPort), ntoa6(&buf->table[i].RemoteAddr),
                   ntohs(buf->table[i].dwRemoteScopeId), ntohs(buf->table[i].dwRemotePort),
@@ -2168,22 +2485,22 @@ static void test_GetUdp6Table(void)
         return;
     }
     ok(apiReturn == ERROR_INSUFFICIENT_BUFFER,
-       "GetUdp6Table(NULL, &dwSize, FALSE) returned %d, expected ERROR_INSUFFICIENT_BUFFER\n",
+       "GetUdp6Table(NULL, &dwSize, FALSE) returned %ld, expected ERROR_INSUFFICIENT_BUFFER\n",
        apiReturn);
     if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
         PMIB_UDP6TABLE buf = HeapAlloc(GetProcessHeap(), 0, dwSize);
 
         apiReturn = pGetUdp6Table(buf, &dwSize, FALSE);
         ok(apiReturn == NO_ERROR,
-           "GetUdp6Table(buf, &dwSize, FALSE) returned %d, expected NO_ERROR\n",
+           "GetUdp6Table(buf, &dwSize, FALSE) returned %ld, expected NO_ERROR\n",
            apiReturn);
 
         if (apiReturn == NO_ERROR && winetest_debug > 1)
         {
             DWORD i;
-            trace( "UDP6 table: %u entries\n", buf->dwNumEntries );
+            trace( "UDP6 table: %lu entries\n", buf->dwNumEntries );
             for (i = 0; i < buf->dwNumEntries; i++)
-                trace( "%u: %s%%%u:%u\n",
+                trace( "%lu: %s%%%u:%u\n",
                        i, ntoa6(&buf->table[i].dwLocalAddr), ntohs(buf->table[i].dwLocalScopeId), ntohs(buf->table[i].dwLocalPort) );
         }
         HeapFree(GetProcessHeap(), 0, buf);
@@ -2239,10 +2556,10 @@ static void test_ParseNetworkString(void)
     }
 
     ret = pParseNetworkString(wstr, -1, NULL, NULL, NULL);
-    ok(ret == ERROR_SUCCESS, "expected success, got %d\n", ret);
+    ok(ret == ERROR_SUCCESS, "expected success, got %ld\n", ret);
 
     ret = pParseNetworkString(NULL, NET_STRING_IPV4_SERVICE, &info, NULL, NULL);
-    ok(ret == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", ret);
+    ok(ret == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %ld\n", ret);
 
     for (i = 0; i < ARRAY_SIZE(ipv4_address_tests); i++)
     {
@@ -2255,7 +2572,7 @@ static void test_ParseNetworkString(void)
         ret = pParseNetworkString(wstr, NET_STRING_IPV4_ADDRESS, &info, &port, &prefix_len);
 
         ok(ret == ipv4_address_tests[i].ret,
-           "%s gave error %d\n", ipv4_address_tests[i].str, ret);
+           "%s gave error %ld\n", ipv4_address_tests[i].str, ret);
         ok(info.Format == ret ? NET_ADDRESS_FORMAT_UNSPECIFIED : NET_ADDRESS_IPV4,
            "%s gave format %d\n", ipv4_address_tests[i].str, info.Format);
         ok(info.Ipv4Address.sin_addr.S_un.S_addr == (ret ? 0x99999999 : ipv4_address_tests[i].addr.S_un.S_addr),
@@ -2281,7 +2598,7 @@ static void test_ParseNetworkString(void)
         ret = pParseNetworkString(wstr, NET_STRING_IPV4_SERVICE, &info, &port, &prefix_len);
 
         ok(ret == ipv4_service_tests[i].ret,
-           "%s gave error %d\n", ipv4_service_tests[i].str, ret);
+           "%s gave error %ld\n", ipv4_service_tests[i].str, ret);
         ok(info.Format == ret ? NET_ADDRESS_FORMAT_UNSPECIFIED : NET_ADDRESS_IPV4,
            "%s gave format %d\n", ipv4_address_tests[i].str, info.Format);
         ok(info.Ipv4Address.sin_addr.S_un.S_addr == (ret ? 0x99999999 : ipv4_service_tests[i].addr.S_un.S_addr),
@@ -2324,12 +2641,39 @@ static void test_NotifyUnicastIpAddressChange(void)
     callback_called = FALSE;
     ret = pNotifyUnicastIpAddressChange(AF_INET, test_ipaddtess_change_callback,
             &callback_called, TRUE, &handle);
-    ok(ret == NO_ERROR, "Unexpected ret %#x.\n", ret);
+    ok(ret == NO_ERROR, "Unexpected ret %#lx.\n", ret);
     ok(callback_called, "Callback was not called.\n");
 
     ret = pCancelMibChangeNotify2(handle);
-    ok(ret == NO_ERROR, "Unexpected ret %#x.\n", ret);
+    ok(ret == NO_ERROR, "Unexpected ret %#lx.\n", ret);
     ok(!CloseHandle(handle), "CloseHandle() succeeded.\n");
+}
+
+static void test_ConvertGuidToString( void )
+{
+    DWORD err;
+    char bufA[39];
+    WCHAR bufW[39];
+    GUID guid = { 0xa, 0xb, 0xc, { 0xd, 0, 0xe, 0xf } }, guid2;
+
+    err = ConvertGuidToStringA( &guid, bufA, 38 );
+    ok( err, "got %ld\n", err );
+    err = ConvertGuidToStringA( &guid, bufA, 39 );
+    ok( !err, "got %ld\n", err );
+    ok( !strcmp( bufA, "{0000000A-000B-000C-0D00-0E0F00000000}" ), "got %s\n", bufA );
+
+    err = ConvertGuidToStringW( &guid, bufW, 38 );
+    ok( err, "got %ld\n", err );
+    err = ConvertGuidToStringW( &guid, bufW, 39 );
+    ok( !err, "got %ld\n", err );
+    ok( !wcscmp( bufW, L"{0000000A-000B-000C-0D00-0E0F00000000}" ), "got %s\n", debugstr_w( bufW ) );
+
+    err = ConvertStringToGuidW( bufW, &guid2 );
+    ok( !err, "got %ld\n", err );
+    ok( IsEqualGUID( &guid, &guid2 ), "guid mismatch\n" );
+
+    err = ConvertStringToGuidW( L"foo", &guid2 );
+    ok( err == ERROR_INVALID_PARAMETER, "got %ld\n", err );
 }
 
 START_TEST(iphlpapi)
@@ -2364,6 +2708,7 @@ START_TEST(iphlpapi)
     test_GetUdp6Table();
     test_ParseNetworkString();
     test_NotifyUnicastIpAddressChange();
+    test_ConvertGuidToString();
     freeIPHlpApi();
   }
 }

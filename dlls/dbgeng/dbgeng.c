@@ -31,7 +31,6 @@
 #include "dbgeng.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbgeng);
@@ -63,8 +62,8 @@ struct debug_client
     IDebugClient7 IDebugClient_iface;
     IDebugDataSpaces IDebugDataSpaces_iface;
     IDebugSymbols3 IDebugSymbols3_iface;
-    IDebugControl2 IDebugControl2_iface;
-    IDebugAdvanced IDebugAdvanced_iface;
+    IDebugControl4 IDebugControl4_iface;
+    IDebugAdvanced3 IDebugAdvanced3_iface;
     IDebugSystemObjects IDebugSystemObjects_iface;
     LONG refcount;
     ULONG engine_options;
@@ -81,7 +80,7 @@ static struct target_process *debug_client_get_target(struct debug_client *debug
 }
 
 static HRESULT debug_target_return_string(const char *str, char *buffer, unsigned int buffer_size,
-        unsigned int *size)
+                                          ULONG *size)
 {
     unsigned int len = strlen(str), dst_len;
 
@@ -149,12 +148,12 @@ static HRESULT debug_target_init_modules_info(struct target_process *target)
 
     count = needed / sizeof(HMODULE);
 
-    if (!(modules = heap_alloc(count * sizeof(*modules))))
+    if (!(modules = calloc(count, sizeof(*modules))))
         return E_OUTOFMEMORY;
 
-    if (!(target->modules.info = heap_alloc_zero(count * sizeof(*target->modules.info))))
+    if (!(target->modules.info = calloc(count, sizeof(*target->modules.info))))
     {
-        heap_free(modules);
+        free(modules);
         return E_OUTOFMEMORY;
     }
 
@@ -164,7 +163,7 @@ static HRESULT debug_target_init_modules_info(struct target_process *target)
         {
             if (!GetModuleInformation(target->handle, modules[i], &info, sizeof(info)))
             {
-                WARN("Failed to get module information, error %d.\n", GetLastError());
+                WARN("Failed to get module information, error %ld.\n", GetLastError());
                 continue;
             }
 
@@ -179,7 +178,7 @@ static HRESULT debug_target_init_modules_info(struct target_process *target)
 
     target->cpu_type = debug_target_get_module_machine(target, modules[0]);
 
-    heap_free(modules);
+    free(modules);
 
     target->modules.loaded = count;
     target->modules.unloaded = 0; /* FIXME */
@@ -230,7 +229,7 @@ static void debug_client_detach_target(struct target_process *target)
         if (resume)
         {
             if ((status = NtResumeProcess(target->handle)))
-                WARN("Failed to resume process, status %#x.\n", status);
+                WARN("Failed to resume process, status %#lx.\n", status);
         }
     }
 
@@ -253,14 +252,14 @@ static struct debug_client *impl_from_IDebugSymbols3(IDebugSymbols3 *iface)
     return CONTAINING_RECORD(iface, struct debug_client, IDebugSymbols3_iface);
 }
 
-static struct debug_client *impl_from_IDebugControl2(IDebugControl2 *iface)
+static struct debug_client *impl_from_IDebugControl4(IDebugControl4 *iface)
 {
-    return CONTAINING_RECORD(iface, struct debug_client, IDebugControl2_iface);
+    return CONTAINING_RECORD(iface, struct debug_client, IDebugControl4_iface);
 }
 
-static struct debug_client *impl_from_IDebugAdvanced(IDebugAdvanced *iface)
+static struct debug_client *impl_from_IDebugAdvanced3(IDebugAdvanced3 *iface)
 {
-    return CONTAINING_RECORD(iface, struct debug_client, IDebugAdvanced_iface);
+    return CONTAINING_RECORD(iface, struct debug_client, IDebugAdvanced3_iface);
 }
 
 static struct debug_client *impl_from_IDebugSystemObjects(IDebugSystemObjects *iface)
@@ -295,14 +294,18 @@ static HRESULT STDMETHODCALLTYPE debugclient_QueryInterface(IDebugClient7 *iface
     {
         *obj = &debug_client->IDebugSymbols3_iface;
     }
-    else if (IsEqualIID(riid, &IID_IDebugControl2)
+    else if (IsEqualIID(riid, &IID_IDebugControl4)
+            || IsEqualIID(riid, &IID_IDebugControl3)
+            || IsEqualIID(riid, &IID_IDebugControl2)
             || IsEqualIID(riid, &IID_IDebugControl))
     {
-        *obj = &debug_client->IDebugControl2_iface;
+        *obj = &debug_client->IDebugControl4_iface;
     }
-    else if (IsEqualIID(riid, &IID_IDebugAdvanced))
+    else if (IsEqualIID(riid, &IID_IDebugAdvanced3)
+            || IsEqualIID(riid, &IID_IDebugAdvanced2)
+            || IsEqualIID(riid, &IID_IDebugAdvanced))
     {
-        *obj = &debug_client->IDebugAdvanced_iface;
+        *obj = &debug_client->IDebugAdvanced3_iface;
     }
     else if (IsEqualIID(riid, &IID_IDebugSystemObjects))
     {
@@ -324,15 +327,15 @@ static ULONG STDMETHODCALLTYPE debugclient_AddRef(IDebugClient7 *iface)
     struct debug_client *debug_client = impl_from_IDebugClient(iface);
     ULONG refcount = InterlockedIncrement(&debug_client->refcount);
 
-    TRACE("%p, %d.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     return refcount;
 }
 
 static void debug_target_free(struct target_process *target)
 {
-    heap_free(target->modules.info);
-    heap_free(target);
+    free(target->modules.info);
+    free(target);
 }
 
 static ULONG STDMETHODCALLTYPE debugclient_Release(IDebugClient7 *iface)
@@ -341,7 +344,7 @@ static ULONG STDMETHODCALLTYPE debugclient_Release(IDebugClient7 *iface)
     ULONG refcount = InterlockedDecrement(&debug_client->refcount);
     struct target_process *cur, *cur2;
 
-    TRACE("%p, %d.\n", debug_client, refcount);
+    TRACE("%p, refcount %lu.\n", debug_client, refcount);
 
     if (!refcount)
     {
@@ -353,7 +356,7 @@ static ULONG STDMETHODCALLTYPE debugclient_Release(IDebugClient7 *iface)
         }
         if (debug_client->event_callbacks)
             debug_client->event_callbacks->lpVtbl->Release(debug_client->event_callbacks);
-        heap_free(debug_client);
+        free(debug_client);
     }
 
     return refcount;
@@ -361,7 +364,7 @@ static ULONG STDMETHODCALLTYPE debugclient_Release(IDebugClient7 *iface)
 
 static HRESULT STDMETHODCALLTYPE debugclient_AttachKernel(IDebugClient7 *iface, ULONG flags, const char *options)
 {
-    FIXME("%p, %#x, %s stub.\n", iface, flags, debugstr_a(options));
+    FIXME("%p, %#lx, %s stub.\n", iface, flags, debugstr_a(options));
 
     return E_NOTIMPL;
 }
@@ -369,7 +372,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_AttachKernel(IDebugClient7 *iface, 
 static HRESULT STDMETHODCALLTYPE debugclient_GetKernelConnectionOptions(IDebugClient7 *iface, char *buffer,
         ULONG buffer_size, ULONG *options_size)
 {
-    FIXME("%p, %p, %u, %p stub.\n", iface, buffer, buffer_size, options_size);
+    FIXME("%p, %p, %lu, %p stub.\n", iface, buffer, buffer_size, options_size);
 
     return E_NOTIMPL;
 }
@@ -384,7 +387,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_SetKernelConnectionOptions(IDebugCl
 static HRESULT STDMETHODCALLTYPE debugclient_StartProcessServer(IDebugClient7 *iface, ULONG flags, const char *options,
         void *reserved)
 {
-    FIXME("%p, %#x, %s, %p stub.\n", iface, flags, debugstr_a(options), reserved);
+    FIXME("%p, %#lx, %s, %p stub.\n", iface, flags, debugstr_a(options), reserved);
 
     return E_NOTIMPL;
 }
@@ -407,7 +410,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_DisconnectProcessServer(IDebugClien
 static HRESULT STDMETHODCALLTYPE debugclient_GetRunningProcessSystemIds(IDebugClient7 *iface, ULONG64 server,
         ULONG *ids, ULONG count, ULONG *actual_count)
 {
-    FIXME("%p, %s, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(server), ids, count, actual_count);
+    FIXME("%p, %s, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(server), ids, count, actual_count);
 
     return E_NOTIMPL;
 }
@@ -415,7 +418,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_GetRunningProcessSystemIds(IDebugCl
 static HRESULT STDMETHODCALLTYPE debugclient_GetRunningProcessSystemIdByExecutableName(IDebugClient7 *iface,
         ULONG64 server, const char *exe_name, ULONG flags, ULONG *id)
 {
-    FIXME("%p, %s, %s, %#x, %p stub.\n", iface, wine_dbgstr_longlong(server), debugstr_a(exe_name), flags, id);
+    FIXME("%p, %s, %s, %#lx, %p stub.\n", iface, wine_dbgstr_longlong(server), debugstr_a(exe_name), flags, id);
 
     return E_NOTIMPL;
 }
@@ -424,7 +427,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_GetRunningProcessDescription(IDebug
         ULONG systemid, ULONG flags, char *exe_name, ULONG exe_name_size, ULONG *actual_exe_name_size,
         char *description, ULONG description_size, ULONG *actual_description_size)
 {
-    FIXME("%p, %s, %u, %#x, %p, %u, %p, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(server), systemid, flags,
+    FIXME("%p, %s, %lu, %#lx, %p, %lu, %p, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(server), systemid, flags,
             exe_name, exe_name_size, actual_exe_name_size, description, description_size, actual_description_size);
 
     return E_NOTIMPL;
@@ -435,7 +438,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_AttachProcess(IDebugClient7 *iface,
     struct debug_client *debug_client = impl_from_IDebugClient(iface);
     struct target_process *process;
 
-    TRACE("%p, %s, %u, %#x.\n", iface, wine_dbgstr_longlong(server), pid, flags);
+    TRACE("%p, %s, %lu, %#lx.\n", iface, wine_dbgstr_longlong(server), pid, flags);
 
     if (server)
     {
@@ -443,7 +446,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_AttachProcess(IDebugClient7 *iface,
         return E_NOTIMPL;
     }
 
-    if (!(process = heap_alloc_zero(sizeof(*process))))
+    if (!(process = calloc(1, sizeof(*process))))
         return E_OUTOFMEMORY;
 
     process->pid = pid;
@@ -457,7 +460,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_AttachProcess(IDebugClient7 *iface,
 static HRESULT STDMETHODCALLTYPE debugclient_CreateProcess(IDebugClient7 *iface, ULONG64 server, char *cmdline,
         ULONG flags)
 {
-    FIXME("%p, %s, %s, %#x stub.\n", iface, wine_dbgstr_longlong(server), debugstr_a(cmdline), flags);
+    FIXME("%p, %s, %s, %#lx stub.\n", iface, wine_dbgstr_longlong(server), debugstr_a(cmdline), flags);
 
     return E_NOTIMPL;
 }
@@ -465,7 +468,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_CreateProcess(IDebugClient7 *iface,
 static HRESULT STDMETHODCALLTYPE debugclient_CreateProcessAndAttach(IDebugClient7 *iface, ULONG64 server, char *cmdline,
         ULONG create_flags, ULONG pid, ULONG attach_flags)
 {
-    FIXME("%p, %s, %s, %#x, %u, %#x stub.\n", iface, wine_dbgstr_longlong(server), debugstr_a(cmdline), create_flags,
+    FIXME("%p, %s, %s, %#lx, %lu, %#lx stub.\n", iface, wine_dbgstr_longlong(server), debugstr_a(cmdline), create_flags,
             pid, attach_flags);
 
     return E_NOTIMPL;
@@ -480,21 +483,21 @@ static HRESULT STDMETHODCALLTYPE debugclient_GetProcessOptions(IDebugClient7 *if
 
 static HRESULT STDMETHODCALLTYPE debugclient_AddProcessOptions(IDebugClient7 *iface, ULONG options)
 {
-    FIXME("%p, %#x stub.\n", iface, options);
+    FIXME("%p, %#lx stub.\n", iface, options);
 
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugclient_RemoveProcessOptions(IDebugClient7 *iface, ULONG options)
 {
-    FIXME("%p, %#x stub.\n", iface, options);
+    FIXME("%p, %#lx stub.\n", iface, options);
 
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugclient_SetProcessOptions(IDebugClient7 *iface, ULONG options)
 {
-    FIXME("%p, %#x stub.\n", iface, options);
+    FIXME("%p, %#lx stub.\n", iface, options);
 
     return E_NOTIMPL;
 }
@@ -508,14 +511,14 @@ static HRESULT STDMETHODCALLTYPE debugclient_OpenDumpFile(IDebugClient7 *iface, 
 
 static HRESULT STDMETHODCALLTYPE debugclient_WriteDumpFile(IDebugClient7 *iface, const char *filename, ULONG qualifier)
 {
-    FIXME("%p, %s, %u stub.\n", iface, debugstr_a(filename), qualifier);
+    FIXME("%p, %s, %lu stub.\n", iface, debugstr_a(filename), qualifier);
 
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugclient_ConnectSession(IDebugClient7 *iface, ULONG flags, ULONG history_limit)
 {
-    FIXME("%p, %#x, %u stub.\n", iface, flags, history_limit);
+    FIXME("%p, %#lx, %lu stub.\n", iface, flags, history_limit);
 
     return E_NOTIMPL;
 }
@@ -530,7 +533,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_StartServer(IDebugClient7 *iface, c
 static HRESULT STDMETHODCALLTYPE debugclient_OutputServers(IDebugClient7 *iface, ULONG output_control,
         const char *machine, ULONG flags)
 {
-    FIXME("%p, %u, %s, %#x stub.\n", iface, output_control, debugstr_a(machine), flags);
+    FIXME("%p, %lu, %s, %#lx stub.\n", iface, output_control, debugstr_a(machine), flags);
 
     return E_NOTIMPL;
 }
@@ -559,7 +562,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_DetachProcesses(IDebugClient7 *ifac
 
 static HRESULT STDMETHODCALLTYPE debugclient_EndSession(IDebugClient7 *iface, ULONG flags)
 {
-    FIXME("%p, %#x stub.\n", iface, flags);
+    FIXME("%p, %#lx stub.\n", iface, flags);
 
     return E_NOTIMPL;
 }
@@ -573,7 +576,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_GetExitCode(IDebugClient7 *iface, U
 
 static HRESULT STDMETHODCALLTYPE debugclient_DispatchCallbacks(IDebugClient7 *iface, ULONG timeout)
 {
-    FIXME("%p, %u stub.\n", iface, timeout);
+    FIXME("%p, %lu stub.\n", iface, timeout);
 
     return E_NOTIMPL;
 }
@@ -629,7 +632,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_GetOutputMask(IDebugClient7 *iface,
 
 static HRESULT STDMETHODCALLTYPE debugclient_SetOutputMask(IDebugClient7 *iface, ULONG mask)
 {
-    FIXME("%p, %#x stub.\n", iface, mask);
+    FIXME("%p, %#lx stub.\n", iface, mask);
 
     return E_NOTIMPL;
 }
@@ -643,7 +646,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_GetOtherOutputMask(IDebugClient7 *i
 
 static HRESULT STDMETHODCALLTYPE debugclient_SetOtherOutputMask(IDebugClient7 *iface, IDebugClient *client, ULONG mask)
 {
-    FIXME("%p, %p, %#x stub.\n", iface, client, mask);
+    FIXME("%p, %p, %#lx stub.\n", iface, client, mask);
 
     return E_NOTIMPL;
 }
@@ -657,7 +660,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_GetOutputWidth(IDebugClient7 *iface
 
 static HRESULT STDMETHODCALLTYPE debugclient_SetOutputWidth(IDebugClient7 *iface, ULONG columns)
 {
-    FIXME("%p, %u stub.\n", iface, columns);
+    FIXME("%p, %lu stub.\n", iface, columns);
 
     return E_NOTIMPL;
 }
@@ -665,7 +668,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_SetOutputWidth(IDebugClient7 *iface
 static HRESULT STDMETHODCALLTYPE debugclient_GetOutputLinePrefix(IDebugClient7 *iface, char *buffer, ULONG buffer_size,
         ULONG *prefix_size)
 {
-    FIXME("%p, %p, %u, %p stub.\n", iface, buffer, buffer_size, prefix_size);
+    FIXME("%p, %p, %lu, %p stub.\n", iface, buffer, buffer_size, prefix_size);
 
     return E_NOTIMPL;
 }
@@ -680,7 +683,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_SetOutputLinePrefix(IDebugClient7 *
 static HRESULT STDMETHODCALLTYPE debugclient_GetIdentity(IDebugClient7 *iface, char *buffer, ULONG buffer_size,
         ULONG *identity_size)
 {
-    FIXME("%p, %p, %u, %p stub.\n", iface, buffer, buffer_size, identity_size);
+    FIXME("%p, %p, %lu, %p stub.\n", iface, buffer, buffer_size, identity_size);
 
     return E_NOTIMPL;
 }
@@ -688,7 +691,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_GetIdentity(IDebugClient7 *iface, c
 static HRESULT STDMETHODCALLTYPE debugclient_OutputIdentity(IDebugClient7 *iface, ULONG output_control, ULONG flags,
         const char *format)
 {
-    FIXME("%p, %u, %#x, %s stub.\n", iface, output_control, flags, debugstr_a(format));
+    FIXME("%p, %lu, %#lx, %s stub.\n", iface, output_control, flags, debugstr_a(format));
 
     return E_NOTIMPL;
 }
@@ -732,13 +735,13 @@ static HRESULT STDMETHODCALLTYPE debugclient_FlushCallbacks(IDebugClient7 *iface
 static HRESULT STDMETHODCALLTYPE debugclient_WriteDumpFile2(IDebugClient7 *iface, const char *dumpfile, ULONG qualifier,
             ULONG flags, const char *comment)
 {
-    FIXME("%p, %s, %d, 0x%08x, %s.\n", iface, debugstr_a(dumpfile), qualifier, flags, debugstr_a(comment));
+    FIXME("%p, %s, %lu, %#lx, %s.\n", iface, debugstr_a(dumpfile), qualifier, flags, debugstr_a(comment));
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugclient_AddDumpInformationFile(IDebugClient7 *iface, const char *infofile, ULONG type)
 {
-    FIXME("%p, %s, %d.\n", iface, debugstr_a(infofile), type);
+    FIXME("%p, %s, %lu.\n", iface, debugstr_a(infofile), type);
     return E_NOTIMPL;
 }
 
@@ -750,7 +753,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_EndProcessServer(IDebugClient7 *ifa
 
 static HRESULT STDMETHODCALLTYPE debugclient_WaitForProcessServerEnd(IDebugClient7 *iface, ULONG timeout)
 {
-    FIXME("%p, %d.\n", iface, timeout);
+    FIXME("%p, %lu.\n", iface, timeout);
     return E_NOTIMPL;
 }
 
@@ -781,28 +784,28 @@ static HRESULT STDMETHODCALLTYPE debugclient_AbandonCurrentProcess(IDebugClient7
 static HRESULT STDMETHODCALLTYPE debugclient_GetRunningProcessSystemIdByExecutableNameWide(IDebugClient7 *iface, ULONG64 server,
             const WCHAR *exename, ULONG flags, ULONG *id)
 {
-    FIXME("%p, %s, %s, 0x%08x, %p.\n", iface, wine_dbgstr_longlong(server), debugstr_w(exename), flags, id);
+    FIXME("%p, %s, %s, %#lx, %p.\n", iface, wine_dbgstr_longlong(server), debugstr_w(exename), flags, id);
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugclient_GetRunningProcessDescriptionWide(IDebugClient7 *iface, ULONG64 server, ULONG id,
             ULONG flags, WCHAR *exename, ULONG size,  ULONG *actualsize, WCHAR *description, ULONG desc_size, ULONG *actual_desc_size)
 {
-    FIXME("%p, %s, %d, 0x%08x, %s, %d, %p, %s, %d, %p.\n", iface, wine_dbgstr_longlong(server), id, flags, debugstr_w(exename), size,
+    FIXME("%p, %s, %lu, %#lx, %s, %lu, %p, %s, %lu, %p.\n", iface, wine_dbgstr_longlong(server), id, flags, debugstr_w(exename), size,
             actualsize, debugstr_w(description), desc_size, actual_desc_size );
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugclient_CreateProcessWide(IDebugClient7 *iface, ULONG64 server, WCHAR *commandline, ULONG flags)
 {
-    FIXME("%p, %s, %s, 0x%08x.\n", iface, wine_dbgstr_longlong(server), debugstr_w(commandline), flags);
+    FIXME("%p, %s, %s, %#lx.\n", iface, wine_dbgstr_longlong(server), debugstr_w(commandline), flags);
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugclient_CreateProcessAndAttachWide(IDebugClient7 *iface, ULONG64 server, WCHAR *commandline,
             ULONG flags, ULONG processid, ULONG attachflags)
 {
-    FIXME("%p, %s, %s, 0x%08x, %d, 0x%08x.\n", iface, wine_dbgstr_longlong(server), debugstr_w(commandline), flags, processid, attachflags);
+    FIXME("%p, %s, %s, %#lx, %lu, %#lx.\n", iface, wine_dbgstr_longlong(server), debugstr_w(commandline), flags, processid, attachflags);
     return E_NOTIMPL;
 }
 
@@ -815,7 +818,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_OpenDumpFileWide(IDebugClient7 *ifa
 static HRESULT STDMETHODCALLTYPE debugclient_WriteDumpFileWide(IDebugClient7 *iface, const WCHAR *filename, ULONG64 handle,
             ULONG qualifier, ULONG flags, const WCHAR *comment)
 {
-    FIXME("%p, %s, %s, %d, 0x%08x, %s.\n", iface, debugstr_w(filename), wine_dbgstr_longlong(handle),
+    FIXME("%p, %s, %s, %lu, %#lx, %s.\n", iface, debugstr_w(filename), wine_dbgstr_longlong(handle),
                 qualifier, flags, debugstr_w(comment));
     return E_NOTIMPL;
 }
@@ -823,7 +826,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_WriteDumpFileWide(IDebugClient7 *if
 static HRESULT STDMETHODCALLTYPE debugclient_AddDumpInformationFileWide(IDebugClient7 *iface, const WCHAR *filename,
             ULONG64 handle, ULONG type)
 {
-    FIXME("%p, %s, %s, %d.\n", iface, debugstr_w(filename), wine_dbgstr_longlong(handle), type);
+    FIXME("%p, %s, %s, %lu.\n", iface, debugstr_w(filename), wine_dbgstr_longlong(handle), type);
     return E_NOTIMPL;
 }
 
@@ -836,27 +839,27 @@ static HRESULT STDMETHODCALLTYPE debugclient_GetNumberDumpFiles(IDebugClient7 *i
 static HRESULT STDMETHODCALLTYPE debugclient_GetDumpFile(IDebugClient7 *iface, ULONG index, char *buffer, ULONG buf_size,
             ULONG *name_size, ULONG64 *handle, ULONG *type)
 {
-    FIXME("%p, %d, %p, %d, %p, %p, %p.\n", iface, index, buffer, buf_size, name_size, handle, type);
+    FIXME("%p, %lu, %p, %lu, %p, %p, %p.\n", iface, index, buffer, buf_size, name_size, handle, type);
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugclient_GetDumpFileWide(IDebugClient7 *iface, ULONG index, WCHAR *buffer, ULONG buf_size,
             ULONG *name_size, ULONG64 *handle, ULONG *type)
 {
-    FIXME("%p, %d, %p, %d, %p, %p, %p.\n", iface, index, buffer, buf_size, name_size, handle, type);
+    FIXME("%p, %lu, %p, %lu, %p, %p, %p.\n", iface, index, buffer, buf_size, name_size, handle, type);
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugclient_AttachKernelWide(IDebugClient7 *iface, ULONG flags, const WCHAR *options)
 {
-    FIXME("%p, 0x%08x, %s.\n", iface, flags, debugstr_w(options));
+    FIXME("%p, %#lx, %s.\n", iface, flags, debugstr_w(options));
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugclient_GetKernelConnectionOptionsWide(IDebugClient7 *iface, WCHAR *buffer,
                 ULONG buf_size, ULONG *size)
 {
-    FIXME("%p, %p, %d, %p.\n", iface, buffer, buf_size, size);
+    FIXME("%p, %p, %lu, %p.\n", iface, buffer, buf_size, size);
     return E_NOTIMPL;
 }
 
@@ -868,7 +871,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_SetKernelConnectionOptionsWide(IDeb
 
 static HRESULT STDMETHODCALLTYPE debugclient_StartProcessServerWide(IDebugClient7 *iface, ULONG flags, const WCHAR *options, void *reserved)
 {
-    FIXME("%p, 0x%08x, %s, %p.\n", iface, flags, debugstr_w(options), reserved);
+    FIXME("%p, %#lx, %s, %p.\n", iface, flags, debugstr_w(options), reserved);
     return E_NOTIMPL;
 }
 
@@ -886,7 +889,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_StartServerWide(IDebugClient7 *ifac
 
 static HRESULT STDMETHODCALLTYPE debugclient_OutputServersWide(IDebugClient7 *iface, ULONG control, const WCHAR *machine, ULONG flags)
 {
-    FIXME("%p, %d, %s, 0x%08x.\n", iface, control, debugstr_w(machine), flags);
+    FIXME("%p, %lu, %s, %#lx.\n", iface, control, debugstr_w(machine), flags);
     return E_NOTIMPL;
 }
 
@@ -904,7 +907,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_SetOutputCallbacksWide(IDebugClient
 
 static HRESULT STDMETHODCALLTYPE debugclient_GetOutputLinePrefixWide(IDebugClient7 *iface, WCHAR *buffer, ULONG buf_size, ULONG *size)
 {
-    FIXME("%p, %p, %d, %p.\n", iface, buffer, buf_size, size);
+    FIXME("%p, %p, %lu, %p.\n", iface, buffer, buf_size, size);
     return E_NOTIMPL;
 }
 
@@ -916,13 +919,13 @@ static HRESULT STDMETHODCALLTYPE debugclient_SetOutputLinePrefixWide(IDebugClien
 
 static HRESULT STDMETHODCALLTYPE debugclient_GetIdentityWide(IDebugClient7 *iface, WCHAR *buffer, ULONG buf_size, ULONG *identity)
 {
-    FIXME("%p, %p, %d, %p.\n", iface, buffer, buf_size, identity);
+    FIXME("%p, %p, %lu, %p.\n", iface, buffer, buf_size, identity);
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugclient_OutputIdentityWide(IDebugClient7 *iface, ULONG control, ULONG flags, const WCHAR *format)
 {
-    FIXME("%p, %d, 0x%08x, %s.\n", iface, control, flags, debugstr_w(format));
+    FIXME("%p, %ld, %#lx, %s.\n", iface, control, flags, debugstr_w(format));
     return E_NOTIMPL;
 }
 
@@ -941,7 +944,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_SetEventCallbacksWide(IDebugClient7
 static HRESULT STDMETHODCALLTYPE debugclient_CreateProcess2(IDebugClient7 *iface, ULONG64 server, char *command, void *options,
             ULONG buf_size, const char *initial, const char *environment)
 {
-    FIXME("%p %s, %s, %p, %d, %s, %s.\n", iface, wine_dbgstr_longlong(server), debugstr_a(command), options,
+    FIXME("%p, %s, %s, %p, %ld, %s, %s.\n", iface, wine_dbgstr_longlong(server), debugstr_a(command), options,
             buf_size, debugstr_a(initial), debugstr_a(environment));
     return E_NOTIMPL;
 }
@@ -949,7 +952,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_CreateProcess2(IDebugClient7 *iface
 static HRESULT STDMETHODCALLTYPE debugclient_CreateProcess2Wide(IDebugClient7 *iface, ULONG64 server, WCHAR *command, void *options,
             ULONG size, const WCHAR *initial, const WCHAR *environment)
 {
-    FIXME("%p %s, %s, %p, %d, %s, %s.\n", iface, wine_dbgstr_longlong(server), debugstr_w(command), options,
+    FIXME("%p, %s, %s, %p, %ld, %s, %s.\n", iface, wine_dbgstr_longlong(server), debugstr_w(command), options,
             size, debugstr_w(initial), debugstr_w(environment));
     return E_NOTIMPL;
 }
@@ -957,7 +960,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_CreateProcess2Wide(IDebugClient7 *i
 static HRESULT STDMETHODCALLTYPE debugclient_CreateProcessAndAttach2(IDebugClient7 *iface, ULONG64 server, char *command,
             void *options, ULONG buf_size, const char *initial, const char *environment, ULONG processid, ULONG flags)
 {
-    FIXME("%p %s, %s, %p, %d, %s, %s, %d, 0x%08x.\n", iface, wine_dbgstr_longlong(server), debugstr_a(command), options,
+    FIXME("%p, %s, %s, %p, %ld, %s, %s, %ld, %#lx.\n", iface, wine_dbgstr_longlong(server), debugstr_a(command), options,
             buf_size, debugstr_a(initial), debugstr_a(environment), processid, flags);
     return E_NOTIMPL;
 }
@@ -965,7 +968,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_CreateProcessAndAttach2(IDebugClien
 static HRESULT STDMETHODCALLTYPE debugclient_CreateProcessAndAttach2Wide(IDebugClient7 *iface, ULONG64 server, WCHAR *command,
             void *buffer, ULONG buf_size, const WCHAR *initial, const WCHAR *environment, ULONG processid, ULONG flags)
 {
-    FIXME("%p %s, %s, %p, %d, %s, %s, %d, 0x%08x.\n", iface, wine_dbgstr_longlong(server), debugstr_w(command), buffer,
+    FIXME("%p %s, %s, %p, %ld, %s, %s, %ld, %#lx.\n", iface, wine_dbgstr_longlong(server), debugstr_w(command), buffer,
             buf_size, debugstr_w(initial), debugstr_w(environment), processid, flags);
     return E_NOTIMPL;
 }
@@ -1002,13 +1005,13 @@ static HRESULT STDMETHODCALLTYPE debugclient_GetNumberOutputCallbacks(IDebugClie
 
 static HRESULT STDMETHODCALLTYPE debugclient_GetNumberEventCallbacks(IDebugClient7 *iface, ULONG flags, ULONG *count)
 {
-    FIXME("%p, 0x%08x, %p.\n", iface, flags, count);
+    FIXME("%p, %#lx, %p.\n", iface, flags, count);
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugclient_GetQuitLockString(IDebugClient7 *iface, char *buffer, ULONG buf_size, ULONG *size)
 {
-    FIXME("%p, %s, %d, %p.\n", iface, debugstr_a(buffer), buf_size, size);
+    FIXME("%p, %s, %ld, %p.\n", iface, debugstr_a(buffer), buf_size, size);
     return E_NOTIMPL;
 }
 
@@ -1020,7 +1023,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_SetQuitLockString(IDebugClient7 *if
 
 static HRESULT STDMETHODCALLTYPE debugclient_GetQuitLockStringWide(IDebugClient7 *iface, WCHAR *buffer, ULONG buf_size, ULONG *size)
 {
-    FIXME("%p, %s, %d, %p.\n", iface, debugstr_w(buffer), buf_size, size);
+    FIXME("%p, %s, %ld, %p.\n", iface, debugstr_w(buffer), buf_size, size);
     return E_NOTIMPL;
 }
 
@@ -1038,7 +1041,7 @@ static HRESULT STDMETHODCALLTYPE debugclient_SetEventContextCallbacks(IDebugClie
 
 static HRESULT STDMETHODCALLTYPE debugclient_SetClientContext(IDebugClient7 *iface, void *context, ULONG size)
 {
-    FIXME("%p, %p, %d.\n", iface, context, size);
+    FIXME("%p, %p, %ld.\n", iface, context, size);
     return E_NOTIMPL;
 }
 
@@ -1178,7 +1181,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadVirtual(IDebugDataSpaces *i
     HRESULT hr = S_OK;
     SIZE_T length;
 
-    TRACE("%p, %s, %p, %u, %p.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size, read_len);
+    TRACE("%p, %s, %p, %lu, %p.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size, read_len);
 
     if (!(target = debug_client_get_target(debug_client)))
         return E_UNEXPECTED;
@@ -1191,7 +1194,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadVirtual(IDebugDataSpaces *i
     else
     {
         hr = HRESULT_FROM_WIN32(GetLastError());
-        WARN("Failed to read process memory %#x.\n", hr);
+        WARN("Failed to read process memory %#lx.\n", hr);
     }
 
     return hr;
@@ -1200,7 +1203,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadVirtual(IDebugDataSpaces *i
 static HRESULT STDMETHODCALLTYPE debugdataspaces_WriteVirtual(IDebugDataSpaces *iface, ULONG64 offset, void *buffer,
         ULONG buffer_size, ULONG *written)
 {
-    FIXME("%p, %s, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size, written);
+    FIXME("%p, %s, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size, written);
 
     return E_NOTIMPL;
 }
@@ -1208,7 +1211,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_WriteVirtual(IDebugDataSpaces *
 static HRESULT STDMETHODCALLTYPE debugdataspaces_SearchVirtual(IDebugDataSpaces *iface, ULONG64 offset, ULONG64 length,
         void *pattern, ULONG pattern_size, ULONG pattern_granularity, ULONG64 *ret_offset)
 {
-    FIXME("%p, %s, %s, %p, %u, %u, %p stub.\n", iface, wine_dbgstr_longlong(offset), wine_dbgstr_longlong(length),
+    FIXME("%p, %s, %s, %p, %lu, %lu, %p stub.\n", iface, wine_dbgstr_longlong(offset), wine_dbgstr_longlong(length),
             pattern, pattern_size, pattern_granularity, ret_offset);
 
     return E_NOTIMPL;
@@ -1217,7 +1220,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_SearchVirtual(IDebugDataSpaces 
 static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadVirtualUncached(IDebugDataSpaces *iface, ULONG64 offset,
         void *buffer, ULONG buffer_size, ULONG *read_len)
 {
-    FIXME("%p, %s, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size, read_len);
+    FIXME("%p, %s, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size, read_len);
 
     return E_NOTIMPL;
 }
@@ -1225,7 +1228,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadVirtualUncached(IDebugDataS
 static HRESULT STDMETHODCALLTYPE debugdataspaces_WriteVirtualUncached(IDebugDataSpaces *iface, ULONG64 offset,
         void *buffer, ULONG buffer_size, ULONG *written)
 {
-    FIXME("%p, %s, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size, written);
+    FIXME("%p, %s, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size, written);
 
     return E_NOTIMPL;
 }
@@ -1233,7 +1236,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_WriteVirtualUncached(IDebugData
 static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadPointersVirtual(IDebugDataSpaces *iface, ULONG count,
         ULONG64 offset, ULONG64 *pointers)
 {
-    FIXME("%p, %u, %s, %p stub.\n", iface, count, wine_dbgstr_longlong(offset), pointers);
+    FIXME("%p, %lu, %s, %p stub.\n", iface, count, wine_dbgstr_longlong(offset), pointers);
 
     return E_NOTIMPL;
 }
@@ -1241,7 +1244,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadPointersVirtual(IDebugDataS
 static HRESULT STDMETHODCALLTYPE debugdataspaces_WritePointersVirtual(IDebugDataSpaces *iface, ULONG count,
         ULONG64 offset, ULONG64 *pointers)
 {
-    FIXME("%p, %u, %s, %p stub.\n", iface, count, wine_dbgstr_longlong(offset), pointers);
+    FIXME("%p, %lu, %s, %p stub.\n", iface, count, wine_dbgstr_longlong(offset), pointers);
 
     return E_NOTIMPL;
 }
@@ -1249,7 +1252,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_WritePointersVirtual(IDebugData
 static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadPhysical(IDebugDataSpaces *iface, ULONG64 offset, void *buffer,
         ULONG buffer_size, ULONG *read_len)
 {
-    FIXME("%p, %s, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size, read_len);
+    FIXME("%p, %s, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size, read_len);
 
     return E_NOTIMPL;
 }
@@ -1257,7 +1260,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadPhysical(IDebugDataSpaces *
 static HRESULT STDMETHODCALLTYPE debugdataspaces_WritePhysical(IDebugDataSpaces *iface, ULONG64 offset, void *buffer,
         ULONG buffer_size, ULONG *written)
 {
-    FIXME("%p, %s, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size, written);
+    FIXME("%p, %s, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size, written);
 
     return E_NOTIMPL;
 }
@@ -1265,7 +1268,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_WritePhysical(IDebugDataSpaces 
 static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadControl(IDebugDataSpaces *iface, ULONG processor, ULONG64 offset,
         void *buffer, ULONG buffer_size, ULONG *read_len)
 {
-    FIXME("%p, %u, %s, %p, %u, %p stub.\n", iface, processor, wine_dbgstr_longlong(offset), buffer, buffer_size, read_len);
+    FIXME("%p, %lu, %s, %p, %lu, %p stub.\n", iface, processor, wine_dbgstr_longlong(offset), buffer, buffer_size, read_len);
 
     return E_NOTIMPL;
 }
@@ -1273,7 +1276,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadControl(IDebugDataSpaces *i
 static HRESULT STDMETHODCALLTYPE debugdataspaces_WriteControl(IDebugDataSpaces *iface, ULONG processor, ULONG64 offset,
         void *buffer, ULONG buffer_size, ULONG *written)
 {
-    FIXME("%p, %u, %s, %p, %u, %p stub.\n", iface, processor, wine_dbgstr_longlong(offset), buffer, buffer_size, written);
+    FIXME("%p, %lu, %s, %p, %lu, %p stub.\n", iface, processor, wine_dbgstr_longlong(offset), buffer, buffer_size, written);
 
     return E_NOTIMPL;
 }
@@ -1281,7 +1284,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_WriteControl(IDebugDataSpaces *
 static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadIo(IDebugDataSpaces *iface, ULONG type, ULONG bus_number,
         ULONG address_space, ULONG64 offset, void *buffer, ULONG buffer_size, ULONG *read_len)
 {
-    FIXME("%p, %u, %u, %u, %s, %p, %u, %p stub.\n", iface, type, bus_number, address_space, wine_dbgstr_longlong(offset),
+    FIXME("%p, %lu, %lu, %lu, %s, %p, %lu, %p stub.\n", iface, type, bus_number, address_space, wine_dbgstr_longlong(offset),
             buffer, buffer_size, read_len);
 
     return E_NOTIMPL;
@@ -1290,7 +1293,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadIo(IDebugDataSpaces *iface,
 static HRESULT STDMETHODCALLTYPE debugdataspaces_WriteIo(IDebugDataSpaces *iface, ULONG type, ULONG bus_number,
         ULONG address_space, ULONG64 offset, void *buffer, ULONG buffer_size, ULONG *written)
 {
-    FIXME("%p, %u, %u, %u, %s, %p, %u, %p stub.\n", iface, type, bus_number, address_space, wine_dbgstr_longlong(offset),
+    FIXME("%p, %lu, %lu, %lu, %s, %p, %lu, %p stub.\n", iface, type, bus_number, address_space, wine_dbgstr_longlong(offset),
             buffer, buffer_size, written);
 
     return E_NOTIMPL;
@@ -1298,14 +1301,14 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_WriteIo(IDebugDataSpaces *iface
 
 static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadMsr(IDebugDataSpaces *iface, ULONG msr, ULONG64 *value)
 {
-    FIXME("%p, %u, %p stub.\n", iface, msr, value);
+    FIXME("%p, %lu, %p stub.\n", iface, msr, value);
 
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugdataspaces_WriteMsr(IDebugDataSpaces *iface, ULONG msr, ULONG64 value)
 {
-    FIXME("%p, %u, %s stub.\n", iface, msr, wine_dbgstr_longlong(value));
+    FIXME("%p, %lu, %s stub.\n", iface, msr, wine_dbgstr_longlong(value));
 
     return E_NOTIMPL;
 }
@@ -1313,7 +1316,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_WriteMsr(IDebugDataSpaces *ifac
 static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadBusData(IDebugDataSpaces *iface, ULONG data_type,
         ULONG bus_number, ULONG slot_number, ULONG offset, void *buffer, ULONG buffer_size, ULONG *read_len)
 {
-    FIXME("%p, %u, %u, %u, %u, %p, %u, %p stub.\n", iface, data_type, bus_number, slot_number, offset, buffer,
+    FIXME("%p, %lu, %lu, %lu, %lu, %p, %lu, %p stub.\n", iface, data_type, bus_number, slot_number, offset, buffer,
             buffer_size, read_len);
 
     return E_NOTIMPL;
@@ -1322,7 +1325,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadBusData(IDebugDataSpaces *i
 static HRESULT STDMETHODCALLTYPE debugdataspaces_WriteBusData(IDebugDataSpaces *iface, ULONG data_type,
         ULONG bus_number, ULONG slot_number, ULONG offset, void *buffer, ULONG buffer_size, ULONG *written)
 {
-    FIXME("%p, %u, %u, %u, %u, %p, %u, %p stub.\n", iface, data_type, bus_number, slot_number, offset, buffer,
+    FIXME("%p, %lu, %lu, %lu, %lu, %p, %lu, %p stub.\n", iface, data_type, bus_number, slot_number, offset, buffer,
             buffer_size, written);
 
     return E_NOTIMPL;
@@ -1338,7 +1341,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_CheckLowMemory(IDebugDataSpaces
 static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadDebuggerData(IDebugDataSpaces *iface, ULONG index, void *buffer,
         ULONG buffer_size, ULONG *data_size)
 {
-    FIXME("%p, %u, %p, %u, %p stub.\n", iface, index, buffer, buffer_size, data_size);
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, index, buffer, buffer_size, data_size);
 
     return E_NOTIMPL;
 }
@@ -1346,7 +1349,7 @@ static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadDebuggerData(IDebugDataSpac
 static HRESULT STDMETHODCALLTYPE debugdataspaces_ReadProcessorSystemData(IDebugDataSpaces *iface, ULONG processor,
         ULONG index, void *buffer, ULONG buffer_size, ULONG *data_size)
 {
-    FIXME("%p, %u, %u, %p, %u, %p stub.\n", iface, processor, index, buffer, buffer_size, data_size);
+    FIXME("%p, %lu, %lu, %p, %lu, %p stub.\n", iface, processor, index, buffer, buffer_size, data_size);
 
     return E_NOTIMPL;
 }
@@ -1408,21 +1411,21 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolOptions(IDebugSymbols3 *i
 
 static HRESULT STDMETHODCALLTYPE debugsymbols_AddSymbolOptions(IDebugSymbols3 *iface, ULONG options)
 {
-    FIXME("%p, %#x stub.\n", iface, options);
+    FIXME("%p, %#lx stub.\n", iface, options);
 
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugsymbols_RemoveSymbolOptions(IDebugSymbols3 *iface, ULONG options)
 {
-    FIXME("%p, %#x stub.\n", iface, options);
+    FIXME("%p, %#lx stub.\n", iface, options);
 
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugsymbols_SetSymbolOptions(IDebugSymbols3 *iface, ULONG options)
 {
-    FIXME("%p, %#x stub.\n", iface, options);
+    FIXME("%p, %#lx stub.\n", iface, options);
 
     return E_NOTIMPL;
 }
@@ -1430,7 +1433,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_SetSymbolOptions(IDebugSymbols3 *i
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetNameByOffset(IDebugSymbols3 *iface, ULONG64 offset, char *buffer,
         ULONG buffer_size, ULONG *name_size, ULONG64 *displacement)
 {
-    FIXME("%p, %s, %p, %u, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size,
+    FIXME("%p, %s, %p, %lu, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size,
             name_size, displacement);
 
     return E_NOTIMPL;
@@ -1447,7 +1450,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetOffsetByName(IDebugSymbols3 *if
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetNearNameByOffset(IDebugSymbols3 *iface, ULONG64 offset, LONG delta,
         char *buffer, ULONG buffer_size, ULONG *name_size, ULONG64 *displacement)
 {
-    FIXME("%p, %s, %d, %p, %u, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), delta, buffer, buffer_size,
+    FIXME("%p, %s, %ld, %p, %lu, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), delta, buffer, buffer_size,
             name_size, displacement);
 
     return E_NOTIMPL;
@@ -1456,7 +1459,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetNearNameByOffset(IDebugSymbols3
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetLineByOffset(IDebugSymbols3 *iface, ULONG64 offset, ULONG *line,
         char *buffer, ULONG buffer_size, ULONG *file_size, ULONG64 *displacement)
 {
-    FIXME("%p, %s, %p, %p, %u, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), line, buffer, buffer_size,
+    FIXME("%p, %s, %p, %p, %lu, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), line, buffer, buffer_size,
             file_size, displacement);
 
     return E_NOTIMPL;
@@ -1465,7 +1468,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetLineByOffset(IDebugSymbols3 *if
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetOffsetByLine(IDebugSymbols3 *iface, ULONG line, const char *file,
         ULONG64 *offset)
 {
-    FIXME("%p, %u, %s, %p stub.\n", iface, line, debugstr_a(file), offset);
+    FIXME("%p, %lu, %s, %p stub.\n", iface, line, debugstr_a(file), offset);
 
     return E_NOTIMPL;
 }
@@ -1496,7 +1499,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleByIndex(IDebugSymbols3 *i
     const struct module_info *info;
     struct target_process *target;
 
-    TRACE("%p, %u, %p.\n", iface, index, base);
+    TRACE("%p, %lu, %p.\n", iface, index, base);
 
     if (!(target = debug_client_get_target(debug_client)))
         return E_UNEXPECTED;
@@ -1512,7 +1515,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleByIndex(IDebugSymbols3 *i
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleByModuleName(IDebugSymbols3 *iface, const char *name,
         ULONG start_index, ULONG *index, ULONG64 *base)
 {
-    FIXME("%p, %s, %u, %p, %p stub.\n", iface, debugstr_a(name), start_index, index, base);
+    FIXME("%p, %s, %lu, %p, %p stub.\n", iface, debugstr_a(name), start_index, index, base);
 
     return E_NOTIMPL;
 }
@@ -1524,7 +1527,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleByOffset(IDebugSymbols3 *
     static struct target_process *target;
     const struct module_info *info;
 
-    TRACE("%p, %s, %u, %p, %p.\n", iface, wine_dbgstr_longlong(offset), start_index, index, base);
+    TRACE("%p, %s, %lu, %p, %p.\n", iface, wine_dbgstr_longlong(offset), start_index, index, base);
 
     if (!(target = debug_client_get_target(debug_client)))
         return E_UNEXPECTED;
@@ -1551,7 +1554,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleNames(IDebugSymbols3 *ifa
         ULONG module_name_buffer_size, ULONG *module_name_size, char *loaded_image_name,
         ULONG loaded_image_name_buffer_size, ULONG *loaded_image_size)
 {
-    FIXME("%p, %u, %s, %p, %u, %p, %p, %u, %p, %p, %u, %p stub.\n", iface, index, wine_dbgstr_longlong(base),
+    FIXME("%p, %lu, %s, %p, %lu, %p, %p, %lu, %p, %p, %lu, %p stub.\n", iface, index, wine_dbgstr_longlong(base),
             image_name, image_name_buffer_size, image_name_size, module_name, module_name_buffer_size,
             module_name_size, loaded_image_name, loaded_image_name_buffer_size, loaded_image_size);
 
@@ -1566,7 +1569,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleParameters(IDebugSymbols3
     struct target_process *target;
     unsigned int i;
 
-    TRACE("%p, %u, %p, %u, %p.\n", iface, count, bases, start, params);
+    TRACE("%p, %lu, %p, %lu, %p.\n", iface, count, bases, start, params);
 
     if (!(target = debug_client_get_target(debug_client)))
         return E_UNEXPECTED;
@@ -1609,7 +1612,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolModule(IDebugSymbols3 *if
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetTypeName(IDebugSymbols3 *iface, ULONG64 base, ULONG type_id,
         char *buffer, ULONG buffer_size, ULONG *name_size)
 {
-    FIXME("%p, %s, %u, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(base), type_id, buffer,
+    FIXME("%p, %s, %lu, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(base), type_id, buffer,
             buffer_size, name_size);
 
     return E_NOTIMPL;
@@ -1626,7 +1629,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetTypeId(IDebugSymbols3 *iface, U
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetTypeSize(IDebugSymbols3 *iface, ULONG64 base, ULONG type_id,
         ULONG *size)
 {
-    FIXME("%p, %s, %u, %p stub.\n", iface, wine_dbgstr_longlong(base), type_id, size);
+    FIXME("%p, %s, %lu, %p stub.\n", iface, wine_dbgstr_longlong(base), type_id, size);
 
     return E_NOTIMPL;
 }
@@ -1634,7 +1637,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetTypeSize(IDebugSymbols3 *iface,
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetFieldOffset(IDebugSymbols3 *iface, ULONG64 base, ULONG type_id,
         const char *field, ULONG *offset)
 {
-    FIXME("%p, %s, %u, %s, %p stub.\n", iface, wine_dbgstr_longlong(base), type_id, debugstr_a(field), offset);
+    FIXME("%p, %s, %lu, %s, %p stub.\n", iface, wine_dbgstr_longlong(base), type_id, debugstr_a(field), offset);
 
     return E_NOTIMPL;
 }
@@ -1658,7 +1661,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetOffsetTypeId(IDebugSymbols3 *if
 static HRESULT STDMETHODCALLTYPE debugsymbols_ReadTypedDataVirtual(IDebugSymbols3 *iface, ULONG64 offset, ULONG64 base,
         ULONG type_id, void *buffer, ULONG buffer_size, ULONG *read_len)
 {
-    FIXME("%p, %s, %s, %u, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(offset), wine_dbgstr_longlong(base),
+    FIXME("%p, %s, %s, %lu, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(offset), wine_dbgstr_longlong(base),
             type_id, buffer, buffer_size, read_len);
 
     return E_NOTIMPL;
@@ -1667,7 +1670,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_ReadTypedDataVirtual(IDebugSymbols
 static HRESULT STDMETHODCALLTYPE debugsymbols_WriteTypedDataVirtual(IDebugSymbols3 *iface, ULONG64 offset, ULONG64 base,
         ULONG type_id, void *buffer, ULONG buffer_size, ULONG *written)
 {
-    FIXME("%p, %s, %s, %u, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(offset), wine_dbgstr_longlong(base),
+    FIXME("%p, %s, %s, %lu, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(offset), wine_dbgstr_longlong(base),
             type_id, buffer, buffer_size, written);
 
     return E_NOTIMPL;
@@ -1676,7 +1679,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_WriteTypedDataVirtual(IDebugSymbol
 static HRESULT STDMETHODCALLTYPE debugsymbols_OutputTypedDataVirtual(IDebugSymbols3 *iface, ULONG output_control,
         ULONG64 offset, ULONG64 base, ULONG type_id, ULONG flags)
 {
-    FIXME("%p, %#x, %s, %s, %u, %#x stub.\n", iface, output_control, wine_dbgstr_longlong(offset),
+    FIXME("%p, %#lx, %s, %s, %lu, %#lx stub.\n", iface, output_control, wine_dbgstr_longlong(offset),
             wine_dbgstr_longlong(base), type_id, flags);
 
     return E_NOTIMPL;
@@ -1685,7 +1688,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_OutputTypedDataVirtual(IDebugSymbo
 static HRESULT STDMETHODCALLTYPE debugsymbols_ReadTypedDataPhysical(IDebugSymbols3 *iface, ULONG64 offset, ULONG64 base,
         ULONG type_id, void *buffer, ULONG buffer_size, ULONG *read_len)
 {
-    FIXME("%p, %s, %s, %u, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(offset), wine_dbgstr_longlong(base),
+    FIXME("%p, %s, %s, %lu, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(offset), wine_dbgstr_longlong(base),
             type_id, buffer, buffer_size, read_len);
 
     return E_NOTIMPL;
@@ -1694,7 +1697,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_ReadTypedDataPhysical(IDebugSymbol
 static HRESULT STDMETHODCALLTYPE debugsymbols_WriteTypedDataPhysical(IDebugSymbols3 *iface, ULONG64 offset,
         ULONG64 base, ULONG type_id, void *buffer, ULONG buffer_size, ULONG *written)
 {
-    FIXME("%p, %s, %s, %u, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(offset), wine_dbgstr_longlong(base),
+    FIXME("%p, %s, %s, %lu, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(offset), wine_dbgstr_longlong(base),
             type_id, buffer, buffer_size, written);
 
     return E_NOTIMPL;
@@ -1703,7 +1706,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_WriteTypedDataPhysical(IDebugSymbo
 static HRESULT STDMETHODCALLTYPE debugsymbols_OutputTypedDataPhysical(IDebugSymbols3 *iface, ULONG output_control,
         ULONG64 offset, ULONG64 base, ULONG type_id, ULONG flags)
 {
-    FIXME("%p, %#x, %s, %s, %u, %#x stub.\n", iface, output_control, wine_dbgstr_longlong(offset),
+    FIXME("%p, %#lx, %s, %s, %lu, %#lx stub.\n", iface, output_control, wine_dbgstr_longlong(offset),
             wine_dbgstr_longlong(base), type_id, flags);
 
     return E_NOTIMPL;
@@ -1712,7 +1715,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_OutputTypedDataPhysical(IDebugSymb
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetScope(IDebugSymbols3 *iface, ULONG64 *instr_offset,
         DEBUG_STACK_FRAME *frame, void *scope_context, ULONG scope_context_size)
 {
-    FIXME("%p, %p, %p, %p, %u stub.\n", iface, instr_offset, frame, scope_context, scope_context_size);
+    FIXME("%p, %p, %p, %p, %lu stub.\n", iface, instr_offset, frame, scope_context, scope_context_size);
 
     return E_NOTIMPL;
 }
@@ -1720,7 +1723,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetScope(IDebugSymbols3 *iface, UL
 static HRESULT STDMETHODCALLTYPE debugsymbols_SetScope(IDebugSymbols3 *iface, ULONG64 instr_offset,
         DEBUG_STACK_FRAME *frame, void *scope_context, ULONG scope_context_size)
 {
-    FIXME("%p, %s, %p, %p, %u stub.\n", iface, wine_dbgstr_longlong(instr_offset), frame, scope_context,
+    FIXME("%p, %s, %p, %p, %lu stub.\n", iface, wine_dbgstr_longlong(instr_offset), frame, scope_context,
             scope_context_size);
 
     return E_NOTIMPL;
@@ -1736,7 +1739,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_ResetScope(IDebugSymbols3 *iface)
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetScopeSymbolGroup(IDebugSymbols3 *iface, ULONG flags,
         IDebugSymbolGroup *update, IDebugSymbolGroup **symbols)
 {
-    FIXME("%p, %#x, %p, %p stub.\n", iface, flags, update, symbols);
+    FIXME("%p, %#lx, %p, %p stub.\n", iface, flags, update, symbols);
 
     return E_NOTIMPL;
 }
@@ -1759,7 +1762,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_StartSymbolMatch(IDebugSymbols3 *i
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetNextSymbolMatch(IDebugSymbols3 *iface, ULONG64 handle, char *buffer,
         ULONG buffer_size, ULONG *match_size, ULONG64 *offset)
 {
-    FIXME("%p, %s, %p, %u, %p, %p stub.\n", iface, wine_dbgstr_longlong(handle), buffer, buffer_size, match_size, offset);
+    FIXME("%p, %s, %p, %lu, %p, %p stub.\n", iface, wine_dbgstr_longlong(handle), buffer, buffer_size, match_size, offset);
 
     return E_NOTIMPL;
 }
@@ -1781,7 +1784,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_Reload(IDebugSymbols3 *iface, cons
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolPath(IDebugSymbols3 *iface, char *buffer, ULONG buffer_size,
         ULONG *path_size)
 {
-    FIXME("%p, %p, %u, %p stub.\n", iface, buffer, buffer_size, path_size);
+    FIXME("%p, %p, %lu, %p stub.\n", iface, buffer, buffer_size, path_size);
 
     return E_NOTIMPL;
 }
@@ -1803,7 +1806,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_AppendSymbolPath(IDebugSymbols3 *i
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetImagePath(IDebugSymbols3 *iface, char *buffer, ULONG buffer_size,
         ULONG *path_size)
 {
-    FIXME("%p, %p, %u, %p stub.\n", iface, buffer, buffer_size, path_size);
+    FIXME("%p, %p, %lu, %p stub.\n", iface, buffer, buffer_size, path_size);
 
     return E_NOTIMPL;
 }
@@ -1825,7 +1828,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_AppendImagePath(IDebugSymbols3 *if
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourcePath(IDebugSymbols3 *iface, char *buffer, ULONG buffer_size,
         ULONG *path_size)
 {
-    FIXME("%p, %p, %u, %p stub.\n", iface, buffer, buffer_size, path_size);
+    FIXME("%p, %p, %lu, %p stub.\n", iface, buffer, buffer_size, path_size);
 
     return E_NOTIMPL;
 }
@@ -1833,7 +1836,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourcePath(IDebugSymbols3 *ifac
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourcePathElement(IDebugSymbols3 *iface, ULONG index, char *buffer,
         ULONG buffer_size, ULONG *element_size)
 {
-    FIXME("%p, %u, %p, %u, %p stub.\n", iface, index, buffer, buffer_size, element_size);
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, index, buffer, buffer_size, element_size);
 
     return E_NOTIMPL;
 }
@@ -1855,7 +1858,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_AppendSourcePath(IDebugSymbols3 *i
 static HRESULT STDMETHODCALLTYPE debugsymbols_FindSourceFile(IDebugSymbols3 *iface, ULONG start, const char *file,
         ULONG flags, ULONG *found_element, char *buffer, ULONG buffer_size, ULONG *found_size)
 {
-    FIXME("%p, %u, %s, %#x, %p, %p, %u, %p stub.\n", iface, start, debugstr_a(file), flags, found_element, buffer,
+    FIXME("%p, %lu, %s, %#lx, %p, %p, %lu, %p stub.\n", iface, start, debugstr_a(file), flags, found_element, buffer,
             buffer_size, found_size);
 
     return E_NOTIMPL;
@@ -1864,7 +1867,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_FindSourceFile(IDebugSymbols3 *ifa
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceFileLineOffsets(IDebugSymbols3 *iface, const char *file,
         ULONG64 *buffer, ULONG buffer_lines, ULONG *file_lines)
 {
-    FIXME("%p, %s, %p, %u, %p stub.\n", iface, debugstr_a(file), buffer, buffer_lines, file_lines);
+    FIXME("%p, %s, %p, %lu, %p stub.\n", iface, debugstr_a(file), buffer, buffer_lines, file_lines);
 
     return E_NOTIMPL;
 }
@@ -1877,9 +1880,10 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleVersionInformation(IDebug
     struct target_process *target;
     void *version_info, *ptr;
     HRESULT hr = E_FAIL;
-    DWORD handle, size;
+    DWORD handle;
+    UINT size;
 
-    TRACE("%p, %u, %s, %s, %p, %u, %p.\n", iface, index, wine_dbgstr_longlong(base), debugstr_a(item), buffer,
+    TRACE("%p, %lu, %s, %s, %p, %lu, %p.\n", iface, index, wine_dbgstr_longlong(base), debugstr_a(item), buffer,
             buffer_size, info_size);
 
     if (!(target = debug_client_get_target(debug_client)))
@@ -1899,7 +1903,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleVersionInformation(IDebug
     if (!(size = GetFileVersionInfoSizeA(info->image_name, &handle)))
         return E_FAIL;
 
-    if (!(version_info = heap_alloc(size)))
+    if (!(version_info = malloc(size)))
         return E_OUTOFMEMORY;
 
     if (GetFileVersionInfoA(info->image_name, handle, size, version_info))
@@ -1920,7 +1924,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleVersionInformation(IDebug
         }
     }
 
-    heap_free(version_info);
+    free(version_info);
 
     return hr;
 }
@@ -1933,7 +1937,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleNameString(IDebugSymbols3
     struct target_process *target;
     HRESULT hr;
 
-    TRACE("%p, %u, %u, %s, %p, %u, %p.\n", iface, which, index, wine_dbgstr_longlong(base), buffer, buffer_size,
+    TRACE("%p, %lu, %lu, %s, %p, %lu, %p.\n", iface, which, index, wine_dbgstr_longlong(base), buffer, buffer_size,
             name_size);
 
     if (!(target = debug_client_get_target(debug_client)))
@@ -1959,10 +1963,10 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleNameString(IDebugSymbols3
         case DEBUG_MODNAME_LOADED_IMAGE:
         case DEBUG_MODNAME_SYMBOL_FILE:
         case DEBUG_MODNAME_MAPPED_IMAGE:
-            FIXME("Unsupported name info %d.\n", which);
+            FIXME("Unsupported name info %ld.\n", which);
             return E_NOTIMPL;
         default:
-            WARN("Unknown name info %d.\n", which);
+            WARN("Unknown name info %ld.\n", which);
             return E_INVALIDARG;
     }
 
@@ -1972,7 +1976,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleNameString(IDebugSymbols3
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetConstantName(IDebugSymbols3 *iface, ULONG64 module, ULONG type_id,
         ULONG64 value, char *buffer, ULONG buffer_size, ULONG *name_size)
 {
-    FIXME("%p, %s, %u, %s, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(module), type_id,
+    FIXME("%p, %s, %lu, %s, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(module), type_id,
             wine_dbgstr_longlong(value), buffer, buffer_size, name_size);
 
     return E_NOTIMPL;
@@ -1981,7 +1985,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetConstantName(IDebugSymbols3 *if
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetFieldName(IDebugSymbols3 *iface, ULONG64 module, ULONG type_id,
         ULONG field_index, char *buffer, ULONG buffer_size, ULONG *name_size)
 {
-    FIXME("%p, %s, %u, %u, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(module), type_id, field_index, buffer,
+    FIXME("%p, %s, %lu, %lu, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(module), type_id, field_index, buffer,
             buffer_size, name_size);
 
     return E_NOTIMPL;
@@ -1996,21 +2000,21 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetTypeOptions(IDebugSymbols3 *ifa
 
 static HRESULT STDMETHODCALLTYPE debugsymbols_AddTypeOptions(IDebugSymbols3 *iface, ULONG options)
 {
-    FIXME("%p, %#x stub.\n", iface, options);
+    FIXME("%p, %#lx stub.\n", iface, options);
 
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugsymbols_RemoveTypeOptions(IDebugSymbols3 *iface, ULONG options)
 {
-    FIXME("%p, %#x stub.\n", iface, options);
+    FIXME("%p, %#lx stub.\n", iface, options);
 
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugsymbols_SetTypeOptions(IDebugSymbols3 *iface, ULONG options)
 {
-    FIXME("%p, %#x stub.\n", iface, options);
+    FIXME("%p, %#lx stub.\n", iface, options);
 
     return E_NOTIMPL;
 }
@@ -2018,7 +2022,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_SetTypeOptions(IDebugSymbols3 *ifa
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetNameByOffsetWide(IDebugSymbols3 *iface, ULONG64 offset, WCHAR *buffer,
         ULONG buffer_size, ULONG *name_size, ULONG64 *displacement)
 {
-    FIXME("%p, %s, %p, %u, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size, name_size,
+    FIXME("%p, %s, %p, %lu, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), buffer, buffer_size, name_size,
             displacement);
 
     return E_NOTIMPL;
@@ -2035,7 +2039,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetOffsetByNameWide(IDebugSymbols3
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetNearNameByOffsetWide(IDebugSymbols3 *iface, ULONG64 offset,
         LONG delta, WCHAR *buffer, ULONG buffer_size, ULONG *name_size, ULONG64 *displacement)
 {
-    FIXME("%p, %s, %d, %p, %u, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), delta, buffer, buffer_size,
+    FIXME("%p, %s, %ld, %p, %lu, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), delta, buffer, buffer_size,
             name_size, displacement);
 
     return E_NOTIMPL;
@@ -2044,7 +2048,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetNearNameByOffsetWide(IDebugSymb
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetLineByOffsetWide(IDebugSymbols3 *iface, ULONG64 offset, ULONG *line,
         WCHAR *buffer, ULONG buffer_size, ULONG *file_size, ULONG64 *displacement)
 {
-    FIXME("%p, %s, %p, %p, %u, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), line, buffer, buffer_size,
+    FIXME("%p, %s, %p, %p, %lu, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), line, buffer, buffer_size,
             file_size, displacement);
 
     return E_NOTIMPL;
@@ -2053,7 +2057,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetLineByOffsetWide(IDebugSymbols3
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetOffsetByLineWide(IDebugSymbols3 *iface, ULONG line, const WCHAR *file,
         ULONG64 *offset)
 {
-    FIXME("%p, %u, %s, %p stub.\n", iface, line, debugstr_w(file), offset);
+    FIXME("%p, %lu, %s, %p stub.\n", iface, line, debugstr_w(file), offset);
 
     return E_NOTIMPL;
 }
@@ -2061,7 +2065,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetOffsetByLineWide(IDebugSymbols3
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleByModuleNameWide(IDebugSymbols3 *iface, const WCHAR *name,
         ULONG start_index, ULONG *index, ULONG64 *base)
 {
-    FIXME("%p, %s, %u, %p, %p stub.\n", iface, debugstr_w(name), start_index, index, base);
+    FIXME("%p, %s, %lu, %p, %p stub.\n", iface, debugstr_w(name), start_index, index, base);
 
     return E_NOTIMPL;
 }
@@ -2077,7 +2081,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolModuleWide(IDebugSymbols3
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetTypeNameWide(IDebugSymbols3 *iface, ULONG64 module, ULONG type_id,
         WCHAR *buffer, ULONG buffer_size, ULONG *name_size)
 {
-    FIXME("%p, %s, %u, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(module), type_id, buffer, buffer_size,
+    FIXME("%p, %s, %lu, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(module), type_id, buffer, buffer_size,
             name_size);
 
     return E_NOTIMPL;
@@ -2094,7 +2098,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetTypeIdWide(IDebugSymbols3 *ifac
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetFieldOffsetWide(IDebugSymbols3 *iface, ULONG64 module, ULONG type_id,
         const WCHAR *field, ULONG *offset)
 {
-    FIXME("%p, %s, %u, %s, %p stub.\n", iface, wine_dbgstr_longlong(module), type_id, debugstr_w(field), offset);
+    FIXME("%p, %s, %lu, %s, %p stub.\n", iface, wine_dbgstr_longlong(module), type_id, debugstr_w(field), offset);
 
     return E_NOTIMPL;
 }
@@ -2110,7 +2114,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolTypeIdWide(IDebugSymbols3
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetScopeSymbolGroup2(IDebugSymbols3 *iface, ULONG flags,
         PDEBUG_SYMBOL_GROUP2 update, PDEBUG_SYMBOL_GROUP2 *symbols)
 {
-    FIXME("%p, %#x, %p, %p stub.\n", iface, flags, update, symbols);
+    FIXME("%p, %#lx, %p, %p stub.\n", iface, flags, update, symbols);
 
     return E_NOTIMPL;
 }
@@ -2133,7 +2137,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_StartSymbolMatchWide(IDebugSymbols
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetNextSymbolMatchWide(IDebugSymbols3 *iface, ULONG64 handle,
         WCHAR *buffer, ULONG buffer_size, ULONG *match_size, ULONG64 *offset)
 {
-    FIXME("%p, %s, %p, %u, %p, %p stub.\n", iface, wine_dbgstr_longlong(handle), buffer, buffer_size, match_size, offset);
+    FIXME("%p, %s, %p, %lu, %p, %p stub.\n", iface, wine_dbgstr_longlong(handle), buffer, buffer_size, match_size, offset);
 
     return E_NOTIMPL;
 }
@@ -2148,7 +2152,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_ReloadWide(IDebugSymbols3 *iface, 
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolPathWide(IDebugSymbols3 *iface, WCHAR *buffer, ULONG buffer_size,
         ULONG *path_size)
 {
-    FIXME("%p, %p, %u, %p stub.\n", iface, buffer, buffer_size, path_size);
+    FIXME("%p, %p, %lu, %p stub.\n", iface, buffer, buffer_size, path_size);
 
     return E_NOTIMPL;
 }
@@ -2170,7 +2174,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_AppendSymbolPathWide(IDebugSymbols
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetImagePathWide(IDebugSymbols3 *iface, WCHAR *buffer, ULONG buffer_size,
         ULONG *path_size)
 {
-    FIXME("%p, %p, %u, %p stub.\n", iface, buffer, buffer_size, path_size);
+    FIXME("%p, %p, %lu, %p stub.\n", iface, buffer, buffer_size, path_size);
 
     return E_NOTIMPL;
 }
@@ -2192,7 +2196,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_AppendImagePathWide(IDebugSymbols3
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourcePathWide(IDebugSymbols3 *iface, WCHAR *buffer, ULONG buffer_size,
         ULONG *path_size)
 {
-    FIXME("%p, %p, %u, %p stub.\n", iface, buffer, buffer_size, path_size);
+    FIXME("%p, %p, %lu, %p stub.\n", iface, buffer, buffer_size, path_size);
 
     return E_NOTIMPL;
 }
@@ -2200,7 +2204,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourcePathWide(IDebugSymbols3 *
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourcePathElementWide(IDebugSymbols3 *iface, ULONG index,
         WCHAR *buffer, ULONG buffer_size, ULONG *element_size)
 {
-    FIXME("%p, %u, %p, %u, %p stub.\n", iface, index, buffer, buffer_size, element_size);
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, index, buffer, buffer_size, element_size);
 
     return E_NOTIMPL;
 }
@@ -2222,7 +2226,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_AppendSourcePathWide(IDebugSymbols
 static HRESULT STDMETHODCALLTYPE debugsymbols_FindSourceFileWide(IDebugSymbols3 *iface, ULONG start_element,
         const WCHAR *file, ULONG flags, ULONG *found_element, WCHAR *buffer, ULONG buffer_size, ULONG *found_size)
 {
-    FIXME("%p, %u, %s, %#x, %p, %p, %u, %p stub.\n", iface, start_element, debugstr_w(file), flags, found_element,
+    FIXME("%p, %lu, %s, %#lx, %p, %p, %lu, %p stub.\n", iface, start_element, debugstr_w(file), flags, found_element,
             buffer, buffer_size, found_size);
 
     return E_NOTIMPL;
@@ -2231,7 +2235,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_FindSourceFileWide(IDebugSymbols3 
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceFileLineOffsetsWide(IDebugSymbols3 *iface, const WCHAR *file,
         ULONG64 *buffer, ULONG buffer_lines, ULONG *file_lines)
 {
-    FIXME("%p, %s, %p, %u, %p stub.\n", iface, debugstr_w(file), buffer, buffer_lines, file_lines);
+    FIXME("%p, %s, %p, %lu, %p stub.\n", iface, debugstr_w(file), buffer, buffer_lines, file_lines);
 
     return E_NOTIMPL;
 }
@@ -2239,7 +2243,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceFileLineOffsetsWide(IDebu
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleVersionInformationWide(IDebugSymbols3 *iface, ULONG index,
         ULONG64 base, const WCHAR *item, void *buffer, ULONG buffer_size, ULONG *version_info_size)
 {
-    FIXME("%p, %u, %s, %s, %p, %u, %p stub.\n", iface, index, wine_dbgstr_longlong(base), debugstr_w(item), buffer,
+    FIXME("%p, %lu, %s, %s, %p, %lu, %p stub.\n", iface, index, wine_dbgstr_longlong(base), debugstr_w(item), buffer,
             buffer_size, version_info_size);
 
     return E_NOTIMPL;
@@ -2248,7 +2252,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleVersionInformationWide(ID
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleNameStringWide(IDebugSymbols3 *iface, ULONG which, ULONG index,
         ULONG64 base, WCHAR *buffer, ULONG buffer_size, ULONG *name_size)
 {
-    FIXME("%p, %u, %u, %s, %p, %u, %p stub.\n", iface, which, index, wine_dbgstr_longlong(base), buffer, buffer_size,
+    FIXME("%p, %lu, %lu, %s, %p, %lu, %p stub.\n", iface, which, index, wine_dbgstr_longlong(base), buffer, buffer_size,
             name_size);
 
     return E_NOTIMPL;
@@ -2257,7 +2261,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleNameStringWide(IDebugSymb
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetConstantNameWide(IDebugSymbols3 *iface, ULONG64 module, ULONG type_id,
         ULONG64 value, WCHAR *buffer, ULONG buffer_size, ULONG *name_size)
 {
-    FIXME("%p, %s, %u, %s, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(module), type_id,
+    FIXME("%p, %s, %lu, %s, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(module), type_id,
             wine_dbgstr_longlong(value), buffer, buffer_size, name_size);
 
     return E_NOTIMPL;
@@ -2266,7 +2270,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetConstantNameWide(IDebugSymbols3
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetFieldNameWide(IDebugSymbols3 *iface, ULONG64 module, ULONG type_id,
         ULONG field_index, WCHAR *buffer, ULONG buffer_size, ULONG *name_size)
 {
-    FIXME("%p, %s, %u, %u, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(module), type_id, field_index, buffer,
+    FIXME("%p, %s, %lu, %lu, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(module), type_id, field_index, buffer,
             buffer_size, name_size);
 
     return E_NOTIMPL;
@@ -2274,7 +2278,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetFieldNameWide(IDebugSymbols3 *i
 
 static HRESULT STDMETHODCALLTYPE debugsymbols_IsManagedModule(IDebugSymbols3 *iface, ULONG index, ULONG64 base)
 {
-    FIXME("%p, %u, %s stub.\n", iface, index, wine_dbgstr_longlong(base));
+    FIXME("%p, %lu, %s stub.\n", iface, index, wine_dbgstr_longlong(base));
 
     return E_NOTIMPL;
 }
@@ -2282,7 +2286,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_IsManagedModule(IDebugSymbols3 *if
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleByModuleName2(IDebugSymbols3 *iface, const char *name,
         ULONG start_index, ULONG flags, ULONG *index, ULONG64 *base)
 {
-    FIXME("%p, %s, %u, %#x, %p, %p stub.\n", iface, debugstr_a(name), start_index, flags, index, base);
+    FIXME("%p, %s, %lu, %#lx, %p, %p stub.\n", iface, debugstr_a(name), start_index, flags, index, base);
 
     return E_NOTIMPL;
 }
@@ -2290,7 +2294,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleByModuleName2(IDebugSymbo
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleByModuleName2Wide(IDebugSymbols3 *iface, const WCHAR *name,
         ULONG start_index, ULONG flags, ULONG *index, ULONG64 *base)
 {
-    FIXME("%p, %s, %u, %#x, %p, %p stub.\n", iface, debugstr_w(name), start_index, flags, index, base);
+    FIXME("%p, %s, %lu, %#lx, %p, %p stub.\n", iface, debugstr_w(name), start_index, flags, index, base);
 
     return E_NOTIMPL;
 }
@@ -2298,7 +2302,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleByModuleName2Wide(IDebugS
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleByOffset2(IDebugSymbols3 *iface, ULONG64 offset,
         ULONG start_index, ULONG flags, ULONG *index, ULONG64 *base)
 {
-    FIXME("%p, %s, %u, %#x, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), start_index, flags, index, base);
+    FIXME("%p, %s, %lu, %#lx, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), start_index, flags, index, base);
 
     return E_NOTIMPL;
 }
@@ -2306,7 +2310,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetModuleByOffset2(IDebugSymbols3 
 static HRESULT STDMETHODCALLTYPE debugsymbols_AddSyntheticModule(IDebugSymbols3 *iface, ULONG64 base, ULONG size,
         const char *image_path, const char *module_name, ULONG flags)
 {
-    FIXME("%p, %s, %u, %s, %s, %#x stub.\n", iface, wine_dbgstr_longlong(base), size, debugstr_a(image_path),
+    FIXME("%p, %s, %lu, %s, %s, %#lx stub.\n", iface, wine_dbgstr_longlong(base), size, debugstr_a(image_path),
             debugstr_a(module_name), flags);
 
     return E_NOTIMPL;
@@ -2315,7 +2319,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_AddSyntheticModule(IDebugSymbols3 
 static HRESULT STDMETHODCALLTYPE debugsymbols_AddSyntheticModuleWide(IDebugSymbols3 *iface, ULONG64 base, ULONG size,
         const WCHAR *image_path, const WCHAR *module_name, ULONG flags)
 {
-    FIXME("%p, %s, %u, %s, %s, %#x stub.\n", iface, wine_dbgstr_longlong(base), size, debugstr_w(image_path),
+    FIXME("%p, %s, %lu, %s, %s, %#lx stub.\n", iface, wine_dbgstr_longlong(base), size, debugstr_w(image_path),
             debugstr_w(module_name), flags);
 
     return E_NOTIMPL;
@@ -2337,7 +2341,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetCurrentScopeFrameIndex(IDebugSy
 
 static HRESULT STDMETHODCALLTYPE debugsymbols_SetScopeFrameByIndex(IDebugSymbols3 *iface, ULONG index)
 {
-    FIXME("%p, %u stub.\n", iface, index);
+    FIXME("%p, %lu stub.\n", iface, index);
 
     return E_NOTIMPL;
 }
@@ -2345,7 +2349,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_SetScopeFrameByIndex(IDebugSymbols
 static HRESULT STDMETHODCALLTYPE debugsymbols_SetScopeFromJitDebugInfo(IDebugSymbols3 *iface, ULONG output_control,
         ULONG64 info_offset)
 {
-    FIXME("%p, %u, %s stub.\n", iface, output_control, wine_dbgstr_longlong(info_offset));
+    FIXME("%p, %lu, %s stub.\n", iface, output_control, wine_dbgstr_longlong(info_offset));
 
     return E_NOTIMPL;
 }
@@ -2360,7 +2364,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_SetScopeFromStoredEvent(IDebugSymb
 static HRESULT STDMETHODCALLTYPE debugsymbols_OutputSymbolByOffset(IDebugSymbols3 *iface, ULONG output_control,
         ULONG flags, ULONG64 offset)
 {
-    FIXME("%p, %u, %#x, %s stub.\n", iface, output_control, flags, wine_dbgstr_longlong(offset));
+    FIXME("%p, %lu, %#lx, %s stub.\n", iface, output_control, flags, wine_dbgstr_longlong(offset));
 
     return E_NOTIMPL;
 }
@@ -2368,7 +2372,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_OutputSymbolByOffset(IDebugSymbols
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetFunctionEntryByOffset(IDebugSymbols3 *iface, ULONG64 offset,
         ULONG flags, void *buffer, ULONG buffer_size, ULONG *needed_size)
 {
-    FIXME("%p, %s, %#x, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(offset), flags, buffer, buffer_size,
+    FIXME("%p, %s, %#lx, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(offset), flags, buffer, buffer_size,
             needed_size);
 
     return E_NOTIMPL;
@@ -2377,7 +2381,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetFunctionEntryByOffset(IDebugSym
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetFieldTypeAndOffset(IDebugSymbols3 *iface, ULONG64 module,
         ULONG container_type_id, const char *field, ULONG *field_type_id, ULONG *offset)
 {
-    FIXME("%p, %s, %u, %s, %p, %p stub.\n", iface, wine_dbgstr_longlong(module), container_type_id, debugstr_a(field),
+    FIXME("%p, %s, %lu, %s, %p, %p stub.\n", iface, wine_dbgstr_longlong(module), container_type_id, debugstr_a(field),
             field_type_id, offset);
 
     return E_NOTIMPL;
@@ -2386,7 +2390,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetFieldTypeAndOffset(IDebugSymbol
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetFieldTypeAndOffsetWide(IDebugSymbols3 *iface, ULONG64 module,
         ULONG container_type_id, const WCHAR *field, ULONG *field_type_id, ULONG *offset)
 {
-    FIXME("%p, %s, %u, %s, %p, %p stub.\n", iface, wine_dbgstr_longlong(module), container_type_id, debugstr_w(field),
+    FIXME("%p, %s, %lu, %s, %p, %p stub.\n", iface, wine_dbgstr_longlong(module), container_type_id, debugstr_w(field),
             field_type_id, offset);
 
     return E_NOTIMPL;
@@ -2395,7 +2399,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetFieldTypeAndOffsetWide(IDebugSy
 static HRESULT STDMETHODCALLTYPE debugsymbols_AddSyntheticSymbol(IDebugSymbols3 *iface, ULONG64 offset, ULONG size,
         const char *name, ULONG flags, DEBUG_MODULE_AND_ID *id)
 {
-    FIXME("%p, %s, %u, %s, %#x, %p stub.\n", iface, wine_dbgstr_longlong(offset), size, debugstr_a(name), flags, id);
+    FIXME("%p, %s, %lu, %s, %#lx, %p stub.\n", iface, wine_dbgstr_longlong(offset), size, debugstr_a(name), flags, id);
 
     return E_NOTIMPL;
 }
@@ -2403,7 +2407,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_AddSyntheticSymbol(IDebugSymbols3 
 static HRESULT STDMETHODCALLTYPE debugsymbols_AddSyntheticSymbolWide(IDebugSymbols3 *iface, ULONG64 offset, ULONG size,
         const WCHAR *name, ULONG flags, DEBUG_MODULE_AND_ID *id)
 {
-    FIXME("%p, %s, %u, %s, %#x, %p stub.\n", iface, wine_dbgstr_longlong(offset), size, debugstr_w(name), flags, id);
+    FIXME("%p, %s, %lu, %s, %#lx, %p stub.\n", iface, wine_dbgstr_longlong(offset), size, debugstr_w(name), flags, id);
 
     return E_NOTIMPL;
 }
@@ -2418,7 +2422,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_RemoveSyntheticSymbol(IDebugSymbol
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolEntriesByOffset(IDebugSymbols3 *iface, ULONG64 offset,
         ULONG flags, DEBUG_MODULE_AND_ID *ids, LONG64 *displacements, ULONG count, ULONG *entries)
 {
-    FIXME("%p, %s, %#x, %p, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(offset), flags, ids, displacements, count,
+    FIXME("%p, %s, %#lx, %p, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(offset), flags, ids, displacements, count,
             entries);
 
     return E_NOTIMPL;
@@ -2427,7 +2431,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolEntriesByOffset(IDebugSym
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolEntriesByName(IDebugSymbols3 *iface, const char *symbol,
         ULONG flags, DEBUG_MODULE_AND_ID *ids, ULONG count, ULONG *entries)
 {
-    FIXME("%p, %s, %#x, %p, %u, %p stub.\n", iface, debugstr_a(symbol), flags, ids, count, entries);
+    FIXME("%p, %s, %#lx, %p, %lu, %p stub.\n", iface, debugstr_a(symbol), flags, ids, count, entries);
 
     return E_NOTIMPL;
 }
@@ -2435,7 +2439,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolEntriesByName(IDebugSymbo
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolEntriesByNameWide(IDebugSymbols3 *iface, const WCHAR *symbol,
         ULONG flags, DEBUG_MODULE_AND_ID *ids, ULONG count, ULONG *entries)
 {
-    FIXME("%p, %s, %#x, %p, %u, %p stub.\n", iface, debugstr_w(symbol), flags, ids, count, entries);
+    FIXME("%p, %s, %#lx, %p, %lu, %p stub.\n", iface, debugstr_w(symbol), flags, ids, count, entries);
 
     return E_NOTIMPL;
 }
@@ -2459,7 +2463,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolEntryInformation(IDebugSy
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolEntryString(IDebugSymbols3 *iface, DEBUG_MODULE_AND_ID *id,
         ULONG which, char *buffer, ULONG buffer_size, ULONG *string_size)
 {
-    FIXME("%p, %p, %u, %p, %u, %p stub.\n", iface, id, which, buffer, buffer_size, string_size);
+    FIXME("%p, %p, %lu, %p, %lu, %p stub.\n", iface, id, which, buffer, buffer_size, string_size);
 
     return E_NOTIMPL;
 }
@@ -2467,7 +2471,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolEntryString(IDebugSymbols
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolEntryStringWide(IDebugSymbols3 *iface, DEBUG_MODULE_AND_ID *id,
         ULONG which, WCHAR *buffer, ULONG buffer_size, ULONG *string_size)
 {
-    FIXME("%p, %p, %u, %p, %u, %p stub.\n", iface, id, which, buffer, buffer_size, string_size);
+    FIXME("%p, %p, %lu, %p, %lu, %p stub.\n", iface, id, which, buffer, buffer_size, string_size);
 
     return E_NOTIMPL;
 }
@@ -2475,7 +2479,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolEntryStringWide(IDebugSym
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolEntryOffsetRegions(IDebugSymbols3 *iface, DEBUG_MODULE_AND_ID *id,
         ULONG flags, DEBUG_OFFSET_REGION *regions, ULONG regions_count, ULONG *regions_avail)
 {
-    FIXME("%p, %p, %#x, %p, %u, %p stub.\n", iface, id, flags, regions, regions_count, regions_avail);
+    FIXME("%p, %p, %#lx, %p, %lu, %p stub.\n", iface, id, flags, regions, regions_count, regions_avail);
 
     return E_NOTIMPL;
 }
@@ -2483,7 +2487,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolEntryOffsetRegions(IDebug
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolEntryBySymbolEntry(IDebugSymbols3 *iface,
         DEBUG_MODULE_AND_ID *from_id, ULONG flags, DEBUG_MODULE_AND_ID *to_id)
 {
-    FIXME("%p, %p, %#x, %p stub.\n", iface, from_id, flags, to_id);
+    FIXME("%p, %p, %#lx, %p stub.\n", iface, from_id, flags, to_id);
 
     return E_NOTIMPL;
 }
@@ -2491,7 +2495,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSymbolEntryBySymbolEntry(IDebug
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceEntriesByOffset(IDebugSymbols3 *iface, ULONG64 offset,
         ULONG flags, DEBUG_SYMBOL_SOURCE_ENTRY *entries, ULONG count, ULONG *entries_avail)
 {
-    FIXME("%p, %s, %#x, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(offset), flags, entries, count, entries_avail);
+    FIXME("%p, %s, %#lx, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(offset), flags, entries, count, entries_avail);
 
     return E_NOTIMPL;
 }
@@ -2499,7 +2503,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceEntriesByOffset(IDebugSym
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceEntriesByLine(IDebugSymbols3 *iface, ULONG line,
         const char *file, ULONG flags, DEBUG_SYMBOL_SOURCE_ENTRY *entries, ULONG count, ULONG *entries_avail)
 {
-    FIXME("%p, %s, %#x, %p, %u, %p stub.\n", iface, debugstr_a(file), flags, entries, count, entries_avail);
+    FIXME("%p, %s, %#lx, %p, %lu, %p stub.\n", iface, debugstr_a(file), flags, entries, count, entries_avail);
 
     return E_NOTIMPL;
 }
@@ -2507,7 +2511,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceEntriesByLine(IDebugSymbo
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceEntriesByLineWide(IDebugSymbols3 *iface, ULONG line,
         const WCHAR *file, ULONG flags, DEBUG_SYMBOL_SOURCE_ENTRY *entries, ULONG count, ULONG *entries_avail)
 {
-    FIXME("%p, %s, %#x, %p, %u, %p stub.\n", iface, debugstr_w(file), flags, entries, count, entries_avail);
+    FIXME("%p, %s, %#lx, %p, %lu, %p stub.\n", iface, debugstr_w(file), flags, entries, count, entries_avail);
 
     return E_NOTIMPL;
 }
@@ -2515,7 +2519,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceEntriesByLineWide(IDebugS
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceEntryString(IDebugSymbols3 *iface,
         DEBUG_SYMBOL_SOURCE_ENTRY *entry, ULONG which, char *buffer, ULONG buffer_size, ULONG *string_size)
 {
-    FIXME("%p, %p, %u, %p, %u, %p stub.\n", iface, entry, which, buffer, buffer_size, string_size);
+    FIXME("%p, %p, %lu, %p, %lu, %p stub.\n", iface, entry, which, buffer, buffer_size, string_size);
 
     return E_NOTIMPL;
 }
@@ -2523,7 +2527,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceEntryString(IDebugSymbols
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceEntryStringWide(IDebugSymbols3 *iface,
         DEBUG_SYMBOL_SOURCE_ENTRY *entry, ULONG which, WCHAR *buffer, ULONG buffer_size, ULONG *string_size)
 {
-    FIXME("%p, %p, %u, %p, %u, %p stub.\n", iface, entry, which, buffer, buffer_size, string_size);
+    FIXME("%p, %p, %lu, %p, %lu, %p stub.\n", iface, entry, which, buffer, buffer_size, string_size);
 
     return E_NOTIMPL;
 }
@@ -2531,7 +2535,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceEntryStringWide(IDebugSym
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceEntryOffsetRegions(IDebugSymbols3 *iface,
         DEBUG_SYMBOL_SOURCE_ENTRY *entry, ULONG flags, DEBUG_OFFSET_REGION *regions, ULONG count, ULONG *regions_avail)
 {
-    FIXME("%p, %p, %#x, %p, %u, %p stub.\n", iface, entry, flags, regions, count, regions_avail);
+    FIXME("%p, %p, %#lx, %p, %lu, %p stub.\n", iface, entry, flags, regions, count, regions_avail);
 
     return E_NOTIMPL;
 }
@@ -2539,7 +2543,7 @@ static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceEntryOffsetRegions(IDebug
 static HRESULT STDMETHODCALLTYPE debugsymbols_GetSourceEntryBySourceEntry(IDebugSymbols3 *iface,
         DEBUG_SYMBOL_SOURCE_ENTRY *from_entry, ULONG flags, DEBUG_SYMBOL_SOURCE_ENTRY *to_entry)
 {
-    FIXME("%p, %p, %#x, %p stub.\n", iface, from_entry, flags, to_entry);
+    FIXME("%p, %p, %#lx, %p stub.\n", iface, from_entry, flags, to_entry);
 
     return E_NOTIMPL;
 }
@@ -2676,189 +2680,189 @@ static const IDebugSymbols3Vtbl debugsymbolsvtbl =
     debugsymbols_GetSourceEntryBySourceEntry,
 };
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_QueryInterface(IDebugControl2 *iface, REFIID riid, void **obj)
+static HRESULT STDMETHODCALLTYPE debugcontrol_QueryInterface(IDebugControl4 *iface, REFIID riid, void **obj)
 {
-    struct debug_client *debug_client = impl_from_IDebugControl2(iface);
+    struct debug_client *debug_client = impl_from_IDebugControl4(iface);
     IUnknown *unk = (IUnknown *)&debug_client->IDebugClient_iface;
     return IUnknown_QueryInterface(unk, riid, obj);
 }
 
-static ULONG STDMETHODCALLTYPE debugcontrol_AddRef(IDebugControl2 *iface)
+static ULONG STDMETHODCALLTYPE debugcontrol_AddRef(IDebugControl4 *iface)
 {
-    struct debug_client *debug_client = impl_from_IDebugControl2(iface);
+    struct debug_client *debug_client = impl_from_IDebugControl4(iface);
     IUnknown *unk = (IUnknown *)&debug_client->IDebugClient_iface;
     return IUnknown_AddRef(unk);
 }
 
-static ULONG STDMETHODCALLTYPE debugcontrol_Release(IDebugControl2 *iface)
+static ULONG STDMETHODCALLTYPE debugcontrol_Release(IDebugControl4 *iface)
 {
-    struct debug_client *debug_client = impl_from_IDebugControl2(iface);
+    struct debug_client *debug_client = impl_from_IDebugControl4(iface);
     IUnknown *unk = (IUnknown *)&debug_client->IDebugClient_iface;
     return IUnknown_Release(unk);
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetInterrupt(IDebugControl2 *iface)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetInterrupt(IDebugControl4 *iface)
 {
     FIXME("%p stub.\n", iface);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetInterrupt(IDebugControl2 *iface, ULONG flags)
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetInterrupt(IDebugControl4 *iface, ULONG flags)
 {
-    FIXME("%p, %#x stub.\n", iface, flags);
+    FIXME("%p, %#lx stub.\n", iface, flags);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetInterruptTimeout(IDebugControl2 *iface, ULONG *timeout)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetInterruptTimeout(IDebugControl4 *iface, ULONG *timeout)
 {
     FIXME("%p, %p stub.\n", iface, timeout);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetInterruptTimeout(IDebugControl2 *iface, ULONG timeout)
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetInterruptTimeout(IDebugControl4 *iface, ULONG timeout)
 {
-    FIXME("%p, %u stub.\n", iface, timeout);
+    FIXME("%p, %lu stub.\n", iface, timeout);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetLogFile(IDebugControl2 *iface, char *buffer, ULONG buffer_size,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetLogFile(IDebugControl4 *iface, char *buffer, ULONG buffer_size,
         ULONG *file_size, BOOL *append)
 {
-    FIXME("%p, %p, %u, %p, %p stub.\n", iface, buffer, buffer_size, file_size, append);
+    FIXME("%p, %p, %lu, %p, %p stub.\n", iface, buffer, buffer_size, file_size, append);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_OpenLogFile(IDebugControl2 *iface, const char *file, BOOL append)
+static HRESULT STDMETHODCALLTYPE debugcontrol_OpenLogFile(IDebugControl4 *iface, const char *file, BOOL append)
 {
     FIXME("%p, %s, %d stub.\n", iface, debugstr_a(file), append);
 
     return E_NOTIMPL;
 }
-static HRESULT STDMETHODCALLTYPE debugcontrol_CloseLogFile(IDebugControl2 *iface)
+static HRESULT STDMETHODCALLTYPE debugcontrol_CloseLogFile(IDebugControl4 *iface)
 {
     FIXME("%p stub.\n", iface);
 
     return E_NOTIMPL;
 }
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetLogMask(IDebugControl2 *iface, ULONG *mask)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetLogMask(IDebugControl4 *iface, ULONG *mask)
 {
     FIXME("%p, %p stub.\n", iface, mask);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetLogMask(IDebugControl2 *iface, ULONG mask)
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetLogMask(IDebugControl4 *iface, ULONG mask)
 {
-    FIXME("%p, %#x stub.\n", iface, mask);
+    FIXME("%p, %#lx stub.\n", iface, mask);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_Input(IDebugControl2 *iface, char *buffer, ULONG buffer_size,
+static HRESULT STDMETHODCALLTYPE debugcontrol_Input(IDebugControl4 *iface, char *buffer, ULONG buffer_size,
         ULONG *input_size)
 {
-    FIXME("%p, %p, %u, %p stub.\n", iface, buffer, buffer_size, input_size);
+    FIXME("%p, %p, %lu, %p stub.\n", iface, buffer, buffer_size, input_size);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_ReturnInput(IDebugControl2 *iface, const char *buffer)
+static HRESULT STDMETHODCALLTYPE debugcontrol_ReturnInput(IDebugControl4 *iface, const char *buffer)
 {
     FIXME("%p, %s stub.\n", iface, debugstr_a(buffer));
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODVCALLTYPE debugcontrol_Output(IDebugControl2 *iface, ULONG mask, const char *format, ...)
+static HRESULT STDMETHODVCALLTYPE debugcontrol_Output(IDebugControl4 *iface, ULONG mask, const char *format, ...)
 {
-    FIXME("%p, %#x, %s stub.\n", iface, mask, debugstr_a(format));
+    FIXME("%p, %#lx, %s stub.\n", iface, mask, debugstr_a(format));
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_OutputVaList(IDebugControl2 *iface, ULONG mask, const char *format,
-        __ms_va_list args)
+static HRESULT STDMETHODCALLTYPE debugcontrol_OutputVaList(IDebugControl4 *iface, ULONG mask, const char *format,
+        va_list args)
 {
-    FIXME("%p, %#x, %s stub.\n", iface, mask, debugstr_a(format));
+    FIXME("%p, %#lx, %s stub.\n", iface, mask, debugstr_a(format));
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODVCALLTYPE debugcontrol_ControlledOutput(IDebugControl2 *iface, ULONG output_control,
+static HRESULT STDMETHODVCALLTYPE debugcontrol_ControlledOutput(IDebugControl4 *iface, ULONG output_control,
         ULONG mask, const char *format, ...)
 {
-    FIXME("%p, %u, %#x, %s stub.\n", iface, output_control, mask, debugstr_a(format));
+    FIXME("%p, %lu, %#lx, %s stub.\n", iface, output_control, mask, debugstr_a(format));
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_ControlledOutputVaList(IDebugControl2 *iface, ULONG output_control,
-        ULONG mask, const char *format, __ms_va_list args)
+static HRESULT STDMETHODCALLTYPE debugcontrol_ControlledOutputVaList(IDebugControl4 *iface, ULONG output_control,
+        ULONG mask, const char *format, va_list args)
 {
-    FIXME("%p, %u, %#x, %s stub.\n", iface, output_control, mask, debugstr_a(format));
+    FIXME("%p, %lu, %#lx, %s stub.\n", iface, output_control, mask, debugstr_a(format));
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODVCALLTYPE debugcontrol_OutputPrompt(IDebugControl2 *iface, ULONG output_control,
+static HRESULT STDMETHODVCALLTYPE debugcontrol_OutputPrompt(IDebugControl4 *iface, ULONG output_control,
         const char *format, ...)
 {
-    FIXME("%p, %u, %s stub.\n", iface, output_control, debugstr_a(format));
+    FIXME("%p, %lu, %s stub.\n", iface, output_control, debugstr_a(format));
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_OutputPromptVaList(IDebugControl2 *iface, ULONG output_control,
-        const char *format, __ms_va_list args)
+static HRESULT STDMETHODCALLTYPE debugcontrol_OutputPromptVaList(IDebugControl4 *iface, ULONG output_control,
+        const char *format, va_list args)
 {
-    FIXME("%p, %u, %s stub.\n", iface, output_control, debugstr_a(format));
+    FIXME("%p, %lu, %s stub.\n", iface, output_control, debugstr_a(format));
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetPromptText(IDebugControl2 *iface, char *buffer, ULONG buffer_size,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetPromptText(IDebugControl4 *iface, char *buffer, ULONG buffer_size,
         ULONG *text_size)
 {
-    FIXME("%p, %p, %u, %p stub.\n", iface, buffer, buffer_size, text_size);
+    FIXME("%p, %p, %lu, %p stub.\n", iface, buffer, buffer_size, text_size);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_OutputCurrentState(IDebugControl2 *iface, ULONG output_control,
+static HRESULT STDMETHODCALLTYPE debugcontrol_OutputCurrentState(IDebugControl4 *iface, ULONG output_control,
         ULONG flags)
 {
-    FIXME("%p, %u, %#x stub.\n", iface, output_control, flags);
+    FIXME("%p, %lu, %#lx stub.\n", iface, output_control, flags);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_OutputVersionInformation(IDebugControl2 *iface, ULONG output_control)
+static HRESULT STDMETHODCALLTYPE debugcontrol_OutputVersionInformation(IDebugControl4 *iface, ULONG output_control)
 {
-    FIXME("%p, %u stub.\n", iface, output_control);
+    FIXME("%p, %lu stub.\n", iface, output_control);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetNotifyEventHandle(IDebugControl2 *iface, ULONG64 *handle)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetNotifyEventHandle(IDebugControl4 *iface, ULONG64 *handle)
 {
     FIXME("%p, %p stub.\n", iface, handle);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetNotifyEventHandle(IDebugControl2 *iface, ULONG64 handle)
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetNotifyEventHandle(IDebugControl4 *iface, ULONG64 handle)
 {
     FIXME("%p, %s stub.\n", iface, wine_dbgstr_longlong(handle));
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_Assemble(IDebugControl2 *iface, ULONG64 offset, const char *code,
+static HRESULT STDMETHODCALLTYPE debugcontrol_Assemble(IDebugControl4 *iface, ULONG64 offset, const char *code,
         ULONG64 *end_offset)
 {
     FIXME("%p, %s, %s, %p stub.\n", iface, wine_dbgstr_longlong(offset), debugstr_a(code), end_offset);
@@ -2866,76 +2870,76 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_Assemble(IDebugControl2 *iface, UL
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_Disassemble(IDebugControl2 *iface, ULONG64 offset, ULONG flags,
+static HRESULT STDMETHODCALLTYPE debugcontrol_Disassemble(IDebugControl4 *iface, ULONG64 offset, ULONG flags,
         char *buffer, ULONG buffer_size, ULONG *disassm_size, ULONG64 *end_offset)
 {
-    FIXME("%p, %s, %#x, %p, %u, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), flags, buffer, buffer_size,
+    FIXME("%p, %s, %#lx, %p, %lu, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), flags, buffer, buffer_size,
             disassm_size, end_offset);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetDisassembleEffectiveOffset(IDebugControl2 *iface, ULONG64 *offset)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetDisassembleEffectiveOffset(IDebugControl4 *iface, ULONG64 *offset)
 {
     FIXME("%p, %p stub.\n", iface, offset);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_OutputDisassembly(IDebugControl2 *iface, ULONG output_control,
+static HRESULT STDMETHODCALLTYPE debugcontrol_OutputDisassembly(IDebugControl4 *iface, ULONG output_control,
         ULONG64 offset, ULONG flags, ULONG64 *end_offset)
 {
-    FIXME("%p, %u, %s, %#x, %p stub.\n", iface, output_control, wine_dbgstr_longlong(offset), flags, end_offset);
+    FIXME("%p, %lu, %s, %#lx, %p stub.\n", iface, output_control, wine_dbgstr_longlong(offset), flags, end_offset);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_OutputDisassemblyLines(IDebugControl2 *iface, ULONG output_control,
+static HRESULT STDMETHODCALLTYPE debugcontrol_OutputDisassemblyLines(IDebugControl4 *iface, ULONG output_control,
         ULONG prev_lines, ULONG total_lines, ULONG64 offset, ULONG flags, ULONG *offset_line, ULONG64 *start_offset,
         ULONG64 *end_offset, ULONG64 *line_offsets)
 {
-    FIXME("%p, %u, %u, %u, %s, %#x, %p, %p, %p, %p stub.\n", iface, output_control, prev_lines, total_lines,
+    FIXME("%p, %lu, %lu, %lu, %s, %#lx, %p, %p, %p, %p stub.\n", iface, output_control, prev_lines, total_lines,
             wine_dbgstr_longlong(offset), flags, offset_line, start_offset, end_offset, line_offsets);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetNearInstruction(IDebugControl2 *iface, ULONG64 offset, LONG delta,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetNearInstruction(IDebugControl4 *iface, ULONG64 offset, LONG delta,
         ULONG64 *instr_offset)
 {
-    FIXME("%p, %s, %d, %p stub.\n", iface, wine_dbgstr_longlong(offset), delta, instr_offset);
+    FIXME("%p, %s, %ld, %p stub.\n", iface, wine_dbgstr_longlong(offset), delta, instr_offset);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetStackTrace(IDebugControl2 *iface, ULONG64 frame_offset,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetStackTrace(IDebugControl4 *iface, ULONG64 frame_offset,
         ULONG64 stack_offset, ULONG64 instr_offset, DEBUG_STACK_FRAME *frames, ULONG frames_size, ULONG *frames_filled)
 {
-    FIXME("%p, %s, %s, %s, %p, %u, %p stub.\n", iface, wine_dbgstr_longlong(frame_offset),
+    FIXME("%p, %s, %s, %s, %p, %lu, %p stub.\n", iface, wine_dbgstr_longlong(frame_offset),
             wine_dbgstr_longlong(stack_offset), wine_dbgstr_longlong(instr_offset), frames, frames_size, frames_filled);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetReturnOffset(IDebugControl2 *iface, ULONG64 *offset)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetReturnOffset(IDebugControl4 *iface, ULONG64 *offset)
 {
     FIXME("%p, %p stub.\n", iface, offset);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_OutputStackTrace(IDebugControl2 *iface, ULONG output_control,
+static HRESULT STDMETHODCALLTYPE debugcontrol_OutputStackTrace(IDebugControl4 *iface, ULONG output_control,
         DEBUG_STACK_FRAME *frames, ULONG frames_size, ULONG flags)
 {
-    FIXME("%p, %u, %p, %u, %#x stub.\n", iface, output_control, frames, frames_size, flags);
+    FIXME("%p, %lu, %p, %lu, %#lx stub.\n", iface, output_control, frames, frames_size, flags);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetDebuggeeType(IDebugControl2 *iface, ULONG *debug_class,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetDebuggeeType(IDebugControl4 *iface, ULONG *debug_class,
         ULONG *qualifier)
 {
-    struct debug_client *debug_client = impl_from_IDebugControl2(iface);
+    struct debug_client *debug_client = impl_from_IDebugControl4(iface);
     static struct target_process *target;
 
     FIXME("%p, %p, %p stub.\n", iface, debug_class, qualifier);
@@ -2952,16 +2956,16 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_GetDebuggeeType(IDebugControl2 *if
     return S_OK;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetActualProcessorType(IDebugControl2 *iface, ULONG *type)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetActualProcessorType(IDebugControl4 *iface, ULONG *type)
 {
     FIXME("%p, %p stub.\n", iface, type);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetExecutingProcessorType(IDebugControl2 *iface, ULONG *type)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetExecutingProcessorType(IDebugControl4 *iface, ULONG *type)
 {
-    struct debug_client *debug_client = impl_from_IDebugControl2(iface);
+    struct debug_client *debug_client = impl_from_IDebugControl4(iface);
     static struct target_process *target;
     HRESULT hr;
 
@@ -2978,7 +2982,7 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_GetExecutingProcessorType(IDebugCo
     return S_OK;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberPossibleExecutingProcessorTypes(IDebugControl2 *iface,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberPossibleExecutingProcessorTypes(IDebugControl4 *iface,
         ULONG *count)
 {
     FIXME("%p, %p stub.\n", iface, count);
@@ -2986,41 +2990,41 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberPossibleExecutingProcesso
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetPossibleExecutingProcessorTypes(IDebugControl2 *iface, ULONG start,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetPossibleExecutingProcessorTypes(IDebugControl4 *iface, ULONG start,
         ULONG count, ULONG *types)
 {
-    FIXME("%p, %u, %u, %p stub.\n", iface, start, count, types);
+    FIXME("%p, %lu, %lu, %p stub.\n", iface, start, count, types);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberProcessors(IDebugControl2 *iface, ULONG *count)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberProcessors(IDebugControl4 *iface, ULONG *count)
 {
     FIXME("%p, %p stub.\n", iface, count);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetSystemVersion(IDebugControl2 *iface, ULONG *platform_id, ULONG *major,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetSystemVersion(IDebugControl4 *iface, ULONG *platform_id, ULONG *major,
         ULONG *minor, char *sp_string, ULONG sp_string_size, ULONG *sp_string_used, ULONG *sp_number,
         char *build_string, ULONG build_string_size, ULONG *build_string_used)
 {
-    FIXME("%p, %p, %p, %p, %p, %u, %p, %p, %p, %u, %p stub.\n", iface, platform_id, major, minor, sp_string,
+    FIXME("%p, %p, %p, %p, %p, %lu, %p, %p, %p, %lu, %p stub.\n", iface, platform_id, major, minor, sp_string,
             sp_string_size, sp_string_used, sp_number, build_string, build_string_size, build_string_used);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetPageSize(IDebugControl2 *iface, ULONG *size)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetPageSize(IDebugControl4 *iface, ULONG *size)
 {
     FIXME("%p, %p stub.\n", iface, size);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_IsPointer64Bit(IDebugControl2 *iface)
+static HRESULT STDMETHODCALLTYPE debugcontrol_IsPointer64Bit(IDebugControl4 *iface)
 {
-    struct debug_client *debug_client = impl_from_IDebugControl2(iface);
+    struct debug_client *debug_client = impl_from_IDebugControl4(iface);
     static struct target_process *target;
     HRESULT hr;
 
@@ -3035,7 +3039,7 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_IsPointer64Bit(IDebugControl2 *ifa
     switch (target->cpu_type)
     {
         case IMAGE_FILE_MACHINE_I386:
-        case IMAGE_FILE_MACHINE_ARM:
+        case IMAGE_FILE_MACHINE_ARMNT:
             hr = S_FALSE;
             break;
         case IMAGE_FILE_MACHINE_IA64:
@@ -3044,14 +3048,14 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_IsPointer64Bit(IDebugControl2 *ifa
             hr = S_OK;
             break;
         default:
-            FIXME("Unexpected cpu type %#x.\n", target->cpu_type);
+            FIXME("Unexpected cpu type %#lx.\n", target->cpu_type);
             hr = E_UNEXPECTED;
     }
 
     return hr;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_ReadBugCheckData(IDebugControl2 *iface, ULONG *code, ULONG64 *arg1,
+static HRESULT STDMETHODCALLTYPE debugcontrol_ReadBugCheckData(IDebugControl4 *iface, ULONG *code, ULONG64 *arg1,
         ULONG64 *arg2, ULONG64 *arg3, ULONG64 *arg4)
 {
     FIXME("%p, %p, %p, %p, %p, %p stub.\n", iface, code, arg1, arg2, arg3, arg4);
@@ -3059,76 +3063,76 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_ReadBugCheckData(IDebugControl2 *i
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberSupportedProcessorTypes(IDebugControl2 *iface, ULONG *count)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberSupportedProcessorTypes(IDebugControl4 *iface, ULONG *count)
 {
     FIXME("%p, %p stub.\n", iface, count);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetSupportedProcessorTypes(IDebugControl2 *iface, ULONG start,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetSupportedProcessorTypes(IDebugControl4 *iface, ULONG start,
         ULONG count, ULONG *types)
 {
-    FIXME("%p, %u, %u, %p stub.\n", iface, start, count, types);
+    FIXME("%p, %lu, %lu, %p stub.\n", iface, start, count, types);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetProcessorTypeNames(IDebugControl2 *iface, ULONG type, char *full_name,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetProcessorTypeNames(IDebugControl4 *iface, ULONG type, char *full_name,
         ULONG full_name_buffer_size, ULONG *full_name_size, char *abbrev_name, ULONG abbrev_name_buffer_size,
         ULONG *abbrev_name_size)
 {
-    FIXME("%p, %u, %p, %u, %p, %p, %u, %p stub.\n", iface, type, full_name, full_name_buffer_size, full_name_size,
+    FIXME("%p, %lu, %p, %lu, %p, %p, %lu, %p stub.\n", iface, type, full_name, full_name_buffer_size, full_name_size,
             abbrev_name, abbrev_name_buffer_size, abbrev_name_size);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetEffectiveProcessorType(IDebugControl2 *iface, ULONG *type)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetEffectiveProcessorType(IDebugControl4 *iface, ULONG *type)
 {
     FIXME("%p, %p stub.\n", iface, type);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetEffectiveProcessorType(IDebugControl2 *iface, ULONG type)
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetEffectiveProcessorType(IDebugControl4 *iface, ULONG type)
 {
-    FIXME("%p, %u stub.\n", iface, type);
+    FIXME("%p, %lu stub.\n", iface, type);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetExecutionStatus(IDebugControl2 *iface, ULONG *status)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetExecutionStatus(IDebugControl4 *iface, ULONG *status)
 {
     FIXME("%p, %p stub.\n", iface, status);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetExecutionStatus(IDebugControl2 *iface, ULONG status)
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetExecutionStatus(IDebugControl4 *iface, ULONG status)
 {
-    FIXME("%p, %u stub.\n", iface, status);
+    FIXME("%p, %lu stub.\n", iface, status);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetCodeLevel(IDebugControl2 *iface, ULONG *level)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetCodeLevel(IDebugControl4 *iface, ULONG *level)
 {
     FIXME("%p, %p stub.\n", iface, level);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetCodeLevel(IDebugControl2 *iface, ULONG level)
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetCodeLevel(IDebugControl4 *iface, ULONG level)
 {
-    FIXME("%p, %u stub.\n", iface, level);
+    FIXME("%p, %lu stub.\n", iface, level);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetEngineOptions(IDebugControl2 *iface, ULONG *options)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetEngineOptions(IDebugControl4 *iface, ULONG *options)
 {
-    struct debug_client *debug_client = impl_from_IDebugControl2(iface);
+    struct debug_client *debug_client = impl_from_IDebugControl4(iface);
 
     TRACE("%p, %p.\n", iface, options);
 
@@ -3137,11 +3141,11 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_GetEngineOptions(IDebugControl2 *i
     return S_OK;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_AddEngineOptions(IDebugControl2 *iface, ULONG options)
+static HRESULT STDMETHODCALLTYPE debugcontrol_AddEngineOptions(IDebugControl4 *iface, ULONG options)
 {
-    struct debug_client *debug_client = impl_from_IDebugControl2(iface);
+    struct debug_client *debug_client = impl_from_IDebugControl4(iface);
 
-    TRACE("%p, %#x.\n", iface, options);
+    TRACE("%p, %#lx.\n", iface, options);
 
     if (options & ~DEBUG_ENGOPT_ALL)
         return E_INVALIDARG;
@@ -3151,22 +3155,22 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_AddEngineOptions(IDebugControl2 *i
     return S_OK;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_RemoveEngineOptions(IDebugControl2 *iface, ULONG options)
+static HRESULT STDMETHODCALLTYPE debugcontrol_RemoveEngineOptions(IDebugControl4 *iface, ULONG options)
 {
-    struct debug_client *debug_client = impl_from_IDebugControl2(iface);
+    struct debug_client *debug_client = impl_from_IDebugControl4(iface);
 
-    TRACE("%p, %#x.\n", iface, options);
+    TRACE("%p, %#lx.\n", iface, options);
 
     debug_client->engine_options &= ~options;
 
     return S_OK;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetEngineOptions(IDebugControl2 *iface, ULONG options)
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetEngineOptions(IDebugControl4 *iface, ULONG options)
 {
-    struct debug_client *debug_client = impl_from_IDebugControl2(iface);
+    struct debug_client *debug_client = impl_from_IDebugControl4(iface);
 
-    TRACE("%p, %#x.\n", iface, options);
+    TRACE("%p, %#lx.\n", iface, options);
 
     if (options & ~DEBUG_ENGOPT_ALL)
         return E_INVALIDARG;
@@ -3176,7 +3180,7 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_SetEngineOptions(IDebugControl2 *i
     return S_OK;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetSystemErrorControl(IDebugControl2 *iface, ULONG *output_level,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetSystemErrorControl(IDebugControl4 *iface, ULONG *output_level,
         ULONG *break_level)
 {
     FIXME("%p, %p, %p stub.\n", iface, output_level, break_level);
@@ -3184,144 +3188,144 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_GetSystemErrorControl(IDebugContro
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetSystemErrorControl(IDebugControl2 *iface, ULONG output_level,
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetSystemErrorControl(IDebugControl4 *iface, ULONG output_level,
         ULONG break_level)
 {
-    FIXME("%p, %u, %u stub.\n", iface, output_level, break_level);
+    FIXME("%p, %lu, %lu stub.\n", iface, output_level, break_level);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetTextMacro(IDebugControl2 *iface, ULONG slot, char *buffer,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetTextMacro(IDebugControl4 *iface, ULONG slot, char *buffer,
         ULONG buffer_size, ULONG *macro_size)
 {
-    FIXME("%p, %u, %p, %u, %p stub.\n", iface, slot, buffer, buffer_size, macro_size);
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, slot, buffer, buffer_size, macro_size);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetTextMacro(IDebugControl2 *iface, ULONG slot, const char *macro)
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetTextMacro(IDebugControl4 *iface, ULONG slot, const char *macro)
 {
-    FIXME("%p, %u, %s stub.\n", iface, slot, debugstr_a(macro));
+    FIXME("%p, %lu, %s stub.\n", iface, slot, debugstr_a(macro));
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetRadix(IDebugControl2 *iface, ULONG *radix)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetRadix(IDebugControl4 *iface, ULONG *radix)
 {
     FIXME("%p, %p stub.\n", iface, radix);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetRadix(IDebugControl2 *iface, ULONG radix)
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetRadix(IDebugControl4 *iface, ULONG radix)
 {
-    FIXME("%p, %u stub.\n", iface, radix);
+    FIXME("%p, %lu stub.\n", iface, radix);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_Evaluate(IDebugControl2 *iface, const char *expression,
+static HRESULT STDMETHODCALLTYPE debugcontrol_Evaluate(IDebugControl4 *iface, const char *expression,
         ULONG desired_type, DEBUG_VALUE *value, ULONG *remainder_index)
 {
-    FIXME("%p, %s, %u, %p, %p stub.\n", iface, debugstr_a(expression), desired_type, value, remainder_index);
+    FIXME("%p, %s, %lu, %p, %p stub.\n", iface, debugstr_a(expression), desired_type, value, remainder_index);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_CoerceValue(IDebugControl2 *iface, DEBUG_VALUE input, ULONG output_type,
+static HRESULT STDMETHODCALLTYPE debugcontrol_CoerceValue(IDebugControl4 *iface, DEBUG_VALUE input, ULONG output_type,
         DEBUG_VALUE *output)
 {
-    FIXME("%p, %u, %p stub.\n", iface, output_type, output);
+    FIXME("%p, %lu, %p stub.\n", iface, output_type, output);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_CoerceValues(IDebugControl2 *iface, ULONG count, DEBUG_VALUE *input,
+static HRESULT STDMETHODCALLTYPE debugcontrol_CoerceValues(IDebugControl4 *iface, ULONG count, DEBUG_VALUE *input,
         ULONG *output_types, DEBUG_VALUE *output)
 {
-    FIXME("%p, %u, %p, %p, %p stub.\n", iface, count, input, output_types, output);
+    FIXME("%p, %lu, %p, %p, %p stub.\n", iface, count, input, output_types, output);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_Execute(IDebugControl2 *iface, ULONG output_control, const char *command,
+static HRESULT STDMETHODCALLTYPE debugcontrol_Execute(IDebugControl4 *iface, ULONG output_control, const char *command,
         ULONG flags)
 {
-    FIXME("%p, %u, %s, %#x stub.\n", iface, output_control, debugstr_a(command), flags);
+    FIXME("%p, %lu, %s, %#lx stub.\n", iface, output_control, debugstr_a(command), flags);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_ExecuteCommandFile(IDebugControl2 *iface, ULONG output_control,
+static HRESULT STDMETHODCALLTYPE debugcontrol_ExecuteCommandFile(IDebugControl4 *iface, ULONG output_control,
         const char *command_file, ULONG flags)
 {
-    FIXME("%p, %u, %s, %#x stub.\n", iface, output_control, debugstr_a(command_file), flags);
+    FIXME("%p, %lu, %s, %#lx stub.\n", iface, output_control, debugstr_a(command_file), flags);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberBreakpoints(IDebugControl2 *iface, ULONG *count)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberBreakpoints(IDebugControl4 *iface, ULONG *count)
 {
     FIXME("%p, %p stub.\n", iface, count);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetBreakpointByIndex(IDebugControl2 *iface, ULONG index,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetBreakpointByIndex(IDebugControl4 *iface, ULONG index,
         IDebugBreakpoint **bp)
 {
-    FIXME("%p, %u, %p stub.\n", iface, index, bp);
+    FIXME("%p, %lu, %p stub.\n", iface, index, bp);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetBreakpointById(IDebugControl2 *iface, ULONG id, IDebugBreakpoint **bp)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetBreakpointById(IDebugControl4 *iface, ULONG id, IDebugBreakpoint **bp)
 {
-    FIXME("%p, %u, %p stub.\n", iface, id, bp);
+    FIXME("%p, %lu, %p stub.\n", iface, id, bp);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetBreakpointParameters(IDebugControl2 *iface, ULONG count, ULONG *ids,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetBreakpointParameters(IDebugControl4 *iface, ULONG count, ULONG *ids,
         ULONG start, DEBUG_BREAKPOINT_PARAMETERS *parameters)
 {
-    FIXME("%p, %u, %p, %u, %p stub.\n", iface, count, ids, start, parameters);
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, count, ids, start, parameters);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_AddBreakpoint(IDebugControl2 *iface, ULONG type, ULONG desired_id,
+static HRESULT STDMETHODCALLTYPE debugcontrol_AddBreakpoint(IDebugControl4 *iface, ULONG type, ULONG desired_id,
         IDebugBreakpoint **bp)
 {
-    FIXME("%p, %u, %u, %p stub.\n", iface, type, desired_id, bp);
+    FIXME("%p, %lu, %lu, %p stub.\n", iface, type, desired_id, bp);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_RemoveBreakpoint(IDebugControl2 *iface, IDebugBreakpoint *bp)
+static HRESULT STDMETHODCALLTYPE debugcontrol_RemoveBreakpoint(IDebugControl4 *iface, IDebugBreakpoint *bp)
 {
     FIXME("%p, %p stub.\n", iface, bp);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_AddExtension(IDebugControl2 *iface, const char *path, ULONG flags,
+static HRESULT STDMETHODCALLTYPE debugcontrol_AddExtension(IDebugControl4 *iface, const char *path, ULONG flags,
         ULONG64 *handle)
 {
-    FIXME("%p, %s, %#x, %p stub.\n", iface, debugstr_a(path), flags, handle);
+    FIXME("%p, %s, %#lx, %p stub.\n", iface, debugstr_a(path), flags, handle);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_RemoveExtension(IDebugControl2 *iface, ULONG64 handle)
+static HRESULT STDMETHODCALLTYPE debugcontrol_RemoveExtension(IDebugControl4 *iface, ULONG64 handle)
 {
     FIXME("%p, %s stub.\n", iface, wine_dbgstr_longlong(handle));
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetExtensionByPath(IDebugControl2 *iface, const char *path,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetExtensionByPath(IDebugControl4 *iface, const char *path,
         ULONG64 *handle)
 {
     FIXME("%p, %s, %p stub.\n", iface, debugstr_a(path), handle);
@@ -3329,7 +3333,7 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_GetExtensionByPath(IDebugControl2 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_CallExtension(IDebugControl2 *iface, ULONG64 handle,
+static HRESULT STDMETHODCALLTYPE debugcontrol_CallExtension(IDebugControl4 *iface, ULONG64 handle,
         const char *function, const char *args)
 {
     FIXME("%p, %s, %s, %s stub.\n", iface, wine_dbgstr_longlong(handle), debugstr_a(function), debugstr_a(args));
@@ -3337,7 +3341,7 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_CallExtension(IDebugControl2 *ifac
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetExtensionFunction(IDebugControl2 *iface, ULONG64 handle,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetExtensionFunction(IDebugControl4 *iface, ULONG64 handle,
         const char *name, void *function)
 {
     FIXME("%p, %s, %s, %p stub.\n", iface, wine_dbgstr_longlong(handle), debugstr_a(name), function);
@@ -3345,7 +3349,7 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_GetExtensionFunction(IDebugControl
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetWindbgExtensionApis32(IDebugControl2 *iface,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetWindbgExtensionApis32(IDebugControl4 *iface,
         PWINDBG_EXTENSION_APIS32 api)
 {
     FIXME("%p, %p stub.\n", iface, api);
@@ -3353,7 +3357,7 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_GetWindbgExtensionApis32(IDebugCon
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetWindbgExtensionApis64(IDebugControl2 *iface,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetWindbgExtensionApis64(IDebugControl4 *iface,
         PWINDBG_EXTENSION_APIS64 api)
 {
     FIXME("%p, %p stub.\n", iface, api);
@@ -3361,7 +3365,7 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_GetWindbgExtensionApis64(IDebugCon
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberEventFilters(IDebugControl2 *iface, ULONG *specific_events,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberEventFilters(IDebugControl4 *iface, ULONG *specific_events,
         ULONG *specific_exceptions, ULONG *arbitrary_exceptions)
 {
     FIXME("%p, %p, %p, %p stub.\n", iface, specific_events, specific_exceptions, arbitrary_exceptions);
@@ -3369,100 +3373,100 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberEventFilters(IDebugContro
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetEventFilterText(IDebugControl2 *iface, ULONG index, char *buffer,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetEventFilterText(IDebugControl4 *iface, ULONG index, char *buffer,
         ULONG buffer_size, ULONG *text_size)
 {
-    FIXME("%p, %u, %p, %u, %p stub.\n", iface, index, buffer, buffer_size, text_size);
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, index, buffer, buffer_size, text_size);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetEventFilterCommand(IDebugControl2 *iface, ULONG index, char *buffer,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetEventFilterCommand(IDebugControl4 *iface, ULONG index, char *buffer,
         ULONG buffer_size, ULONG *command_size)
 {
-    FIXME("%p, %u, %p, %u, %p stub.\n", iface, index, buffer, buffer_size, command_size);
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, index, buffer, buffer_size, command_size);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetEventFilterCommand(IDebugControl2 *iface, ULONG index,
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetEventFilterCommand(IDebugControl4 *iface, ULONG index,
         const char *command)
 {
-    FIXME("%p, %u, %s stub.\n", iface, index, debugstr_a(command));
+    FIXME("%p, %lu, %s stub.\n", iface, index, debugstr_a(command));
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetSpecificFilterParameters(IDebugControl2 *iface, ULONG start,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetSpecificFilterParameters(IDebugControl4 *iface, ULONG start,
         ULONG count, DEBUG_SPECIFIC_FILTER_PARAMETERS *parameters)
 {
-    FIXME("%p, %u, %u, %p stub.\n", iface, start, count, parameters);
+    FIXME("%p, %lu, %lu, %p stub.\n", iface, start, count, parameters);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetSpecificFilterParameters(IDebugControl2 *iface, ULONG start,
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetSpecificFilterParameters(IDebugControl4 *iface, ULONG start,
         ULONG count, DEBUG_SPECIFIC_FILTER_PARAMETERS *parameters)
 {
-    FIXME("%p, %u, %u, %p stub.\n", iface, start, count, parameters);
+    FIXME("%p, %lu, %lu, %p stub.\n", iface, start, count, parameters);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetSpecificFilterArgument(IDebugControl2 *iface, ULONG index,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetSpecificFilterArgument(IDebugControl4 *iface, ULONG index,
         char *buffer, ULONG buffer_size, ULONG *argument_size)
 {
-    FIXME("%p, %u, %p, %u, %p stub.\n", iface, index, buffer, buffer_size, argument_size);
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, index, buffer, buffer_size, argument_size);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetSpecificFilterArgument(IDebugControl2 *iface, ULONG index,
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetSpecificFilterArgument(IDebugControl4 *iface, ULONG index,
         const char *argument)
 {
-    FIXME("%p, %u, %s stub.\n", iface, index, debugstr_a(argument));
+    FIXME("%p, %lu, %s stub.\n", iface, index, debugstr_a(argument));
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetExceptionFilterParameters(IDebugControl2 *iface, ULONG count,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetExceptionFilterParameters(IDebugControl4 *iface, ULONG count,
         ULONG *codes, ULONG start, DEBUG_EXCEPTION_FILTER_PARAMETERS *parameters)
 {
-    FIXME("%p, %u, %p, %u, %p stub.\n", iface, count, codes, start, parameters);
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, count, codes, start, parameters);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetExceptionFilterParameters(IDebugControl2 *iface, ULONG count,
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetExceptionFilterParameters(IDebugControl4 *iface, ULONG count,
         DEBUG_EXCEPTION_FILTER_PARAMETERS *parameters)
 {
-    FIXME("%p, %u, %p stub.\n", iface, count, parameters);
+    FIXME("%p, %lu, %p stub.\n", iface, count, parameters);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetExceptionFilterSecondCommand(IDebugControl2 *iface, ULONG index,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetExceptionFilterSecondCommand(IDebugControl4 *iface, ULONG index,
         char *buffer, ULONG buffer_size, ULONG *command_size)
 {
-    FIXME("%p, %u, %p, %u, %p stub.\n", iface, index, buffer, buffer_size, command_size);
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, index, buffer, buffer_size, command_size);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetExceptionFilterSecondCommand(IDebugControl2 *iface, ULONG index,
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetExceptionFilterSecondCommand(IDebugControl4 *iface, ULONG index,
         const char *command)
 {
-    FIXME("%p, %u, %s stub.\n", iface, index, debugstr_a(command));
+    FIXME("%p, %lu, %s stub.\n", iface, index, debugstr_a(command));
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_WaitForEvent(IDebugControl2 *iface, ULONG flags, ULONG timeout)
+static HRESULT STDMETHODCALLTYPE debugcontrol_WaitForEvent(IDebugControl4 *iface, ULONG flags, ULONG timeout)
 {
-    struct debug_client *debug_client = impl_from_IDebugControl2(iface);
+    struct debug_client *debug_client = impl_from_IDebugControl4(iface);
     struct target_process *target;
 
-    TRACE("%p, %#x, %u.\n", iface, flags, timeout);
+    TRACE("%p, %#lx, %lu.\n", iface, flags, timeout);
 
     /* FIXME: only one target is used currently */
 
@@ -3489,7 +3493,7 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_WaitForEvent(IDebugControl2 *iface
         {
             status = NtSuspendProcess(target->handle);
             if (status)
-                WARN("Failed to suspend a process, status %#x.\n", status);
+                WARN("Failed to suspend a process, status %#lx.\n", status);
         }
 
         return S_OK;
@@ -3502,55 +3506,55 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_WaitForEvent(IDebugControl2 *iface
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetLastEventInformation(IDebugControl2 *iface, ULONG *type, ULONG *pid,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetLastEventInformation(IDebugControl4 *iface, ULONG *type, ULONG *pid,
         ULONG *tid, void *extra_info, ULONG extra_info_size, ULONG *extra_info_used, char *description,
         ULONG desc_size, ULONG *desc_used)
 {
-    FIXME("%p, %p, %p, %p, %p, %u, %p, %p, %u, %p stub.\n", iface, type, pid, tid, extra_info, extra_info_size,
+    FIXME("%p, %p, %p, %p, %p, %lu, %p, %p, %lu, %p stub.\n", iface, type, pid, tid, extra_info, extra_info_size,
             extra_info_used, description, desc_size, desc_used);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetCurrentTimeDate(IDebugControl2 *iface, ULONG timedate)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetCurrentTimeDate(IDebugControl4 *iface, ULONG timedate)
 {
-    FIXME("%p, %u stub.\n", iface, timedate);
+    FIXME("%p, %lu stub.\n", iface, timedate);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetCurrentSystemUpTime(IDebugControl2 *iface, ULONG uptime)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetCurrentSystemUpTime(IDebugControl4 *iface, ULONG uptime)
 {
-    FIXME("%p, %u stub.\n", iface, uptime);
+    FIXME("%p, %lu stub.\n", iface, uptime);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetDumpFormatFlags(IDebugControl2 *iface, ULONG *flags)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetDumpFormatFlags(IDebugControl4 *iface, ULONG *flags)
 {
     FIXME("%p, %p stub.\n", iface, flags);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberTextPlacements(IDebugControl2 *iface, ULONG *count)
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberTextPlacements(IDebugControl4 *iface, ULONG *count)
 {
     FIXME("%p, %p stub.\n", iface, count);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberTextReplacement(IDebugControl2 *iface, const char *src_text,
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberTextReplacement(IDebugControl4 *iface, const char *src_text,
         ULONG index, char *src_buffer, ULONG src_buffer_size, ULONG *src_size, char *dst_buffer,
         ULONG dst_buffer_size, ULONG *dst_size)
 {
-    FIXME("%p, %s, %u, %p, %u, %p, %p, %u, %p stub.\n", iface, debugstr_a(src_text), index, src_buffer,
+    FIXME("%p, %s, %lu, %p, %lu, %p, %p, %lu, %p stub.\n", iface, debugstr_a(src_text), index, src_buffer,
             src_buffer_size, src_size, dst_buffer, dst_buffer_size, dst_size);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_SetTextReplacement(IDebugControl2 *iface, const char *src_text,
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetTextReplacement(IDebugControl4 *iface, const char *src_text,
         const char *dst_text)
 {
     FIXME("%p, %s, %s stub.\n", iface, debugstr_a(src_text), debugstr_a(dst_text));
@@ -3558,22 +3562,540 @@ static HRESULT STDMETHODCALLTYPE debugcontrol_SetTextReplacement(IDebugControl2 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_RemoveTextReplacements(IDebugControl2 *iface)
+static HRESULT STDMETHODCALLTYPE debugcontrol_RemoveTextReplacements(IDebugControl4 *iface)
 {
     FIXME("%p stub.\n", iface);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugcontrol_OutputTextReplacements(IDebugControl2 *iface, ULONG output_control,
+static HRESULT STDMETHODCALLTYPE debugcontrol_OutputTextReplacements(IDebugControl4 *iface, ULONG output_control,
         ULONG flags)
 {
-    FIXME("%p, %u, %#x stub.\n", iface, output_control, flags);
+    FIXME("%p, %lu, %#lx stub.\n", iface, output_control, flags);
 
     return E_NOTIMPL;
 }
 
-static const IDebugControl2Vtbl debugcontrolvtbl =
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetAssemblyOptions(IDebugControl4 *iface, ULONG *options)
+{
+    FIXME("%p, %p stub.\n", iface, options);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_AddAssemblyOptions(IDebugControl4 *iface, ULONG options)
+{
+    FIXME("%p, %#lx stub.\n", iface, options);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_RemoveAssemblyOptions(IDebugControl4 *iface, ULONG options)
+{
+    FIXME("%p, %#lx stub.\n", iface, options);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetAssemblyOptions(IDebugControl4 *iface, ULONG options)
+{
+    FIXME("%p, %#lx stub.\n", iface, options);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetExpressionSyntax(IDebugControl4 *iface, ULONG *flags)
+{
+    FIXME("%p, %p stub.\n", iface, flags);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetExpressionSyntax(IDebugControl4 *iface, ULONG flags)
+{
+    FIXME("%p, %#lx stub.\n", iface, flags);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetExpressionSyntaxByName(IDebugControl4 *iface, const char *name)
+{
+    FIXME("%p, %s stub.\n", iface, debugstr_a(name));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberExpressionSyntaxes(IDebugControl4 *iface, ULONG *number)
+{
+    FIXME("%p, %p stub.\n", iface, number);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetExpressionSyntaxNames(IDebugControl4 *iface, ULONG index, char *fullname,
+        ULONG fullname_buffer_size, ULONG *fullname_size, char *abbrevname, ULONG abbrevname_buffer_size, ULONG *abbrevname_size)
+{
+    FIXME("%p, %lu, %p, %lu, %p, %p, %lu, %p stub.\n", iface, index, fullname, fullname_buffer_size, fullname_size, abbrevname,
+            abbrevname_buffer_size, abbrevname_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetNumberEvents(IDebugControl4 *iface, ULONG *events)
+{
+    FIXME("%p, %p stub.\n", iface, events);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetEventIndexDescription(IDebugControl4 *iface, ULONG index, ULONG which,
+        char *buffer, ULONG buffer_size, ULONG *desc_size)
+{
+    FIXME("%p, %lu, %lu, %p, %lu, %p stub.\n", iface, index, which, buffer, buffer_size, desc_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetCurrentEventIndex(IDebugControl4 *iface, ULONG *index)
+{
+    FIXME("%p, %p stub.\n", iface, index);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetNextEventIndex(IDebugControl4 *iface, ULONG relation, ULONG value,
+        ULONG *next_index)
+{
+    FIXME("%p, %lu, %lu, %p stub.\n", iface, relation, value, next_index);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetLogFileWide(IDebugControl4 *iface, WCHAR *buffer, ULONG buffer_size,
+        ULONG *file_size, BOOL *append)
+{
+    FIXME("%p, %p, %lu, %p, %p stub.\n", iface, buffer, buffer_size, file_size, append);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_OpenLogFileWide(IDebugControl4 *iface, const WCHAR *filename, BOOL append)
+{
+    FIXME("%p, %s, %d stub.\n", iface, debugstr_w(filename), append);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_InputWide(IDebugControl4 *iface, WCHAR *buffer, ULONG buffer_size,
+       ULONG *input_size)
+{
+    FIXME("%p, %p, %lu, %p stub.\n", iface, buffer, buffer_size, input_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_ReturnInputWide(IDebugControl4 *iface, const WCHAR *buffer)
+{
+    FIXME("%p, %p stub.\n", iface, buffer);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODVCALLTYPE debugcontrol_OutputWide(IDebugControl4 *iface, ULONG mask, const WCHAR *format, ...)
+{
+    FIXME("%p, %lx, %s stub.\n", iface, mask, debugstr_w(format));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_OutputVaListWide(IDebugControl4 *iface, ULONG mask, const WCHAR *format,
+        va_list args)
+{
+    FIXME("%p, %lx, %s stub.\n", iface, mask, debugstr_w(format));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODVCALLTYPE debugcontrol_ControlledOutputWide(IDebugControl4 *iface, ULONG output_control, ULONG mask,
+        const WCHAR *format, ...)
+{
+    FIXME("%p, %lx, %lx, %s stub.\n", iface, output_control, mask, debugstr_w(format));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_ControlledOutputVaListWide(IDebugControl4 *iface, ULONG output_control,
+        ULONG mask, const WCHAR *format, va_list args)
+{
+    FIXME("%p, %lx, %lx, %s stub.\n", iface, output_control, mask, debugstr_w(format));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODVCALLTYPE debugcontrol_OutputPromptWide(IDebugControl4 *iface, ULONG output_control,
+        const WCHAR *format, ...)
+{
+    FIXME("%p, %lx, %s stub.\n", iface, output_control, debugstr_w(format));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_OutputPromptVaListWide(IDebugControl4 *iface, ULONG output_control,
+        const WCHAR *format, va_list args)
+{
+    FIXME("%p, %lx, %s stub.\n", iface, output_control, debugstr_w(format));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetPromptTextWide(IDebugControl4 *iface, WCHAR *buffer, ULONG buffer_size,
+        ULONG *text_size)
+{
+    FIXME("%p, %p, %lu, %p stub.\n", iface, buffer, buffer_size, text_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_AssembleWide(IDebugControl4 *iface, ULONG64 offset, const WCHAR *instr,
+        ULONG64 *end_offset)
+{
+    FIXME("%p, %s, %s, %p stub.\n", iface, wine_dbgstr_longlong(offset), debugstr_w(instr), end_offset);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_DisassembleWide(IDebugControl4 *iface, ULONG64 offset, ULONG flags, WCHAR *buffer,
+        ULONG buffer_size, ULONG *size, ULONG64 *end_offset)
+{
+    FIXME("%p, %s, %#lx, %p, %lu, %p, %p stub.\n", iface, wine_dbgstr_longlong(offset), flags, buffer, buffer_size, size, end_offset);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetProcessorTypeNamesWide(IDebugControl4 *iface, ULONG type, WCHAR *fullname,
+        ULONG fullname_buffer_size, ULONG *fullname_size, WCHAR *abbrevname, ULONG abbrevname_buffer_size, ULONG *abbrevname_size)
+{
+    FIXME("%p, %lu, %p, %lu, %p, %p, %lu, %p stub.\n", iface, type, fullname, fullname_buffer_size, fullname_size, abbrevname,
+            abbrevname_buffer_size, abbrevname_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetTextMacroWide(IDebugControl4 *iface, ULONG slot, WCHAR *buffer,
+        ULONG buffer_size, ULONG *macro_size)
+{
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, slot, buffer, buffer_size, macro_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetTextMacroWide(IDebugControl4 *iface, ULONG slot, const WCHAR *macro)
+{
+    FIXME("%p, %lu, %s stub.\n", iface, slot, debugstr_w(macro));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_EvaluateWide(IDebugControl4 *iface, const WCHAR *expression, ULONG desired_type,
+        DEBUG_VALUE *value, ULONG *remainder_index)
+{
+    FIXME("%p, %s, %lu, %p, %p stub.\n", iface, debugstr_w(expression), desired_type, value, remainder_index);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_ExecuteWide(IDebugControl4 *iface, ULONG output_control, const WCHAR *command,
+        ULONG flags)
+{
+    FIXME("%p, %lx, %s, %lx stub.\n", iface, output_control, debugstr_w(command), flags);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_ExecuteCommandFileWide(IDebugControl4 *iface, ULONG output_control,
+        const WCHAR *commandfile, ULONG flags)
+{
+    FIXME("%p, %lx, %s, %lx stub.\n", iface, output_control, debugstr_w(commandfile), flags);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetBreakpointByIndex2(IDebugControl4 *iface, ULONG index, PDEBUG_BREAKPOINT2 *bp)
+{
+    FIXME("%p, %lu, %p stub.\n", iface, index, bp);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetBreakpointById2(IDebugControl4 *iface, ULONG id, PDEBUG_BREAKPOINT2 *bp)
+{
+    FIXME("%p, %lu, %p stub.\n", iface, id, bp);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_AddBreakpoint2(IDebugControl4 *iface, ULONG type, ULONG desired_id,
+        PDEBUG_BREAKPOINT2 *bp)
+{
+    FIXME("%p, %lu, %lu, %p stub.\n", iface, type, desired_id, bp);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_RemoveBreakpoint2(IDebugControl4 *iface, PDEBUG_BREAKPOINT2 bp)
+{
+    FIXME("%p, %p stub.\n", iface, bp);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_AddExtensionWide(IDebugControl4 *iface, const WCHAR *path, ULONG flags,
+        ULONG64 *handle)
+{
+    FIXME("%p, %s, %#lx, %p stub.\n", iface, debugstr_w(path), flags, handle);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetExtensionByPathWide(IDebugControl4 *iface, const WCHAR *path, ULONG64 *handle)
+{
+    FIXME("%p, %s, %p stub.\n", iface, debugstr_w(path), handle);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_CallExtensionWide(IDebugControl4 *iface, ULONG64 handle, const WCHAR *function,
+        const WCHAR *arguments)
+{
+    FIXME("%p, %s, %s, %s stub.\n", iface, wine_dbgstr_longlong(handle), debugstr_w(function), debugstr_w(arguments));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetExtensionFunctionWide(IDebugControl4 *iface, ULONG64 handle,
+        const WCHAR *function, FARPROC *func)
+{
+    FIXME("%p, %s, %s, %p stub.\n", iface, wine_dbgstr_longlong(handle), debugstr_w(function), func);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetEventFilterTextWide(IDebugControl4 *iface, ULONG index, WCHAR *buffer,
+        ULONG buffer_size, ULONG *text_size)
+{
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, index, buffer, buffer_size, text_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetEventFilterCommandWide(IDebugControl4 *iface, ULONG index, WCHAR *buffer,
+        ULONG buffer_size, ULONG *command_size)
+{
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, index, buffer, buffer_size, command_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetEventFilterCommandWide(IDebugControl4 *iface, ULONG index, const WCHAR *command)
+{
+    FIXME("%p, %lu, %s stub.\n", iface, index, debugstr_w(command));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetSpecificFilterArgumentWide(IDebugControl4 *iface, ULONG index, WCHAR *buffer,
+        ULONG buffer_size, ULONG *argument_size)
+{
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, index, buffer, buffer_size, argument_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetSpecificFilterArgumentWide(IDebugControl4 *iface, ULONG index,
+        const WCHAR *argument)
+{
+    FIXME("%p, %lu, %s stub.\n", iface, index, debugstr_w(argument));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetSpecificFilterSecondCommandWide(IDebugControl4 *iface, ULONG index,
+        WCHAR *buffer, ULONG buffer_size, ULONG *command_size)
+{
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, index, buffer, buffer_size, command_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetSpecificFilterSecondCommandWide(IDebugControl4 *iface, ULONG index,
+        const WCHAR *command)
+{
+    FIXME("%p, %lu, %s stub.\n", iface, index, debugstr_w(command));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetLastEventInformationWide(IDebugControl4 *iface, ULONG *type, ULONG *processid,
+        ULONG *threadid, void *extra_info, ULONG extra_info_size, ULONG *extra_info_used, WCHAR *desc, ULONG desc_size,
+        ULONG *desc_used)
+{
+    FIXME("%p, %p, %p, %p, %p, %lu, %p, %p, %lu, %p stub.\n", iface, type, processid, threadid, extra_info, extra_info_size,
+            extra_info_used, desc, desc_size, desc_used);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetTextReplacementWide(IDebugControl4 *iface, const WCHAR *src_text, ULONG index,
+        WCHAR *src_buffer, ULONG src_buffer_size, ULONG *src_size, WCHAR *dst_buffer, ULONG dest_buffer_size, ULONG *dst_size)
+{
+    FIXME("%p, %s, %lu, %p, %lu, %p, %p, %lu, %p stub.\n", iface, debugstr_w(src_text), index, src_buffer, src_buffer_size,
+            src_size, dst_buffer, dest_buffer_size, dst_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetTextReplacementWide(IDebugControl4 *iface, const WCHAR *src_text,
+        const WCHAR *dst_text)
+{
+    FIXME("%p, %s, %s stub.\n", iface, debugstr_w(src_text), debugstr_w(dst_text));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_SetExpressionSyntaxByNameWide(IDebugControl4 *iface, const WCHAR *abbrevname)
+{
+    FIXME("%p, %s stub.\n", iface, debugstr_w(abbrevname));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetExpressionSyntaxNamesWide(IDebugControl4 *iface, ULONG index,
+        WCHAR *fullname_buffer, ULONG fullname_buffer_size, ULONG *fullname_size, WCHAR *abbrevname_buffer,
+        ULONG abbrevname_buffer_size, ULONG *abbrev_size)
+{
+    FIXME("%p, %lu, %p, %lu, %p, %p, %lu, %p stub.\n", iface, index, fullname_buffer, fullname_buffer_size, fullname_size,
+            abbrevname_buffer, abbrevname_buffer_size, abbrev_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetEventIndexDescriptionWide(IDebugControl4 *iface, ULONG index, ULONG which,
+        WCHAR *buffer, ULONG buffer_size, ULONG *desc_size)
+{
+    FIXME("%p, %lu, %lu, %p, %lu, %p stub.\n", iface, index, which, buffer, buffer_size, desc_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetLogFile2(IDebugControl4 *iface, char *buffer, ULONG buffer_size,
+        ULONG *file_size, ULONG *flags)
+{
+    FIXME("%p, %p, %lu, %p, %p stub.\n", iface, buffer, buffer_size, file_size, flags);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_OpenLogFile2(IDebugControl4 *iface, const char *filename, ULONG flags)
+{
+    FIXME("%p, %s, %#lx stub.\n", iface, debugstr_a(filename), flags);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetLogFile2Wide(IDebugControl4 *iface, WCHAR *buffer, ULONG buffer_size,
+        ULONG *file_size, ULONG *flags)
+{
+    FIXME("%p, %p, %lu, %p, %p stub.\n", iface, buffer, buffer_size, file_size, flags);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_OpenLogFile2Wide(IDebugControl4 *iface, const WCHAR *filename, ULONG flags)
+{
+    FIXME("%p, %s, %#lx stub.\n", iface, debugstr_w(filename), flags);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetSystemVersionValues(IDebugControl4 *iface, ULONG *platformid,
+        ULONG *win32major, ULONG *win32minor, ULONG *kdmajor, ULONG *kdminor)
+{
+    FIXME("%p, %p, %p, %p, %p, %p stub.\n", iface, platformid, win32major, win32minor, kdmajor, kdminor);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetSystemVersionString(IDebugControl4 *iface, ULONG which, char *buffer,
+        ULONG buffer_size, ULONG *string_size)
+{
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, which, buffer, buffer_size, string_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetSystemVersionStringWide(IDebugControl4 *iface, ULONG which, WCHAR *buffer,
+        ULONG buffer_size, ULONG *string_size)
+{
+    FIXME("%p, %lu, %p, %lu, %p stub.\n", iface, which, buffer, buffer_size, string_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetContextStackTrace(IDebugControl4 *iface, void *start_context,
+        ULONG start_context_size, PDEBUG_STACK_FRAME frames, ULONG frames_size, void *frame_contexts, ULONG frame_contexts_size,
+        ULONG frame_contexts_entry_size, ULONG *frames_filled)
+{
+    FIXME("%p, %p, %lu, %p, %lu, %p, %lu, %lu, %p stub.\n", iface, start_context, start_context_size, frames, frames_size,
+            frame_contexts, frame_contexts_size, frame_contexts_entry_size, frames_filled);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_OutputContextStackTrace(IDebugControl4 *iface, ULONG output_control,
+        PDEBUG_STACK_FRAME frames, ULONG frames_size, void *frame_contexts, ULONG frame_contexts_size,
+        ULONG frame_contexts_entry_size, ULONG flags)
+{
+    FIXME("%p, %#lx, %p, %lu, %p, %lu, %lu, %#lx stub.\n", iface, output_control, frames, frames_size, frame_contexts,
+            frame_contexts_size, frame_contexts_entry_size, flags);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetStoredEventInformation(IDebugControl4 *iface, ULONG *type, ULONG *processid,
+        ULONG *threadid, void *context, ULONG context_size, ULONG *context_used, void *extra_info, ULONG extra_info_size,
+        ULONG *extra_info_used)
+{
+    FIXME("%p, %p, %p, %p, %p, %lu, %p, %p, %lu, %p stub.\n", iface, type, processid, threadid, context, context_size,
+            context_used, extra_info, extra_info_size, extra_info_used);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetManagedStatus(IDebugControl4 *iface, ULONG *flags, ULONG which_string,
+        char *string, ULONG string_size, ULONG string_needed)
+{
+    FIXME("%p, %p, %lu, %p, %lu, %lu stub.\n", iface, flags, which_string, string, string_size, string_needed);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_GetManagedStatusWide(IDebugControl4 *iface, ULONG *flags, ULONG which_string,
+        WCHAR *string, ULONG string_size, ULONG string_needed)
+{
+    FIXME("%p, %p, %lu, %p, %lu, %lu stub.\n", iface, flags, which_string, string, string_size, string_needed);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugcontrol_ResetManagedStatus(IDebugControl4 *iface, ULONG flags)
+{
+    FIXME("%p, %#lx stub.\n", iface, flags);
+
+    return E_NOTIMPL;
+}
+
+static const IDebugControl4Vtbl debugcontrolvtbl =
 {
     debugcontrol_QueryInterface,
     debugcontrol_AddRef,
@@ -3678,55 +4200,199 @@ static const IDebugControl2Vtbl debugcontrolvtbl =
     debugcontrol_SetTextReplacement,
     debugcontrol_RemoveTextReplacements,
     debugcontrol_OutputTextReplacements,
+    debugcontrol_GetAssemblyOptions,
+    debugcontrol_AddAssemblyOptions,
+    debugcontrol_RemoveAssemblyOptions,
+    debugcontrol_SetAssemblyOptions,
+    debugcontrol_GetExpressionSyntax,
+    debugcontrol_SetExpressionSyntax,
+    debugcontrol_SetExpressionSyntaxByName,
+    debugcontrol_GetNumberExpressionSyntaxes,
+    debugcontrol_GetExpressionSyntaxNames,
+    debugcontrol_GetNumberEvents,
+    debugcontrol_GetEventIndexDescription,
+    debugcontrol_GetCurrentEventIndex,
+    debugcontrol_SetNextEventIndex,
+    debugcontrol_GetLogFileWide,
+    debugcontrol_OpenLogFileWide,
+    debugcontrol_InputWide,
+    debugcontrol_ReturnInputWide,
+    debugcontrol_OutputWide,
+    debugcontrol_OutputVaListWide,
+    debugcontrol_ControlledOutputWide,
+    debugcontrol_ControlledOutputVaListWide,
+    debugcontrol_OutputPromptWide,
+    debugcontrol_OutputPromptVaListWide,
+    debugcontrol_GetPromptTextWide,
+    debugcontrol_AssembleWide,
+    debugcontrol_DisassembleWide,
+    debugcontrol_GetProcessorTypeNamesWide,
+    debugcontrol_GetTextMacroWide,
+    debugcontrol_SetTextMacroWide,
+    debugcontrol_EvaluateWide,
+    debugcontrol_ExecuteWide,
+    debugcontrol_ExecuteCommandFileWide,
+    debugcontrol_GetBreakpointByIndex2,
+    debugcontrol_GetBreakpointById2,
+    debugcontrol_AddBreakpoint2,
+    debugcontrol_RemoveBreakpoint2,
+    debugcontrol_AddExtensionWide,
+    debugcontrol_GetExtensionByPathWide,
+    debugcontrol_CallExtensionWide,
+    debugcontrol_GetExtensionFunctionWide,
+    debugcontrol_GetEventFilterTextWide,
+    debugcontrol_GetEventFilterCommandWide,
+    debugcontrol_SetEventFilterCommandWide,
+    debugcontrol_GetSpecificFilterArgumentWide,
+    debugcontrol_SetSpecificFilterArgumentWide,
+    debugcontrol_GetSpecificFilterSecondCommandWide,
+    debugcontrol_SetSpecificFilterSecondCommandWide,
+    debugcontrol_GetLastEventInformationWide,
+    debugcontrol_GetTextReplacementWide,
+    debugcontrol_SetTextReplacementWide,
+    debugcontrol_SetExpressionSyntaxByNameWide,
+    debugcontrol_GetExpressionSyntaxNamesWide,
+    debugcontrol_GetEventIndexDescriptionWide,
+    debugcontrol_GetLogFile2,
+    debugcontrol_OpenLogFile2,
+    debugcontrol_GetLogFile2Wide,
+    debugcontrol_OpenLogFile2Wide,
+    debugcontrol_GetSystemVersionValues,
+    debugcontrol_GetSystemVersionString,
+    debugcontrol_GetSystemVersionStringWide,
+    debugcontrol_GetContextStackTrace,
+    debugcontrol_OutputContextStackTrace,
+    debugcontrol_GetStoredEventInformation,
+    debugcontrol_GetManagedStatus,
+    debugcontrol_GetManagedStatusWide,
+    debugcontrol_ResetManagedStatus,
 };
 
-static HRESULT STDMETHODCALLTYPE debugadvanced_QueryInterface(IDebugAdvanced *iface, REFIID riid, void **obj)
+static HRESULT STDMETHODCALLTYPE debugadvanced_QueryInterface(IDebugAdvanced3 *iface, REFIID riid, void **obj)
 {
-    struct debug_client *debug_client = impl_from_IDebugAdvanced(iface);
-    IUnknown *unk = (IUnknown *)&debug_client->IDebugClient_iface;
-    return IUnknown_QueryInterface(unk, riid, obj);
+    struct debug_client *debug_client = impl_from_IDebugAdvanced3(iface);
+    return IUnknown_QueryInterface((IUnknown *)&debug_client->IDebugClient_iface, riid, obj);
 }
 
-static ULONG STDMETHODCALLTYPE debugadvanced_AddRef(IDebugAdvanced *iface)
+static ULONG STDMETHODCALLTYPE debugadvanced_AddRef(IDebugAdvanced3 *iface)
 {
-    struct debug_client *debug_client = impl_from_IDebugAdvanced(iface);
-    IUnknown *unk = (IUnknown *)&debug_client->IDebugClient_iface;
-    return IUnknown_AddRef(unk);
+    struct debug_client *debug_client = impl_from_IDebugAdvanced3(iface);
+    return IUnknown_AddRef((IUnknown *)&debug_client->IDebugClient_iface);
 }
 
-static ULONG STDMETHODCALLTYPE debugadvanced_Release(IDebugAdvanced *iface)
+static ULONG STDMETHODCALLTYPE debugadvanced_Release(IDebugAdvanced3 *iface)
 {
-    struct debug_client *debug_client = impl_from_IDebugAdvanced(iface);
-    IUnknown *unk = (IUnknown *)&debug_client->IDebugClient_iface;
-    return IUnknown_Release(unk);
+    struct debug_client *debug_client = impl_from_IDebugAdvanced3(iface);
+    return IUnknown_Release((IUnknown *)&debug_client->IDebugClient_iface);
 }
 
-static HRESULT STDMETHODCALLTYPE debugadvanced_GetThreadContext(IDebugAdvanced *iface, void *context,
+static HRESULT STDMETHODCALLTYPE debugadvanced_GetThreadContext(IDebugAdvanced3 *iface, void *context,
         ULONG context_size)
 {
-    FIXME("%p, %p, %u stub.\n", iface, context, context_size);
+    FIXME("%p, %p, %lu stub.\n", iface, context, context_size);
 
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE debugadvanced_SetThreadContext(IDebugAdvanced *iface, void *context,
+static HRESULT STDMETHODCALLTYPE debugadvanced_SetThreadContext(IDebugAdvanced3 *iface, void *context,
         ULONG context_size)
 {
-    FIXME("%p, %p, %u stub.\n", iface, context, context_size);
+    FIXME("%p, %p, %lu stub.\n", iface, context, context_size);
 
     return E_NOTIMPL;
 }
 
-static const IDebugAdvancedVtbl debugadvancedvtbl =
+static HRESULT STDMETHODCALLTYPE debugadvanced_Request(IDebugAdvanced3 *iface, ULONG request, void *inbuffer,
+        ULONG inbuffer_size, void *outbuffer, ULONG outbuffer_size, ULONG *outsize)
+{
+    FIXME("%p, %lu, %p, %lu, %p, %lu, %p stub.\n", iface, request, inbuffer, inbuffer_size, outbuffer, outbuffer_size, outsize);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugadvanced_GetSourceFileInformation(IDebugAdvanced3 *iface, ULONG which, char *sourcefile,
+        ULONG64 arg64, ULONG arg32, void *buffer, ULONG buffer_size, ULONG *info_size)
+{
+    FIXME("%p, %lu, %p, %s, %#lx, %p, %lu, %p stub.\n", iface, which, sourcefile, wine_dbgstr_longlong(arg64),
+            arg32, buffer, buffer_size, info_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugadvanced_FindSourceFileAndToken(IDebugAdvanced3 *iface, ULONG start_element,
+        ULONG64 modaddr, const char *filename, ULONG flags, void *filetoken, ULONG filetokensize, ULONG *found_element,
+        char *buffer, ULONG buffer_size, ULONG *found_size)
+{
+    FIXME("%p, %lu, %s, %s, %#lx, %p, %lu, %p, %p, %lu, %p stub.\n", iface, start_element, wine_dbgstr_longlong(modaddr),
+            debugstr_a(filename), flags, filetoken, filetokensize, found_element, buffer, buffer_size, found_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugadvanced_GetSymbolInformation(IDebugAdvanced3 *iface, ULONG which, ULONG64 arg64,
+        ULONG arg32, void *buffer, ULONG buffer_size, ULONG *info_size, char *string_buffer, ULONG string_buffer_size,
+        ULONG *string_size)
+{
+    FIXME("%p, %lu, %s, %#lx, %p, %lu, %p, %p, %lu, %p stub.\n", iface, which, wine_dbgstr_longlong(arg64),
+            arg32, buffer, buffer_size, info_size, string_buffer, string_buffer_size, string_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugadvanced_GetSystemObjectInformation(IDebugAdvanced3 *iface, ULONG which, ULONG64 arg64,
+        ULONG arg32, void *buffer, ULONG buffer_size, ULONG *info_size)
+{
+    FIXME("%p, %lu, %s, %#lx, %p, %lu, %p stub.\n", iface, which, wine_dbgstr_longlong(arg64), arg32, buffer,
+            buffer_size, info_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugadvanced_GetSourceFileInformationWide(IDebugAdvanced3 *iface, ULONG which,
+        WCHAR *source_file, ULONG64 arg64, ULONG arg32, void *buffer, ULONG buffer_size, ULONG *info_size)
+{
+    FIXME("%p, %lu, %p, %s, %#lx, %p, %lu, %p stub.\n", iface, which, source_file, wine_dbgstr_longlong(arg64),
+            arg32, buffer, buffer_size, info_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugadvanced_FindSourceFileAndTokenWide(IDebugAdvanced3 *iface, ULONG start_element,
+        ULONG64 modaddr, const WCHAR *filename, ULONG flags, void *filetoken, ULONG filetokensize, ULONG *found_element,
+        WCHAR *buffer, ULONG buffer_size, ULONG *found_size)
+{
+    FIXME("%p, %lu, %s, %s, %#lx, %p, %lu, %p, %p, %lu, %p stub.\n", iface, start_element, wine_dbgstr_longlong(modaddr),
+            debugstr_w(filename), flags, filetoken, filetokensize, found_element, buffer, buffer_size, found_size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE debugadvanced_GetSymbolInformationWide(IDebugAdvanced3 *iface, ULONG which, ULONG64 arg64,
+        ULONG arg32, void *buffer, ULONG buffer_size, ULONG *info_size, WCHAR *string_buffer, ULONG string_buffer_size,
+        ULONG *string_size)
+{
+    FIXME("%p, %lu, %s, %#lx, %p, %lu, %p, %p, %lu, %p stub.\n", iface, which, wine_dbgstr_longlong(arg64),
+            arg32, buffer, buffer_size, info_size, string_buffer, string_buffer_size, string_size);
+
+    return E_NOTIMPL;
+}
+
+static const IDebugAdvanced3Vtbl debugadvancedvtbl =
 {
     debugadvanced_QueryInterface,
     debugadvanced_AddRef,
     debugadvanced_Release,
-    /* IDebugAdvanced */
     debugadvanced_GetThreadContext,
     debugadvanced_SetThreadContext,
+    debugadvanced_Request,
+    debugadvanced_GetSourceFileInformation,
+    debugadvanced_FindSourceFileAndToken,
+    debugadvanced_GetSymbolInformation,
+    debugadvanced_GetSystemObjectInformation,
+    debugadvanced_GetSourceFileInformationWide,
+    debugadvanced_FindSourceFileAndTokenWide,
+    debugadvanced_GetSymbolInformationWide,
 };
-
 
 static HRESULT STDMETHODCALLTYPE debugsystemobjects_QueryInterface(IDebugSystemObjects *iface, REFIID riid, void **obj)
 {
@@ -3772,14 +4438,14 @@ static HRESULT STDMETHODCALLTYPE debugsystemobjects_GetCurrentThreadId(IDebugSys
 
 static HRESULT STDMETHODCALLTYPE debugsystemobjects_SetCurrentThreadId(IDebugSystemObjects *iface, ULONG id)
 {
-    FIXME("%p, %u stub.\n", iface, id);
+    FIXME("%p, %lu stub.\n", iface, id);
 
     return E_NOTIMPL;
 }
 
 static HRESULT STDMETHODCALLTYPE debugsystemobjects_SetCurrentProcessId(IDebugSystemObjects *iface, ULONG id)
 {
-    FIXME("%p, %u stub.\n", iface, id);
+    FIXME("%p, %lu stub.\n", iface, id);
 
     return E_NOTIMPL;
 }
@@ -3802,7 +4468,7 @@ static HRESULT STDMETHODCALLTYPE debugsystemobjects_GetTotalNumberThreads(IDebug
 static HRESULT STDMETHODCALLTYPE debugsystemobjects_GetThreadIdsByIndex(IDebugSystemObjects *iface, ULONG start,
         ULONG count, ULONG *ids, ULONG *sysids)
 {
-    FIXME("%p, %u, %u, %p, %p stub.\n", iface, start, count, ids, sysids);
+    FIXME("%p, %lu, %lu, %p, %p stub.\n", iface, start, count, ids, sysids);
 
     return E_NOTIMPL;
 }
@@ -3810,7 +4476,7 @@ static HRESULT STDMETHODCALLTYPE debugsystemobjects_GetThreadIdsByIndex(IDebugSy
 static HRESULT STDMETHODCALLTYPE debugsystemobjects_GetThreadIdByProcessor(IDebugSystemObjects *iface, ULONG processor,
         ULONG *id)
 {
-    FIXME("%p, %u, %p stub.\n", iface, processor, id);
+    FIXME("%p, %lu, %p stub.\n", iface, processor, id);
 
     return E_NOTIMPL;
 }
@@ -3856,7 +4522,7 @@ static HRESULT STDMETHODCALLTYPE debugsystemobjects_GetCurrentThreadSystemId(IDe
 static HRESULT STDMETHODCALLTYPE debugsystemobjects_GetThreadIdBySystemId(IDebugSystemObjects *iface, ULONG sysid,
         ULONG *id)
 {
-    FIXME("%p, %u, %p stub.\n", iface, sysid, id);
+    FIXME("%p, %lu, %p stub.\n", iface, sysid, id);
 
     return E_NOTIMPL;
 }
@@ -3886,7 +4552,7 @@ static HRESULT STDMETHODCALLTYPE debugsystemobjects_GetNumberProcesses(IDebugSys
 static HRESULT STDMETHODCALLTYPE debugsystemobjects_GetProcessIdsByIndex(IDebugSystemObjects *iface, ULONG start,
         ULONG count, ULONG *ids, ULONG *sysids)
 {
-    FIXME("%p, %u, %u, %p, %p stub.\n", iface, start, count, ids, sysids);
+    FIXME("%p, %lu, %lu, %p, %p stub.\n", iface, start, count, ids, sysids);
 
     return E_NOTIMPL;
 }
@@ -3932,7 +4598,7 @@ static HRESULT STDMETHODCALLTYPE debugsystemobjects_GetCurrentProcessSystemId(ID
 static HRESULT STDMETHODCALLTYPE debugsystemobjects_GetProcessIdBySystemId(IDebugSystemObjects *iface, ULONG sysid,
         ULONG *id)
 {
-    FIXME("%p, %u, %p stub.\n", iface, sysid, id);
+    FIXME("%p, %lu, %p stub.\n", iface, sysid, id);
 
     return E_NOTIMPL;
 }
@@ -3956,7 +4622,7 @@ static HRESULT STDMETHODCALLTYPE debugsystemobjects_GetProcessIdByHandle(IDebugS
 static HRESULT STDMETHODCALLTYPE debugsystemobjects_GetCurrentProcessExecutableName(IDebugSystemObjects *iface,
         char *buffer, ULONG buffer_size, ULONG *exe_size)
 {
-    FIXME("%p, %p, %u, %p stub.\n", iface, buffer, buffer_size, exe_size);
+    FIXME("%p, %p, %lu, %p stub.\n", iface, buffer, buffer_size, exe_size);
 
     return E_NOTIMPL;
 }
@@ -4032,15 +4698,14 @@ HRESULT WINAPI DebugCreate(REFIID riid, void **obj)
 
     TRACE("%s, %p.\n", debugstr_guid(riid), obj);
 
-    debug_client = heap_alloc_zero(sizeof(*debug_client));
-    if (!debug_client)
+    if (!(debug_client = calloc(1, sizeof(*debug_client))))
         return E_OUTOFMEMORY;
 
     debug_client->IDebugClient_iface.lpVtbl = &debugclientvtbl;
     debug_client->IDebugDataSpaces_iface.lpVtbl = &debugdataspacesvtbl;
     debug_client->IDebugSymbols3_iface.lpVtbl = &debugsymbolsvtbl;
-    debug_client->IDebugControl2_iface.lpVtbl = &debugcontrolvtbl;
-    debug_client->IDebugAdvanced_iface.lpVtbl = &debugadvancedvtbl;
+    debug_client->IDebugControl4_iface.lpVtbl = &debugcontrolvtbl;
+    debug_client->IDebugAdvanced3_iface.lpVtbl = &debugadvancedvtbl;
     debug_client->IDebugSystemObjects_iface.lpVtbl = &debugsystemobjectsvtbl;
     debug_client->refcount = 1;
     list_init(&debug_client->targets);
@@ -4058,7 +4723,7 @@ HRESULT WINAPI DebugCreate(REFIID riid, void **obj)
 */
 HRESULT WINAPI DebugCreateEx(REFIID riid, DWORD flags, void **obj)
 {
-    FIXME("(%s, %#x, %p): stub\n", debugstr_guid(riid), flags, obj);
+    FIXME("%s, %#lx, %p: stub\n", debugstr_guid(riid), flags, obj);
 
     return E_NOTIMPL;
 }

@@ -139,7 +139,7 @@ static UINT get_signature( MSIPACKAGE *package, MSISIGNATURE *sig, const WCHAR *
     TRACE("MaxVersion is %d.%d.%d.%d\n", HIWORD(sig->MaxVersionMS),
           LOWORD(sig->MaxVersionMS), HIWORD(sig->MaxVersionLS),
           LOWORD(sig->MaxVersionLS));
-    TRACE("MinSize is %d, MaxSize is %d;\n", sig->MinSize, sig->MaxSize);
+    TRACE("MinSize is %lu, MaxSize is %lu\n", sig->MinSize, sig->MaxSize);
     TRACE("Languages is %s\n", debugstr_w(sig->Languages));
 
     msiobj_release( &row->hdr );
@@ -157,7 +157,8 @@ static void free_signature( MSISIGNATURE *sig )
 static WCHAR *search_file( MSIPACKAGE *package, WCHAR *path, MSISIGNATURE *sig )
 {
     VS_FIXEDFILEINFO *info;
-    DWORD attr, size;
+    DWORD attr;
+    UINT size;
     LPWSTR val = NULL;
     LPBYTE buffer;
 
@@ -335,7 +336,7 @@ static void convert_reg_value( DWORD regType, const BYTE *value, DWORD sz, WCHAR
                 swprintf(ptr, 3, L"%02X", value[i]);
             break;
         default:
-            WARN("unimplemented for values of type %d\n", regType);
+            WARN( "unimplemented for values of type %lu\n", regType );
             *appValue = NULL;
     }
 }
@@ -622,7 +623,8 @@ static BOOL match_languages( const void *version, const WCHAR *languages )
         USHORT id;
         USHORT codepage;
     } *lang;
-    DWORD len, num_ids, i, j;
+    UINT len, j;
+    DWORD num_ids, i;
     BOOL found = FALSE;
     LANGID *ids;
 

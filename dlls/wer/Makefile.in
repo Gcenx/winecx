@@ -2,7 +2,7 @@ MODULE    = wer.dll
 IMPORTLIB = wer
 IMPORTS   = advapi32
 
-EXTRADLLFLAGS = -mno-cygwin
+EXTRADLLFLAGS = -Wb,--prefer-native
 
 C_SRCS = \
 	main.c

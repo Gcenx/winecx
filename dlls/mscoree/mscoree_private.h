@@ -45,7 +45,7 @@ extern HRESULT assembly_get_runtime_version(ASSEMBLY *assembly, LPSTR *version) 
 extern HRESULT assembly_get_vtable_fixups(ASSEMBLY *assembly, VTableFixup **fixups, DWORD *count) DECLSPEC_HIDDEN;
 extern HRESULT assembly_get_native_entrypoint(ASSEMBLY *assembly, NativeEntryPointFunc *func) DECLSPEC_HIDDEN;
 
-#define WINE_MONO_VERSION "7.0.0"
+#define WINE_MONO_VERSION "7.2.0"
 
 /* Mono embedding */
 typedef struct _MonoDomain MonoDomain;
@@ -143,9 +143,23 @@ typedef enum {
 
 typedef MonoAssembly* (CDECL *MonoAssemblyPreLoadFunc)(MonoAssemblyName *aname, char **assemblies_path, void *user_data);
 
+typedef MonoAssembly* (CDECL *WineMonoAssemblyPreLoadFunc)(MonoAssemblyName *aname, char **assemblies_path, int *halt_search, void *user_data);
+
 typedef void (CDECL *MonoProfileFunc)(MonoProfiler *prof);
 
 typedef void (CDECL *MonoPrintCallback) (const char *string, INT is_stdout);
+
+typedef enum {
+    MONO_AOT_MODE_NONE,
+    MONO_AOT_MODE_NORMAL,
+    MONO_AOT_MODE_HYBRID,
+    MONO_AOT_MODE_FULL,
+    MONO_AOT_MODE_LLVMONLY,
+    MONO_AOT_MODE_INTERP,
+    MONO_AOT_MODE_INTERP_LLVMONLY,
+    MONO_AOT_MODE_LLVMONLY_INTERP,
+    MONO_AOT_MODE_INTERP_ONLY
+} MonoAotMode;
 
 extern BOOL is_mono_started DECLSPEC_HIDDEN;
 
@@ -200,11 +214,13 @@ HRESULT WINAPI CLRMetaHost_GetRuntime(ICLRMetaHost* iface, LPCWSTR pwzVersion, R
 
 extern HRESULT CorDebug_Create(ICLRRuntimeHost *runtimehost, IUnknown** ppUnk) DECLSPEC_HIDDEN;
 
-extern HRESULT create_monodata(REFIID riid, LPVOID *ppObj) DECLSPEC_HIDDEN;
+extern HRESULT create_monodata(REFCLSID clsid, LPVOID *ppObj) DECLSPEC_HIDDEN;
 
 extern HRESULT get_file_from_strongname(WCHAR* stringnameW, WCHAR* assemblies_path, int path_length) DECLSPEC_HIDDEN;
 
 extern void runtimehost_init(void) DECLSPEC_HIDDEN;
 extern void runtimehost_uninit(void) DECLSPEC_HIDDEN;
+
+extern void CDECL mono_print_handler_fn(const char *string, INT is_stdout) DECLSPEC_HIDDEN;
 
 #endif   /* __MSCOREE_PRIVATE__ */

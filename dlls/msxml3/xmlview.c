@@ -16,16 +16,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
 #define COBJMACROS
 #define NONAMELESSUNION
-
-#ifdef HAVE_LIBXML2
-#include <libxml/parser.h>
-#endif
 
 #include "windef.h"
 #include "winbase.h"
@@ -38,9 +32,7 @@
 
 #include "wine/debug.h"
 
-#include "msxml_private.h"
-
-#ifdef HAVE_LIBXML2
+#include "msxml_dispex.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msxml);
 
@@ -108,9 +100,9 @@ static HRESULT WINAPI XMLView_Binding_QueryInterface(
 static ULONG WINAPI XMLView_Binding_AddRef(IBinding *iface)
 {
     Binding *This = impl_from_IBinding(iface);
-    LONG ref = InterlockedIncrement(&This->ref);
+    ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->(%d)\n", This, ref);
+    TRACE("%p, refcount %lu.\n", iface, ref);
 
     return ref;
 }
@@ -120,7 +112,7 @@ static ULONG WINAPI XMLView_Binding_Release(IBinding *iface)
     Binding *This = impl_from_IBinding(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(%d)\n", This, ref);
+    TRACE("%p, refcount %lu.\n", iface, ref);
 
     if(!ref) {
         IBinding_Release(This->binding);
@@ -155,7 +147,7 @@ static HRESULT WINAPI XMLView_Binding_SetPriority(
         IBinding *iface, LONG nPriority)
 {
     Binding *This = impl_from_IBinding(iface);
-    TRACE("(%p)->(%d)\n", This, nPriority);
+    TRACE("%p, %ld.\n", iface, nPriority);
 
     return IBinding_SetPriority(This->binding, nPriority);
 }
@@ -237,9 +229,9 @@ static ULONG WINAPI XMLView_BindStatusCallback_AddRef(
         IBindStatusCallback *iface)
 {
     BindStatusCallback *This = impl_from_IBindStatusCallback(iface);
-    LONG ref = InterlockedIncrement(&This->ref);
+    ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->(%d)\n", This, ref);
+    TRACE("%p, refcount %lu.\n", iface, ref);
 
     return ref;
 }
@@ -250,7 +242,7 @@ static ULONG WINAPI XMLView_BindStatusCallback_Release(
     BindStatusCallback *This = impl_from_IBindStatusCallback(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(%d)\n", This, ref);
+    TRACE("%p, refcount %lu.\n", iface, ref);
 
     if(!ref) {
         if(This->stream)
@@ -269,7 +261,7 @@ static HRESULT WINAPI XMLView_BindStatusCallback_OnStartBinding(
     IBinding *binding;
     HRESULT hres;
 
-    TRACE("(%p)->(%x %p)\n", This, dwReserved, pib);
+    TRACE("%p, %lx, %p.\n", iface, dwReserved, pib);
 
     hres = XMLView_Binding_Create(pib, &binding);
     if(FAILED(hres)) {
@@ -298,8 +290,7 @@ static HRESULT WINAPI XMLView_BindStatusCallback_GetPriority(
 static HRESULT WINAPI XMLView_BindStatusCallback_OnLowResource(
         IBindStatusCallback *iface, DWORD reserved)
 {
-    BindStatusCallback *This = impl_from_IBindStatusCallback(iface);
-    FIXME("(%p)->(%x)\n", This, reserved);
+    FIXME("%p, %lx.\n", iface, reserved);
     return E_NOTIMPL;
 }
 
@@ -308,7 +299,7 @@ static HRESULT WINAPI XMLView_BindStatusCallback_OnProgress(
         ULONG ulStatusCode, LPCWSTR szStatusText)
 {
     BindStatusCallback *This = impl_from_IBindStatusCallback(iface);
-    TRACE("(%p)->(%d %d %x %s)\n", This, ulProgress, ulProgressMax,
+    TRACE("%p, %lu, %lu, %lu, %s.\n", iface, ulProgress, ulProgressMax,
             ulStatusCode, debugstr_w(szStatusText));
 
     switch(ulStatusCode) {
@@ -318,7 +309,7 @@ static HRESULT WINAPI XMLView_BindStatusCallback_OnProgress(
     case BINDSTATUS_MIMETYPEAVAILABLE:
         return S_OK;
     default:
-        FIXME("ulStatusCode: %d\n", ulStatusCode);
+        FIXME("ulStatusCode: %lu\n", ulStatusCode);
         return E_NOTIMPL;
     }
 }
@@ -327,7 +318,7 @@ static HRESULT WINAPI XMLView_BindStatusCallback_OnStopBinding(
         IBindStatusCallback *iface, HRESULT hresult, LPCWSTR szError)
 {
     BindStatusCallback *This = impl_from_IBindStatusCallback(iface);
-    TRACE("(%p)->(%x %s)\n", This, hresult, debugstr_w(szError));
+    TRACE("%p, %#lx, %s.\n", iface, hresult, debugstr_w(szError));
     return IBindStatusCallback_OnStopBinding(This->bsc, hresult, szError);
 }
 
@@ -399,7 +390,7 @@ static inline HRESULT handle_xml_load(BindStatusCallback *This)
     if(FAILED(hres))
         return display_error_page(This);
 
-    hres = DOMDocument_create(MSXML_DEFAULT, (void**)&xml);
+    hres = dom_document_create(MSXML_DEFAULT, (void **)&xml);
     if(FAILED(hres))
         return display_error_page(This);
 
@@ -433,12 +424,12 @@ static inline HRESULT handle_xml_load(BindStatusCallback *This)
     }
 
     /* TODO: fix parsing processing instruction value */
-    if((p = strstrW(V_BSTR(&var), hrefW))) {
+    if((p = wcsstr(V_BSTR(&var), hrefW))) {
         p += ARRAY_SIZE(hrefW) - 1;
         if(*p!='\'' && *p!='\"') p = NULL;
         else {
             href = p+1;
-            p = strchrW(href, *p);
+            p = wcschr(href, *p);
         }
     }
     if(p) {
@@ -475,7 +466,7 @@ static inline HRESULT handle_xml_load(BindStatusCallback *This)
         return display_error_page(This);
     }
 
-    hres = DOMDocument_create(MSXML_DEFAULT, (void**)&xsl);
+    hres = dom_document_create(MSXML_DEFAULT, (void **)&xsl);
     if(FAILED(hres)) {
         VariantClear(&var);
         IXMLDOMDocument3_Release(xml);
@@ -521,7 +512,7 @@ static HRESULT WINAPI XMLView_BindStatusCallback_OnDataAvailable(
     DWORD size;
     HRESULT hres;
 
-    TRACE("(%p)->(%x %d %p %p)\n", This, grfBSCF, dwSize, pformatetc, pstgmed);
+    TRACE("%p, %lx, %ld, %p, %p.\n", iface, grfBSCF, dwSize, pformatetc, pstgmed);
 
     if(!This->stream)
         return E_FAIL;
@@ -612,7 +603,7 @@ static ULONG WINAPI XMLView_Moniker_AddRef(IMoniker *iface)
     Moniker *This = impl_from_IMoniker(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->(%d)\n", This, ref);
+    TRACE("%p, refcount %lu.\n", iface, ref);
 
     return ref;
 }
@@ -622,7 +613,7 @@ static ULONG WINAPI XMLView_Moniker_Release(IMoniker *iface)
     Moniker *This = impl_from_IMoniker(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(%d)\n", This, ref);
+    TRACE("%p, refcount %lu.\n", iface, ref);
 
     if(!ref) {
         IMoniker_Release(This->mon);
@@ -699,8 +690,7 @@ static HRESULT WINAPI XMLView_Moniker_BindToStorage(IMoniker *iface, IBindCtx *p
 static HRESULT WINAPI XMLView_Moniker_Reduce(IMoniker *iface, IBindCtx *pbc,
         DWORD dwReduceHowFar, IMoniker **ppmkToLeft, IMoniker **ppmkReduced)
 {
-    Moniker *This = impl_from_IMoniker(iface);
-    FIXME("(%p)->(%p %d %p %p)\n", This, pbc, dwReduceHowFar, ppmkToLeft, ppmkReduced);
+    FIXME("%p, %p, %ld, %p, %p.\n", iface, pbc, dwReduceHowFar, ppmkToLeft, ppmkReduced);
     return E_NOTIMPL;
 }
 
@@ -878,9 +868,9 @@ static HRESULT WINAPI XMLView_PersistMoniker_QueryInterface(
 static ULONG WINAPI XMLView_PersistMoniker_AddRef(IPersistMoniker *iface)
 {
     XMLView *This = impl_from_IPersistMoniker(iface);
-    LONG ref = InterlockedIncrement(&This->ref);
+    ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->(%d)\n", This, ref);
+    TRACE("%p, refcount %lu.\n", iface, ref);
 
     return ref;
 }
@@ -890,7 +880,7 @@ static ULONG WINAPI XMLView_PersistMoniker_Release(IPersistMoniker *iface)
     XMLView *This = impl_from_IPersistMoniker(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(%d)\n", This, ref);
+    TRACE("%p, refcount %lu.\n", iface, ref);
 
     if(!ref) {
         if(This->mon)
@@ -934,7 +924,7 @@ static HRESULT WINAPI XMLView_PersistMoniker_Load(IPersistMoniker *iface,
     IUnknown *unk;
     HRESULT hres;
 
-    TRACE("(%p)->(%x %p %p %x)\n", This, fFullyAvailable, pimkName, pibc, grfMode);
+    TRACE("%p, %x, %p, %p, %lx.\n", iface, fFullyAvailable, pimkName, pibc, grfMode);
 
     hres = IBindCtx_GetObjectParam(pibc, (LPOLESTR)XSLParametersW, &unk);
     if(SUCCEEDED(hres)) {
@@ -1133,8 +1123,7 @@ static HRESULT WINAPI XMLView_PersistHistory_SaveHistory(
 static HRESULT WINAPI XMLView_PersistHistory_SetPositionCookie(
         IPersistHistory *iface, DWORD dwPositioncookie)
 {
-    XMLView *This = impl_from_IPersistHistory(iface);
-    FIXME("(%p)->(%d)\n", This, dwPositioncookie);
+    FIXME("%p, %ld.\n", iface, dwPositioncookie);
     return E_NOTIMPL;
 }
 
@@ -1184,8 +1173,7 @@ static ULONG WINAPI XMLView_OleCommandTarget_Release(IOleCommandTarget *iface)
 static HRESULT WINAPI XMLView_OleCommandTarget_QueryStatus(IOleCommandTarget *iface,
         const GUID *pguidCmdGroup, ULONG cCmds, OLECMD prgCmds[], OLECMDTEXT *pCmdText)
 {
-    XMLView *This = impl_from_IOleCommandTarget(iface);
-    FIXME("(%p)->(%p %x %p %p)\n", This, pguidCmdGroup, cCmds, prgCmds, pCmdText);
+    FIXME("%p, %p, %lu, %p, %p.\n", iface, pguidCmdGroup, cCmds, prgCmds, pCmdText);
     return E_NOTIMPL;
 }
 
@@ -1193,8 +1181,7 @@ static HRESULT WINAPI XMLView_OleCommandTarget_Exec(IOleCommandTarget *iface,
         const GUID *pguidCmdGroup, DWORD nCmdID, DWORD nCmdexecopt,
         VARIANT *pvaIn, VARIANT *pvaOut)
 {
-    XMLView *This = impl_from_IOleCommandTarget(iface);
-    FIXME("(%p)->(%p %d %x %p %p)\n", This, pguidCmdGroup,
+    FIXME("%p, %p, %ld, %lx, %p, %p.\n", iface, pguidCmdGroup,
             nCmdID, nCmdexecopt, pvaIn, pvaOut);
     return E_NOTIMPL;
 }
@@ -1257,40 +1244,35 @@ static HRESULT WINAPI XMLView_OleObject_SetHostNames(IOleObject *iface,
 
 static HRESULT WINAPI XMLView_OleObject_Close(IOleObject *iface, DWORD dwSaveOption)
 {
-    XMLView *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%x)\n", This, dwSaveOption);
+    FIXME("%p, %lx.\n", iface, dwSaveOption);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI XMLView_OleObject_SetMoniker(IOleObject *iface,
         DWORD dwWhichMoniker, IMoniker *pmk)
 {
-    XMLView *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%x %p)\n", This, dwWhichMoniker, pmk);
+    FIXME("%p, %lx, %p.\n", iface, dwWhichMoniker, pmk);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI XMLView_OleObject_GetMoniker(IOleObject *iface,
         DWORD dwAssign, DWORD dwWhichMoniker, IMoniker **ppmk)
 {
-    XMLView *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%x %x %p)\n", This, dwAssign, dwWhichMoniker, ppmk);
+    FIXME("%p, %lx, %lx, %p.\n", iface, dwAssign, dwWhichMoniker, ppmk);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI XMLView_OleObject_InitFromData(IOleObject *iface,
         IDataObject *pDataObject, BOOL fCreation, DWORD dwReserved)
 {
-    XMLView *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%p %x %x)\n", This, pDataObject, fCreation, dwReserved);
+    FIXME("%p, %p, %x, %lx.\n", iface, pDataObject, fCreation, dwReserved);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI XMLView_OleObject_GetClipboardData(IOleObject *iface,
         DWORD dwReserved, IDataObject **ppDataObject)
 {
-    XMLView *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%x %p)\n", This, dwReserved, ppDataObject);
+    FIXME("%p, %lx, %p.\n", iface, dwReserved, ppDataObject);
     return E_NOTIMPL;
 }
 
@@ -1298,8 +1280,7 @@ static HRESULT WINAPI XMLView_OleObject_DoVerb(IOleObject *iface,
         LONG iVerb, LPMSG lpmsg, IOleClientSite *pActiveSite,
         LONG lindex, HWND hwndParent, LPCRECT lprcPosRect)
 {
-    XMLView *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%d %p %p %d %p %p)\n", This, iVerb, lpmsg,
+    FIXME("%p, %ld, %p, %p, %ld, %p, %p.\n", iface, iVerb, lpmsg,
             pActiveSite, lindex, hwndParent, lprcPosRect);
     return E_NOTIMPL;
 }
@@ -1336,24 +1317,21 @@ static HRESULT WINAPI XMLView_OleObject_GetUserClassID(IOleObject *iface, CLSID 
 static HRESULT WINAPI XMLView_OleObject_GetUserType(IOleObject *iface,
         DWORD dwFormOfType, LPOLESTR *pszUserType)
 {
-    XMLView *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%x %p)\n", This, dwFormOfType, pszUserType);
+    FIXME("%p, %lx, %p.\n", iface, dwFormOfType, pszUserType);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI XMLView_OleObject_SetExtent(IOleObject *iface,
         DWORD dwDrawAspect, SIZEL *psizel)
 {
-    XMLView *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%x %p)\n", This, dwDrawAspect, psizel);
+    FIXME("%p, %lx, %p.\n", iface, dwDrawAspect, psizel);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI XMLView_OleObject_GetExtent(IOleObject *iface,
         DWORD dwDrawAspect, SIZEL *psizel)
 {
-    XMLView *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%x %p)\n", This, dwDrawAspect, psizel);
+    FIXME("%p, %lx, %p.\n", iface, dwDrawAspect, psizel);
     return E_NOTIMPL;
 }
 
@@ -1368,8 +1346,7 @@ static HRESULT WINAPI XMLView_OleObject_Advise(IOleObject *iface,
 static HRESULT WINAPI XMLView_OleObject_Unadvise(
         IOleObject *iface, DWORD dwConnection)
 {
-    XMLView *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%d)\n", This, dwConnection);
+    FIXME("%p, %ld.\n", iface, dwConnection);
     return E_NOTIMPL;
 }
 
@@ -1384,8 +1361,7 @@ static HRESULT WINAPI XMLView_OleObject_EnumAdvise(
 static HRESULT WINAPI XMLView_OleObject_GetMiscStatus(
         IOleObject *iface, DWORD dwAspect, DWORD *pdwStatus)
 {
-    XMLView *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%d %p)\n", This, dwAspect, pdwStatus);
+    FIXME("%p, %ld, %p.\n", iface, dwAspect, pdwStatus);
     return E_NOTIMPL;
 }
 
@@ -1451,14 +1427,3 @@ HRESULT XMLView_create(void **ppObj)
     *ppObj = &This->IPersistMoniker_iface;
     return S_OK;
 }
-
-#else
-
-HRESULT XMLView_create(void **ppObj)
-{
-    MESSAGE("This program tried to use a XMLView object, but\n"
-            "libxml2 support was not present at compile time.\n");
-    return E_NOTIMPL;
-}
-
-#endif /* HAVE_LIBXML2 */

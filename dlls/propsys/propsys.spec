@@ -49,7 +49,7 @@
 @ stub InitVariantFromBooleanArray
 @ stdcall InitVariantFromBuffer(ptr long ptr)
 @ stub InitVariantFromDoubleArray
-@ stub InitVariantFromFileTime
+@ stdcall InitVariantFromFileTime(ptr ptr)
 @ stub InitVariantFromFileTimeArray
 @ stdcall InitVariantFromGUIDAsString(ptr ptr)
 @ stub InitVariantFromInt16Array
@@ -194,7 +194,7 @@
 @ stub VariantToStringAlloc
 @ stub VariantToStringArray
 @ stub VariantToStringArrayAlloc
-@ stub VariantToStringWithDefault
+@ stdcall VariantToStringWithDefault(ptr wstr)
 @ stub VariantToUInt16
 @ stub VariantToUInt16Array
 @ stub VariantToUInt16ArrayAlloc

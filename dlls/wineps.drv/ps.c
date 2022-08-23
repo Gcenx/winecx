@@ -25,8 +25,6 @@
 #include <stdarg.h>
 #include <locale.h>
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -170,7 +168,7 @@ static const char psarc[] = /* x, y, w, h, ang1, ang2 */
 "tmpmtrx setmatrix\n";
 
 static const char pscurveto[] = /* x1, y1, x2, y2, x3, y3 */
-"%d %d %d %d %d %d curveto\n";
+"%ld %ld %ld %ld %ld %ld curveto\n";
 
 static const char psgsave[] =
 "gsave\n";
@@ -209,7 +207,7 @@ static const char psrotate[] = /* ang */
 "%.1f rotate\n";
 
 static const char psarrayput[] =
-"%s %d %d put\n";
+"%s %d %ld put\n";
 
 static const char psarraydef[] =
 "/%s %d array def\n";
@@ -381,10 +379,10 @@ static void write_cups_job_ticket( PHYSDEV dev, const struct ticket_info *info )
         }
     }
 
-    if (physDev->Devmode->dmPublic.u1.s1.dmCopies > 1)
+    if (physDev->Devmode->dmPublic.dmCopies > 1)
     {
         len = snprintf( buf, sizeof(buf), "%%cupsJobTicket: copies=%d\n",
-                        physDev->Devmode->dmPublic.u1.s1.dmCopies );
+                        physDev->Devmode->dmPublic.dmCopies );
         if (len > 0 && len < sizeof(buf))
             write_spool( dev, buf, len );
 
@@ -398,7 +396,7 @@ static void write_cups_job_ticket( PHYSDEV dev, const struct ticket_info *info )
     }
 
     if (!(physDev->Devmode->dmPublic.dmFields & DM_DEFAULTSOURCE) ||
-        physDev->Devmode->dmPublic.u1.s1.dmDefaultSource == DMBIN_AUTO)
+        physDev->Devmode->dmPublic.dmDefaultSource == DMBIN_AUTO)
         write_spool( dev, cups_ap_d_inputslot, sizeof(cups_ap_d_inputslot) - 1 );
 }
 
@@ -444,7 +442,7 @@ INT PSDRV_WriteHeader( PHYSDEV dev, LPCWSTR title )
     ury = physDev->ImageableArea.top * 72.0 / physDev->logPixelsY;
     /* FIXME should do something better with BBox */
 
-    dmOrientation = (physDev->Devmode->dmPublic.u1.s1.dmOrientation == DMORIENT_LANDSCAPE ? "Landscape" : "Portrait");
+    dmOrientation = (physDev->Devmode->dmPublic.dmOrientation == DMORIENT_LANDSCAPE ? "Landscape" : "Portrait");
     sprintf(buf, psheader, escaped_title, llx, lly, urx, ury, dmOrientation);
 
     HeapFree(GetProcessHeap(), 0, escaped_title);
@@ -526,7 +524,7 @@ INT PSDRV_WriteNewPage( PHYSDEV dev )
         return 0;
     }
 
-    if(physDev->Devmode->dmPublic.u1.s1.dmOrientation == DMORIENT_LANDSCAPE) {
+    if(physDev->Devmode->dmPublic.dmOrientation == DMORIENT_LANDSCAPE) {
         if(physDev->pi->ppd->LandscapeOrientation == -90) {
 	    xtrans = physDev->ImageableArea.right;
 	    ytrans = physDev->ImageableArea.top;
@@ -682,7 +680,7 @@ BOOL PSDRV_WriteSetPen(PHYSDEV dev)
     if (physDev->pen.dash_len)
     {
         for (i = pos = 0; i < physDev->pen.dash_len; i++)
-            pos += sprintf( buf + pos, " %u", physDev->pen.dash[i] );
+            pos += sprintf( buf + pos, " %lu", physDev->pen.dash[i] );
         buf[0] = '[';
         sprintf(buf + pos, "] %u setdash\n", 0);
     }
@@ -965,7 +963,7 @@ BOOL PSDRV_WriteDIBPatternDict(PHYSDEV dev, const BITMAPINFO *bmi, BYTE *bits, U
     INT w, h, x, y, w_mult, h_mult, abs_height = abs( bmi->bmiHeader.biHeight );
     COLORREF map[2];
 
-    TRACE( "size %dx%dx%d\n",
+    TRACE( "size %ldx%ldx%d\n",
            bmi->bmiHeader.biWidth, bmi->bmiHeader.biHeight, bmi->bmiHeader.biBitCount);
 
     if(bmi->bmiHeader.biBitCount != 1) {

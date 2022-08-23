@@ -43,13 +43,10 @@ DECLSPEC_HIDDEN HMODULE hcpl;
  */
 BOOL WINAPI DllMain(HINSTANCE hdll, DWORD reason, LPVOID reserved)
 {
-    TRACE("(%p, %d, %p)\n", hdll, reason, reserved);
+    TRACE("(%p, %ld, %p)\n", hdll, reason, reserved);
 
     switch (reason)
     {
-        case DLL_WINE_PREATTACH:
-            return FALSE;  /* prefer native version */
-
         case DLL_PROCESS_ATTACH:
             DisableThreadLibraryCalls(hdll);
             hcpl = hdll;
@@ -63,8 +60,18 @@ BOOL WINAPI DllMain(HINSTANCE hdll, DWORD reason, LPVOID reserved)
  *   First time it checks if space for the joysticks was already reserved
  *   and if not, just counts how many there are.
  */
+static BOOL CALLBACK ff_effects_callback(const DIEFFECTINFOW *pdei, void *pvRef);
 static BOOL CALLBACK enum_callback(const DIDEVICEINSTANCEW *instance, void *context)
 {
+    DIPROPGUIDANDPATH prop_guid_path =
+    {
+        .diph =
+        {
+            .dwSize = sizeof(DIPROPGUIDANDPATH),
+            .dwHeaderSize = sizeof(DIPROPHEADER),
+            .dwHow = DIPH_DEVICE,
+        },
+    };
     struct JoystickData *data = context;
     struct Joystick *joystick;
     DIPROPRANGE proprange;
@@ -92,6 +99,9 @@ static BOOL CALLBACK enum_callback(const DIDEVICEINSTANCEW *instance, void *cont
     joystick->forcefeedback = caps.dwFlags & DIDC_FORCEFEEDBACK;
     joystick->num_effects = 0;
 
+    IDirectInputDevice8_GetProperty(joystick->device, DIPROP_GUIDANDPATH, &prop_guid_path.diph);
+    joystick->is_xinput = wcsstr(prop_guid_path.wszPath, L"&ig_") != NULL;
+
     if (joystick->forcefeedback) data->num_ff++;
 
     /* Set axis range to ease the GUI visualization */
@@ -104,6 +114,18 @@ static BOOL CALLBACK enum_callback(const DIDEVICEINSTANCEW *instance, void *cont
 
     IDirectInputDevice_SetProperty(joystick->device, DIPROP_RANGE, &proprange.diph);
 
+    if (!joystick->forcefeedback) return DIENUM_CONTINUE;
+
+    /* Count device effects and then store them */
+    joystick->num_effects = 0;
+    joystick->effects = NULL;
+    IDirectInputDevice8_EnumEffects(joystick->device, ff_effects_callback, (void *)joystick, 0);
+    joystick->effects = malloc(sizeof(struct Effect) * joystick->num_effects);
+
+    joystick->cur_effect = 0;
+    IDirectInputDevice8_EnumEffects(joystick->device, ff_effects_callback, (void*)joystick, 0);
+    joystick->num_effects = joystick->cur_effect;
+
     return DIENUM_CONTINUE;
 }
 
@@ -115,7 +137,7 @@ static void initialize_joysticks(struct JoystickData *data)
     data->num_joysticks = 0;
     data->cur_joystick = 0;
     IDirectInput8_EnumDevices(data->di, DI8DEVCLASS_GAMECTRL, enum_callback, data, DIEDFL_ATTACHEDONLY);
-    data->joysticks = HeapAlloc(GetProcessHeap(), 0, sizeof(struct Joystick) * data->num_joysticks);
+    data->joysticks = malloc(sizeof(struct Joystick) * data->num_joysticks);
 
     /* Get all the joysticks */
     IDirectInput8_EnumDevices(data->di, DI8DEVCLASS_GAMECTRL, enum_callback, data, DIEDFL_ATTACHEDONLY);
@@ -137,28 +159,15 @@ static void destroy_joysticks(struct JoystickData *data)
                 if (data->joysticks[i].effects[j].effect)
                     IDirectInputEffect_Release(data->joysticks[i].effects[j].effect);
 
-            HeapFree(GetProcessHeap(), 0, data->joysticks[i].effects);
+            free(data->joysticks[i].effects);
         }
 
         IDirectInputDevice8_Unacquire(data->joysticks[i].device);
         IDirectInputDevice8_Release(data->joysticks[i].device);
     }
 
-    HeapFree(GetProcessHeap(), 0, data->joysticks);
-}
-
-static void initialize_joysticks_list(HWND hwnd, struct JoystickData *data)
-{
-    int i;
-
-    SendDlgItemMessageW(hwnd, IDC_JOYSTICKLIST, LB_RESETCONTENT, 0, 0);
-
-    /* Add enumerated joysticks */
-    for (i = 0; i < data->num_joysticks; i++)
-    {
-        struct Joystick *joy = &data->joysticks[i];
-        SendDlgItemMessageW(hwnd, IDC_JOYSTICKLIST, LB_ADDSTRING, 0, (LPARAM) joy->instance.tszInstanceName);
-    }
+    free(data->joysticks);
+    data->joysticks = NULL;
 }
 
 /******************************************************************************
@@ -215,7 +224,7 @@ static void enable_joystick(WCHAR *joy_name, BOOL enable)
     get_app_key(&hkey, &appkey);
 
     if (!enable)
-        set_config_key(hkey, appkey, joy_name, L"disabled", lstrlenW(L"disabled"));
+        set_config_key(hkey, appkey, joy_name, L"disabled", wcslen(L"disabled"));
     else
         set_config_key(hkey, appkey, joy_name, NULL, 0);
 
@@ -223,14 +232,26 @@ static void enable_joystick(WCHAR *joy_name, BOOL enable)
     if (appkey) RegCloseKey(appkey);
 }
 
-static void initialize_disabled_joysticks_list(HWND hwnd)
+static void refresh_joystick_list(HWND hwnd, struct JoystickData *data)
 {
+    struct Joystick *joy, *joy_end;
     HKEY hkey, appkey;
     DWORD values = 0;
     LSTATUS status;
     DWORD i;
 
+    destroy_joysticks(data);
+    initialize_joysticks(data);
+
+    SendDlgItemMessageW(hwnd, IDC_JOYSTICKLIST, LB_RESETCONTENT, 0, 0);
     SendDlgItemMessageW(hwnd, IDC_DISABLEDLIST, LB_RESETCONTENT, 0, 0);
+    SendDlgItemMessageW(hwnd, IDC_XINPUTLIST, LB_RESETCONTENT, 0, 0);
+
+    for (joy = data->joysticks, joy_end = joy + data->num_joysticks; joy != joy_end; ++joy)
+    {
+        if (joy->is_xinput) SendDlgItemMessageW(hwnd, IDC_XINPUTLIST, LB_ADDSTRING, 0, (LPARAM) joy->instance.tszInstanceName);
+        else SendDlgItemMessageW(hwnd, IDC_JOYSTICKLIST, LB_ADDSTRING, 0, (LPARAM) joy->instance.tszInstanceName);
+    }
 
     /* Search for disabled joysticks */
     get_app_key(&hkey, &appkey);
@@ -243,9 +264,24 @@ static void initialize_disabled_joysticks_list(HWND hwnd)
 
         status = RegEnumValueW(hkey, i, buf_name, &name_len, NULL, NULL, (BYTE*) buf_data, &data_len);
 
-        if (status == ERROR_SUCCESS && !lstrcmpW(L"disabled", buf_data))
+        if (status == ERROR_SUCCESS && !wcscmp(L"disabled", buf_data))
             SendDlgItemMessageW(hwnd, IDC_DISABLEDLIST, LB_ADDSTRING, 0, (LPARAM) buf_name);
     }
+
+    if (hkey) RegCloseKey(hkey);
+    if (appkey) RegCloseKey(appkey);
+}
+
+static void override_joystick(WCHAR *joy_name, BOOL override)
+{
+    HKEY hkey, appkey;
+
+    get_app_key(&hkey, &appkey);
+
+    if (override)
+        set_config_key(hkey, appkey, joy_name, L"override", wcslen(L"override"));
+    else
+        set_config_key(hkey, appkey, joy_name, NULL, 0);
 
     if (hkey) RegCloseKey(hkey);
     if (appkey) RegCloseKey(appkey);
@@ -257,19 +293,23 @@ static void initialize_disabled_joysticks_list(HWND hwnd)
  */
 static INT_PTR CALLBACK list_dlgproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
+    WCHAR instance_name[MAX_PATH] = {0};
     static struct JoystickData *data;
-    TRACE("(%p, 0x%08x/%d, 0x%lx)\n", hwnd, msg, msg, lparam);
+    int sel;
+
+    TRACE("(%p, 0x%08x/%d, 0x%Ix)\n", hwnd, msg, msg, lparam);
     switch (msg)
     {
         case WM_INITDIALOG:
         {
             data = (struct JoystickData*) ((PROPSHEETPAGEW*)lparam)->lParam;
 
-            initialize_joysticks_list(hwnd, data);
-            initialize_disabled_joysticks_list(hwnd);
+            refresh_joystick_list(hwnd, data);
 
             EnableWindow(GetDlgItem(hwnd, IDC_BUTTONENABLE), FALSE);
             EnableWindow(GetDlgItem(hwnd, IDC_BUTTONDISABLE), FALSE);
+            EnableWindow(GetDlgItem(hwnd, IDC_BUTTONRESET), FALSE);
+            EnableWindow(GetDlgItem(hwnd, IDC_BUTTONOVERRIDE), FALSE);
 
             /* Store the hwnd to be used with MapDialogRect for unit conversions */
             data->graphics.hwnd = hwnd;
@@ -283,38 +323,79 @@ static INT_PTR CALLBACK list_dlgproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM 
             {
                 case IDC_BUTTONDISABLE:
                 {
-                    int sel = SendDlgItemMessageW(hwnd, IDC_JOYSTICKLIST, LB_GETCURSEL, 0, 0);
+                    if ((sel = SendDlgItemMessageW(hwnd, IDC_JOYSTICKLIST, LB_GETCURSEL, 0, 0)) >= 0)
+                        SendDlgItemMessageW(hwnd, IDC_JOYSTICKLIST, LB_GETTEXT, sel, (LPARAM)instance_name);
+                    if ((sel = SendDlgItemMessageW(hwnd, IDC_XINPUTLIST, LB_GETCURSEL, 0, 0)) >= 0)
+                        SendDlgItemMessageW(hwnd, IDC_XINPUTLIST, LB_GETTEXT, sel, (LPARAM)instance_name);
 
-                    if (sel >= 0)
+                    if (instance_name[0])
                     {
-                        enable_joystick(data->joysticks[sel].instance.tszInstanceName, FALSE);
-                        initialize_disabled_joysticks_list(hwnd);
+                        enable_joystick(instance_name, FALSE);
+                        refresh_joystick_list(hwnd, data);
                     }
                 }
                 break;
 
                 case IDC_BUTTONENABLE:
                 {
-                    int sel = SendDlgItemMessageW(hwnd, IDC_DISABLEDLIST, LB_GETCURSEL, 0, 0);
+                    if ((sel = SendDlgItemMessageW(hwnd, IDC_DISABLEDLIST, LB_GETCURSEL, 0, 0)) >= 0)
+                        SendDlgItemMessageW(hwnd, IDC_DISABLEDLIST, LB_GETTEXT, sel, (LPARAM)instance_name);
 
-                    if (sel >= 0)
+                    if (instance_name[0])
                     {
-                        WCHAR text[MAX_PATH];
-                        SendDlgItemMessageW(hwnd, IDC_DISABLEDLIST, LB_GETTEXT, sel, (LPARAM) text);
-                        enable_joystick(text, TRUE);
-                        initialize_disabled_joysticks_list(hwnd);
+                        enable_joystick(instance_name, TRUE);
+                        refresh_joystick_list(hwnd, data);
+                    }
+                }
+                break;
+
+                case IDC_BUTTONRESET:
+                {
+                    if ((sel = SendDlgItemMessageW(hwnd, IDC_JOYSTICKLIST, LB_GETCURSEL, 0, 0)) >= 0)
+                    {
+                        SendDlgItemMessageW(hwnd, IDC_JOYSTICKLIST, LB_GETTEXT, sel, (LPARAM)instance_name);
+                        override_joystick(instance_name, FALSE);
+                        refresh_joystick_list(hwnd, data);
+                    }
+                }
+                break;
+
+                case IDC_BUTTONOVERRIDE:
+                {
+                    if ((sel = SendDlgItemMessageW(hwnd, IDC_XINPUTLIST, LB_GETCURSEL, 0, 0)) >= 0)
+                    {
+                        SendDlgItemMessageW(hwnd, IDC_XINPUTLIST, LB_GETTEXT, sel, (LPARAM)instance_name);
+                        override_joystick(instance_name, TRUE);
+                        refresh_joystick_list(hwnd, data);
                     }
                 }
                 break;
 
                 case IDC_JOYSTICKLIST:
+                    SendDlgItemMessageW(hwnd, IDC_DISABLEDLIST, LB_SETCURSEL, -1, 0);
+                    SendDlgItemMessageW(hwnd, IDC_XINPUTLIST, LB_SETCURSEL, -1, 0);
                     EnableWindow(GetDlgItem(hwnd, IDC_BUTTONENABLE), FALSE);
                     EnableWindow(GetDlgItem(hwnd, IDC_BUTTONDISABLE), TRUE);
+                    EnableWindow(GetDlgItem(hwnd, IDC_BUTTONOVERRIDE), FALSE);
+                    EnableWindow(GetDlgItem(hwnd, IDC_BUTTONRESET), TRUE);
+                break;
+
+                case IDC_XINPUTLIST:
+                    SendDlgItemMessageW(hwnd, IDC_JOYSTICKLIST, LB_SETCURSEL, -1, 0);
+                    SendDlgItemMessageW(hwnd, IDC_DISABLEDLIST, LB_SETCURSEL, -1, 0);
+                    EnableWindow(GetDlgItem(hwnd, IDC_BUTTONENABLE), FALSE);
+                    EnableWindow(GetDlgItem(hwnd, IDC_BUTTONDISABLE), TRUE);
+                    EnableWindow(GetDlgItem(hwnd, IDC_BUTTONOVERRIDE), TRUE);
+                    EnableWindow(GetDlgItem(hwnd, IDC_BUTTONRESET), FALSE);
                 break;
 
                 case IDC_DISABLEDLIST:
+                    SendDlgItemMessageW(hwnd, IDC_JOYSTICKLIST, LB_SETCURSEL, -1, 0);
+                    SendDlgItemMessageW(hwnd, IDC_XINPUTLIST, LB_SETCURSEL, -1, 0);
                     EnableWindow(GetDlgItem(hwnd, IDC_BUTTONENABLE), TRUE);
                     EnableWindow(GetDlgItem(hwnd, IDC_BUTTONDISABLE), FALSE);
+                    EnableWindow(GetDlgItem(hwnd, IDC_BUTTONOVERRIDE), FALSE);
+                    EnableWindow(GetDlgItem(hwnd, IDC_BUTTONRESET), FALSE);
                 break;
             }
 
@@ -333,16 +414,16 @@ static INT_PTR CALLBACK list_dlgproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM 
  * Joystick testing functions
  *
  */
-static void dump_joy_state(DIJOYSTATE* st, int num_buttons)
+static void dump_joy_state(DIJOYSTATE* st)
 {
     int i;
-    TRACE("Ax (% 5d,% 5d,% 5d)\n", st->lX,st->lY, st->lZ);
-    TRACE("RAx (% 5d,% 5d,% 5d)\n", st->lRx, st->lRy, st->lRz);
-    TRACE("Slider (% 5d,% 5d)\n", st->rglSlider[0], st->rglSlider[1]);
-    TRACE("Pov (% 5d,% 5d,% 5d,% 5d)\n", st->rgdwPOV[0], st->rgdwPOV[1], st->rgdwPOV[2], st->rgdwPOV[3]);
+    TRACE("Ax (% 5ld,% 5ld,% 5ld)\n", st->lX,st->lY, st->lZ);
+    TRACE("RAx (% 5ld,% 5ld,% 5ld)\n", st->lRx, st->lRy, st->lRz);
+    TRACE("Slider (% 5ld,% 5ld)\n", st->rglSlider[0], st->rglSlider[1]);
+    TRACE("Pov (% 5ld,% 5ld,% 5ld,% 5ld)\n", st->rgdwPOV[0], st->rgdwPOV[1], st->rgdwPOV[2], st->rgdwPOV[3]);
 
     TRACE("Buttons ");
-    for(i=0; i < num_buttons; i++)
+    for(i=0; i < TEST_MAX_BUTTONS; i++)
         TRACE("  %c",st->rgbButtons[i] ? 'x' : 'o');
     TRACE("\n");
 }
@@ -393,10 +474,10 @@ static DWORD WINAPI input_thread(void *param)
 
         poll_input(&data->joysticks[data->chosen_joystick], &state);
 
-        dump_joy_state(&state, data->joysticks[data->chosen_joystick].num_buttons);
+        dump_joy_state(&state);
 
         /* Indicate pressed buttons */
-        for (i = 0; i < data->joysticks[data->chosen_joystick].num_buttons; i++)
+        for (i = 0; i < TEST_MAX_BUTTONS; i++)
             SendMessageW(data->graphics.buttons[i], BM_SETSTATE, !!state.rgbButtons[i], 0);
 
         /* Indicate axis positions, axes showing are hardcoded for now */
@@ -523,27 +604,27 @@ static void draw_joystick_axes(HWND hwnd, struct JoystickData* data)
  * test_dlgproc [internal]
  *
  */
+static void refresh_test_joystick_list(HWND hwnd, struct JoystickData *data)
+{
+    struct Joystick *joy, *joy_end;
+    SendDlgItemMessageW(hwnd, IDC_TESTSELECTCOMBO, CB_RESETCONTENT, 0, 0);
+    for (joy = data->joysticks, joy_end = joy + data->num_joysticks; joy != joy_end; ++joy)
+        SendDlgItemMessageW(hwnd, IDC_TESTSELECTCOMBO, CB_ADDSTRING, 0, (LPARAM)joy->instance.tszInstanceName);
+}
+
 static INT_PTR CALLBACK test_dlgproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     static HANDLE thread;
     static struct JoystickData *data;
-    TRACE("(%p, 0x%08x/%d, 0x%lx)\n", hwnd, msg, msg, lparam);
+    TRACE("(%p, 0x%08x/%d, 0x%Ix)\n", hwnd, msg, msg, lparam);
 
     switch (msg)
     {
         case WM_INITDIALOG:
         {
-            int i;
-
             data = (struct JoystickData*) ((PROPSHEETPAGEW*)lparam)->lParam;
 
-            /* Add enumerated joysticks to the combobox */
-            for (i = 0; i < data->num_joysticks; i++)
-            {
-                struct Joystick *joy = &data->joysticks[i];
-                SendDlgItemMessageW(hwnd, IDC_TESTSELECTCOMBO, CB_ADDSTRING, 0, (LPARAM) joy->instance.tszInstanceName);
-            }
-
+            refresh_test_joystick_list(hwnd, data);
             draw_joystick_buttons(hwnd, data);
             draw_joystick_axes(hwnd, data);
 
@@ -565,6 +646,8 @@ static INT_PTR CALLBACK test_dlgproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM 
                 case PSN_SETACTIVE:
                 {
                     DWORD tid;
+
+                    refresh_test_joystick_list(hwnd, data);
 
                     /* Initialize input thread */
                     if (data->num_joysticks > 0)
@@ -630,12 +713,9 @@ static void initialize_effects_list(HWND hwnd, struct Joystick* joy)
 
 static void ff_handle_joychange(HWND hwnd, struct JoystickData *data)
 {
-    int sel;
-
     if (data->num_ff == 0) return;
 
-    sel = SendDlgItemMessageW(hwnd, IDC_FFSELECTCOMBO, CB_GETCURSEL, 0, 0);
-    data->chosen_joystick = SendDlgItemMessageW(hwnd, IDC_FFSELECTCOMBO, CB_GETITEMDATA, sel, 0);
+    data->chosen_joystick = SendDlgItemMessageW(hwnd, IDC_FFSELECTCOMBO, CB_GETCURSEL, 0, 0);
     initialize_effects_list(hwnd, &data->joysticks[data->chosen_joystick]);
 }
 
@@ -646,6 +726,9 @@ static void ff_handle_effectchange(HWND hwnd, struct Joystick *joy)
     if (sel < 0) return;
 
     joy->chosen_effect = sel;
+    IDirectInputDevice8_Unacquire(joy->device);
+    IDirectInputDevice8_SetCooperativeLevel(joy->device, GetAncestor(hwnd, GA_ROOT), DISCL_BACKGROUND|DISCL_EXCLUSIVE);
+    IDirectInputDevice8_Acquire(joy->device);
 }
 
 static DWORD WINAPI ff_input_thread(void *param)
@@ -683,7 +766,7 @@ static DWORD WINAPI ff_input_thread(void *param)
 
         SetWindowPos(data->graphics.ff_axis, 0, r.left, r.top, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
 
-        for (i=0; i < joy->num_buttons; i++)
+        for (i=0; i < TEST_MAX_BUTTONS; i++)
             if (state.rgbButtons[i])
             {
                 IDirectInputEffect_SetParameters(joy->effects[chosen_effect].effect, dieffect, flags);
@@ -706,7 +789,8 @@ static BOOL CALLBACK ff_effects_callback(const DIEFFECTINFOW *pdei, void *pvRef)
     HRESULT hr;
     DIEFFECT dieffect;
     DWORD axes[2] = {DIJOFS_X, DIJOFS_Y};
-    int direction[2] = {0, 0};
+    LONG direction[2] = {0, 0};
+    int num_axes = 2;
     struct Joystick *joystick = pvRef;
     DIRAMPFORCE rforce;
     DICONSTANTFORCE cforce;
@@ -726,10 +810,10 @@ static BOOL CALLBACK ff_effects_callback(const DIEFFECTINFOW *pdei, void *pvRef)
     ZeroMemory(&dieffect, sizeof(dieffect));
 
     dieffect.dwSize = sizeof(dieffect);
-    dieffect.dwFlags = DIEFF_CARTESIAN;
+    dieffect.dwFlags = DIEFF_CARTESIAN|DIEFF_OBJECTOFFSETS;
     dieffect.dwDuration = FF_PLAY_TIME;
+    dieffect.dwGain = DI_FFNOMINALMAX;
 
-    dieffect.cAxes = 2;
     dieffect.rgdwAxes = axes;
     dieffect.rglDirection = direction;
 
@@ -782,8 +866,19 @@ static BOOL CALLBACK ff_effects_callback(const DIEFFECTINFOW *pdei, void *pvRef)
         dieffect.dwFlags |= DIEP_TYPESPECIFICPARAMS;
     }
 
-    hr = IDirectInputDevice2_CreateEffect(
-        joystick->device, &pdei->guid, &dieffect, &joystick->effects[joystick->cur_effect].effect, NULL);
+    do
+    {
+        dieffect.cAxes = num_axes--;
+        hr = IDirectInputDevice2_CreateEffect(
+            joystick->device, &pdei->guid, &dieffect, &joystick->effects[joystick->cur_effect].effect, NULL);
+    }
+    while (FAILED(hr) && num_axes);
+
+    if (FAILED(hr))
+    {
+        FIXME("Failed to create effect with type %s, hr %#lx\n", debugstr_guid(&pdei->guid), hr);
+        return DIENUM_CONTINUE;
+    }
 
     joystick->effects[joystick->cur_effect].params = dieffect;
     joystick->effects[joystick->cur_effect].info = *pdei;
@@ -796,44 +891,27 @@ static BOOL CALLBACK ff_effects_callback(const DIEFFECTINFOW *pdei, void *pvRef)
  * ff_dlgproc [internal]
  *
  */
+static void refresh_ff_joystick_list(HWND hwnd, struct JoystickData *data)
+{
+    struct Joystick *joy, *joy_end;
+    SendDlgItemMessageW(hwnd, IDC_FFSELECTCOMBO, CB_RESETCONTENT, 0, 0);
+    for (joy = data->joysticks, joy_end = joy + data->num_joysticks; joy != joy_end; ++joy)
+        SendDlgItemMessageW(hwnd, IDC_FFSELECTCOMBO, CB_ADDSTRING, 0, (LPARAM)joy->instance.tszInstanceName);
+}
+
 static INT_PTR CALLBACK ff_dlgproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     static HANDLE thread;
     static struct JoystickData *data;
-    TRACE("(%p, 0x%08x/%d, 0x%lx)\n", hwnd, msg, msg, lparam);
+    TRACE("(%p, 0x%08x/%d, 0x%Ix)\n", hwnd, msg, msg, lparam);
 
     switch (msg)
     {
         case WM_INITDIALOG:
         {
-            int i, cur = 0;
-
             data = (struct JoystickData*) ((PROPSHEETPAGEW*)lparam)->lParam;
 
-            /* Add joysticks with FF support to the combobox and get the effects */
-            for (i = 0; i < data->num_joysticks; i++)
-            {
-                struct Joystick *joy = &data->joysticks[i];
-
-                if (joy->forcefeedback)
-                {
-                    SendDlgItemMessageW(hwnd, IDC_FFSELECTCOMBO, CB_ADDSTRING, 0, (LPARAM) joy->instance.tszInstanceName);
-                    SendDlgItemMessageW(hwnd, IDC_FFSELECTCOMBO, CB_SETITEMDATA, cur, i);
-
-                    cur++;
-
-                    /* Count device effects and then store them */
-                    joy->num_effects = 0;
-                    joy->effects = NULL;
-                    IDirectInputDevice8_EnumEffects(joy->device, ff_effects_callback, (void *) joy, 0);
-                    joy->effects = HeapAlloc(GetProcessHeap(), 0, sizeof(struct Effect) * joy->num_effects);
-
-                    joy->cur_effect = 0;
-                    IDirectInputDevice8_EnumEffects(joy->device, ff_effects_callback, (void*) joy, 0);
-                    joy->num_effects = joy->cur_effect;
-                }
-            }
-
+            refresh_ff_joystick_list(hwnd, data);
             draw_ff_axis(hwnd, data);
 
             return TRUE;
@@ -859,6 +937,8 @@ static INT_PTR CALLBACK ff_dlgproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
             switch(((LPNMHDR)lparam)->code)
             {
                 case PSN_SETACTIVE:
+                    refresh_ff_joystick_list(hwnd, data);
+
                     if (data->num_ff > 0)
                     {
                         DWORD tid;
@@ -893,7 +973,7 @@ static INT_PTR CALLBACK ff_dlgproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
  */
 static int CALLBACK propsheet_callback(HWND hwnd, UINT msg, LPARAM lparam)
 {
-    TRACE("(%p, 0x%08x/%d, 0x%lx)\n", hwnd, msg, msg, lparam);
+    TRACE("(%p, 0x%08x/%d, 0x%Ix)\n", hwnd, msg, msg, lparam);
     switch (msg)
     {
         case PSCB_INITIALIZED:
@@ -912,10 +992,24 @@ static void display_cpl_sheets(HWND parent, struct JoystickData *data)
 {
     INITCOMMONCONTROLSEX icex;
     PROPSHEETPAGEW psp[NUM_PROPERTY_PAGES];
+    BOOL activated = FALSE;
     PROPSHEETHEADERW psh;
+    ULONG_PTR cookie;
+    ACTCTXW actctx;
+    HANDLE context;
     DWORD id = 0;
 
     OleInitialize(NULL);
+    /* Activate context */
+    memset(&actctx, 0, sizeof(actctx));
+    actctx.cbSize = sizeof(actctx);
+    actctx.hModule = hcpl;
+    actctx.lpResourceName = MAKEINTRESOURCEW(124);
+    actctx.dwFlags = ACTCTX_FLAG_HMODULE_VALID | ACTCTX_FLAG_RESOURCE_NAME_VALID;
+    context = CreateActCtxW(&actctx);
+    if (context != INVALID_HANDLE_VALUE)
+        activated = ActivateActCtx(context, &cookie);
+
     /* Initialize common controls */
     icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
     icex.dwICC = ICC_LISTVIEW_CLASSES | ICC_BAR_CLASSES;
@@ -959,6 +1053,9 @@ static void display_cpl_sheets(HWND parent, struct JoystickData *data)
     /* display the dialog */
     PropertySheetW(&psh);
 
+    if (activated)
+        DeactivateActCtx(0, cookie);
+    ReleaseActCtx(context);
     OleUninitialize();
 }
 
@@ -980,7 +1077,7 @@ static void display_cpl_sheets(HWND parent, struct JoystickData *data)
 LONG CALLBACK CPlApplet(HWND hwnd, UINT command, LPARAM lParam1, LPARAM lParam2)
 {
     static struct JoystickData data;
-    TRACE("(%p, %u, 0x%lx, 0x%lx)\n", hwnd, command, lParam1, lParam2);
+    TRACE("(%p, %u, 0x%Ix, 0x%Ix)\n", hwnd, command, lParam1, lParam2);
 
     switch (command)
     {
@@ -993,7 +1090,7 @@ LONG CALLBACK CPlApplet(HWND hwnd, UINT command, LPARAM lParam1, LPARAM lParam2)
 
             if (FAILED(hr))
             {
-                ERR("Failed to initialize DirectInput: 0x%08x\n", hr);
+                ERR("Failed to initialize DirectInput: 0x%08lx\n", hr);
                 return FALSE;
             }
 

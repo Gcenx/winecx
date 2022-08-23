@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "wine/asm.h"
+#include "cppexcept.h"
 
 #ifdef _WIN64
 
@@ -46,7 +46,7 @@
 
 #ifndef __x86_64__
 
-#define DEFINE_RTTI_DATA(name, off, base_classes_no, cl1, cl2, cl3, cl4, cl5, cl6, cl7, cl8, cl9, mangled_name) \
+#define DEFINE_RTTI_BASE(name, base_classes_no, mangled_name) \
     static type_info name ## _type_info = { \
         &type_info_vtable, \
         NULL, \
@@ -58,7 +58,10 @@ static const rtti_base_descriptor name ## _rtti_base_descriptor = { \
     base_classes_no, \
     { 0, -1, 0}, \
     64 \
-}; \
+};
+
+#define DEFINE_RTTI_DATA(name, off, base_classes_no, cl1, cl2, cl3, cl4, cl5, cl6, cl7, cl8, cl9, mangled_name) \
+    DEFINE_RTTI_BASE(name, base_classes_no, mangled_name) \
 \
 static const rtti_base_array name ## _rtti_base_array = { \
     { \
@@ -92,7 +95,7 @@ const rtti_object_locator name ## _rtti = { \
 
 #else
 
-#define DEFINE_RTTI_DATA(name, off, base_classes_no, cl1, cl2, cl3, cl4, cl5, cl6, cl7, cl8, cl9, mangled_name) \
+#define __DEFINE_RTTI_BASE(name, base_classes_no, mangled_name) \
     static type_info name ## _type_info = { \
         &type_info_vtable, \
         NULL, \
@@ -104,7 +107,18 @@ static rtti_base_descriptor name ## _rtti_base_descriptor = { \
     base_classes_no, \
     { 0, -1, 0}, \
     64 \
-}; \
+};
+
+#define DEFINE_RTTI_BASE(name, base_classes_no, mangled_name) \
+    __DEFINE_RTTI_BASE(name, base_classes_no, mangled_name) \
+    \
+    static void init_ ## name ## _rtti(char *base) \
+    { \
+        name ## _rtti_base_descriptor.type_descriptor = (char*)&name ## _type_info - base; \
+    }
+
+#define DEFINE_RTTI_DATA(name, off, base_classes_no, cl1, cl2, cl3, cl4, cl5, cl6, cl7, cl8, cl9, mangled_name) \
+    __DEFINE_RTTI_BASE(name, base_classes_no, mangled_name) \
 \
 static rtti_base_array name ## _rtti_base_array = { \
     { \
@@ -265,3 +279,32 @@ extern void *vtbl_wrapper_48;
 #endif
 
 exception* __thiscall exception_ctor(exception*, const char**);
+
+extern const vtable_ptr type_info_vtable;
+
+#define CREATE_TYPE_INFO_VTABLE \
+DEFINE_THISCALL_WRAPPER(type_info_vector_dtor,8) \
+void * __thiscall type_info_vector_dtor(type_info * _this, unsigned int flags) \
+{ \
+    if (flags & 2) \
+    { \
+        /* we have an array, with the number of elements stored before the first object */ \
+        INT_PTR i, *ptr = (INT_PTR *)_this - 1; \
+\
+        for (i = *ptr - 1; i >= 0; i--) free(_this[i].name); \
+        free(ptr); \
+    } \
+    else \
+    { \
+        free(_this->name); \
+        if (flags & 1) free(_this); \
+    } \
+    return _this; \
+} \
+\
+DEFINE_RTTI_DATA0( type_info, 0, ".?AVtype_info@@" ) \
+\
+__ASM_BLOCK_BEGIN(type_info_vtables) \
+    __ASM_VTABLE(type_info, \
+            VTABLE_ADD_FUNC(type_info_vector_dtor)); \
+__ASM_BLOCK_END

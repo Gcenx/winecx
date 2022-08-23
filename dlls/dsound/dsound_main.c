@@ -92,7 +92,6 @@ const WCHAR wine_vxd_drv[] = L"winemm.vxd";
 
 /* All default settings, you most likely don't want to touch these, see wiki on UsefulRegistryKeys */
 int ds_hel_buflen = 32768 * 2;
-static HINSTANCE instance;
 
 /*
  * Get a config key from either the app-specific or the default config
@@ -175,7 +174,7 @@ static HRESULT get_mmdevenum(IMMDeviceEnumerator **devenum)
         if(SUCCEEDED(init_hr))
             CoUninitialize();
         *devenum = NULL;
-        ERR("CoCreateInstance failed: %08x\n", hr);
+        ERR("CoCreateInstance failed: %08lx\n", hr);
         return hr;
     }
 
@@ -198,7 +197,7 @@ static HRESULT get_mmdevice_guid(IMMDevice *device, IPropertyStore *ps,
     if(!ps){
         hr = IMMDevice_OpenPropertyStore(device, STGM_READ, &ps);
         if(FAILED(hr)){
-            WARN("OpenPropertyStore failed: %08x\n", hr);
+            WARN("OpenPropertyStore failed: %08lx\n", hr);
             return hr;
         }
     }else
@@ -209,11 +208,11 @@ static HRESULT get_mmdevice_guid(IMMDevice *device, IPropertyStore *ps,
     hr = IPropertyStore_GetValue(ps, &PKEY_AudioEndpoint_GUID, &pv);
     if(FAILED(hr)){
         IPropertyStore_Release(ps);
-        WARN("GetValue(GUID) failed: %08x\n", hr);
+        WARN("GetValue(GUID) failed: %08lx\n", hr);
         return hr;
     }
 
-    CLSIDFromString(pv.u.pwszVal, guid);
+    CLSIDFromString(pv.pwszVal, guid);
 
     PropVariantClear(&pv);
     IPropertyStore_Release(ps);
@@ -277,7 +276,7 @@ HRESULT WINAPI GetDeviceID(LPCGUID pGuidSrc, LPGUID pGuidDest)
         hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(devenum,
                 flow, role, &device);
         if(FAILED(hr)){
-            WARN("GetDefaultAudioEndpoint failed: %08x\n", hr);
+            WARN("GetDefaultAudioEndpoint failed: %08lx\n", hr);
             release_mmdevenum(devenum, init_hr);
             return DSERR_NODRIVER;
         }
@@ -358,7 +357,7 @@ HRESULT get_mmdevice(EDataFlow flow, const GUID *tgt, IMMDevice **device)
     hr = IMMDeviceEnumerator_EnumAudioEndpoints(devenum, flow,
             DEVICE_STATE_ACTIVE, &coll);
     if(FAILED(hr)){
-        WARN("EnumAudioEndpoints failed: %08x\n", hr);
+        WARN("EnumAudioEndpoints failed: %08lx\n", hr);
         release_mmdevenum(devenum, init_hr);
         return hr;
     }
@@ -367,7 +366,7 @@ HRESULT get_mmdevice(EDataFlow flow, const GUID *tgt, IMMDevice **device)
     if(FAILED(hr)){
         IMMDeviceCollection_Release(coll);
         release_mmdevenum(devenum, init_hr);
-        WARN("GetCount failed: %08x\n", hr);
+        WARN("GetCount failed: %08lx\n", hr);
         return hr;
     }
 
@@ -413,7 +412,7 @@ static BOOL send_device(IMMDevice *device, GUID *guid,
 
     hr = IMMDevice_OpenPropertyStore(device, STGM_READ, &ps);
     if(FAILED(hr)){
-        WARN("OpenPropertyStore failed: %08x\n", hr);
+        WARN("OpenPropertyStore failed: %08lx\n", hr);
         return TRUE;
     }
 
@@ -427,14 +426,14 @@ static BOOL send_device(IMMDevice *device, GUID *guid,
             (const PROPERTYKEY *)&DEVPKEY_Device_FriendlyName, &pv);
     if(FAILED(hr)){
         IPropertyStore_Release(ps);
-        WARN("GetValue(FriendlyName) failed: %08x\n", hr);
+        WARN("GetValue(FriendlyName) failed: %08lx\n", hr);
         return TRUE;
     }
 
     TRACE("Calling back with %s (%s)\n", wine_dbgstr_guid(guid),
-            wine_dbgstr_w(pv.u.pwszVal));
+            wine_dbgstr_w(pv.pwszVal));
 
-    keep_going = cb(guid, pv.u.pwszVal, wine_vxd_drv, user);
+    keep_going = cb(guid, pv.pwszVal, wine_vxd_drv, user);
 
     PropVariantClear(&pv);
     IPropertyStore_Release(ps);
@@ -462,7 +461,7 @@ HRESULT enumerate_mmdevices(EDataFlow flow, GUID *guids,
             DEVICE_STATE_ACTIVE, &coll);
     if(FAILED(hr)){
         release_mmdevenum(devenum, init_hr);
-        WARN("EnumAudioEndpoints failed: %08x\n", hr);
+        WARN("EnumAudioEndpoints failed: %08lx\n", hr);
         return DS_OK;
     }
 
@@ -470,7 +469,7 @@ HRESULT enumerate_mmdevices(EDataFlow flow, GUID *guids,
     if(FAILED(hr)){
         IMMDeviceCollection_Release(coll);
         release_mmdevenum(devenum, init_hr);
-        WARN("GetCount failed: %08x\n", hr);
+        WARN("GetCount failed: %08lx\n", hr);
         return DS_OK;
     }
 
@@ -501,7 +500,7 @@ HRESULT enumerate_mmdevices(EDataFlow flow, GUID *guids,
 
         hr = IMMDeviceCollection_Item(coll, i, &device);
         if(FAILED(hr)){
-            WARN("Item failed: %08x\n", hr);
+            WARN("Item failed: %08lx\n", hr);
             continue;
         }
 
@@ -760,19 +759,6 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 }
 
 
-/*******************************************************************************
- * DllCanUnloadNow [DSOUND.4]
- * Determines whether the DLL is in use.
- *
- * RETURNS
- *    Can unload now: S_OK
- *    Cannot unload now (the DLL is still active): S_FALSE
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
-}
-
 #define INIT_GUID(guid, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8)      \
         guid.Data1 = l; guid.Data2 = w1; guid.Data3 = w2;               \
         guid.Data4[0] = b1; guid.Data4[1] = b2; guid.Data4[2] = b3;     \
@@ -784,11 +770,10 @@ HRESULT WINAPI DllCanUnloadNow(void)
  */
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-    TRACE("(%p %d %p)\n", hInstDLL, fdwReason, lpvReserved);
+    TRACE("(%p %ld %p)\n", hInstDLL, fdwReason, lpvReserved);
 
     switch (fdwReason) {
     case DLL_PROCESS_ATTACH:
-        instance = hInstDLL;
         DisableThreadLibraryCalls(hInstDLL);
         /* Increase refcount on dsound by 1 */
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)hInstDLL, &hInstDLL);
@@ -800,20 +785,4 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpvReserved)
         break;
     }
     return TRUE;
-}
-
-/***********************************************************************
- *		DllRegisterServer (DSOUND.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( instance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (DSOUND.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( instance );
 }

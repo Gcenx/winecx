@@ -17,7 +17,6 @@
  */
 
 #include <stdarg.h>
-#include <assert.h>
 
 #define COBJMACROS
 
@@ -181,7 +180,7 @@ static nsresult run_insert_comment(HTMLDocumentNode *doc, nsISupports *comment_i
 
     nsres = nsISupports_QueryInterface(comment_iface, &IID_nsIDOMComment, (void**)&nscomment);
     if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDOMComment iface:%08x\n", nsres);
+        ERR("Could not get nsIDOMComment iface:%08lx\n", nsres);
         return nsres;
     }
 
@@ -313,14 +312,14 @@ static nsresult run_insert_script(HTMLDocumentNode *doc, nsISupports *script_ifa
 
     nsres = nsISupports_QueryInterface(script_iface, &IID_nsIDOMHTMLScriptElement, (void**)&nsscript);
     if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDOMHTMLScriptElement: %08x\n", nsres);
+        ERR("Could not get nsIDOMHTMLScriptElement: %08lx\n", nsres);
         return nsres;
     }
 
     if(parser_iface) {
         nsres = nsISupports_QueryInterface(parser_iface, &IID_nsIParser, (void**)&nsparser);
         if(NS_FAILED(nsres)) {
-            ERR("Could not get nsIParser iface: %08x\n", nsres);
+            ERR("Could not get nsIParser iface: %08lx\n", nsres);
             nsparser = NULL;
         }
     }
@@ -473,7 +472,7 @@ void process_document_response_headers(HTMLDocumentNode *doc, IBinding *binding)
         compat_mode_t document_mode;
         WCHAR *header;
 
-        TRACE("size %u\n", size);
+        TRACE("size %lu\n", size);
 
         header = heap_strdupAtoW(buf);
         if(header && parse_ua_compatible(header, &document_mode)) {
@@ -565,7 +564,7 @@ static nsrefcnt NSAPI nsRunnable_AddRef(nsIRunnable *iface)
     nsRunnable *This = impl_from_nsIRunnable(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -575,7 +574,7 @@ static nsrefcnt NSAPI nsRunnable_Release(nsIRunnable *iface)
     nsRunnable *This = impl_from_nsIRunnable(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
         htmldoc_release(&This->doc->basedoc);
@@ -829,15 +828,10 @@ static void NSAPI nsDocumentObserver_BindToDocument(nsIDocumentObserver *iface, 
                 DWORD zone;
                 HRESULT hres;
 
-                /*
-                 * Internet URL zone is treated differently. Native defaults to latest supported
-                 * mode. We default to IE8. Ideally, we'd sync that with version used for IE=edge
-                 * X-UA-Compatible version, allow configuration and default to higher version
-                 * (once it's well supported).
-                 */
+                /* Internet URL zone is treated differently and defaults to the latest supported mode. */
                 hres = IInternetSecurityManager_MapUrlToZone(get_security_manager(), window->url, &zone, 0);
                 if(SUCCEEDED(hres) && zone == URLZONE_INTERNET)
-                    mode = COMPAT_MODE_IE8;
+                    mode = COMPAT_MODE_IE11;
             }
 
             set_document_mode(This, mode, FALSE);
@@ -945,7 +939,7 @@ void init_document_mutation(HTMLDocumentNode *doc)
 
     nsres = nsIDOMHTMLDocument_QueryInterface(doc->nsdoc, &IID_nsIDocument, (void**)&nsdoc);
     if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDocument: %08x\n", nsres);
+        ERR("Could not get nsIDocument: %08lx\n", nsres);
         return;
     }
 
@@ -960,7 +954,7 @@ void release_document_mutation(HTMLDocumentNode *doc)
 
     nsres = nsIDOMHTMLDocument_QueryInterface(doc->nsdoc, &IID_nsIDocument, (void**)&nsdoc);
     if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDocument: %08x\n", nsres);
+        ERR("Could not get nsIDocument: %08lx\n", nsres);
         return;
     }
 
@@ -1000,12 +994,12 @@ void init_mutation(nsIComponentManager *component_manager)
     nsres = nsIComponentManager_GetClassObject(component_manager, &NS_ICONTENTUTILS_CID,
             &IID_nsIFactory, (void**)&factory);
     if(NS_FAILED(nsres)) {
-        ERR("Could not create nsIContentUtils service: %08x\n", nsres);
+        ERR("Could not create nsIContentUtils service: %08lx\n", nsres);
         return;
     }
 
     nsres = nsIFactory_CreateInstance(factory, NULL, &IID_nsIContentUtils, (void**)&content_utils);
     nsIFactory_Release(factory);
     if(NS_FAILED(nsres))
-        ERR("Could not create nsIContentUtils instance: %08x\n", nsres);
+        ERR("Could not create nsIContentUtils instance: %08lx\n", nsres);
 }

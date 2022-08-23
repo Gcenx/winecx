@@ -137,24 +137,39 @@ async_test("iframe_location", function() {
 });
 
 sync_test("anchor", function() {
-    var iframe = document.body.firstChild;
-    var anchor = document.createElement("a");
-
     var anchor_tests = [
-        { href: "http://www.winehq.org:123/about", protocol: "http:", host: "www.winehq.org:123" },
-        { href: "https://www.winehq.org:123/about", protocol: "https:", host: "www.winehq.org:123" },
-        { href: "about:blank", protocol: "about:", host: "" },
-        { href: "file:///c:/dir/file.html", protocol: "file:", host: "" },
-        { href: "http://www.winehq.org/about", protocol: "http:", host: "www.winehq.org:80", todo_host: true },
-        { href: "https://www.winehq.org/about", protocol: "https:", host: "www.winehq.org:443", todo_host: true },
+        { href: "http://www.winehq.org:123/about",
+          protocol: "http:", host: "www.winehq.org:123", path: "/about" },
+        { href: "https://www.winehq.org:123/about",
+          protocol: "https:", host: "www.winehq.org:123", path: "/about" },
+        { href: "about:blank",
+          protocol: "about:", host: "", path: "/blank", todo_pathname: 1 },
+        { href: "unknown:path",
+          protocol: "unknown:", host: "", path: "path" },
+        { href: "ftp:path",
+          protocol: "ftp:", host: "", path: "path" },
+        { href: "mailto:path",
+          protocol: "mailto:", host: "", path: "path" },
+        { href: "ws:path",
+          protocol: "ws:", host: "", path: "path" },
+        { href: "file:path",
+          protocol: "file:", host: "", path: "/path", todo_pathname: 1 },
+        { href: "file:///c:/dir/file.html",
+          protocol: "file:", host: "", path: "/c:/dir/file.html" },
+        { href: "http://www.winehq.org/about",
+          protocol: "http:", host: "www.winehq.org", path: "/about" },
+        { href: "https://www.winehq.org/about",
+          protocol: "https:", host: "www.winehq.org", path: "/about" },
     ];
 
     for(var i in anchor_tests) {
         var t = anchor_tests[i];
-        anchor.href = t.href;
+        document.body.innerHTML = '<a href="' + t.href + '">';
+        var anchor = document.body.firstChild;
         ok(anchor.protocol === t.protocol, "anchor(" + t.href + ").protocol = " + anchor.protocol);
-        todo_wine_if("todo_host" in t).
         ok(anchor.host === t.host, "anchor(" + t.href + ").host = " + anchor.host);
+        todo_wine_if("todo_pathname" in t).
+        ok(anchor.pathname === t.path, "anchor(" + t.href + ").pathname = " + anchor.pathname);
     }
 });
 
@@ -390,6 +405,9 @@ sync_test("stylesheets", function() {
     ok(typeof(stylesheet.rules.item(0)) === "object",
        "typeof(stylesheet.rules.item(0)) = " + typeof(stylesheet.rules.item(0)));
 
+    stylesheet = document.styleSheets[0];
+    ok(stylesheet.rules.length === 1, "document.styleSheets[0].rules.length = " + stylesheet.rules.length);
+
     try {
         stylesheet.rules.item(1);
         ok(false, "expected exception");
@@ -403,6 +421,32 @@ sync_test("stylesheets", function() {
 
     try {
         stylesheet.insertRule(".input { margin-left: 1px; }", 3);
+        ok(false, "expected exception");
+    }catch(e) {}
+
+    id = stylesheet.addRule(".p", "margin-top: 2px");
+    ok(id === 2, "id = " + id);
+    ok(document.styleSheets.length === 1, "document.styleSheets.length = " + document.styleSheets.length);
+    ok(stylesheet.rules.length === 3, "stylesheet.rules.length = " + stylesheet.rules.length);
+
+    id = stylesheet.addRule(".pre", "border: none", -1);
+    ok(id === 3, "id = " + id);
+    ok(stylesheet.rules.length === 4, "stylesheet.rules.length = " + stylesheet.rules.length);
+
+    id = stylesheet.addRule(".h1", " ", 0);
+    ok(id === 0, "id = " + id);
+    ok(stylesheet.rules.length === 5, "stylesheet.rules.length = " + stylesheet.rules.length);
+
+    id = stylesheet.addRule(".h2", "color: black", 8);
+    ok(id === 5, "id = " + id);
+    ok(stylesheet.rules.length === 6, "stylesheet.rules.length = " + stylesheet.rules.length);
+
+    try {
+        stylesheet.addRule("", "border: none", 0);
+        ok(false, "expected exception");
+    }catch(e) {}
+    try {
+        stylesheet.addRule(".img", "", 0);
         ok(false, "expected exception");
     }catch(e) {}
 });
@@ -453,7 +497,7 @@ async_test("animation_frame", function() {
     var id = requestAnimationFrame(function(x) {
         ok(this === window, "this != window");
         ok(typeof(x) === "number", "x = " + x);
-        ok(arguments.length === 1, "arguments.lenght = " + arguments.length);
+        ok(arguments.length === 1, "arguments.length = " + arguments.length);
         next_test();
     });
     ok(typeof(id) === "number", "id = " + id);
@@ -507,4 +551,108 @@ sync_test("hasAttribute", function() {
     elem.removeAttribute("attr");
     r = elem.hasAttribute("attr");
     ok(r === false, "hasAttribute(attr) returned " + r);
+});
+
+sync_test("classList", function() {
+    var elem = document.createElement("div");
+    var classList = elem.classList;
+
+    classList.add("a");
+    ok(elem.className === "a", "Expected className 'a', got " + elem.className);
+
+    classList.add("b");
+    ok(elem.className === "a b", "Expected className 'a b', got " + elem.className);
+
+    classList.add("c");
+    ok(elem.className === "a b c", "Expected className 'a b c', got " + elem.className);
+
+    classList.add(4);
+    ok(elem.className === "a b c 4", "Expected className 'a b c 4', got " + elem.className);
+
+    classList.add("c");
+    ok(elem.className === "a b c 4", "(2) Expected className 'a b c 4', got " + elem.className);
+    ok(("" + classList) === "a b c 4", "Expected classList value 'a b c 4', got " + classList);
+    ok(classList.toString() === "a b c 4", "Expected classList toString 'a b c 4', got " + classList.toString());
+
+    var exception = false
+
+    try
+    {
+        classList.add();
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception && elem.className === "a b c 4", "Expected exception, className 'a b c 4', got exception "
+            + exception + ", className" + elem.className);
+
+    exception = false
+    try
+    {
+        classList.add("");
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "Expected exception for classList.add(\"\")");
+
+    exception = false
+    try
+    {
+        classList.add("e f");
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "Expected exception for classList.add(\"e f\")");
+
+    classList.remove("e");
+    ok(elem.className === "a b c 4", "remove: expected className 'a b c 4', got " + elem.className);
+
+    exception = false
+    try
+    {
+        classList.remove("e f");
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "remove: expected exception for classList.remove(\"e f\")");
+
+    exception = false
+    try
+    {
+        classList.remove("");
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "remove: expected exception for classList.remove(\"\")");
+
+    classList.remove("d");
+    ok(elem.className === "a b c 4", "remove: expected className 'a b c 4', got " + elem.className);
+
+    classList.remove("c");
+    ok(elem.className === "a b 4", "remove: expected className 'a b 4', got " + elem.className);
+
+    classList.remove(4);
+    ok(elem.className === "a b", "remove: expected className 'a b', got " + elem.className);
+
+    classList.remove('a');
+    ok(elem.className === "b", "remove: expected className 'b', got " + elem.className);
+
+    classList.remove("a");
+    ok(elem.className === "b", "remove (2): expected className 'b', got " + elem.className);
+
+    classList.remove("b");
+    ok(elem.className === "", "remove: expected className '', got " + elem.className);
+
+    elem.className = "  testclass    foobar  ";
+    ok(("" + classList) === "  testclass    foobar  ", "Expected classList value '  testclass    foobar  ', got " + classList);
+    ok(classList.toString() === "  testclass    foobar  ", "Expected classList toString '  testclass    foobar  ', got " + classList.toString());
 });

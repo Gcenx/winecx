@@ -36,24 +36,20 @@ extern int debuglevel;
 extern int win32;
 extern int extensions;
 extern int pedantic;
-extern int byteorder;
 extern int preprocess_only;
 extern int no_preprocess;
 extern int utf8_input;
 extern int check_utf8;
 
-extern char *input_name;
-extern char *cmdline;
-
+extern const char *input_name;
 extern const char *nlsdirs[];
 
 extern int line_number;
 extern int char_number;
 
 extern resource_t *resource_top;
-extern language_t *currentlanguage;
+extern language_t currentlanguage;
 
-void verify_translations(resource_t *top);
 void write_pot_file( const char *outname );
 void write_po_files( const char *outname );
 void add_translations( const char *po_dir );

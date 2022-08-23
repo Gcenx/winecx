@@ -17,6 +17,7 @@
  */
 
 #include <stdarg.h>
+#include <stdlib.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -24,7 +25,6 @@
 #include "webservices.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wine/list.h"
 #include "webservices_private.h"
 
@@ -53,7 +53,7 @@ static struct error *alloc_error(void)
     struct error *ret;
     ULONG size = sizeof(*ret) + prop_size( error_props, count );
 
-    if (!(ret = heap_alloc_zero( size ))) return NULL;
+    if (!(ret = calloc( 1, size ))) return NULL;
 
     ret->magic      = ERROR_MAGIC;
     InitializeCriticalSection( &ret->cs );
@@ -68,7 +68,7 @@ static void free_error( struct error *error )
 {
     error->cs.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection( &error->cs );
-    heap_free( error );
+    free( error );
 }
 
 /**************************************************************************
@@ -81,7 +81,7 @@ HRESULT WINAPI WsCreateError( const WS_ERROR_PROPERTY *properties, ULONG count, 
     HRESULT hr;
     ULONG i;
 
-    TRACE( "%p %u %p\n", properties, count, handle );
+    TRACE( "%p %lu %p\n", properties, count, handle );
 
     if (!handle) return E_INVALIDARG;
     if (!(error = alloc_error())) return E_OUTOFMEMORY;
@@ -164,7 +164,7 @@ HRESULT WINAPI WsResetError( WS_ERROR *handle )
     reset_error( error );
 
     LeaveCriticalSection( &error->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -177,7 +177,7 @@ HRESULT WINAPI WsGetErrorProperty( WS_ERROR *handle, WS_ERROR_PROPERTY_ID id, vo
     struct error *error = (struct error *)handle;
     HRESULT hr;
 
-    TRACE( "%p %u %p %u\n", handle, id, buf, size );
+    TRACE( "%p %u %p %lu\n", handle, id, buf, size );
 
     if (!error) return E_INVALIDARG;
 
@@ -192,7 +192,7 @@ HRESULT WINAPI WsGetErrorProperty( WS_ERROR *handle, WS_ERROR_PROPERTY_ID id, vo
     hr = prop_get( error->prop, error->prop_count, id, buf, size );
 
     LeaveCriticalSection( &error->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -201,7 +201,7 @@ HRESULT WINAPI WsGetErrorProperty( WS_ERROR *handle, WS_ERROR_PROPERTY_ID id, vo
  */
 HRESULT WINAPI WsGetErrorString( WS_ERROR *handle, ULONG index, WS_STRING *str )
 {
-    FIXME( "%p %u %p: stub\n", handle, index, str );
+    FIXME( "%p %lu %p: stub\n", handle, index, str );
     return E_NOTIMPL;
 }
 
@@ -214,7 +214,7 @@ HRESULT WINAPI WsSetErrorProperty( WS_ERROR *handle, WS_ERROR_PROPERTY_ID id, co
     struct error *error = (struct error *)handle;
     HRESULT hr;
 
-    TRACE( "%p %u %p %u\n", handle, id, value, size );
+    TRACE( "%p %u %p %lu\n", handle, id, value, size );
 
     if (!error) return E_INVALIDARG;
 
@@ -230,6 +230,6 @@ HRESULT WINAPI WsSetErrorProperty( WS_ERROR *handle, WS_ERROR_PROPERTY_ID id, co
     else hr = prop_set( error->prop, error->prop_count, id, value, size );
 
     LeaveCriticalSection( &error->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }

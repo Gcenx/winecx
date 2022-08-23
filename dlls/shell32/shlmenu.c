@@ -30,7 +30,6 @@
 #include "wingdi.h"
 #include "winuser.h"
 #include "shlobj.h"
-#include "undocshell.h"
 #include "shlwapi.h"
 #include "shell32_main.h"
 
@@ -38,13 +37,30 @@
 #include "wine/debug.h"
 #include "debughlp.h"
 
-#ifdef FM_SEPARATOR
-#undef FM_SEPARATOR
-#endif
-#define FM_SEPARATOR (LPCWSTR)1
+/* FileMenu_Create nSelHeight constants */
+#define FM_DEFAULT_SELHEIGHT  -1
+#define FM_FULL_SELHEIGHT     0
+
+/* FileMenu_Create flags */
+#define FMF_SMALL_ICONS      0x00
+#define FMF_LARGE_ICONS      0x08
+#define FMF_NO_COLUMN_BREAK  0x10
+
+/* FileMenu_AppendItem constants */
+#define FM_SEPARATOR       ((const WCHAR *)1)
+#define FM_BLANK_ICON      -1
+#define FM_DEFAULT_HEIGHT  0
+
+/* FileMenu_InsertUsingPidl flags */
+#define FMF_NO_EMPTY_ITEM      0x01
+#define FMF_NO_PROGRAM_GROUPS  0x04
+
+/* FileMenu_InsertUsingPidl callback function */
+typedef void (CALLBACK *LPFNFMCALLBACK)(LPCITEMIDLIST pidlFolder, LPCITEMIDLIST pidlFile);
 
 static BOOL FileMenu_AppendItemW(HMENU hMenu, LPCWSTR lpText, UINT uID, int icon,
                                  HMENU hMenuPopup, int nItemHeight);
+BOOL WINAPI FileMenu_DeleteAllItems(HMENU hMenu);
 
 typedef struct
 {
@@ -91,7 +107,7 @@ static LPFMINFO FM_GetMenuInfo(HMENU hmenu)
 
 	if ((menudata == 0) || (MenuInfo.cbSize != sizeof(MENUINFO)))
 	{
-	  ERR("menudata corrupt: %p %u\n", menudata, MenuInfo.cbSize);
+	  ERR("menudata corrupt: %p %lu\n", menudata, MenuInfo.cbSize);
 	  return 0;
 	}
 
@@ -154,7 +170,7 @@ static int FM_InitMenuPopup(HMENU hmenu, LPCITEMIDLIST pAlternatePidl)
 
 	if ((menudata == 0) || (MenuInfo.cbSize != sizeof(MENUINFO)))
 	{
-	  ERR("menudata corrupt: %p %u\n", menudata, MenuInfo.cbSize);
+	  ERR("menudata corrupt: %p %lu\n", menudata, MenuInfo.cbSize);
 	  return 0;
 	}
 
@@ -236,8 +252,7 @@ static int FM_InitMenuPopup(HMENU hmenu, LPCITEMIDLIST pAlternatePidl)
 
 	if ( GetMenuItemCount (hmenu) == 0 )
 	{
-          static const WCHAR szEmpty[] = { '(','e','m','p','t','y',')',0 };
-	  FileMenu_AppendItemW (hmenu, szEmpty, uID, FM_BLANK_ICON, 0, FM_DEFAULT_HEIGHT);
+	  FileMenu_AppendItemW (hmenu, L"(empty)", uID, FM_BLANK_ICON, 0, FM_DEFAULT_HEIGHT);
 	  NumberOfItems++;
 	}
 
@@ -265,7 +280,7 @@ HMENU WINAPI FileMenu_Create (
 
 	HMENU hMenu = CreatePopupMenu();
 
-	TRACE("0x%08x 0x%08x %p 0x%08x 0x%08x  hMenu=%p\n",
+	TRACE("0x%08lx 0x%08x %p 0x%08x 0x%08x  hMenu=%p\n",
 	crBorderColor, nBorderWidth, hBorderBmp, nSelHeight, uFlags, hMenu);
 
 	menudata = heap_alloc_zero(sizeof(*menudata));
@@ -331,9 +346,9 @@ static BOOL FileMenu_AppendItemW(
 
 	if (lpText != FM_SEPARATOR)
 	{
-	  int len = strlenW (lpText);
+	  int len = lstrlenW (lpText);
           myItem = SHAlloc(sizeof(FMITEM) + len*sizeof(WCHAR));
-	  strcpyW (myItem->szItemText, lpText);
+	  lstrcpyW (myItem->szItemText, lpText);
 	  myItem->cchItemText = len;
 	  myItem->iIconIndex = icon;
 	  myItem->hMenu = hMenu;
@@ -371,7 +386,7 @@ static BOOL FileMenu_AppendItemW(
 	menudata = (LPFMINFO)MenuInfo.dwMenuData;
 	if ((menudata == 0) || (MenuInfo.cbSize != sizeof(MENUINFO)))
 	{
-	  ERR("menudata corrupt: %p %u\n", menudata, MenuInfo.cbSize);
+	  ERR("menudata corrupt: %p %lu\n", menudata, MenuInfo.cbSize);
 	  return FALSE;
 	}
 
@@ -662,7 +677,7 @@ LRESULT WINAPI FileMenu_HandleMenuChar(
 	HMENU	hMenu,
 	WPARAM	wParam)
 {
-	FIXME("%p 0x%08lx\n",hMenu,wParam);
+	FIXME("%p 0x%08Ix\n",hMenu,wParam);
 	return 0;
 }
 
@@ -828,7 +843,7 @@ void WINAPI FileMenu_AbortInitMenu (void)
  */
 LPVOID WINAPI SHFind_InitMenuPopup (HMENU hMenu, HWND hWndParent, DWORD w, DWORD x)
 {
-	FIXME("hmenu=%p hwnd=%p 0x%08x 0x%08x stub\n",
+	FIXME("hmenu=%p hwnd=%p 0x%08lx 0x%08lx stub\n",
 		hMenu,hWndParent,w,x);
 	return NULL; /* this is supposed to be a pointer */
 }
@@ -867,7 +882,7 @@ UINT WINAPI Shell_MergeMenus (HMENU hmDst, HMENU hmSrc, UINT uInsert, UINT uIDAd
 	WCHAR		szName[256];
 	UINT		uTemp, uIDMax = uIDAdjust;
 
-	TRACE("hmenu1=%p hmenu2=%p 0x%04x 0x%04x 0x%04x  0x%04x\n",
+	TRACE("hmenu1=%p hmenu2=%p 0x%04x 0x%04x 0x%04x  0x%04lx\n",
 		 hmDst, hmSrc, uInsert, uIDAdjust, uIDAdjustMax, uFlags);
 
 	if (!hmDst || !hmSrc)
@@ -1110,7 +1125,7 @@ static HRESULT WINAPI CompositeCMenu_GetCommandString(IContextMenu3* iface, UINT
 {
     CompositeCMenu *This = impl_from_IContextMenu3(iface);
     UINT index = CompositeCMenu_GetIndexForCommandId(This,idCmd);
-    TRACE("(%p)->(%lx,%x,%p,%s,%u)\n",iface,idCmd,uFlags,pwReserved,pszName,cchMax);
+    TRACE("(%p)->(%Ix,%x,%p,%s,%u)\n",iface,idCmd,uFlags,pwReserved,pszName,cchMax);
     return IContextMenu_GetCommandString(This->menus[index],idCmd,uFlags,pwReserved,pszName,cchMax);
 }
 
@@ -1166,7 +1181,7 @@ static HRESULT WINAPI CompositeCMenu_HandleMenuMsg(IContextMenu3 *iface, UINT uM
     UINT index;
     IContextMenu2 *handler;
     HRESULT hres;
-    TRACE("(%p)->(%x,%lx,%lx)\n",iface,uMsg,wParam,lParam);
+    TRACE("(%p)->(%x,%Ix,%Ix)\n",iface,uMsg,wParam,lParam);
     switch(uMsg)
     {
     case WM_INITMENUPOPUP:
@@ -1200,7 +1215,7 @@ static HRESULT WINAPI CompositeCMenu_HandleMenuMsg2(IContextMenu3 *iface, UINT u
     IContextMenu3 *handler;
     HRESULT hres;
     LRESULT lres;
-    TRACE("(%p)->(%x,%lx,%lx,%p)\n",iface,uMsg,wParam,lParam,plResult);
+    TRACE("(%p)->(%x,%Ix,%Ix,%p)\n",iface,uMsg,wParam,lParam,plResult);
     if(!plResult)
         plResult=&lres;
     switch(uMsg)

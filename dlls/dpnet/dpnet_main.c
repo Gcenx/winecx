@@ -37,8 +37,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dpnet);
 
-static HINSTANCE instance;
-
 static BOOL winsock_loaded = FALSE;
 
 static BOOL WINAPI winsock_startup(INIT_ONCE *once, void *param, void **context)
@@ -50,7 +48,7 @@ static BOOL WINAPI winsock_startup(INIT_ONCE *once, void *param, void **context)
     if(res == ERROR_SUCCESS)
         winsock_loaded = TRUE;
     else
-        ERR("WSAStartup failed: %u\n", res);
+        ERR("WSAStartup failed: %lu\n", res);
     return TRUE;
 }
 
@@ -63,12 +61,11 @@ void init_winsock(void)
 /* At process attach */
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-    TRACE("%p,%x,%p\n", hInstDLL, fdwReason, lpvReserved);
+    TRACE("%p,%lx,%p\n", hInstDLL, fdwReason, lpvReserved);
 
     switch(fdwReason)
     {
         case DLL_PROCESS_ATTACH:
-            instance = hInstDLL;
             DisableThreadLibraryCalls(hInstDLL);
             break;
 
@@ -158,14 +155,6 @@ static IClassFactoryImpl DPNET_CFS[] = {
 };
 
 /***********************************************************************
- *             DllCanUnloadNow (DPNET.@)
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
-}
-
-/***********************************************************************
  *		DllGetClassObject (DPNET.@)
  */
 HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
@@ -191,20 +180,4 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 
     FIXME("(%s,%s,%p): no interface found.\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
     return CLASS_E_CLASSNOTAVAILABLE;
-}
-
-/***********************************************************************
- *		DllRegisterServer (DPNET.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( instance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (DPNET.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( instance );
 }

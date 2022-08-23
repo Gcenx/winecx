@@ -17,7 +17,6 @@
  */
 
 #include <stdarg.h>
-#include <assert.h>
 
 #define COBJMACROS
 
@@ -593,7 +592,7 @@ static HRESULT WINAPI HTMLCurrentStyle_getAttribute(IHTMLCurrentStyle *iface, BS
         LONG lFlags, VARIANT *AttributeValue)
 {
     HTMLCurrentStyle *This = impl_from_IHTMLCurrentStyle(iface);
-    FIXME("(%p)->(%s %x %p)\n", This, debugstr_w(strAttributeName), lFlags, AttributeValue);
+    FIXME("(%p)->(%s %lx %p)\n", This, debugstr_w(strAttributeName), lFlags, AttributeValue);
     return E_NOTIMPL;
 }
 
@@ -1301,6 +1300,7 @@ static const tid_t HTMLCurrentStyle_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLCurrentStyle_dispex = {
+    L"MSCurrentStyleCSSProperties",
     &CSSStyle_dispex_vtbl,
     DispHTMLCurrentStyle_tid,
     HTMLCurrentStyle_iface_tids,
@@ -1323,7 +1323,7 @@ HRESULT HTMLCurrentStyle_Create(HTMLElement *elem, IHTMLCurrentStyle **p)
 
     nsres = nsIDOMHTMLDocument_GetDefaultView(elem->node.doc->nsdoc, &nsview);
     if(NS_FAILED(nsres)) {
-        ERR("GetDefaultView failed: %08x\n", nsres);
+        ERR("GetDefaultView failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -1336,7 +1336,7 @@ HRESULT HTMLCurrentStyle_Create(HTMLElement *elem, IHTMLCurrentStyle **p)
     nsAString_Finish(&nsempty_str);
     nsIDOMWindow_Release(nswindow);
     if(NS_FAILED(nsres)) {
-        ERR("GetComputedStyle failed: %08x\n", nsres);
+        ERR("GetComputedStyle failed: %08lx\n", nsres);
         return E_FAIL;
     }
 

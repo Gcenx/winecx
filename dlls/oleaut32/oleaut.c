@@ -691,7 +691,7 @@ HRESULT WINAPI OleTranslateColor(
   COLORREF colorref;
   BYTE b = HIBYTE(HIWORD(clr));
 
-  TRACE("(%08x, %p, %p)\n", clr, hpal, pColorRef);
+  TRACE("%#lx, %p, %p.\n", clr, hpal, pColorRef);
 
   /*
    * In case pColorRef is NULL, provide our own to simplify the code.
@@ -814,7 +814,7 @@ static BOOL actctx_get_typelib_module(REFIID iid, WCHAR *module, DWORD len)
 
     if (tlib->name_len/sizeof(WCHAR) >= len)
     {
-        ERR("need larger module buffer, %u\n", tlib->name_len);
+        ERR("need larger module buffer, %lu.\n", tlib->name_len);
         return FALSE;
     }
 
@@ -832,7 +832,7 @@ static HRESULT reg_get_typelib_module(REFIID iid, WCHAR *module, DWORD len)
     BOOL is_wow64;
     HKEY ikey;
 
-    sprintf( interfacekey, "Interface\\{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}\\Typelib",
+    sprintf( interfacekey, "Interface\\{%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}\\Typelib",
         iid->Data1, iid->Data2, iid->Data3,
         iid->Data4[0], iid->Data4[1], iid->Data4[2], iid->Data4[3],
         iid->Data4[4], iid->Data4[5], iid->Data4[6], iid->Data4[7]
@@ -979,7 +979,7 @@ static HRESULT WINAPI dispatch_typelib_ps_CreateProxy(IPSFactoryBuffer *iface,
         hr = dispatch_create_proxy(outer, proxy, out);
 
     if (FAILED(hr))
-        ERR("Failed to create proxy, hr %#x.\n", hr);
+        ERR("Failed to create proxy, hr %#lx.\n", hr);
 
     ITypeInfo_ReleaseTypeAttr(typeinfo, attr);
     ITypeInfo_Release(typeinfo);
@@ -1025,7 +1025,7 @@ static HRESULT WINAPI dispatch_typelib_ps_CreateStub(IPSFactoryBuffer *iface,
         hr = dispatch_create_stub(server, stub);
 
     if (FAILED(hr))
-        ERR("Failed to create proxy, hr %#x.\n", hr);
+        ERR("Failed to create proxy, hr %#lx.\n", hr);
 
     ITypeInfo_ReleaseTypeAttr(typeinfo, attr);
     ITypeInfo_Release(typeinfo);
@@ -1078,22 +1078,6 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv)
         return OLEAUTPS_DllGetClassObject(&CLSID_PSFactoryBuffer, iid, ppv);
 
     return OLEAUTPS_DllGetClassObject(rclsid, iid, ppv);
-}
-
-/***********************************************************************
- *		DllCanUnloadNow (OLEAUT32.@)
- *
- * Determine if this dll can be unloaded from the callers address space.
- *
- * PARAMS
- *  None.
- *
- * RETURNS
- *  Always returns S_FALSE. This dll cannot be unloaded.
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
 }
 
 /*****************************************************************************
@@ -1189,7 +1173,7 @@ HRESULT WINAPI GetAltMonthNames(LCID lcid, LPOLESTR **str)
         NULL
     };
 
-    TRACE("%#x, %p\n", lcid, str);
+    TRACE("%#lx, %p.\n", lcid, str);
 
     if (PRIMARYLANGID(LANGIDFROMLCID(lcid)) == LANG_ARABIC)
         *str = (LPOLESTR *)arabic_hijri;

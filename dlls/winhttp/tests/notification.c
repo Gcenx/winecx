@@ -62,6 +62,8 @@ struct notification
 #define NF_ALLOW       0x0001  /* notification may or may not happen */
 #define NF_WINE_ALLOW  0x0002  /* wine sends notification when it should not */
 #define NF_SIGNAL      0x0004  /* signal wait handle when notified */
+#define NF_MAIN_THREAD 0x0008  /* the operation completes synchronously and callback is called from the main thread */
+#define NF_SAVE_BUFFER 0x0010  /* save buffer data when notified */
 
 struct info
 {
@@ -71,6 +73,11 @@ struct info
     unsigned int index;
     HANDLE wait;
     unsigned int line;
+    DWORD main_thread_id;
+    DWORD last_thread_id;
+    DWORD last_status;
+    char buffer[256];
+    unsigned int buflen;
 };
 
 struct test_request
@@ -85,6 +92,9 @@ static void CALLBACK check_notification( HINTERNET handle, DWORD_PTR context, DW
     BOOL status_ok, function_ok;
     struct info *info = (struct info *)context;
 
+    info->last_status = status;
+    info->last_thread_id = GetCurrentThreadId();
+
     if (status == WINHTTP_CALLBACK_STATUS_HANDLE_CREATED)
     {
         DWORD size = sizeof(struct info *);
@@ -94,17 +104,28 @@ static void CALLBACK check_notification( HINTERNET handle, DWORD_PTR context, DW
         info->index++;
     while (info->index < info->count && (info->test[info->index].flags & NF_WINE_ALLOW))
     {
-        todo_wine ok(info->test[info->index].status != status, "unexpected %x notification\n", status);
+        todo_wine ok( info->test[info->index].status != status, "unexpected %#lx notification\n", status );
         if (info->test[info->index].status == status) break;
         info->index++;
     }
-    ok(info->index < info->count, "%u: unexpected notification 0x%08x\n", info->line, status);
+    ok( info->index < info->count, "%u: unexpected notification %#lx\n", info->line, status );
     if (info->index >= info->count) return;
 
     status_ok   = (info->test[info->index].status == status);
     function_ok = (info->test[info->index].function == info->function);
-    ok(status_ok, "%u: expected status 0x%08x got 0x%08x\n", info->line, info->test[info->index].status, status);
+    ok( status_ok, "%u: expected status %#x got %#lx\n", info->line, info->test[info->index].status, status );
     ok(function_ok, "%u: expected function %u got %u\n", info->line, info->test[info->index].function, info->function);
+
+    if (info->test[info->index].flags & NF_MAIN_THREAD)
+    {
+        ok(GetCurrentThreadId() == info->main_thread_id, "%u: expected callback to be called from the same thread\n",
+                info->line);
+    }
+    if (info->test[info->index].flags & NF_SAVE_BUFFER)
+    {
+        info->buflen = buflen;
+        memcpy( info->buffer, buffer, min( buflen, sizeof(info->buffer) ));
+    }
 
     if (status_ok && function_ok && info->test[info->index++].flags & NF_SIGNAL)
     {
@@ -177,6 +198,9 @@ static void setup_test( struct info *info, enum api function, unsigned int line 
     ok_(__FILE__,line)(info->test[info->index].function == function,
                        "unexpected function %u, expected %u. probably some notifications were missing\n",
                        info->test[info->index].function, function);
+    info->last_thread_id = 0xdeadbeef;
+    info->last_status = 0xdeadbeef;
+    info->main_thread_id = GetCurrentThreadId();
 }
 
 static void end_test( struct info *info, unsigned int line )
@@ -198,7 +222,7 @@ static void test_connection_cache( void )
     info.wait = CreateEventW( NULL, FALSE, FALSE, NULL );
 
     ses = WinHttpOpen( L"winetest", 0, NULL, NULL, 0 );
-    ok(ses != NULL, "failed to open session %u\n", GetLastError());
+    ok( ses != NULL, "failed to open session %lu\n", GetLastError() );
 
     event = CreateEventW( NULL, FALSE, FALSE, NULL );
     ret = WinHttpSetOption( ses, WINHTTP_OPTION_UNLOAD_NOTIFY_EVENT, &event, sizeof(event) );
@@ -211,15 +235,15 @@ static void test_connection_cache( void )
     WinHttpSetStatusCallback( ses, check_notification, WINHTTP_CALLBACK_FLAG_ALL_NOTIFICATIONS, 0 );
 
     ret = WinHttpSetOption( ses, WINHTTP_OPTION_CONTEXT_VALUE, &context, sizeof(struct info *) );
-    ok(ret, "failed to set context value %u\n", GetLastError());
+    ok( ret, "failed to set context value %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_connect, __LINE__ );
     con = WinHttpConnect( ses, L"test.winehq.org", 0, 0 );
-    ok(con != NULL, "failed to open a connection %u\n", GetLastError());
+    ok( con != NULL, "failed to open a connection %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_open_request, __LINE__ );
     req = WinHttpOpenRequest( con, NULL, L"/tests/hello.html", NULL, NULL, NULL, 0 );
-    ok(req != NULL, "failed to open a request %u\n", GetLastError());
+    ok( req != NULL, "failed to open a request %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_send_request, __LINE__ );
     ret = WinHttpSendRequest( req, NULL, 0, NULL, 0, 0, 0 );
@@ -229,16 +253,16 @@ static void test_connection_cache( void )
         skip("connection failed, skipping\n");
         goto done;
     }
-    ok(ret, "failed to send request %u\n", GetLastError());
+    ok( ret, "failed to send request %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_receive_response, __LINE__ );
     ret = WinHttpReceiveResponse( req, NULL );
-    ok(ret, "failed to receive response %u\n", GetLastError());
+    ok( ret, "failed to receive response %lu\n", GetLastError() );
 
     size = sizeof(status);
     ret = WinHttpQueryHeaders( req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL );
-    ok(ret, "failed unexpectedly %u\n", GetLastError());
-    ok(status == 200, "request failed unexpectedly %u\n", status);
+    ok( ret, "failed unexpectedly %lu\n", GetLastError() );
+    ok( status == 200, "request failed unexpectedly %lu\n", status );
 
     ResetEvent( info.wait );
     setup_test( &info, winhttp_close_handle, __LINE__ );
@@ -247,10 +271,10 @@ static void test_connection_cache( void )
 
     setup_test( &info, winhttp_open_request, __LINE__ );
     req = WinHttpOpenRequest( con, NULL, L"/tests/hello.html", NULL, NULL, NULL, 0 );
-    ok(req != NULL, "failed to open a request %u\n", GetLastError());
+    ok( req != NULL, "failed to open a request %lu\n", GetLastError() );
 
     ret = WinHttpSetOption( req, WINHTTP_OPTION_CONTEXT_VALUE, &context, sizeof(struct info *) );
-    ok(ret, "failed to set context value %u\n", GetLastError());
+    ok( ret, "failed to set context value %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_send_request, __LINE__ );
     ret = WinHttpSendRequest( req, NULL, 0, NULL, 0, 0, 0 );
@@ -260,16 +284,16 @@ static void test_connection_cache( void )
         skip("connection failed, skipping\n");
         goto done;
     }
-    ok(ret, "failed to send request %u\n", GetLastError());
+    ok( ret, "failed to send request %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_receive_response, __LINE__ );
     ret = WinHttpReceiveResponse( req, NULL );
-    ok(ret, "failed to receive response %u\n", GetLastError());
+    ok( ret, "failed to receive response %lu\n", GetLastError() );
 
     size = sizeof(status);
     ret = WinHttpQueryHeaders( req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL );
-    ok(ret, "failed unexpectedly %u\n", GetLastError());
-    ok(status == 200, "request failed unexpectedly %u\n", status);
+    ok( ret, "failed unexpectedly %lu\n", GetLastError() );
+    ok( status == 200, "request failed unexpectedly %lu\n", status );
 
     ResetEvent( info.wait );
     setup_test( &info, winhttp_close_handle, __LINE__ );
@@ -281,7 +305,7 @@ static void test_connection_cache( void )
     if (unload)
     {
         status = WaitForSingleObject( event, 0 );
-        ok(status == WAIT_TIMEOUT, "got %08x\n", status);
+        ok( status == WAIT_TIMEOUT, "got %#lx\n", status );
     }
 
     setup_test( &info, winhttp_close_handle, __LINE__ );
@@ -291,12 +315,11 @@ static void test_connection_cache( void )
     if (unload)
     {
         status = WaitForSingleObject( event, 100 );
-        ok(status == WAIT_OBJECT_0, "got %08x\n", status);
+        ok( status == WAIT_OBJECT_0, "got %#lx\n", status );
     }
 
-
     ses = WinHttpOpen( L"winetest", 0, NULL, NULL, 0 );
-    ok(ses != NULL, "failed to open session %u\n", GetLastError());
+    ok( ses != NULL, "failed to open session %lu\n", GetLastError() );
 
     if (unload)
     {
@@ -307,18 +330,18 @@ static void test_connection_cache( void )
     WinHttpSetStatusCallback( ses, check_notification, WINHTTP_CALLBACK_FLAG_ALL_NOTIFICATIONS, 0 );
 
     ret = WinHttpSetOption( ses, WINHTTP_OPTION_CONTEXT_VALUE, &context, sizeof(struct info *) );
-    ok(ret, "failed to set context value %u\n", GetLastError());
+    ok( ret, "failed to set context value %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_connect, __LINE__ );
     con = WinHttpConnect( ses, L"test.winehq.org", 0, 0 );
-    ok(con != NULL, "failed to open a connection %u\n", GetLastError());
+    ok( con != NULL, "failed to open a connection %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_open_request, __LINE__ );
     req = WinHttpOpenRequest( con, NULL, L"/tests/hello.html", NULL, NULL, NULL, 0 );
-    ok(req != NULL, "failed to open a request %u\n", GetLastError());
+    ok( req != NULL, "failed to open a request %lu\n", GetLastError() );
 
     ret = WinHttpSetOption( req, WINHTTP_OPTION_CONTEXT_VALUE, &context, sizeof(struct info *) );
-    ok(ret, "failed to set context value %u\n", GetLastError());
+    ok( ret, "failed to set context value %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_send_request, __LINE__ );
     ret = WinHttpSendRequest( req, NULL, 0, NULL, 0, 0, 0 );
@@ -328,16 +351,16 @@ static void test_connection_cache( void )
         skip("connection failed, skipping\n");
         goto done;
     }
-    ok(ret, "failed to send request %u\n", GetLastError());
+    ok( ret, "failed to send request %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_receive_response, __LINE__ );
     ret = WinHttpReceiveResponse( req, NULL );
-    ok(ret, "failed to receive response %u\n", GetLastError());
+    ok( ret, "failed to receive response %lu\n", GetLastError() );
 
     size = sizeof(status);
     ret = WinHttpQueryHeaders( req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL );
-    ok(ret, "failed unexpectedly %u\n", GetLastError());
-    ok(status == 200, "request failed unexpectedly %u\n", status);
+    ok( ret, "failed unexpectedly %lu\n", GetLastError() );
+    ok( status == 200, "request failed unexpectedly %lu\n", status );
 
     ResetEvent( info.wait );
     setup_test( &info, winhttp_close_handle, __LINE__ );
@@ -346,10 +369,10 @@ static void test_connection_cache( void )
 
     setup_test( &info, winhttp_open_request, __LINE__ );
     req = WinHttpOpenRequest( con, NULL, L"/tests/hello.html", NULL, NULL, NULL, 0 );
-    ok(req != NULL, "failed to open a request %u\n", GetLastError());
+    ok( req != NULL, "failed to open a request %lu\n", GetLastError() );
 
     ret = WinHttpSetOption( req, WINHTTP_OPTION_CONTEXT_VALUE, &context, sizeof(struct info *) );
-    ok(ret, "failed to set context value %u\n", GetLastError());
+    ok( ret, "failed to set context value %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_send_request, __LINE__ );
     ret = WinHttpSendRequest( req, NULL, 0, NULL, 0, 0, 0 );
@@ -359,16 +382,16 @@ static void test_connection_cache( void )
         skip("connection failed, skipping\n");
         goto done;
     }
-    ok(ret, "failed to send request %u\n", GetLastError());
+    ok( ret, "failed to send request %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_receive_response, __LINE__ );
     ret = WinHttpReceiveResponse( req, NULL );
-    ok(ret, "failed to receive response %u\n", GetLastError());
+    ok( ret, "failed to receive response %lu\n", GetLastError() );
 
     size = sizeof(status);
     ret = WinHttpQueryHeaders( req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL );
-    ok(ret, "failed unexpectedly %u\n", GetLastError());
-    ok(status == 200, "request failed unexpectedly %u\n", status);
+    ok( ret, "failed unexpectedly %lu\n", GetLastError() );
+    ok( status == 200, "request failed unexpectedly %lu\n", status );
 
     setup_test( &info, winhttp_close_handle, __LINE__ );
 done:
@@ -379,7 +402,7 @@ done:
     if (unload)
     {
         status = WaitForSingleObject( event, 0 );
-        ok(status == WAIT_TIMEOUT, "got %08x\n", status);
+        ok( status == WAIT_TIMEOUT, "got %#lx\n", status );
     }
 
     setup_test( &info, winhttp_close_handle, __LINE__ );
@@ -391,7 +414,7 @@ done:
     if (unload)
     {
         status = WaitForSingleObject( event, 100 );
-        ok(status == WAIT_OBJECT_0, "got %08x\n", status);
+        ok( status == WAIT_OBJECT_0, "got %#lx\n", status );
     }
 
     CloseHandle( event );
@@ -438,20 +461,20 @@ static void test_redirect( void )
     info.wait = CreateEventW( NULL, FALSE, FALSE, NULL );
 
     ses = WinHttpOpen( L"winetest", 0, NULL, NULL, 0 );
-    ok(ses != NULL, "failed to open session %u\n", GetLastError());
+    ok( ses != NULL, "failed to open session %lu\n", GetLastError() );
 
     WinHttpSetStatusCallback( ses, check_notification, WINHTTP_CALLBACK_FLAG_ALL_NOTIFICATIONS, 0 );
 
     ret = WinHttpSetOption( ses, WINHTTP_OPTION_CONTEXT_VALUE, &context, sizeof(struct info *) );
-    ok(ret, "failed to set context value %u\n", GetLastError());
+    ok( ret, "failed to set context value %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_connect, __LINE__ );
     con = WinHttpConnect( ses, L"test.winehq.org", 0, 0 );
-    ok(con != NULL, "failed to open a connection %u\n", GetLastError());
+    ok( con != NULL, "failed to open a connection %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_open_request, __LINE__ );
     req = WinHttpOpenRequest( con, NULL, L"/tests/redirect", NULL, NULL, NULL, 0 );
-    ok(req != NULL, "failed to open a request %u\n", GetLastError());
+    ok( req != NULL, "failed to open a request %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_send_request, __LINE__ );
     ret = WinHttpSendRequest( req, NULL, 0, NULL, 0, 0, 0 );
@@ -461,16 +484,16 @@ static void test_redirect( void )
         skip("connection failed, skipping\n");
         goto done;
     }
-    ok(ret, "failed to send request %u\n", GetLastError());
+    ok( ret, "failed to send request %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_receive_response, __LINE__ );
     ret = WinHttpReceiveResponse( req, NULL );
-    ok(ret, "failed to receive response %u\n", GetLastError());
+    ok( ret, "failed to receive response %lu\n", GetLastError() );
 
     size = sizeof(status);
     ret = WinHttpQueryHeaders( req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL );
-    ok(ret, "failed unexpectedly %u\n", GetLastError());
-    ok(status == 200, "request failed unexpectedly %u\n", status);
+    ok( ret, "failed unexpectedly %lu\n", GetLastError() );
+    ok( status == 200, "request failed unexpectedly %lu\n", status );
 
     setup_test( &info, winhttp_close_handle, __LINE__ );
 done:
@@ -519,7 +542,7 @@ static void test_async( void )
     info.wait = CreateEventW( NULL, FALSE, FALSE, NULL );
 
     ses = WinHttpOpen( L"winetest", 0, NULL, NULL, WINHTTP_FLAG_ASYNC );
-    ok(ses != NULL, "failed to open session %u\n", GetLastError());
+    ok( ses != NULL, "failed to open session %lu\n", GetLastError() );
 
     event = CreateEventW( NULL, FALSE, FALSE, NULL );
     ret = WinHttpSetOption( ses, WINHTTP_OPTION_UNLOAD_NOTIFY_EVENT, &event, sizeof(event) );
@@ -532,27 +555,27 @@ static void test_async( void )
     SetLastError( 0xdeadbeef );
     WinHttpSetStatusCallback( ses, check_notification, WINHTTP_CALLBACK_FLAG_ALL_NOTIFICATIONS, 0 );
     err = GetLastError();
-    ok(err == ERROR_SUCCESS || broken(err == 0xdeadbeef) /* < win7 */, "got %u\n", err);
+    ok( err == ERROR_SUCCESS || broken(err == 0xdeadbeef) /* < win7 */, "got %lu\n", err );
 
     SetLastError( 0xdeadbeef );
     ret = WinHttpSetOption( ses, WINHTTP_OPTION_CONTEXT_VALUE, &context, sizeof(struct info *) );
     err = GetLastError();
-    ok(ret, "failed to set context value %u\n", err);
-    ok(err == ERROR_SUCCESS || broken(err == 0xdeadbeef) /* < win7 */, "got %u\n", err);
+    ok( ret, "failed to set context value %lu\n", err );
+    ok( err == ERROR_SUCCESS || broken(err == 0xdeadbeef) /* < win7 */, "got %lu\n", err );
 
     setup_test( &info, winhttp_connect, __LINE__ );
     SetLastError( 0xdeadbeef );
     con = WinHttpConnect( ses, L"test.winehq.org", 0, 0 );
     err = GetLastError();
-    ok(con != NULL, "failed to open a connection %u\n", err);
-    ok(err == ERROR_SUCCESS || broken(err == WSAEINVAL) /* < win7 */, "got %u\n", err);
+    ok( con != NULL, "failed to open a connection %lu\n", err );
+    ok( err == ERROR_SUCCESS || broken(err == WSAEINVAL) /* < win7 */, "got %lu\n", err );
 
     setup_test( &info, winhttp_open_request, __LINE__ );
     SetLastError( 0xdeadbeef );
     req = WinHttpOpenRequest( con, NULL, L"/tests/hello.html", NULL, NULL, NULL, 0 );
     err = GetLastError();
-    ok(req != NULL, "failed to open a request %u\n", err);
-    ok(err == ERROR_SUCCESS, "got %u\n", err);
+    ok( req != NULL, "failed to open a request %lu\n", err );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
 
     setup_test( &info, winhttp_send_request, __LINE__ );
     SetLastError( 0xdeadbeef );
@@ -567,8 +590,8 @@ static void test_async( void )
         CloseHandle( info.wait );
         return;
     }
-    ok(ret, "failed to send request %u\n", err);
-    ok(err == ERROR_SUCCESS, "got %u\n", err);
+    ok( ret, "failed to send request %lu\n", err );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
 
     WaitForSingleObject( info.wait, INFINITE );
 
@@ -576,8 +599,8 @@ static void test_async( void )
     SetLastError( 0xdeadbeef );
     ret = WinHttpReceiveResponse( req, NULL );
     err = GetLastError();
-    ok(ret, "failed to receive response %u\n", err);
-    ok(err == ERROR_SUCCESS, "got %u\n", err);
+    ok( ret, "failed to receive response %lu\n", err );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
 
     WaitForSingleObject( info.wait, INFINITE );
 
@@ -585,24 +608,33 @@ static void test_async( void )
     SetLastError( 0xdeadbeef );
     ret = WinHttpQueryHeaders( req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL );
     err = GetLastError();
-    ok(ret, "failed unexpectedly %u\n", err);
-    ok(status == 200, "request failed unexpectedly %u\n", status);
-    ok(err == ERROR_SUCCESS || broken(err == 0xdeadbeef) /* < win7 */, "got %u\n", err);
+    ok( ret, "failed unexpectedly %lu\n", err );
+    ok( status == 200, "request failed unexpectedly %lu\n", status );
+    ok( err == ERROR_SUCCESS || broken(err == 0xdeadbeef) /* < win7 */, "got %lu\n", err );
 
     setup_test( &info, winhttp_query_data, __LINE__ );
     SetLastError( 0xdeadbeef );
     ret = WinHttpQueryDataAvailable( req, NULL );
     err = GetLastError();
-    ok(ret, "failed to query data available %u\n", err);
-    ok(err == ERROR_SUCCESS || err == ERROR_IO_PENDING || broken(err == 0xdeadbeef) /* < win7 */, "got %u\n", err);
+    ok( ret, "failed to query data available %lu\n", err );
+    ok( err == ERROR_SUCCESS || err == ERROR_IO_PENDING || broken(err == 0xdeadbeef) /* < win7 */, "got %lu\n", err );
 
     WaitForSingleObject( info.wait, INFINITE );
+    ok( info.last_status == WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, "got status %#lx\n", status );
+    ok(( err == ERROR_SUCCESS && info.last_thread_id == GetCurrentThreadId())
+         || (err == ERROR_IO_PENDING && info.last_thread_id != GetCurrentThreadId()),
+         "got unexpected thread %#lx, err %#lx\n", info.last_thread_id, err );
 
     setup_test( &info, winhttp_read_data, __LINE__ );
     ret = WinHttpReadData( req, buffer, sizeof(buffer), NULL );
-    ok(ret, "failed to read data %u\n", err);
+    ok( ret, "failed to read data %lu\n", err );
 
     WaitForSingleObject( info.wait, INFINITE );
+
+    ok( info.last_status == WINHTTP_CALLBACK_STATUS_READ_COMPLETE, "got status %#lx\n", status );
+    ok( (err == ERROR_SUCCESS && info.last_thread_id == GetCurrentThreadId())
+        || (err == ERROR_IO_PENDING && info.last_thread_id != GetCurrentThreadId()),
+        "got unexpected thread %#lx, err %#lx\n", info.last_thread_id, err );
 
     setup_test( &info, winhttp_close_handle, __LINE__ );
     WinHttpCloseHandle( req );
@@ -611,7 +643,7 @@ static void test_async( void )
     if (unload)
     {
         status = WaitForSingleObject( event, 0 );
-        ok(status == WAIT_TIMEOUT, "got %08x\n", status);
+        ok( status == WAIT_TIMEOUT, "got %#lx\n", status );
     }
     WinHttpCloseHandle( ses );
     WaitForSingleObject( info.wait, INFINITE );
@@ -620,7 +652,7 @@ static void test_async( void )
     if (unload)
     {
         status = WaitForSingleObject( event, 2000 );
-        ok(status == WAIT_OBJECT_0, "got %08x\n", status);
+        ok( status == WAIT_OBJECT_0, "got %#lx\n", status );
     }
     CloseHandle( event );
     CloseHandle( info.wait );
@@ -642,11 +674,63 @@ static const struct notification websocket_test[] =
     { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED },
     { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_SIGNAL },
     { winhttp_websocket_complete_upgrade, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, NF_SIGNAL },
-    { winhttp_websocket_send,             WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE, NF_SIGNAL },
-    { winhttp_websocket_receive,          WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SIGNAL },
-    { winhttp_websocket_receive,          WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SIGNAL },
-    { winhttp_websocket_shutdown,         WINHTTP_CALLBACK_STATUS_SHUTDOWN_COMPLETE, NF_SIGNAL },
+    { winhttp_websocket_send,             WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE, NF_MAIN_THREAD | NF_SIGNAL },
+    { winhttp_websocket_send,             WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE, NF_MAIN_THREAD | NF_SIGNAL },
+    { winhttp_websocket_send,             WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE, NF_MAIN_THREAD | NF_SIGNAL },
+    { winhttp_websocket_send,             WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE, NF_MAIN_THREAD | NF_SIGNAL },
+    { winhttp_websocket_shutdown,         WINHTTP_CALLBACK_STATUS_SHUTDOWN_COMPLETE, NF_MAIN_THREAD | NF_SIGNAL },
+    { winhttp_websocket_receive,          WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SAVE_BUFFER | NF_SIGNAL },
+    { winhttp_websocket_receive,          WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SAVE_BUFFER | NF_SIGNAL },
     { winhttp_websocket_close,            WINHTTP_CALLBACK_STATUS_CLOSE_COMPLETE, NF_SIGNAL },
+    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
+    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_CLOSING_CONNECTION, NF_WINE_ALLOW },
+    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_CONNECTION_CLOSED, NF_WINE_ALLOW },
+    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
+};
+
+static const struct notification websocket_test2[] =
+{
+    { winhttp_open_request,               WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_RESOLVING_NAME, NF_ALLOW },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_NAME_RESOLVED, NF_ALLOW },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, NF_SIGNAL },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_SIGNAL },
+    { winhttp_websocket_complete_upgrade, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, NF_SIGNAL },
+    { winhttp_websocket_receive,          WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SIGNAL },
+    { winhttp_websocket_close,            WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, NF_MAIN_THREAD | NF_SAVE_BUFFER},
+    { winhttp_websocket_close,            WINHTTP_CALLBACK_STATUS_CLOSE_COMPLETE, NF_SIGNAL },
+    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
+    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_CLOSING_CONNECTION, NF_WINE_ALLOW },
+    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_CONNECTION_CLOSED, NF_WINE_ALLOW },
+    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL }
+};
+
+static const struct notification websocket_test3[] =
+{
+    { winhttp_open_request,               WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_RESOLVING_NAME, NF_ALLOW },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_NAME_RESOLVED, NF_ALLOW },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, NF_SIGNAL },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_SIGNAL },
+    { winhttp_websocket_complete_upgrade, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, NF_SIGNAL },
+    { winhttp_websocket_receive,          WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SIGNAL },
+
+    { winhttp_websocket_shutdown,         WINHTTP_CALLBACK_STATUS_SHUTDOWN_COMPLETE, NF_MAIN_THREAD },
+    { winhttp_websocket_shutdown,         WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SAVE_BUFFER | NF_SIGNAL },
+    { winhttp_websocket_close,            WINHTTP_CALLBACK_STATUS_CLOSE_COMPLETE,
+                                                                 NF_MAIN_THREAD| NF_SAVE_BUFFER | NF_SIGNAL },
     { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
     { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_CLOSING_CONNECTION, NF_WINE_ALLOW },
     { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_CONNECTION_CLOSED, NF_WINE_ALLOW },
@@ -655,15 +739,22 @@ static const struct notification websocket_test[] =
     { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL }
 };
 
-static void test_websocket(void)
+#define BIG_BUFFER_SIZE (32 * 1024)
+
+static void test_websocket(BOOL secure)
 {
     HANDLE session, connection, request, socket, event;
+    WINHTTP_WEB_SOCKET_ASYNC_RESULT *result;
+    WINHTTP_WEB_SOCKET_STATUS *ws_status;
     WINHTTP_WEB_SOCKET_BUFFER_TYPE type;
     DWORD size, status, err;
     BOOL ret, unload = TRUE;
     struct info info, *context = &info;
+    unsigned char *big_buffer;
     char buffer[1024];
     USHORT close_status;
+    DWORD protocols, flags;
+    unsigned int i, test_index, offset;
 
     if (!pWinHttpWebSocketCompleteUpgrade)
     {
@@ -677,7 +768,7 @@ static void test_websocket(void)
     info.wait  = CreateEventW( NULL, FALSE, FALSE, NULL );
 
     session = WinHttpOpen( L"winetest", 0, NULL, NULL, WINHTTP_FLAG_ASYNC );
-    ok( session != NULL, "got %u\n", GetLastError() );
+    ok( session != NULL, "got %lu\n", GetLastError() );
 
     event = CreateEventW( NULL, FALSE, FALSE, NULL );
     ret = WinHttpSetOption( session, WINHTTP_OPTION_UNLOAD_NOTIFY_EVENT, &event, sizeof(event) );
@@ -687,33 +778,48 @@ static void test_websocket(void)
         unload = FALSE;
     }
 
+    if (secure)
+    {
+        protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2;
+        ret = WinHttpSetOption(session, WINHTTP_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols));
+        ok( ret, "failed to set protocols %lu\n", GetLastError() );
+    }
+
     SetLastError( 0xdeadbeef );
     WinHttpSetStatusCallback( session, check_notification, WINHTTP_CALLBACK_FLAG_ALL_NOTIFICATIONS, 0 );
     err = GetLastError();
-    ok( err == ERROR_SUCCESS || broken(err == 0xdeadbeef) /* < win7 */, "got %u\n", err );
+    ok( err == ERROR_SUCCESS || broken(err == 0xdeadbeef) /* < win7 */, "got %lu\n", err );
 
     SetLastError( 0xdeadbeef );
     ret = WinHttpSetOption( session, WINHTTP_OPTION_CONTEXT_VALUE, &context, sizeof(context) );
     err = GetLastError();
-    ok( ret, "got %u\n", err );
-    ok( err == ERROR_SUCCESS || broken(err == 0xdeadbeef) /* < win7 */, "got %u\n", err);
+    ok( ret, "got %lu\n", err );
+    ok( err == ERROR_SUCCESS || broken(err == 0xdeadbeef) /* < win7 */, "got %lu\n", err );
 
     setup_test( &info, winhttp_connect, __LINE__ );
     SetLastError( 0xdeadbeef );
     connection = WinHttpConnect( session, L"ws.ifelse.io", 0, 0 );
     err = GetLastError();
-    ok( connection != NULL, "got %u\n", err);
-    ok( err == ERROR_SUCCESS || broken(err == WSAEINVAL) /* < win7 */, "got %u\n", err );
+    ok( connection != NULL, "got %lu\n", err );
+    ok( err == ERROR_SUCCESS || broken(err == WSAEINVAL) /* < win7 */, "got %lu\n", err );
 
     setup_test( &info, winhttp_open_request, __LINE__ );
     SetLastError( 0xdeadbeef );
-    request = WinHttpOpenRequest( connection, NULL, L"/", NULL, NULL, NULL, 0 );
+    request = WinHttpOpenRequest( connection, NULL, L"/", NULL, NULL, NULL, secure ? WINHTTP_FLAG_SECURE : 0);
     err = GetLastError();
-    ok( request != NULL, "got %u\n", err );
-    ok( err == ERROR_SUCCESS, "got %u\n", err );
+    ok( request != NULL, "got %lu\n", err );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+
+    if (secure)
+    {
+        flags = SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID |
+                SECURITY_FLAG_IGNORE_CERT_CN_INVALID;
+        ret = WinHttpSetOption(request, WINHTTP_OPTION_SECURITY_FLAGS, &flags, sizeof(flags));
+        ok( ret, "failed to set security flags %lu\n", GetLastError() );
+    }
 
     ret = WinHttpSetOption( request, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, NULL, 0 );
-    ok( ret, "got %u\n", GetLastError() );
+    ok( ret, "got %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_send_request, __LINE__ );
     SetLastError( 0xdeadbeef );
@@ -728,79 +834,328 @@ static void test_websocket(void)
         CloseHandle( info.wait );
         return;
     }
-    ok( ret, "got %u\n", err );
-    ok( err == ERROR_SUCCESS, "got %u\n", err );
+    ok( ret, "got %lu\n", err );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
     WaitForSingleObject( info.wait, INFINITE );
 
     setup_test( &info, winhttp_receive_response, __LINE__ );
     SetLastError( 0xdeadbeef );
     ret = WinHttpReceiveResponse( request, NULL );
     err = GetLastError();
-    ok( ret, "got %u\n", err );
-    ok( err == ERROR_SUCCESS, "got %u\n", err );
+    ok( ret, "got %lu\n", err );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
     WaitForSingleObject( info.wait, INFINITE );
 
     size = sizeof(status);
     SetLastError( 0xdeadbeef );
     ret = WinHttpQueryHeaders( request, WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL );
     err = GetLastError();
-    ok( ret, "failed unexpectedly %u\n", err );
-    ok( status == 101, "got %u\n", status );
-    ok( err == ERROR_SUCCESS || broken(err == 0xdeadbeef) /* < win7 */, "got %u\n", err );
+    ok( ret, "failed unexpectedly %lu\n", err );
+    ok( status == 101, "got %lu\n", status );
+    ok( err == ERROR_SUCCESS || broken(err == 0xdeadbeef) /* < win7 */, "got %lu\n", err );
 
     setup_test( &info, winhttp_websocket_complete_upgrade, __LINE__ );
     SetLastError( 0xdeadbeef );
     socket = pWinHttpWebSocketCompleteUpgrade( request, (DWORD_PTR)context );
     err = GetLastError();
-    ok( socket != NULL, "got %u\n", err );
-    ok( err == ERROR_SUCCESS, "got %u\n", err );
+    ok( socket != NULL, "got %lu\n", err );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    /* The send is executed synchronously (even if sending a reasonably big buffer exceeding SSL buffer size).
+     * It is possible to trigger queueing the send into another thread but that involves sending a considerable
+     * amount of big enough buffers. */
+    big_buffer = malloc( BIG_BUFFER_SIZE );
+    for (i = 0; i < BIG_BUFFER_SIZE; ++i) big_buffer[i] = (i & 0xff) ^ 0xcc;
+
+    setup_test( &info, winhttp_websocket_send, __LINE__ );
+    err = pWinHttpWebSocketSend( socket, WINHTTP_WEB_SOCKET_BINARY_FRAGMENT_BUFFER_TYPE, big_buffer, BIG_BUFFER_SIZE / 2 );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    err = pWinHttpWebSocketSend( socket, WINHTTP_WEB_SOCKET_UTF8_FRAGMENT_BUFFER_TYPE,
+                                 big_buffer + BIG_BUFFER_SIZE / 2, BIG_BUFFER_SIZE / 2 );
+    ok( err == ERROR_INVALID_PARAMETER, "got %lu\n", err );
+    err = pWinHttpWebSocketSend( socket, WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE,
+                                 big_buffer + BIG_BUFFER_SIZE / 2, BIG_BUFFER_SIZE / 2 );
+    ok( err == ERROR_INVALID_PARAMETER, "got %lu\n", err );
+
+    setup_test( &info, winhttp_websocket_send, __LINE__ );
+    err = pWinHttpWebSocketSend( socket, WINHTTP_WEB_SOCKET_BINARY_FRAGMENT_BUFFER_TYPE,
+                                 big_buffer + BIG_BUFFER_SIZE / 2, BIG_BUFFER_SIZE / 2 );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
     WaitForSingleObject( info.wait, INFINITE );
 
     setup_test( &info, winhttp_websocket_send, __LINE__ );
-    err = pWinHttpWebSocketSend( socket, 0, (void *)"hello", sizeof("hello") );
-    ok( err == ERROR_SUCCESS, "got %u\n", err );
+    err = pWinHttpWebSocketSend( socket, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, NULL, 0 );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
     WaitForSingleObject( info.wait, INFINITE );
 
-    setup_test( &info, winhttp_websocket_receive, __LINE__ );
-    buffer[0] = 0;
-    size = 0xdeadbeef;
-    type = 0xdeadbeef;
-    err = pWinHttpWebSocketReceive( socket, buffer, sizeof(buffer), &size, &type );
-    ok( err == ERROR_SUCCESS, "got %u\n", err );
+    setup_test( &info, winhttp_websocket_send, __LINE__ );
+    err = pWinHttpWebSocketSend( socket, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, (void *)"hello", sizeof("hello") );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
     WaitForSingleObject( info.wait, INFINITE );
-    ok( size == 0xdeadbeef, "got %u\n", size );
-    ok( type == 0xdeadbeef, "got %u\n", type );
-    ok( buffer[0] == 'R', "unexpected data\n" );
-
-    setup_test( &info, winhttp_websocket_receive, __LINE__ );
-    buffer[0] = 0;
-    size = 0xdeadbeef;
-    type = 0xdeadbeef;
-    err = pWinHttpWebSocketReceive( socket, buffer, sizeof(buffer), &size, &type );
-    ok( err == ERROR_SUCCESS, "got %u\n", err );
-    WaitForSingleObject( info.wait, INFINITE );
-    ok( size == 0xdeadbeef, "got %u\n", size );
-    ok( type == 0xdeadbeef, "got %u\n", type );
-    ok( buffer[0] == 'h', "unexpected data\n" );
 
     setup_test( &info, winhttp_websocket_shutdown, __LINE__ );
     err = pWinHttpWebSocketShutdown( socket, 1000, (void *)"success", sizeof("success") );
-    ok( err == ERROR_SUCCESS, "got %u\n", err );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+
+    err = pWinHttpWebSocketSend( socket, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, (void *)"hello", sizeof("hello") );
+    ok( err == ERROR_INVALID_OPERATION, "got %lu\n", err );
+
     WaitForSingleObject( info.wait, INFINITE );
 
+    err = pWinHttpWebSocketShutdown( socket, 1000, (void *)"success", sizeof("success") );
+    ok( err == ERROR_INVALID_OPERATION, "got %lu\n", err );
+    err = pWinHttpWebSocketSend( socket, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, (void *)"hello", sizeof("hello") );
+    ok( err == ERROR_INVALID_OPERATION, "got %lu\n", err );
+
+    setup_test( &info, winhttp_websocket_receive, __LINE__ );
+    buffer[0] = 0;
+    size = 0xdeadbeef;
+    type = 0xdeadbeef;
+    err = pWinHttpWebSocketReceive( socket, buffer, sizeof(buffer), &size, &type );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+    WaitForSingleObject( info.wait, INFINITE );
+    ok( info.buflen == sizeof(*ws_status), "got %u\n", info.buflen );
+    ws_status = (WINHTTP_WEB_SOCKET_STATUS *)info.buffer;
+    ok( ws_status->eBufferType == WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE,
+        "got unexpected eBufferType %u\n", ws_status->eBufferType );
+    ok( size == 0xdeadbeef, "got %lu\n", size );
+    ok( type == 0xdeadbeef, "got %u\n", type );
+    ok( buffer[0] == 'R', "unexpected data\n" );
+
+    memset( big_buffer, 0, BIG_BUFFER_SIZE );
+    offset = 0;
+    test_index = info.index;
+    do
+    {
+        info.index = test_index;
+        setup_test( &info, winhttp_websocket_receive, __LINE__ );
+        size = 0xdeadbeef;
+        type = 0xdeadbeef;
+        ws_status = (WINHTTP_WEB_SOCKET_STATUS *)info.buffer;
+        ws_status->eBufferType = ~0u;
+        err = pWinHttpWebSocketReceive( socket, big_buffer + offset, BIG_BUFFER_SIZE - offset, &size, &type );
+        ok( err == ERROR_SUCCESS, "got %lu\n", err );
+        WaitForSingleObject( info.wait, INFINITE );
+        ok( info.buflen == sizeof(*ws_status), "got %u\n", info.buflen );
+        ok( ws_status->eBufferType == WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE
+            || ws_status->eBufferType == WINHTTP_WEB_SOCKET_BINARY_FRAGMENT_BUFFER_TYPE, "got %u\n", ws_status->eBufferType );
+        offset += ws_status->dwBytesTransferred;
+        ok( offset <= BIG_BUFFER_SIZE, "got %lu\n", ws_status->dwBytesTransferred );
+        ok( size == 0xdeadbeef, "got %lu\n", size );
+        ok( type == 0xdeadbeef, "got %u\n", type );
+    }
+    while (ws_status->eBufferType == WINHTTP_WEB_SOCKET_BINARY_FRAGMENT_BUFFER_TYPE);
+
+    ok( offset == BIG_BUFFER_SIZE, "got %u\n", offset );
+
+    for (i = 0; i < BIG_BUFFER_SIZE; ++i)
+        if (big_buffer[i] != ((i & 0xff) ^ 0xcc)) break;
+    ok( i == BIG_BUFFER_SIZE, "unexpected data %#x at %u\n", (unsigned char)big_buffer[i], i );
+
+    free( big_buffer );
+
+    close_status = 0xdead;
+    size = sizeof(buffer) + 1;
+    err = pWinHttpWebSocketQueryCloseStatus( socket, &close_status, buffer, sizeof(buffer), &size );
+    ok( err == ERROR_INVALID_OPERATION, "got %lu\n", err );
+    ok( close_status == 0xdead, "got %u\n", close_status );
+    ok( size == sizeof(buffer) + 1, "got %lu\n", size );
+
     setup_test( &info, winhttp_websocket_close, __LINE__ );
-    ret = pWinHttpWebSocketClose( socket, 1000, (void *)"success", sizeof("success") );
-    ok( err == ERROR_SUCCESS, "got %u\n", err );
+    err = pWinHttpWebSocketClose( socket, 1000, (void *)"success", sizeof("success") );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
     WaitForSingleObject( info.wait, INFINITE );
 
     close_status = 0xdead;
     size = sizeof(buffer) + 1;
     err = pWinHttpWebSocketQueryCloseStatus( socket, &close_status, buffer, sizeof(buffer), &size );
-    ok( err == ERROR_SUCCESS, "got %u\n", err );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
     ok( close_status == 1000, "got %u\n", close_status );
-    ok( size <= sizeof(buffer), "got %u\n", size );
+    ok( size <= sizeof(buffer), "got %lu\n", size );
 
     setup_test( &info, winhttp_close_handle, __LINE__ );
+    WinHttpCloseHandle( socket );
+    WinHttpCloseHandle( request );
+
+    WaitForSingleObject( info.wait, INFINITE );
+    end_test( &info, __LINE__ );
+
+    /* Test socket close while receive is pending. */
+    info.test  = websocket_test2;
+    info.count = ARRAY_SIZE( websocket_test2 );
+    info.index = 0;
+
+    setup_test( &info, winhttp_open_request, __LINE__ );
+    request = WinHttpOpenRequest( connection, NULL, L"/", NULL, NULL, NULL, secure ? WINHTTP_FLAG_SECURE : 0);
+    ok( request != NULL, "got %lu\n", err );
+
+    if (secure)
+    {
+        flags = SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID |
+                SECURITY_FLAG_IGNORE_CERT_CN_INVALID;
+        ret = WinHttpSetOption(request, WINHTTP_OPTION_SECURITY_FLAGS, &flags, sizeof(flags));
+        ok( ret, "failed to set security flags %lu\n", GetLastError() );
+    }
+
+    ret = WinHttpSetOption( request, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, NULL, 0 );
+    ok( ret, "got %lu\n", GetLastError() );
+
+    setup_test( &info, winhttp_send_request, __LINE__ );
+    ret = WinHttpSendRequest( request, NULL, 0, NULL, 0, 0, 0 );
+    ok( ret, "got %lu\n", GetLastError() );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    setup_test( &info, winhttp_receive_response, __LINE__ );
+    ret = WinHttpReceiveResponse( request, NULL );
+    ok( ret, "got %lu\n", err );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    size = sizeof(status);
+    ret = WinHttpQueryHeaders( request, WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL );
+    ok( ret, "failed unexpectedly %lu\n", err );
+    ok( status == 101, "got %lu\n", status );
+
+    setup_test( &info, winhttp_websocket_complete_upgrade, __LINE__ );
+    socket = pWinHttpWebSocketCompleteUpgrade( request, (DWORD_PTR)context );
+    ok( socket != NULL, "got %lu\n", err );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    setup_test( &info, winhttp_websocket_receive, __LINE__ );
+    buffer[0] = 0;
+    err = pWinHttpWebSocketReceive( socket, buffer, sizeof(buffer), &size, &type );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+    WaitForSingleObject( info.wait, INFINITE );
+    ok( buffer[0] == 'R', "unexpected data\n" );
+
+    err = pWinHttpWebSocketReceive( socket, buffer, sizeof(buffer), &size, &type );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+
+    setup_test( &info, winhttp_websocket_close, __LINE__ );
+    err = pWinHttpWebSocketClose( socket, 1000, (void *)"success", sizeof("success") );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+    ok( info.buflen == sizeof(*result), "got %u\n", info.buflen );
+    result = (WINHTTP_WEB_SOCKET_ASYNC_RESULT *)info.buffer;
+    ok( result->Operation == WINHTTP_WEB_SOCKET_RECEIVE_OPERATION, "got %u\n", result->Operation );
+    ok( !result->AsyncResult.dwResult, "got %Iu\n", result->AsyncResult.dwResult );
+    ok( result->AsyncResult.dwError == ERROR_WINHTTP_OPERATION_CANCELLED, "got %lu\n", result->AsyncResult.dwError );
+
+    close_status = 0xdead;
+    size = sizeof(buffer) + 1;
+    err = pWinHttpWebSocketQueryCloseStatus( socket, &close_status, buffer, sizeof(buffer), &size );
+    ok( err == ERROR_INVALID_OPERATION, "got %lu\n", err );
+    ok( close_status == 0xdead, "got %u\n", close_status );
+    ok( size == sizeof(buffer) + 1, "got %lu\n", size );
+
+    WaitForSingleObject( info.wait, INFINITE );
+
+    close_status = 0xdead;
+    size = sizeof(buffer) + 1;
+    err = pWinHttpWebSocketQueryCloseStatus( socket, &close_status, buffer, sizeof(buffer), &size );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+    ok( close_status == 1000, "got %u\n", close_status );
+    ok( size <= sizeof(buffer), "got %lu\n", size );
+
+    setup_test( &info, winhttp_close_handle, __LINE__ );
+    WinHttpCloseHandle( socket );
+    WinHttpCloseHandle( request );
+
+    WaitForSingleObject( info.wait, INFINITE );
+    end_test( &info, __LINE__ );
+
+    /* Test socket shutdown while receive is pending. */
+    info.test  = websocket_test3;
+    info.count = ARRAY_SIZE( websocket_test3 );
+    info.index = 0;
+
+    setup_test( &info, winhttp_open_request, __LINE__ );
+    request = WinHttpOpenRequest( connection, NULL, L"/", NULL, NULL, NULL, secure ? WINHTTP_FLAG_SECURE : 0);
+    ok( request != NULL, "got %lu\n", err );
+
+    if (secure)
+    {
+        flags = SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID |
+                SECURITY_FLAG_IGNORE_CERT_CN_INVALID;
+        ret = WinHttpSetOption(request, WINHTTP_OPTION_SECURITY_FLAGS, &flags, sizeof(flags));
+        ok( ret, "failed to set security flags %lu\n", GetLastError() );
+    }
+
+    ret = WinHttpSetOption( request, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, NULL, 0 );
+    ok( ret, "got %lu\n", GetLastError() );
+
+    setup_test( &info, winhttp_send_request, __LINE__ );
+    ret = WinHttpSendRequest( request, NULL, 0, NULL, 0, 0, 0 );
+    ok( ret, "got %lu\n", GetLastError() );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    setup_test( &info, winhttp_receive_response, __LINE__ );
+    ret = WinHttpReceiveResponse( request, NULL );
+    ok( ret, "got %lu\n", err );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    size = sizeof(status);
+    ret = WinHttpQueryHeaders( request, WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL );
+    ok( ret, "failed unexpectedly %lu\n", err );
+    ok( status == 101, "got %lu\n", status );
+
+    setup_test( &info, winhttp_websocket_complete_upgrade, __LINE__ );
+    socket = pWinHttpWebSocketCompleteUpgrade( request, (DWORD_PTR)context );
+    ok( socket != NULL, "got %lu\n", err );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    setup_test( &info, winhttp_websocket_receive, __LINE__ );
+    buffer[0] = 0;
+    err = pWinHttpWebSocketReceive( socket, buffer, sizeof(buffer), &size, &type );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+    WaitForSingleObject( info.wait, INFINITE );
+    ok( buffer[0] == 'R', "unexpected data\n" );
+
+    err = pWinHttpWebSocketReceive( socket, buffer, sizeof(buffer), &size, &type );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+    err = pWinHttpWebSocketReceive( socket, buffer, sizeof(buffer), &size, &type );
+    ok( err == ERROR_INVALID_OPERATION, "got %lu\n", err );
+
+    setup_test( &info, winhttp_websocket_shutdown, __LINE__ );
+    ws_status = (WINHTTP_WEB_SOCKET_STATUS *)info.buffer;
+    ws_status->eBufferType = ~0u;
+    err = pWinHttpWebSocketShutdown( socket, 1000, (void *)"success", sizeof("success") );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+
+    close_status = 0xdead;
+    size = sizeof(buffer) + 1;
+    err = pWinHttpWebSocketQueryCloseStatus( socket, &close_status, buffer, sizeof(buffer), &size );
+    ok( err == ERROR_INVALID_OPERATION, "got %lu\n", err );
+    ok( close_status == 0xdead, "got %u\n", close_status );
+    ok( size == sizeof(buffer) + 1, "got %lu\n", size );
+
+    WaitForSingleObject( info.wait, INFINITE );
+
+    ok( info.buflen == sizeof(*ws_status), "got %u\n", info.buflen );
+    ok( ws_status->eBufferType == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE, "got %u\n", ws_status->eBufferType );
+    ok( !ws_status->dwBytesTransferred, "got %lu\n", ws_status->dwBytesTransferred );
+
+    close_status = 0xdead;
+    size = sizeof(buffer) + 1;
+    err = pWinHttpWebSocketQueryCloseStatus( socket, &close_status, buffer, sizeof(buffer), &size );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+    ok( close_status == 1000, "got %u\n", close_status );
+    ok( size <= sizeof(buffer), "got %lu\n", size );
+
+    err = pWinHttpWebSocketReceive( socket, buffer, sizeof(buffer), &size, &type );
+    ok( err == ERROR_INVALID_OPERATION, "got %lu\n", err );
+
+    info.buflen = 0xdeadbeef;
+    setup_test( &info, winhttp_websocket_close, __LINE__ );
+    err = pWinHttpWebSocketClose( socket, 1000, (void *)"success", sizeof("success") );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+
+    WaitForSingleObject( info.wait, INFINITE );
+    ok( !info.buflen, "got %u\n", info.buflen );
+
+    setup_test( &info, winhttp_close_handle, __LINE__ );
+
     WinHttpCloseHandle( socket );
     WinHttpCloseHandle( request );
     WinHttpCloseHandle( connection );
@@ -808,7 +1163,7 @@ static void test_websocket(void)
     if (unload)
     {
         status = WaitForSingleObject( event, 0 );
-        ok( status == WAIT_TIMEOUT, "got %08x\n", status );
+        ok( status == WAIT_TIMEOUT, "got %#lx\n", status );
     }
     WinHttpCloseHandle( session );
     WaitForSingleObject( info.wait, INFINITE );
@@ -817,7 +1172,7 @@ static void test_websocket(void)
     if (unload)
     {
         status = WaitForSingleObject( event, 2000 );
-        ok( status == WAIT_OBJECT_0, "got %08x\n", status );
+        ok( status == WAIT_OBJECT_0, "got %#lx\n", status );
     }
     CloseHandle( event );
     CloseHandle( info.wait );
@@ -919,30 +1274,30 @@ static void test_basic_request(int port, const WCHAR *verb, const WCHAR *path)
     BOOL ret;
 
     ses = WinHttpOpen(NULL, WINHTTP_ACCESS_TYPE_NO_PROXY, NULL, NULL, 0);
-    ok(ses != NULL, "failed to open session %u\n", GetLastError());
+    ok( ses != NULL, "failed to open session %lu\n", GetLastError() );
 
     con = WinHttpConnect(ses, L"localhost", port, 0);
-    ok(con != NULL, "failed to open a connection %u\n", GetLastError());
+    ok( con != NULL, "failed to open a connection %lu\n", GetLastError() );
 
     req = WinHttpOpenRequest(con, verb, path, NULL, NULL, NULL, 0);
-    ok(req != NULL, "failed to open a request %u\n", GetLastError());
+    ok( req != NULL, "failed to open a request %lu\n", GetLastError() );
 
     ret = WinHttpSendRequest(req, NULL, 0, NULL, 0, 0, 0);
-    ok(ret, "failed to send request %u\n", GetLastError());
+    ok( ret, "failed to send request %lu\n", GetLastError() );
 
     ret = WinHttpReceiveResponse(req, NULL);
-    ok(ret, "failed to receive response %u\n", GetLastError());
+    ok( ret, "failed to receive response %lu\n", GetLastError() );
 
     status = 0xdeadbeef;
     size = sizeof(status);
     ret = WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL);
-    ok(ret, "failed to query status code %u\n", GetLastError());
-    ok(status == HTTP_STATUS_OK, "request failed unexpectedly %u\n", status);
+    ok( ret, "failed to query status code %lu\n", GetLastError());
+    ok( status == HTTP_STATUS_OK, "request failed unexpectedly %lu\n", status );
 
     count = 0;
     memset(buffer, 0, sizeof(buffer));
     ret = WinHttpReadData(req, buffer, sizeof buffer, &count);
-    ok(ret, "failed to read data %u\n", GetLastError());
+    ok( ret, "failed to read data %lu\n", GetLastError() );
     ok(count == sizeof page1 - 1, "count was wrong\n");
     ok(!memcmp(buffer, page1, sizeof page1), "http data wrong\n");
 
@@ -991,22 +1346,22 @@ static void open_async_request(int port, struct test_request *req, struct info *
     }
 
     req->session = WinHttpOpen( L"winetest", 0, NULL, NULL, WINHTTP_FLAG_ASYNC );
-    ok(req->session != NULL, "failed to open session %u\n", GetLastError());
+    ok( req->session != NULL, "failed to open session %lu\n", GetLastError() );
 
     WinHttpSetOption( req->session, WINHTTP_OPTION_CONTEXT_VALUE, &info, sizeof(struct info *) );
     WinHttpSetStatusCallback( req->session, check_notification, WINHTTP_CALLBACK_FLAG_ALL_NOTIFICATIONS, 0 );
 
     setup_test( info, winhttp_connect, __LINE__ );
     req->connection = WinHttpConnect( req->session, L"localhost", port, 0 );
-    ok(req->connection != NULL, "failed to open a connection %u\n", GetLastError());
+    ok( req->connection != NULL, "failed to open a connection %lu\n", GetLastError() );
 
     setup_test( info, winhttp_open_request, __LINE__ );
     req->request = WinHttpOpenRequest( req->connection, NULL, path, NULL, NULL, NULL, 0 );
-    ok(req->request != NULL, "failed to open a request %u\n", GetLastError());
+    ok( req->request != NULL, "failed to open a request %lu\n", GetLastError() );
 
     setup_test( info, winhttp_send_request, __LINE__ );
     ret = WinHttpSendRequest( req->request, NULL, 0, NULL, 0, 0, 0 );
-    ok(ret, "failed to send request %u\n", GetLastError());
+    ok( ret, "failed to send request %lu\n", GetLastError() );
 }
 
 static void open_socket_request(int port, struct test_request *req, struct info *info)
@@ -1035,7 +1390,7 @@ static void server_send_reply(struct test_request *req, struct info *info, const
     info->index = 0;
     setup_test( info, winhttp_send_request, __LINE__ );
     ret = WinHttpReceiveResponse( req->request, NULL );
-    ok(ret, "failed to receive response %u\n", GetLastError());
+    ok( ret, "failed to receive response %lu\n", GetLastError() );
 
     WaitForSingleObject( info->wait, INFINITE );
     end_test( info, __LINE__ );
@@ -1091,11 +1446,11 @@ static void close_request(struct test_request *req, struct info *info, BOOL allo
     setup_test( info, winhttp_close_handle, __LINE__ );
 
     ret = WinHttpCloseHandle( req->request );
-    ok(ret, "WinHttpCloseHandle failed: %u\n", GetLastError());
+    ok( ret, "WinHttpCloseHandle failed: %lu\n", GetLastError() );
     ret = WinHttpCloseHandle( req->connection );
-    ok(ret, "WinHttpCloseHandle failed: %u\n", GetLastError());
+    ok( ret, "WinHttpCloseHandle failed: %lu\n", GetLastError() );
     ret = WinHttpCloseHandle( req->session );
-    ok(ret, "WinHttpCloseHandle failed: %u\n", GetLastError());
+    ok( ret, "WinHttpCloseHandle failed: %lu\n", GetLastError() );
 
     WaitForSingleObject( info->wait, INFINITE );
     end_test( info, __LINE__ );
@@ -1108,38 +1463,21 @@ static const struct notification read_test[] =
     { winhttp_read_data,        WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SIGNAL }
 };
 
-static const struct notification read_allow_close_test[] =
-{
-    { winhttp_read_data,        WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_ALLOW },
-    { winhttp_read_data,        WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_ALLOW },
-    { winhttp_read_data,        WINHTTP_CALLBACK_STATUS_CLOSING_CONNECTION, NF_ALLOW },
-    { winhttp_read_data,        WINHTTP_CALLBACK_STATUS_CONNECTION_CLOSED, NF_ALLOW },
-    { winhttp_read_data,        WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SIGNAL }
-};
-
-#define read_request_data(a,b,c,d) _read_request_data(a,b,c,d,__LINE__)
-static void _read_request_data(struct test_request *req, struct info *info, const char *expected_data, BOOL closing_connection, unsigned line)
+#define read_request_data(a,b,c) _read_request_data(a,b,c,__LINE__)
+static void _read_request_data(struct test_request *req, struct info *info, const char *expected_data, unsigned line)
 {
     char buffer[1024];
     DWORD len;
     BOOL ret;
 
-    if (closing_connection)
-    {
-        info->test = read_allow_close_test;
-        info->count = ARRAY_SIZE( read_allow_close_test );
-    }
-    else
-    {
-        info->test = read_test;
-        info->count = ARRAY_SIZE( read_test );
-    }
+    info->test = read_test;
+    info->count = ARRAY_SIZE( read_test );
     info->index = 0;
 
     setup_test( info, winhttp_read_data, line );
     memset(buffer, '?', sizeof(buffer));
     ret = WinHttpReadData( req->request, buffer, sizeof(buffer), NULL );
-    ok(ret, "failed to read data %u\n", GetLastError());
+    ok( ret, "failed to read data %lu\n", GetLastError() );
 
     WaitForSingleObject( info->wait, INFINITE );
 
@@ -1164,7 +1502,7 @@ static void test_persistent_connection(int port)
                        "Content-Length: 1\r\n"
                        "\r\n"
                        "X" );
-    read_request_data( &req, &info, "X", FALSE );
+    read_request_data( &req, &info, "X" );
     close_request( &req, &info, FALSE );
 
     /* chunked connection test */
@@ -1178,7 +1516,7 @@ static void test_persistent_connection(int port)
                        "\r\n"
                        "9\r\n123456789\r\n"
                        "0\r\n\r\n" );
-    read_request_data( &req, &info, "123456789", FALSE );
+    read_request_data( &req, &info, "123456789" );
     close_request( &req, &info, FALSE );
 
     /* HTTP/1.1 connections are persistent by default, no additional header is needed */
@@ -1190,7 +1528,7 @@ static void test_persistent_connection(int port)
                        "Content-Length: 2\r\n"
                        "\r\n"
                        "xx" );
-    read_request_data( &req, &info, "xx", FALSE );
+    read_request_data( &req, &info, "xx" );
     close_request( &req, &info, FALSE );
 
     open_async_request( port, &req, &info, L"/test", TRUE );
@@ -1202,10 +1540,159 @@ static void test_persistent_connection(int port)
                        "Connection: close\r\n"
                        "\r\n"
                        "yy" );
+    read_request_data( &req, &info, "yy" );
     close_request( &req, &info, TRUE );
 
     SetEvent( server_socket_done );
     CloseHandle( info.wait );
+}
+
+struct test_recursion_context
+{
+    HANDLE request;
+    HANDLE wait;
+    LONG recursion_count, max_recursion_query, max_recursion_read;
+    BOOL read_from_callback;
+    BOOL have_sync_callback;
+};
+
+/* The limit is 128 before Win7 and 3 on newer Windows. */
+#define TEST_RECURSION_LIMIT 128
+
+static void CALLBACK test_recursion_callback( HINTERNET handle, DWORD_PTR context_ptr,
+                                              DWORD status, void *buffer, DWORD buflen )
+{
+    struct test_recursion_context *context = (struct test_recursion_context *)context_ptr;
+    DWORD err;
+    BOOL ret;
+    BYTE b;
+
+    switch (status)
+    {
+        case WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE:
+        case WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE:
+            SetEvent( context->wait );
+            break;
+
+        case WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE:
+            if (!context->read_from_callback)
+            {
+                SetEvent( context->wait );
+                break;
+            }
+
+            if (!*(DWORD *)buffer)
+            {
+                SetEvent( context->wait );
+                break;
+            }
+
+            ok( context->recursion_count < TEST_RECURSION_LIMIT,
+                "got %lu, thread %#lx\n", context->recursion_count, GetCurrentThreadId() );
+            context->max_recursion_query = max( context->max_recursion_query, context->recursion_count );
+            InterlockedIncrement( &context->recursion_count );
+            ret = WinHttpReadData( context->request, &b, 1, NULL );
+            err = GetLastError();
+            ok( ret, "failed to read data, GetLastError() %lu\n", err );
+            ok( err == ERROR_SUCCESS || err == ERROR_IO_PENDING, "got %lu\n", err );
+            if (err == ERROR_SUCCESS) context->have_sync_callback = TRUE;
+            InterlockedDecrement( &context->recursion_count );
+            break;
+
+        case WINHTTP_CALLBACK_STATUS_READ_COMPLETE:
+            if (!buflen)
+            {
+                SetEvent( context->wait );
+                break;
+            }
+            ok( context->recursion_count < TEST_RECURSION_LIMIT,
+                "got %lu, thread %#lx\n", context->recursion_count, GetCurrentThreadId() );
+            context->max_recursion_read = max( context->max_recursion_read, context->recursion_count );
+            context->read_from_callback = TRUE;
+            InterlockedIncrement( &context->recursion_count );
+            ret = WinHttpQueryDataAvailable( context->request, NULL );
+            err = GetLastError();
+            ok( ret, "failed to query data available, GetLastError() %lu\n", err );
+            ok( err == ERROR_SUCCESS || err == ERROR_IO_PENDING, "got %lu\n", err );
+            if (err == ERROR_SUCCESS) context->have_sync_callback = TRUE;
+            InterlockedDecrement( &context->recursion_count );
+            break;
+    }
+}
+
+static void test_recursion(void)
+{
+    struct test_recursion_context context;
+    HANDLE session, connection, request;
+    DWORD size, status, err;
+    BOOL ret;
+    BYTE b;
+
+    memset( &context, 0, sizeof(context) );
+
+    context.wait = CreateEventW( NULL, FALSE, FALSE, NULL );
+
+    session = WinHttpOpen( L"winetest", 0, NULL, NULL, WINHTTP_FLAG_ASYNC );
+    ok( !!session, "failed to open session, GetLastError() %lu\n", GetLastError() );
+
+    WinHttpSetStatusCallback( session, test_recursion_callback, WINHTTP_CALLBACK_FLAG_ALL_NOTIFICATIONS, 0 );
+
+    connection = WinHttpConnect( session, L"test.winehq.org", 0, 0 );
+    ok( !!connection, "failed to open a connection, GetLastError() %lu\n", GetLastError() );
+
+    request = WinHttpOpenRequest( connection, NULL, L"/tests/hello.html", NULL, NULL, NULL, 0 );
+    ok( !!request, "failed to open a request, GetLastError() %lu\n", GetLastError() );
+
+    context.request = request;
+    ret = WinHttpSendRequest( request, NULL, 0, NULL, 0, 0, (DWORD_PTR)&context );
+    err = GetLastError();
+    if (!ret && (err == ERROR_WINHTTP_CANNOT_CONNECT || err == ERROR_WINHTTP_TIMEOUT))
+    {
+        skip("Connection failed, skipping\n");
+        WinHttpSetStatusCallback( session, NULL, WINHTTP_CALLBACK_FLAG_ALL_NOTIFICATIONS, 0 );
+        WinHttpCloseHandle( request );
+        WinHttpCloseHandle( connection );
+        WinHttpCloseHandle( session );
+        CloseHandle( context.wait );
+        return;
+    }
+    ok( ret, "failed to send request, GetLastError() %lu\n", GetLastError() );
+
+    WaitForSingleObject( context.wait, INFINITE );
+
+    ret = WinHttpReceiveResponse( request, NULL );
+    ok( ret, "failed to receive response, GetLastError() %lu\n", GetLastError() );
+
+    WaitForSingleObject( context.wait, INFINITE );
+
+    size = sizeof(status);
+    ret = WinHttpQueryHeaders( request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL,
+                               &status, &size, NULL );
+    ok( ret, "request failed, GetLastError() %lu\n", GetLastError() );
+    ok( status == 200, "request failed unexpectedly, status %lu\n", status );
+
+    ret = WinHttpQueryDataAvailable( request, NULL );
+    ok( ret, "failed to query data available, GetLastError() %lu\n", GetLastError() );
+
+    WaitForSingleObject( context.wait, INFINITE );
+
+    ret = WinHttpReadData( request, &b, 1, NULL );
+    ok( ret, "failed to read data, GetLastError() %lu\n", GetLastError() );
+
+    WaitForSingleObject( context.wait, INFINITE );
+    if (context.have_sync_callback)
+    {
+        ok( context.max_recursion_query >= 2, "got %lu\n", context.max_recursion_query );
+        ok( context.max_recursion_read >= 2, "got %lu\n", context.max_recursion_read );
+    }
+    else skip( "no sync callbacks\n");
+
+    WinHttpSetStatusCallback( session, NULL, WINHTTP_CALLBACK_FLAG_ALL_NOTIFICATIONS, 0 );
+
+    WinHttpCloseHandle( request );
+    WinHttpCloseHandle( connection );
+    WinHttpCloseHandle( session );
+    CloseHandle( context.wait );
 }
 
 START_TEST (notification)
@@ -1225,19 +1712,23 @@ START_TEST (notification)
     test_connection_cache();
     test_redirect();
     test_async();
-    test_websocket();
+    test_websocket( FALSE );
+    winetest_push_context( "secure" );
+    test_websocket( TRUE );
+    winetest_pop_context();
+    test_recursion();
 
     si.event = CreateEventW( NULL, 0, 0, NULL );
     si.port = 7533;
 
     thread = CreateThread( NULL, 0, server_thread, &si, 0, NULL );
-    ok(thread != NULL, "failed to create thread %u\n", GetLastError());
+    ok( thread != NULL, "failed to create thread %lu\n", GetLastError() );
 
     server_socket_available = CreateEventW( NULL, 0, 0, NULL );
     server_socket_done = CreateEventW( NULL, 0, 0, NULL );
 
     ret = WaitForSingleObject( si.event, 10000 );
-    ok(ret == WAIT_OBJECT_0, "failed to start winhttp test server %u\n", GetLastError());
+    ok( ret == WAIT_OBJECT_0, "failed to start winhttp test server %lu\n", GetLastError() );
     if (ret != WAIT_OBJECT_0)
     {
         CloseHandle(thread);

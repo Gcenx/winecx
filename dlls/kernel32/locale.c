@@ -38,23 +38,25 @@
 #include "winerror.h"
 #include "winver.h"
 #include "kernel_private.h"
-#include "wine/heap.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(nls);
 
-extern BOOL WINAPI Internal_EnumCalendarInfo( CALINFO_ENUMPROCW proc, LCID lcid, CALID id,
+extern const NLS_LOCALE_DATA * WINAPI NlsValidateLocale( LCID *lcid, ULONG flags );
+
+extern BOOL WINAPI Internal_EnumCalendarInfo( CALINFO_ENUMPROCW proc,
+                                              const NLS_LOCALE_DATA *locale, CALID id,
                                               CALTYPE type, BOOL unicode, BOOL ex,
                                               BOOL exex, LPARAM lparam );
-extern BOOL WINAPI Internal_EnumDateFormats( DATEFMT_ENUMPROCW proc, LCID lcid, DWORD flags, BOOL unicode,
-                                             BOOL ex, BOOL exex, LPARAM lparam );
+extern BOOL WINAPI Internal_EnumDateFormats( DATEFMT_ENUMPROCW proc, const NLS_LOCALE_DATA *locale,
+                                             DWORD flags, BOOL unicode, BOOL ex, BOOL exex, LPARAM lparam );
 extern BOOL WINAPI Internal_EnumLanguageGroupLocales( LANGGROUPLOCALE_ENUMPROCW proc, LGRPID id,
                                                       DWORD flags, LONG_PTR param, BOOL unicode );
 extern BOOL WINAPI Internal_EnumSystemCodePages( CODEPAGE_ENUMPROCW proc, DWORD flags, BOOL unicode );
 extern BOOL WINAPI Internal_EnumSystemLanguageGroups( LANGUAGEGROUP_ENUMPROCW proc, DWORD flags,
                                                       LONG_PTR param, BOOL unicode );
-extern BOOL WINAPI Internal_EnumTimeFormats( TIMEFMT_ENUMPROCW proc, LCID lcid, DWORD flags,
-                                             BOOL unicode, BOOL ex, LPARAM lparam );
+extern BOOL WINAPI Internal_EnumTimeFormats( TIMEFMT_ENUMPROCW proc, const NLS_LOCALE_DATA *locale,
+                                             DWORD flags, BOOL unicode, BOOL ex, LPARAM lparam );
 extern BOOL WINAPI Internal_EnumUILanguages( UILANGUAGE_ENUMPROCW proc, DWORD flags,
                                              LONG_PTR param, BOOL unicode );
 
@@ -63,11 +65,13 @@ extern BOOL WINAPI Internal_EnumUILanguages( UILANGUAGE_ENUMPROCW proc, DWORD fl
  *
  * Retrieve the ANSI codepage for a given locale.
  */
-static inline UINT get_lcid_codepage( LCID lcid )
+static UINT get_lcid_codepage( LCID lcid, UINT flags )
 {
-    UINT ret;
-    if (!GetLocaleInfoW( lcid, LOCALE_IDEFAULTANSICODEPAGE|LOCALE_RETURN_NUMBER, (WCHAR *)&ret,
-                         sizeof(ret)/sizeof(WCHAR) )) ret = 0;
+    UINT ret = 0;
+
+    if (flags & LOCALE_USE_CP_ACP) return CP_ACP;
+    GetLocaleInfoW( lcid, LOCALE_IDEFAULTANSICODEPAGE | LOCALE_RETURN_NUMBER,
+                    (WCHAR *)&ret, sizeof(ret)/sizeof(WCHAR) );
     return ret;
 }
 
@@ -98,12 +102,10 @@ static inline UINT get_lcid_codepage( LCID lcid )
  */
 BOOL WINAPI SetLocaleInfoA(LCID lcid, LCTYPE lctype, LPCSTR data)
 {
-    UINT codepage = CP_ACP;
+    UINT codepage = get_lcid_codepage( lcid, lctype );
     WCHAR *strW;
     DWORD len;
     BOOL ret;
-
-    if (!(lctype & LOCALE_USE_CP_ACP)) codepage = get_lcid_codepage( lcid );
 
     if (!data)
     {
@@ -299,7 +301,8 @@ BOOL WINAPI EnumLanguageGroupLocalesA( LANGGROUPLOCALE_ENUMPROCA proc, LGRPID id
  */
 BOOL WINAPI EnumCalendarInfoA( CALINFO_ENUMPROCA proc, LCID lcid, CALID id, CALTYPE type )
 {
-    return Internal_EnumCalendarInfo( (CALINFO_ENUMPROCW)proc, lcid, id, type, FALSE, FALSE, FALSE, 0 );
+    return Internal_EnumCalendarInfo( (CALINFO_ENUMPROCW)proc, NlsValidateLocale( &lcid, 0 ),
+                                      id, type, FALSE, FALSE, FALSE, 0 );
 }
 
 /******************************************************************************
@@ -307,7 +310,8 @@ BOOL WINAPI EnumCalendarInfoA( CALINFO_ENUMPROCA proc, LCID lcid, CALID id, CALT
  */
 BOOL WINAPI EnumCalendarInfoExA( CALINFO_ENUMPROCEXA proc, LCID lcid, CALID id, CALTYPE type )
 {
-    return Internal_EnumCalendarInfo( (CALINFO_ENUMPROCW)proc, lcid, id, type, FALSE, TRUE, FALSE, 0 );
+    return Internal_EnumCalendarInfo( (CALINFO_ENUMPROCW)proc, NlsValidateLocale( &lcid, 0 ),
+                                      id, type, FALSE, TRUE, FALSE, 0 );
 }
 
 /**************************************************************************
@@ -318,7 +322,8 @@ BOOL WINAPI EnumCalendarInfoExA( CALINFO_ENUMPROCEXA proc, LCID lcid, CALID id, 
  */
 BOOL WINAPI EnumDateFormatsExA(DATEFMT_ENUMPROCEXA proc, LCID lcid, DWORD flags)
 {
-    return Internal_EnumDateFormats( (DATEFMT_ENUMPROCW)proc, lcid, flags, FALSE, TRUE, FALSE, 0 );
+    return Internal_EnumDateFormats( (DATEFMT_ENUMPROCW)proc, NlsValidateLocale( &lcid, 0 ),
+                                     flags, FALSE, TRUE, FALSE, 0 );
 }
 
 /**************************************************************************
@@ -329,7 +334,8 @@ BOOL WINAPI EnumDateFormatsExA(DATEFMT_ENUMPROCEXA proc, LCID lcid, DWORD flags)
  */
 BOOL WINAPI EnumDateFormatsA(DATEFMT_ENUMPROCA proc, LCID lcid, DWORD flags)
 {
-    return Internal_EnumDateFormats( (DATEFMT_ENUMPROCW)proc, lcid, flags, FALSE, FALSE, FALSE, 0 );
+    return Internal_EnumDateFormats( (DATEFMT_ENUMPROCW)proc, NlsValidateLocale( &lcid, 0 ),
+                                     flags, FALSE, FALSE, FALSE, 0 );
 }
 
 /**************************************************************************
@@ -346,7 +352,8 @@ BOOL WINAPI EnumTimeFormatsA( TIMEFMT_ENUMPROCA proc, LCID lcid, DWORD flags )
         SetLastError(ERROR_INVALID_FLAGS);
         return FALSE;
     }
-    return Internal_EnumTimeFormats( (TIMEFMT_ENUMPROCW)proc, lcid, flags, FALSE, FALSE, 0 );
+    return Internal_EnumTimeFormats( (TIMEFMT_ENUMPROCW)proc, NlsValidateLocale( &lcid, 0 ),
+                                     flags, FALSE, FALSE, 0 );
 }
 
 /******************************************************************************
@@ -376,35 +383,43 @@ BOOL WINAPI EnumUILanguagesA( UILANGUAGE_ENUMPROCA proc, DWORD flags, LONG_PTR p
 }
 
 
+/*********************************************************************
+ *            GetCalendarInfoA (KERNEL32.@)
+ */
+int WINAPI GetCalendarInfoA( LCID lcid, CALID id, CALTYPE type, LPSTR data, int data_len, DWORD *val )
+{
+    WCHAR buffer[256];
+
+    if (type & CAL_RETURN_NUMBER)
+        return GetCalendarInfoW( lcid, id, type, (WCHAR *)data, data_len, val ) * sizeof(WCHAR);
+
+    if (!GetCalendarInfoW( lcid, id, type, buffer, ARRAY_SIZE(buffer), val )) return 0;
+    return WideCharToMultiByte( get_lcid_codepage(lcid, type), 0, buffer, -1, data, data_len, NULL, NULL );
+}
+
+
+/*********************************************************************
+ *            SetCalendarInfoA (KERNEL32.@)
+ */
+int WINAPI SetCalendarInfoA( LCID lcid, CALID id, CALTYPE type, LPCSTR data )
+{
+    WCHAR buffer[256];
+
+    if (!MultiByteToWideChar( get_lcid_codepage(lcid, type), 0, data, -1, buffer, ARRAY_SIZE(buffer) ))
+        return 0;
+    return SetCalendarInfoW( lcid, id, type, buffer );
+}
+
+
 /******************************************************************************
  *           GetGeoInfoA (KERNEL32.@)
  */
 INT WINAPI GetGeoInfoA(GEOID geoid, GEOTYPE geotype, LPSTR data, int data_len, LANGID lang)
 {
-    WCHAR *buffW;
-    INT len;
+    WCHAR buffer[256];
 
-    TRACE("%d %d %p %d %d\n", geoid, geotype, data, data_len, lang);
+    TRACE("%ld %ld %p %d %d\n", geoid, geotype, data, data_len, lang);
 
-    len = GetGeoInfoW(geoid, geotype, NULL, 0, lang);
-    if (!len)
-        return 0;
-
-    buffW = HeapAlloc(GetProcessHeap(), 0, len*sizeof(WCHAR));
-    if (!buffW)
-        return 0;
-
-    GetGeoInfoW(geoid, geotype, buffW, len, lang);
-    len = WideCharToMultiByte(CP_ACP, 0, buffW, -1, NULL, 0, NULL, NULL);
-    if (!data || !data_len) {
-        HeapFree(GetProcessHeap(), 0, buffW);
-        return len;
-    }
-
-    len = WideCharToMultiByte(CP_ACP, 0, buffW, -1, data, data_len, NULL, NULL);
-    HeapFree(GetProcessHeap(), 0, buffW);
-
-    if (data_len < len)
-        SetLastError(ERROR_INSUFFICIENT_BUFFER);
-    return data_len < len ? 0 : len;
+    if (!GetGeoInfoW( geoid, geotype, buffer, ARRAY_SIZE(buffer), lang )) return 0;
+    return WideCharToMultiByte( CP_ACP, 0, buffer, -1, data, data_len, NULL, NULL );
 }

@@ -17,151 +17,88 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
-#include <stdio.h>
-#include <fcntl.h>
-#ifdef HAVE_SYS_IOCTL_H
-# include <sys/ioctl.h>
-#endif
-#ifdef HAVE_SYS_STAT_H
-# include <sys/stat.h>
-#endif
-#include <errno.h>
-#ifdef HAVE_SYS_TIME_H
-# include <sys/time.h>
-#endif
-#ifdef HAVE_ASM_TYPES_H
-# include <asm/types.h>
-#endif
-#ifdef HAVE_LINUX_VIDEODEV2_H
-# include <linux/videodev2.h>
-#endif
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
-
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
 #include "vfw.h"
-#include "winnls.h"
 #include "winternl.h"
 #include "wine/debug.h"
 
-#define CAP_DESC_MAX 32
+#include "unixlib.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(avicap);
 
+static HINSTANCE avicap_instance;
+static unixlib_handle_t unix_handle;
+
+static const WCHAR class_name[] = L"wine_avicap_class";
+
+static LRESULT CALLBACK avicap_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    switch (msg)
+    {
+        default:
+            if (msg >= WM_CAP_START && msg <= WM_CAP_END)
+                FIXME("Unhandled message %#x.\n", msg);
+            return DefWindowProcW(hwnd, msg, wparam, lparam);
+    }
+}
+
+static void register_class(void)
+{
+    WNDCLASSEXW class =
+    {
+        .cbSize = sizeof(WNDCLASSEXW),
+        .lpfnWndProc = avicap_wndproc,
+        .hInstance = avicap_instance,
+        .hCursor = LoadCursorW(NULL, (LPWSTR)IDC_ARROW),
+        .hbrBackground = (HBRUSH)(COLOR_BTNFACE+1),
+        .lpszClassName = class_name,
+    };
+
+    if (!RegisterClassExW(&class) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+        ERR("Failed to register class, error %lu.\n", GetLastError());
+}
+
+static void unregister_class(void)
+{
+    if (!UnregisterClassW(class_name, avicap_instance) && GetLastError() != ERROR_CLASS_DOES_NOT_EXIST)
+        ERR("Failed to unregister class, error %lu.\n", GetLastError());
+}
 
 /***********************************************************************
  *             capCreateCaptureWindowW   (AVICAP32.@)
  */
-HWND VFWAPI capCreateCaptureWindowW(LPCWSTR lpszWindowName, DWORD dwStyle, INT x,
-                                    INT y, INT nWidth, INT nHeight, HWND hWnd,
-                                    INT nID)
+HWND VFWAPI capCreateCaptureWindowW(const WCHAR *window_name, DWORD style,
+        int x, int y, int width, int height, HWND parent, int id)
 {
-    FIXME("(%s, %08x, %08x, %08x, %08x, %08x, %p, %08x): stub\n",
-           debugstr_w(lpszWindowName), dwStyle, x, y, nWidth, nHeight, hWnd, nID);
-    return 0;
+    TRACE("window_name %s, style %#lx, x %d, y %d, width %d, height %d, parent %p, id %#x.\n",
+            debugstr_w(window_name), style, x, y, width, height, parent, id);
+
+    return CreateWindowW(class_name, window_name, style, x, y, width, height, parent, NULL, avicap_instance, NULL);
 }
 
 /***********************************************************************
  *             capCreateCaptureWindowA   (AVICAP32.@)
  */
-HWND VFWAPI capCreateCaptureWindowA(LPCSTR lpszWindowName, DWORD dwStyle, INT x,
-                                    INT y, INT nWidth, INT nHeight, HWND hWnd,
-                                    INT nID)
-{   UNICODE_STRING nameW;
-    HWND retW;
+HWND VFWAPI capCreateCaptureWindowA(const char *window_name, DWORD style,
+        int x, int y, int width, int height, HWND parent, int id)
+{
+    UNICODE_STRING nameW;
+    HWND window;
 
-    if (lpszWindowName) RtlCreateUnicodeStringFromAsciiz(&nameW, lpszWindowName);
-    else nameW.Buffer = NULL;
+    if (window_name)
+        RtlCreateUnicodeStringFromAsciiz(&nameW, window_name);
+    else
+        nameW.Buffer = NULL;
 
-    retW = capCreateCaptureWindowW(nameW.Buffer, dwStyle, x, y, nWidth, nHeight,
-                                   hWnd, nID);
+    window = capCreateCaptureWindowW(nameW.Buffer, style, x, y, width, height, parent, id);
     RtlFreeUnicodeString(&nameW);
 
-    return retW;
+    return window;
 }
-
-#ifdef HAVE_LINUX_VIDEODEV2_H
-
-static int xioctl(int fd, int request, void * arg)
-{
-   int r;
-
-   do r = ioctl (fd, request, arg);
-   while (-1 == r && EINTR == errno);
-
-   return r;
-}
-
-static BOOL query_video_device(int devnum, char *name, int namesize, char *version, int versionsize)
-{
-   int fd;
-   char device[16];
-   struct stat st;
-   struct v4l2_capability caps;
-
-   snprintf(device, sizeof(device), "/dev/video%i", devnum);
-
-   if (stat (device, &st) == -1) {
-      /* This is probably because the device does not exist */
-      WARN("%s: %s\n", device, strerror(errno));
-      return FALSE;
-   }
-
-   if (!S_ISCHR (st.st_mode)) {
-      ERR("%s: Not a device\n", device);
-      return FALSE;
-   }
-
-   fd = open(device, O_RDWR | O_NONBLOCK);
-   if (fd == -1) {
-      ERR("%s: Failed to open: %s\n", device, strerror(errno));
-      return FALSE;
-   }
-
-   memset(&caps, 0, sizeof(caps));
-   if (xioctl(fd, VIDIOC_QUERYCAP, &caps) != -1) {
-      BOOL isCaptureDevice;
-#ifdef V4L2_CAP_DEVICE_CAPS
-      if (caps.capabilities & V4L2_CAP_DEVICE_CAPS)
-         isCaptureDevice = caps.device_caps & V4L2_CAP_VIDEO_CAPTURE;
-      else
-#endif
-         isCaptureDevice = caps.capabilities & V4L2_CAP_VIDEO_CAPTURE;
-      if (isCaptureDevice) {
-         lstrcpynA(name, (char *)caps.card, namesize);
-         snprintf(version, versionsize, "%s v%u.%u.%u", (char *)caps.driver, (caps.version >> 16) & 0xFF,
-                             (caps.version >> 8) & 0xFF, caps.version & 0xFF);
-      }
-      close(fd);
-      return isCaptureDevice;
-   }
-
-   if (errno != EINVAL && errno != 515)
-/* errno 515 is used by some webcam drivers for unknown IOICTL command */
-      ERR("%s: Querying failed: %s\n", device, strerror(errno));
-   else ERR("%s: Querying failed: Not a V4L compatible device\n", device);
-
-   close(fd);
-   return FALSE;
-}
-
-#else /* HAVE_LINUX_VIDEODEV2_H */
-
-static BOOL query_video_device(int devnum, char *name, int namesize, char *version, int versionsize)
-{
-   ERR("Video 4 Linux support not enabled\n");
-   return FALSE;
-}
-
-#endif /* HAVE_LINUX_VIDEODEV2_H */
 
 /***********************************************************************
  *             capGetDriverDescriptionA   (AVICAP32.@)
@@ -183,15 +120,37 @@ BOOL VFWAPI capGetDriverDescriptionA(WORD wDriverIndex, LPSTR lpszName,
 /***********************************************************************
  *             capGetDriverDescriptionW   (AVICAP32.@)
  */
-BOOL VFWAPI capGetDriverDescriptionW(WORD wDriverIndex, LPWSTR lpszName,
-                                     INT cbName, LPWSTR lpszVer, INT cbVer)
+BOOL VFWAPI capGetDriverDescriptionW(WORD index, WCHAR *name, int name_len, WCHAR *version, int version_len)
 {
-   char devname[CAP_DESC_MAX], devver[CAP_DESC_MAX];
+    struct get_device_desc_params params;
 
-   if (!query_video_device(wDriverIndex, devname, CAP_DESC_MAX, devver, CAP_DESC_MAX)) return FALSE;
+    params.index = index;
+    if (!unix_handle || __wine_unix_call(unix_handle, unix_get_device_desc, &params))
+        return FALSE;
 
-   MultiByteToWideChar(CP_UNIXCP, 0, devname, -1, lpszName, cbName);
-   MultiByteToWideChar(CP_UNIXCP, 0, devver, -1, lpszVer, cbVer);
-   TRACE("Version: %s - Name: %s\n", debugstr_w(lpszVer), debugstr_w(lpszName));
-   return TRUE;
+    TRACE("Found device name %s, version %s.\n", debugstr_w(params.name), debugstr_w(params.version));
+    lstrcpynW(name, params.name, name_len);
+    lstrcpynW(version, params.version, version_len);
+    return TRUE;
+}
+
+BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
+{
+    switch (reason)
+    {
+        case DLL_PROCESS_ATTACH:
+            NtQueryVirtualMemory(GetCurrentProcess(), instance,
+                    MemoryWineUnixFuncs, &unix_handle, sizeof(unix_handle), NULL);
+            DisableThreadLibraryCalls(instance);
+            register_class();
+            avicap_instance = instance;
+            break;
+
+        case DLL_PROCESS_DETACH:
+            if (!reserved)
+                unregister_class();
+            break;
+    }
+
+    return TRUE;
 }

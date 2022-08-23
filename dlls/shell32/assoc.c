@@ -30,7 +30,6 @@
 #include "shobjidl.h"
 #include "shell32_main.h"
 #include "ver.h"
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
@@ -132,7 +131,7 @@ static ULONG WINAPI IQueryAssociations_fnAddRef(IQueryAssociations *iface)
   IQueryAssociationsImpl *This = impl_from_IQueryAssociations(iface);
   ULONG refCount = InterlockedIncrement(&This->ref);
 
-  TRACE("(%p)->(ref before=%u)\n",This, refCount - 1);
+  TRACE("(%p)->(ref before=%lu)\n",This, refCount - 1);
 
   return refCount;
 }
@@ -147,7 +146,7 @@ static ULONG WINAPI IQueryAssociations_fnRelease(IQueryAssociations *iface)
   IQueryAssociationsImpl *This = impl_from_IQueryAssociations(iface);
   ULONG refCount = InterlockedDecrement(&This->ref);
 
-  TRACE("(%p)->(ref before=%u)\n",This, refCount + 1);
+  TRACE("(%p)->(ref before=%lu)\n",This, refCount + 1);
 
   if (!refCount)
   {
@@ -183,11 +182,10 @@ static HRESULT WINAPI IQueryAssociations_fnInit(
   HKEY hkeyProgid,
   HWND hWnd)
 {
-    static const WCHAR szProgID[] = {'P','r','o','g','I','D',0};
     IQueryAssociationsImpl *This = impl_from_IQueryAssociations(iface);
     LONG ret;
 
-    TRACE("(%p)->(%d,%s,%p,%p)\n", iface,
+    TRACE("(%p)->(%ld,%s,%p,%p)\n", iface,
                                     cfFlags,
                                     debugstr_w(pszAssoc),
                                     hkeyProgid,
@@ -195,7 +193,7 @@ static HRESULT WINAPI IQueryAssociations_fnInit(
     if (hWnd != NULL)
         FIXME("hwnd != NULL not supported\n");
     if (cfFlags != 0)
-	FIXME("unsupported flags: %x\n", cfFlags);
+	FIXME("unsupported flags: %lx\n", cfFlags);
 
     RegCloseKey(This->hkeySource);
     if (This->hkeySource != This->hkeyProgID)
@@ -234,11 +232,7 @@ static HRESULT WINAPI IQueryAssociations_fnInit(
         {
             HKEY progIdKey;
             /* for a clsid, the progid is the default value of the ProgID subkey */
-            ret = RegOpenKeyExW(This->hkeySource,
-                                szProgID,
-                                0,
-                                KEY_READ,
-                                &progIdKey);
+            ret = RegOpenKeyExW(This->hkeySource, L"ProgID", 0, KEY_READ, &progIdKey);
             if (ret != ERROR_SUCCESS)
                 return S_OK;
             hr = ASSOC_GetValue(progIdKey, NULL, (void**)&progId, NULL);
@@ -301,8 +295,6 @@ static HRESULT ASSOC_GetCommand(IQueryAssociationsImpl *This, const WCHAR *extra
   LONG ret;
   WCHAR *extra_from_reg = NULL;
   WCHAR *filetype;
-  static const WCHAR commandW[] = { 'c','o','m','m','a','n','d',0 };
-  static const WCHAR shellW[] = { 's','h','e','l','l',0 };
 
   /* When looking for file extension it's possible to have a default value
      that points to another key that contains 'shell/<verb>/command' subtree. */
@@ -316,14 +308,14 @@ static HRESULT ASSOC_GetCommand(IQueryAssociationsImpl *This, const WCHAR *extra
 
       if (ret == ERROR_SUCCESS)
       {
-          ret = RegOpenKeyExW(hkeyFile, shellW, 0, KEY_READ, &hkeyShell);
+          ret = RegOpenKeyExW(hkeyFile, L"shell", 0, KEY_READ, &hkeyShell);
           RegCloseKey(hkeyFile);
       }
       else
-          ret = RegOpenKeyExW(This->hkeySource, shellW, 0, KEY_READ, &hkeyShell);
+          ret = RegOpenKeyExW(This->hkeySource, L"shell", 0, KEY_READ, &hkeyShell);
   }
   else
-      ret = RegOpenKeyExW(This->hkeySource, shellW, 0, KEY_READ, &hkeyShell);
+      ret = RegOpenKeyExW(This->hkeySource, L"shell", 0, KEY_READ, &hkeyShell);
 
   if (ret) return HRESULT_FROM_WIN32(ret);
 
@@ -369,7 +361,7 @@ static HRESULT ASSOC_GetCommand(IQueryAssociationsImpl *This, const WCHAR *extra
   if (ret) return HRESULT_FROM_WIN32(ret);
 
   /* open command subkey */
-  ret = RegOpenKeyExW(hkeyVerb, commandW, 0, KEY_READ, &hkeyCommand);
+  ret = RegOpenKeyExW(hkeyVerb, L"command", 0, KEY_READ, &hkeyCommand);
   RegCloseKey(hkeyVerb);
   if (ret) return HRESULT_FROM_WIN32(ret);
 
@@ -395,7 +387,7 @@ static HRESULT ASSOC_GetExecutable(IQueryAssociationsImpl *This,
   if (pszCommand[0] == '"')
   {
     pszStart = pszCommand + 1;
-    pszEnd = strchrW(pszStart, '"');
+    pszEnd = wcschr(pszStart, '"');
     if (pszEnd)
       *pszEnd = 0;
     *len = SearchPathW(NULL, pszStart, NULL, pathlen, path, NULL);
@@ -403,7 +395,7 @@ static HRESULT ASSOC_GetExecutable(IQueryAssociationsImpl *This,
   else
   {
     pszStart = pszCommand;
-    for (pszEnd = pszStart; (pszEnd = strchrW(pszEnd, ' ')); pszEnd++)
+    for (pszEnd = pszStart; (pszEnd = wcschr(pszEnd, ' ')); pszEnd++)
     {
       WCHAR c = *pszEnd;
       *pszEnd = 0;
@@ -447,7 +439,7 @@ static HRESULT ASSOC_ReturnString(ASSOCF flags, LPWSTR out, DWORD *outlen, LPCWS
     HRESULT hr = S_OK;
     DWORD len;
 
-    TRACE("flags=0x%08x, data=%s\n", flags, debugstr_w(data));
+    TRACE("flags=0x%08lx, data=%s\n", flags, debugstr_w(data));
 
     if (!out)
     {
@@ -510,10 +502,10 @@ static HRESULT WINAPI IQueryAssociations_fnGetString(
   HRESULT hr;
   WCHAR path[MAX_PATH];
 
-  TRACE("(%p)->(0x%08x, %u, %s, %p, %p)\n", This, flags, str, debugstr_w(pszExtra), pszOut, pcchOut);
+  TRACE("(%p)->(0x%08lx, %u, %s, %p, %p)\n", This, flags, str, debugstr_w(pszExtra), pszOut, pcchOut);
 
   if (flags & unimplemented_flags)
-    FIXME("%08x: unimplemented flags\n", flags & unimplemented_flags);
+    FIXME("%08lx: unimplemented flags\n", flags & unimplemented_flags);
 
   if (!pcchOut)
     return E_UNEXPECTED;
@@ -529,7 +521,7 @@ static HRESULT WINAPI IQueryAssociations_fnGetString(
       hr = ASSOC_GetCommand(This, pszExtra, &command);
       if (SUCCEEDED(hr))
       {
-        hr = ASSOC_ReturnString(flags, pszOut, pcchOut, command, strlenW(command) + 1);
+        hr = ASSOC_ReturnString(flags, pszOut, pcchOut, command, lstrlenW(command) + 1);
         heap_free(command);
       }
       return hr;
@@ -553,7 +545,7 @@ static HRESULT WINAPI IQueryAssociations_fnGetString(
           /* hKeyProgID is NULL or there is no default value, so fail */
           return HRESULT_FROM_WIN32(ERROR_NO_ASSOCIATION);
       }
-      hr = ASSOC_ReturnString(flags, pszOut, pcchOut, docName, strlenW(docName) + 1);
+      hr = ASSOC_ReturnString(flags, pszOut, pcchOut, docName, lstrlenW(docName) + 1);
       heap_free(docName);
       return hr;
     }
@@ -564,15 +556,6 @@ static HRESULT WINAPI IQueryAssociations_fnGetString(
       DWORD size, retval = 0;
       UINT flen;
       WCHAR *bufW;
-      static const WCHAR translationW[] = {
-        '\\','V','a','r','F','i','l','e','I','n','f','o',
-        '\\','T','r','a','n','s','l','a','t','i','o','n',0
-      };
-      static const WCHAR fileDescFmtW[] = {
-        '\\','S','t','r','i','n','g','F','i','l','e','I','n','f','o',
-        '\\','%','0','4','x','%','0','4','x',
-        '\\','F','i','l','e','D','e','s','c','r','i','p','t','i','o','n',0
-      };
       WCHAR fileDescW[41];
 
       hr = ASSOC_GetExecutable(This, pszExtra, path, MAX_PATH, &len);
@@ -587,18 +570,18 @@ static HRESULT WINAPI IQueryAssociations_fnGetString(
         return E_OUTOFMEMORY;
       if (!GetFileVersionInfoW(path, 0, retval, verinfoW))
         goto get_friendly_name_fail;
-      if (VerQueryValueW(verinfoW, translationW, (LPVOID *)&bufW, &flen))
+      if (VerQueryValueW(verinfoW, L"\\VarFileInfo\\Translation", (LPVOID *)&bufW, &flen))
       {
         UINT i;
         DWORD *langCodeDesc = (DWORD *)bufW;
         for (i = 0; i < flen / sizeof(DWORD); i++)
         {
-          sprintfW(fileDescW, fileDescFmtW, LOWORD(langCodeDesc[i]),
-                   HIWORD(langCodeDesc[i]));
+          swprintf(fileDescW, ARRAY_SIZE(fileDescW), L"\\StringFileInfo\\%04x%04x\\FileDescription",
+                   LOWORD(langCodeDesc[i]), HIWORD(langCodeDesc[i]));
           if (VerQueryValueW(verinfoW, fileDescW, (LPVOID *)&bufW, &flen))
           {
-            /* Does strlenW(bufW) == 0 mean we use the filename? */
-            len = strlenW(bufW) + 1;
+            /* Does lstrlenW(bufW) == 0 mean we use the filename? */
+            len = lstrlenW(bufW) + 1;
             TRACE("found FileDescription: %s\n", debugstr_w(bufW));
             hr = ASSOC_ReturnString(flags, pszOut, pcchOut, bufW, len);
             heap_free(verinfoW);
@@ -610,28 +593,27 @@ get_friendly_name_fail:
       PathRemoveExtensionW(path);
       PathStripPathW(path);
       TRACE("using filename: %s\n", debugstr_w(path));
-      hr = ASSOC_ReturnString(flags, pszOut, pcchOut, path, strlenW(path) + 1);
+      hr = ASSOC_ReturnString(flags, pszOut, pcchOut, path, lstrlenW(path) + 1);
       heap_free(verinfoW);
       return hr;
     }
 
     case ASSOCSTR_CONTENTTYPE:
     {
-      static const WCHAR Content_TypeW[] = {'C','o','n','t','e','n','t',' ','T','y','p','e',0};
       WCHAR *contentType;
       DWORD ret;
       DWORD size;
 
       size = 0;
-      ret = RegGetValueW(This->hkeySource, NULL, Content_TypeW, RRF_RT_REG_SZ, NULL, NULL, &size);
+      ret = RegGetValueW(This->hkeySource, NULL, L"Content Type", RRF_RT_REG_SZ, NULL, NULL, &size);
       if (ret != ERROR_SUCCESS)
         return HRESULT_FROM_WIN32(ret);
       contentType = heap_alloc(size);
       if (contentType != NULL)
       {
-        ret = RegGetValueW(This->hkeySource, NULL, Content_TypeW, RRF_RT_REG_SZ, NULL, contentType, &size);
+        ret = RegGetValueW(This->hkeySource, NULL, L"Content Type", RRF_RT_REG_SZ, NULL, contentType, &size);
         if (ret == ERROR_SUCCESS)
-          hr = ASSOC_ReturnString(flags, pszOut, pcchOut, contentType, strlenW(contentType) + 1);
+          hr = ASSOC_ReturnString(flags, pszOut, pcchOut, contentType, lstrlenW(contentType) + 1);
         else
           hr = HRESULT_FROM_WIN32(ret);
         heap_free(contentType);
@@ -643,21 +625,19 @@ get_friendly_name_fail:
 
     case ASSOCSTR_DEFAULTICON:
     {
-      static const WCHAR DefaultIconW[] = {'D','e','f','a','u','l','t','I','c','o','n',0};
-      static const WCHAR documentIcon[] = {'s','h','e','l','l','3','2','.','d','l','l',',','0',0};
       DWORD ret;
       DWORD size;
 
       size = 0;
-      ret = RegGetValueW(This->hkeyProgID, DefaultIconW, NULL, RRF_RT_REG_SZ, NULL, NULL, &size);
+      ret = RegGetValueW(This->hkeyProgID, L"DefaultIcon", NULL, RRF_RT_REG_SZ, NULL, NULL, &size);
       if (ret == ERROR_SUCCESS)
       {
         WCHAR *icon = heap_alloc(size);
         if (icon)
         {
-          ret = RegGetValueW(This->hkeyProgID, DefaultIconW, NULL, RRF_RT_REG_SZ, NULL, icon, &size);
+          ret = RegGetValueW(This->hkeyProgID, L"DefaultIcon", NULL, RRF_RT_REG_SZ, NULL, icon, &size);
           if (ret == ERROR_SUCCESS)
-            hr = ASSOC_ReturnString(flags, pszOut, pcchOut, icon, strlenW(icon) + 1);
+            hr = ASSOC_ReturnString(flags, pszOut, pcchOut, icon, lstrlenW(icon) + 1);
           else
             hr = HRESULT_FROM_WIN32(ret);
           heap_free(icon);
@@ -667,7 +647,7 @@ get_friendly_name_fail:
       } else {
           /* there is no DefaultIcon subkey or hkeyProgID is NULL, so return the default document icon */
           if (This->hkeyProgID == NULL)
-              hr = ASSOC_ReturnString(flags, pszOut, pcchOut, documentIcon, strlenW(documentIcon) + 1);
+              hr = ASSOC_ReturnString(flags, pszOut, pcchOut, L"shell32.dll,0", lstrlenW(L"shell32.dll,0") + 1);
           else
               return HRESULT_FROM_WIN32(ERROR_NO_ASSOCIATION);
       }
@@ -675,8 +655,7 @@ get_friendly_name_fail:
     }
     case ASSOCSTR_SHELLEXTENSION:
     {
-        static const WCHAR shellexW[] = {'S','h','e','l','l','E','x','\\',0};
-        WCHAR keypath[ARRAY_SIZE(shellexW) + 39], guid[39];
+        WCHAR keypath[ARRAY_SIZE(L"ShellEx\\") + 39], guid[39];
         CLSID clsid;
         HKEY hkey;
         DWORD size;
@@ -685,8 +664,8 @@ get_friendly_name_fail:
         hr = CLSIDFromString(pszExtra, &clsid);
         if (FAILED(hr)) return hr;
 
-        strcpyW(keypath, shellexW);
-        strcatW(keypath, pszExtra);
+        lstrcpyW(keypath, L"ShellEx\\");
+        lstrcatW(keypath, pszExtra);
         ret = RegOpenKeyExW(This->hkeySource, keypath, 0, KEY_READ, &hkey);
         if (ret) return HRESULT_FROM_WIN32(ret);
 
@@ -729,7 +708,7 @@ static HRESULT WINAPI IQueryAssociations_fnGetKey(
 {
   IQueryAssociationsImpl *This = impl_from_IQueryAssociations(iface);
 
-  FIXME("(%p,0x%8x,0x%8x,%s,%p)-stub!\n", This, cfFlags, assockey,
+  FIXME("(%p,0x%8lx,0x%8x,%s,%p)-stub!\n", This, cfFlags, assockey,
         debugstr_w(pszExtra), phkeyOut);
   return E_NOTIMPL;
 }
@@ -755,25 +734,23 @@ static HRESULT WINAPI IQueryAssociations_fnGetData(IQueryAssociations *iface,
         ASSOCF cfFlags, ASSOCDATA assocdata, LPCWSTR pszExtra, LPVOID pvOut,
         DWORD *pcbOut)
 {
-    static const WCHAR edit_flags[] = {'E','d','i','t','F','l','a','g','s',0};
-
     IQueryAssociationsImpl *This = impl_from_IQueryAssociations(iface);
     void *data = NULL;
     DWORD size;
     HRESULT hres;
 
-    TRACE("(%p,0x%8x,0x%8x,%s,%p,%p)\n", This, cfFlags, assocdata,
+    TRACE("(%p,0x%8lx,0x%8x,%s,%p,%p)\n", This, cfFlags, assocdata,
             debugstr_w(pszExtra), pvOut, pcbOut);
 
     if(cfFlags)
-        FIXME("Unsupported flags: %x\n", cfFlags);
+        FIXME("Unsupported flags: %lx\n", cfFlags);
 
     switch(assocdata) {
     case ASSOCDATA_EDITFLAGS:
         if(!This->hkeyProgID)
             return HRESULT_FROM_WIN32(ERROR_NO_ASSOCIATION);
 
-        hres = ASSOC_GetValue(This->hkeyProgID, edit_flags, &data, &size);
+        hres = ASSOC_GetValue(This->hkeyProgID, L"EditFlags", &data, &size);
         if(SUCCEEDED(hres) && pcbOut)
             hres = ASSOC_ReturnData(pvOut, pcbOut, data, size);
         heap_free(data);
@@ -814,7 +791,7 @@ static HRESULT WINAPI IQueryAssociations_fnGetEnum(
 {
   IQueryAssociationsImpl *This = impl_from_IQueryAssociations(iface);
 
-  FIXME("(%p,0x%8x,0x%8x,%s,%s,%p)-stub!\n", This, cfFlags, assocenum,
+  FIXME("(%p,0x%8lx,0x%8x,%s,%s,%p)-stub!\n", This, cfFlags, assocenum,
         debugstr_w(pszExtra), debugstr_guid(riid), ppvOut);
   return E_NOTIMPL;
 }
@@ -867,7 +844,7 @@ static ULONG WINAPI ApplicationAssociationRegistration_AddRef(IApplicationAssoci
     IApplicationAssociationRegistrationImpl *This = impl_from_IApplicationAssociationRegistration(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
     return ref;
 }
 
@@ -876,7 +853,7 @@ static ULONG WINAPI ApplicationAssociationRegistration_Release(IApplicationAssoc
     IApplicationAssociationRegistrationImpl *This = impl_from_IApplicationAssociationRegistration(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if (!ref) {
         SHFree(This);
@@ -888,15 +865,7 @@ static HRESULT WINAPI ApplicationAssociationRegistration_QueryCurrentDefault(IAp
                                                                              ASSOCIATIONTYPE type, ASSOCIATIONLEVEL level, LPWSTR *association)
 {
     IApplicationAssociationRegistrationImpl *This = impl_from_IApplicationAssociationRegistration(iface);
-    static WCHAR urlassoc[] = {'U','r','l','A','s','s','o','c','i','a','t','i','o','n','s',0};
-    static WCHAR mimeassoc[] = {'M','I','M','E','A','s','s','o','c','i','a','t','i','o','n','s',0};
-    static WCHAR associations[] = {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
-                                'W','i','n','d','o','w','s','\\','S','h','e','l','l','\\',
-                                'A','s','s','o','c','i','a','t','i','o','n','s',0};
-    static WCHAR slash[] = {'\\',0};
-    static WCHAR choice[] = {'U','s','e','r','C','h','o','i','c','e',0};
-    static WCHAR propid[] = {'P','r','o','g','i','d',0};
-    WCHAR path[MAX_PATH] = {0};
+    WCHAR path[MAX_PATH];
     DWORD ret, keytype, size;
     HKEY hkey = NULL;
     HRESULT hr = HRESULT_FROM_WIN32(ERROR_NO_ASSOCIATION);
@@ -940,13 +909,13 @@ static HRESULT WINAPI ApplicationAssociationRegistration_QueryCurrentDefault(IAp
     }
     else
     {
-        ret = RegOpenKeyExW(HKEY_CURRENT_USER, associations, 0, KEY_READ, &hkey);
+        ret = RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\Shell\\Associations", 0, KEY_READ, &hkey);
         if(ret == ERROR_SUCCESS)
         {
             if(type == AT_URLPROTOCOL)
-                lstrcpyW(path, urlassoc);
+                swprintf( path, ARRAY_SIZE(path), L"UrlAssociations\\%s\\UserChoice", query );
             else if(type == AT_MIMETYPE)
-                lstrcpyW(path, mimeassoc);
+                swprintf( path, ARRAY_SIZE(path), L"MIMEAssociations\\%s\\UserChoice", query );
             else
             {
                 WARN("Unsupported type (%d).\n", type);
@@ -954,18 +923,13 @@ static HRESULT WINAPI ApplicationAssociationRegistration_QueryCurrentDefault(IAp
                 return hr;
             }
 
-            lstrcatW(path, slash);
-            lstrcatW(path, query);
-            lstrcatW(path, slash);
-            lstrcatW(path, choice);
-
-            ret = RegGetValueW(hkey, path, propid, RRF_RT_REG_SZ, &keytype, NULL, &size);
+            ret = RegGetValueW(hkey, path, L"Progid", RRF_RT_REG_SZ, &keytype, NULL, &size);
             if(ret == ERROR_SUCCESS)
             {
                 *association = CoTaskMemAlloc(size);
                 if(*association)
                 {
-                    ret = RegGetValueW(hkey, path, propid, RRF_RT_REG_SZ, &keytype, *association, &size);
+                    ret = RegGetValueW(hkey, path, L"Progid", RRF_RT_REG_SZ, &keytype, *association, &size);
                     if(ret == ERROR_SUCCESS)
                         hr = S_OK;
                     else
@@ -1078,7 +1042,7 @@ HRESULT WINAPI ApplicationAssociationRegistration_Constructor(IUnknown *outer, R
     if (FAILED(hr))
         SHFree(This);
 
-    TRACE("returning 0x%x with %p\n", hr, *ppv);
+    TRACE("returning 0x%lx with %p\n", hr, *ppv);
     return hr;
 }
 
@@ -1105,7 +1069,7 @@ static ULONG WINAPI enumassochandlers_AddRef(IEnumAssocHandlers *iface)
     struct enumassochandlers *This = impl_from_IEnumAssocHandlers(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->(%u)\n", This, ref);
+    TRACE("(%p)->(%lu)\n", This, ref);
     return ref;
 }
 
@@ -1114,7 +1078,7 @@ static ULONG WINAPI enumassochandlers_Release(IEnumAssocHandlers *iface)
     struct enumassochandlers *This = impl_from_IEnumAssocHandlers(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(%u)\n", This, ref);
+    TRACE("(%p)->(%lu)\n", This, ref);
 
     if (!ref)
         SHFree(This);
@@ -1127,7 +1091,7 @@ static HRESULT WINAPI enumassochandlers_Next(IEnumAssocHandlers *iface, ULONG co
 {
     struct enumassochandlers *This = impl_from_IEnumAssocHandlers(iface);
 
-    FIXME("(%p)->(%u %p %p): stub\n", This, count, handlers, fetched);
+    FIXME("(%p)->(%lu %p %p): stub\n", This, count, handlers, fetched);
 
     return E_NOTIMPL;
 }

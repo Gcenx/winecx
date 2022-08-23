@@ -23,7 +23,7 @@
 
 #include "wine/winheader_enter.h"
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 #include <pshpack4.h>
 #endif
 
@@ -1633,7 +1633,7 @@ typedef enum _D3DSHADER_COMPARISON
     D3DSPC_RESERVED1,
 } D3DSHADER_COMPARISON;
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 #include <poppack.h>
 #endif
 

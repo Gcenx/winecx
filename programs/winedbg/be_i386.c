@@ -21,7 +21,7 @@
 #include "debugger.h"
 #include "wine/debug.h"
 
-#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
+#if defined(__i386__) || defined(__x86_64__)
 
 WINE_DEFAULT_DEBUG_CHANNEL(winedbg);
 
@@ -33,19 +33,6 @@ extern void             be_i386_disasm_one_insn(ADDRESS64* addr, int display);
 
 #define IS_VM86_MODE(ctx) (ctx->EFlags & V86_FLAG)
 
-static inline void * wine_ldt_get_base( const LDT_ENTRY *ent )
-{
-    return (void *)(ent->BaseLow |
-                    (ULONG_PTR)ent->HighWord.Bits.BaseMid << 16 |
-                    (ULONG_PTR)ent->HighWord.Bits.BaseHi << 24);
-}
-static inline unsigned int wine_ldt_get_limit( const LDT_ENTRY *ent )
-{
-    unsigned int limit = ent->LimitLow | (ent->HighWord.Bits.LimitHi << 16);
-    if (ent->HighWord.Bits.Granularity) limit = (limit << 12) | 0xfff;
-    return limit;
-}
-
 static ADDRESS_MODE get_selector_type(HANDLE hThread, const WOW64_CONTEXT *ctx, WORD sel)
 {
     LDT_ENTRY	le;
@@ -54,11 +41,7 @@ static ADDRESS_MODE get_selector_type(HANDLE hThread, const WOW64_CONTEXT *ctx, 
     /* null or system selector */
     if (!(sel & 4) || ((sel >> 3) < 17)) return AddrModeFlat;
     if (dbg_curr_process->process_io->get_selector(hThread, sel, &le))
-    {
-        if (wine_ldt_get_base(&le) == 0 && wine_ldt_get_limit(&le) == 0xffffffff)
-            return AddrModeFlat;
         return le.HighWord.Bits.Default_Big ? AddrMode1632 : AddrMode1616;
-    }
     /* selector doesn't exist */
     return -1;
 }
@@ -87,7 +70,7 @@ static void* be_i386_linearize(HANDLE hThread, const ADDRESS64* addr)
 }
 
 static BOOL be_i386_build_addr(HANDLE hThread, const dbg_ctx_t *ctx, ADDRESS64* addr,
-                               unsigned seg, unsigned long offset)
+                               unsigned seg, DWORD64 offset)
 {
     addr->Mode    = AddrModeFlat;
     addr->Segment = seg;
@@ -150,7 +133,6 @@ static void be_i386_all_print_context(HANDLE hThread, const dbg_ctx_t *pctx)
                                              "DM", "ZM", "OM", "UM", "PM", "R-", "R+", "FZ" };
     const WOW64_CONTEXT *ctx = &pctx->x86;
     XSAVE_FORMAT *xmm_area;
-    long double ST[8];                         /* These are for floating regs */
     int         cnt;
 
     /* Break out the FPU state and the floating point registers    */
@@ -161,7 +143,7 @@ static void be_i386_all_print_context(HANDLE hThread, const dbg_ctx_t *pctx)
     dbg_printf(" FLSW:%04x", LOWORD(ctx->FloatSave.StatusWord));
 
     /* Isolate the condition code bits - note they are not contiguous */
-    dbg_printf("(CC:%d%d%d%d", (ctx->FloatSave.StatusWord & 0x00004000) >> 14,
+    dbg_printf("(CC:%ld%ld%ld%ld", (ctx->FloatSave.StatusWord & 0x00004000) >> 14,
                (ctx->FloatSave.StatusWord & 0x00000400) >> 10,
                (ctx->FloatSave.StatusWord & 0x00000200) >> 9,
                (ctx->FloatSave.StatusWord & 0x00000100) >> 8);
@@ -194,7 +176,7 @@ static void be_i386_all_print_context(HANDLE hThread, const dbg_ctx_t *pctx)
     dbg_printf(")\n");
     
     /* Here are the rest of the registers */
-    dbg_printf(" FLES:%08x  FLDO:%08x  FLDS:%08x  FLCNS:%08x\n",
+    dbg_printf(" FLES:%08lx  FLDO:%08lx  FLDS:%08lx  FLCNS:%08lx\n",
                ctx->FloatSave.ErrorSelector,
                ctx->FloatSave.DataOffset,
                ctx->FloatSave.DataSelector,
@@ -202,21 +184,17 @@ static void be_i386_all_print_context(HANDLE hThread, const dbg_ctx_t *pctx)
 
     /* Now for the floating point registers */
     dbg_printf("Floating Point Registers:\n");
-    for (cnt = 0; cnt < 4; cnt++) 
+    for (cnt = 0; cnt < 8; cnt++)
     {
-        memcpy(&ST[cnt], &ctx->FloatSave.RegisterArea[cnt * 10], 10);
-        dbg_printf(" ST%d:%Lf ", cnt, ST[cnt]);
-    }
-    dbg_printf("\n");
-    for (cnt = 4; cnt < 8; cnt++) 
-    {
-        memcpy(&ST[cnt], &ctx->FloatSave.RegisterArea[cnt * 10], 10);
-        dbg_printf(" ST%d:%Lf ", cnt, ST[cnt]);
+        const BYTE *p = &ctx->FloatSave.RegisterArea[cnt * 10];
+        if (cnt == 4) dbg_printf("\n");
+        dbg_printf(" ST%d:%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x ", cnt,
+                   p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9] );
     }
 
     xmm_area = (XSAVE_FORMAT *) &ctx->ExtendedRegisters;
 
-    dbg_printf(" mxcsr: %04x (", xmm_area->MxCsr );
+    dbg_printf(" mxcsr: %04lx (", xmm_area->MxCsr );
     for (cnt = 0; cnt < 16; cnt++)
         if (xmm_area->MxCsr & (1 << cnt)) dbg_printf( " %s", mxcsr_flags[cnt] );
     dbg_printf(" )\n");
@@ -273,11 +251,11 @@ static void be_i386_print_context(HANDLE hThread, const dbg_ctx_t *pctx, int all
         break;
     case AddrModeFlat:
     case AddrMode1632:
-        dbg_printf("\n EIP:%08x ESP:%08x EBP:%08x EFLAGS:%08x(%s)\n",
+        dbg_printf("\n EIP:%08lx ESP:%08lx EBP:%08lx EFLAGS:%08lx(%s)\n",
                    ctx->Eip, ctx->Esp, ctx->Ebp, ctx->EFlags, buf);
-        dbg_printf(" EAX:%08x EBX:%08x ECX:%08x EDX:%08x\n",
+        dbg_printf(" EAX:%08lx EBX:%08lx ECX:%08lx EDX:%08lx\n",
                    ctx->Eax, ctx->Ebx, ctx->Ecx, ctx->Edx);
-        dbg_printf(" ESI:%08x EDI:%08x\n",
+        dbg_printf(" ESI:%08lx EDI:%08lx\n",
                    ctx->Esi, ctx->Edi);
         break;
     }
@@ -299,57 +277,57 @@ static void be_i386_print_segment_info(HANDLE hThread, const dbg_ctx_t *ctx)
 
 static struct dbg_internal_var be_i386_ctx[] =
 {
-    {CV_REG_AL,         "AL",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Eax),     dbg_itype_unsigned_char_int},
-    {CV_REG_CL,         "CL",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Ecx),     dbg_itype_unsigned_char_int},
-    {CV_REG_DL,         "DL",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Edx),     dbg_itype_unsigned_char_int},
-    {CV_REG_BL,         "BL",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Ebx),     dbg_itype_unsigned_char_int},
-    {CV_REG_AH,         "AH",           (DWORD_PTR*)(FIELD_OFFSET(WOW64_CONTEXT, Eax)+1), dbg_itype_unsigned_char_int},
-    {CV_REG_CH,         "CH",           (DWORD_PTR*)(FIELD_OFFSET(WOW64_CONTEXT, Ecx)+1), dbg_itype_unsigned_char_int},
-    {CV_REG_DH,         "DH",           (DWORD_PTR*)(FIELD_OFFSET(WOW64_CONTEXT, Edx)+1), dbg_itype_unsigned_char_int},
-    {CV_REG_BH,         "BH",           (DWORD_PTR*)(FIELD_OFFSET(WOW64_CONTEXT, Ebx)+1), dbg_itype_unsigned_char_int},
-    {CV_REG_AX,         "AX",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Eax),     dbg_itype_unsigned_short_int},
-    {CV_REG_CX,         "CX",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Ecx),     dbg_itype_unsigned_short_int},
-    {CV_REG_DX,         "DX",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Edx),     dbg_itype_unsigned_short_int},
-    {CV_REG_BX,         "BX",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Ebx),     dbg_itype_unsigned_short_int},
-    {CV_REG_SP,         "SP",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Esp),     dbg_itype_unsigned_short_int},
-    {CV_REG_BP,         "BP",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Ebp),     dbg_itype_unsigned_short_int},
-    {CV_REG_SI,         "SI",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Esi),     dbg_itype_unsigned_short_int},
-    {CV_REG_DI,         "DI",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Edi),     dbg_itype_unsigned_short_int},
-    {CV_REG_EAX,        "EAX",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Eax),     dbg_itype_unsigned_int},
-    {CV_REG_ECX,        "ECX",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Ecx),     dbg_itype_unsigned_int},
-    {CV_REG_EDX,        "EDX",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Edx),     dbg_itype_unsigned_int},
-    {CV_REG_EBX,        "EBX",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Ebx),     dbg_itype_unsigned_int},
-    {CV_REG_ESP,        "ESP",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Esp),     dbg_itype_unsigned_int},
-    {CV_REG_EBP,        "EBP",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Ebp),     dbg_itype_unsigned_int},
-    {CV_REG_ESI,        "ESI",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Esi),     dbg_itype_unsigned_int},
-    {CV_REG_EDI,        "EDI",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Edi),     dbg_itype_unsigned_int},
-    {CV_REG_ES,         "ES",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, SegEs),   dbg_itype_unsigned_short_int},
-    {CV_REG_CS,         "CS",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, SegCs),   dbg_itype_unsigned_short_int},
-    {CV_REG_SS,         "SS",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, SegSs),   dbg_itype_unsigned_short_int},
-    {CV_REG_DS,         "DS",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, SegDs),   dbg_itype_unsigned_short_int},
-    {CV_REG_FS,         "FS",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, SegFs),   dbg_itype_unsigned_short_int},
-    {CV_REG_GS,         "GS",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, SegGs),   dbg_itype_unsigned_short_int},
-    {CV_REG_IP,         "IP",           (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Eip),     dbg_itype_unsigned_short_int},
-    {CV_REG_FLAGS,      "FLAGS",        (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, EFlags),  dbg_itype_unsigned_short_int},
-    {CV_REG_EIP,        "EIP",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, Eip),     dbg_itype_unsigned_int},
-    {CV_REG_EFLAGS,     "EFLAGS",       (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, EFlags),  dbg_itype_unsigned_int},
-    {CV_REG_ST0,        "ST0",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[ 0]), dbg_itype_long_real},
-    {CV_REG_ST0+1,      "ST1",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[10]), dbg_itype_long_real},
-    {CV_REG_ST0+2,      "ST2",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[20]), dbg_itype_long_real},
-    {CV_REG_ST0+3,      "ST3",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[30]), dbg_itype_long_real},
-    {CV_REG_ST0+4,      "ST4",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[40]), dbg_itype_long_real},
-    {CV_REG_ST0+5,      "ST5",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[50]), dbg_itype_long_real},
-    {CV_REG_ST0+6,      "ST6",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[60]), dbg_itype_long_real},
-    {CV_REG_ST0+7,      "ST7",          (DWORD_PTR*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[70]), dbg_itype_long_real},
-    {CV_AMD64_XMM0,     "XMM0",         (DWORD_PTR*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[0])), dbg_itype_m128a},
-    {CV_AMD64_XMM0+1,   "XMM1",         (DWORD_PTR*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[1])), dbg_itype_m128a},
-    {CV_AMD64_XMM0+2,   "XMM2",         (DWORD_PTR*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[2])), dbg_itype_m128a},
-    {CV_AMD64_XMM0+3,   "XMM3",         (DWORD_PTR*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[3])), dbg_itype_m128a},
-    {CV_AMD64_XMM0+4,   "XMM4",         (DWORD_PTR*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[4])), dbg_itype_m128a},
-    {CV_AMD64_XMM0+5,   "XMM5",         (DWORD_PTR*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[5])), dbg_itype_m128a},
-    {CV_AMD64_XMM0+6,   "XMM6",         (DWORD_PTR*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[6])), dbg_itype_m128a},
-    {CV_AMD64_XMM0+7,   "XMM7",         (DWORD_PTR*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[7])), dbg_itype_m128a},
-    {0,                 NULL,           0,                                      dbg_itype_none}
+    {CV_REG_AL,         "AL",           (void*)FIELD_OFFSET(WOW64_CONTEXT, Eax),     dbg_itype_unsigned_char_int},
+    {CV_REG_CL,         "CL",           (void*)FIELD_OFFSET(WOW64_CONTEXT, Ecx),     dbg_itype_unsigned_char_int},
+    {CV_REG_DL,         "DL",           (void*)FIELD_OFFSET(WOW64_CONTEXT, Edx),     dbg_itype_unsigned_char_int},
+    {CV_REG_BL,         "BL",           (void*)FIELD_OFFSET(WOW64_CONTEXT, Ebx),     dbg_itype_unsigned_char_int},
+    {CV_REG_AH,         "AH",           (void*)(FIELD_OFFSET(WOW64_CONTEXT, Eax)+1), dbg_itype_unsigned_char_int},
+    {CV_REG_CH,         "CH",           (void*)(FIELD_OFFSET(WOW64_CONTEXT, Ecx)+1), dbg_itype_unsigned_char_int},
+    {CV_REG_DH,         "DH",           (void*)(FIELD_OFFSET(WOW64_CONTEXT, Edx)+1), dbg_itype_unsigned_char_int},
+    {CV_REG_BH,         "BH",           (void*)(FIELD_OFFSET(WOW64_CONTEXT, Ebx)+1), dbg_itype_unsigned_char_int},
+    {CV_REG_AX,         "AX",           (void*)FIELD_OFFSET(WOW64_CONTEXT, Eax),     dbg_itype_unsigned_short_int},
+    {CV_REG_CX,         "CX",           (void*)FIELD_OFFSET(WOW64_CONTEXT, Ecx),     dbg_itype_unsigned_short_int},
+    {CV_REG_DX,         "DX",           (void*)FIELD_OFFSET(WOW64_CONTEXT, Edx),     dbg_itype_unsigned_short_int},
+    {CV_REG_BX,         "BX",           (void*)FIELD_OFFSET(WOW64_CONTEXT, Ebx),     dbg_itype_unsigned_short_int},
+    {CV_REG_SP,         "SP",           (void*)FIELD_OFFSET(WOW64_CONTEXT, Esp),     dbg_itype_unsigned_short_int},
+    {CV_REG_BP,         "BP",           (void*)FIELD_OFFSET(WOW64_CONTEXT, Ebp),     dbg_itype_unsigned_short_int},
+    {CV_REG_SI,         "SI",           (void*)FIELD_OFFSET(WOW64_CONTEXT, Esi),     dbg_itype_unsigned_short_int},
+    {CV_REG_DI,         "DI",           (void*)FIELD_OFFSET(WOW64_CONTEXT, Edi),     dbg_itype_unsigned_short_int},
+    {CV_REG_EAX,        "EAX",          (void*)FIELD_OFFSET(WOW64_CONTEXT, Eax),     dbg_itype_unsigned_int},
+    {CV_REG_ECX,        "ECX",          (void*)FIELD_OFFSET(WOW64_CONTEXT, Ecx),     dbg_itype_unsigned_int},
+    {CV_REG_EDX,        "EDX",          (void*)FIELD_OFFSET(WOW64_CONTEXT, Edx),     dbg_itype_unsigned_int},
+    {CV_REG_EBX,        "EBX",          (void*)FIELD_OFFSET(WOW64_CONTEXT, Ebx),     dbg_itype_unsigned_int},
+    {CV_REG_ESP,        "ESP",          (void*)FIELD_OFFSET(WOW64_CONTEXT, Esp),     dbg_itype_unsigned_int},
+    {CV_REG_EBP,        "EBP",          (void*)FIELD_OFFSET(WOW64_CONTEXT, Ebp),     dbg_itype_unsigned_int},
+    {CV_REG_ESI,        "ESI",          (void*)FIELD_OFFSET(WOW64_CONTEXT, Esi),     dbg_itype_unsigned_int},
+    {CV_REG_EDI,        "EDI",          (void*)FIELD_OFFSET(WOW64_CONTEXT, Edi),     dbg_itype_unsigned_int},
+    {CV_REG_ES,         "ES",           (void*)FIELD_OFFSET(WOW64_CONTEXT, SegEs),   dbg_itype_unsigned_short_int},
+    {CV_REG_CS,         "CS",           (void*)FIELD_OFFSET(WOW64_CONTEXT, SegCs),   dbg_itype_unsigned_short_int},
+    {CV_REG_SS,         "SS",           (void*)FIELD_OFFSET(WOW64_CONTEXT, SegSs),   dbg_itype_unsigned_short_int},
+    {CV_REG_DS,         "DS",           (void*)FIELD_OFFSET(WOW64_CONTEXT, SegDs),   dbg_itype_unsigned_short_int},
+    {CV_REG_FS,         "FS",           (void*)FIELD_OFFSET(WOW64_CONTEXT, SegFs),   dbg_itype_unsigned_short_int},
+    {CV_REG_GS,         "GS",           (void*)FIELD_OFFSET(WOW64_CONTEXT, SegGs),   dbg_itype_unsigned_short_int},
+    {CV_REG_IP,         "IP",           (void*)FIELD_OFFSET(WOW64_CONTEXT, Eip),     dbg_itype_unsigned_short_int},
+    {CV_REG_FLAGS,      "FLAGS",        (void*)FIELD_OFFSET(WOW64_CONTEXT, EFlags),  dbg_itype_unsigned_short_int},
+    {CV_REG_EIP,        "EIP",          (void*)FIELD_OFFSET(WOW64_CONTEXT, Eip),     dbg_itype_unsigned_int},
+    {CV_REG_EFLAGS,     "EFLAGS",       (void*)FIELD_OFFSET(WOW64_CONTEXT, EFlags),  dbg_itype_unsigned_int},
+    {CV_REG_ST0,        "ST0",          (void*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[ 0]), dbg_itype_long_real},
+    {CV_REG_ST0+1,      "ST1",          (void*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[10]), dbg_itype_long_real},
+    {CV_REG_ST0+2,      "ST2",          (void*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[20]), dbg_itype_long_real},
+    {CV_REG_ST0+3,      "ST3",          (void*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[30]), dbg_itype_long_real},
+    {CV_REG_ST0+4,      "ST4",          (void*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[40]), dbg_itype_long_real},
+    {CV_REG_ST0+5,      "ST5",          (void*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[50]), dbg_itype_long_real},
+    {CV_REG_ST0+6,      "ST6",          (void*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[60]), dbg_itype_long_real},
+    {CV_REG_ST0+7,      "ST7",          (void*)FIELD_OFFSET(WOW64_CONTEXT, FloatSave.RegisterArea[70]), dbg_itype_long_real},
+    {CV_AMD64_XMM0,     "XMM0",         (void*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[0])), dbg_itype_m128a},
+    {CV_AMD64_XMM0+1,   "XMM1",         (void*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[1])), dbg_itype_m128a},
+    {CV_AMD64_XMM0+2,   "XMM2",         (void*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[2])), dbg_itype_m128a},
+    {CV_AMD64_XMM0+3,   "XMM3",         (void*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[3])), dbg_itype_m128a},
+    {CV_AMD64_XMM0+4,   "XMM4",         (void*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[4])), dbg_itype_m128a},
+    {CV_AMD64_XMM0+5,   "XMM5",         (void*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[5])), dbg_itype_m128a},
+    {CV_AMD64_XMM0+6,   "XMM6",         (void*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[6])), dbg_itype_m128a},
+    {CV_AMD64_XMM0+7,   "XMM7",         (void*)(FIELD_OFFSET(WOW64_CONTEXT, ExtendedRegisters) + FIELD_OFFSET(XSAVE_FORMAT, XmmRegisters[7])), dbg_itype_m128a},
+    {0,                 NULL,           0,                                           dbg_itype_none}
 };
 
 static BOOL be_i386_is_step_over_insn(const void* insn)
@@ -699,13 +677,13 @@ static inline int be_i386_get_unused_DR(dbg_ctx_t *pctx, DWORD** r)
 
 static BOOL be_i386_insert_Xpoint(HANDLE hProcess, const struct be_process_io* pio,
                                   dbg_ctx_t *ctx, enum be_xpoint_type type,
-                                  void* addr, unsigned long* val, unsigned size)
+                                  void* addr, unsigned *val, unsigned size)
 {
     unsigned char       ch;
     SIZE_T              sz;
     DWORD              *pr;
     int                 reg;
-    unsigned long       bits;
+    unsigned int        bits;
 
     switch (type)
     {
@@ -750,7 +728,7 @@ static BOOL be_i386_insert_Xpoint(HANDLE hProcess, const struct be_process_io* p
 
 static BOOL be_i386_remove_Xpoint(HANDLE hProcess, const struct be_process_io* pio,
                                   dbg_ctx_t *ctx, enum be_xpoint_type type,
-                                  void* addr, unsigned long val, unsigned size)
+                                  void* addr, unsigned val, unsigned size)
 {
     SIZE_T              sz;
     unsigned char       ch;
@@ -797,52 +775,6 @@ static int be_i386_adjust_pc_for_break(dbg_ctx_t *ctx, BOOL way)
     }
     ctx->x86.Eip++;
     return 1;
-}
-
-static BOOL be_i386_fetch_integer(const struct dbg_lvalue* lvalue, unsigned size,
-                                  BOOL is_signed, LONGLONG* ret)
-{
-    if (size != 1 && size != 2 && size != 4 && size != 8 && size != 16) return FALSE;
-
-    memset(ret, 0, sizeof(*ret)); /* clear unread bytes */
-    /* FIXME: this assumes that debuggee and debugger use the same
-     * integral representation
-     */
-    if (!memory_read_value(lvalue, size, ret)) return FALSE;
-
-    /* propagate sign information */
-    if (is_signed && size < 8 && (*ret >> (size * 8 - 1)) != 0)
-    {
-        ULONGLONG neg = -1;
-        *ret |= neg << (size * 8);
-    }
-    return TRUE;
-}
-
-static BOOL be_i386_fetch_float(const struct dbg_lvalue* lvalue, unsigned size,
-                                long double* ret)
-{
-    char        tmp[sizeof(long double)];
-
-    /* FIXME: this assumes that debuggee and debugger use the same 
-     * representation for reals
-     */
-    if (!memory_read_value(lvalue, size, tmp)) return FALSE;
-
-    /* float & double types have to be promoted to a long double */
-    if (size == 4) *ret = *(float*)tmp;
-    else if (size == 8) *ret = *(double*)tmp;
-    else if (size == 10) *ret = *(long double*)tmp;
-    else return FALSE;
-
-    return TRUE;
-}
-
-static BOOL be_i386_store_integer(const struct dbg_lvalue* lvalue, unsigned size,
-                                  BOOL is_signed, LONGLONG val)
-{
-    /* this is simple as we're on a little endian CPU */
-    return memory_write_value(lvalue, size, &val);
 }
 
 static BOOL be_i386_get_context(HANDLE thread, dbg_ctx_t *ctx)
@@ -926,9 +858,6 @@ struct backend_cpu be_i386 =
     be_i386_is_watchpoint_set,
     be_i386_clear_watchpoint,
     be_i386_adjust_pc_for_break,
-    be_i386_fetch_integer,
-    be_i386_fetch_float,
-    be_i386_store_integer,
     be_i386_get_context,
     be_i386_set_context,
     be_i386_gdb_register_map,

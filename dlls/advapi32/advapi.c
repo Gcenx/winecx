@@ -201,7 +201,7 @@ BOOL WINAPI InitiateSystemShutdownExA( LPSTR lpMachineName, LPSTR lpMessage,
          DWORD dwTimeout, BOOL bForceAppsClosed, BOOL bRebootAfterShutdown,
          DWORD dwReason)
 {
-     FIXME("%s %s %d %d %d %#x\n", debugstr_a(lpMachineName),
+     FIXME("%s %s %ld %d %d %#lx\n", debugstr_a(lpMachineName),
             debugstr_a(lpMessage), dwTimeout, bForceAppsClosed,
             bRebootAfterShutdown, dwReason);
      return TRUE;
@@ -216,7 +216,7 @@ BOOL WINAPI InitiateSystemShutdownExW( LPWSTR lpMachineName, LPWSTR lpMessage,
          DWORD dwTimeout, BOOL bForceAppsClosed, BOOL bRebootAfterShutdown,
          DWORD dwReason)
 {
-     FIXME("%s %s %d %d %d %#x\n", debugstr_w(lpMachineName),
+     FIXME("%s %s %ld %d %d %#lx\n", debugstr_w(lpMachineName),
             debugstr_w(lpMessage), dwTimeout, bForceAppsClosed,
             bRebootAfterShutdown, dwReason);
      return TRUE;
@@ -243,7 +243,7 @@ BOOL WINAPI InitiateSystemShutdownW( LPWSTR lpMachineName, LPWSTR lpMessage, DWO
  */
 DWORD WINAPI InitiateShutdownA(char *name, char *message, DWORD seconds, DWORD flags, DWORD reason)
 {
-    FIXME("%s, %s, %d, %d, %d stub\n", debugstr_a(name), debugstr_a(message), seconds, flags, reason);
+    FIXME("%s, %s, %ld, %ld, %ld stub\n", debugstr_a(name), debugstr_a(message), seconds, flags, reason);
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
@@ -252,7 +252,7 @@ DWORD WINAPI InitiateShutdownA(char *name, char *message, DWORD seconds, DWORD f
  */
 DWORD WINAPI InitiateShutdownW(WCHAR *name, WCHAR *message, DWORD seconds, DWORD flags, DWORD reason)
 {
-    FIXME("%s, %s, %d, %d, %d stub\n", debugstr_w(name), debugstr_w(message), seconds, flags, reason);
+    FIXME("%s, %s, %ld, %ld, %ld stub\n", debugstr_w(name), debugstr_w(message), seconds, flags, reason);
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
@@ -262,7 +262,7 @@ BOOL WINAPI LogonUserA( LPCSTR lpszUsername, LPCSTR lpszDomain, LPCSTR lpszPassw
     WCHAR *usernameW = NULL, *domainW = NULL, *passwordW = NULL;
     BOOL ret = FALSE;
 
-    TRACE("%s %s %p 0x%08x 0x%08x %p\n", debugstr_a(lpszUsername),
+    TRACE("%s %s %p 0x%08lx 0x%08lx %p\n", debugstr_a(lpszUsername),
           debugstr_a(lpszDomain), lpszPassword, dwLogonType, dwLogonProvider, phToken);
 
     if (lpszUsername && !(usernameW = strdupAW( lpszUsername ))) return FALSE;
@@ -281,7 +281,7 @@ done:
 BOOL WINAPI LogonUserW( LPCWSTR lpszUsername, LPCWSTR lpszDomain, LPCWSTR lpszPassword,
                         DWORD dwLogonType, DWORD dwLogonProvider, PHANDLE phToken )
 {
-    FIXME("%s %s %p 0x%08x 0x%08x %p - stub\n", debugstr_w(lpszUsername),
+    FIXME("%s %s %p 0x%08lx 0x%08lx %p - stub\n", debugstr_w(lpszUsername),
           debugstr_w(lpszDomain), lpszPassword, dwLogonType, dwLogonProvider, phToken);
 
     *phToken = (HANDLE *)0xdeadbeef;
@@ -317,4 +317,20 @@ void WINAPI RegisterWaitChainCOMCallback(PCOGETCALLSTATE call_state_cb,
                                          PCOGETACTIVATIONSTATE activation_state_cb)
 {
     FIXME("%p, %p\n", call_state_cb, activation_state_cb);
+}
+
+HWCT WINAPI OpenThreadWaitChainSession(DWORD flags, PWAITCHAINCALLBACK callback)
+{
+    FIXME("flags %ld, callback %p stub!\n", flags, callback);
+    SetLastError(ERROR_NOT_SUPPORTED);
+    return NULL;
+}
+
+BOOL WINAPI GetThreadWaitChain(HWCT handle, DWORD_PTR ctx, DWORD flags, DWORD thread_id, DWORD *node_count,
+    WAITCHAIN_NODE_INFO *node_info_arr, BOOL *is_cycle)
+{
+    FIXME( "handle %p, ctx %Ix, flags %ld, thread_id %ld, node_count %p, node_info_arr %p, is_cycle %p stub!\n",
+           handle, ctx, flags, thread_id, node_count, node_info_arr, is_cycle );
+    SetLastError(ERROR_NOT_SUPPORTED);
+    return FALSE;
 }

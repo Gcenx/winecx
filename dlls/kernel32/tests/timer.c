@@ -79,10 +79,10 @@ static DWORD WINAPI thread_WaitForSingleObject(void *arg)
     ok(event != NULL, "CreateEvent failed\n");
     t = GetTickCount();
     r = WaitForSingleObject(event, 3000);
-    ok(r == WAIT_TIMEOUT, "WiatForSingleObject returned %x\n", r);
+    ok(r == WAIT_TIMEOUT, "WiatForSingleObject returned %lx\n", r);
     CloseHandle(event);
     t = GetTickCount() - t;
-    ok(t > 2000, "t = %d\n", t);
+    ok(t > 2000, "t = %ld\n", t);
     return 0;
 }
 
@@ -92,7 +92,7 @@ static DWORD WINAPI thread_Sleep(void *arg)
 
     Sleep(3000);
     t = GetTickCount() - t;
-    ok(t > 2000, "t = %d\n", t);
+    ok(t > 2000, "t = %ld\n", t);
     return 0;
 }
 
@@ -102,7 +102,7 @@ static DWORD WINAPI thread_SleepEx(void *arg)
 
     SleepEx(3000, TRUE);
     t = GetTickCount() - t;
-    ok(t > 2000, "t = %d\n", t);
+    ok(t > 2000, "t = %ld\n", t);
     return 0;
 }
 
@@ -122,10 +122,10 @@ static DWORD WINAPI thread_WaitableTimer_rel(void *arg)
     ok(r, "SetWaitableTimer failed\n");
 
     r = WaitForSingleObject(timer, INFINITE);
-    ok(r == WAIT_OBJECT_0, "WaitForSingleObject returned %d\n", r);
+    ok(r == WAIT_OBJECT_0, "WaitForSingleObject returned %ld\n", r);
     CloseHandle(timer);
     t = GetTickCount() - t;
-    ok(t > 2000, "t = %d\n", t);
+    ok(t > 2000, "t = %ld\n", t);
     return 0;
 }
 
@@ -149,10 +149,10 @@ static DWORD WINAPI thread_WaitableTimer_abs(void *arg)
     ok(r, "SetWaitableTimer failed\n");
 
     r = WaitForSingleObject(timer, INFINITE);
-    ok(r == WAIT_OBJECT_0, "WaitForSingleObject returned %d\n", r);
+    ok(r == WAIT_OBJECT_0, "WaitForSingleObject returned %ld\n", r);
     CloseHandle(timer);
     t = GetTickCount() - t;
-    ok(t < 2000, "t = %d\n", t);
+    ok(t < 2000, "t = %ld\n", t);
     return 0;
 }
 
@@ -172,13 +172,13 @@ static DWORD WINAPI thread_WaitableTimer_period(void *arg)
     ok(r, "SetWaitableTimer failed\n");
 
     r = WaitForSingleObject(timer, INFINITE);
-    ok(r == WAIT_OBJECT_0, "WaitForSingleObject returned %d\n", r);
+    ok(r == WAIT_OBJECT_0, "WaitForSingleObject returned %ld\n", r);
 
     r = WaitForSingleObject(timer, INFINITE);
-    ok(r == WAIT_OBJECT_0, "WaitForSingleObject returned %d\n", r);
+    ok(r == WAIT_OBJECT_0, "WaitForSingleObject returned %ld\n", r);
     CloseHandle(timer);
     t = GetTickCount() - t;
-    ok(t > 2000, "t = %d\n", t);
+    ok(t > 2000, "t = %ld\n", t);
     return 0;
 }
 
@@ -189,7 +189,7 @@ static DWORD WINAPI thread_SetTimer(void *arg)
     MSG msg;
 
     timer = SetTimer(NULL, 0, 3000, NULL);
-    ok(timer, "SetTimer failed (%d)\n", GetLastError());
+    ok(timer, "SetTimer failed (%ld)\n", GetLastError());
 
     while (GetMessageW(&msg, NULL, 0, 0))
     {
@@ -198,7 +198,7 @@ static DWORD WINAPI thread_SetTimer(void *arg)
     }
 
     t = GetTickCount() - t;
-    ok(t > 2000, "t = %d\n", t);
+    ok(t > 2000, "t = %ld\n", t);
     KillTimer(NULL, timer);
     return 0;
 }
@@ -210,7 +210,7 @@ static void test_timeouts(void)
 
     if (!adjust_system_time(1))
     {
-        skip("can't adjust system clock (%d)\n", GetLastError());
+        skip("can't adjust system clock (%ld)\n", GetLastError());
         return;
     }
 

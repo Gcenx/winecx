@@ -1,8 +1,11 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE    = winex11.drv
-IMPORTS   = uuid setupapi rpcrt4 user32 gdi32 advapi32
+IMPORTS   = uuid user32 gdi32 win32u
 DELAYIMPORTS = comctl32 ole32 shell32 imm32
 EXTRAINCL = $(X_CFLAGS)
-EXTRALIBS = $(X_LIBS) $(X_EXTRA_LIBS)
+EXTRALIBS = $(X_LIBS) $(X_EXTRA_LIBS) $(PTHREAD_LIBS)
+
+EXTRADLLFLAGS = -mcygwin
 
 C_SRCS = \
 	bitblt.c \
@@ -15,7 +18,6 @@ C_SRCS = \
 	ime.c \
 	init.c \
 	keyboard.c \
-	mac_xim.c \
 	mouse.c \
 	opengl.c \
 	palette.c \

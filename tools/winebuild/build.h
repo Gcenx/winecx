@@ -29,16 +29,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-
-#ifndef max
-#define max(a,b)   (((a) > (b)) ? (a) : (b))
-#endif
-#ifndef min
-#define min(a,b)   (((a) < (b)) ? (a) : (b))
-#endif
-
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#include "../tools.h"
 
 typedef enum
 {
@@ -114,6 +105,34 @@ typedef struct
     } u;
 } ORDDEF;
 
+struct apiset_entry
+{
+    unsigned int name_off;
+    unsigned int name_len;
+    unsigned int hash;
+    unsigned int hash_len;
+    unsigned int val_count;
+    struct apiset_value
+    {
+        unsigned int name_off;
+        unsigned int name_len;
+        unsigned int val_off;
+        unsigned int val_len;
+    } values[4];
+};
+
+struct apiset
+{
+    unsigned int count;
+    unsigned int size;
+    struct apiset_entry *entries;
+    unsigned int str_pos;
+    unsigned int str_size;
+    char *strings;
+};
+
+static const unsigned int apiset_hash_factor = 31;
+
 typedef struct
 {
     char            *src_name;           /* file name of the source spec file */
@@ -136,37 +155,35 @@ typedef struct
     int              subsystem;          /* subsystem id */
     int              subsystem_major;    /* subsystem version major number */
     int              subsystem_minor;    /* subsystem version minor number */
+    int              syscall_table;      /* syscall table id */
     int              unicode_app;        /* default to unicode entry point */
     ORDDEF          *entry_points;       /* dll entry points */
     ORDDEF         **names;              /* array of entry point names (points into entry_points) */
     ORDDEF         **ordinals;           /* array of dll ordinals (points into entry_points) */
     struct resource *resources;          /* array of dll resources (format differs between Win16/Win32) */
+    struct apiset    apiset;             /* list of defined api sets */
 } DLLSPEC;
 
-enum target_cpu
-{
-    CPU_x86, CPU_x86_32on64, CPU_x86_64, CPU_POWERPC, CPU_ARM, CPU_ARM64, CPU_LAST = CPU_ARM64
-};
-
-enum target_platform
-{
-    PLATFORM_UNSPECIFIED,
-    PLATFORM_APPLE,
-    PLATFORM_FREEBSD,
-    PLATFORM_SOLARIS,
-    PLATFORM_WINDOWS
-};
-
 extern char *target_alias;
-extern enum target_cpu target_cpu;
-extern enum target_platform target_platform;
+extern struct target target;
 
-struct strarray
+static inline unsigned int get_ptr_size(void)
 {
-    const char **str;
-    unsigned int count;
-    unsigned int max;
-};
+    return get_target_ptr_size( target );
+}
+
+/* return the size of a pointer on the target CPU */
+static inline unsigned int get_host_ptr_size(void)
+{
+    if (target.cpu == CPU_x86_32on64)
+        return 8;
+    return get_ptr_size();
+}
+
+static inline int is_pe(void)
+{
+    return target.platform == PLATFORM_MINGW || target.platform == PLATFORM_WINDOWS;
+}
 
 /* entry point flags */
 #define FLAG_NORELAY   0x0001  /* don't use relay debugging for this function */
@@ -186,9 +203,9 @@ struct strarray
 #define FLAG_EXPORT32  0x4000  /* 32-bit export in 16-bit spec file */
 
 #define FLAG_CPU(cpu)  (0x10000 << (cpu))
-#define FLAG_CPU_MASK  (FLAG_CPU(CPU_LAST + 1) - FLAG_CPU(0))
+#define FLAG_CPU_MASK  (FLAG_CPU_WIN32 | FLAG_CPU_WIN64)
 #define FLAG_CPU_WIN64 (FLAG_CPU(CPU_x86_64) | FLAG_CPU(CPU_ARM64))
-#define FLAG_CPU_WIN32 (FLAG_CPU_MASK & ~FLAG_CPU_WIN64)
+#define FLAG_CPU_WIN32 (FLAG_CPU(CPU_i386) | FLAG_CPU(CPU_ARM))
 
 #define MAX_ORDINALS  65535
 
@@ -211,7 +228,8 @@ struct strarray
 #define IMAGE_FILE_UP_SYSTEM_ONLY	   0x4000
 #define IMAGE_FILE_BYTES_REVERSED_HI	   0x8000
 
-#define IMAGE_DLLCHARACTERISTICS_NX_COMPAT 0x0100
+#define IMAGE_DLLCHARACTERISTICS_PREFER_NATIVE 0x0010 /* Wine extension */
+#define IMAGE_DLLCHARACTERISTICS_NX_COMPAT     0x0100
 
 #define	IMAGE_SUBSYSTEM_NATIVE      1
 #define	IMAGE_SUBSYSTEM_WINDOWS_GUI 2
@@ -220,10 +238,6 @@ struct strarray
 
 /* global functions */
 
-#ifndef __GNUC__
-#define __attribute__(X)
-#endif
-
 #ifndef DECLSPEC_NORETURN
 # if defined(_MSC_VER) && (_MSC_VER >= 1200) && !defined(MIDL_PASS)
 #  define DECLSPEC_NORETURN __declspec(noreturn)
@@ -231,17 +245,7 @@ struct strarray
 #  define DECLSPEC_NORETURN __attribute__((noreturn))
 # endif
 #endif
-
-extern void *xmalloc (size_t size);
-extern void *xrealloc (void *ptr, size_t size);
-extern char *xstrdup( const char *str );
 extern char *strupper(char *s);
-extern int strendswith(const char* str, const char* end);
-extern char *strmake(const char* fmt, ...) __attribute__((__format__ (__printf__, 1, 2 )));
-extern struct strarray strarray_fromstring( const char *str, const char *delim );
-extern void strarray_add( struct strarray *array, ... );
-extern void strarray_addv( struct strarray *array, char * const *argv );
-extern void strarray_addall( struct strarray *array, struct strarray args );
 extern DECLSPEC_NORETURN void fatal_error( const char *msg, ... )
    __attribute__ ((__format__ (__printf__, 1, 2)));
 extern DECLSPEC_NORETURN void fatal_perror( const char *msg, ... )
@@ -258,6 +262,7 @@ extern void output_rva( const char *format, ... )
    __attribute__ ((__format__ (__printf__, 1, 2)));
 extern void spawn( struct strarray array );
 extern struct strarray find_tool( const char *name, const char * const *names );
+extern struct strarray find_link_tool(void);
 extern struct strarray get_as_command(void);
 extern struct strarray get_ld_command(void);
 extern const char *get_nm_command(void);
@@ -278,11 +283,8 @@ extern char *make_c_identifier( const char *str );
 extern const char *get_stub_name( const ORDDEF *odp, const DLLSPEC *spec );
 extern const char *get_link_name( const ORDDEF *odp );
 extern int sort_func_list( ORDDEF **list, int count, int (*compare)(const void *, const void *) );
-extern int get_cpu_from_name( const char *name );
 extern unsigned int get_alignment(unsigned int align);
 extern unsigned int get_page_size(void);
-extern unsigned int get_ptr_size(void);
-extern unsigned int get_host_ptr_size(void);
 extern unsigned int get_args_size( const ORDDEF *odp );
 extern const char *asm_name( const char *func );
 extern const char *thunk32_name( const char *func );
@@ -304,7 +306,7 @@ extern void add_import_dll( const char *name, const char *filename );
 extern void add_delayed_import( const char *name );
 extern void add_extra_ld_symbol( const char *name );
 extern void add_spec_extra_ld_symbol( const char *name );
-extern void read_undef_symbols( DLLSPEC *spec, char **argv );
+extern void read_undef_symbols( DLLSPEC *spec, struct strarray files );
 extern void resolve_imports( DLLSPEC *spec );
 extern int is_undefined( const char *name );
 extern int has_imports(void);
@@ -313,14 +315,16 @@ extern void output_module( DLLSPEC *spec );
 extern void output_stubs( DLLSPEC *spec );
 extern void output_syscalls( DLLSPEC *spec );
 extern void output_imports( DLLSPEC *spec );
-extern void output_static_lib( DLLSPEC *spec, char **argv );
+extern void output_static_lib( DLLSPEC *spec, struct strarray files );
 extern void output_exports( DLLSPEC *spec );
 extern int load_res32_file( const char *name, DLLSPEC *spec );
 extern void output_resources( DLLSPEC *spec );
 extern void output_bin_resources( DLLSPEC *spec, unsigned int start_rva );
 extern void output_spec32_file( DLLSPEC *spec );
 extern void output_fake_module( DLLSPEC *spec );
+extern void output_data_module( DLLSPEC *spec );
 extern void output_def_file( DLLSPEC *spec, int import_only );
+extern void output_apiset_lib( DLLSPEC *spec, const struct apiset *apiset );
 extern void load_res16_file( const char *name, DLLSPEC *spec );
 extern void output_res16_data( DLLSPEC *spec );
 extern void output_bin_res16_data( DLLSPEC *spec );
@@ -330,8 +334,8 @@ extern void output_spec16_file( DLLSPEC *spec );
 extern void output_fake_module16( DLLSPEC *spec16 );
 extern void output_res_o_file( DLLSPEC *spec );
 extern void output_asm_relays16(void);
-extern void make_builtin_files( char *argv[] );
-extern void fixup_constructors( char *argv[] );
+extern void make_builtin_files( struct strarray files );
+extern void fixup_constructors( struct strarray files );
 
 extern void add_16bit_exports( DLLSPEC *spec32, DLLSPEC *spec16 );
 extern int parse_spec_file( FILE *file, DLLSPEC *spec );
@@ -344,23 +348,12 @@ extern const char *input_buffer_filename;
 extern const unsigned char *input_buffer;
 extern size_t input_buffer_pos;
 extern size_t input_buffer_size;
-extern unsigned char *output_buffer;
-extern size_t output_buffer_pos;
-extern size_t output_buffer_size;
 
 extern void init_input_buffer( const char *file );
-extern void init_output_buffer(void);
-extern void flush_output_buffer(void);
 extern unsigned char get_byte(void);
 extern unsigned short get_word(void);
 extern unsigned int get_dword(void);
-extern void put_data( const void *data, size_t size );
-extern void put_byte( unsigned char val );
-extern void put_word( unsigned short val );
-extern void put_dword( unsigned int val );
-extern void put_qword( unsigned int val );
 extern void put_pword( unsigned int val );
-extern void align_output( unsigned int align );
 
 /* global variables */
 
@@ -376,6 +369,8 @@ extern int unwind_tables;
 extern int use_msvcrt;
 extern int unix_lib;
 extern int safe_seh;
+extern int prefer_native;
+extern int data_only;
 
 extern char *input_file_name;
 extern char *spec_file_name;

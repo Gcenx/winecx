@@ -19,8 +19,10 @@
  */
 
 #define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #include "ntdll_test.h"
 #include "ddk/wdm.h"
+#include "intrin.h"
 
 #define TICKSPERSEC        10000000
 #define TICKSPERMSEC       10000
@@ -34,6 +36,9 @@ static NTSTATUS (WINAPI *pNtQuerySystemInformation)( SYSTEM_INFORMATION_CLASS cl
 static NTSTATUS (WINAPI *pRtlQueryTimeZoneInformation)( RTL_TIME_ZONE_INFORMATION *);
 static NTSTATUS (WINAPI *pRtlQueryDynamicTimeZoneInformation)( RTL_DYNAMIC_TIME_ZONE_INFORMATION *);
 static BOOL     (WINAPI *pRtlQueryUnbiasedInterruptTime)( ULONGLONG *time );
+
+static BOOL     (WINAPI *pRtlQueryPerformanceCounter)(LARGE_INTEGER*);
+static BOOL     (WINAPI *pRtlQueryPerformanceFrequency)(LARGE_INTEGER*);
 
 static const int MonthLengths[2][12] =
 {
@@ -108,18 +113,219 @@ static void test_NtQueryPerformanceCounter(void)
     NTSTATUS status;
 
     status = pNtQueryPerformanceCounter(NULL, NULL);
-    ok(status == STATUS_ACCESS_VIOLATION, "expected STATUS_ACCESS_VIOLATION, got %08x\n", status);
+    ok(status == STATUS_ACCESS_VIOLATION, "expected STATUS_ACCESS_VIOLATION, got %08lx\n", status);
     status = pNtQueryPerformanceCounter(NULL, &frequency);
-    ok(status == STATUS_ACCESS_VIOLATION, "expected STATUS_ACCESS_VIOLATION, got %08x\n", status);
+    ok(status == STATUS_ACCESS_VIOLATION, "expected STATUS_ACCESS_VIOLATION, got %08lx\n", status);
     status = pNtQueryPerformanceCounter(&counter, (void *)0xdeadbee0);
-    ok(status == STATUS_ACCESS_VIOLATION, "expected STATUS_ACCESS_VIOLATION, got %08x\n", status);
+    ok(status == STATUS_ACCESS_VIOLATION, "expected STATUS_ACCESS_VIOLATION, got %08lx\n", status);
     status = pNtQueryPerformanceCounter((void *)0xdeadbee0, &frequency);
-    ok(status == STATUS_ACCESS_VIOLATION, "expected STATUS_ACCESS_VIOLATION, got %08x\n", status);
+    ok(status == STATUS_ACCESS_VIOLATION, "expected STATUS_ACCESS_VIOLATION, got %08lx\n", status);
 
     status = pNtQueryPerformanceCounter(&counter, NULL);
-    ok(status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %08x\n", status);
+    ok(status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %08lx\n", status);
     status = pNtQueryPerformanceCounter(&counter, &frequency);
-    ok(status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %08x\n", status);
+    ok(status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %08lx\n", status);
+}
+
+#if defined(__i386__) || defined(__x86_64__)
+
+struct hypervisor_shared_data
+{
+    UINT64 unknown;
+    UINT64 QpcMultiplier;
+    UINT64 QpcBias;
+};
+
+/* 128-bit multiply a by b and return the high 64 bits, same as __umulh */
+static UINT64 multiply_tsc(UINT64 a, UINT64 b)
+{
+    UINT64 ah = a >> 32, al = (UINT32)a, bh = b >> 32, bl = (UINT32)b, m;
+    m = (ah * bl) + (bh * al) + ((al * bl) >> 32);
+    return (ah * bh) + (m >> 32);
+}
+
+static void test_RtlQueryPerformanceCounter(void)
+{
+    struct hypervisor_shared_data *hsd;
+    KSHARED_USER_DATA *usd = (void *)0x7ffe0000;
+    LARGE_INTEGER frequency, counter;
+    NTSTATUS status;
+    UINT64 tsc0, tsc1;
+    ULONG len;
+    BOOL ret;
+
+    if (!pRtlQueryPerformanceCounter || !pRtlQueryPerformanceFrequency)
+    {
+        win_skip( "RtlQueryPerformanceCounter/Frequency not available, skipping tests\n" );
+        return;
+    }
+
+    if (!(usd->u3.s.QpcBypassEnabled & SHARED_GLOBAL_FLAGS_QPC_BYPASS_ENABLED))
+    {
+        todo_wine win_skip("QpcBypassEnabled is not set, skipping tests\n");
+        return;
+    }
+
+    if ((usd->u3.s.QpcBypassEnabled & SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_HV_PAGE))
+    {
+        ok( usd->u3.s.QpcBypassEnabled == (SHARED_GLOBAL_FLAGS_QPC_BYPASS_ENABLED|SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_HV_PAGE|SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_RDTSCP),
+            "unexpected QpcBypassEnabled %x, expected 0x83\n", usd->u3.s.QpcBypassEnabled );
+        ok( usd->QpcFrequency == 10000000, "unexpected QpcFrequency %I64d, expected 10000000\n", usd->QpcFrequency );
+        ok( !usd->u3.s.QpcShift, "unexpected QpcShift %d, expected 0\n", usd->u3.s.QpcShift );
+
+        hsd = NULL;
+        status = pNtQuerySystemInformation( SystemHypervisorSharedPageInformation, &hsd, sizeof(void *), &len );
+        ok( !status, "NtQuerySystemInformation returned %lx\n", status );
+        ok( len == sizeof(void *), "unexpected SystemHypervisorSharedPageInformation length %lu\n", len );
+        ok( !!hsd, "unexpected SystemHypervisorSharedPageInformation address %p\n", hsd );
+
+        tsc0 = __rdtsc();
+        ret = pRtlQueryPerformanceCounter( &counter );
+        tsc1 = __rdtsc();
+        ok( ret, "RtlQueryPerformanceCounter failed\n" );
+
+        tsc0 = multiply_tsc(tsc0, hsd->QpcMultiplier) + hsd->QpcBias + usd->QpcBias;
+        tsc1 = multiply_tsc(tsc1, hsd->QpcMultiplier) + hsd->QpcBias + usd->QpcBias;
+
+        ok( tsc0 <= counter.QuadPart, "rdtscp %I64d and RtlQueryPerformanceCounter %I64d are out of order\n", tsc0, counter.QuadPart );
+        ok( counter.QuadPart <= tsc1, "RtlQueryPerformanceCounter %I64d and rdtscp %I64d are out of order\n", counter.QuadPart, tsc1 );
+    }
+    else
+    {
+        ok( usd->u3.s.QpcShift == 10, "unexpected QpcShift %d, expected 10\n", usd->u3.s.QpcShift );
+
+        tsc0 = __rdtsc();
+        ret = pRtlQueryPerformanceCounter( &counter );
+        tsc1 = __rdtsc();
+        ok( ret, "RtlQueryPerformanceCounter failed\n" );
+
+        tsc0 += usd->QpcBias;
+        tsc0 >>= usd->u3.s.QpcShift;
+        tsc1 += usd->QpcBias;
+        tsc1 >>= usd->u3.s.QpcShift;
+
+        ok( tsc0 <= counter.QuadPart, "rdtscp %I64d and RtlQueryPerformanceCounter %I64d are out of order\n", tsc0, counter.QuadPart );
+        ok( counter.QuadPart <= tsc1, "RtlQueryPerformanceCounter %I64d and rdtscp %I64d are out of order\n", counter.QuadPart, tsc1 );
+    }
+
+    ret = pRtlQueryPerformanceFrequency( &frequency );
+    ok( ret, "RtlQueryPerformanceFrequency failed\n" );
+    ok( frequency.QuadPart == usd->QpcFrequency,
+        "RtlQueryPerformanceFrequency returned %I64d, expected USD QpcFrequency %I64d\n",
+        frequency.QuadPart, usd->QpcFrequency );
+}
+#endif
+
+#define TIMER_LEEWAY 10
+#define CHECK_CURRENT_TIMER(expected) \
+    do { \
+        ok(status == STATUS_SUCCESS, "NtSetTimerResolution failed %lx\n", status); \
+        ok(cur2 == (expected) || broken(abs((int)((expected) - cur2)) <= TIMER_LEEWAY), "expected new timer resolution %lu, got %lu\n", (expected), cur2); \
+        set = cur2; \
+        min2 = min + 20000; \
+        cur2 = min2 + 1; \
+        max2 = cur2 + 1; \
+        status = NtQueryTimerResolution(&min2, &max2, &cur2); \
+        ok(status == STATUS_SUCCESS, "NtQueryTimerResolution() failed %lx\n", status); \
+        ok(min2 == min, "NtQueryTimerResolution() expected min=%lu, got %lu\n", min, min2); \
+        ok(max2 == max, "NtQueryTimerResolution() expected max=%lu, got %lu\n", max, max2); \
+        ok(cur2 == set, "NtQueryTimerResolution() expected timer resolution %lu, got %lu\n", set, cur2); \
+    } while (0)
+
+static void test_TimerResolution(void)
+{
+    ULONG min, max, cur, min2, max2, cur2, set;
+    NTSTATUS status;
+
+    status = NtQueryTimerResolution(NULL, &max, &cur);
+    ok(status == STATUS_ACCESS_VIOLATION, "NtQueryTimerResolution(NULL,,) success\n");
+
+    status = NtQueryTimerResolution(&min, NULL, &cur);
+    ok(status == STATUS_ACCESS_VIOLATION, "NtQueryTimerResolution(,NULL,) success\n");
+
+    status = NtQueryTimerResolution(&min, &max, NULL);
+    ok(status == STATUS_ACCESS_VIOLATION, "NtQueryTimerResolution(,,NULL) success\n");
+
+    min = 212121;
+    cur = min + 1;
+    max = cur + 1;
+    status = NtQueryTimerResolution(&min, &max, &cur);
+    ok(status == STATUS_SUCCESS, "NtQueryTimerResolution() failed (%lx)\n", status);
+    ok(min == 156250 /* 1/64s HPET */ || min == 156001 /* RTC */,
+       "unexpected minimum timer resolution %lu\n", min);
+    ok(0 < max, "invalid maximum timer resolution, should be 0 < %lu\n", max);
+    ok(max <= cur || broken(max - TIMER_LEEWAY <= cur), "invalid timer resolutions, should be %lu <= %lu\n", max, cur);
+    ok(cur <= min || broken(cur <= min + TIMER_LEEWAY), "invalid timer resolutions, should be %lu <= %lu\n", cur, min);
+
+    status = NtSetTimerResolution(0, FALSE, NULL);
+    ok(status == STATUS_ACCESS_VIOLATION, "NtSetTimerResolution(,,NULL) success\n");
+
+    /* Nothing happens if that pointer is not good */
+    status = NtSetTimerResolution(cur - 1, TRUE, NULL);
+    ok(status == STATUS_ACCESS_VIOLATION, "NtSetTimerResolution() failed %lx\n", status);
+
+    min2 = min + 10000;
+    cur2 = min2 + 1;
+    max2 = cur2 + 1;
+    status = NtQueryTimerResolution(&min2, &max2, &cur2);
+    ok(status == STATUS_SUCCESS, "NtQueryTimerResolution() failed (%lx)\n", status);
+    ok(min2 == min, "NtQueryTimerResolution() expected min=%lu, got %lu\n", min, min2);
+    ok(max2 == max, "NtQueryTimerResolution() expected max=%lu, got %lu\n", max, max2);
+    ok(cur2 == cur, "NtQueryTimerResolution() expected timer resolution %lu, got %lu\n", cur, cur2);
+
+    /* 'fails' until the first valid timer resolution request */
+    cur2 = 7654321;
+    status = NtSetTimerResolution(0, FALSE, &cur2);
+    ok(status == STATUS_TIMER_RESOLUTION_NOT_SET, "NtSetTimerResolution() failed %lx\n", status);
+    /* and returns the current timer resolution */
+    ok(cur2 == cur, "expected requested timer resolution %lu, got %lu\n", cur, cur2);
+
+
+    cur2 = 7654321;
+    status = NtSetTimerResolution(max - 1, TRUE, &cur2);
+    CHECK_CURRENT_TIMER(max);
+
+    /* Rescinds our timer resolution request */
+    cur2 = 7654321;
+    status = NtSetTimerResolution(0, FALSE, &cur2);
+    ok(status == STATUS_SUCCESS, "NtSetTimerResolution() failed %lx\n", status);
+    /* -> the timer resolution was reset to its initial value */
+    ok(cur2 == cur, "expected requested timer resolution %lu, got %lu\n", min, cur2);
+
+    cur2 = 7654321;
+    status = NtSetTimerResolution(0, FALSE, &cur2);
+    ok(status == STATUS_TIMER_RESOLUTION_NOT_SET, "NtSetTimerResolution() failed %lx\n", status);
+    ok(cur2 == cur, "expected requested timer resolution %lu, got %lu\n", cur, cur2);
+
+    cur2 = 7654321;
+    status = NtSetTimerResolution(min + 1, TRUE, &cur2);
+    ok(status == STATUS_SUCCESS, "NtSetTimerResolution() failed %lx\n", status);
+    /* This works because:
+     * - Either cur is the minimum (15.6 ms) resolution already, i.e. the
+     *   closest valid value 'set' is rounded to.
+     * - Or some other application requested a higher timer resolution, cur,
+     *   and any attempt to lower the resolution has no effect until that
+     *   request is rescinded (hopefully after this test is done).
+     */
+    CHECK_CURRENT_TIMER(cur);
+
+    /* The requested resolution may (win7) or may not be rounded */
+    cur2 = 7654321;
+    set = max < cur ? cur - 1 : max;
+    status = NtSetTimerResolution(set, TRUE, &cur2);
+    ok(status == STATUS_SUCCESS, "NtSetTimerResolution() failed %lx\n", status);
+    ok(cur2 <= set || broken(cur2 <= set + TIMER_LEEWAY), "expected new timer resolution %lu <= %lu\n", cur2, set);
+    trace("timer resolution: %lu(max) <= %lu(cur) <= %lu(prev) <= %lu(min)\n", max, cur2, cur, min);
+
+    cur2 = 7654321;
+    status = NtSetTimerResolution(cur + 1, TRUE, &cur2);
+    CHECK_CURRENT_TIMER(cur); /* see min + 1 test */
+
+    /* Cleanup by rescinding the last request */
+    cur2 = 7654321;
+    status = NtSetTimerResolution(0, FALSE, &cur2);
+    ok(status == STATUS_SUCCESS, "NtSetTimerResolution() failed %lx\n", status);
+    ok(cur2 == cur, "expected requested timer resolution %lu, got %lu\n", set, cur2);
 }
 
 static void test_RtlQueryTimeZoneInformation(void)
@@ -139,47 +345,53 @@ static void test_RtlQueryTimeZoneInformation(void)
     memset(&tzinfo, 0xcc, sizeof(tzinfo));
     status = pRtlQueryDynamicTimeZoneInformation(&tzinfo);
     ok(status == STATUS_SUCCESS,
-       "RtlQueryDynamicTimeZoneInformation failed, got %08x\n", status);
-    ok(tzinfo.StandardName[0] == '@',
+       "RtlQueryDynamicTimeZoneInformation failed, got %08lx\n", status);
+    ok(tzinfo.StandardName[0] == '@' ||
+       broken(tzinfo.StandardName[0]), /* some win10 2004 */
        "standard time zone name isn't an indirect string, got %s\n",
        wine_dbgstr_w(tzinfo.StandardName));
-    ok(tzinfo.DaylightName[0] == '@',
+    ok(tzinfo.DaylightName[0] == '@' ||
+       broken(tzinfo.DaylightName[0]), /* some win10 2004 */
        "daylight time zone name isn't an indirect string, got %s\n",
        wine_dbgstr_w(tzinfo.DaylightName));
 
     memset(&tzinfo2, 0xcc, sizeof(tzinfo2));
     status = pNtQuerySystemInformation( SystemDynamicTimeZoneInformation, &tzinfo2, sizeof(tzinfo2), &len );
-    ok( !status, "NtQuerySystemInformation failed %x\n", status );
-    ok( len == sizeof(tzinfo2), "wrong len %u\n", len );
+    ok( !status, "NtQuerySystemInformation failed %lx\n", status );
+    ok( len == sizeof(tzinfo2), "wrong len %lu\n", len );
     ok( !memcmp( &tzinfo, &tzinfo2, sizeof(tzinfo2) ), "tz data is different\n" );
 
     memset(&tzinfo, 0xcc, sizeof(tzinfo));
     status = pRtlQueryTimeZoneInformation((RTL_TIME_ZONE_INFORMATION *)&tzinfo);
     ok(status == STATUS_SUCCESS,
-       "RtlQueryTimeZoneInformation failed, got %08x\n", status);
-    ok(tzinfo.StandardName[0] == '@',
+       "RtlQueryTimeZoneInformation failed, got %08lx\n", status);
+    ok(tzinfo.StandardName[0] == '@' ||
+       broken(tzinfo.StandardName[0]), /* some win10 2004 */
        "standard time zone name isn't an indirect string, got %s\n",
        wine_dbgstr_w(tzinfo.StandardName));
-    ok(tzinfo.DaylightName[0] == '@',
+    ok(tzinfo.DaylightName[0] == '@' ||
+       broken(tzinfo.DaylightName[0]), /* some win10 2004 */
        "daylight time zone name isn't an indirect string, got %s\n",
        wine_dbgstr_w(tzinfo.DaylightName));
 
     memset(&tzinfo, 0xcc, sizeof(tzinfo));
     status = pRtlQueryTimeZoneInformation((RTL_TIME_ZONE_INFORMATION *)&tzinfo);
     ok(status == STATUS_SUCCESS,
-       "RtlQueryTimeZoneInformation failed, got %08x\n", status);
-    ok(tzinfo.StandardName[0] == '@',
+       "RtlQueryTimeZoneInformation failed, got %08lx\n", status);
+    ok(tzinfo.StandardName[0] == '@' ||
+       broken(tzinfo.StandardName[0]), /* some win10 2004 */
        "standard time zone name isn't an indirect string, got %s\n",
        wine_dbgstr_w(tzinfo.StandardName));
-    ok(tzinfo.DaylightName[0] == '@',
+    ok(tzinfo.DaylightName[0] == '@' ||
+       broken(tzinfo.DaylightName[0]), /* some win10 2004 */
        "daylight time zone name isn't an indirect string, got %s\n",
        wine_dbgstr_w(tzinfo.DaylightName));
 
     memset(&tzinfo2, 0xcc, sizeof(tzinfo2));
-    status = pNtQuerySystemInformation( SystemTimeZoneInformation, &tzinfo2,
+    status = pNtQuerySystemInformation( SystemCurrentTimeZoneInformation, &tzinfo2,
                                         sizeof(RTL_TIME_ZONE_INFORMATION), &len );
-    ok( !status, "NtQuerySystemInformation failed %x\n", status );
-    ok( len == sizeof(RTL_TIME_ZONE_INFORMATION), "wrong len %u\n", len );
+    ok( !status, "NtQuerySystemInformation failed %lx\n", status );
+    ok( len == sizeof(RTL_TIME_ZONE_INFORMATION), "wrong len %lu\n", len );
     ok( !memcmp( &tzinfo, &tzinfo2, sizeof(RTL_TIME_ZONE_INFORMATION) ), "tz data is different\n" );
 }
 
@@ -208,9 +420,9 @@ static void test_user_shared_data_time(void)
     {
         t1 = GetTickCount();
         if (user_shared_data->NtMajorVersion <= 5 && user_shared_data->NtMinorVersion <= 1)
-            t2 = (*(volatile ULONG*)&user_shared_data->TickCountLowDeprecated * (ULONG64)user_shared_data->TickCountMultiplier) >> 24;
+            t2 = (DWORD)((*(volatile ULONG*)&user_shared_data->TickCountLowDeprecated * (ULONG64)user_shared_data->TickCountMultiplier) >> 24);
         else
-            t2 = (read_ksystem_time(&user_shared_data->u.TickCount) * user_shared_data->TickCountMultiplier) >> 24;
+            t2 = (DWORD)((read_ksystem_time(&user_shared_data->u.TickCount) * user_shared_data->TickCountMultiplier) >> 24);
         t3 = GetTickCount();
     } while(t3 < t1 && i++ < 1); /* allow for wrap, but only once */
 
@@ -245,20 +457,19 @@ static void test_user_shared_data_time(void)
         do
         {
             pRtlQueryUnbiasedInterruptTime(&t1);
-            t2 = read_ksystem_time(&user_shared_data->InterruptTime);
+            t2 = read_ksystem_time(&user_shared_data->InterruptTime) - user_shared_data->InterruptTimeBias;
             pRtlQueryUnbiasedInterruptTime(&t3);
         } while(t3 < t1 && i++ < 1); /* allow for wrap, but only once */
 
         ok(t1 <= t2, "USD InterruptTime / RtlQueryUnbiasedInterruptTime are out of order %s %s\n",
            wine_dbgstr_longlong(t1), wine_dbgstr_longlong(t2));
-        ok(t2 <= t3 || broken(t2 == t3 + 82410089070) /* w864 has some weird offset on testbot */,
-           "USD InterruptTime / RtlQueryUnbiasedInterruptTime are out of order %s %s\n",
+        ok(t2 <= t3, "USD InterruptTime / RtlQueryUnbiasedInterruptTime are out of order %s %s\n",
            wine_dbgstr_longlong(t2), wine_dbgstr_longlong(t3));
     }
 
     t1 = read_ksystem_time(&user_shared_data->TimeZoneBias);
     status = NtQuerySystemInformation(SystemTimeOfDayInformation, &timeofday, sizeof(timeofday), NULL);
-    ok(!status, "failed to query time of day, status %#x\n", status);
+    ok(!status, "failed to query time of day, status %#lx\n", status);
     ok(timeofday.TimeZoneBias.QuadPart == t1, "got USD bias %I64u, ntdll bias %I64u\n",
             t1, timeofday.TimeZoneBias.QuadPart);
 }
@@ -275,6 +486,8 @@ START_TEST(time)
     pRtlQueryDynamicTimeZoneInformation =
         (void *)GetProcAddress(mod, "RtlQueryDynamicTimeZoneInformation");
     pRtlQueryUnbiasedInterruptTime = (void *)GetProcAddress(mod, "RtlQueryUnbiasedInterruptTime");
+    pRtlQueryPerformanceCounter = (void *)GetProcAddress(mod, "RtlQueryPerformanceCounter");
+    pRtlQueryPerformanceFrequency = (void *)GetProcAddress(mod, "RtlQueryPerformanceFrequency");
 
     if (pRtlTimeToTimeFields && pRtlTimeFieldsToTime)
         test_pRtlTimeToTimeFields();
@@ -283,4 +496,8 @@ START_TEST(time)
     test_NtQueryPerformanceCounter();
     test_RtlQueryTimeZoneInformation();
     test_user_shared_data_time();
+#if defined(__i386__) || defined(__x86_64__)
+    test_RtlQueryPerformanceCounter();
+#endif
+    test_TimerResolution();
 }

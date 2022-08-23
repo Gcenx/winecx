@@ -28,7 +28,9 @@
 #include "wownt32.h"
 #include "excpt.h"
 #include "winternl.h"
+#include "ntgdi.h"
 #include "kernel16_private.h"
+#include "wine/asm.h"
 #include "wine/exception.h"
 #include "wine/debug.h"
 
@@ -40,12 +42,28 @@ WINE_DECLARE_DEBUG_CHANNEL(snoop);
 extern DWORD WINAPI wine_call_to_16( FARPROC16 target, DWORD cbArgs, PEXCEPTION_HANDLER handler );
 extern void WINAPI wine_call_to_16_regs( CONTEXT *context, DWORD cbArgs, PEXCEPTION_HANDLER handler );
 extern void __wine_call_to_16_ret(void);
-extern void CALL32_CBClient_Ret(void);
-extern void CALL32_CBClientEx_Ret(void);
 extern BYTE __wine_call16_start[];
 extern BYTE __wine_call16_end[];
 
 static SEGPTR call16_ret_addr;  /* segptr to __wine_call_to_16_ret routine */
+
+extern const BYTE cbclient_ret[], cbclient_ret_end[];
+__ASM_GLOBAL_FUNC( cbclient_ret,
+                   "movzwl %sp,%ebx\n\t"
+                   "lssl %ss:-16(%ebx),%esp\n\t"
+                   "lretl\n\t"
+                   ".globl " __ASM_NAME("cbclient_ret_end") "\n"
+                   __ASM_NAME("cbclient_ret_end") ":" )
+
+extern const BYTE cbclientex_ret[], cbclientex_ret_end[];
+__ASM_GLOBAL_FUNC( cbclientex_ret,
+                   "movzwl %bp,%ebx\n\t"
+                   "subw %bp,%sp\n\t"
+                   "movzwl %sp,%ebp\n\t"
+                   "lssl %ss:-12(%ebx),%esp\n\t"
+                   "lretl\n\t"
+                   ".globl " __ASM_NAME("cbclientex_ret_end") "\n"
+                   __ASM_NAME("cbclientex_ret_end") ":" )
 
 /***********************************************************************
  *           WOWTHUNK_Init
@@ -56,16 +74,18 @@ BOOL WOWTHUNK_Init(void)
     WORD codesel = SELECTOR_AllocBlock( __wine_call16_start,
                                         (BYTE *)(&CallTo16_TebSelector + 1) - __wine_call16_start,
                                         LDT_FLAGS_CODE | LDT_FLAGS_32BIT );
-    if (!codesel) return FALSE;
+
+    cbclient_selector = SELECTOR_AllocBlock( cbclient_ret, cbclient_ret_end - cbclient_ret,
+                                             LDT_FLAGS_CODE | LDT_FLAGS_32BIT );
+    cbclientex_selector = SELECTOR_AllocBlock( cbclientex_ret, cbclientex_ret_end - cbclientex_ret,
+                                               LDT_FLAGS_CODE | LDT_FLAGS_32BIT );
+    if (!codesel || !cbclient_selector || !cbclientex_selector)
+        return FALSE;
 
       /* Patch the return addresses for CallTo16 routines */
 
     CallTo16_DataSelector = get_ds();
     call16_ret_addr = MAKESEGPTR( codesel, (BYTE *)__wine_call_to_16_ret - __wine_call16_start );
-    CALL32_CBClient_RetAddr =
-        MAKESEGPTR( codesel, (BYTE *)CALL32_CBClient_Ret - __wine_call16_start );
-    CALL32_CBClientEx_RetAddr =
-        MAKESEGPTR( codesel, (BYTE *)CALL32_CBClientEx_Ret - __wine_call16_start );
 
     if (TRACE_ON(relay) || TRACE_ON(snoop)) RELAY16_InitDebugLists();
 
@@ -92,7 +112,6 @@ static BOOL fix_selector( CONTEXT *context )
     switch(instr[0])
     {
     case 0x07: /* pop es */
-    case 0x17: /* pop ss */
     case 0x1f: /* pop ds */
         break;
     case 0x0f: /* extended instruction */
@@ -309,6 +328,24 @@ VOID WINAPI K32WOWDirectedYield16( WORD htask16 )
     DirectedYield16( (HTASK16)htask16 );
 }
 
+static HANDLE gdi_handle32( WORD handle )
+{
+    static GDI_SHARED_MEMORY *gdi_shared;
+
+    if (!gdi_shared)
+    {
+        if (NtCurrentTeb()->GdiBatchCount)
+        {
+            TEB64 *teb64 = (TEB64 *)(UINT_PTR)NtCurrentTeb()->GdiBatchCount;
+            PEB64 *peb64 = (PEB64 *)(UINT_PTR)teb64->Peb;
+            gdi_shared = (GDI_SHARED_MEMORY *)(UINT_PTR)peb64->GdiSharedHandleTable;
+        }
+        else gdi_shared = (GDI_SHARED_MEMORY *)NtCurrentTeb()->Peb->GdiSharedHandleTable;
+        if (!gdi_shared) return ULongToHandle( handle );
+    }
+
+    return ULongToHandle( (gdi_shared->Handles[handle].Unique << 16) | handle );
+}
 
 /***********************************************************************
  *           K32WOWHandle32              (KERNEL32.57)
@@ -321,6 +358,9 @@ HANDLE WINAPI K32WOWHandle32( WORD handle, WOW_HANDLE_TYPE type )
     case WOW_TYPE_HMENU:
     case WOW_TYPE_HDWP:
     case WOW_TYPE_HDROP:
+    case WOW_TYPE_HACCEL:
+        return (HANDLE)(ULONG_PTR)handle;
+
     case WOW_TYPE_HDC:
     case WOW_TYPE_HFONT:
     case WOW_TYPE_HRGN:
@@ -328,12 +368,8 @@ HANDLE WINAPI K32WOWHandle32( WORD handle, WOW_HANDLE_TYPE type )
     case WOW_TYPE_HBRUSH:
     case WOW_TYPE_HPALETTE:
     case WOW_TYPE_HPEN:
-    case WOW_TYPE_HACCEL:
-        return (HANDLE)(ULONG_PTR)handle;
-
     case WOW_TYPE_HMETAFILE:
-        FIXME( "conversion of metafile handles not supported yet\n" );
-        return (HANDLE)(ULONG_PTR)handle;
+        return gdi_handle32( handle );
 
     case WOW_TYPE_HTASK:
         return ((TDB *)GlobalLock16(handle))->teb->ClientId.UniqueThread;
@@ -400,7 +436,7 @@ BOOL WINAPI K32WOWCallback16Ex( DWORD vpfn16, DWORD dwFlags,
 
     memcpy( stack, pArgs, cbArgs );
 
-    if (dwFlags & (WCB16_REGS|WCB16_REGS_LONG))
+    if (dwFlags & WCB16_REGS)
     {
         CONTEXT *context = (CONTEXT *)pdwRetCode;
 
@@ -409,7 +445,7 @@ BOOL WINAPI K32WOWCallback16Ex( DWORD vpfn16, DWORD dwFlags,
             DWORD count = cbArgs / sizeof(WORD);
             WORD * wstack = (WORD *)stack;
 
-            TRACE_(relay)( "\1CallTo16(func=%04x:%04x", context->SegCs, LOWORD(context->Eip) );
+            TRACE_(relay)( "\1CallTo16(func=%04lx:%04x", context->SegCs, LOWORD(context->Eip) );
             while (count) TRACE_(relay)( ",%04x", wstack[--count] );
             TRACE_(relay)( ") ss:sp=%04x:%04x ax=%04x bx=%04x cx=%04x dx=%04x si=%04x di=%04x bp=%04x ds=%04x es=%04x\n",
                            CURRENT_SS, CURRENT_SP,
@@ -420,20 +456,9 @@ BOOL WINAPI K32WOWCallback16Ex( DWORD vpfn16, DWORD dwFlags,
         }
 
         /* push return address */
-        if (dwFlags & WCB16_REGS_LONG)
-        {
-            stack -= sizeof(DWORD);
-            *((DWORD *)stack) = HIWORD(call16_ret_addr);
-            stack -= sizeof(DWORD);
-            *((DWORD *)stack) = LOWORD(call16_ret_addr);
-            cbArgs += 2 * sizeof(DWORD);
-        }
-        else
-        {
-            stack -= sizeof(SEGPTR);
-            *((SEGPTR *)stack) = call16_ret_addr;
-            cbArgs += sizeof(SEGPTR);
-        }
+        stack -= sizeof(SEGPTR);
+        *((SEGPTR *)stack) = call16_ret_addr;
+        cbArgs += sizeof(SEGPTR);
 
         _EnterWin16Lock();
         wine_call_to_16_regs( context, cbArgs, call16_handler );
@@ -482,7 +507,7 @@ BOOL WINAPI K32WOWCallback16Ex( DWORD vpfn16, DWORD dwFlags,
 
         if (TRACE_ON(relay))
         {
-            TRACE_(relay)( "\1RetFrom16() ss:sp=%04x:%04x retval=%08x\n", CURRENT_SS, CURRENT_SP, ret );
+            TRACE_(relay)( "\1RetFrom16() ss:sp=%04x:%04x retval=%08lx\n", CURRENT_SS, CURRENT_SP, ret );
             SYSLEVEL_CheckNotLevel( 2 );
         }
     }

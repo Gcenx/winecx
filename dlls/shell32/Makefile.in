@@ -3,8 +3,6 @@ MODULE    = shell32.dll
 IMPORTLIB = shell32
 IMPORTS   = uuid shlwapi user32 gdi32 advapi32
 DELAYIMPORTS = ole32 oleaut32 shdocvw version comctl32 gdiplus
-# AUTHORS file is in the top-level directory
-EXTRAINCL = -I$(top_srcdir)
 
 C_SRCS = \
 	appbar.c \
@@ -41,7 +39,6 @@ C_SRCS = \
 	shfldr_mycomp.c \
 	shfldr_netplaces.c \
 	shfldr_printers.c \
-	shfldr_unixfs.c \
 	shlexec.c \
 	shlfileop.c \
 	shlfolder.c \
@@ -50,9 +47,7 @@ C_SRCS = \
 	shlview.c \
 	shlview_cmenu.c \
 	shpolicy.c \
-	systray.c \
-	trash.c \
-	xdg.c
+	systray.c
 
 RC_SRCS = shell32.rc
 

@@ -65,7 +65,7 @@ static WCHAR *decode_url( LPCWSTR url, DWORD *len )
     const WCHAR *p = url;
     WCHAR hex[3], *q, *ret;
 
-    if (!(ret = heap_alloc( *len * sizeof(WCHAR) ))) return NULL;
+    if (!(ret = malloc( *len * sizeof(WCHAR) ))) return NULL;
     q = ret;
     while (*len > 0)
     {
@@ -144,7 +144,7 @@ static DWORD escape_url( const WCHAR *url, DWORD *len, WCHAR **ret )
         len_path = 0;
     }
 
-    if (!(*ret = heap_alloc( (len_base + len_path + 1) * sizeof(WCHAR) ))) return ERROR_OUTOFMEMORY;
+    if (!(*ret = malloc( (len_base + len_path + 1) * sizeof(WCHAR) ))) return ERROR_OUTOFMEMORY;
     memcpy( *ret, url, len_base * sizeof(WCHAR) );
 
     if (p) escape_string( p, *len - (p - url), *ret + len_base, &len_path );
@@ -170,15 +170,15 @@ static DWORD parse_port( const WCHAR *str, DWORD len, INTERNET_PORT *ret )
 /***********************************************************************
  *          WinHttpCrackUrl (winhttp.@)
  */
-BOOL WINAPI WinHttpCrackUrl( LPCWSTR url, DWORD len, DWORD flags, LPURL_COMPONENTSW uc )
+BOOL WINAPI WinHttpCrackUrl( const WCHAR *url, DWORD len, DWORD flags, URL_COMPONENTSW *uc )
 {
-    WCHAR *p, *q, *r, *url_decoded = NULL, *url_escaped = NULL;
+    WCHAR *p, *q, *r, *url_transformed = NULL;
     INTERNET_SCHEME scheme_number = 0;
     struct url_component scheme, username, password, hostname, path, extra;
     BOOL overflow = FALSE;
     DWORD err;
 
-    TRACE("%s, %d, %x, %p\n", debugstr_wn(url, len), len, flags, uc);
+    TRACE( "%s, %lu, %#lx, %p\n", debugstr_wn(url, len), len, flags, uc );
 
     if (!url || !uc || uc->dwStructSize != sizeof(*uc))
     {
@@ -189,25 +189,26 @@ BOOL WINAPI WinHttpCrackUrl( LPCWSTR url, DWORD len, DWORD flags, LPURL_COMPONEN
 
     if (flags & ICU_ESCAPE)
     {
-        if ((err = escape_url( url, &len, &url_escaped )))
+        if ((err = escape_url( url, &len, &url_transformed )))
         {
             SetLastError( err );
             return FALSE;
         }
-        url = url_escaped;
+        url = url_transformed;
     }
     else if (flags & ICU_DECODE)
     {
-        if (!(url_decoded = decode_url( url, &len )))
+        if (!(url_transformed = decode_url( url, &len )))
         {
             SetLastError( ERROR_OUTOFMEMORY );
             return FALSE;
         }
-        url = url_decoded;
+        url = url_transformed;
     }
     if (!(p = wcschr( url, ':' )))
     {
         SetLastError( ERROR_WINHTTP_UNRECOGNIZED_SCHEME );
+        free( url_transformed );
         return FALSE;
     }
     if (p - url == 4 && !wcsnicmp( url, L"http", 4 )) scheme_number = INTERNET_SCHEME_HTTP;
@@ -331,8 +332,7 @@ exit:
         if (overflow) err = ERROR_INSUFFICIENT_BUFFER;
         uc->nScheme = scheme_number;
     }
-    heap_free( url_decoded );
-    heap_free( url_escaped );
+    free( url_transformed );
     SetLastError( err );
     return !err;
 }
@@ -427,12 +427,12 @@ static BOOL get_url_length( URL_COMPONENTS *uc, DWORD flags, DWORD *len )
 /***********************************************************************
  *          WinHttpCreateUrl (winhttp.@)
  */
-BOOL WINAPI WinHttpCreateUrl( LPURL_COMPONENTS uc, DWORD flags, LPWSTR url, LPDWORD required )
+BOOL WINAPI WinHttpCreateUrl( URL_COMPONENTS *uc, DWORD flags, WCHAR *url, DWORD *required )
 {
     DWORD len, len_escaped;
     INTERNET_SCHEME scheme;
 
-    TRACE("%p, 0x%08x, %p, %p\n", uc, flags, url, required);
+    TRACE( "%p, %#lx, %p, %p\n", uc, flags, url, required );
 
     if (!uc || uc->dwStructSize != sizeof(URL_COMPONENTS) || !required)
     {

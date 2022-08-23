@@ -28,7 +28,7 @@
 
 #include "ipconfig.h"
 
-static int ipconfig_vprintfW(const WCHAR *msg, __ms_va_list va_args)
+static int ipconfig_vprintfW(const WCHAR *msg, va_list va_args)
 {
     int wlen;
     DWORD count, ret;
@@ -64,27 +64,27 @@ static int ipconfig_vprintfW(const WCHAR *msg, __ms_va_list va_args)
 
 static int WINAPIV ipconfig_printfW(const WCHAR *msg, ...)
 {
-    __ms_va_list va_args;
+    va_list va_args;
     int len;
 
-    __ms_va_start(va_args, msg);
+    va_start(va_args, msg);
     len = ipconfig_vprintfW(msg, va_args);
-    __ms_va_end(va_args);
+    va_end(va_args);
 
     return len;
 }
 
 static int WINAPIV ipconfig_message_printfW(int msg, ...)
 {
-    __ms_va_list va_args;
+    va_list va_args;
     WCHAR msg_buffer[8192];
     int len;
 
     LoadStringW(GetModuleHandleW(NULL), msg, msg_buffer, ARRAY_SIZE(msg_buffer));
 
-    __ms_va_start(va_args, msg);
+    va_start(va_args, msg);
     len = ipconfig_vprintfW(msg_buffer, va_args);
-    __ms_va_end(va_args);
+    va_end(va_args);
 
     return len;
 }
@@ -277,11 +277,13 @@ static void print_full_information(void)
         if (GetNetworkParams(info, &out) == ERROR_SUCCESS)
         {
             WCHAR hostnameW[MAX_HOSTNAME_LEN + 4];
+            WCHAR dnssuffixW[MAX_DOMAIN_NAME_LEN + 4];
 
             MultiByteToWideChar(CP_ACP, 0, info->HostName, -1, hostnameW, ARRAY_SIZE(hostnameW));
             print_field(STRING_HOSTNAME, hostnameW);
 
-            /* FIXME: Output primary DNS suffix. */
+            MultiByteToWideChar(CP_ACP, 0, info->DomainName, -1, dnssuffixW, ARRAY_SIZE(dnssuffixW));
+            print_field(STRING_PRIMARY_DNS_SUFFIX, dnssuffixW);
 
             print_field(STRING_NODE_TYPE, nodetype_to_string(info->NodeType));
             print_field(STRING_IP_ROUTING, boolean_to_string(info->EnableRouting));

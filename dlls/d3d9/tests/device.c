@@ -1886,11 +1886,19 @@ static void test_cursor(void)
 
     IDirect3DSurface9_Release(cursor);
 
+    /* On the testbot the cursor handle does not behave as expected in rare situations,
+     * leading to random test failures. Either the cursor handle changes before we expect
+     * it to, or it doesn't change afterwards (or already changed before we read the
+     * initial handle?). I was not able to reproduce this on my own machines. Moving the
+     * mouse outside the window results in similar behavior. However, I tested various
+     * obvious failure causes: Was the mouse moved? Was the window hidden or moved? Is
+     * the window in the background? Neither of those applies. Making the window topmost
+     * or using a fullscreen device doesn't improve the test's reliability either. */
     memset(&info, 0, sizeof(info));
     info.cbSize = sizeof(info);
     ok(GetCursorInfo(&info), "GetCursorInfo failed\n");
     ok(info.flags & (CURSOR_SHOWING|CURSOR_SUPPRESSED), "The gdi cursor is hidden (%08x)\n", info.flags);
-    ok(info.hCursor == cur, "The cursor handle is %p\n", info.hCursor); /* unchanged */
+    ok(info.hCursor == cur || broken(1), "The cursor handle is %p\n", info.hCursor); /* unchanged */
 
     /* Still hidden */
     ret = IDirect3DDevice9_ShowCursor(device, TRUE);
@@ -1904,7 +1912,7 @@ static void test_cursor(void)
     info.cbSize = sizeof(info);
     ok(GetCursorInfo(&info), "GetCursorInfo failed\n");
     ok(info.flags & (CURSOR_SHOWING|CURSOR_SUPPRESSED), "The gdi cursor is hidden (%08x)\n", info.flags);
-    ok(info.hCursor != cur, "The cursor handle is %p\n", info.hCursor);
+    ok(info.hCursor != cur || broken(1), "The cursor handle is %p\n", info.hCursor);
 
     /* Cursor dimensions must all be powers of two */
     for (test_idx = 0; test_idx < ARRAY_SIZE(cursor_sizes); ++test_idx)
@@ -5180,6 +5188,7 @@ static void test_cursor_pos(void)
     HWND window;
     HRESULT hr;
     BOOL ret;
+    POINT pt;
 
     /* Note that we don't check for movement we're not supposed to receive.
      * That's because it's hard to distinguish from the user accidentally
@@ -5196,6 +5205,32 @@ static void test_cursor_pos(void)
         {150, 150},
         {0, 0},
     };
+
+    /* Windows 10 1709 is unreliable. One or more of the cursor movements we
+     * expect don't show up. Moving the mouse to a defined position beforehand
+     * seems to get it into better shape - only the final 150x150 move we do
+     * below is missing - it looks as if this Windows version filters redundant
+     * SetCursorPos calls on the user32 level, although I am not entirely sure.
+     *
+     * The weird thing is that the previous test leaves the cursor position
+     * reliably at 512x384 on the testbot. So the 50x50 mouse move shouldn't
+     * be stripped away anyway, but it might be a difference between moving the
+     * cursor through SetCursorPos vs moving it by changing the display mode. */
+    ret = SetCursorPos(99, 99);
+    ok(ret, "Failed to set cursor position.\n");
+    flush_events();
+
+    /* Check if we can move the cursor. If we're running in a virtual desktop
+     * that does not have focus or the mouse is outside the desktop window, some
+     * window managers (e.g. kwin) will refuse to let us steal the pointer. That
+     * is reasonable, but breaks the test. */
+    ret = GetCursorPos(&pt);
+    ok(ret, "Failed to get cursor position.\n");
+    if (pt.x != 99 || pt.y != 99)
+    {
+        skip("Could not warp the cursor (cur pos %ux%u), skipping test.\n", pt.x, pt.y);
+        return;
+    }
 
     wc.lpfnWndProc = test_cursor_proc;
     wc.lpszClassName = "d3d9_test_cursor_wc";
@@ -5231,7 +5266,8 @@ static void test_cursor_pos(void)
 
     IDirect3DDevice9_SetCursorPosition(device, 75, 75, 0);
     flush_events();
-    /* SetCursorPosition() eats duplicates. */
+    /* SetCursorPosition() eats duplicates. FIXME: Since we accept unexpected
+     * mouse moves the test doesn't actually demonstrate that. */
     IDirect3DDevice9_SetCursorPosition(device, 75, 75, 0);
     flush_events();
 
@@ -5252,13 +5288,14 @@ static void test_cursor_pos(void)
 
     IDirect3DDevice9_SetCursorPosition(device, 150, 150, 0);
     flush_events();
-    /* SetCursorPos() doesn't. */
+    /* SetCursorPos() doesn't. Except for Win10 1709. */
     ret = SetCursorPos(150, 150);
     ok(ret, "Failed to set cursor position.\n");
     flush_events();
 
-    ok(!expect_pos->x && !expect_pos->y, "Didn't receive MOUSEMOVE %u (%d, %d).\n",
-       (unsigned)(expect_pos - points), expect_pos->x, expect_pos->y);
+    ok((!expect_pos->x && !expect_pos->y) || broken(expect_pos - points == 7),
+        "Didn't receive MOUSEMOVE %u (%d, %d).\n",
+        (unsigned)(expect_pos - points), expect_pos->x, expect_pos->y);
 
     refcount = IDirect3DDevice9_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
@@ -14255,18 +14292,71 @@ struct IDirect3DShaderValidator9
     const struct IDirect3DShaderValidator9Vtbl *vtbl;
 };
 
+#define MAX_VALIDATOR_CB_CALL_COUNT 5
+
+struct test_shader_validator_cb_context
+{
+    unsigned int call_count;
+    const char *file[MAX_VALIDATOR_CB_CALL_COUNT];
+    int line[MAX_VALIDATOR_CB_CALL_COUNT];
+    DWORD_PTR message_id[MAX_VALIDATOR_CB_CALL_COUNT];
+    const char *message[MAX_VALIDATOR_CB_CALL_COUNT];
+};
+
 HRESULT WINAPI test_shader_validator_cb(const char *file, int line, DWORD_PTR arg3,
         DWORD_PTR message_id, const char *message, void *context)
 {
-    ok(0, "Unexpected call.\n");
+    if (context)
+    {
+        struct test_shader_validator_cb_context *c = context;
+
+        c->file[c->call_count] = file;
+        c->line[c->call_count] = line;
+        c->message_id[c->call_count] = message_id;
+        c->message[c->call_count] = message;
+        ++c->call_count;
+    }
+    else
+    {
+        ok(0, "Unexpected call.\n");
+    }
     return S_OK;
 }
 
 static void test_shader_validator(void)
 {
+    static const unsigned int dcl_texcoord_9_9[] = {0x0200001f, 0x80090005, 0x902f0009};   /* dcl_texcoord9_pp v9 */
+    static const unsigned int dcl_texcoord_9_10[] = {0x0200001f, 0x80090005, 0x902f000a};  /* dcl_texcoord9_pp v10 */
+    static const unsigned int dcl_texcoord_10_9[] = {0x0200001f, 0x800a0005, 0x902f0009};  /* dcl_texcoord10_pp v9 */
+    static const unsigned int mov_r2_v9[] = {0x02000001, 0x80220002, 0x90ff0009};          /* mov_pp r2.y, v9.w */
+    static const unsigned int mov_r2_v10[] = {0x02000001, 0x80220002, 0x90ff000a};         /* mov_pp r2.y, v10.w */
+
+    static const unsigned int ps_3_0 = D3DPS_VERSION(3, 0);
+    static const unsigned int end_token = 0x0000ffff;
+    static const char *test_file_name = "test_file";
+    static const struct instruction_test
+    {
+        unsigned int shader_version;
+        const unsigned int *instruction;
+        unsigned int instruction_length;
+        DWORD_PTR message_id;
+        const unsigned int *decl;
+        unsigned int decl_length;
+    }
+    instruction_tests[] =
+    {
+        {D3DPS_VERSION(3, 0), dcl_texcoord_9_9, ARRAY_SIZE(dcl_texcoord_9_9)},
+        {D3DPS_VERSION(3, 0), dcl_texcoord_9_10, ARRAY_SIZE(dcl_texcoord_9_10), 0x12c},
+        {D3DPS_VERSION(3, 0), dcl_texcoord_10_9, ARRAY_SIZE(dcl_texcoord_10_9)},
+        {D3DPS_VERSION(3, 0), mov_r2_v9, ARRAY_SIZE(mov_r2_v9), 0, dcl_texcoord_9_9, ARRAY_SIZE(dcl_texcoord_9_9)},
+        {D3DPS_VERSION(3, 0), mov_r2_v10, ARRAY_SIZE(mov_r2_v10), 0x167},
+    };
+
+    struct test_shader_validator_cb_context context;
     IDirect3DShaderValidator9 *validator;
+    HRESULT expected_hr, hr;
+    unsigned int i;
     ULONG refcount;
-    HRESULT hr;
 
     validator = Direct3DShaderValidatorCreate9();
 
@@ -14288,6 +14378,104 @@ static void test_shader_validator(void)
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
     hr = validator->vtbl->End(validator);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = validator->vtbl->Begin(validator, test_shader_validator_cb, &context, 0);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    memset(&context, 0, sizeof(context));
+    hr = validator->vtbl->Instruction(validator, test_file_name, 28, &simple_vs[1], 3);
+    todo_wine
+    {
+        ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+        ok(context.call_count == 2, "Got unexpected call_count %u.\n", context.call_count);
+        ok(!!context.message[0], "Got NULL message.\n");
+        ok(!!context.message[1], "Got NULL message.\n");
+        ok(context.message_id[0] == 0xef, "Got unexpected message_id[0] %p.\n", (void *)context.message_id[0]);
+        ok(context.message_id[1] == 0xf0, "Got unexpected message_id[1] %p.\n", (void *)context.message_id[1]);
+        ok(context.line[0] == -1, "Got unexpected line %d.\n", context.line[0]);
+    }
+    ok(!context.file[0], "Got unexpected file[0] %s.\n", context.file[0]);
+    ok(!context.file[1], "Got unexpected file[0] %s.\n", context.file[1]);
+    ok(!context.line[1], "Got unexpected line %d.\n", context.line[1]);
+
+    memset(&context, 0, sizeof(context));
+    hr = validator->vtbl->End(validator);
+    todo_wine ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(!context.call_count, "Got unexpected call_count %u.\n", context.call_count);
+
+    memset(&context, 0, sizeof(context));
+    hr = validator->vtbl->Begin(validator, test_shader_validator_cb, &context, 0);
+    todo_wine
+    {
+        ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+        ok(context.call_count == 1, "Got unexpected call_count %u.\n", context.call_count);
+        ok(context.message_id[0] == 0xeb, "Got unexpected message_id[0] %p.\n", (void *)context.message_id[0]);
+        ok(!!context.message[0], "Got NULL message.\n");
+    }
+    ok(!context.file[0], "Got unexpected file[0] %s.\n", context.file[0]);
+    ok(!context.line[0], "Got unexpected line %d.\n", context.line[0]);
+
+    hr = validator->vtbl->Begin(validator, NULL, &context, 0);
+    todo_wine ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+
+    refcount = validator->vtbl->Release(validator);
+    todo_wine ok(!refcount, "Validator has %u references left.\n", refcount);
+    validator = Direct3DShaderValidatorCreate9();
+
+    hr = validator->vtbl->Begin(validator, NULL, &context, 0);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = validator->vtbl->Instruction(validator, test_file_name, 1, &ps_3_0, 1);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = validator->vtbl->Instruction(validator, test_file_name, 5, &end_token, 1);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = validator->vtbl->End(validator);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(instruction_tests); ++i)
+    {
+        const struct instruction_test *test = &instruction_tests[i];
+
+        hr = validator->vtbl->Begin(validator, test_shader_validator_cb, &context, 0);
+        ok(hr == S_OK, "Got unexpected hr %#x, test %u.\n", hr, i);
+
+        hr = validator->vtbl->Instruction(validator, test_file_name, 1, &test->shader_version, 1);
+        ok(hr == S_OK, "Got unexpected hr %#x, test %u.\n", hr, i);
+
+        if (test->decl)
+        {
+            memset(&context, 0, sizeof(context));
+            hr = validator->vtbl->Instruction(validator, test_file_name, 3, test->decl, test->decl_length);
+            ok(hr == S_OK, "Got unexpected hr %#x, test %u.\n", hr, i);
+            ok(!context.call_count, "Got unexpected call_count %u, test %u.\n", context.call_count, i);
+        }
+
+        memset(&context, 0, sizeof(context));
+        hr = validator->vtbl->Instruction(validator, test_file_name, 3, test->instruction, test->instruction_length);
+        ok(hr == S_OK, "Got unexpected hr %#x, test %u.\n", hr, i);
+        if (test->message_id)
+        {
+            todo_wine
+            {
+                ok(context.call_count == 1, "Got unexpected call_count %u, test %u.\n", context.call_count, i);
+                ok(!!context.message[0], "Got NULL message, test %u.\n", i);
+                ok(context.message_id[0] == test->message_id, "Got unexpected message_id[0] %p, test %u.\n",
+                        (void *)context.message_id[0], i);
+                ok(context.file[0] == test_file_name, "Got unexpected file[0] %s, test %u.\n", context.file[0], i);
+                ok(context.line[0] == 3, "Got unexpected line %d, test %u.\n", context.line[0], i);
+            }
+        }
+        else
+        {
+            ok(!context.call_count, "Got unexpected call_count %u, test %u.\n", context.call_count, i);
+        }
+
+        hr = validator->vtbl->Instruction(validator, test_file_name, 5, &end_token, 1);
+        ok(hr == S_OK, "Got unexpected hr %#x, test %u.\n", hr, i);
+
+        hr = validator->vtbl->End(validator);
+        expected_hr = test->message_id ? E_FAIL : S_OK;
+        todo_wine_if(expected_hr) ok(hr == expected_hr, "Got unexpected hr %#x, test %u.\n", hr, i);
+    }
 
     refcount = validator->vtbl->Release(validator);
     todo_wine ok(!refcount, "Validator has %u references left.\n", refcount);
@@ -14421,10 +14609,10 @@ static void test_window_position(void)
 {
     unsigned int adapter_idx, adapter_count;
     struct device_desc device_desc;
+    RECT window_rect, new_rect;
     IDirect3DDevice9 *device;
     MONITORINFO monitor_info;
     HMONITOR monitor;
-    RECT window_rect;
     IDirect3D9 *d3d;
     HWND window;
     HRESULT hr;
@@ -14458,6 +14646,42 @@ static void test_window_position(void)
         ret = GetWindowRect(window, &window_rect);
         ok(ret, "Adapter %u: GetWindowRect failed, error %#x.\n", adapter_idx, GetLastError());
         ok(EqualRect(&window_rect, &monitor_info.rcMonitor),
+                "Adapter %u: Expect window rect %s, got %s.\n", adapter_idx,
+                wine_dbgstr_rect(&monitor_info.rcMonitor), wine_dbgstr_rect(&window_rect));
+
+        new_rect = window_rect;
+        --new_rect.right;
+        --new_rect.bottom;
+
+        ret = MoveWindow(window, new_rect.left, new_rect.top, new_rect.right - new_rect.left,
+                new_rect.bottom - new_rect.top, TRUE);
+        ok(ret, "Got unexpected ret %#x, error %#x, Adapter %u.\n", ret, GetLastError(), adapter_idx);
+        ret = GetWindowRect(window, &window_rect);
+        ok(ret, "Got unexpected ret %#x, error %#x, Adapter %u.\n", ret, GetLastError(), adapter_idx);
+        ok(EqualRect(&window_rect, &new_rect),
+                "Adapter %u: Expect window rect %s, got %s.\n", adapter_idx,
+                wine_dbgstr_rect(&monitor_info.rcMonitor), wine_dbgstr_rect(&window_rect));
+        /* After processing window events window rectangle gets restored. But only once, the size set
+         * on the second resize remains. */
+        flush_events();
+        ret = GetWindowRect(window, &window_rect);
+        ok(ret, "Got unexpected ret %#x, error %#x, Adapter %u.\n", ret, GetLastError(), adapter_idx);
+        todo_wine ok(EqualRect(&window_rect, &monitor_info.rcMonitor),
+                "Adapter %u: Expect window rect %s, got %s.\n", adapter_idx,
+                wine_dbgstr_rect(&monitor_info.rcMonitor), wine_dbgstr_rect(&window_rect));
+
+        ret = MoveWindow(window, new_rect.left, new_rect.top, new_rect.right - new_rect.left,
+                new_rect.bottom - new_rect.top, TRUE);
+        ok(ret, "Got unexpected ret %#x, error %#x, Adapter %u.\n", ret, GetLastError(), adapter_idx);
+        ret = GetWindowRect(window, &window_rect);
+        ok(ret, "Got unexpected ret %#x, error %#x, Adapter %u.\n", ret, GetLastError(), adapter_idx);
+        ok(EqualRect(&window_rect, &new_rect),
+                "Adapter %u: Expect window rect %s, got %s.\n", adapter_idx,
+                wine_dbgstr_rect(&monitor_info.rcMonitor), wine_dbgstr_rect(&window_rect));
+        flush_events();
+        ret = GetWindowRect(window, &window_rect);
+        ok(ret, "Got unexpected ret %#x, error %#x, Adapter %u.\n", ret, GetLastError(), adapter_idx);
+        ok(EqualRect(&window_rect, &new_rect),
                 "Adapter %u: Expect window rect %s, got %s.\n", adapter_idx,
                 wine_dbgstr_rect(&monitor_info.rcMonitor), wine_dbgstr_rect(&window_rect));
 

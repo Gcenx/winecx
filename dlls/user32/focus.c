@@ -30,198 +30,6 @@
 #include "imm.h"
 #include "user_private.h"
 #include "wine/server.h"
-#include "wine/debug.h"
-
-WINE_DEFAULT_DEBUG_CHANNEL(win);
-
-
-/*****************************************************************
- *		set_focus_window
- *
- * Change the focus window, sending the WM_SETFOCUS and WM_KILLFOCUS messages
- */
-static HWND set_focus_window( HWND hwnd )
-{
-    HWND previous = 0, ime_default;
-    BOOL ret;
-
-    SERVER_START_REQ( set_focus_window )
-    {
-        req->handle = wine_server_user_handle( hwnd );
-        if ((ret = !wine_server_call_err( req )))
-            previous = wine_server_ptr_handle( reply->previous );
-    }
-    SERVER_END_REQ;
-    if (!ret) return 0;
-    if (previous == hwnd) return previous;
-
-    if (previous)
-    {
-        SendMessageW( previous, WM_KILLFOCUS, (WPARAM)hwnd, 0 );
-
-        ime_default = ImmGetDefaultIMEWnd( previous );
-        if (ime_default)
-            SendMessageW( ime_default, WM_IME_INTERNAL, IME_INTERNAL_DEACTIVATE, (LPARAM)previous );
-
-        if (hwnd != GetFocus()) return previous;  /* changed by the message */
-    }
-    if (IsWindow(hwnd))
-    {
-        USER_Driver->pSetFocus(hwnd);
-
-        ime_default = ImmGetDefaultIMEWnd( hwnd );
-        if (ime_default)
-            SendMessageW( ime_default, WM_IME_INTERNAL, IME_INTERNAL_ACTIVATE, (LPARAM)hwnd );
-
-        SendMessageW( hwnd, WM_SETFOCUS, (WPARAM)previous, 0 );
-    }
-    return previous;
-}
-
-
-/*******************************************************************
- *		set_active_window
- */
-static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
-{
-    HWND previous = GetActiveWindow();
-    BOOL ret;
-    DWORD old_thread, new_thread;
-    CBTACTIVATESTRUCT cbt;
-
-    if (previous == hwnd)
-    {
-        if (prev) *prev = hwnd;
-        return TRUE;
-    }
-
-    /* call CBT hook chain */
-    cbt.fMouse     = mouse;
-    cbt.hWndActive = previous;
-    if (HOOK_CallHooks( WH_CBT, HCBT_ACTIVATE, (WPARAM)hwnd, (LPARAM)&cbt, TRUE )) return FALSE;
-
-    if (IsWindow(previous))
-    {
-        SendMessageW( previous, WM_NCACTIVATE, FALSE, (LPARAM)hwnd );
-        SendMessageW( previous, WM_ACTIVATE,
-                      MAKEWPARAM( WA_INACTIVE, IsIconic(previous) ), (LPARAM)hwnd );
-    }
-
-    SERVER_START_REQ( set_active_window )
-    {
-        req->handle = wine_server_user_handle( hwnd );
-        if ((ret = !wine_server_call_err( req )))
-            previous = wine_server_ptr_handle( reply->previous );
-    }
-    SERVER_END_REQ;
-    if (!ret) return FALSE;
-    if (prev) *prev = previous;
-    if (previous == hwnd) return TRUE;
-
-    if (hwnd)
-    {
-        /* send palette messages */
-        if (SendMessageW( hwnd, WM_QUERYNEWPALETTE, 0, 0 ))
-            SendMessageTimeoutW( HWND_BROADCAST, WM_PALETTEISCHANGING, (WPARAM)hwnd, 0,
-                                 SMTO_ABORTIFHUNG, 2000, NULL );
-        if (!IsWindow(hwnd)) return FALSE;
-    }
-
-    old_thread = previous ? GetWindowThreadProcessId( previous, NULL ) : 0;
-    new_thread = hwnd ? GetWindowThreadProcessId( hwnd, NULL ) : 0;
-
-    if (old_thread != new_thread)
-    {
-        HWND *list, *phwnd;
-
-        if ((list = WIN_ListChildren( GetDesktopWindow() )))
-        {
-            if (old_thread)
-            {
-                for (phwnd = list; *phwnd; phwnd++)
-                {
-                    if (GetWindowThreadProcessId( *phwnd, NULL ) == old_thread)
-                        SendMessageW( *phwnd, WM_ACTIVATEAPP, 0, new_thread );
-                }
-            }
-            if (new_thread)
-            {
-                for (phwnd = list; *phwnd; phwnd++)
-                {
-                    if (GetWindowThreadProcessId( *phwnd, NULL ) == new_thread)
-                        SendMessageW( *phwnd, WM_ACTIVATEAPP, 1, old_thread );
-                }
-            }
-            HeapFree( GetProcessHeap(), 0, list );
-        }
-    }
-
-    if (IsWindow(hwnd))
-    {
-        SendMessageW( hwnd, WM_NCACTIVATE, (hwnd == GetForegroundWindow()), (LPARAM)previous );
-        SendMessageW( hwnd, WM_ACTIVATE,
-                      MAKEWPARAM( mouse ? WA_CLICKACTIVE : WA_ACTIVE, IsIconic(hwnd) ),
-                      (LPARAM)previous );
-        if (GetAncestor( hwnd, GA_PARENT ) == GetDesktopWindow())
-            PostMessageW( GetDesktopWindow(), WM_PARENTNOTIFY, WM_NCACTIVATE, (LPARAM)hwnd );
-    }
-
-    /* now change focus if necessary */
-    if (focus)
-    {
-        GUITHREADINFO info;
-
-        info.cbSize = sizeof(info);
-        GetGUIThreadInfo( GetCurrentThreadId(), &info );
-        /* Do not change focus if the window is no more active */
-        if (hwnd == info.hwndActive)
-        {
-            if (!info.hwndFocus || !hwnd || GetAncestor( info.hwndFocus, GA_ROOT ) != hwnd)
-                set_focus_window( hwnd );
-        }
-    }
-
-    return TRUE;
-}
-
-
-/*******************************************************************
- *		set_foreground_window
- */
-static BOOL set_foreground_window( HWND hwnd, BOOL mouse )
-{
-    BOOL ret, send_msg_old = FALSE, send_msg_new = FALSE;
-    HWND previous = 0;
-
-    SERVER_START_REQ( set_foreground_window )
-    {
-        req->handle = wine_server_user_handle( hwnd );
-        if ((ret = !wine_server_call_err( req )))
-        {
-            previous = wine_server_ptr_handle( reply->previous );
-            send_msg_old = reply->send_msg_old;
-            send_msg_new = reply->send_msg_new;
-        }
-    }
-    SERVER_END_REQ;
-
-    if (ret && previous != hwnd)
-    {
-        if (send_msg_old)  /* old window belongs to other thread */
-            SendNotifyMessageW( previous, WM_WINE_SETACTIVEWINDOW, 0, 0 );
-        else if (send_msg_new)  /* old window belongs to us but new one to other thread */
-            ret = set_active_window( 0, NULL, mouse, TRUE );
-
-        if (send_msg_new)  /* new window belongs to other thread */
-            SendNotifyMessageW( hwnd, WM_WINE_SETACTIVEWINDOW, (WPARAM)hwnd, 0 );
-        else  /* new window belongs to us */
-            ret = set_active_window( hwnd, NULL, mouse, TRUE );
-    }
-
-    MENU_send_window_menubar_to_macapp( hwnd );
-
-    return ret;
-}
 
 
 /*******************************************************************
@@ -231,100 +39,7 @@ static BOOL set_foreground_window( HWND hwnd, BOOL mouse )
  */
 BOOL FOCUS_MouseActivate( HWND hwnd )
 {
-    return set_foreground_window( hwnd, TRUE );
-}
-
-
-/*******************************************************************
- *		SetActiveWindow (USER32.@)
- */
-HWND WINAPI SetActiveWindow( HWND hwnd )
-{
-    HWND prev;
-
-    TRACE( "%p\n", hwnd );
-
-    if (hwnd)
-    {
-        LONG style;
-
-        hwnd = WIN_GetFullHandle( hwnd );
-        if (!IsWindow( hwnd ))
-        {
-            SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-            return 0;
-        }
-
-        style = GetWindowLongW( hwnd, GWL_STYLE );
-        if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD)
-            return GetActiveWindow();  /* Windows doesn't seem to return an error here */
-    }
-
-    if (!set_active_window( hwnd, &prev, FALSE, TRUE )) return 0;
-    return prev;
-}
-
-
-/*****************************************************************
- *		SetFocus  (USER32.@)
- */
-HWND WINAPI SetFocus( HWND hwnd )
-{
-    HWND hwndTop = hwnd;
-    HWND previous = GetFocus();
-
-    TRACE( "%p prev %p\n", hwnd, previous );
-
-    if (hwnd)
-    {
-        /* Check if we can set the focus to this window */
-        hwnd = WIN_GetFullHandle( hwnd );
-        if (!IsWindow( hwnd ))
-        {
-            SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-            return 0;
-        }
-        if (hwnd == previous) return previous;  /* nothing to do */
-        for (;;)
-        {
-            HWND parent;
-            LONG style = GetWindowLongW( hwndTop, GWL_STYLE );
-            if (style & (WS_MINIMIZE | WS_DISABLED)) return 0;
-            if (!(style & WS_CHILD)) break;
-            parent = GetAncestor( hwndTop, GA_PARENT );
-            if (!parent || parent == GetDesktopWindow())
-            {
-                if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD) return 0;
-                break;
-            }
-            if (parent == get_hwnd_message_parent()) return 0;
-            hwndTop = parent;
-        }
-
-        /* call hooks */
-        if (HOOK_CallHooks( WH_CBT, HCBT_SETFOCUS, (WPARAM)hwnd, (LPARAM)previous, TRUE )) return 0;
-
-        /* activate hwndTop if needed. */
-        if (hwndTop != GetActiveWindow())
-        {
-            if (!set_active_window( hwndTop, NULL, FALSE, FALSE )) return 0;
-            if (!IsWindow( hwnd )) return 0;  /* Abort if window destroyed */
-
-            /* Do not change focus if the window is no longer active */
-            if (hwndTop != GetActiveWindow()) return 0;
-        }
-    }
-    else /* NULL hwnd passed in */
-    {
-        if (!previous) return 0;  /* nothing to do */
-        if (HOOK_CallHooks( WH_CBT, HCBT_SETFOCUS, 0, (LPARAM)previous, TRUE )) return 0;
-    }
-
-    /* CrossOver HACK for bug 6727 */
-    MENU_send_window_menubar_to_macapp( hwnd );
-
-    /* change focus and send messages */
-    return set_focus_window( hwnd );
+    return NtUserSetForegroundWindow( hwnd, TRUE );
 }
 
 
@@ -333,10 +48,8 @@ HWND WINAPI SetFocus( HWND hwnd )
  */
 BOOL WINAPI SetForegroundWindow( HWND hwnd )
 {
-    TRACE( "%p\n", hwnd );
-
-    hwnd = WIN_GetFullHandle( hwnd );
-    return set_foreground_window( hwnd, FALSE );
+    MENU_send_window_menubar_to_macapp( hwnd );
+    return NtUserSetForegroundWindow( hwnd, FALSE );
 }
 
 
@@ -345,15 +58,9 @@ BOOL WINAPI SetForegroundWindow( HWND hwnd )
  */
 HWND WINAPI GetActiveWindow(void)
 {
-    HWND ret = 0;
-
-    SERVER_START_REQ( get_thread_input )
-    {
-        req->tid = GetCurrentThreadId();
-        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->active );
-    }
-    SERVER_END_REQ;
-    return ret;
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndActive : 0;
 }
 
 
@@ -362,32 +69,9 @@ HWND WINAPI GetActiveWindow(void)
  */
 HWND WINAPI GetFocus(void)
 {
-    HWND ret = 0;
-
-    SERVER_START_REQ( get_thread_input )
-    {
-        req->tid = GetCurrentThreadId();
-        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->focus );
-    }
-    SERVER_END_REQ;
-    return ret;
-}
-
-
-/*******************************************************************
- *		GetForegroundWindow  (USER32.@)
- */
-HWND WINAPI GetForegroundWindow(void)
-{
-    HWND ret = 0;
-
-    SERVER_START_REQ( get_thread_input )
-    {
-        req->tid = 0;
-        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->foreground );
-    }
-    SERVER_END_REQ;
-    return ret;
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndFocus : 0;
 }
 
 
@@ -417,9 +101,9 @@ BOOL WINAPI SetShellWindowEx(HWND hwndShell, HWND hwndListView)
             return FALSE;
 
     if (hwndListView && hwndListView!=hwndShell)
-        SetWindowPos(hwndListView, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+        NtUserSetWindowPos( hwndListView, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE );
 
-    SetWindowPos(hwndShell, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+    NtUserSetWindowPos( hwndShell, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE );
 
     SERVER_START_REQ(set_global_windows)
     {

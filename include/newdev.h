@@ -23,8 +23,6 @@
 
 #include "setupapi.h"
 
-#include "wine/winheader_enter.h"
-
 #define INSTALLFLAG_FORCE           0x1
 #define INSTALLFLAG_READONLY        0x2
 #define INSTALLFLAG_NONINTERACTIVE  0x4
@@ -48,7 +46,5 @@ BOOL WINAPI UpdateDriverForPlugAndPlayDevicesW(HWND parent, const WCHAR *hardwar
 BOOL WINAPI DiInstallDriverA(HWND parent, const char *inf_path, DWORD flags, BOOL *reboot);
 BOOL WINAPI DiInstallDriverW(HWND parent, const WCHAR *inf_path, DWORD flags, BOOL *reboot);
 #define DiInstallDriver WINELIB_NAME_AW(DiInstallDriver)
-
-#include "wine/winheader_exit.h"
 
 #endif

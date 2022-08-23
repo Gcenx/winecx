@@ -549,7 +549,7 @@ static HRESULT writeroutput_flush_stream(xmlwriteroutput *output)
         written = 0;
         hr = ISequentialStream_Write(output->stream, buffer->data + offset, buffer->written, &written);
         if (FAILED(hr)) {
-            WARN("write to stream failed (0x%08x)\n", hr);
+            WARN("write to stream failed %#lx.\n", hr);
             buffer->written = 0;
             return hr;
         }
@@ -700,28 +700,30 @@ static HRESULT WINAPI xmlwriter_QueryInterface(IXmlWriter *iface, REFIID riid, v
 
 static ULONG WINAPI xmlwriter_AddRef(IXmlWriter *iface)
 {
-    xmlwriter *This = impl_from_IXmlWriter(iface);
-    ULONG ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p)->(%u)\n", This, ref);
+    xmlwriter *writer = impl_from_IXmlWriter(iface);
+    ULONG ref = InterlockedIncrement(&writer->ref);
+    TRACE("%p, refcount %lu.\n", iface, ref);
     return ref;
 }
 
 static ULONG WINAPI xmlwriter_Release(IXmlWriter *iface)
 {
-    xmlwriter *This = impl_from_IXmlWriter(iface);
-    ULONG ref = InterlockedDecrement(&This->ref);
+    xmlwriter *writer = impl_from_IXmlWriter(iface);
+    ULONG ref = InterlockedDecrement(&writer->ref);
 
-    TRACE("(%p)->(%u)\n", This, ref);
+    TRACE("%p, refcount %lu.\n", iface, ref);
 
-    if (ref == 0) {
-        IMalloc *imalloc = This->imalloc;
+    if (!ref)
+    {
+        IMalloc *imalloc = writer->imalloc;
 
-        writeroutput_flush_stream(This->output);
-        if (This->output) IUnknown_Release(&This->output->IXmlWriterOutput_iface);
+        writeroutput_flush_stream(writer->output);
+        if (writer->output)
+            IUnknown_Release(&writer->output->IXmlWriterOutput_iface);
 
-        writer_free_element_stack(This);
+        writer_free_element_stack(writer);
 
-        writer_free(This, This);
+        writer_free(writer, writer);
         if (imalloc) IMalloc_Release(imalloc);
     }
 
@@ -812,20 +814,20 @@ static HRESULT WINAPI xmlwriter_GetProperty(IXmlWriter *iface, UINT property, LO
 
 static HRESULT WINAPI xmlwriter_SetProperty(IXmlWriter *iface, UINT property, LONG_PTR value)
 {
-    xmlwriter *This = impl_from_IXmlWriter(iface);
+    xmlwriter *writer = impl_from_IXmlWriter(iface);
 
-    TRACE("(%p)->(%s %lu)\n", This, debugstr_writer_prop(property), value);
+    TRACE("%p, %s, %Id.\n", iface, debugstr_writer_prop(property), value);
 
     switch (property)
     {
         case XmlWriterProperty_Indent:
-            This->indent = !!value;
+            writer->indent = !!value;
             break;
         case XmlWriterProperty_ByteOrderMark:
-            This->bom = !!value;
+            writer->bom = !!value;
             break;
         case XmlWriterProperty_OmitXmlDeclaration:
-            This->omitxmldecl = !!value;
+            writer->omitxmldecl = !!value;
             break;
         default:
             FIXME("Unimplemented property (%u)\n", property);
@@ -1822,9 +1824,9 @@ static HRESULT WINAPI xmlwriteroutput_QueryInterface(IXmlWriterOutput *iface, RE
 
 static ULONG WINAPI xmlwriteroutput_AddRef(IXmlWriterOutput *iface)
 {
-    xmlwriteroutput *This = impl_from_IXmlWriterOutput(iface);
-    ULONG ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p)->(%d)\n", This, ref);
+    xmlwriteroutput *output = impl_from_IXmlWriterOutput(iface);
+    ULONG ref = InterlockedIncrement(&output->ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
     return ref;
 }
 
@@ -1833,7 +1835,7 @@ static ULONG WINAPI xmlwriteroutput_Release(IXmlWriterOutput *iface)
     xmlwriteroutput *This = impl_from_IXmlWriterOutput(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(%d)\n", This, ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
 
     if (ref == 0)
     {
@@ -1863,13 +1865,8 @@ HRESULT WINAPI CreateXmlWriter(REFIID riid, void **obj, IMalloc *imalloc)
 
     TRACE("(%s, %p, %p)\n", wine_dbgstr_guid(riid), obj, imalloc);
 
-    if (imalloc)
-        writer = IMalloc_Alloc(imalloc, sizeof(*writer));
-    else
-        writer = heap_alloc(sizeof(*writer));
-    if (!writer)
+    if (!(writer = m_alloc(imalloc, sizeof(*writer))))
         return E_OUTOFMEMORY;
-
     memset(writer, 0, sizeof(*writer));
 
     writer->IXmlWriter_iface.lpVtbl = &xmlwriter_vtbl;
@@ -1884,7 +1881,7 @@ HRESULT WINAPI CreateXmlWriter(REFIID riid, void **obj, IMalloc *imalloc)
     hr = IXmlWriter_QueryInterface(&writer->IXmlWriter_iface, riid, obj);
     IXmlWriter_Release(&writer->IXmlWriter_iface);
 
-    TRACE("returning iface %p, hr %#x\n", *obj, hr);
+    TRACE("returning iface %p, hr %#lx.\n", *obj, hr);
 
     return hr;
 }
@@ -1897,12 +1894,9 @@ static HRESULT create_writer_output(IUnknown *stream, IMalloc *imalloc, xml_enco
 
     *out = NULL;
 
-    if (imalloc)
-        writeroutput = IMalloc_Alloc(imalloc, sizeof(*writeroutput));
-    else
-        writeroutput = heap_alloc(sizeof(*writeroutput));
-    if (!writeroutput)
+    if (!(writeroutput = m_alloc(imalloc, sizeof(*writeroutput))))
         return E_OUTOFMEMORY;
+    memset(writeroutput, 0, sizeof(*writeroutput));
 
     writeroutput->IXmlWriterOutput_iface.lpVtbl = &xmlwriteroutputvtbl;
     writeroutput->ref = 1;
@@ -1910,21 +1904,18 @@ static HRESULT create_writer_output(IUnknown *stream, IMalloc *imalloc, xml_enco
     if (imalloc)
         IMalloc_AddRef(imalloc);
     writeroutput->encoding = encoding;
-    writeroutput->stream = NULL;
     hr = init_output_buffer(writeroutput);
     if (FAILED(hr)) {
         IUnknown_Release(&writeroutput->IXmlWriterOutput_iface);
         return hr;
     }
 
-    if (encoding_name) {
+    if (encoding_name)
+    {
         unsigned int size = (lstrlenW(encoding_name) + 1) * sizeof(WCHAR);
         writeroutput->encoding_name = writeroutput_alloc(writeroutput, size);
         memcpy(writeroutput->encoding_name, encoding_name, size);
     }
-    else
-        writeroutput->encoding_name = NULL;
-    writeroutput->written = 0;
 
     IUnknown_QueryInterface(stream, &IID_IUnknown, (void**)&writeroutput->output);
 

@@ -3384,7 +3384,7 @@ static ULONG STDMETHODCALLTYPE d2d_path_geometry_AddRef(ID2D1PathGeometry *iface
     struct d2d_geometry *geometry = impl_from_ID2D1PathGeometry(iface);
     ULONG refcount = InterlockedIncrement(&geometry->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -3394,7 +3394,7 @@ static ULONG STDMETHODCALLTYPE d2d_path_geometry_Release(ID2D1PathGeometry *ifac
     struct d2d_geometry *geometry = impl_from_ID2D1PathGeometry(iface);
     ULONG refcount = InterlockedDecrement(&geometry->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -3974,7 +3974,7 @@ static ULONG STDMETHODCALLTYPE d2d_ellipse_geometry_AddRef(ID2D1EllipseGeometry 
     struct d2d_geometry *geometry = impl_from_ID2D1EllipseGeometry(iface);
     ULONG refcount = InterlockedIncrement(&geometry->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -3984,7 +3984,7 @@ static ULONG STDMETHODCALLTYPE d2d_ellipse_geometry_Release(ID2D1EllipseGeometry
     struct d2d_geometry *geometry = impl_from_ID2D1EllipseGeometry(iface);
     ULONG refcount = InterlockedDecrement(&geometry->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -4246,7 +4246,7 @@ static ULONG STDMETHODCALLTYPE d2d_rectangle_geometry_AddRef(ID2D1RectangleGeome
     struct d2d_geometry *geometry = impl_from_ID2D1RectangleGeometry(iface);
     ULONG refcount = InterlockedIncrement(&geometry->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -4256,7 +4256,7 @@ static ULONG STDMETHODCALLTYPE d2d_rectangle_geometry_Release(ID2D1RectangleGeom
     struct d2d_geometry *geometry = impl_from_ID2D1RectangleGeometry(iface);
     ULONG refcount = InterlockedDecrement(&geometry->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -4662,7 +4662,7 @@ static ULONG STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_AddRef(ID2D1Rounde
     struct d2d_geometry *geometry = impl_from_ID2D1RoundedRectangleGeometry(iface);
     ULONG refcount = InterlockedIncrement(&geometry->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -4672,7 +4672,7 @@ static ULONG STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_Release(ID2D1Round
     struct d2d_geometry *geometry = impl_from_ID2D1RoundedRectangleGeometry(iface);
     ULONG refcount = InterlockedDecrement(&geometry->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -4958,7 +4958,7 @@ static ULONG STDMETHODCALLTYPE d2d_transformed_geometry_AddRef(ID2D1TransformedG
     struct d2d_geometry *geometry = impl_from_ID2D1TransformedGeometry(iface);
     ULONG refcount = InterlockedIncrement(&geometry->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -4968,7 +4968,7 @@ static ULONG STDMETHODCALLTYPE d2d_transformed_geometry_Release(ID2D1Transformed
     struct d2d_geometry *geometry = impl_from_ID2D1TransformedGeometry(iface);
     ULONG refcount = InterlockedDecrement(&geometry->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -5036,8 +5036,12 @@ static HRESULT STDMETHODCALLTYPE d2d_transformed_geometry_StrokeContainsPoint(ID
             iface, debug_d2d_point_2f(&point), stroke_width, stroke_style, transform, tolerance, contains);
 
     g = geometry->transform;
+    stroke_width /= g.m11;
     if (transform)
         d2d_matrix_multiply(&g, transform);
+
+    if (tolerance <= 0.0f)
+        tolerance = D2D1_DEFAULT_FLATTENING_TOLERANCE;
 
     return ID2D1Geometry_StrokeContainsPoint(geometry->u.transformed.src_geometry, point, stroke_width, stroke_style,
             &g, tolerance, contains);
@@ -5238,7 +5242,7 @@ static ULONG STDMETHODCALLTYPE d2d_geometry_group_AddRef(ID2D1GeometryGroup *ifa
     struct d2d_geometry *geometry = impl_from_ID2D1GeometryGroup(iface);
     ULONG refcount = InterlockedIncrement(&geometry->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -5249,7 +5253,7 @@ static ULONG STDMETHODCALLTYPE d2d_geometry_group_Release(ID2D1GeometryGroup *if
     ULONG refcount = InterlockedDecrement(&geometry->refcount);
     unsigned int i;
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
     {

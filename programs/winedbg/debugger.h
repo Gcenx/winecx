@@ -39,9 +39,7 @@
 #include "oaidl.h"
 #include <wine/list.h>
 
-#include <wine/winheader_enter.h>
-
-#define ADDRSIZE        (dbg_curr_process->be_cpu->pointer_size)
+#define ADDRSIZE        ((int)(dbg_curr_process ? dbg_curr_process->be_cpu->pointer_size : sizeof(void*)))
 #define ADDRWIDTH       (ADDRSIZE * 2)
 
 /* the debugger uses these exceptions for its internal use */
@@ -80,6 +78,11 @@ enum dbg_internal_types
     dbg_itype_signed_long_int,
     dbg_itype_unsigned_longlong_int,
     dbg_itype_signed_longlong_int,
+
+    /* they represent the dbg_lg(u)int_t types */
+    dbg_itype_lgint,
+    dbg_itype_lguint,
+
     dbg_itype_char,
     dbg_itype_wchar,
     dbg_itype_short_real, /* aka float */
@@ -92,6 +95,14 @@ enum dbg_internal_types
     dbg_itype_none              = 0xffffffff
 };
 
+/* Largest integers the debugger's compiler can support.
+ * It's large enough to store a pointer (in debuggee or debugger's address space).
+ * It can be smaller than the largest integer(s) of the debuggee.
+ * (eg. 64 bit on PE build of debugger, vs 128 int in ELF build of a library)
+ */
+typedef LONG64  dbg_lgint_t;
+typedef ULONG64 dbg_lguint_t;
+
 /* type description (in the following order):
  * - if 'id' is dbg_itype_none (whatever 'module' value), the type isn't known
  * - if 'module' is 0, it's an internal type (id is one of dbg_itype...)
@@ -100,21 +111,40 @@ enum dbg_internal_types
  */
 struct dbg_type
 {
-    unsigned long       id;
+    ULONG               id;
     DWORD_PTR           module;
 };
 
 struct dbg_lvalue       /* structure to hold left-values... */
 {
-    int			cookie;	/* DLV_??? */
-/* DLV_TARGET references an address in debuggee's address space, whereas DLV_HOST
- * references the winedbg's address space
- */
-#	define	DLV_TARGET	0xF00D
-#	define	DLV_HOST	0x50DA
+    unsigned            in_debuggee : 1, /* 1 = debuggee address space, 0 = debugger address space */
+                        bitstart : 8, /* in fact, 7 should be sufficient for underlying 128bit integers */
+                        bitlen;
     ADDRESS64           addr;
     struct dbg_type     type;
 };
+
+static inline void init_lvalue(struct dbg_lvalue* lv, BOOL in_debuggee, void* addr)
+{
+    lv->in_debuggee = !!in_debuggee;
+    lv->bitstart = 0;
+    lv->bitlen = 0;
+    lv->addr.Mode = AddrModeFlat;
+    lv->addr.Offset = (DWORD_PTR)addr;
+    lv->type.module = 0;
+    lv->type.id = dbg_itype_none;
+}
+
+static inline void init_lvalue_in_debugger(struct dbg_lvalue* lv, enum dbg_internal_types it, void* addr)
+{
+    lv->in_debuggee = 0;
+    lv->bitstart = 0;
+    lv->bitlen = 0;
+    lv->addr.Mode = AddrModeFlat;
+    lv->addr.Offset = (DWORD_PTR)addr;
+    lv->type.module = 0;
+    lv->type.id = it;
+}
 
 enum dbg_exec_mode
 {
@@ -135,11 +165,11 @@ enum dbg_exec_mode
 struct dbg_breakpoint
 {
     ADDRESS64           addr;
-    unsigned long       enabled : 1,
+    unsigned int        enabled : 1,
                         xpoint_type : 2,
                         refcount : 13,
                         skipcount : 16;
-    unsigned long       info;
+    unsigned int        info;
     struct              /* only used for watchpoints */
     {
         BYTE		len : 2;
@@ -147,21 +177,6 @@ struct dbg_breakpoint
     } w;
     struct expr*        condition;
 };
-
-/* used for C++ exceptions in msvcrt
- * parameters:
- * [0] CXX_FRAME_MAGIC
- * [1] pointer to exception object
- * [2] pointer to type
- */
-#define CXX_EXCEPTION                       0xe06d7363
-#define CXX_FRAME_MAGIC                     0x19930520
-
-/* Wine extension; Windows doesn't have a name for this code.  This is an
-   undocumented exception understood by MS VC debugger, allowing the program
-   to name a particular thread.  Search google.com or deja.com for "0x406d1388"
-   for more info. */
-#define EXCEPTION_NAME_THREAD               0x406D1388
 
 /* Helper structure */
 typedef struct tagTHREADNAME_INFO
@@ -196,7 +211,7 @@ struct dbg_thread
                                                  *      - only valid when in_exception is TRUE
                                                  */
     EXCEPTION_RECORD            excpt_record;   /* only valid when in_exception is TRUE */
-    struct
+    struct dbg_frame
     {
         ADDRESS64               addr_pc;
         ADDRESS64               addr_frame;
@@ -205,6 +220,7 @@ struct dbg_thread
         DWORD_PTR               linear_frame;
         DWORD_PTR               linear_stack;
         dbg_ctx_t               context;        /* context we got out of stackwalk for this frame */
+        DWORD                   inline_ctx;
         BOOL                    is_ctx_valid;   /* is the context above valid */
     }*                          frames;
     int                         num_frames;
@@ -255,25 +271,25 @@ struct dbg_process
 struct be_process_io
 {
     BOOL        (*close_process)(struct dbg_process*, BOOL);
-    BOOL        (*read)(HANDLE, const void* HOSTPTR, void*, SIZE_T, SIZE_T* HOSTPTR);
-    BOOL        (*write)(HANDLE, void* HOSTPTR, const void*, SIZE_T, SIZE_T*);
+    BOOL        (*read)(HANDLE, const void*, void*, SIZE_T, SIZE_T*);
+    BOOL        (*write)(HANDLE, void*, const void*, SIZE_T, SIZE_T*);
     BOOL        (*get_selector)(HANDLE, DWORD, LDT_ENTRY*);
 };
 
 extern	struct dbg_process*	dbg_curr_process;
-extern	DWORD_PTR	        dbg_curr_pid;
+extern	DWORD	                dbg_curr_pid;
 extern	struct dbg_thread*	dbg_curr_thread;
-extern	DWORD_PTR	        dbg_curr_tid;
+extern	DWORD	                dbg_curr_tid;
 extern  dbg_ctx_t               dbg_context;
 extern  BOOL                    dbg_interactiveP;
 extern  HANDLE                  dbg_houtput;
 
 struct dbg_internal_var
 {
-    DWORD_PTR		        val;
-    const char*		        name;
-    DWORD_PTR		        *pval;
-    unsigned long               typeid; /* always internal type */
+    DWORD                       val;
+    const char*                 name;
+    void*                       pval;
+    ULONG                       typeid; /* always internal type */
 };
 
 enum sym_get_lval {sglv_found, sglv_unknown, sglv_aborted};
@@ -325,10 +341,10 @@ extern HANDLE           display_crash_details(HANDLE event);
 extern int              msgbox_res_id(HWND hwnd, UINT textId, UINT captionId, UINT uType);
 
   /* dbg.y */
-extern void             parser_handle(HANDLE);
+extern void             parser_handle(const char*, HANDLE);
 extern int              input_read_line(const char* pfx, char* buffer, int size);
-extern int              input_fetch_entire_line(const char* pfx, char** line);
-extern HANDLE           parser_generate_command_file(const char*, ...);
+extern size_t           input_lex_read_buffer(char* pfx, int size);
+extern HANDLE           WINAPIV parser_generate_command_file(const char*, ...);
 
   /* debug.l */
 extern void             lexeme_flush(void);
@@ -345,14 +361,14 @@ extern BOOL             display_enable(int displaynum, int enable);
 extern void             expr_free_all(void);
 extern struct expr*     expr_alloc_internal_var(const char* name);
 extern struct expr*     expr_alloc_symbol(const char* name);
-extern struct expr*     expr_alloc_sconstant(long int val);
-extern struct expr*     expr_alloc_uconstant(long unsigned val);
+extern struct expr*     expr_alloc_sconstant(dbg_lgint_t val);
+extern struct expr*     expr_alloc_uconstant(dbg_lguint_t val);
 extern struct expr*     expr_alloc_string(const char* str);
 extern struct expr*     expr_alloc_binary_op(int oper, struct expr*, struct expr*);
 extern struct expr*     expr_alloc_unary_op(int oper, struct expr*);
 extern struct expr*     expr_alloc_pstruct(struct expr*, const char* element);
 extern struct expr*     expr_alloc_struct(struct expr*, const char* element);
-extern struct expr*     expr_alloc_func_call(const char*, int nargs, ...);
+extern struct expr*     WINAPIV expr_alloc_func_call(const char*, int nargs, ...);
 extern struct expr*     expr_alloc_typecast(struct type_expr_t*, struct expr*);
 extern struct dbg_lvalue expr_eval(struct expr*);
 extern struct expr*     expr_clone(const struct expr* exp, BOOL *local_binding);
@@ -376,6 +392,12 @@ extern void             info_wine_dbg_channel(BOOL add, const char* chnl, const 
   /* memory.c */
 extern BOOL             memory_read_value(const struct dbg_lvalue* lvalue, DWORD size, void* result);
 extern BOOL             memory_write_value(const struct dbg_lvalue* val, DWORD size, void* value);
+extern BOOL             memory_transfer_value(const struct dbg_lvalue* to, const struct dbg_lvalue* from);
+extern BOOL             memory_fetch_integer(const struct dbg_lvalue* lvalue, unsigned size,
+                                             BOOL is_signed, dbg_lgint_t* ret);
+extern BOOL             memory_store_integer(const struct dbg_lvalue* lvalue, dbg_lgint_t val);
+extern BOOL             memory_fetch_float(const struct dbg_lvalue* lvalue, double *ret);
+extern BOOL             memory_store_float(const struct dbg_lvalue* lvalue, double *ret);
 extern void             memory_examine(const struct dbg_lvalue *lvalue, int count, char format);
 extern void*            memory_to_linear_addr(const ADDRESS64* address);
 extern BOOL             memory_get_current_pc(ADDRESS64* address);
@@ -403,14 +425,24 @@ extern void             source_free_files(struct dbg_process* p);
 extern void             stack_info(int len);
 extern void             stack_backtrace(DWORD threadID);
 extern BOOL             stack_set_frame(int newframe);
-extern BOOL             stack_get_current_frame(IMAGEHLP_STACK_FRAME* ihsf);
 extern BOOL             stack_get_register_frame(const struct dbg_internal_var* div, DWORD_PTR** pval);
 extern unsigned         stack_fetch_frames(const dbg_ctx_t *ctx);
 extern BOOL             stack_get_current_symbol(SYMBOL_INFO* sym);
+static inline struct dbg_frame*
+                        stack_get_thread_frame(struct dbg_thread* thd, unsigned nf)
+{
+    if (!thd->frames || nf >= thd->num_frames) return NULL;
+    return &thd->frames[nf];
+}
+static inline struct dbg_frame*
+                        stack_get_curr_frame(void)
+{
+    return stack_get_thread_frame(dbg_curr_thread, dbg_curr_thread->curr_frame);
+}
 
   /* symbol.c */
 extern enum sym_get_lval symbol_get_lvalue(const char* name, const int lineno, struct dbg_lvalue* addr, BOOL bp_disp);
-extern void             symbol_read_symtable(const char* filename, unsigned long offset);
+extern void             symbol_read_symtable(const char* filename, ULONG_PTR offset);
 extern enum dbg_line_status symbol_get_function_line_status(const ADDRESS64* addr);
 extern BOOL             symbol_get_line(const char* filename, const char* func, IMAGEHLP_LINE64* ret);
 extern void             symbol_info(const char* str);
@@ -427,7 +459,12 @@ extern enum sym_get_lval symbol_picker_scoped(const char* name, const struct sgv
                                               struct dbg_lvalue* rtn);
 
   /* tgt_active.c */
-extern void             dbg_run_debuggee(const char* args);
+struct list_string
+{
+    char* string;
+    struct list_string* next;
+};
+extern void             dbg_run_debuggee(struct list_string* ls);
 extern void             dbg_wait_next_exception(DWORD cont, int count, int mode);
 extern enum dbg_start   dbg_active_attach(int argc, char* argv[]);
 extern BOOL             dbg_set_curr_thread(DWORD tid);
@@ -436,6 +473,7 @@ extern enum dbg_start   dbg_active_auto(int argc, char* argv[]);
 extern enum dbg_start   dbg_active_minidump(int argc, char* argv[]);
 extern void             dbg_active_wait_for_first_exception(void);
 extern BOOL             dbg_attach_debuggee(DWORD pid);
+extern void             fetch_module_name(void* name_addr, void* mod_addr, WCHAR* buffer, size_t bufsz);
 
   /* tgt_minidump.c */
 extern void             minidump_write(const char*, const EXCEPTION_RECORD*);
@@ -448,24 +486,25 @@ extern enum dbg_start   tgt_module_load(const char* name, BOOL keep);
 extern void             print_value(const struct dbg_lvalue* addr, char format, int level);
 extern BOOL             types_print_type(const struct dbg_type*, BOOL details);
 extern BOOL             print_types(void);
-extern long int         types_extract_as_integer(const struct dbg_lvalue*);
-extern LONGLONG         types_extract_as_longlong(const struct dbg_lvalue*, unsigned* psize, BOOL *pissigned);
+extern dbg_lgint_t      types_extract_as_integer(const struct dbg_lvalue*);
+extern dbg_lgint_t      types_extract_as_lgint(const struct dbg_lvalue*, unsigned* psize, BOOL *pissigned);
 extern void             types_extract_as_address(const struct dbg_lvalue*, ADDRESS64*);
 extern BOOL             types_store_value(struct dbg_lvalue* lvalue_to, const struct dbg_lvalue* lvalue_from);
-extern BOOL             types_udt_find_element(struct dbg_lvalue* value, const char* name, long int* tmpbuf);
+extern BOOL             types_udt_find_element(struct dbg_lvalue* value, const char* name);
 extern BOOL             types_array_index(const struct dbg_lvalue* value, int index, struct dbg_lvalue* result);
 extern BOOL             types_get_info(const struct dbg_type*, IMAGEHLP_SYMBOL_TYPE_INFO, void*);
 extern BOOL             types_get_real_type(struct dbg_type* type, DWORD* tag);
 extern struct dbg_type  types_find_pointer(const struct dbg_type* type);
-extern struct dbg_type  types_find_type(unsigned long linear, const char* name, enum SymTagEnum tag);
+extern struct dbg_type  types_find_type(DWORD64 linear, const char* name, enum SymTagEnum tag);
+extern BOOL             types_compare(const struct dbg_type, const struct dbg_type, BOOL* equal);
+extern BOOL             types_is_integral_type(const struct dbg_lvalue*);
+extern BOOL             types_is_float_type(const struct dbg_lvalue*);
 
   /* winedbg.c */
-extern void	        dbg_outputW(const WCHAR* buffer, int len);
-extern const char*      dbg_W2A(const WCHAR* buffer, unsigned len);
 #ifdef __GNUC__
-extern int	        dbg_printf(const char* format, ...) __attribute__((format (printf,1,2)));
+extern int WINAPIV      dbg_printf(const char* format, ...) __attribute__((format (printf,1,2)));
 #else
-extern int	        dbg_printf(const char* format, ...);
+extern int WINAPIV      dbg_printf(const char* format, ...);
 #endif
 extern const struct dbg_internal_var* dbg_get_internal_var(const char*);
 extern BOOL             dbg_interrupt_debuggee(void);
@@ -480,9 +519,8 @@ extern struct dbg_thread* dbg_get_thread(struct dbg_process* p, DWORD tid);
 extern void             dbg_del_thread(struct dbg_thread* t);
 extern BOOL             dbg_init(HANDLE hProc, const WCHAR* in, BOOL invade);
 extern BOOL             dbg_load_module(HANDLE hProc, HANDLE hFile, const WCHAR* name, DWORD_PTR base, DWORD size);
-extern BOOL             dbg_get_debuggee_info(HANDLE hProcess, IMAGEHLP_MODULE64* imh_mod);
 extern void             dbg_set_option(const char*, const char*);
-extern void             dbg_start_interactive(HANDLE hFile);
+extern void             dbg_start_interactive(const char*, HANDLE hFile);
 extern void             dbg_init_console(void);
 
   /* gdbproxy.c */
@@ -510,7 +548,7 @@ extern struct dbg_internal_var          dbg_internal_vars[];
 
 #define  DBG_IVARNAME(_var)	dbg_internal_var_##_var
 #define  DBG_IVARSTRUCT(_var)	dbg_internal_vars[DBG_IVARNAME(_var)]
-#define  DBG_IVAR(_var)		(*(DBG_IVARSTRUCT(_var).pval))
+#define  DBG_IVAR(_var)		(DBG_IVARSTRUCT(_var).val)
 #define  INTERNAL_VAR(_var,_val,_ref,itype) DBG_IVARNAME(_var),
 enum debug_int_var
 {
@@ -521,7 +559,5 @@ enum debug_int_var
 
 /* include CPU dependent bits */
 #include "be_cpu.h"
-
-#include <wine/winheader_exit.h>
 
 #endif  /* __WINE_DEBUGGER_H */

@@ -20,6 +20,7 @@
 #define __CRYPT32_PRIVATE_H__
 
 #include "wine/list.h"
+#include "wine/unixlib.h"
 
 BOOL CNG_ImportPubKey(CERT_PUBLIC_KEY_INFO *pubKeyInfo, BCRYPT_KEY_HANDLE *key) DECLSPEC_HIDDEN;
 
@@ -41,6 +42,11 @@ BOOL CNG_ImportPubKey(CERT_PUBLIC_KEY_INFO *pubKeyInfo, BCRYPT_KEY_HANDLE *key) 
 #define ASN_GENERALSTRING   (ASN_UNIVERSAL | ASN_PRIMITIVE | 0x1b)
 #define ASN_UNIVERSALSTRING (ASN_UNIVERSAL | ASN_PRIMITIVE | 0x1c)
 #define ASN_BMPSTRING       (ASN_UNIVERSAL | ASN_PRIMITIVE | 0x1e)
+
+/* Copies `len` bytes from `src` to `dst`,
+ * reversing the order of the bytes
+ */
+void CRYPT_CopyReversed(BYTE *dst, const BYTE *src, size_t len);
 
 BOOL CRYPT_EncodeLen(DWORD len, BYTE *pbEncoded, DWORD *pcbEncoded) DECLSPEC_HIDDEN;
 
@@ -447,7 +453,7 @@ void init_empty_store(void) DECLSPEC_HIDDEN;
 /* Align up to a DWORD_PTR boundary
  */
 #define ALIGN_DWORD_PTR(x) (((x) + sizeof(DWORD_PTR) - 1) & ~(sizeof(DWORD_PTR) - 1))
-#define POINTER_ALIGN_DWORD_PTR(p) TRUNCCAST(LPVOID, ALIGN_DWORD_PTR((DWORD_PTR)(p)))
+#define POINTER_ALIGN_DWORD_PTR(p) ((LPVOID)ALIGN_DWORD_PTR((DWORD_PTR)(p)))
 
 /* Check if the OID is a small int
  */
@@ -455,13 +461,55 @@ void init_empty_store(void) DECLSPEC_HIDDEN;
 
 /* Unix interface */
 
-struct unix_funcs
+typedef UINT64 cert_store_data_t;
+
+struct open_cert_store_params
 {
-    BOOL (WINAPI *enum_root_certs)( void *buffer, SIZE_T size, SIZE_T *needed );
-    BOOL (WINAPI *import_cert_store)( CRYPT_DATA_BLOB *pfx, const WCHAR *password, DWORD flags,
-                                      void **key_ret, void ***chain_ret, DWORD *count_ret );
+    CRYPT_DATA_BLOB *pfx;
+    const WCHAR *password;
+    cert_store_data_t *data_ret;
 };
 
-extern const struct unix_funcs *unix_funcs DECLSPEC_HIDDEN;
+struct import_store_key_params
+{
+    cert_store_data_t data;
+    void *buf;
+    DWORD *buf_size;
+};
+
+struct import_store_cert_params
+{
+    cert_store_data_t data;
+    unsigned int index;
+    void *buf;
+    DWORD *buf_size;
+};
+
+struct close_cert_store_params
+{
+    cert_store_data_t data;
+};
+
+struct enum_root_certs_params
+{
+    void  *buffer;
+    DWORD  size;
+    DWORD *needed;
+};
+
+enum unix_funcs
+{
+    unix_process_attach,
+    unix_process_detach,
+    unix_open_cert_store,
+    unix_import_store_key,
+    unix_import_store_cert,
+    unix_close_cert_store,
+    unix_enum_root_certs,
+};
+
+extern unixlib_handle_t crypt32_handle;
+
+#define CRYPT32_CALL( func, params ) __wine_unix_call( crypt32_handle, unix_ ## func, params )
 
 #endif

@@ -19,11 +19,16 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <ctype.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <unistd.h>
+#include <limits.h>
+#ifdef HAVE_SYS_SYSCTL_H
+# include <sys/sysctl.h>
+#endif
 
 #include "windef.h"
 #include "winternl.h"
@@ -239,7 +244,17 @@ static char *get_nls_dir(void)
 #if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
     dir = realpath( "/proc/self/exe", NULL );
 #elif defined (__FreeBSD__) || defined(__DragonFly__)
-    dir = realpath( "/proc/curproc/file", NULL );
+    static int pathname[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
+    size_t dir_size = PATH_MAX;
+    dir = malloc( dir_size );
+    if (dir)
+    {
+        if (sysctl( pathname, sizeof(pathname)/sizeof(pathname[0]), dir, &dir_size, NULL, 0 ))
+        {
+            free( dir );
+            dir = NULL;
+        }
+    }
 #else
     dir = realpath( server_argv0, NULL );
 #endif
@@ -264,6 +279,9 @@ static char *get_nls_dir(void)
 struct fd *load_intl_file(void)
 {
     static const char *nls_dirs[] = { NULL, NLSDIR, "/usr/local/share/wine/nls", "/usr/share/wine/nls" };
+    static const WCHAR nt_pathW[] = {'C',':','\\','w','i','n','d','o','w','s','\\',
+        's','y','s','t','e','m','3','2','\\','l','_','i','n','t','l','.','n','l','s',0};
+    static const struct unicode_str nt_name = { nt_pathW, sizeof(nt_pathW) };
     unsigned int i, offset, size;
     unsigned short data;
     char *path;
@@ -278,7 +296,7 @@ struct fd *load_intl_file(void)
         if (!(path = malloc( strlen(nls_dirs[i]) + sizeof("/l_intl.nls" )))) continue;
         strcpy( path, nls_dirs[i] );
         strcat( path, "/l_intl.nls" );
-        if ((fd = open_fd( NULL, path, O_RDONLY, &mode, FILE_READ_DATA,
+        if ((fd = open_fd( NULL, path, nt_name, O_RDONLY, &mode, FILE_READ_DATA,
                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT ))) break;
         free( path );

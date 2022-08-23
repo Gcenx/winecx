@@ -20,51 +20,39 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 #include <string.h>
 #include <assert.h>
 #include <ctype.h>
 #include <signal.h>
-#ifdef HAVE_GETOPT_H
-# include <getopt.h>
+#include <limits.h>
+#include <sys/types.h>
+#ifdef HAVE_SYS_SYSCTL_H
+# include <sys/sysctl.h>
 #endif
 
+#include "../tools.h"
 #include "wrc.h"
 #include "utils.h"
-#include "dumpres.h"
-#include "genres.h"
 #include "newstruc.h"
 #include "parser.h"
-#include "wine/wpp.h"
-
-#ifdef WORDS_BIGENDIAN
-#define ENDIAN	"big"
-#else
-#define ENDIAN	"little"
-#endif
+#include "wpp_private.h"
 
 static const char usage[] =
 	"Usage: wrc [options...] [infile[.rc|.res]]\n"
-	"   -b, --target=TARGET        Specify target CPU and platform when cross-compiling\n"
 	"   -D, --define id[=val]      Define preprocessor identifier id=val\n"
 	"   --debug=nn                 Set debug level to 'nn'\n"
 	"   -E                         Preprocess only\n"
-	"   --endianness=e             Set output byte-order e={n[ative], l[ittle], b[ig]}\n"
-	"                              (win32 only; default is " ENDIAN "-endian)\n"
-	"   -F TARGET                  Synonym for -b for compatibility with windres\n"
+	"   -F TARGET                  Ignored, for compatibility with windres\n"
 	"   -fo FILE                   Synonym for -o for compatibility with windres\n"
 	"   -h, --help                 Prints this summary\n"
 	"   -i, --input=FILE           The name of the input file\n"
-	"   -I, --include-dir=PATH     Set include search dir to path (multiple -I allowed)\n"
+	"   -I, --include-dir=DIR      Add dir to the include search path (multiple -I allowed)\n"
 	"   -J, --input-format=FORMAT  The input format (either `rc' or `rc16')\n"
 	"   -l, --language=LANG        Set default language to LANG (default is neutral {0, 0})\n"
-	"   -m16, -m32, -m64           Build for 16-bit, 32-bit resp. 64-bit platforms\n"
+	"   -m16                       Build a 16-bit resource file\n"
 	"   --nls-dir=DIR              Directory containing the NLS codepage mappings\n"
 	"   --no-use-temp-file         Ignored for compatibility with windres\n"
 	"   --nostdinc                 Disables searching the standard include path\n"
@@ -121,18 +109,13 @@ int extensions = 1;
 /*
  * Language setting for resources (-l option)
  */
-static language_t *defaultlanguage;
-language_t *currentlanguage = NULL;
+static language_t defaultlanguage;
+language_t currentlanguage = 0;
 
 /*
  * Set when extra warnings should be generated (-W option)
  */
 int pedantic = 0;
-
-/*
- * The output byte-order of resources (set with -B)
- */
-int byteorder = WRC_BO_NATIVE;
 
 /*
  * Set when _only_ to run the preprocessor (-E option)
@@ -148,32 +131,26 @@ int utf8_input = 0;
 
 int check_utf8 = 1;  /* whether to check for valid utf8 */
 
-#ifdef __i386_on_x86_64__
-static int pointer_size = 4;
-#else
-static int pointer_size = sizeof(void *);
-#endif
-
-static int verify_translations_mode;
-
 static char *output_name;	/* The name given by the -o option */
-char *input_name = NULL;	/* The name given on the command-line */
+const char *input_name = NULL;	/* The name given on the command-line */
 static char *temp_name = NULL;	/* Temporary file for preprocess pipe */
+static struct strarray input_files;
 
+static int stdinc = 1;
+static int po_mode;
+static const char *po_dir;
+static const char *sysroot = "";
 static const char *includedir;
 const char *nlsdirs[3] = { NULL, NLSDIR, NULL };
 
 int line_number = 1;		/* The current line */
 int char_number = 1;		/* The current char pos within the line */
 
-char *cmdline;			/* The entire commandline */
-
 int parser_debug, yy_flex_debug;
 
 resource_t *resource_top;	/* The top of the parsed resources */
 
 static void cleanup_files(void);
-static void segvhandler(int sig);
 
 enum long_options_values
 {
@@ -186,39 +163,35 @@ enum long_options_values
     LONG_OPT_SYSROOT,
     LONG_OPT_VERSION,
     LONG_OPT_DEBUG,
-    LONG_OPT_ENDIANNESS,
     LONG_OPT_PEDANTIC,
-    LONG_OPT_VERIFY_TRANSL
 };
 
 static const char short_options[] =
 	"b:D:Ef:F:hi:I:J:l:m:o:O:ruU:v";
-static const struct option long_options[] = {
-	{ "debug", 1, NULL, LONG_OPT_DEBUG },
-	{ "define", 1, NULL, 'D' },
-	{ "endianness", 1, NULL, LONG_OPT_ENDIANNESS },
-	{ "help", 0, NULL, 'h' },
-	{ "include-dir", 1, NULL, 'I' },
-	{ "input", 1, NULL, 'i' },
-	{ "input-format", 1, NULL, 'J' },
-	{ "language", 1, NULL, 'l' },
-	{ "nls-dir", 1, NULL, LONG_OPT_NLS_DIR },
-	{ "no-use-temp-file", 0, NULL, LONG_OPT_NOTMPFILE },
-	{ "nostdinc", 0, NULL, LONG_OPT_NOSTDINC },
-	{ "output", 1, NULL, 'o' },
-	{ "output-format", 1, NULL, 'O' },
-	{ "pedantic", 0, NULL, LONG_OPT_PEDANTIC },
-	{ "po-dir", 1, NULL, LONG_OPT_PO_DIR },
-	{ "preprocessor", 1, NULL, LONG_OPT_PREPROCESSOR },
-	{ "sysroot", 1, NULL, LONG_OPT_SYSROOT },
-	{ "target", 1, NULL, 'F' },
-	{ "utf8", 0, NULL, 'u' },
-	{ "undefine", 1, NULL, 'U' },
-	{ "use-temp-file", 0, NULL, LONG_OPT_TMPFILE },
-	{ "verbose", 0, NULL, 'v' },
-	{ "verify-translations", 0, NULL, LONG_OPT_VERIFY_TRANSL },
-	{ "version", 0, NULL, LONG_OPT_VERSION },
-	{ NULL, 0, NULL, 0 }
+static const struct long_option long_options[] = {
+	{ "debug", 1, LONG_OPT_DEBUG },
+	{ "define", 1, 'D' },
+	{ "help", 0, 'h' },
+	{ "include-dir", 1, 'I' },
+	{ "input", 1, 'i' },
+	{ "input-format", 1, 'J' },
+	{ "language", 1, 'l' },
+	{ "nls-dir", 1, LONG_OPT_NLS_DIR },
+	{ "no-use-temp-file", 0, LONG_OPT_NOTMPFILE },
+	{ "nostdinc", 0, LONG_OPT_NOSTDINC },
+	{ "output", 1, 'o' },
+	{ "output-format", 1, 'O' },
+	{ "pedantic", 0, LONG_OPT_PEDANTIC },
+	{ "po-dir", 1, LONG_OPT_PO_DIR },
+	{ "preprocessor", 1, LONG_OPT_PREPROCESSOR },
+	{ "sysroot", 1, LONG_OPT_SYSROOT },
+	{ "target", 1, 'F' },
+	{ "utf8", 0, 'u' },
+	{ "undefine", 1, 'U' },
+	{ "use-temp-file", 0, LONG_OPT_TMPFILE },
+	{ "verbose", 0, 'v' },
+	{ "version", 0, LONG_OPT_VERSION },
+	{ NULL }
 };
 
 static void set_version_defines(void)
@@ -286,12 +259,7 @@ static int load_file( const char *input_name, const char *output_name )
             exit(0);
         }
 
-        if (output_name && output_name[0]) name = strmake( "%s.XXXXXX", output_name );
-        else name = xstrdup( "wrc.XXXXXX" );
-
-        if ((fd = mkstemps( name, 0 )) == -1)
-            error("Could not generate a temp name from %s\n", name);
-
+        fd = make_temp_file( output_name, "", &name );
         temp_name = name;
         if (!(output = fdopen(fd, "wt")))
             error("Could not open fd %s for writing\n", name);
@@ -303,7 +271,7 @@ static int load_file( const char *input_name, const char *output_name )
     }
 
     /* Reset the language */
-    currentlanguage = dup_language( defaultlanguage );
+    currentlanguage = defaultlanguage;
     check_utf8 = 1;
 
     /* Go from .rc to .res */
@@ -320,63 +288,137 @@ static int load_file( const char *input_name, const char *output_name )
         unlink( temp_name );
         temp_name = NULL;
     }
-    free( currentlanguage );
     return ret;
-}
-
-static void set_target( const char *target )
-{
-    char *p, *cpu = xstrdup( target );
-
-    /* target specification is in the form CPU-MANUFACTURER-OS or CPU-MANUFACTURER-KERNEL-OS */
-    if (!(p = strchr( cpu, '-' ))) error( "Invalid target specification '%s'\n", target );
-    *p = 0;
-    if (!strcmp( cpu, "amd64" ) || !strcmp( cpu, "x86_64" ) ||
-        !strcmp( cpu, "ia64" ) || !strcmp( cpu, "aarch64" ))
-        pointer_size = 8;
-    else
-        pointer_size = 4;
-    free( cpu );
 }
 
 static void init_argv0_dir( const char *argv0 )
 {
 #ifndef _WIN32
-    char *p, *dir;
+    char *dir;
 
 #if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
     dir = realpath( "/proc/self/exe", NULL );
 #elif defined (__FreeBSD__) || defined(__DragonFly__)
-    dir = realpath( "/proc/curproc/file", NULL );
+    static int pathname[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
+    size_t path_size = PATH_MAX;
+    char *path = xmalloc( path_size );
+    if (!sysctl( pathname, sizeof(pathname)/sizeof(pathname[0]), path, &path_size, NULL, 0 ))
+        dir = realpath( path, NULL );
+    free( path );
 #else
     dir = realpath( argv0, NULL );
 #endif
     if (!dir) return;
-    if (!(p = strrchr( dir, '/' ))) return;
-    if (p == dir) p++;
-    *p = 0;
+    dir = get_dirname( dir );
     includedir = strmake( "%s/%s", dir, BIN_TO_INCLUDEDIR );
     if (strendswith( dir, "/tools/wrc" )) nlsdirs[0] = strmake( "%s/../../nls", dir );
     else nlsdirs[0] = strmake( "%s/%s", dir, BIN_TO_NLSDIR );
-    free( dir );
 #endif
+}
+
+static void option_callback( int optc, char *optarg )
+{
+    switch(optc)
+    {
+    case LONG_OPT_NOSTDINC:
+        stdinc = 0;
+        break;
+    case LONG_OPT_TMPFILE:
+        if (debuglevel) warning("--use-temp-file option not yet supported, ignored.\n");
+        break;
+    case LONG_OPT_NOTMPFILE:
+        if (debuglevel) warning("--no-use-temp-file option not yet supported, ignored.\n");
+        break;
+    case LONG_OPT_NLS_DIR:
+        nlsdirs[0] = xstrdup( optarg );
+        break;
+    case LONG_OPT_PO_DIR:
+        po_dir = xstrdup( optarg );
+        break;
+    case LONG_OPT_PREPROCESSOR:
+        if (strcmp(optarg, "cat") == 0) no_preprocess = 1;
+        else fprintf(stderr, "-P option not yet supported, ignored.\n");
+        break;
+    case LONG_OPT_SYSROOT:
+        sysroot = xstrdup( optarg );
+        break;
+    case LONG_OPT_VERSION:
+        printf(version_string);
+        exit(0);
+        break;
+    case LONG_OPT_DEBUG:
+        debuglevel = strtol(optarg, NULL, 0);
+        break;
+    case LONG_OPT_PEDANTIC:
+        pedantic = 1;
+        break;
+    case 'D':
+        wpp_add_cmdline_define(optarg);
+        break;
+    case 'E':
+        preprocess_only = 1;
+        break;
+    case 'b':
+    case 'F':
+        break;
+    case 'h':
+        printf(usage);
+        exit(0);
+    case 'i':
+        strarray_add( &input_files, optarg );
+        break;
+    case 'I':
+        wpp_add_include_path(optarg);
+        break;
+    case 'J':
+        if (strcmp(optarg, "rc16") == 0)  extensions = 0;
+        else if (strcmp(optarg, "rc")) error("Output format %s not supported.\n", optarg);
+        break;
+    case 'l':
+        defaultlanguage = strtol(optarg, NULL, 0);
+        if (get_language_codepage( defaultlanguage ) == -1)
+            error("Language %04x is not supported\n", defaultlanguage);
+        break;
+    case 'm':
+        if (!strcmp( optarg, "16" )) win32 = 0;
+        else win32 = 1;
+        break;
+    case 'f':
+        if (*optarg != 'o') error("Unknown option: -f%s\n",  optarg);
+        optarg++;
+        /* fall through */
+    case 'o':
+        if (!output_name) output_name = xstrdup(optarg);
+        else error("Too many output files.\n");
+        break;
+    case 'O':
+        if (strcmp(optarg, "po") == 0) po_mode = 1;
+        else if (strcmp(optarg, "pot") == 0) po_mode = 2;
+        else if (strcmp(optarg, "res16") == 0) win32 = 0;
+        else if (strcmp(optarg, "res")) warning("Output format %s not supported.\n", optarg);
+        break;
+    case 'r':
+        /* ignored for compatibility with rc */
+        break;
+    case 'u':
+        utf8_input = 1;
+        break;
+    case 'U':
+        wpp_del_define(optarg);
+        break;
+    case 'v':
+        debuglevel = DEBUGLEVEL_CHAT;
+        break;
+    case '?':
+        fprintf(stderr, "wrc: %s\n\n%s", optarg, usage);
+        exit(1);
+    }
 }
 
 int main(int argc,char *argv[])
 {
-	int optc;
-	int opti = 0;
-	int stdinc = 1;
-	int lose = 0;
-	int nb_files = 0;
 	int i;
-	int cmdlen;
-        int po_mode = 0;
-        char *po_dir = NULL;
-        const char *sysroot = "";
-        char **files = xmalloc( argc * sizeof(*files) );
 
-	signal(SIGSEGV, segvhandler);
         signal( SIGTERM, exit_on_signal );
         signal( SIGINT, exit_on_signal );
 #ifdef SIGHUP
@@ -390,160 +432,10 @@ int main(int argc,char *argv[])
 	/* Microsoft RC always searches current directory */
 	wpp_add_include_path(".");
 
-	/* First rebuild the commandline to put in destination */
-	/* Could be done through env[], but not all OS-es support it */
-	cmdlen = 4; /* for "wrc " */
-	for(i = 1; i < argc; i++)
-		cmdlen += strlen(argv[i]) + 1;
-	cmdline = xmalloc(cmdlen);
-	strcpy(cmdline, "wrc ");
-	for(i = 1; i < argc; i++)
-	{
-		strcat(cmdline, argv[i]);
-		if(i < argc-1)
-			strcat(cmdline, " ");
-	}
+        strarray_addall( &input_files,
+                         parse_options( argc, argv, short_options, long_options, 0, option_callback ));
 
-	while((optc = getopt_long(argc, argv, short_options, long_options, &opti)) != EOF)
-	{
-		switch(optc)
-		{
-		case LONG_OPT_NOSTDINC:
-			stdinc = 0;
-			break;
-		case LONG_OPT_TMPFILE:
-			if (debuglevel) warning("--use-temp-file option not yet supported, ignored.\n");
-			break;
-		case LONG_OPT_NOTMPFILE:
-			if (debuglevel) warning("--no-use-temp-file option not yet supported, ignored.\n");
-			break;
-		case LONG_OPT_NLS_DIR:
-			nlsdirs[0] = xstrdup( optarg );
-			break;
-		case LONG_OPT_PO_DIR:
-			po_dir = xstrdup( optarg );
-			break;
-		case LONG_OPT_PREPROCESSOR:
-			if (strcmp(optarg, "cat") == 0) no_preprocess = 1;
-			else fprintf(stderr, "-P option not yet supported, ignored.\n");
-			break;
-		case LONG_OPT_SYSROOT:
-			sysroot = xstrdup( optarg );
-			break;
-		case LONG_OPT_VERSION:
-			printf(version_string);
-			exit(0);
-			break;
-		case LONG_OPT_DEBUG:
-			debuglevel = strtol(optarg, NULL, 0);
-			break;
-		case LONG_OPT_ENDIANNESS:
-			switch(optarg[0])
-			{
-			case 'n':
-			case 'N':
-				byteorder = WRC_BO_NATIVE;
-				break;
-			case 'l':
-			case 'L':
-				byteorder = WRC_BO_LITTLE;
-				break;
-			case 'b':
-			case 'B':
-				byteorder = WRC_BO_BIG;
-				break;
-			default:
-				fprintf(stderr, "Byte ordering must be n[ative], l[ittle] or b[ig]\n");
-				lose++;
-			}
-			break;
-		case LONG_OPT_PEDANTIC:
-			pedantic = 1;
-			wpp_set_pedantic(1);
-			break;
-		case LONG_OPT_VERIFY_TRANSL:
-			verify_translations_mode = 1;
-			break;
-		case 'D':
-			wpp_add_cmdline_define(optarg);
-			break;
-		case 'E':
-			preprocess_only = 1;
-			break;
-		case 'b':
-		case 'F':
-			set_target( optarg );
-			break;
-		case 'h':
-			printf(usage);
-			exit(0);
-		case 'i':
-			files[nb_files++] = optarg;
-			break;
-		case 'I':
-			wpp_add_include_path(optarg);
-			break;
-		case 'J':
-			if (strcmp(optarg, "rc16") == 0)  extensions = 0;
-			else if (strcmp(optarg, "rc")) error("Output format %s not supported.\n", optarg);
-			break;
-		case 'l':
-			{
-				int lan;
-				lan = strtol(optarg, NULL, 0);
-				if (get_language_codepage(PRIMARYLANGID(lan), SUBLANGID(lan)) == -1)
-					error("Language %04x is not supported\n", lan);
-				defaultlanguage = new_language(PRIMARYLANGID(lan), SUBLANGID(lan));
-			}
-			break;
-                case 'm':
-			if (!strcmp( optarg, "16" )) win32 = 0;
-			else if (!strcmp( optarg, "32" )) { win32 = 1; pointer_size = 4; }
-			else if (!strcmp( optarg, "64" )) { win32 = 1; pointer_size = 8; }
-			break;
-		case 'f':
-			if (*optarg != 'o') error("Unknown option: -f%s\n",  optarg);
-			optarg++;
-			/* fall through */
-		case 'o':
-			if (!output_name) output_name = strdup(optarg);
-			else error("Too many output files.\n");
-			break;
-		case 'O':
-			if (strcmp(optarg, "po") == 0) po_mode = 1;
-			else if (strcmp(optarg, "pot") == 0) po_mode = 2;
-			else if (strcmp(optarg, "res16") == 0) win32 = 0;
-			else if (strcmp(optarg, "res")) warning("Output format %s not supported.\n", optarg);
-			break;
-		case 'r':
-			/* ignored for compatibility with rc */
-			break;
-		case 'u':
-			utf8_input = 1;
-			break;
-		case 'U':
-			wpp_del_define(optarg);
-			break;
-		case 'v':
-			debuglevel = DEBUGLEVEL_CHAT;
-			break;
-		default:
-			lose++;
-			break;
-		}
-	}
-
-	if(lose)
-	{
-		fprintf(stderr, usage);
-		return 1;
-	}
-
-	if (win32)
-	{
-		wpp_add_cmdline_define("_WIN32=1");
-		if (pointer_size == 8) wpp_add_cmdline_define("_WIN64=1");
-	}
+	if (win32) wpp_add_cmdline_define("_WIN32=1");
 
 	/* If we do need to search standard includes, add them to the path */
 	if (stdinc)
@@ -577,30 +469,16 @@ int main(int argc,char *argv[])
                        (debuglevel & DEBUGLEVEL_PPTRACE) != 0,
                        (debuglevel & DEBUGLEVEL_PPMSG) != 0 );
 
-	/* Check if the user set a language, else set default */
-	if(!defaultlanguage)
-		defaultlanguage = new_language(0, 0);
-
 	atexit(cleanup_files);
 
-        while (optind < argc) files[nb_files++] = argv[optind++];
-
-        for (i = 0; i < nb_files; i++)
+        for (i = 0; i < input_files.count; i++)
         {
-            input_name = files[i];
+            input_name = input_files.str[i];
             if (load_file( input_name, output_name )) exit(1);
         }
 	/* stdin special case. NULL means "stdin" for wpp. */
-        if (nb_files == 0 && load_file( NULL, output_name )) exit(1);
+        if (input_files.count == 0 && load_file( NULL, output_name )) exit(1);
 
-	if(debuglevel & DEBUGLEVEL_DUMP)
-		dump_resources(resource_top);
-
-	if(verify_translations_mode)
-	{
-		verify_translations(resource_top);
-		exit(0);
-	}
         if (!po_mode && output_name)
         {
             if (strendswith( output_name, ".po" )) po_mode = 1;
@@ -613,8 +491,8 @@ int main(int argc,char *argv[])
             {
                 if (!output_name)
                 {
-                    output_name = dup_basename( nb_files ? files[0] : NULL, ".rc" );
-                    strcat( output_name, ".pot" );
+                    const char *name = input_files.count ? get_basename(input_files.str[0]) : "wrc.tab";
+                    output_name = replace_extension( name, ".rc", ".pot" );
                 }
                 write_pot_file( output_name );
             }
@@ -624,14 +502,11 @@ int main(int argc,char *argv[])
 	}
         if (win32) add_translations( po_dir );
 
-	/* Convert the internal lists to binary data */
-	resources2res(resource_top);
-
 	chat("Writing .res-file\n");
         if (!output_name)
         {
-            output_name = dup_basename( nb_files ? files[0] : NULL, ".rc" );
-            strcat(output_name, ".res");
+            const char *name = input_files.count ? get_basename(input_files.str[0]) : "wrc.tab";
+            output_name = replace_extension( name, ".rc", ".res" );
         }
 	write_resfile(output_name, resource_top);
 	output_name = NULL;
@@ -644,12 +519,4 @@ static void cleanup_files(void)
 {
 	if (output_name) unlink(output_name);
 	if (temp_name) unlink(temp_name);
-}
-
-static void segvhandler(int sig)
-{
-	fprintf(stderr, "\n%s:%d: Oops, segment violation\n", input_name, line_number);
-	fflush(stdout);
-	fflush(stderr);
-	abort();
 }

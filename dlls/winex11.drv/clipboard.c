@@ -64,16 +64,14 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+#include <unistd.h>
 #include <fcntl.h>
+#include <dlfcn.h>
 #include <limits.h>
 #include <time.h>
 #include <assert.h>
@@ -1053,7 +1051,7 @@ static HANDLE import_selection( Display *display, Window win, Atom selection,
  */
 void X11DRV_CLIPBOARD_ImportSelection( Display *display, Window win, Atom selection,
                                        Atom *targets, UINT count,
-                                       void (*callback)( Atom, UINT, HANDLE ))
+                                       void (*callback)( UINT, HANDLE ))
 {
     UINT i;
     HANDLE handle;
@@ -1066,7 +1064,7 @@ void X11DRV_CLIPBOARD_ImportSelection( Display *display, Window win, Atom select
         if (!(format = find_x11_format( targets[i] ))) continue;
         if (!format->id) continue;
         if (!(handle = import_selection( display, win, selection, format ))) continue;
-        callback( targets[i], format->id, handle );
+        callback( format->id, handle );
     }
 }
 
@@ -2117,9 +2115,8 @@ static DWORD WINAPI clipboard_thread( void *arg )
     clipboard_thread_id = GetCurrentThreadId();
     AddClipboardFormatListener( clipboard_hwnd );
     register_builtin_formats();
-    request_selection_contents( clipboard_display, TRUE );
-
     xfixes_init();
+    request_selection_contents( clipboard_display, TRUE );
 
     TRACE( "clipboard thread %04x running\n", GetCurrentThreadId() );
     while (GetMessageW( &msg, 0, 0, 0 )) DispatchMessageW( &msg );
@@ -2130,7 +2127,7 @@ static DWORD WINAPI clipboard_thread( void *arg )
 /**************************************************************************
  *		X11DRV_UpdateClipboard
  */
-void CDECL X11DRV_UpdateClipboard(void)
+void X11DRV_UpdateClipboard(void)
 {
     static ULONG last_update;
     ULONG now;

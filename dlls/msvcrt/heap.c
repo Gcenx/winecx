@@ -46,7 +46,7 @@ static HANDLE heap, sb_heap;
 typedef int (CDECL *MSVCRT_new_handler_func)(size_t size);
 
 static MSVCRT_new_handler_func MSVCRT_new_handler;
-static int MSVCRT_new_mode;
+static LONG MSVCRT_new_mode;
 
 /* FIXME - According to documentation it should be 8*1024, at runtime it returns 16 */ 
 static unsigned int MSVCRT_amblksiz = 16;
@@ -156,7 +156,7 @@ void* CDECL DECLSPEC_HOTPATCH operator_new(size_t size)
 
   TRACE("(%Iu) out of memory\n", size);
 #if _MSVCR_VER >= 80
-  throw_exception(EXCEPTION_BAD_ALLOC, 0, "bad allocation");
+  throw_bad_alloc();
 #endif
   return NULL;
 }

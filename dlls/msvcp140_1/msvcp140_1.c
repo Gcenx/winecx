@@ -64,7 +64,7 @@ void __cdecl MSVCRT_operator_delete(void *mem)
     free(mem);
 }
 
-static void* __cdecl MSVCRT_operator_new_aligned(size_t size, size_t alignment)
+static void* MSVCRT_operator_new_aligned(size_t size, size_t alignment)
 {
     void *retval;
     int freed;
@@ -85,7 +85,7 @@ static void* __cdecl MSVCRT_operator_new_aligned(size_t size, size_t alignment)
     return NULL;
 }
 
-static void __cdecl MSVCRT_operator_delete_aligned(void *mem, size_t alignment)
+static void MSVCRT_operator_delete_aligned(void *mem, size_t alignment)
 {
     _aligned_free(mem);
 }
@@ -94,9 +94,9 @@ typedef struct {
     const vtable_ptr *vtable;
 } memory_resource;
 
-extern const vtable_ptr MSVCP_aligned_resource_vtable;
-extern const vtable_ptr MSVCP_unaligned_resource_vtable;
-extern const vtable_ptr MSVCP_null_resource_vtable;
+extern const vtable_ptr aligned_resource_vtable;
+extern const vtable_ptr unaligned_resource_vtable;
+extern const vtable_ptr null_resource_vtable;
 
 __ASM_BLOCK_BEGIN(vtables)
     __ASM_VTABLE(aligned_resource,
@@ -197,13 +197,13 @@ static memory_resource *default_resource;
 
 memory_resource* __cdecl _Aligned_new_delete_resource(void)
 {
-    static memory_resource impl = { &MSVCP_aligned_resource_vtable };
+    static memory_resource impl = { &aligned_resource_vtable };
     return &impl;
 }
 
 memory_resource* __cdecl _Unaligned_new_delete_resource(void)
 {
-    static memory_resource impl = { &MSVCP_unaligned_resource_vtable };
+    static memory_resource impl = { &unaligned_resource_vtable };
     return &impl;
 }
 
@@ -235,7 +235,7 @@ memory_resource* __cdecl _Unaligned_set_default_resource(memory_resource *res)
 
 memory_resource* __cdecl null_memory_resource(void)
 {
-    static memory_resource impl = { &MSVCP_null_resource_vtable };
+    static memory_resource impl = { &null_resource_vtable };
     return &impl;
 }
 

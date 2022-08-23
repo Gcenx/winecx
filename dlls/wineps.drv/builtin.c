@@ -68,7 +68,7 @@ static VOID ScaleFont(const AFM *afm, LONG lfHeight, PSFONT *font,
     USHORT  	    	usUnitsPerEm, usWinAscent, usWinDescent;
     SHORT   	    	sAscender, sDescender, sLineGap, sAvgCharWidth;
 
-    TRACE("'%s' %i\n", afm->FontName, lfHeight);
+    TRACE("'%s' %li\n", afm->FontName, lfHeight);
 
     if (lfHeight < 0)   	    	    	    	/* match em height */
     {
@@ -142,9 +142,9 @@ static VOID ScaleFont(const AFM *afm, LONG lfHeight, PSFONT *font,
     font->strikeoutPosition = tm->tmAscent / 2;
     font->strikeoutThickness = font->underlineThickness;
 
-    TRACE("Selected PS font '%s' size %d weight %d.\n", afm->FontName,
+    TRACE("Selected PS font '%s' size %d weight %ld.\n", afm->FontName,
           font->size.xx, tm->tmWeight );
-    TRACE("H = %d As = %d Des = %d IL = %d EL = %d\n", tm->tmHeight,
+    TRACE("H = %ld As = %ld Des = %ld IL = %ld EL = %ld\n", tm->tmHeight,
     	    tm->tmAscent, tm->tmDescent, tm->tmInternalLeading,
     	    tm->tmExternalLeading);
 }
@@ -308,7 +308,7 @@ const AFMMETRICS *PSDRV_UVMetrics(LONG UV, const AFM *afm)
 
     if (needle == NULL)
     {
-    	WARN("No glyph for U+%.4X in %s\n", UV, afm->FontName);
+	WARN("No glyph for U+%.4lX in %s\n", UV, afm->FontName);
     	needle = afm->Metrics;
     }
 
@@ -343,28 +343,30 @@ BOOL CDECL PSDRV_GetTextExtentExPoint(PHYSDEV dev, LPCWSTR str, INT count, LPINT
 /***********************************************************************
  *           PSDRV_GetCharWidth
  */
-BOOL CDECL PSDRV_GetCharWidth(PHYSDEV dev, UINT firstChar, UINT lastChar, LPINT buffer)
+BOOL CDECL PSDRV_GetCharWidth(PHYSDEV dev, UINT first, UINT count, const WCHAR *chars, INT *buffer)
 {
     PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
-    UINT    	    i;
+    UINT i, c;
 
     if (physDev->font.fontloc == Download)
     {
         dev = GET_NEXT_PHYSDEV( dev, pGetCharWidth );
-        return dev->funcs->pGetCharWidth( dev, firstChar, lastChar, buffer );
+        return dev->funcs->pGetCharWidth( dev, first, count, chars, buffer );
     }
 
-    TRACE("U+%.4X U+%.4X\n", firstChar, lastChar);
+    TRACE("U+%.4X +%u\n", first, count);
 
-    if (lastChar > 0xffff || firstChar > lastChar)
+    for (i = 0; i < count; ++i)
     {
-    	SetLastError(ERROR_INVALID_PARAMETER);
-    	return FALSE;
-    }
+        c = chars ? chars[i] : first + i;
 
-    for (i = firstChar; i <= lastChar; ++i)
-    {
-        *buffer = floor( PSDRV_UVMetrics(i, physDev->font.fontinfo.Builtin.afm)->WX
+        if (c > 0xffff)
+        {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return FALSE;
+        }
+
+        *buffer = floor( PSDRV_UVMetrics(c, physDev->font.fontinfo.Builtin.afm)->WX
                          * physDev->font.fontinfo.Builtin.scale + 0.5 );
 	TRACE("U+%.4X: %i\n", i, *buffer);
 	++buffer;

@@ -1,11 +1,11 @@
 MODULE    = wmvcore.dll
 IMPORTLIB = wmvcore
 IMPORTS   = kernel32
+DELAYIMPORTS = winegstreamer
 
-EXTRADLLFLAGS = -mno-cygwin
+EXTRADLLFLAGS = -Wb,--prefer-native
 
 C_SRCS = \
-	reader.c \
 	wmvcore_main.c \
 	writer.c
 

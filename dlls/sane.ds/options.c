@@ -16,249 +16,200 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
+#include <stdarg.h>
 #include <stdlib.h>
+#include "windef.h"
+#include "winbase.h"
+#include "winnls.h"
 #include "sane_i.h"
 #include "wine/debug.h"
 
-#ifdef SONAME_LIBSANE
-static SANE_Status sane_find_option(SANE_Handle h, const char *option_name,
-        const SANE_Option_Descriptor **opt_p, int *optno, SANE_Value_Type type)
+WINE_DEFAULT_DEBUG_CHANNEL(twain);
+
+TW_UINT16 sane_option_get_value( int optno, void *val )
 {
-    SANE_Status rc;
-    SANE_Int optcount;
-    const SANE_Option_Descriptor *opt;
-    int i;
+    struct option_get_value_params params = { optno, val };
 
-    /* Debian, in 32_net_backend_standard_fix.dpatch,
-     *  forces a frontend (that's us) to reload options
-     *  manually by invoking get_option_descriptor. */
-    opt = psane_get_option_descriptor(h, 0);
-    if (! opt)
-        return SANE_STATUS_EOF;
+    return SANE_CALL( option_get_value, &params );
+}
 
-    rc = psane_control_option(h, 0, SANE_ACTION_GET_VALUE, &optcount, NULL);
-    if (rc != SANE_STATUS_GOOD)
-        return rc;
+TW_UINT16 sane_option_set_value( int optno, void *val, BOOL *reload )
+{
+    struct option_set_value_params params = { optno, val, reload };
 
-    for (i = 1; i < optcount; i++)
+    return SANE_CALL( option_set_value, &params );
+}
+
+static TW_UINT16 sane_find_option( const char *name, int type, struct option_descriptor *descr )
+{
+    struct option_find_descriptor_params params = { name, type, descr };
+    return SANE_CALL( option_find_descriptor, &params ) ? TWCC_CAPUNSUPPORTED : TWCC_SUCCESS;
+}
+
+TW_UINT16 sane_option_get_int(const char *option_name, int *val)
+{
+    struct option_descriptor opt;
+    TW_UINT16 rc = sane_find_option(option_name, TYPE_INT, &opt);
+
+    if (rc == TWCC_SUCCESS) rc = sane_option_get_value( opt.optno, val );
+    return rc;
+}
+
+TW_UINT16 sane_option_set_int(const char *option_name, int val, BOOL *needs_reload )
+{
+    struct option_descriptor opt;
+    TW_UINT16 rc = sane_find_option(option_name, TYPE_INT, &opt);
+
+    if (rc == TWCC_SUCCESS) rc = sane_option_set_value( opt.optno, &val, needs_reload );
+    return rc;
+}
+
+TW_UINT16 sane_option_get_bool(const char *option_name, int *val)
+{
+    struct option_descriptor opt;
+    TW_UINT16 rc = sane_find_option(option_name, TYPE_BOOL, &opt);
+
+    if (rc == TWCC_SUCCESS) rc = sane_option_get_value( opt.optno, val );
+    return rc;
+}
+
+TW_UINT16 sane_option_set_bool(const char *option_name, int val )
+{
+    struct option_descriptor opt;
+    TW_UINT16 rc = sane_find_option(option_name, TYPE_BOOL, &opt);
+
+    if (rc == TWCC_SUCCESS) rc = sane_option_set_value( opt.optno, &val, NULL );
+    return rc;
+}
+
+TW_UINT16 sane_option_get_str(const char *option_name, char *val, int len)
+{
+    struct option_descriptor opt;
+    TW_UINT16 rc = sane_find_option(option_name, TYPE_STRING, &opt);
+
+    if (rc == TWCC_SUCCESS)
     {
-        opt = psane_get_option_descriptor(h, i);
-        if (opt && (opt->name && strcmp(opt->name, option_name) == 0) &&
-               opt->type == type)
-        {
-            *opt_p = opt;
-            *optno = i;
-            return SANE_STATUS_GOOD;
-        }
+        if (opt.size < len)
+            rc = sane_option_get_value( opt.optno, val );
+        else
+            rc = TWCC_BADVALUE;
     }
-    return SANE_STATUS_EOF;
-}
-
-SANE_Status sane_option_get_int(SANE_Handle h, const char *option_name, SANE_Int *val)
-{
-    SANE_Status rc;
-    int optno;
-    const SANE_Option_Descriptor *opt;
-
-    rc = sane_find_option(h, option_name, &opt, &optno, SANE_TYPE_INT);
-    if (rc != SANE_STATUS_GOOD)
-        return rc;
-
-    return psane_control_option(h, optno, SANE_ACTION_GET_VALUE, val, NULL);
-}
-
-SANE_Status sane_option_set_int(SANE_Handle h, const char *option_name, SANE_Int val, SANE_Int *status)
-{
-    SANE_Status rc;
-    int optno;
-    const SANE_Option_Descriptor *opt;
-
-    rc = sane_find_option(h, option_name, &opt, &optno, SANE_TYPE_INT);
-    if (rc != SANE_STATUS_GOOD)
-        return rc;
-
-    return psane_control_option(h, optno, SANE_ACTION_SET_VALUE, (void *) &val, status);
-}
-
-SANE_Status sane_option_get_bool(SANE_Handle h, const char *option_name, SANE_Bool *val, SANE_Int *status)
-{
-    SANE_Status rc;
-    int optno;
-    const SANE_Option_Descriptor *opt;
-
-    rc = sane_find_option(h, option_name, &opt, &optno, SANE_TYPE_BOOL);
-    if (rc != SANE_STATUS_GOOD)
-        return rc;
-
-    return psane_control_option(h, optno, SANE_ACTION_GET_VALUE, (void *) val, status);
-}
-
-SANE_Status sane_option_set_bool(SANE_Handle h, const char *option_name, SANE_Bool val, SANE_Int *status)
-{
-    SANE_Status rc;
-    int optno;
-    const SANE_Option_Descriptor *opt;
-
-    rc = sane_find_option(h, option_name, &opt, &optno, SANE_TYPE_BOOL);
-    if (rc != SANE_STATUS_GOOD)
-        return rc;
-
-    return psane_control_option(h, optno, SANE_ACTION_SET_VALUE, (void *) &val, status);
-}
-
-SANE_Status sane_option_set_fixed(SANE_Handle h, const char *option_name, SANE_Fixed val, SANE_Int *status)
-{
-    SANE_Status rc;
-    int optno;
-    const SANE_Option_Descriptor *opt;
-
-    rc = sane_find_option(h, option_name, &opt, &optno, SANE_TYPE_FIXED);
-    if (rc != SANE_STATUS_GOOD)
-        return rc;
-
-    return psane_control_option(h, optno, SANE_ACTION_SET_VALUE, (void *) &val, status);
-}
-
-SANE_Status sane_option_get_str(SANE_Handle h, const char *option_name, SANE_String val, size_t len, SANE_Int *status)
-{
-    SANE_Status rc;
-    int optno;
-    const SANE_Option_Descriptor *opt;
-
-    rc = sane_find_option(h, option_name, &opt, &optno, SANE_TYPE_STRING);
-    if (rc != SANE_STATUS_GOOD)
-        return rc;
-
-    if (opt->size < len)
-        return psane_control_option(h, optno, SANE_ACTION_GET_VALUE, (void *) val, status);
-    else
-        return SANE_STATUS_NO_MEM;
+    return rc;
 }
 
 /* Important:  SANE has the side effect of overwriting val with the returned value */
-SANE_Status sane_option_set_str(SANE_Handle h, const char *option_name, SANE_String val, SANE_Int *status)
+TW_UINT16 sane_option_set_str(const char *option_name, char *val, BOOL *needs_reload)
 {
-    SANE_Status rc;
-    int optno;
-    const SANE_Option_Descriptor *opt;
+    struct option_descriptor opt;
+    TW_UINT16 rc = sane_find_option(option_name, TYPE_STRING, &opt);
 
-    rc = sane_find_option(h, option_name, &opt, &optno, SANE_TYPE_STRING);
-    if (rc != SANE_STATUS_GOOD)
-        return rc;
-
-    return psane_control_option(h, optno, SANE_ACTION_SET_VALUE, (void *) val, status);
-}
-
-SANE_Status sane_option_probe_resolution(SANE_Handle h, const char *option_name, SANE_Int *minval, SANE_Int *maxval, SANE_Int *quant)
-{
-    SANE_Status rc;
-    int optno;
-    const SANE_Option_Descriptor *opt;
-
-    rc = sane_find_option(h, option_name, &opt, &optno, SANE_TYPE_INT);
-    if (rc != SANE_STATUS_GOOD)
-        return rc;
-
-    if (opt->constraint_type != SANE_CONSTRAINT_RANGE)
-        return SANE_STATUS_UNSUPPORTED;
-
-    *minval = opt->constraint.range->min;
-    *maxval = opt->constraint.range->max;
-    *quant = opt->constraint.range->quant;
-
+    if (rc == TWCC_SUCCESS) rc = sane_option_set_value( opt.optno, &val, needs_reload );
     return rc;
 }
 
-SANE_Status sane_option_probe_mode(SANE_Handle h, SANE_String_Const **choices, char *current, int current_size)
+TW_UINT16 sane_option_probe_resolution(const char *option_name, int *minval, int *maxval, int *quant)
 {
-    SANE_Status rc;
-    int optno;
-    const SANE_Option_Descriptor *opt;
-    rc = sane_find_option(h, "mode", &opt, &optno, SANE_TYPE_STRING);
-    if (rc != SANE_STATUS_GOOD)
-        return rc;
+    struct option_descriptor opt;
+    TW_UINT16 rc = sane_find_option(option_name, TYPE_INT, &opt);
 
-    if (choices && opt->constraint_type == SANE_CONSTRAINT_STRING_LIST)
-        *choices = (SANE_String_Const *) opt->constraint.string_list;
+    if (rc != TWCC_SUCCESS) return rc;
+    if (opt.constraint_type != CONSTRAINT_RANGE) return TWCC_CAPUNSUPPORTED;
 
-    if (opt->size < current_size)
-        return psane_control_option(h, optno, SANE_ACTION_GET_VALUE, current, NULL);
-    else
-        return SANE_STATUS_NO_MEM;
-
-}
-
-SANE_Status sane_option_probe_scan_area(SANE_Handle h, const char *option_name, SANE_Fixed *val,
-                                        SANE_Unit *unit, SANE_Fixed *min, SANE_Fixed *max, SANE_Fixed *quant)
-{
-    SANE_Status rc;
-    int optno;
-    const SANE_Option_Descriptor *opt;
-
-    rc = sane_find_option(h, option_name, &opt, &optno, SANE_TYPE_FIXED);
-    if (rc != SANE_STATUS_GOOD)
-        return rc;
-
-    if (unit)
-        *unit = opt->unit;
-    if (min)
-        *min = opt->constraint.range->min;
-    if (max)
-        *max = opt->constraint.range->max;
-    if (quant)
-        *quant = opt->constraint.range->quant;
-
-    if (val)
-        rc = psane_control_option(h, optno, SANE_ACTION_GET_VALUE, val, NULL);
-
+    *minval = opt.constraint.range.min;
+    *maxval = opt.constraint.range.max;
+    *quant  = opt.constraint.range.quant;
     return rc;
 }
 
-TW_UINT16 sane_status_to_twcc(SANE_Status rc)
+TW_UINT16 sane_option_probe_mode(TW_UINT16 *current, TW_UINT32 *choices, int *count)
 {
-    switch (rc)
+    WCHAR *p;
+    char buffer[256];
+    struct option_descriptor opt;
+    TW_UINT16 rc = sane_find_option("mode", TYPE_STRING, &opt);
+
+    if (rc != TWCC_SUCCESS) return rc;
+    if (opt.size > sizeof(buffer)) return TWCC_BADVALUE;
+    rc = sane_option_get_value( opt.optno, buffer );
+    if (rc != TWCC_SUCCESS) return rc;
+
+    if (!strcmp( buffer, "Lineart" )) *current = TWPT_BW;
+    else if (!strcmp( buffer, "Color" )) *current = TWPT_RGB;
+    else if (!strncmp( buffer, "Gray", 4 )) *current = TWPT_GRAY;
+
+    *count = 0;
+    if (opt.constraint_type == CONSTRAINT_STRING_LIST)
     {
-        case SANE_STATUS_GOOD:
-            return TWCC_SUCCESS;
-        case SANE_STATUS_UNSUPPORTED:
-            return TWCC_CAPUNSUPPORTED;
-        case SANE_STATUS_JAMMED:
-            return TWCC_PAPERJAM;
-        case SANE_STATUS_NO_MEM:
-            return TWCC_LOWMEMORY;
-        case SANE_STATUS_ACCESS_DENIED:
-            return TWCC_DENIED;
-
-        case SANE_STATUS_IO_ERROR:
-        case SANE_STATUS_NO_DOCS:
-        case SANE_STATUS_COVER_OPEN:
-        case SANE_STATUS_EOF:
-        case SANE_STATUS_INVAL:
-        case SANE_STATUS_CANCELLED:
-        case SANE_STATUS_DEVICE_BUSY:
-        default:
-            return TWCC_BUMMER;
+        for (p = opt.constraint.strings; *p; p += lstrlenW(p) + 1)
+        {
+            if (!wcscmp( p, L"Lineart" )) choices[(*count)++] = TWPT_BW;
+            else if (!wcscmp( p, L"Color" )) choices[(*count)++] = TWPT_RGB;
+            else if (!wcsncmp( p, L"Gray", 4 )) choices[(*count)++] = TWPT_GRAY;
+        }
     }
+    return rc;
 }
-static void convert_double_fix32(double d, TW_FIX32 *fix32)
+
+TW_UINT16 sane_option_get_scan_area( int *tlx, int *tly, int *brx, int *bry )
 {
-    TW_INT32 value = (TW_INT32) (d * 65536.0 + 0.5);
-    fix32->Whole = value >> 16;
-    fix32->Frac = value & 0x0000ffffL;
+    TW_UINT16 rc;
+    struct option_descriptor opt;
+
+    if ((rc = sane_find_option( "tl-x", TYPE_FIXED, &opt )) != TWCC_SUCCESS) return rc;
+    if ((rc = sane_option_get_value( opt.optno, tlx )) != TWCC_SUCCESS) return rc;
+    if ((rc = sane_find_option( "tl-y", TYPE_FIXED, &opt )) != TWCC_SUCCESS) return rc;
+    if ((rc = sane_option_get_value( opt.optno, tly )) != TWCC_SUCCESS) return rc;
+    if ((rc = sane_find_option( "br-x", TYPE_FIXED, &opt )) != TWCC_SUCCESS) return rc;
+    if ((rc = sane_option_get_value( opt.optno, brx )) != TWCC_SUCCESS) return rc;
+    if ((rc = sane_find_option( "br-y", TYPE_FIXED, &opt )) != TWCC_SUCCESS) return rc;
+    if ((rc = sane_option_get_value( opt.optno, bry )) != TWCC_SUCCESS) return rc;
+    if (opt.unit != UNIT_MM) FIXME( "unsupported unit %u\n", opt.unit );
+    return rc;
 }
 
-BOOL convert_sane_res_to_twain(double sane_res, SANE_Unit unit, TW_FIX32 *twain_res, TW_UINT16 twtype)
+TW_UINT16 sane_option_get_max_scan_area( int *tlx, int *tly, int *brx, int *bry )
 {
-    if (unit != SANE_UNIT_MM)
-        return FALSE;
+    TW_UINT16 rc;
+    struct option_descriptor opt;
 
-    if (twtype != TWUN_INCHES)
-        return FALSE;
-
-    convert_double_fix32((sane_res / 10.0) / 2.54, twain_res);
-
-    return TRUE;
+    if ((rc = sane_find_option( "tl-x", TYPE_FIXED, &opt )) != TWCC_SUCCESS) return rc;
+    *tlx = opt.constraint.range.min;
+    if ((rc = sane_find_option( "tl-y", TYPE_FIXED, &opt )) != TWCC_SUCCESS) return rc;
+    *tly = opt.constraint.range.min;
+    if ((rc = sane_find_option( "br-x", TYPE_FIXED, &opt )) != TWCC_SUCCESS) return rc;
+    *brx = opt.constraint.range.max;
+    if ((rc = sane_find_option( "br-y", TYPE_FIXED, &opt )) != TWCC_SUCCESS) return rc;
+    *bry = opt.constraint.range.max;
+    if (opt.unit != UNIT_MM) FIXME( "unsupported unit %u\n", opt.unit );
+    return rc;
 }
-#endif
+
+TW_UINT16 sane_option_set_scan_area( int tlx, int tly, int brx, int bry, BOOL *reload )
+{
+    TW_UINT16 rc;
+    struct option_descriptor opt;
+
+    if ((rc = sane_find_option( "tl-x", TYPE_FIXED, &opt )) != TWCC_SUCCESS) return rc;
+    if ((rc = sane_option_set_value( opt.optno, &tlx, reload )) != TWCC_SUCCESS) return rc;
+    if ((rc = sane_find_option( "tl-y", TYPE_FIXED, &opt )) != TWCC_SUCCESS) return rc;
+    if ((rc = sane_option_set_value( opt.optno, &tly, reload )) != TWCC_SUCCESS) return rc;
+    if ((rc = sane_find_option( "br-x", TYPE_FIXED, &opt )) != TWCC_SUCCESS) return rc;
+    if ((rc = sane_option_set_value( opt.optno, &brx, reload )) != TWCC_SUCCESS) return rc;
+    if ((rc = sane_find_option( "br-y", TYPE_FIXED, &opt )) != TWCC_SUCCESS) return rc;
+    if ((rc = sane_option_set_value( opt.optno, &bry, reload )) != TWCC_SUCCESS) return rc;
+    return rc;
+}
+
+TW_FIX32 convert_sane_res_to_twain(int res)
+{
+    TW_FIX32 value;
+    res = MulDiv( res, 10, 254 );  /* mm -> inch */
+    value.Whole = res / 65536;
+    value.Frac  = res & 0xffff;
+    return value;
+}
+
+TW_UINT16 get_sane_params( struct frame_parameters *params )
+{
+    return SANE_CALL( get_params, params );
+}

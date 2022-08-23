@@ -19,8 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __WINE_BASETSD_H
-#define __WINE_BASETSD_H
+#ifndef _BASETSD_H_
+#define _BASETSD_H_
 
 #include "wine/winheader_enter.h"
 
@@ -59,7 +59,7 @@ extern "C" {
 #    define __int32 int
 #  endif
 #  ifndef __int64
-#    if (defined(_WIN64) || defined(__i386_on_x86_64__)) && !defined(__MINGW64__)
+#    if defined(_WIN64) && !defined(__MINGW64__)
 #      define __int64 long
 #    else
 #      define __int64 long long
@@ -110,7 +110,6 @@ typedef /* [public] */ signed __int3264   INT_PTR, *PINT_PTR;
 typedef /* [public] */ signed __int3264   LONG_PTR, *PLONG_PTR;
 typedef /* [public] */ unsigned __int3264 UINT_PTR, *PUINT_PTR;
 typedef /* [public] */ unsigned __int3264 ULONG_PTR, *PULONG_PTR;
-typedef ULONG_PTR                   DWORD_PTR, *PDWORD_PTR;
 
 typedef ULONG_PTR ULONG_HOSTPTR;
 
@@ -122,7 +121,6 @@ typedef signed __int64   INT_PTR, *PINT_PTR;
 typedef signed __int64   LONG_PTR, *PLONG_PTR;
 typedef unsigned __int64 UINT_PTR, *PUINT_PTR;
 typedef unsigned __int64 ULONG_PTR, *PULONG_PTR;
-typedef ULONG_PTR        DWORD_PTR, *PDWORD_PTR;
 
 typedef ULONG_PTR ULONG_HOSTPTR;
 
@@ -142,11 +140,15 @@ typedef unsigned __int64 ULONG_HOSTPTR;
 
 #define __int3264 __int32
 
+#ifdef WINE_NO_LONG_TYPES
 typedef long          INT_PTR, *PINT_PTR;
 typedef unsigned long UINT_PTR, *PUINT_PTR;
+#else
+typedef int           INT_PTR, *PINT_PTR;
+typedef unsigned int  UINT_PTR, *PUINT_PTR;
+#endif
 typedef long          LONG_PTR, *PLONG_PTR;
 typedef unsigned long ULONG_PTR, *PULONG_PTR;
-typedef ULONG_PTR     DWORD_PTR, *PDWORD_PTR;
 
 typedef ULONG_PTR ULONG_HOSTPTR;
 
@@ -171,15 +173,65 @@ typedef unsigned int UHALF_PTR, *PUHALF_PTR;
 
 #if !defined(__midl) && !defined(__WIDL__)
 
-static inline ULONG32 HandleToULong(const void *h)
+#if !defined(__LP64__) && !defined(WINE_NO_LONG_TYPES)
+
+static inline unsigned long HandleToULong(const void *h)
 {
-    return (ULONG32)(ULONG_PTR)h;
+    return (unsigned long)(ULONG_PTR)h;
 }
 
-static inline LONG32 HandleToLong(const void *h)
+static inline long HandleToLong(const void *h)
 {
-    return (LONG32)(LONG_PTR)h;
+    return (long)(LONG_PTR)h;
 }
+
+static inline unsigned long PtrToUlong(const void *p)
+{
+    return (unsigned long)(ULONG_PTR)p;
+}
+
+static inline long PtrToLong(const void *p)
+{
+    return (long)(LONG_PTR)p;
+}
+
+
+#else
+
+static inline unsigned HandleToULong(const void *h)
+{
+    return (unsigned)(ULONG_PTR)h;
+}
+
+static inline int HandleToLong(const void *h)
+{
+    return (int)(LONG_PTR)h;
+}
+
+static inline unsigned PtrToUlong(const void *p)
+{
+    return (unsigned)(ULONG_PTR)p;
+}
+
+static inline int PtrToLong(const void *p)
+{
+    return (int)(LONG_PTR)p;
+}
+
+
+#endif /* !defined(__LP64__) && !defined(WINE_NO_LONG_TYPES) */
+
+#ifdef __i386_on_x86_64__
+
+#define ULongToHandle(ul)       ((HANDLE)(ULONG_PTR)(ul))
+#define LongToHandle(l)         ((HANDLE)(LONG_PTR)(l))
+
+#define IntToPtr(i)             ((void *)(INT_PTR)((INT)i))
+#define UIntToPtr(ui)           ((void *)(UINT_PTR)((UINT)ui))
+#define LongToPtr(l)            ((void *)(LONG_PTR)((LONG)l))
+#define ULongToPtr(ul)          ((void *)(ULONG_PTR)((ULONG)ul))
+
+#else
 
 static inline void *ULongToHandle(ULONG32 ul)
 {
@@ -191,15 +243,27 @@ static inline void *LongToHandle(LONG32 l)
     return (void *)(LONG_PTR)l;
 }
 
-static inline ULONG32 PtrToUlong(const void *p)
+
+static inline void *IntToPtr(INT32 i)
 {
-    return (ULONG32)(ULONG_PTR)p;
+    return (void *)(INT_PTR)i;
 }
 
-static inline LONG32 PtrToLong(const void *p)
+static inline void *UIntToPtr(UINT32 ui)
 {
-    return (LONG32)(LONG_PTR)p;
+    return (void *)(UINT_PTR)ui;
 }
+
+static inline void *LongToPtr(LONG32 l)
+{
+    return (void *)(LONG_PTR)l;
+}
+
+static inline void *ULongToPtr(ULONG32 ul)
+{
+    return (void *)(ULONG_PTR)ul;
+}
+#endif
 
 static inline UINT32 PtrToUint(const void *p)
 {
@@ -221,26 +285,6 @@ static inline INT16 PtrToShort(const void *p)
     return (INT16)(LONG_PTR)p;
 }
 
-static inline void *IntToPtr(INT32 i)
-{
-    return (void *)(INT_PTR)i;
-}
-
-static inline void *UIntToPtr(UINT32 ui)
-{
-    return (void *)(UINT_PTR)ui;
-}
-
-static inline void *LongToPtr(LONG32 l)
-{
-    return (void *)(LONG_PTR)l;
-}
-
-static inline void *ULongToPtr(ULONG32 ul)
-{
-    return (void *)(ULONG_PTR)ul;
-}
-
 #endif  /* !__midl && !__WIDL__ */
 
 #else /* FIXME: defined(_WIN32) */
@@ -249,13 +293,8 @@ static inline void *ULongToPtr(ULONG32 ul)
 #define MININT_PTR 0x80000000
 #define MAXUINT_PTR 0xffffffff
 
-#ifdef __i386_on_x86_64__
-typedef int SHANDLE_PTR;
-typedef unsigned int HANDLE_PTR;
-#else
 typedef long SHANDLE_PTR;
 typedef unsigned long HANDLE_PTR;
-#endif
 typedef signed short HALF_PTR, *PHALF_PTR;
 typedef unsigned short UHALF_PTR, *PUHALF_PTR;
 
@@ -287,7 +326,7 @@ typedef unsigned short UHALF_PTR, *PUHALF_PTR;
 
 typedef LONG_PTR SSIZE_T, *PSSIZE_T;
 typedef ULONG_PTR SIZE_T, *PSIZE_T;
-
+typedef ULONG_PTR DWORD_PTR, *PDWORD_PTR;
 typedef ULONG_PTR KAFFINITY, *PKAFFINITY;
 
 #define MINLONGLONG             ((LONGLONG)~MAXLONGLONG)
@@ -299,6 +338,10 @@ typedef ULONG_PTR KAFFINITY, *PKAFFINITY;
 #if defined(__i386__) || defined(__i386_on_x86_64__)
 # undef  WORDS_BIGENDIAN
 #elif defined(__x86_64__)
+# undef  WORDS_BIGENDIAN
+#elif defined(__powerpc64__) && defined(__BIG_ENDIAN__)
+# define WORDS_BIGENDIAN
+#elif defined(__powerpc64__)
 # undef  WORDS_BIGENDIAN
 #elif defined(__powerpc__)
 # define WORDS_BIGENDIAN
@@ -326,4 +369,4 @@ typedef ULONG_PTR KAFFINITY, *PKAFFINITY;
 
 #include "wine/winheader_exit.h"
 
-#endif /* !defined(__WINE_BASETSD_H) */
+#endif /* !defined(_BASETSD_H_) */

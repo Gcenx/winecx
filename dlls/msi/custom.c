@@ -22,6 +22,9 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
@@ -33,7 +36,6 @@
 #include "msipriv.h"
 #include "winemsi.h"
 #include "wine/asm.h"
-#include "wine/heap.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
 
@@ -65,12 +67,12 @@ static struct list msi_pending_custom_actions = LIST_INIT( msi_pending_custom_ac
 
 void  __RPC_FAR * __RPC_USER MIDL_user_allocate(SIZE_T len)
 {
-    return heap_alloc(len);
+    return malloc(len);
 }
 
 void __RPC_USER MIDL_user_free(void __RPC_FAR * ptr)
 {
-    heap_free(ptr);
+    free(ptr);
 }
 
 LONG WINAPI rpc_filter(EXCEPTION_POINTERS *eptr)
@@ -210,7 +212,7 @@ WCHAR *msi_create_temp_file( MSIDATABASE *db )
     if (!db->tempfolder)
     {
         WCHAR tmp[MAX_PATH];
-        UINT len = ARRAY_SIZE( tmp );
+        DWORD len = ARRAY_SIZE( tmp );
 
         if (msi_get_property( db, L"TempFolder", tmp, &len ) ||
             GetFileAttributesW( tmp ) != FILE_ATTRIBUTE_DIRECTORY)
@@ -312,7 +314,7 @@ static UINT custom_get_process_return( HANDLE process )
     DWORD rc = 0;
 
     GetExitCodeProcess( process, &rc );
-    TRACE("exit code is %u\n", rc);
+    TRACE( "exit code is %lu\n", rc );
     if (rc != 0)
         return ERROR_FUNCTION_FAILED;
     return ERROR_SUCCESS;
@@ -337,7 +339,7 @@ static UINT custom_get_thread_return( MSIPACKAGE *package, HANDLE thread )
         ACTION_ForceReboot( package );
         return ERROR_SUCCESS;
     default:
-        ERR("Invalid Return Code %d\n",rc);
+        ERR( "invalid Return Code %lu\n", rc );
         return ERROR_INSTALL_FAILURE;
     }
 }
@@ -446,21 +448,15 @@ static msi_custom_action_info *find_action_by_guid( const GUID *guid )
     return info;
 }
 
-static void handle_msi_break(LPCSTR target)
+static void handle_msi_break( const WCHAR *action )
 {
-    char format[] = "To debug your custom action, attach your debugger to "
-                    "process %i (0x%X) and press OK";
-    char val[MAX_PATH];
-    char msg[100];
+    const WCHAR fmt[] = L"To debug your custom action, attach your debugger to process %u (0x%x) and press OK";
+    WCHAR val[MAX_PATH], msg[100];
 
-    if (!GetEnvironmentVariableA("MsiBreak", val, MAX_PATH))
-        return;
+    if (!GetEnvironmentVariableW( L"MsiBreak", val, MAX_PATH ) || wcscmp( val, action )) return;
 
-    if (strcmp(val, target))
-        return;
-
-    sprintf(msg, format, GetCurrentProcessId(), GetCurrentProcessId());
-    MessageBoxA(NULL, msg, "Windows Installer", MB_OK);
+    swprintf( msg, ARRAY_SIZE(msg), fmt, GetCurrentProcessId(), GetCurrentProcessId() );
+    MessageBoxW( NULL, msg, L"Windows Installer", MB_OK );
     DebugBreak();
 }
 
@@ -494,7 +490,7 @@ UINT CDECL __wine_msi_call_dll_function(DWORD client_pid, const GUID *guid)
     RPC_WSTR binding_str;
     MSIHANDLE hPackage;
     RPC_STATUS status;
-    LPWSTR dll = NULL;
+    WCHAR *dll = NULL, *action = NULL;
     LPSTR proc = NULL;
     HANDLE hModule;
     INT type;
@@ -510,26 +506,27 @@ UINT CDECL __wine_msi_call_dll_function(DWORD client_pid, const GUID *guid)
         status = RpcStringBindingComposeW(NULL, (WCHAR *)L"ncalrpc", NULL, endpoint, NULL, &binding_str);
         if (status != RPC_S_OK)
         {
-            ERR("RpcStringBindingCompose failed: %#x\n", status);
+            ERR("RpcStringBindingCompose failed: %#lx\n", status);
             return status;
         }
         status = RpcBindingFromStringBindingW(binding_str, &rpc_handle);
         if (status != RPC_S_OK)
         {
-            ERR("RpcBindingFromStringBinding failed: %#x\n", status);
+            ERR("RpcBindingFromStringBinding failed: %#lx\n", status);
             return status;
         }
         RpcStringFreeW(&binding_str);
     }
 
-    r = remote_GetActionInfo(guid, &type, &dll, &proc, &remote_package);
+    r = remote_GetActionInfo(guid, &action, &type, &dll, &proc, &remote_package);
     if (r != ERROR_SUCCESS)
         return r;
 
     hPackage = alloc_msi_remote_handle( remote_package );
     if (!hPackage)
     {
-        ERR( "failed to create handle for %x\n", remote_package );
+        ERR( "failed to create handle for %#lx\n", remote_package );
+        midl_user_free( action );
         midl_user_free( dll );
         midl_user_free( proc );
         return ERROR_INSTALL_FAILURE;
@@ -538,7 +535,8 @@ UINT CDECL __wine_msi_call_dll_function(DWORD client_pid, const GUID *guid)
     hModule = LoadLibraryW( dll );
     if (!hModule)
     {
-        ERR( "failed to load dll %s (%u)\n", debugstr_w( dll ), GetLastError() );
+        ERR( "failed to load dll %s (%lu)\n", debugstr_w( dll ), GetLastError() );
+        midl_user_free( action );
         midl_user_free( dll );
         midl_user_free( proc );
         MsiCloseHandle( hPackage );
@@ -549,7 +547,7 @@ UINT CDECL __wine_msi_call_dll_function(DWORD client_pid, const GUID *guid)
     if (!fn) WARN( "GetProcAddress(%s) failed\n", debugstr_a(proc) );
     else
     {
-        handle_msi_break(proc);
+        handle_msi_break(action);
 
         __TRY
         {
@@ -557,7 +555,7 @@ UINT CDECL __wine_msi_call_dll_function(DWORD client_pid, const GUID *guid)
         }
         __EXCEPT_PAGE_FAULT
         {
-            ERR( "Custom action (%s:%s) caused a page fault: %08x\n",
+            ERR( "Custom action (%s:%s) caused a page fault: %#lx\n",
                  debugstr_w(dll), debugstr_a(proc), GetExceptionCode() );
             r = ERROR_SUCCESS;
         }
@@ -566,11 +564,11 @@ UINT CDECL __wine_msi_call_dll_function(DWORD client_pid, const GUID *guid)
 
     FreeLibrary(hModule);
 
+    midl_user_free(action);
     midl_user_free(dll);
     midl_user_free(proc);
 
     MsiCloseAllHandles();
-
     return r;
 }
 
@@ -592,7 +590,7 @@ static DWORD custom_start_server(MSIPACKAGE *package, DWORD arch)
     pipe = CreateNamedPipeW(buffer, PIPE_ACCESS_DUPLEX, 0, 1, sizeof(DWORD64),
         sizeof(GUID), 0, NULL);
     if (pipe == INVALID_HANDLE_VALUE)
-        ERR("Failed to create custom action client pipe: %u\n", GetLastError());
+        ERR("failed to create custom action client pipe: %lu\n", GetLastError());
 
     if ((sizeof(void *) == 8 || is_wow64) && arch == SCS_32BIT_BINARY)
         GetSystemWow64DirectoryW(path, MAX_PATH - ARRAY_SIZE(L"\\msiexec.exe"));
@@ -625,7 +623,7 @@ static DWORD custom_start_server(MSIPACKAGE *package, DWORD arch)
 
     if (!ConnectNamedPipe(pipe, NULL))
     {
-        ERR("Failed to connect to custom action server: %u\n", GetLastError());
+        ERR("failed to connect to custom action server: %lu\n", GetLastError());
         return GetLastError();
     }
 
@@ -650,7 +648,7 @@ static DWORD WINAPI custom_client_thread(void *arg)
     HANDLE thread;
     HANDLE pipe;
     DWORD size;
-    UINT rc;
+    DWORD rc;
 
     CoInitializeEx(NULL, COINIT_MULTITHREADED); /* needed to marshal streams */
 
@@ -670,13 +668,13 @@ static DWORD WINAPI custom_client_thread(void *arg)
     if (!WriteFile(pipe, &info->guid, sizeof(info->guid), &size, NULL) ||
         size != sizeof(info->guid))
     {
-        ERR("Failed to write to custom action client pipe: %u\n", GetLastError());
+        ERR("failed to write to custom action client pipe: %lu\n", GetLastError());
         LeaveCriticalSection(&msi_custom_action_cs);
         return GetLastError();
     }
     if (!ReadFile(pipe, &thread64, sizeof(thread64), &size, NULL) || size != sizeof(thread64))
     {
-        ERR("Failed to read from custom action client pipe: %u\n", GetLastError());
+        ERR("failed to read from custom action client pipe: %lu\n", GetLastError());
         LeaveCriticalSection(&msi_custom_action_cs);
         return GetLastError();
     }
@@ -695,6 +693,51 @@ static DWORD WINAPI custom_client_thread(void *arg)
 
     CoUninitialize();
     return rc;
+}
+
+/* based on kernel32.GetBinaryTypeW() */
+static BOOL get_binary_type( const WCHAR *name, DWORD *type )
+{
+    HANDLE hfile, mapping;
+    NTSTATUS status;
+
+    hfile = CreateFileW( name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0 );
+    if (hfile == INVALID_HANDLE_VALUE)
+        return FALSE;
+
+    status = NtCreateSection( &mapping, STANDARD_RIGHTS_REQUIRED | SECTION_QUERY, NULL, NULL, PAGE_READONLY,
+                              SEC_IMAGE, hfile );
+    CloseHandle( hfile );
+
+    switch (status)
+    {
+    case STATUS_SUCCESS:
+        {
+            SECTION_IMAGE_INFORMATION info;
+
+            status = NtQuerySection( mapping, SectionImageInformation, &info, sizeof(info), NULL );
+            CloseHandle( mapping );
+            if (status) return FALSE;
+            switch (info.Machine)
+            {
+            case IMAGE_FILE_MACHINE_I386:
+            case IMAGE_FILE_MACHINE_ARMNT:
+                *type = SCS_32BIT_BINARY;
+                return TRUE;
+            case IMAGE_FILE_MACHINE_AMD64:
+            case IMAGE_FILE_MACHINE_ARM64:
+                *type = SCS_64BIT_BINARY;
+                return TRUE;
+            default:
+                return FALSE;
+            }
+        }
+    case STATUS_INVALID_IMAGE_WIN_64:
+        *type = SCS_64BIT_BINARY;
+        return TRUE;
+    default:
+        return FALSE;
+    }
 }
 
 static msi_custom_action_info *do_msidbCustomActionTypeDll(
@@ -729,7 +772,7 @@ static msi_custom_action_info *do_msidbCustomActionTypeDll(
             endpoint, NULL);
         if (status != RPC_S_OK)
         {
-            ERR("RpcServerUseProtseqEp failed: %#x\n", status);
+            ERR("RpcServerUseProtseqEp failed: %#lx\n", status);
             return NULL;
         }
 
@@ -737,16 +780,23 @@ static msi_custom_action_info *do_msidbCustomActionTypeDll(
             RPC_IF_AUTOLISTEN, RPC_C_LISTEN_MAX_CALLS_DEFAULT, NULL);
         if (status != RPC_S_OK)
         {
-            ERR("RpcServerRegisterIfEx failed: %#x\n", status);
+            ERR("RpcServerRegisterIfEx failed: %#lx\n", status);
             return NULL;
         }
 
         info->package->rpc_server_started = 1;
     }
 
-    ret = GetBinaryTypeW(source, &info->arch);
+    ret = get_binary_type(source, &info->arch);
     if (!ret)
         info->arch = (sizeof(void *) == 8 ? SCS_64BIT_BINARY : SCS_32BIT_BINARY);
+
+    if (info->arch == SCS_64BIT_BINARY && sizeof(void *) == 4 && !is_wow64)
+    {
+        ERR("Attempt to run a 64-bit custom action inside a 32-bit WINEPREFIX.\n");
+        free_custom_action_data( info );
+        return NULL;
+    }
 
     custom_start_server(package, info->arch);
 
@@ -771,13 +821,15 @@ static UINT HANDLE_CustomType1( MSIPACKAGE *package, const WCHAR *source, const 
 
     TRACE("Calling function %s from %s\n", debugstr_w(target), debugstr_w(binary->tmpfile));
 
-    info = do_msidbCustomActionTypeDll( package, type, binary->tmpfile, target, action );
+    if (!(info = do_msidbCustomActionTypeDll( package, type, binary->tmpfile, target, action )))
+        return ERROR_FUNCTION_FAILED;
     return wait_thread_handle( info );
 }
 
-static HANDLE execute_command( const WCHAR *app, WCHAR *arg, const WCHAR *dir )
+static HANDLE execute_command( const WCHAR *app, WCHAR *arg, const WCHAR *dir, const WCHAR *action )
 {
     STARTUPINFOW si;
+    DWORD creation_flags = 0;
     PROCESS_INFORMATION info;
     WCHAR *exe = NULL, *cmd = NULL, *p;
     BOOL ret;
@@ -797,7 +849,7 @@ static HANDLE execute_command( const WCHAR *app, WCHAR *arg, const WCHAR *dir )
         }
         if (!len_exe)
         {
-            ERR("can't find executable %u\n", GetLastError());
+            ERR("can't find executable %lu\n", GetLastError());
             msi_free( exe );
             return INVALID_HANDLE_VALUE;
         }
@@ -830,12 +882,21 @@ static HANDLE execute_command( const WCHAR *app, WCHAR *arg, const WCHAR *dir )
         }
     }
     memset( &si, 0, sizeof(STARTUPINFOW) );
-    ret = CreateProcessW( exe, exe ? cmd : arg, NULL, NULL, FALSE, 0, NULL, dir, &si, &info );
+
+    /* CX HACK 21038: Don't create console windows for wine-mono's
+     * installinf tool. */
+    if (!wcscmp( action, L"INSTALLFAKEDLLS" ) ||
+        !wcscmp( action, L"INSTALLFAKEDLLS64" ))
+    {
+        creation_flags = CREATE_NO_WINDOW;
+    }
+
+    ret = CreateProcessW( exe, exe ? cmd : arg, NULL, NULL, FALSE, creation_flags, NULL, dir, &si, &info );
     msi_free( cmd );
     msi_free( exe );
     if (!ret)
     {
-        ERR("unable to execute command %u\n", GetLastError());
+        ERR("unable to execute command %lu\n", GetLastError());
         return INVALID_HANDLE_VALUE;
     }
     CloseHandle( info.hThread );
@@ -855,7 +916,7 @@ static UINT HANDLE_CustomType2( MSIPACKAGE *package, const WCHAR *source, const 
     deformat_string( package, target, &arg );
     TRACE("exe %s arg %s\n", debugstr_w(binary->tmpfile), debugstr_w(arg));
 
-    handle = execute_command( binary->tmpfile, arg, L"C:\\" );
+    handle = execute_command( binary->tmpfile, arg, L"C:\\", action );
     msi_free( arg );
     if (handle == INVALID_HANDLE_VALUE) return ERROR_SUCCESS;
     return wait_process_handle( package, type, handle, action );
@@ -876,7 +937,8 @@ static UINT HANDLE_CustomType17( MSIPACKAGE *package, const WCHAR *source, const
         return ERROR_FUNCTION_FAILED;
     }
 
-    info = do_msidbCustomActionTypeDll( package, type, file->TargetPath, target, action );
+    if (!(info = do_msidbCustomActionTypeDll( package, type, file->TargetPath, target, action )))
+        return ERROR_FUNCTION_FAILED;
     return wait_thread_handle( info );
 }
 
@@ -892,7 +954,7 @@ static UINT HANDLE_CustomType18( MSIPACKAGE *package, const WCHAR *source, const
     deformat_string( package, target, &arg );
     TRACE("exe %s arg %s\n", debugstr_w(file->TargetPath), debugstr_w(arg));
 
-    handle = execute_command( file->TargetPath, arg, L"C:\\" );
+    handle = execute_command( file->TargetPath, arg, L"C:\\", action );
     msi_free( arg );
     if (handle == INVALID_HANDLE_VALUE) return ERROR_SUCCESS;
     return wait_process_handle( package, type, handle, action );
@@ -973,7 +1035,7 @@ static UINT HANDLE_CustomType23( MSIPACKAGE *package, const WCHAR *source, const
 
     TRACE("installing %s concurrently\n", debugstr_w(source));
 
-    handle = execute_command( L"msiexec", args, dir );
+    handle = execute_command( L"msiexec", args, dir, action );
     msi_free( dir );
     msi_free( args );
     if (handle == INVALID_HANDLE_VALUE) return ERROR_SUCCESS;
@@ -989,27 +1051,27 @@ static UINT write_substorage_to_file( MSIPACKAGE *package, const WCHAR *source, 
     hr = StgCreateDocfile( filename, STGM_CREATE|STGM_TRANSACTED|STGM_WRITE|STGM_SHARE_EXCLUSIVE, 0, &dst );
     if (FAILED( hr ))
     {
-        WARN( "can't open destination storage %s (%08x)\n", debugstr_w(filename), hr );
+        WARN( "can't open destination storage %s (%#lx)\n", debugstr_w(filename), hr );
         goto done;
     }
 
     hr = IStorage_OpenStorage( package->db->storage, source, NULL, STGM_SHARE_EXCLUSIVE, NULL, 0, &src );
     if (FAILED( hr ))
     {
-        WARN( "can't open source storage %s (%08x)\n", debugstr_w(source), hr );
+        WARN( "can't open source storage %s (%#lx)\n", debugstr_w(source), hr );
         goto done;
     }
 
     hr = IStorage_CopyTo( src, 0, NULL, NULL, dst );
     if (FAILED( hr ))
     {
-        ERR( "failed to copy storage %s (%08x)\n", debugstr_w(source), hr );
+        ERR( "failed to copy storage %s (%#lx)\n", debugstr_w(source), hr );
         goto done;
     }
 
     hr = IStorage_Commit( dst, 0 );
     if (FAILED( hr ))
-        ERR( "failed to commit storage (%08x)\n", hr );
+        ERR( "failed to commit storage (%#lx)\n", hr );
     else
         r = ERROR_SUCCESS;
 
@@ -1042,7 +1104,7 @@ static UINT HANDLE_CustomType7( MSIPACKAGE *package, const WCHAR *source, const 
 
     TRACE("installing %s concurrently\n", debugstr_w(source));
 
-    handle = execute_command( L"msiexec", args, L"C:\\" );
+    handle = execute_command( L"msiexec", args, L"C:\\", action );
     msi_free( args );
     if (handle == INVALID_HANDLE_VALUE) return ERROR_SUCCESS;
     return wait_process_handle( package, type, handle, action );
@@ -1064,7 +1126,7 @@ static UINT HANDLE_CustomType50( MSIPACKAGE *package, const WCHAR *source, const
     deformat_string( package, target, &arg );
     TRACE("exe %s arg %s\n", debugstr_w(exe), debugstr_w(arg));
 
-    handle = execute_command( exe, arg, L"C:\\" );
+    handle = execute_command( exe, arg, L"C:\\", action );
     msi_free( exe );
     msi_free( arg );
     if (handle == INVALID_HANDLE_VALUE) return ERROR_SUCCESS;
@@ -1088,7 +1150,7 @@ static UINT HANDLE_CustomType34( MSIPACKAGE *package, const WCHAR *source, const
 
     TRACE("cmd %s dir %s\n", debugstr_w(cmd), debugstr_w(workingdir));
 
-    handle = execute_command( NULL, cmd, workingdir );
+    handle = execute_command( NULL, cmd, workingdir, action );
     msi_free( cmd );
     if (handle == INVALID_HANDLE_VALUE) return ERROR_SUCCESS;
     return wait_process_handle( package, type, handle, action );
@@ -1127,11 +1189,11 @@ static DWORD WINAPI ScriptThread( LPVOID arg )
     LPGUID guid = arg;
     DWORD rc;
 
-    TRACE("custom action (%x) started\n", GetCurrentThreadId() );
+    TRACE("custom action (%#lx) started\n", GetCurrentThreadId() );
 
     rc = ACTION_CallScript( guid );
 
-    TRACE("custom action (%x) returned %i\n", GetCurrentThreadId(), rc );
+    TRACE("custom action (%#lx) returned %lu\n", GetCurrentThreadId(), rc );
 
     MsiCloseAllHandles();
     return rc;
@@ -1555,7 +1617,7 @@ void ACTION_FinishCustomActions(const MSIPACKAGE* package)
     LeaveCriticalSection( &msi_custom_action_cs );
 }
 
-UINT __cdecl s_remote_GetActionInfo(const GUID *guid, int *type, LPWSTR *dll, LPSTR *func, MSIHANDLE *hinst)
+UINT __cdecl s_remote_GetActionInfo(const GUID *guid, WCHAR **name, int *type, WCHAR **dll, char **func, MSIHANDLE *hinst)
 {
     msi_custom_action_info *info;
 
@@ -1563,6 +1625,7 @@ UINT __cdecl s_remote_GetActionInfo(const GUID *guid, int *type, LPWSTR *dll, LP
     if (!info)
         return ERROR_INVALID_DATA;
 
+    *name = strdupW(info->action);
     *type = info->type;
     *hinst = alloc_msihandle(&info->package->hdr);
     *dll = strdupW(info->source);

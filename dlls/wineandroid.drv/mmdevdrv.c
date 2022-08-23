@@ -19,7 +19,6 @@
 #define NONAMELESSUNION
 #define COBJMACROS
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdarg.h>
 #include <errno.h>
@@ -33,6 +32,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <math.h>
+#include <dlfcn.h>
 
 #include <SLES/OpenSLES.h>
 #include <SLES/OpenSLES_Android.h>
@@ -44,7 +44,6 @@
 #include "winnls.h"
 #include "winreg.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 #include "wine/list.h"
 
 #include "ole2.h"
@@ -282,47 +281,37 @@ int WINAPI AUDDRV_GetPriority(void)
 static SLObjectItf sl;
 static SLEngineItf engine;
 static SLObjectItf outputmix;
-static HANDLE engine_thread;
 
-DWORD WINAPI engine_threadproc(void *user)
+HRESULT AUDDRV_Init(void)
 {
     static const SLEngineOption options[] = { {SL_ENGINEOPTION_THREADSAFE, SL_BOOLEAN_TRUE} };
-    HANDLE evt = user;
     SLresult sr;
 
     sr = pslCreateEngine(&sl, 1, options, 0, NULL, NULL);
     if(sr != SL_RESULT_SUCCESS){
         WARN("slCreateEngine failed: 0x%x\n", sr);
-        engine_thread = NULL;
-        SetEvent(evt);
-        return 1;
+        return E_FAIL;
     }
 
     sr = SLCALL(sl, Realize, SL_BOOLEAN_FALSE);
     if(sr != SL_RESULT_SUCCESS){
         SLCALL_N(sl, Destroy);
         WARN("Engine Realize failed: 0x%x\n", sr);
-        engine_thread = NULL;
-        SetEvent(evt);
-        return 1;
+        return E_FAIL;
     }
 
     sr = SLCALL(sl, GetInterface, *pSL_IID_ENGINE, (void*)&engine);
     if(sr != SL_RESULT_SUCCESS){
         SLCALL_N(sl, Destroy);
         WARN("GetInterface failed: 0x%x\n", sr);
-        engine_thread = NULL;
-        SetEvent(evt);
-        return 1;
+        return E_FAIL;
     }
 
     sr = SLCALL(engine, CreateOutputMix, &outputmix, 0, NULL, NULL);
     if(sr != SL_RESULT_SUCCESS){
         SLCALL_N(sl, Destroy);
         WARN("CreateOutputMix failed: 0x%x\n", sr);
-        engine_thread = NULL;
-        SetEvent(evt);
-        return 1;
+        return E_FAIL;
     }
 
     sr = SLCALL(outputmix, Realize, SL_BOOLEAN_FALSE);
@@ -330,35 +319,6 @@ DWORD WINAPI engine_threadproc(void *user)
         SLCALL_N(outputmix, Destroy);
         SLCALL_N(sl, Destroy);
         WARN("outputmix Realize failed: 0x%x\n", sr);
-        engine_thread = NULL;
-        SetEvent(evt);
-        return 1;
-    }
-
-    SetEvent(evt);
-
-    /* never exit */
-    WaitForSingleObject(engine_thread, INFINITE);
-
-    return 0;
-}
-
-HRESULT AUDDRV_Init(void)
-{
-    HANDLE evt = CreateEventW(NULL, FALSE, FALSE, NULL);
-
-    /* FIXME: A small number of badly behaved applications initialize the audio
-     * DLLs during their DllMain, so this CreateThread will hang forever. But
-     * we have to do this due to an Android bug, see CW Bug 15429. */
-    engine_thread = CreateThread(NULL, 0, &engine_threadproc, evt, 0, NULL);
-
-    if(engine_thread)
-        WaitForSingleObject(evt, INFINITE);
-
-    CloseHandle(evt);
-
-    if(!engine_thread){
-        ERR("OpenSL engine initialization failed\n");
         return E_FAIL;
     }
 

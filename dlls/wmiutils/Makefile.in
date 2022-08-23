@@ -1,7 +1,7 @@
 MODULE    = wmiutils.dll
 IMPORTS   = oleaut32 ole32 advapi32
 
-EXTRADLLFLAGS = -mno-cygwin
+EXTRADLLFLAGS = -Wb,--prefer-native
 
 C_SRCS = \
 	main.c \

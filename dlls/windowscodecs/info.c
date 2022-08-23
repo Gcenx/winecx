@@ -101,8 +101,8 @@ static HRESULT ComponentInfo_GetGUIDValue(HKEY classkey, LPCWSTR value,
     return hr;
 }
 
-static HRESULT ComponentInfo_GetDWORDValue(HKEY classkey, LPCWSTR value,
-    DWORD *result)
+static HRESULT ComponentInfo_GetUINTValue(HKEY classkey, LPCWSTR value,
+    UINT *result)
 {
     LONG ret;
     DWORD cbdata = sizeof(DWORD);
@@ -111,7 +111,7 @@ static HRESULT ComponentInfo_GetDWORDValue(HKEY classkey, LPCWSTR value,
         return E_INVALIDARG;
 
     ret = RegGetValueW(classkey, NULL, value, RRF_RT_DWORD, NULL,
-        result, &cbdata);
+        (DWORD *)result, &cbdata);
 
     if (ret == ERROR_FILE_NOT_FOUND)
     {
@@ -179,7 +179,7 @@ static HRESULT ComponentInfo_GetGuidList(HKEY classkey, LPCWSTR subkeyname,
     }
     else
     {
-        ret = RegQueryInfoKeyW(subkey, NULL, NULL, NULL, actual_size, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+        ret = RegQueryInfoKeyW(subkey, NULL, NULL, NULL, (DWORD *)actual_size, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
         if (ret != ERROR_SUCCESS)
             hr = HRESULT_FROM_WIN32(ret);
     }
@@ -232,7 +232,7 @@ static ULONG WINAPI BitmapDecoderInfo_AddRef(IWICBitmapDecoderInfo *iface)
     BitmapDecoderInfo *This = impl_from_IWICBitmapDecoderInfo(iface);
     ULONG ref = InterlockedIncrement(&This->base.ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     return ref;
 }
@@ -242,7 +242,7 @@ static ULONG WINAPI BitmapDecoderInfo_Release(IWICBitmapDecoderInfo *iface)
     BitmapDecoderInfo *This = impl_from_IWICBitmapDecoderInfo(iface);
     ULONG ref = InterlockedDecrement(&This->base.ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     if (ref == 0)
     {
@@ -552,7 +552,8 @@ static const IWICBitmapDecoderInfoVtbl BitmapDecoderInfo_Vtbl = {
 
 static void read_bitmap_patterns(BitmapDecoderInfo *info)
 {
-    UINT pattern_count=0, patterns_size=0;
+    DWORD pattern_count=0;
+    UINT patterns_size=0;
     WCHAR subkeyname[11];
     LONG res;
     HKEY patternskey, patternkey;
@@ -715,7 +716,7 @@ static ULONG WINAPI BitmapEncoderInfo_AddRef(IWICBitmapEncoderInfo *iface)
     BitmapEncoderInfo *This = impl_from_IWICBitmapEncoderInfo(iface);
     ULONG ref = InterlockedIncrement(&This->base.ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     return ref;
 }
@@ -725,7 +726,7 @@ static ULONG WINAPI BitmapEncoderInfo_Release(IWICBitmapEncoderInfo *iface)
     BitmapEncoderInfo *This = impl_from_IWICBitmapEncoderInfo(iface);
     ULONG ref = InterlockedDecrement(&This->base.ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     if (ref == 0)
     {
@@ -1005,7 +1006,7 @@ static ULONG WINAPI FormatConverterInfo_AddRef(IWICFormatConverterInfo *iface)
     FormatConverterInfo *This = impl_from_IWICFormatConverterInfo(iface);
     ULONG ref = InterlockedIncrement(&This->base.ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     return ref;
 }
@@ -1015,7 +1016,7 @@ static ULONG WINAPI FormatConverterInfo_Release(IWICFormatConverterInfo *iface)
     FormatConverterInfo *This = impl_from_IWICFormatConverterInfo(iface);
     ULONG ref = InterlockedDecrement(&This->base.ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     if (ref == 0)
     {
@@ -1219,7 +1220,7 @@ static ULONG WINAPI PixelFormatInfo_AddRef(IWICPixelFormatInfo2 *iface)
     PixelFormatInfo *This = impl_from_IWICPixelFormatInfo2(iface);
     ULONG ref = InterlockedIncrement(&This->base.ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     return ref;
 }
@@ -1229,7 +1230,7 @@ static ULONG WINAPI PixelFormatInfo_Release(IWICPixelFormatInfo2 *iface)
     PixelFormatInfo *This = impl_from_IWICPixelFormatInfo2(iface);
     ULONG ref = InterlockedDecrement(&This->base.ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     if (ref == 0)
     {
@@ -1353,7 +1354,7 @@ static HRESULT WINAPI PixelFormatInfo_GetBitsPerPixel(IWICPixelFormatInfo2 *ifac
 
     TRACE("(%p,%p)\n", iface, puiBitsPerPixel);
 
-    return ComponentInfo_GetDWORDValue(This->classkey, L"BitLength", puiBitsPerPixel);
+    return ComponentInfo_GetUINTValue(This->classkey, L"BitLength", puiBitsPerPixel);
 }
 
 static HRESULT WINAPI PixelFormatInfo_GetChannelCount(IWICPixelFormatInfo2 *iface,
@@ -1363,7 +1364,7 @@ static HRESULT WINAPI PixelFormatInfo_GetChannelCount(IWICPixelFormatInfo2 *ifac
 
     TRACE("(%p,%p)\n", iface, puiChannelCount);
 
-    return ComponentInfo_GetDWORDValue(This->classkey, L"ChannelCount", puiChannelCount);
+    return ComponentInfo_GetUINTValue(This->classkey, L"ChannelCount", puiChannelCount);
 }
 
 static HRESULT WINAPI PixelFormatInfo_GetChannelMask(IWICPixelFormatInfo2 *iface,
@@ -1413,7 +1414,7 @@ static HRESULT WINAPI PixelFormatInfo_SupportsTransparency(IWICPixelFormatInfo2 
 
     TRACE("(%p,%p)\n", iface, pfSupportsTransparency);
 
-    return ComponentInfo_GetDWORDValue(This->classkey, L"SupportsTransparency", (DWORD*)pfSupportsTransparency);
+    return ComponentInfo_GetUINTValue(This->classkey, L"SupportsTransparency", (UINT *)pfSupportsTransparency);
 }
 
 static HRESULT WINAPI PixelFormatInfo_GetNumericRepresentation(IWICPixelFormatInfo2 *iface,
@@ -1423,7 +1424,7 @@ static HRESULT WINAPI PixelFormatInfo_GetNumericRepresentation(IWICPixelFormatIn
 
     TRACE("(%p,%p)\n", iface, pNumericRepresentation);
 
-    return ComponentInfo_GetDWORDValue(This->classkey, L"NumericRepresentation", pNumericRepresentation);
+    return ComponentInfo_GetUINTValue(This->classkey, L"NumericRepresentation", pNumericRepresentation);
 }
 
 static const IWICPixelFormatInfo2Vtbl PixelFormatInfo_Vtbl = {
@@ -1530,7 +1531,7 @@ static ULONG WINAPI MetadataReaderInfo_AddRef(IWICMetadataReaderInfo *iface)
     MetadataReaderInfo *This = impl_from_IWICMetadataReaderInfo(iface);
     ULONG ref = InterlockedIncrement(&This->base.ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
     return ref;
 }
 
@@ -1539,7 +1540,7 @@ static ULONG WINAPI MetadataReaderInfo_Release(IWICMetadataReaderInfo *iface)
     MetadataReaderInfo *This = impl_from_IWICMetadataReaderInfo(iface);
     ULONG ref = InterlockedDecrement(&This->base.ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     if (!ref)
     {
@@ -1682,7 +1683,7 @@ static HRESULT WINAPI MetadataReaderInfo_DoesRequireFullStream(IWICMetadataReade
 {
     MetadataReaderInfo *This = impl_from_IWICMetadataReaderInfo(iface);
     TRACE("(%p,%p)\n", iface, param);
-    return ComponentInfo_GetDWORDValue(This->classkey, L"RequiresFullStream", (DWORD *)param);
+    return ComponentInfo_GetUINTValue(This->classkey, L"RequiresFullStream", (UINT *)param);
 }
 
 static HRESULT WINAPI MetadataReaderInfo_DoesSupportPadding(IWICMetadataReaderInfo *iface,
@@ -1690,7 +1691,7 @@ static HRESULT WINAPI MetadataReaderInfo_DoesSupportPadding(IWICMetadataReaderIn
 {
     MetadataReaderInfo *This = impl_from_IWICMetadataReaderInfo(iface);
     TRACE("(%p,%p)\n", iface, param);
-    return ComponentInfo_GetDWORDValue(This->classkey, L"SupportsPadding", (DWORD *)param);
+    return ComponentInfo_GetUINTValue(This->classkey, L"SupportsPadding", (UINT *)param);
 }
 
 static HRESULT WINAPI MetadataReaderInfo_DoesRequireFixedSize(IWICMetadataReaderInfo *iface,
@@ -1826,7 +1827,8 @@ static const IWICMetadataReaderInfoVtbl MetadataReaderInfo_Vtbl = {
 static void read_metadata_patterns(MetadataReaderInfo *info, GUID *container_guid,
                                    struct metadata_container *container)
 {
-    UINT pattern_count=0, patterns_size=0;
+    DWORD pattern_count=0;
+    UINT patterns_size=0;
     WCHAR subkeyname[11], guidkeyname[39];
     LONG res;
     HKEY containers_key, guid_key, patternkey;
@@ -2178,7 +2180,7 @@ static ULONG WINAPI ComponentEnum_AddRef(IEnumUnknown *iface)
     ComponentEnum *This = impl_from_IEnumUnknown(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     return ref;
 }
@@ -2189,7 +2191,7 @@ static ULONG WINAPI ComponentEnum_Release(IEnumUnknown *iface)
     ULONG ref = InterlockedDecrement(&This->ref);
     ComponentEnumItem *cursor, *cursor2;
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     if (ref == 0)
     {
@@ -2215,7 +2217,7 @@ static HRESULT WINAPI ComponentEnum_Next(IEnumUnknown *iface, ULONG celt,
     ComponentEnumItem *item;
     HRESULT hr=S_OK;
 
-    TRACE("(%p,%u,%p,%p)\n", iface, celt, rgelt, pceltFetched);
+    TRACE("(%p,%lu,%p,%p)\n", iface, celt, rgelt, pceltFetched);
 
     EnterCriticalSection(&This->lock);
     while (num_fetched<celt)
@@ -2243,7 +2245,7 @@ static HRESULT WINAPI ComponentEnum_Skip(IEnumUnknown *iface, ULONG celt)
     ULONG i;
     HRESULT hr=S_OK;
 
-    TRACE("(%p,%u)\n", iface, celt);
+    TRACE("(%p,%lu)\n", iface, celt);
 
     EnterCriticalSection(&This->lock);
     for (i=0; i<celt; i++)
@@ -2344,7 +2346,7 @@ HRESULT CreateComponentEnumerator(DWORD componentTypes, DWORD options, IEnumUnkn
     HRESULT hr=S_OK;
     CLSID clsid;
 
-    if (options) FIXME("ignoring flags %x\n", options);
+    if (options) FIXME("ignoring flags %lx\n", options);
 
     res = RegOpenKeyExW(HKEY_CLASSES_ROOT, L"CLSID", 0, KEY_READ, &clsidkey);
     if (res != ERROR_SUCCESS)

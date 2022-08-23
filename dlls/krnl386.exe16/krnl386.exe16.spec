@@ -100,7 +100,7 @@
 96  pascal -ret16 FreeLibrary(word) FreeLibrary16
 97  pascal -ret16 GetTempFileName(word str word ptr) GetTempFileName16
 98  pascal -ret16 GetLastDiskChange() KERNEL_nop
-99  stub GetLPErrMode
+99  pascal GetLPErrMode()
 100 pascal -ret16 ValidateCodeSegments() KERNEL_nop
 101 stub NoHookDosCall
 102 pascal -register DOS3Call() DOS3Call
@@ -741,8 +741,13 @@
 # or 'wine_' (for user-visible functions) to avoid namespace conflicts.
 
 # DOS support
-@ cdecl -arch=win32 __wine_call_int_handler(ptr long)
+2000 pascal -register __wine_call_int_handler(word) __wine_call_int_handler16
+@ stdcall -arch=win32 __wine_call_int_handler16(long ptr)
 
 # VxDs
 @ cdecl -arch=win32 -private __wine_vxd_open(wstr long ptr)
 @ cdecl -arch=win32 -private __wine_vxd_get_proc(long)
+
+# Snoop support
+2001 pascal -register __wine_snoop_entry()
+2002 pascal -register __wine_snoop_return()

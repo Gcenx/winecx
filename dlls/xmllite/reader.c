@@ -840,10 +840,12 @@ static HRESULT readerinput_growraw(xmlreaderinput *readerinput)
 
     read = 0;
     hr = ISequentialStream_Read(readerinput->stream, buffer->data + buffer->written, len, &read);
-    TRACE("written=%d, alloc=%d, requested=%d, read=%d, ret=0x%08x\n", buffer->written, buffer->allocated, len, read, hr);
+    TRACE("written=%d, alloc=%d, requested=%ld, read=%ld, ret=%#lx\n", buffer->written, buffer->allocated, len, read, hr);
     readerinput->pending = hr == E_PENDING;
     if (FAILED(hr)) return hr;
     buffer->written += read;
+    if (!buffer->written)
+        return MX_E_INPUTEND;
 
     return hr;
 }
@@ -929,6 +931,8 @@ static int readerinput_get_utf8_convlen(xmlreaderinput *readerinput)
     encoded_buffer *buffer = &readerinput->buffer->encoded;
     int len = buffer->written;
 
+    assert(len);
+
     /* complete single byte char */
     if (!(buffer->data[len-1] & 0x80)) return len;
 
@@ -966,6 +970,7 @@ static void readerinput_shrinkraw(xmlreaderinput *readerinput, int len)
     if (len == -1)
         len = readerinput_get_convlen(readerinput);
 
+    assert(len >= 0);
     memmove(buffer->data, buffer->data + buffer->cur + (buffer->written - len), len);
     /* everything below cur is lost too */
     buffer->written -= len + buffer->cur;
@@ -1068,7 +1073,9 @@ static HRESULT reader_more(xmlreader *reader)
     WCHAR *ptr;
 
     /* get some raw data from stream first */
-    hr = readerinput_growraw(readerinput);
+    if (FAILED(hr = readerinput_growraw(readerinput)))
+        return hr;
+
     len = readerinput_get_convlen(readerinput);
     prev_len = dest->written / sizeof(WCHAR);
 
@@ -2121,6 +2128,7 @@ static HRESULT reader_parse_reference(xmlreader *reader)
         memmove(start + 1, ptr + 1, len);
 
         buffer->written -= (reader_get_cur(reader) - cur) * sizeof(WCHAR);
+        *(WCHAR*)(buffer->data + buffer->written) = 0;
         buffer->cur = cur + 1;
 
         *start = ch;
@@ -2144,6 +2152,7 @@ static HRESULT reader_parse_reference(xmlreader *reader)
             memmove(start+1, ptr+1, len);
             buffer->cur = cur + 1;
             buffer->written -= (ptr - start) * sizeof(WCHAR);
+            *(WCHAR*)(buffer->data + buffer->written) = 0;
 
             *start = ch;
         }
@@ -2570,7 +2579,7 @@ static HRESULT reader_parse_nextnode(xmlreader *reader)
 
                 /* try to detect encoding by BOM or data and set input code page */
                 hr = readerinput_detectencoding(reader->input, &enc);
-                TRACE("detected encoding %s, 0x%08x\n", enc == XmlEncoding_Unknown ? "(unknown)" :
+                TRACE("detected encoding %s, %#lx.\n", enc == XmlEncoding_Unknown ? "(unknown)" :
                         debugstr_w(xml_encoding_map[enc].name), hr);
                 if (FAILED(hr)) return hr;
 
@@ -2670,9 +2679,9 @@ static HRESULT WINAPI xmlreader_QueryInterface(IXmlReader *iface, REFIID riid, v
 
 static ULONG WINAPI xmlreader_AddRef(IXmlReader *iface)
 {
-    xmlreader *This = impl_from_IXmlReader(iface);
-    ULONG ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p)->(%d)\n", This, ref);
+    xmlreader *reader = impl_from_IXmlReader(iface);
+    ULONG ref = InterlockedIncrement(&reader->ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
     return ref;
 }
 
@@ -2716,7 +2725,7 @@ static ULONG WINAPI xmlreader_Release(IXmlReader *iface)
     xmlreader *This = impl_from_IXmlReader(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(%d)\n", This, ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
 
     if (ref == 0)
     {
@@ -2832,7 +2841,7 @@ static HRESULT WINAPI xmlreader_SetProperty(IXmlReader* iface, UINT property, LO
 {
     xmlreader *This = impl_from_IXmlReader(iface);
 
-    TRACE("(%p)->(%s 0x%lx)\n", This, debugstr_reader_prop(property), value);
+    TRACE("%p, %s, %Ix.\n", iface, debugstr_reader_prop(property), value);
 
     switch (property)
     {
@@ -3581,9 +3590,9 @@ static HRESULT WINAPI xmlreaderinput_QueryInterface(IXmlReaderInput *iface, REFI
 
 static ULONG WINAPI xmlreaderinput_AddRef(IXmlReaderInput *iface)
 {
-    xmlreaderinput *This = impl_from_IXmlReaderInput(iface);
-    ULONG ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p)->(%d)\n", This, ref);
+    xmlreaderinput *input = impl_from_IXmlReaderInput(iface);
+    ULONG ref = InterlockedIncrement(&input->ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
     return ref;
 }
 
@@ -3592,7 +3601,7 @@ static ULONG WINAPI xmlreaderinput_Release(IXmlReaderInput *iface)
     xmlreaderinput *This = impl_from_IXmlReaderInput(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(%d)\n", This, ref);
+    TRACE("%p, refcount %ld.\n", iface, ref);
 
     if (ref == 0)
     {
@@ -3623,11 +3632,7 @@ HRESULT WINAPI CreateXmlReader(REFIID riid, void **obj, IMalloc *imalloc)
 
     TRACE("(%s, %p, %p)\n", wine_dbgstr_guid(riid), obj, imalloc);
 
-    if (imalloc)
-        reader = IMalloc_Alloc(imalloc, sizeof(*reader));
-    else
-        reader = heap_alloc(sizeof(*reader));
-    if (!reader)
+    if (!(reader = m_alloc(imalloc, sizeof(*reader))))
         return E_OUTOFMEMORY;
 
     memset(reader, 0, sizeof(*reader));
@@ -3653,7 +3658,7 @@ HRESULT WINAPI CreateXmlReader(REFIID riid, void **obj, IMalloc *imalloc)
     hr = IXmlReader_QueryInterface(&reader->IXmlReader_iface, riid, obj);
     IXmlReader_Release(&reader->IXmlReader_iface);
 
-    TRACE("returning iface %p, hr %#x\n", *obj, hr);
+    TRACE("returning iface %p, hr %#lx.\n", *obj, hr);
 
     return hr;
 }
@@ -3673,21 +3678,17 @@ HRESULT WINAPI CreateXmlReaderInputWithEncodingName(IUnknown *stream,
 
     if (!stream || !ppInput) return E_INVALIDARG;
 
-    if (imalloc)
-        readerinput = IMalloc_Alloc(imalloc, sizeof(*readerinput));
-    else
-        readerinput = heap_alloc(sizeof(*readerinput));
-    if(!readerinput) return E_OUTOFMEMORY;
+    if (!(readerinput = m_alloc(imalloc, sizeof(*readerinput))))
+        return E_OUTOFMEMORY;
+    memset(readerinput, 0, sizeof(*readerinput));
 
     readerinput->IXmlReaderInput_iface.lpVtbl = &xmlreaderinputvtbl;
     readerinput->ref = 1;
     readerinput->imalloc = imalloc;
-    readerinput->stream = NULL;
     if (imalloc) IMalloc_AddRef(imalloc);
     readerinput->encoding = parse_encoding_name(encoding, -1);
     readerinput->hint = hint;
     readerinput->baseuri = readerinput_strdupW(readerinput, base_uri);
-    readerinput->pending = 0;
 
     hr = alloc_input_buffer(readerinput);
     if (hr != S_OK)

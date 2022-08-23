@@ -24,8 +24,6 @@
 #include "winnls.h"
 
 #include "wine/test.h"
-#include "wine/exception.h"
-#include "winbase.h"
 
 typedef unsigned char MSVCP_bool;
 
@@ -259,7 +257,7 @@ static void test_null_memory_resource(void)
             "Resource should not be equal to a random pointer.\n");
 }
 
-static void test_get_set_defult_resource(
+static void test_get_set_default_resource(
         memory_resource *(__cdecl *new_delete_resource)(void),
         memory_resource *(__cdecl *set_default_resource)(memory_resource*))
 {
@@ -295,9 +293,9 @@ START_TEST(msvcp140_1)
 
     test_null_memory_resource();
 
-    test_get_set_defult_resource(p__Aligned_new_delete_resource,
+    test_get_set_default_resource(p__Aligned_new_delete_resource,
             p__Aligned_set_default_resource);
-    test_get_set_defult_resource(p__Unaligned_new_delete_resource,
+    test_get_set_default_resource(p__Unaligned_new_delete_resource,
             p__Unaligned_set_default_resource);
 
     FreeLibrary(msvcp);

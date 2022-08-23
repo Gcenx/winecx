@@ -33,7 +33,7 @@ static WCHAR *ATTRIB_LoadMessage(UINT id)
     static WCHAR msg[MAXSTRING];
 
     if (!LoadStringW(GetModuleHandleW(NULL), id, msg, ARRAY_SIZE(msg))) {
-        WINE_FIXME("LoadString failed with %d\n", GetLastError());
+        WINE_FIXME("LoadString failed with %ld\n", GetLastError());
         lstrcpyW(msg, L"Failed!");
     }
     return msg;
@@ -52,7 +52,7 @@ static int WINAPIV ATTRIB_wprintf(const WCHAR *format, ...)
     static BOOL  traceOutput  = FALSE;
 #define MAX_WRITECONSOLE_SIZE 65535
 
-    __ms_va_list parms;
+    va_list parms;
     DWORD   nOut;
     int len;
     DWORD   res = 0;
@@ -70,12 +70,12 @@ static int WINAPIV ATTRIB_wprintf(const WCHAR *format, ...)
         return 0;
     }
 
-    __ms_va_start(parms, format);
+    va_start(parms, format);
     len = FormatMessageW(FORMAT_MESSAGE_FROM_STRING, format, 0, 0, output_bufW,
                    MAX_WRITECONSOLE_SIZE/sizeof(*output_bufW), &parms);
-    __ms_va_end(parms);
+    va_end(parms);
     if (len == 0 && GetLastError() != ERROR_NO_WORK_DONE) {
-        WINE_FIXME("Could not format string: le=%u, fmt=%s\n", GetLastError(), wine_dbgstr_w(format));
+        WINE_FIXME("Could not format string: le=%lu, fmt=%s\n", GetLastError(), wine_dbgstr_w(format));
         return 0;
     }
 
@@ -143,7 +143,7 @@ static BOOL ATTRIB_processdirectory(const WCHAR *rootdir, const WCHAR *filespec,
     WIN32_FIND_DATAW fd;
     WCHAR flags[] = L"        ";
 
-    WINE_TRACE("Processing dir '%s', spec '%s', %d,%x,%x\n",
+    WINE_TRACE("Processing dir '%s', spec '%s', %d,%lx,%lx\n",
                wine_dbgstr_w(rootdir), wine_dbgstr_w(filespec),
                recurse, attrib_set, attrib_clear);
 
@@ -252,7 +252,7 @@ int __cdecl wmain(int argc, WCHAR *argv[])
     }
 
     /* By default all files from current directory are taken into account */
-    lstrcpyW(name, L"*");
+    lstrcpyW(originalname, L".\\*");
 
     while (i < argc) {
         WCHAR *param = argv[i++];

@@ -23,21 +23,14 @@
 /* Some global variables */
 extern int cx_mode;
 extern int cx_dump_menus;
-extern char *xdg_data_dir;
-extern FILE *cx_menu_file;
-extern int cx_write_to_file;
-
 
 /* Functions used by the cxmenu backend */
 char* wchars_to_utf8_chars(LPCWSTR string);
-WCHAR* utf8_chars_to_wchars(const char *);
 
 /* The backend functions */
 int cx_process_menu(LPCWSTR linkW, BOOL is_desktop, DWORD root_csidl,
                     LPCWSTR pathW, LPCWSTR argsW,
-                    LPCSTR icon_name, LPCSTR description, LPCSTR arch);
-
-BOOL cx_link_is_64_bit(IShellLinkW *sl, int recurse_level);
+                    LPCWSTR icon_name, LPCWSTR description, IShellLinkW *sl);
 
 /* Functions used by the winemenubuilder extensions */
 BOOL Process_Link( LPCWSTR linkname, BOOL bWait );

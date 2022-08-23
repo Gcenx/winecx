@@ -52,6 +52,7 @@ typedef LONG_PTR DB_LRESERVE;
 #include "cmdbas.idl"
 #include "cmdtxt.idl"
 #include "colinf.idl"
+#include "colrst.idl"
 #include "dbccmd.idl"
 #include "dbcses.idl"
 #include "srcrst.idl"
@@ -77,6 +78,12 @@ typedef LONG_PTR DB_LRESERVE;
 #include "cmdpre.idl"
 #include "rstchg.idl"
 #include "rstupd.idl"
+#include "mulres.idl"
+#include "transact.idl"
+#include "trnjoi.idl"
+#include "trnlcl.idl"
+#include "trnobj.idl"
+#include "cmdwpr.idl"
 
 cpp_quote("#include <accctrl.h>")
 

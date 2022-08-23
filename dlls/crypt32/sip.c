@@ -40,7 +40,7 @@ static void CRYPT_guid2wstr( const GUID *guid, LPWSTR wstr )
 {
     char str[40];
 
-    sprintf(str, "{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+    sprintf(str, "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
            guid->Data1, guid->Data2, guid->Data3,
            guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
            guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7] );
@@ -352,7 +352,7 @@ BOOL WINAPI CryptSIPRetrieveSubjectGuid
     {
         DWORD fileLen = GetFileSize(hFile, NULL);
 
-        TRACE("fileLen = %d\n", fileLen);
+        TRACE("fileLen = %ld\n", fileLen);
         /* Sanity-check length */
         if (hdr[1] < 0x80 && fileLen == 2 + hdr[1])
         {
@@ -657,7 +657,7 @@ error:
 BOOL WINAPI CryptSIPLoad
        (const GUID *pgSubject, DWORD dwFlags, SIP_DISPATCH_INFO *pSipDispatch)
 {
-    TRACE("(%s %d %p)\n", debugstr_guid(pgSubject), dwFlags, pSipDispatch);
+    TRACE("(%s %ld %p)\n", debugstr_guid(pgSubject), dwFlags, pSipDispatch);
 
     if (!pgSubject || dwFlags != 0 || !pSipDispatch)
     {
@@ -708,7 +708,7 @@ BOOL WINAPI CryptSIPGetSignedDataMsg(SIP_SUBJECTINFO* pSubjectInfo, DWORD* pdwEn
     WINE_SIP_PROVIDER *sip;
     BOOL ret = FALSE;
 
-    TRACE("(%p %p %d %p %p)\n", pSubjectInfo, pdwEncodingType, dwIndex,
+    TRACE("(%p %p %ld %p %p)\n", pSubjectInfo, pdwEncodingType, dwIndex,
           pcbSignedDataMsg, pbSignedDataMsg);
 
     if ((sip = CRYPT_GetCachedSIP(pSubjectInfo->pgSubjectType)))
@@ -727,7 +727,7 @@ BOOL WINAPI CryptSIPPutSignedDataMsg(SIP_SUBJECTINFO* pSubjectInfo, DWORD pdwEnc
     WINE_SIP_PROVIDER *sip;
     BOOL ret = FALSE;
 
-    TRACE("(%p %d %p %d %p)\n", pSubjectInfo, pdwEncodingType, pdwIndex,
+    TRACE("(%p %ld %p %ld %p)\n", pSubjectInfo, pdwEncodingType, pdwIndex,
           cbSignedDataMsg, pbSignedDataMsg);
 
     if ((sip = CRYPT_GetCachedSIP(pSubjectInfo->pgSubjectType)))
@@ -746,7 +746,7 @@ BOOL WINAPI CryptSIPRemoveSignedDataMsg(SIP_SUBJECTINFO* pSubjectInfo,
     WINE_SIP_PROVIDER *sip;
     BOOL ret = FALSE;
 
-    TRACE("(%p %d)\n", pSubjectInfo, dwIndex);
+    TRACE("(%p %ld)\n", pSubjectInfo, dwIndex);
 
     if ((sip = CRYPT_GetCachedSIP(pSubjectInfo->pgSubjectType)))
         ret = sip->info.pfRemove(pSubjectInfo, dwIndex);

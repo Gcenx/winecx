@@ -1,16 +1,15 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE  = wineandroid.drv
-IMPORTS = uuid ole32 psapi imm32 user32 gdi32 advapi32 ntoskrnl
+IMPORTS = uuid ole32 user32 gdi32 advapi32 ntoskrnl win32u
+
+EXTRADLLFLAGS = -mcygwin
 
 C_SRCS = \
-	clipboard.c \
 	device.c \
-	gamepad.c \
-	ime.c \
 	init.c \
 	keyboard.c \
 	mmdevdrv.c \
 	opengl.c \
-	systray.c \
 	window.c
 
 IN_SRCS = \
@@ -19,6 +18,4 @@ IN_SRCS = \
 SVG_SRCS = \
 	wine.svg
 
-RC_SRCS = version.rc
-
-EXTRA_TARGETS = wineandroid.drv-debug.aar
+EXTRA_TARGETS = wine-debug.apk

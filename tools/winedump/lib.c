@@ -19,23 +19,11 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
-#ifdef HAVE_SYS_TYPES_H
-# include <sys/types.h>
-#endif
-#ifdef HAVE_SYS_MMAN_H
-#include <sys/mman.h>
-#endif
 #include <fcntl.h>
-
-#define NONAMELESSUNION
 
 #include "windef.h"
 #include "winbase.h"
@@ -48,9 +36,9 @@ static inline USHORT ushort_bswap(USHORT s)
     return (s >> 8) | (s << 8);
 }
 
-static inline ULONG ulong_bswap(ULONG l)
+static inline UINT ulong_bswap(UINT l)
 {
-    return ((ULONG)ushort_bswap((USHORT)l) << 16) | ushort_bswap((USHORT)(l >> 16));
+    return ((UINT)ushort_bswap((USHORT)l) << 16) | ushort_bswap(l >> 16);
 }
 
 static void dump_import_object(const IMPORT_OBJECT_HEADER *ioh)
@@ -63,14 +51,14 @@ static void dump_import_object(const IMPORT_OBJECT_HEADER *ioh)
 
         printf("  Version      : %X\n", ioh->Version);
         printf("  Machine      : %X (%s)\n", ioh->Machine, get_machine_str(ioh->Machine));
-        printf("  TimeDateStamp: %08X %s\n", ioh->TimeDateStamp, get_time_str(ioh->TimeDateStamp));
-        printf("  SizeOfData   : %08X\n", ioh->SizeOfData);
+        printf("  TimeDateStamp: %08X %s\n", (UINT)ioh->TimeDateStamp, get_time_str(ioh->TimeDateStamp));
+        printf("  SizeOfData   : %08X\n", (UINT)ioh->SizeOfData);
         name = (const char *)ioh + sizeof(*ioh);
         printf("  DLL name     : %s\n", name + strlen(name) + 1);
         printf("  Symbol name  : %s\n", name);
         printf("  Type         : %s\n", (ioh->Type < ARRAY_SIZE(obj_type)) ? obj_type[ioh->Type] : "unknown");
         printf("  Name type    : %s\n", (ioh->NameType < ARRAY_SIZE(name_type)) ? name_type[ioh->NameType] : "unknown");
-        printf("  %-13s: %u\n", (ioh->NameType == IMPORT_OBJECT_ORDINAL) ? "Ordinal" : "Hint", ioh->u.Ordinal);
+        printf("  %-13s: %u\n", (ioh->NameType == IMPORT_OBJECT_ORDINAL) ? "Ordinal" : "Hint", ioh->Ordinal);
         printf("\n");
     }
 }
@@ -107,7 +95,7 @@ static void dump_long_import(const void *base, const IMAGE_SECTION_HEADER *ish, 
         {
             const char *imp_debugS = (const char *)base + ish[i].PointerToRawData;
 
-            codeview_dump_symbols(imp_debugS, ish[i].SizeOfRawData);
+            codeview_dump_symbols(imp_debugS, 0, ish[i].SizeOfRawData);
             printf("\n");
         }
     }
@@ -202,9 +190,9 @@ void lib_dump(void)
         }
         else if (!strncmp((const char *)iamh->Name, IMAGE_ARCHIVE_LINKER_MEMBER, sizeof(iamh->Name)))
         {
-            const DWORD *offset = (const DWORD *)ioh;
+            const UINT *offset = (const UINT *)ioh;
             const char *name;
-            DWORD i, count;
+            UINT i, count;
 
             if (first_linker_member) /* 1st archive linker member, BE format */
             {

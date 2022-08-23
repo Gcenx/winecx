@@ -34,8 +34,6 @@
 #include "shlguid.h"
 #include "shlobj.h"
 
-#include "wine/heap.h"
-
 #include "browseui.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(browseui);
@@ -55,12 +53,6 @@ static inline ACLShellSource *impl_from_IACList2(IACList2 *iface)
 static inline ACLShellSource *impl_from_IEnumString(IEnumString *iface)
 {
     return CONTAINING_RECORD(iface, ACLShellSource, IEnumString_iface);
-}
-
-static void ACLShellSource_Destructor(ACLShellSource *This)
-{
-    TRACE("destroying %p\n", This);
-    heap_free(This);
 }
 
 static HRESULT WINAPI ACLShellSource_QueryInterface(IEnumString *iface, REFIID iid, LPVOID *ppvOut)
@@ -94,7 +86,7 @@ static ULONG WINAPI ACLShellSource_AddRef(IEnumString *iface)
 {
     ACLShellSource *This = impl_from_IEnumString(iface);
     ULONG ref = InterlockedIncrement(&This->refCount);
-    TRACE("(%p)->(%u)\n", This, ref);
+    TRACE("(%p)->(%lu)\n", This, ref);
     return ref;
 }
 
@@ -103,10 +95,10 @@ static ULONG WINAPI ACLShellSource_Release(IEnumString *iface)
     ACLShellSource *This = impl_from_IEnumString(iface);
     ULONG ref = InterlockedDecrement(&This->refCount);
 
-    TRACE("(%p)->(%u)\n", This, ref);
+    TRACE("(%p)->(%lu)\n", This, ref);
 
     if (ref == 0)
-        ACLShellSource_Destructor(This);
+        free(This);
     return ref;
 }
 
@@ -114,14 +106,14 @@ static HRESULT WINAPI ACLShellSource_Next(IEnumString *iface, ULONG celt, LPOLES
     ULONG *fetched)
 {
     ACLShellSource *This = impl_from_IEnumString(iface);
-    FIXME("(%p)->(%u %p %p): stub\n", This, celt, rgelt, fetched);
+    FIXME("(%p)->(%lu %p %p): stub\n", This, celt, rgelt, fetched);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI ACLShellSource_Skip(IEnumString *iface, ULONG celt)
 {
     ACLShellSource *This = impl_from_IEnumString(iface);
-    FIXME("(%p)->(%u): stub\n", This, celt);
+    FIXME("(%p)->(%lu): stub\n", This, celt);
     return E_NOTIMPL;
 }
 
@@ -205,8 +197,7 @@ HRESULT ACLShellSource_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut)
     if (pUnkOuter)
         return CLASS_E_NOAGGREGATION;
 
-    This = heap_alloc_zero(sizeof(ACLShellSource));
-    if (This == NULL)
+    if (!(This = calloc(1, sizeof(*This))))
         return E_OUTOFMEMORY;
 
     This->IEnumString_iface.lpVtbl = &ACLShellSourceVtbl;

@@ -412,7 +412,7 @@ static SCRIPT_STRING_ANALYSIS EDIT_UpdateUniscribeData_linedef(EDITSTATE *es, HD
 		if (es->font)
 			SelectObject(udc, old_font);
 		if (udc != dc)
-			ReleaseDC(es->hwndSelf, udc);
+                    NtUserReleaseDC( es->hwndSelf, udc );
 	}
 
 	return line_def->ssa;
@@ -443,7 +443,7 @@ static SCRIPT_STRING_ANALYSIS EDIT_UpdateUniscribeData(EDITSTATE *es, HDC dc, IN
 			if (es->font)
 				SelectObject(udc, old_font);
 			if (udc != dc)
-				ReleaseDC(es->hwndSelf, udc);
+                            NtUserReleaseDC( es->hwndSelf, udc );
 		}
 		return es->ssa;
 	}
@@ -2633,7 +2633,7 @@ static void EDIT_EM_ReplaceSel(EDITSTATE *es, BOOL can_undo, const WCHAR *lpsz_r
 				abs(es->selection_end - es->selection_start) - strl, hrgn);
 			strl = 0;
 			e = s;
-			hrgn = CreateRectRgn(0, 0, 0, 0);
+			SetRectRgn(hrgn, 0, 0, 0, 0);
 			EDIT_NOTIFY_PARENT(es, EN_MAXTEXT);
 		}
 	}
@@ -2923,7 +2923,7 @@ static void EDIT_EM_SetMargins(EDITSTATE *es, INT action,
                 }
             }
             SelectObject(dc, old_font);
-            ReleaseDC(es->hwndSelf, dc);
+            NtUserReleaseDC( es->hwndSelf, dc );
         }
 
 	if (action & EC_LEFTMARGIN) {
@@ -3107,7 +3107,7 @@ static void EDIT_WM_Paste(EDITSTATE *es)
             /* clear selected text in password edit box even with empty clipboard */
             EDIT_EM_ReplaceSel(es, TRUE, NULL, 0, TRUE, TRUE);
         }
-	CloseClipboard();
+	NtUserCloseClipboard();
 }
 
 
@@ -3134,9 +3134,9 @@ static void EDIT_WM_Copy(EDITSTATE *es)
 	TRACE("%s\n", debugstr_w(dst));
 	GlobalUnlock(hdst);
 	OpenClipboard(es->hwndSelf);
-	EmptyClipboard();
+	NtUserEmptyClipboard();
 	SetClipboardData(CF_UNICODETEXT, hdst);
-	CloseClipboard();
+	NtUserCloseClipboard();
 }
 
 
@@ -3176,7 +3176,7 @@ static LRESULT EDIT_WM_Char(EDITSTATE *es, WCHAR c)
 {
         BOOL control;
 
-	control = GetKeyState(VK_CONTROL) & 0x8000;
+	control = NtUserGetKeyState(VK_CONTROL) & 0x8000;
 
 	switch (c) {
 	case '\r':
@@ -3302,22 +3302,29 @@ static void EDIT_WM_ContextMenu(EDITSTATE *es, INT x, INT y)
 	HMENU popup = GetSubMenu(menu, 0);
 	UINT start = es->selection_start;
 	UINT end = es->selection_end;
+        BOOL enabled;
 	UINT cmd;
 
 	ORDER_UINT(start, end);
 
-	/* undo */
-	EnableMenuItem(popup, 0, MF_BYPOSITION | (EDIT_EM_CanUndo(es) && !(es->style & ES_READONLY) ? MF_ENABLED : MF_GRAYED));
-	/* cut */
-	EnableMenuItem(popup, 2, MF_BYPOSITION | ((end - start) && !(es->style & ES_PASSWORD) && !(es->style & ES_READONLY) ? MF_ENABLED : MF_GRAYED));
-	/* copy */
-	EnableMenuItem(popup, 3, MF_BYPOSITION | ((end - start) && !(es->style & ES_PASSWORD) ? MF_ENABLED : MF_GRAYED));
-	/* paste */
-	EnableMenuItem(popup, 4, MF_BYPOSITION | (IsClipboardFormatAvailable(CF_UNICODETEXT) && !(es->style & ES_READONLY) ? MF_ENABLED : MF_GRAYED));
-	/* delete */
-	EnableMenuItem(popup, 5, MF_BYPOSITION | ((end - start) && !(es->style & ES_READONLY) ? MF_ENABLED : MF_GRAYED));
-	/* select all */
-	EnableMenuItem(popup, 7, MF_BYPOSITION | (start || (end != get_text_length(es)) ? MF_ENABLED : MF_GRAYED));
+        /* undo */
+        enabled = EDIT_EM_CanUndo(es) && !(es->style & ES_READONLY);
+        NtUserEnableMenuItem( popup, 0, MF_BYPOSITION | (enabled ? MF_ENABLED : MF_GRAYED) );
+        /* cut */
+        enabled = (end - start) && !(es->style & ES_PASSWORD) && !(es->style & ES_READONLY);
+        NtUserEnableMenuItem( popup, 2, MF_BYPOSITION | (enabled ? MF_ENABLED : MF_GRAYED) );
+        /* copy */
+        enabled = (end - start) && !(es->style & ES_PASSWORD);
+        NtUserEnableMenuItem( popup, 3, MF_BYPOSITION | (enabled ? MF_ENABLED : MF_GRAYED) );
+        /* paste */
+        enabled = NtUserIsClipboardFormatAvailable(CF_UNICODETEXT) && !(es->style & ES_READONLY);
+        NtUserEnableMenuItem( popup, 4, MF_BYPOSITION | (enabled ? MF_ENABLED : MF_GRAYED) );
+        /* delete */
+        enabled = (end - start) && !(es->style & ES_READONLY);
+        NtUserEnableMenuItem( popup, 5, MF_BYPOSITION | (enabled ? MF_ENABLED : MF_GRAYED) );
+        /* select all */
+        enabled = start || end != get_text_length(es);
+        NtUserEnableMenuItem( popup, 7, MF_BYPOSITION | (enabled ? MF_ENABLED : MF_GRAYED) );
 
         if (x == -1 && y == -1) /* passed via VK_APPS press/release */
         {
@@ -3329,7 +3336,7 @@ static void EDIT_WM_ContextMenu(EDITSTATE *es, INT x, INT y)
         }
 
 	if (!(es->flags & EF_FOCUSED))
-            SetFocus(es->hwndSelf);
+            NtUserSetFocus(es->hwndSelf);
 
 	cmd = TrackPopupMenu(popup, TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY,
 			     x, y, 0, es->hwndSelf, NULL);
@@ -3337,7 +3344,7 @@ static void EDIT_WM_ContextMenu(EDITSTATE *es, INT x, INT y)
 	if (cmd)
 	    EDIT_ContextMenuCommand(es, cmd);
 
-	DestroyMenu(menu);
+        NtUserDestroyMenu(menu);
 }
 
 
@@ -3436,11 +3443,11 @@ static LRESULT EDIT_WM_KeyDown(EDITSTATE *es, INT key)
 	BOOL shift;
 	BOOL control;
 
-	if (GetKeyState(VK_MENU) & 0x8000)
+	if (NtUserGetKeyState(VK_MENU) & 0x8000)
 		return 0;
 
-	shift = GetKeyState(VK_SHIFT) & 0x8000;
-	control = GetKeyState(VK_CONTROL) & 0x8000;
+	shift = NtUserGetKeyState(VK_SHIFT) & 0x8000;
+	control = NtUserGetKeyState(VK_CONTROL) & 0x8000;
 
 	switch (key) {
 	case VK_F4:
@@ -3584,7 +3591,7 @@ static LRESULT EDIT_WM_LButtonDblClk(EDITSTATE *es)
 	INT ll;
 
 	es->bCaptureState = TRUE;
-	SetCapture(es->hwndSelf);
+	NtUserSetCapture(es->hwndSelf);
 
 	l = EDIT_EM_LineFromChar(es, e);
 	li = EDIT_EM_LineIndex(es, l);
@@ -3610,7 +3617,7 @@ static LRESULT EDIT_WM_LButtonDown(EDITSTATE *es, DWORD keys, INT x, INT y)
 	BOOL after_wrap;
 
 	es->bCaptureState = TRUE;
-	SetCapture(es->hwndSelf);
+	NtUserSetCapture(es->hwndSelf);
 	EDIT_ConfinePoint(es, &x, &y);
 	e = EDIT_CharFromPos(es, x, y, &after_wrap);
 	EDIT_EM_SetSel(es, (keys & MK_SHIFT) ? es->selection_start : e, e, after_wrap);
@@ -3619,7 +3626,7 @@ static LRESULT EDIT_WM_LButtonDown(EDITSTATE *es, DWORD keys, INT x, INT y)
 	SetTimer(es->hwndSelf, 0, 100, NULL);
 
 	if (!(es->flags & EF_FOCUSED))
-            SetFocus(es->hwndSelf);
+            NtUserSetFocus(es->hwndSelf);
 
 	return 0;
 }
@@ -3633,7 +3640,7 @@ static LRESULT EDIT_WM_LButtonDown(EDITSTATE *es, DWORD keys, INT x, INT y)
 static LRESULT EDIT_WM_LButtonUp(EDITSTATE *es)
 {
 	if (es->bCaptureState) {
-		KillTimer(es->hwndSelf, 0);
+		NtUserKillTimer(es->hwndSelf, 0);
 		if (GetCapture() == es->hwndSelf) ReleaseCapture();
 	}
 	es->bCaptureState = FALSE;
@@ -3706,7 +3713,7 @@ static void EDIT_WM_Paint(EDITSTATE *es, HDC hdc)
 	BOOL rev = es->bEnableState &&
 				((es->flags & EF_FOCUSED) ||
 					(es->style & ES_NOHIDESEL));
-        dc = hdc ? hdc : BeginPaint(es->hwndSelf, &ps);
+        dc = hdc ? hdc : NtUserBeginPaint( es->hwndSelf, &ps );
 
 	/* The dc we use for calculating may not be the one we paint into.
 	   This is the safest action. */
@@ -3776,7 +3783,7 @@ static void EDIT_WM_Paint(EDITSTATE *es, HDC hdc)
 		SelectObject(dc, old_font);
 
         if (!hdc)
-            EndPaint(es->hwndSelf, &ps);
+            NtUserEndPaint( es->hwndSelf, &ps );
 }
 
 
@@ -3797,7 +3804,7 @@ static void EDIT_WM_SetFocus(EDITSTATE *es)
         {
             HDC hdc = GetDC(es->hwndSelf);
             EDIT_WM_Paint(es, hdc);
-            ReleaseDC(es->hwndSelf, hdc);
+            NtUserReleaseDC( es->hwndSelf, hdc );
         }
 
 	CreateCaret(es->hwndSelf, 0, 1, es->line_height);
@@ -3865,7 +3872,7 @@ static void EDIT_WM_SetFont(EDITSTATE *es, HFONT font, BOOL redraw)
 	margins = get_font_margins(dc, &tm, es->is_unicode);
 	if (font)
 		SelectObject(dc, old_font);
-	ReleaseDC(es->hwndSelf, dc);
+	NtUserReleaseDC( es->hwndSelf, dc );
 	
 	/* Reset the format rect and the margins */
 	GetClientRect(es->hwndSelf, &clientRect);
@@ -5253,7 +5260,7 @@ const struct builtin_class_descr EDIT_builtin_class =
     L"Edit",              /* name */
     CS_DBLCLKS | CS_PARENTDC,   /* style */
     WINPROC_EDIT,         /* proc */
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
     sizeof(EDITSTATE *) + sizeof(WORD), /* extra */
 #else
     sizeof(EDITSTATE *),  /* extra */

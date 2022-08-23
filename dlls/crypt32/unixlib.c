@@ -21,15 +21,14 @@
 #endif
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdarg.h>
+#include <stdlib.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <unistd.h>
-#ifdef HAVE_SYS_STAT_H
+#include <dlfcn.h>
 #include <sys/stat.h>
-#endif
 #ifdef HAVE_SECURITY_SECURITY_H
 #include <Security/Security.h>
 #endif
@@ -43,19 +42,14 @@
 #include "winbase.h"
 #include "winternl.h"
 #include "wincrypt.h"
-#include "snmp.h"
 #include "crypt32_private.h"
-
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(crypt);
 
 #ifdef SONAME_LIBGNUTLS
 
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
-
-#include "wine/hostptraddrspace_enter.h"
 
 /* Not present in gnutls version < 3.0 */
 int gnutls_pkcs12_simple_parse(gnutls_pkcs12_t p12, const char *password,
@@ -66,7 +60,7 @@ int gnutls_pkcs12_simple_parse(gnutls_pkcs12_t p12, const char *password,
 int gnutls_x509_privkey_get_pk_algorithm2(gnutls_x509_privkey_t, unsigned int*);
 
 static void *libgnutls_handle;
-#define MAKE_FUNCPTR(f) static typeof(f) * HOSTPTR p##f
+#define MAKE_FUNCPTR(f) static typeof(f) * p##f
 MAKE_FUNCPTR(gnutls_global_deinit);
 MAKE_FUNCPTR(gnutls_global_init);
 MAKE_FUNCPTR(gnutls_global_set_log_function);
@@ -86,11 +80,9 @@ static void gnutls_log( int level, const char *msg )
     TRACE( "<%d> %s", level, msg );
 }
 
-#include "wine/hostptraddrspace_exit.h"
-
-BOOL gnutls_initialize(void)
+static NTSTATUS process_attach( void *args )
 {
-    const char * HOSTPTR env_str;
+    const char *env_str;
     int ret;
 
     if ((env_str = getenv("GNUTLS_SYSTEM_PRIORITY_FILE")))
@@ -120,7 +112,7 @@ else
     if (!libgnutls_handle)
     {
         ERR_(winediag)( "failed to load libgnutls, no support for pfx import/export\n" );
-        return FALSE;
+        return STATUS_DLL_NOT_FOUND;
     }
 
 #define LOAD_FUNCPTR(f) \
@@ -161,52 +153,59 @@ else
 fail:
     dlclose( libgnutls_handle );
     libgnutls_handle = NULL;
-    return FALSE;
+    return STATUS_DLL_INIT_FAILED;
 }
 
-void gnutls_uninitialize(void)
+static NTSTATUS process_detach( void *args )
 {
     pgnutls_global_deinit();
     dlclose( libgnutls_handle );
     libgnutls_handle = NULL;
+    return STATUS_SUCCESS;
 }
 #define RSA_MAGIC_KEY  ('R' | ('S' << 8) | ('A' << 16) | ('2' << 24))
 #define RSA_PUBEXP     65537
 
-static DWORD import_key( gnutls_x509_privkey_t key, DWORD flags, void **data_ret )
+struct cert_store_data
 {
+    gnutls_pkcs12_t p12;
+    gnutls_x509_privkey_t key;
+    gnutls_x509_crt_t *chain;
+    unsigned int key_bitlen;
+    unsigned int chain_len;
+};
+
+static struct cert_store_data *get_store_data( cert_store_data_t data )
+{
+    return (struct cert_store_data *)(ULONG_PTR)data;
+}
+
+static NTSTATUS import_store_key( void *args )
+{
+    struct import_store_key_params *params = args;
+    struct cert_store_data *data = get_store_data( params->data );
     int i, ret;
-    unsigned int bitlen;
+    unsigned int bitlen = data->key_bitlen;
     gnutls_datum_t m, e, d, p, q, u, e1, e2;
     BLOBHEADER *hdr;
     RSAPUBKEY *rsakey;
-    BYTE *buf, * HOSTPTR src, * HOSTPTR dst;
+    BYTE *src, *dst;
     DWORD size;
 
-    *data_ret = NULL;
-
-    if ((ret = pgnutls_x509_privkey_get_pk_algorithm2( key, &bitlen )) < 0)
-    {
-        pgnutls_perror( ret );
-        return 0;
-    }
-
-    if (ret != GNUTLS_PK_RSA)
-    {
-        FIXME( "key algorithm %u not supported\n", ret );
-        return 0;
-    }
-
-    if ((ret = pgnutls_x509_privkey_export_rsa_raw2( key, &m, &e, &d, &p, &q, &u, &e1, &e2 )) < 0)
-    {
-        pgnutls_perror( ret );
-        return 0;
-    }
-
     size = sizeof(*hdr) + sizeof(*rsakey) + (bitlen * 9 / 16);
-    if (!(buf = RtlAllocateHeap( GetProcessHeap(), 0, size ))) goto done;
+    if (!params->buf || *params->buf_size < size)
+    {
+        *params->buf_size = size;
+        return STATUS_BUFFER_TOO_SMALL;
+    }
 
-    hdr = (BLOBHEADER *)buf;
+    if ((ret = pgnutls_x509_privkey_export_rsa_raw2( data->key, &m, &e, &d, &p, &q, &u, &e1, &e2 )) < 0)
+    {
+        pgnutls_perror( ret );
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    hdr = params->buf;
     hdr->bType    = PRIVATEKEYBLOB;
     hdr->bVersion = CUR_BLOB_VERSION;
     hdr->reserved = 0;
@@ -253,8 +252,6 @@ static DWORD import_key( gnutls_x509_privkey_t key, DWORD flags, void **data_ret
     else src = d.data;
     for (i = bitlen / 8 - 1; i >= 0; i--) *dst++ = src[i];
 
-    *data_ret = buf;
-
 done:
     free( m.data );
     free( e.data );
@@ -264,13 +261,12 @@ done:
     free( u.data );
     free( e1.data );
     free( e2.data );
-    if (!*data_ret) RtlFreeHeap( GetProcessHeap(), 0, buf );
-    return size;
+    return STATUS_SUCCESS;
 }
 
-static char * HOSTPTR password_to_ascii( const WCHAR *str )
+static char *password_to_ascii( const WCHAR *str )
 {
-    char * HOSTPTR ret;
+    char *ret;
     unsigned int i = 0;
 
     if (!(ret = malloc( (lstrlenW(str) + 1) * sizeof(*ret) ))) return NULL;
@@ -283,57 +279,103 @@ static char * HOSTPTR password_to_ascii( const WCHAR *str )
     return ret;
 }
 
-static BOOL WINAPI import_cert_store( CRYPT_DATA_BLOB *pfx, const WCHAR *password, DWORD flags,
-                                      void **key_ret, void ***chain_ret, DWORD *count_ret )
+static NTSTATUS open_cert_store( void *args )
 {
+    struct open_cert_store_params *params = args;
     gnutls_pkcs12_t p12;
     gnutls_datum_t pfx_data;
     gnutls_x509_privkey_t key;
     gnutls_x509_crt_t *chain;
-    unsigned int chain_len, i;
-    char * HOSTPTR pwd = NULL;
+    unsigned int chain_len;
+    unsigned int bitlen;
+    char *pwd = NULL;
     int ret;
+    struct cert_store_data *store_data;
 
-    if (password && !(pwd = password_to_ascii( password ))) return FALSE;
+    if (!libgnutls_handle) return STATUS_DLL_NOT_FOUND;
+    if (params->password && !(pwd = password_to_ascii( params->password ))) return STATUS_NO_MEMORY;
 
     if ((ret = pgnutls_pkcs12_init( &p12 )) < 0) goto error;
 
-    pfx_data.data = pfx->pbData;
-    pfx_data.size = pfx->cbData;
+    pfx_data.data = params->pfx->pbData;
+    pfx_data.size = params->pfx->cbData;
     if ((ret = pgnutls_pkcs12_import( p12, &pfx_data, GNUTLS_X509_FMT_DER, 0 )) < 0) goto error;
 
     if ((ret = pgnutls_pkcs12_simple_parse( p12, pwd ? pwd : "", &key, &chain, &chain_len, NULL, NULL, NULL, 0 )) < 0)
         goto error;
 
-    if (!import_key( key, flags, key_ret )) goto error;
+    if ((ret = pgnutls_x509_privkey_get_pk_algorithm2( key, &bitlen )) < 0)
+        goto error;
 
-    *chain_ret = RtlAllocateHeap( GetProcessHeap(), 0, chain_len * sizeof(*chain_ret) );
-    *count_ret = chain_len;
-    for (i = 0; i < chain_len; i++)
+    free( pwd );
+
+    if (ret != GNUTLS_PK_RSA)
     {
-        size_t size = 0;
-
-        if ((ret = pgnutls_x509_crt_export( chain[i], GNUTLS_X509_FMT_DER, NULL, &size )) != GNUTLS_E_SHORT_MEMORY_BUFFER)
-            goto error;
-
-        (*chain_ret)[i] = RtlAllocateHeap( GetProcessHeap(), 0, size );
-        if ((ret = pgnutls_x509_crt_export( chain[i], GNUTLS_X509_FMT_DER, (*chain_ret)[i], &size )) < 0)
-        {
-            i++;
-            while (i) RtlFreeHeap( GetProcessHeap(), 0, (*chain_ret)[--i] );
-            RtlFreeHeap( GetProcessHeap(), 0, *chain_ret );
-            goto error;
-        }
+        FIXME( "key algorithm %u not supported\n", ret );
+        pgnutls_pkcs12_deinit( p12 );
+        return STATUS_INVALID_PARAMETER;
     }
-    pgnutls_pkcs12_deinit( p12 );
-    return TRUE;
+
+    store_data = malloc( sizeof(*store_data) );
+    store_data->p12 = p12;
+    store_data->key = key;
+    store_data->chain = chain;
+    store_data->key_bitlen = bitlen;
+    store_data->chain_len = chain_len;
+    *params->data_ret = (ULONG_PTR)store_data;
+    return STATUS_SUCCESS;
 
 error:
     pgnutls_perror( ret );
     pgnutls_pkcs12_deinit( p12 );
     free( pwd );
-    return FALSE;
+    return STATUS_INVALID_PARAMETER;
 }
+
+static NTSTATUS import_store_cert( void *args )
+{
+    struct import_store_cert_params *params = args;
+    struct cert_store_data *data = get_store_data( params->data );
+    size_t size = 0;
+    int ret;
+
+    if (params->index >= data->chain_len) return STATUS_NO_MORE_ENTRIES;
+
+    if ((ret = pgnutls_x509_crt_export( data->chain[params->index], GNUTLS_X509_FMT_DER, NULL, &size )) != GNUTLS_E_SHORT_MEMORY_BUFFER)
+        return STATUS_INVALID_PARAMETER;
+
+    if (!params->buf || *params->buf_size < size)
+    {
+        *params->buf_size = size;
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+    if ((ret = pgnutls_x509_crt_export( data->chain[params->index], GNUTLS_X509_FMT_DER, params->buf, &size )) < 0)
+        return STATUS_INVALID_PARAMETER;
+
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS close_cert_store( void *args )
+{
+    struct close_cert_store_params *params = args;
+    struct cert_store_data *data = get_store_data( params->data );
+
+    if (params->data)
+    {
+        pgnutls_pkcs12_deinit( data->p12 );
+        free( data );
+    }
+    return STATUS_SUCCESS;
+}
+
+#else /* SONAME_LIBGNUTLS */
+
+static NTSTATUS process_attach( void *args ) { return STATUS_SUCCESS; }
+static NTSTATUS process_detach( void *args ) { return STATUS_SUCCESS; }
+static NTSTATUS open_cert_store( void *args ) { return STATUS_DLL_NOT_FOUND; }
+static NTSTATUS import_store_key( void *args ) { return STATUS_DLL_NOT_FOUND; }
+static NTSTATUS import_store_cert( void *args ) { return STATUS_DLL_NOT_FOUND; }
+static NTSTATUS close_cert_store( void *args ) { return STATUS_DLL_NOT_FOUND; }
 
 #endif /* SONAME_LIBGNUTLS */
 
@@ -348,7 +390,7 @@ static struct list root_cert_list = LIST_INIT(root_cert_list);
 
 static BYTE *add_cert( SIZE_T size )
 {
-    struct root_cert *cert = RtlAllocateHeap( GetProcessHeap(), 0, offsetof( struct root_cert, data[size] ));
+    struct root_cert *cert = malloc( offsetof( struct root_cert, data[size] ));
 
     if (!cert) return NULL;
     cert->size = size;
@@ -374,11 +416,7 @@ static void add_line_to_buffer(struct DynamicBuffer *buffer, LPCSTR line)
     if (buffer->used + strlen(line) + 1 > buffer->allocated)
     {
         DWORD new_size = max( max( buffer->allocated * 2, 1024 ), buffer->used + strlen(line) + 1 );
-        void *ptr;
-        if (buffer->data)
-            ptr = RtlReAllocateHeap( GetProcessHeap(), 0, buffer->data, new_size );
-        else
-            ptr = RtlAllocateHeap( GetProcessHeap(), 0, new_size );
+        void *ptr = realloc( buffer->data, new_size );
         if (!ptr) return;
         buffer->data = ptr;
         buffer->allocated = new_size;
@@ -502,7 +540,7 @@ static void import_certs_from_file( int fd )
         }
         else if (in_cert) add_line_to_buffer(&saved_cert, line);
     }
-    RtlFreeHeap( GetProcessHeap(), 0, saved_cert.data );
+    free( saved_cert.data );
     TRACE("Read %d certs\n", num_certs);
     fclose(fp);
 }
@@ -513,11 +551,7 @@ static BOOL check_buffer_resize(char **ptr_buf, size_t *buf_size, size_t check_s
 {
     if (check_size > *buf_size)
     {
-        void *ptr;
-        if (*ptr_buf)
-            ptr = RtlReAllocateHeap( GetProcessHeap(), 0, *ptr_buf, check_size );
-        else
-            ptr = RtlAllocateHeap( GetProcessHeap(), 0, check_size );
+        void *ptr = realloc(*ptr_buf, check_size);
 
         if (!ptr) return FALSE;
         *buf_size = check_size;
@@ -552,7 +586,7 @@ static void import_certs_from_dir( LPCSTR path )
                 import_certs_from_path(filebuf, FALSE);
             }
         }
-        RtlFreeHeap( GetProcessHeap(), 0, filebuf);
+        free(filebuf);
         closedir(dir);
     }
 }
@@ -603,29 +637,38 @@ static const char * const CRYPT_knownLocations[] = {
 
 static void load_root_certs(void)
 {
-    DWORD i;
+    unsigned int i;
 
 #ifdef HAVE_SECURITY_SECURITY_H
+    const SecTrustSettingsDomain domains[] = {
+        kSecTrustSettingsDomainSystem,
+        kSecTrustSettingsDomainAdmin,
+        kSecTrustSettingsDomainUser
+    };
     OSStatus status;
-    CFArrayRef rootCerts;
+    CFArrayRef certs;
+    DWORD domain;
 
-    status = SecTrustCopyAnchorCertificates(&rootCerts);
-    if (status == noErr)
+    for (domain = 0; domain < ARRAY_SIZE(domains); domain++)
     {
-        for (i = 0; i < CFArrayGetCount(rootCerts); i++)
+        status = SecTrustSettingsCopyCertificates(domains[domain], &certs);
+        if (status == noErr)
         {
-            SecCertificateRef cert = (SecCertificateRef)CFArrayGetValueAtIndex(rootCerts, i);
-            CFDataRef certData;
-            if ((status = SecKeychainItemExport(cert, kSecFormatX509Cert, 0, NULL, &certData)) == noErr)
+            for (i = 0; i < CFArrayGetCount(certs); i++)
             {
-                BYTE *data = add_cert( CFDataGetLength(certData) );
-                if (data) memcpy( data, CFDataGetBytePtr(certData), CFDataGetLength(certData) );
-                CFRelease(certData);
+                SecCertificateRef cert = (SecCertificateRef)CFArrayGetValueAtIndex(certs, i);
+                CFDataRef certData;
+                if ((status = SecItemExport(cert, kSecFormatX509Cert, 0, NULL, &certData)) == noErr)
+                {
+                    BYTE *data = add_cert( CFDataGetLength(certData) );
+                    if (data) memcpy( data, CFDataGetBytePtr(certData), CFDataGetLength(certData) );
+                    CFRelease(certData);
+                }
+                else
+                    WARN("could not export certificate %u to X509 format: 0x%08x\n", i, (unsigned int)status);
             }
-            else
-                WARN("could not export certificate %d to X509 format: 0x%08x\n", i, (unsigned int)status);
+            CFRelease(certs);
         }
-        CFRelease(rootCerts);
     }
 #endif
 
@@ -633,8 +676,9 @@ static void load_root_certs(void)
         import_certs_from_path( CRYPT_knownLocations[i], TRUE );
 }
 
-static BOOL WINAPI enum_root_certs( void *buffer, SIZE_T size, SIZE_T *needed )
+static NTSTATUS enum_root_certs( void *args )
 {
+    struct enum_root_certs_params *params = args;
     static BOOL loaded;
     struct list *ptr;
     struct root_cert *cert;
@@ -642,39 +686,128 @@ static BOOL WINAPI enum_root_certs( void *buffer, SIZE_T size, SIZE_T *needed )
     if (!loaded) load_root_certs();
     loaded = TRUE;
 
-    if (!(ptr = list_head( &root_cert_list ))) return FALSE;
+    if (!(ptr = list_head( &root_cert_list ))) return STATUS_NO_MORE_ENTRIES;
     cert = LIST_ENTRY( ptr, struct root_cert, entry );
-    *needed = cert->size;
-    if (cert->size <= size)
+    *params->needed = cert->size;
+    if (cert->size <= params->size)
     {
-        memcpy( buffer, cert->data, cert->size );
+        memcpy( params->buffer, cert->data, cert->size );
         list_remove( &cert->entry );
-        RtlFreeHeap( GetProcessHeap(), 0, cert );
-    }
-    return TRUE;
-}
-
-static struct unix_funcs funcs =
-{
-    enum_root_certs,
-    NULL
-};
-
-NTSTATUS CDECL __wine_init_unix_lib( HMODULE module, DWORD reason, const void *ptr_in, void *ptr_out )
-{
-    switch (reason)
-    {
-    case DLL_PROCESS_ATTACH:
-#ifdef SONAME_LIBGNUTLS
-        if (gnutls_initialize()) funcs.import_cert_store = import_cert_store;
-#endif
-        *(const struct unix_funcs **)ptr_out = &funcs;
-        break;
-    case DLL_PROCESS_DETACH:
-#ifdef SONAME_LIBGNUTLS
-        if (libgnutls_handle) gnutls_uninitialize();
-#endif
-        break;
+        free( cert );
     }
     return STATUS_SUCCESS;
 }
+
+const unixlib_entry_t __wine_unix_call_funcs[] =
+{
+    process_attach,
+    process_detach,
+    open_cert_store,
+    import_store_key,
+    import_store_cert,
+    close_cert_store,
+    enum_root_certs,
+};
+
+#ifdef _WIN64
+
+typedef ULONG PTR32;
+
+typedef struct
+{
+    DWORD cbData;
+    PTR32 pbData;
+} CRYPT_DATA_BLOB32;
+
+static NTSTATUS wow64_open_cert_store( void *args )
+{
+    struct
+    {
+        PTR32 pfx;
+        PTR32 password;
+        PTR32 data_ret;
+    } const *params32 = args;
+
+    const CRYPT_DATA_BLOB32 *pfx32 = ULongToPtr( params32->pfx );
+    CRYPT_DATA_BLOB pfx = { pfx32->cbData, ULongToPtr( pfx32->pbData ) };
+    struct open_cert_store_params params =
+    {
+        &pfx,
+        ULongToPtr( params32->password ),
+        ULongToPtr( params32->data_ret )
+    };
+
+    return open_cert_store( &params );
+}
+
+static NTSTATUS wow64_import_store_key( void *args )
+{
+    struct
+    {
+        cert_store_data_t data;
+        PTR32 buf;
+        PTR32 buf_size;
+    } const *params32 = args;
+
+    struct import_store_key_params params =
+    {
+        params32->data,
+        ULongToPtr( params32->buf ),
+        ULongToPtr( params32->buf_size )
+    };
+
+    return import_store_key( &params );
+}
+
+static NTSTATUS wow64_import_store_cert( void *args )
+{
+    struct
+    {
+        cert_store_data_t data;
+        unsigned int index;
+        PTR32 buf;
+        PTR32 buf_size;
+    } const *params32 = args;
+
+    struct import_store_cert_params params =
+    {
+        params32->data,
+        params32->index,
+        ULongToPtr( params32->buf ),
+        ULongToPtr( params32->buf_size )
+    };
+
+    return import_store_cert( &params );
+}
+
+static NTSTATUS wow64_enum_root_certs( void *args )
+{
+    struct
+    {
+        PTR32  buffer;
+        DWORD  size;
+        PTR32  needed;
+    } const *params32 = args;
+
+    struct enum_root_certs_params params =
+    {
+        ULongToPtr( params32->buffer ),
+        params32->size,
+        ULongToPtr( params32->needed )
+    };
+
+    return enum_root_certs( &params );
+}
+
+const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
+{
+    process_attach,
+    process_detach,
+    wow64_open_cert_store,
+    wow64_import_store_key,
+    wow64_import_store_cert,
+    close_cert_store,
+    wow64_enum_root_certs,
+};
+
+#endif  /* _WIN64 */

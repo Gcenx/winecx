@@ -17,6 +17,7 @@
  */
 
 #include <stdarg.h>
+#include <stdlib.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -24,7 +25,6 @@
 #include "webservices.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wine/list.h"
 #include "webservices_private.h"
 
@@ -59,7 +59,7 @@ static struct proxy *alloc_proxy(void)
     struct proxy *ret;
     ULONG size = sizeof(*ret) + prop_size( proxy_props, count );
 
-    if (!(ret = heap_alloc_zero( size ))) return NULL;
+    if (!(ret = calloc( 1, size ))) return NULL;
 
     ret->magic      = PROXY_MAGIC;
     InitializeCriticalSection( &ret->cs );
@@ -83,7 +83,7 @@ static void free_proxy( struct proxy *proxy )
 
     proxy->cs.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection( &proxy->cs );
-    heap_free( proxy );
+    free( proxy );
 }
 
 static HRESULT create_proxy( WS_CHANNEL *channel, const WS_PROXY_PROPERTY *properties, ULONG count,
@@ -125,7 +125,7 @@ HRESULT WINAPI WsCreateServiceProxy( const WS_CHANNEL_TYPE type, const WS_CHANNE
     WS_CHANNEL *channel;
     HRESULT hr;
 
-    TRACE( "%u %u %p %p %u %p %u %p %p\n", type, binding, desc, proxy_props, proxy_props_count,
+    TRACE( "%u %u %p %p %lu %p %lu %p %p\n", type, binding, desc, proxy_props, proxy_props_count,
            channel_props, channel_props_count, handle, error );
     if (error) FIXME( "ignoring error parameter\n" );
     if (desc) FIXME( "ignoring security description\n" );
@@ -160,7 +160,7 @@ HRESULT WINAPI WsCreateServiceProxyFromTemplate( WS_CHANNEL_TYPE channel_type,
     WS_CHANNEL *channel;
     HRESULT hr;
 
-    TRACE( "%u %p %u %u %p %u %p %u %p %p\n", channel_type, properties, count, type, value, size, desc,
+    TRACE( "%u %p %lu %u %p %lu %p %lu %p %p\n", channel_type, properties, count, type, value, size, desc,
            desc_size, handle, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
@@ -236,7 +236,7 @@ HRESULT WINAPI WsResetServiceProxy( WS_SERVICE_PROXY *handle, WS_ERROR *error )
         reset_proxy( proxy );
 
     LeaveCriticalSection( &proxy->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -274,7 +274,7 @@ HRESULT WINAPI WsGetServiceProxyProperty( WS_SERVICE_PROXY *handle, WS_PROXY_PRO
     struct proxy *proxy = (struct proxy *)handle;
     HRESULT hr = S_OK;
 
-    TRACE( "%p %u %p %u %p\n", handle, id, buf, size, error );
+    TRACE( "%p %u %p %lu %p\n", handle, id, buf, size, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!proxy) return E_INVALIDARG;
@@ -299,7 +299,7 @@ HRESULT WINAPI WsGetServiceProxyProperty( WS_SERVICE_PROXY *handle, WS_PROXY_PRO
     }
 
     LeaveCriticalSection( &proxy->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -330,7 +330,7 @@ HRESULT WINAPI WsOpenServiceProxy( WS_SERVICE_PROXY *handle, const WS_ENDPOINT_A
         proxy->state = WS_SERVICE_PROXY_STATE_OPEN;
 
     LeaveCriticalSection( &proxy->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -360,7 +360,7 @@ HRESULT WINAPI WsCloseServiceProxy( WS_SERVICE_PROXY *handle, const WS_ASYNC_CON
         proxy->state = WS_SERVICE_PROXY_STATE_CLOSED;
 
     LeaveCriticalSection( &proxy->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -505,7 +505,7 @@ HRESULT WINAPI WsCall( WS_SERVICE_PROXY *handle, const WS_OPERATION_DESCRIPTION 
     HRESULT hr;
     ULONG i;
 
-    TRACE( "%p %p %p %p %p %u %p %p\n", handle, desc, args, heap, properties, count, ctx, error );
+    TRACE( "%p %p %p %p %p %lu %p %p\n", handle, desc, args, heap, properties, count, ctx, error );
     if (error) FIXME( "ignoring error parameter\n" );
     if (ctx) FIXME( "ignoring ctx parameter\n" );
     for (i = 0; i < count; i++)
@@ -542,6 +542,6 @@ HRESULT WINAPI WsCall( WS_SERVICE_PROXY *handle, const WS_OPERATION_DESCRIPTION 
 done:
     WsFreeMessage( msg );
     LeaveCriticalSection( &proxy->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }

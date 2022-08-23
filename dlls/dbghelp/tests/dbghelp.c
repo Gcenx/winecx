@@ -26,7 +26,7 @@
 static DWORD CALLBACK stack_walk_thread(void *arg)
 {
     DWORD count = SuspendThread(GetCurrentThread());
-    ok(!count, "got %d\n", count);
+    ok(!count, "got %ld\n", count);
     return 0;
 }
 
@@ -86,7 +86,7 @@ static void test_stack_walk(void)
     /* first invocation just calculates the return address */
     ret = StackWalk64(machine, GetCurrentProcess(), thread, &frame, &ctx, NULL,
         SymFunctionTableAccess64, SymGetModuleBase64, NULL);
-    ok(ret, "StackWalk64() failed: %u\n", GetLastError());
+    ok(ret, "StackWalk64() failed: %lu\n", GetLastError());
     ok(frame.AddrPC.Offset == frame0.AddrPC.Offset, "expected %s, got %s\n",
         wine_dbgstr_longlong(frame0.AddrPC.Offset),
         wine_dbgstr_longlong(frame.AddrPC.Offset));
@@ -102,11 +102,11 @@ static void test_stack_walk(void)
 
         ret = StackWalk64(machine, GetCurrentProcess(), thread, &frame, &ctx, NULL,
             SymFunctionTableAccess64, SymGetModuleBase64, NULL);
-        ok(ret, "StackWalk64() failed: %u\n", GetLastError());
+        ok(ret, "StackWalk64() failed: %lu\n", GetLastError());
 
         addr = (void *)(DWORD_PTR)frame.AddrPC.Offset;
 
-        if (addr > (char *)stack_walk_thread && addr < (char *)stack_walk_thread + 0x100)
+        if (!found_our_frame && addr > (char *)stack_walk_thread && addr < (char *)stack_walk_thread + 0x100)
         {
             found_our_frame = TRUE;
 
@@ -132,13 +132,78 @@ static void test_stack_walk(void)
 
 #endif /* __i386__ || __x86_64__ */
 
+static void test_search_path(void)
+{
+    char search_path[128];
+    BOOL ret;
+
+    /* The default symbol path is ".[;%_NT_SYMBOL_PATH%][;%_NT_ALT_SYMBOL_PATH%]".
+     * We unset both variables earlier so should simply get "." */
+    ret = SymGetSearchPath(GetCurrentProcess(), search_path, ARRAY_SIZE(search_path));
+    ok(ret == TRUE, "ret = %d\n", ret);
+    ok(!strcmp(search_path, "."), "Got search path '%s', expected '.'\n", search_path);
+
+    /* Set an arbitrary search path */
+    ret = SymSetSearchPath(GetCurrentProcess(), "W:\\");
+    ok(ret == TRUE, "ret = %d\n", ret);
+    ret = SymGetSearchPath(GetCurrentProcess(), search_path, ARRAY_SIZE(search_path));
+    ok(ret == TRUE, "ret = %d\n", ret);
+    ok(!strcmp(search_path, "W:\\"), "Got search path '%s', expected 'W:\\'\n", search_path);
+
+    /* Setting to NULL resets to the default */
+    ret = SymSetSearchPath(GetCurrentProcess(), NULL);
+    ok(ret == TRUE, "ret = %d\n", ret);
+    ret = SymGetSearchPath(GetCurrentProcess(), search_path, ARRAY_SIZE(search_path));
+    ok(ret == TRUE, "ret = %d\n", ret);
+    ok(!strcmp(search_path, "."), "Got search path '%s', expected '.'\n", search_path);
+
+    /* With _NT_SYMBOL_PATH */
+    SetEnvironmentVariableA("_NT_SYMBOL_PATH", "X:\\");
+    ret = SymSetSearchPath(GetCurrentProcess(), NULL);
+    ok(ret == TRUE, "ret = %d\n", ret);
+    ret = SymGetSearchPath(GetCurrentProcess(), search_path, ARRAY_SIZE(search_path));
+    ok(ret == TRUE, "ret = %d\n", ret);
+    ok(!strcmp(search_path, ".;X:\\"), "Got search path '%s', expected '.;X:\\'\n", search_path);
+
+    /* With both _NT_SYMBOL_PATH and _NT_ALT_SYMBOL_PATH */
+    SetEnvironmentVariableA("_NT_ALT_SYMBOL_PATH", "Y:\\");
+    ret = SymSetSearchPath(GetCurrentProcess(), NULL);
+    ok(ret == TRUE, "ret = %d\n", ret);
+    ret = SymGetSearchPath(GetCurrentProcess(), search_path, ARRAY_SIZE(search_path));
+    ok(ret == TRUE, "ret = %d\n", ret);
+    ok(!strcmp(search_path, ".;X:\\;Y:\\"), "Got search path '%s', expected '.;X:\\;Y:\\'\n", search_path);
+
+    /* With just _NT_ALT_SYMBOL_PATH */
+    SetEnvironmentVariableA("_NT_SYMBOL_PATH", NULL);
+    ret = SymSetSearchPath(GetCurrentProcess(), NULL);
+    ok(ret == TRUE, "ret = %d\n", ret);
+    ret = SymGetSearchPath(GetCurrentProcess(), search_path, ARRAY_SIZE(search_path));
+    ok(ret == TRUE, "ret = %d\n", ret);
+    ok(!strcmp(search_path, ".;Y:\\"), "Got search path '%s', expected '.;Y:\\'\n", search_path);
+
+    /* Restore original search path */
+    SetEnvironmentVariableA("_NT_ALT_SYMBOL_PATH", NULL);
+    ret = SymSetSearchPath(GetCurrentProcess(), NULL);
+    ok(ret == TRUE, "ret = %d\n", ret);
+    ret = SymGetSearchPath(GetCurrentProcess(), search_path, ARRAY_SIZE(search_path));
+    ok(ret == TRUE, "ret = %d\n", ret);
+    ok(!strcmp(search_path, "."), "Got search path '%s', expected '.'\n", search_path);
+}
+
 START_TEST(dbghelp)
 {
-    BOOL ret = SymInitialize(GetCurrentProcess(), NULL, TRUE);
-    ok(ret, "got error %u\n", GetLastError());
+    BOOL ret;
+
+    /* Don't let the user's environment influence our symbol path */
+    SetEnvironmentVariableA("_NT_SYMBOL_PATH", NULL);
+    SetEnvironmentVariableA("_NT_ALT_SYMBOL_PATH", NULL);
+
+    ret = SymInitialize(GetCurrentProcess(), NULL, TRUE);
+    ok(ret, "got error %lu\n", GetLastError());
 
     test_stack_walk();
+    test_search_path();
 
     ret = SymCleanup(GetCurrentProcess());
-    ok(ret, "got error %u\n", GetLastError());
+    ok(ret, "got error %lu\n", GetLastError());
 }

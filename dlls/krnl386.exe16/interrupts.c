@@ -120,18 +120,24 @@ static INTPROC DOSVM_GetBuiltinHandler( BYTE intnum )
     return DOSVM_DefaultHandler;
 }
 
-
-/**********************************************************************
- *          DOSVM_IntProcRelay
+/* Set up the context so that we will call __wine_call_int_handler16 upon
+ * resuming execution.
  *
- * Simple DOSRELAY that interprets its argument as INTPROC and calls it.
- */
-static void DOSVM_IntProcRelay( CONTEXT *context, LPVOID data )
+ * We can't just call the interrupt handler directly, since some code (in
+ * particular, LoadModule16) assumes that it's running on the 32-bit stack and
+ * that CURRENT_STACK16 points to the bottom of the used 16-bit stack. */
+static void return_to_interrupt_handler( CONTEXT *context, BYTE intnum )
 {
-    INTPROC proc = (INTPROC)data;
-    proc(context);
-}
+    FARPROC16 addr = GetProcAddress16( GetModuleHandle16( "KERNEL" ), "__wine_call_int_handler" );
+    WORD *stack = ldt_get_ptr( context->SegSs, context->Esp );
 
+    *--stack = intnum;
+    *--stack = context->SegCs;
+    *--stack = context->Eip;
+    context->Esp -= 3 * sizeof(WORD);
+    context->SegCs = SELECTOROF(addr);
+    context->Eip = OFFSETOF(addr);
+}
 
 /**********************************************************************
  *          DOSVM_PushFlags
@@ -205,10 +211,7 @@ static void DOSVM_HardwareInterruptPM( CONTEXT *context, BYTE intnum )
         if (intnum == 0x25 || intnum == 0x26)
             DOSVM_PushFlags( context, FALSE, FALSE );
 
-        DOSVM_BuildCallFrame( context,
-                              DOSVM_IntProcRelay,
-                              DOSVM_GetBuiltinHandler(
-                                  OFFSETOF(addr)/DOSVM_STUB_PM16 ) );
+        return_to_interrupt_handler( context, OFFSETOF(addr) / DOSVM_STUB_PM16 );
     }
     else
     {
@@ -238,10 +241,10 @@ static void DOSVM_HardwareInterruptPM( CONTEXT *context, BYTE intnum )
  */
 BOOL DOSVM_EmulateInterruptPM( CONTEXT *context, BYTE intnum )
 {
-    TRACE_(relay)("\1Call DOS int 0x%02x ret=%04x:%08x\n"
-                  "  eax=%08x ebx=%08x ecx=%08x edx=%08x\n"
-                  "  esi=%08x edi=%08x ebp=%08x esp=%08x\n"
-                  "  ds=%04x es=%04x fs=%04x gs=%04x ss=%04x flags=%08x\n",
+    TRACE_(relay)("\1Call DOS int 0x%02x ret=%04lx:%08lx\n"
+                  "  eax=%08lx ebx=%08lx ecx=%08lx edx=%08lx\n"
+                  "  esi=%08lx edi=%08lx ebp=%08lx esp=%08lx\n"
+                  "  ds=%04lx es=%04lx fs=%04lx gs=%04lx ss=%04lx flags=%08lx\n",
                   intnum, context->SegCs, context->Eip,
                   context->Eax, context->Ebx, context->Ecx, context->Edx,
                   context->Esi, context->Edi, context->Ebp, context->Esp,
@@ -250,14 +253,7 @@ BOOL DOSVM_EmulateInterruptPM( CONTEXT *context, BYTE intnum )
 
     DOSMEM_InitDosMemory();
 
-    if (context->SegCs == relay_code_sel)
-    {
-        /*
-         * This must not be called using DOSVM_BuildCallFrame.
-         */
-        DOSVM_RelayHandler( context );
-    }
-    else if (context->SegCs == int16_sel)
+    if (context->SegCs == int16_sel)
     {
         /* Restore original flags stored into the stack by the caller. */
         WORD *stack = CTX_SEG_OFF_TO_LIN(context, 
@@ -266,7 +262,7 @@ BOOL DOSVM_EmulateInterruptPM( CONTEXT *context, BYTE intnum )
 
         if (intnum != context->Eip / DOSVM_STUB_PM16)
             WARN( "interrupt stub has been modified "
-                  "(interrupt is %02x, interrupt stub is %02x)\n",
+                  "(interrupt is %02x, interrupt stub is %02lx)\n",
                   intnum, context->Eip/DOSVM_STUB_PM16 );
 
         TRACE( "builtin interrupt %02x has been branched to\n", intnum );
@@ -274,9 +270,7 @@ BOOL DOSVM_EmulateInterruptPM( CONTEXT *context, BYTE intnum )
         if (intnum == 0x25 || intnum == 0x26)
             DOSVM_PushFlags( context, FALSE, TRUE );
 
-        DOSVM_BuildCallFrame( context, 
-                              DOSVM_IntProcRelay, 
-                              DOSVM_GetBuiltinHandler(intnum) );
+        return_to_interrupt_handler( context, intnum );
     }
     else if (ldt_is_system(context->SegCs))
     {
@@ -406,9 +400,9 @@ static void DOSVM_CallBuiltinHandler( CONTEXT *context, BYTE intnum )
 
 
 /**********************************************************************
- *         __wine_call_int_handler    (KERNEL.@)
+ *         __wine_call_int_handler16    (KERNEL.@)
  */
-void __wine_call_int_handler( CONTEXT *context, BYTE intnum )
+void WINAPI __wine_call_int_handler16( BYTE intnum, CONTEXT *context )
 {
     DOSMEM_InitDosMemory();
     DOSVM_CallBuiltinHandler( context, intnum );
@@ -561,7 +555,7 @@ static void WINAPI DOSVM_Int1aHandler( CONTEXT *context )
             SET_CX( context, HIWORD(data->Ticks) );
             SET_DX( context, LOWORD(data->Ticks) );
             SET_AL( context, 0 ); /* FIXME: midnight flag is unsupported */
-            TRACE( "GET SYSTEM TIME - ticks=%d\n", data->Ticks );
+            TRACE( "GET SYSTEM TIME - ticks=%ld\n", data->Ticks );
         }
         break;
 

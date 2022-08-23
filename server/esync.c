@@ -19,7 +19,7 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
+
 
 #include <errno.h>
 #include <fcntl.h>
@@ -28,9 +28,7 @@
 #ifdef HAVE_SYS_EVENTFD_H
 # include <sys/eventfd.h>
 #endif
-#ifdef HAVE_SYS_MMAN_H
-# include <sys/mman.h>
-#endif
+#include <sys/mman.h>
 #ifdef HAVE_SYS_STAT_H
 # include <sys/stat.h>
 #endif
@@ -133,8 +131,8 @@ static void esync_destroy( struct object *obj );
 const struct object_ops esync_ops =
 {
     sizeof(struct esync),      /* size */
+    &no_type,                  /* type */
     esync_dump,                /* dump */
-    no_get_type,               /* get_type */
     no_add_queue,              /* add_queue */
     NULL,                      /* remove_queue */
     NULL,                      /* signaled */

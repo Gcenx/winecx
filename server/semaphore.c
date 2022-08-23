@@ -19,12 +19,12 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <sys/types.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -36,6 +36,20 @@
 #include "request.h"
 #include "security.h"
 
+static const WCHAR semaphore_name[] = {'S','e','m','a','p','h','o','r','e'};
+
+struct type_descr semaphore_type =
+{
+    { semaphore_name, sizeof(semaphore_name) },   /* name */
+    SEMAPHORE_ALL_ACCESS,                         /* valid_access */
+    {                                             /* mapping */
+        STANDARD_RIGHTS_READ | SEMAPHORE_QUERY_STATE,
+        STANDARD_RIGHTS_WRITE | SEMAPHORE_MODIFY_STATE,
+        STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE,
+        SEMAPHORE_ALL_ACCESS
+    },
+};
+
 struct semaphore
 {
     struct object  obj;    /* object header */
@@ -44,17 +58,15 @@ struct semaphore
 };
 
 static void semaphore_dump( struct object *obj, int verbose );
-static struct object_type *semaphore_get_type( struct object *obj );
 static int semaphore_signaled( struct object *obj, struct wait_queue_entry *entry );
 static void semaphore_satisfied( struct object *obj, struct wait_queue_entry *entry );
-static unsigned int semaphore_map_access( struct object *obj, unsigned int access );
 static int semaphore_signal( struct object *obj, unsigned int access );
 
 static const struct object_ops semaphore_ops =
 {
     sizeof(struct semaphore),      /* size */
+    &semaphore_type,               /* type */
     semaphore_dump,                /* dump */
-    semaphore_get_type,            /* get_type */
     add_queue,                     /* add_queue */
     remove_queue,                  /* remove_queue */
     semaphore_signaled,            /* signaled */
@@ -62,7 +74,7 @@ static const struct object_ops semaphore_ops =
     semaphore_satisfied,           /* satisfied */
     semaphore_signal,              /* signal */
     no_get_fd,                     /* get_fd */
-    semaphore_map_access,          /* map_access */
+    default_map_access,            /* map_access */
     default_get_sd,                /* get_sd */
     default_set_sd,                /* set_sd */
     default_get_full_name,         /* get_full_name */
@@ -128,13 +140,6 @@ static void semaphore_dump( struct object *obj, int verbose )
     fprintf( stderr, "Semaphore count=%d max=%d\n", sem->count, sem->max );
 }
 
-static struct object_type *semaphore_get_type( struct object *obj )
-{
-    static const WCHAR name[] = {'S','e','m','a','p','h','o','r','e'};
-    static const struct unicode_str str = { name, sizeof(name) };
-    return get_object_type( &str );
-}
-
 static int semaphore_signaled( struct object *obj, struct wait_queue_entry *entry )
 {
     struct semaphore *sem = (struct semaphore *)obj;
@@ -148,15 +153,6 @@ static void semaphore_satisfied( struct object *obj, struct wait_queue_entry *en
     assert( obj->ops == &semaphore_ops );
     assert( sem->count );
     sem->count--;
-}
-
-static unsigned int semaphore_map_access( struct object *obj, unsigned int access )
-{
-    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ | SEMAPHORE_QUERY_STATE;
-    if (access & GENERIC_WRITE)   access |= STANDARD_RIGHTS_WRITE | SEMAPHORE_MODIFY_STATE;
-    if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE;
-    if (access & GENERIC_ALL)     access |= STANDARD_RIGHTS_ALL | SEMAPHORE_ALL_ACCESS;
-    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
 static int semaphore_signal( struct object *obj, unsigned int access )

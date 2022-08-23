@@ -28,22 +28,37 @@
 #include "mfmediaengine.h"
 #include "mferror.h"
 #include "dxgi.h"
+#include "d3d11.h"
+#include "mmdeviceapi.h"
+#include "audiosessiontypes.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 
-BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
+static BOOL mf_array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
 {
-    switch (reason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(instance);
-            break;
-    }
+    size_t new_capacity, max_capacity;
+    void *new_elements;
+
+    if (count <= *capacity)
+        return TRUE;
+
+    max_capacity = ~(SIZE_T)0 / size;
+    if (count > max_capacity)
+        return FALSE;
+
+    new_capacity = max(4, *capacity);
+    while (new_capacity < count && new_capacity <= max_capacity / 2)
+        new_capacity *= 2;
+    if (new_capacity < count)
+        new_capacity = max_capacity;
+
+    if (!(new_elements = realloc(*elements, new_capacity * size)))
+        return FALSE;
+
+    *elements = new_elements;
+    *capacity = new_capacity;
 
     return TRUE;
 }
@@ -69,41 +84,360 @@ enum media_engine_flags
     FLAGS_ENGINE_HAS_AUDIO = 0x800,
     FLAGS_ENGINE_HAS_VIDEO = 0x1000,
     FLAGS_ENGINE_FIRST_FRAME = 0x2000,
+    FLAGS_ENGINE_IS_ENDED = 0x4000,
+    FLAGS_ENGINE_NEW_FRAME = 0x8000,
+    FLAGS_ENGINE_SOURCE_PENDING = 0x10000,
+    FLAGS_ENGINE_PLAY_PENDING = 0x20000,
 };
 
-struct video_frame
+struct vec3
 {
-    LONGLONG pts;
-    SIZE size;
-    SIZE ratio;
-    TOPOID node_id;
+    float x, y, z;
+};
+
+struct color
+{
+    float r, g, b, a;
+};
+
+static const struct vec3 fullquad[] =
+{
+    {-1.0f, -1.0f, 0.0f},
+    {-1.0f,  1.0f, 0.0f},
+    { 1.0f, -1.0f, 0.0f},
+    { 1.0f,  1.0f, 0.0f},
+};
+
+struct rect
+{
+    float left, top, right, bottom;
 };
 
 struct media_engine
 {
-    IMFMediaEngine IMFMediaEngine_iface;
+    IMFMediaEngineEx IMFMediaEngineEx_iface;
+    IMFGetService IMFGetService_iface;
     IMFAsyncCallback session_events;
     IMFAsyncCallback load_handler;
     IMFSampleGrabberSinkCallback grabber_callback;
     LONG refcount;
     IMFMediaEngineNotify *callback;
     IMFAttributes *attributes;
+    IMFDXGIDeviceManager *device_manager;
+    HANDLE device_handle;
     enum media_engine_mode mode;
     unsigned int flags;
     double playback_rate;
     double default_playback_rate;
     double volume;
     double duration;
+    MF_MEDIA_ENGINE_NETWORK network_state;
     MF_MEDIA_ENGINE_ERR error_code;
     HRESULT extended_code;
     MF_MEDIA_ENGINE_READY ready_state;
     MF_MEDIA_ENGINE_PRELOAD preload;
     IMFMediaSession *session;
+    IMFPresentationClock *clock;
     IMFSourceResolver *resolver;
     BSTR current_source;
-    struct video_frame video_frame;
+    struct
+    {
+        IMFMediaSource *source;
+        IMFPresentationDescriptor *pd;
+    } presentation;
+    struct
+    {
+        LONGLONG pts;
+        SIZE size;
+        SIZE ratio;
+        TOPOID node_id;
+        BYTE *buffer;
+        UINT buffer_size;
+        DXGI_FORMAT output_format;
+
+        struct
+        {
+            ID3D11Buffer *vb;
+            ID3D11Buffer *ps_cb;
+            ID3D11Texture2D *source;
+            ID3D11ShaderResourceView *srv;
+            ID3D11SamplerState *sampler;
+            ID3D11InputLayout *input_layout;
+            ID3D11VertexShader *vs;
+            ID3D11PixelShader *ps;
+            struct vec3 quad[4];
+            struct
+            {
+                struct rect dst;
+                struct rect src;
+                struct color backcolor;
+            } cb;
+        } d3d11;
+    } video_frame;
     CRITICAL_SECTION cs;
 };
+
+static void media_engine_release_video_frame_resources(struct media_engine *engine)
+{
+    if (engine->video_frame.d3d11.vb)
+        ID3D11Buffer_Release(engine->video_frame.d3d11.vb);
+    if (engine->video_frame.d3d11.ps_cb)
+        ID3D11Buffer_Release(engine->video_frame.d3d11.ps_cb);
+    if (engine->video_frame.d3d11.source)
+        ID3D11Texture2D_Release(engine->video_frame.d3d11.source);
+    if (engine->video_frame.d3d11.srv)
+        ID3D11ShaderResourceView_Release(engine->video_frame.d3d11.srv);
+    if (engine->video_frame.d3d11.sampler)
+        ID3D11SamplerState_Release(engine->video_frame.d3d11.sampler);
+    if (engine->video_frame.d3d11.input_layout)
+        ID3D11InputLayout_Release(engine->video_frame.d3d11.input_layout);
+    if (engine->video_frame.d3d11.vs)
+        ID3D11VertexShader_Release(engine->video_frame.d3d11.vs);
+    if (engine->video_frame.d3d11.ps)
+        ID3D11PixelShader_Release(engine->video_frame.d3d11.ps);
+
+    memset(&engine->video_frame.d3d11, 0, sizeof(engine->video_frame.d3d11));
+    memcpy(engine->video_frame.d3d11.quad, fullquad, sizeof(fullquad));
+}
+
+static HRESULT media_engine_lock_d3d_device(struct media_engine *engine, ID3D11Device **device)
+{
+    HRESULT hr;
+
+    if (!engine->device_manager)
+    {
+        FIXME("Device manager wasn't set.\n");
+        return E_UNEXPECTED;
+    }
+
+    if (!engine->device_handle)
+    {
+        if (FAILED(hr = IMFDXGIDeviceManager_OpenDeviceHandle(engine->device_manager, &engine->device_handle)))
+        {
+            WARN("Failed to open device handle, hr %#lx.\n", hr);
+            return hr;
+        }
+    }
+
+    hr = IMFDXGIDeviceManager_LockDevice(engine->device_manager, engine->device_handle, &IID_ID3D11Device,
+            (void **)device, TRUE);
+    if (hr == MF_E_DXGI_NEW_VIDEO_DEVICE)
+    {
+        IMFDXGIDeviceManager_CloseDeviceHandle(engine->device_manager, engine->device_handle);
+        engine->device_handle = NULL;
+
+        media_engine_release_video_frame_resources(engine);
+
+        if (FAILED(hr = IMFDXGIDeviceManager_OpenDeviceHandle(engine->device_manager, &engine->device_handle)))
+        {
+            WARN("Failed to open a device handle, hr %#lx.\n", hr);
+            return hr;
+        }
+        hr = IMFDXGIDeviceManager_LockDevice(engine->device_manager, engine->device_handle, &IID_ID3D11Device,
+                (void **)device, TRUE);
+    }
+
+    return hr;
+}
+
+static void media_engine_unlock_d3d_device(struct media_engine *engine, ID3D11Device *device)
+{
+    ID3D11Device_Release(device);
+    IMFDXGIDeviceManager_UnlockDevice(engine->device_manager, engine->device_handle, FALSE);
+}
+
+static HRESULT media_engine_create_d3d11_video_frame_resources(struct media_engine *engine, ID3D11Device *device)
+{
+    static const D3D11_INPUT_ELEMENT_DESC layout_desc[] =
+    {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+    };
+    static const DWORD vs_code[] =
+    {
+#if 0
+        float4 main(float4 position : POSITION) : SV_POSITION
+        {
+            return position;
+        }
+#endif
+        0x43425844, 0xa7a2f22d, 0x83ff2560, 0xe61638bd, 0x87e3ce90, 0x00000001, 0x000000d8, 0x00000003,
+        0x0000002c, 0x00000060, 0x00000094, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020,
+        0x00000000, 0x00000000, 0x00000003, 0x00000000, 0x00000f0f, 0x49534f50, 0x4e4f4954, 0xababab00,
+        0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000001, 0x00000003,
+        0x00000000, 0x0000000f, 0x505f5653, 0x5449534f, 0x004e4f49, 0x52444853, 0x0000003c, 0x00010040,
+        0x0000000f, 0x0300005f, 0x001010f2, 0x00000000, 0x04000067, 0x001020f2, 0x00000000, 0x00000001,
+        0x05000036, 0x001020f2, 0x00000000, 0x00101e46, 0x00000000, 0x0100003e,
+    };
+    static const DWORD ps_code[] =
+    {
+#if 0
+        Texture2D t;
+        SamplerState s;
+        float4 dst;
+        float4 src;
+        float4 backcolor;
+
+        float4 main(float4 position : SV_POSITION) : SV_TARGET
+        {
+            float2 p;
+
+            if (position.x < dst.x || position.x > dst.z) return backcolor;
+            if (position.y < dst.y || position.y > dst.w) return backcolor;
+            p.x = (position.x - dst.x) / (dst.z - dst.x);
+            p.y = 1.0f - (position.y - dst.y) / (dst.w - dst.y);
+            p.x = src.x + p.x * (src.z - src.x);
+            p.y = src.y + p.y * (src.w - src.y);
+            return t.Sample(s, p);
+        }
+#endif
+        0x43425844, 0x5892e3b1, 0x24c17f7c, 0x9999f143, 0x49667872, 0x00000001, 0x0000032c, 0x00000003,
+        0x0000002c, 0x00000060, 0x00000094, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020,
+        0x00000000, 0x00000001, 0x00000003, 0x00000000, 0x0000030f, 0x505f5653, 0x5449534f, 0x004e4f49,
+        0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003,
+        0x00000000, 0x0000000f, 0x545f5653, 0x45475241, 0xabab0054, 0x52444853, 0x00000290, 0x00000040,
+        0x000000a4, 0x04000059, 0x00208e46, 0x00000000, 0x00000003, 0x0300005a, 0x00106000, 0x00000000,
+        0x04001858, 0x00107000, 0x00000000, 0x00005555, 0x04002064, 0x00101032, 0x00000000, 0x00000001,
+        0x03000065, 0x001020f2, 0x00000000, 0x02000068, 0x00000002, 0x08000031, 0x00100012, 0x00000000,
+        0x0010100a, 0x00000000, 0x0020800a, 0x00000000, 0x00000000, 0x08000031, 0x00100022, 0x00000000,
+        0x0020802a, 0x00000000, 0x00000000, 0x0010100a, 0x00000000, 0x0700003c, 0x00100012, 0x00000000,
+        0x0010001a, 0x00000000, 0x0010000a, 0x00000000, 0x0304001f, 0x0010000a, 0x00000000, 0x06000036,
+        0x001020f2, 0x00000000, 0x00208e46, 0x00000000, 0x00000002, 0x0100003e, 0x01000015, 0x08000031,
+        0x00100012, 0x00000000, 0x0010101a, 0x00000000, 0x0020801a, 0x00000000, 0x00000000, 0x08000031,
+        0x00100022, 0x00000000, 0x0020803a, 0x00000000, 0x00000000, 0x0010101a, 0x00000000, 0x0700003c,
+        0x00100012, 0x00000000, 0x0010001a, 0x00000000, 0x0010000a, 0x00000000, 0x0304001f, 0x0010000a,
+        0x00000000, 0x06000036, 0x001020f2, 0x00000000, 0x00208e46, 0x00000000, 0x00000002, 0x0100003e,
+        0x01000015, 0x09000000, 0x00100032, 0x00000000, 0x00101046, 0x00000000, 0x80208046, 0x00000041,
+        0x00000000, 0x00000000, 0x0a000000, 0x001000c2, 0x00000000, 0x80208406, 0x00000041, 0x00000000,
+        0x00000000, 0x00208ea6, 0x00000000, 0x00000000, 0x0700000e, 0x00100032, 0x00000000, 0x00100046,
+        0x00000000, 0x00100ae6, 0x00000000, 0x08000000, 0x00100022, 0x00000000, 0x8010001a, 0x00000041,
+        0x00000000, 0x00004001, 0x3f800000, 0x0a000000, 0x001000c2, 0x00000000, 0x80208406, 0x00000041,
+        0x00000000, 0x00000001, 0x00208ea6, 0x00000000, 0x00000001, 0x0a000032, 0x00100012, 0x00000001,
+        0x0010000a, 0x00000000, 0x0010002a, 0x00000000, 0x0020800a, 0x00000000, 0x00000001, 0x0a000032,
+        0x00100022, 0x00000001, 0x0010001a, 0x00000000, 0x0010003a, 0x00000000, 0x0020801a, 0x00000000,
+        0x00000001, 0x09000045, 0x001020f2, 0x00000000, 0x00100046, 0x00000001, 0x00107e46, 0x00000000,
+        0x00106000, 0x00000000, 0x0100003e,
+    };
+    D3D11_SUBRESOURCE_DATA resource_data;
+    D3D11_TEXTURE2D_DESC texture_desc;
+    D3D11_SAMPLER_DESC sampler_desc;
+    D3D11_BUFFER_DESC buffer_desc;
+    HRESULT hr;
+
+    if (engine->video_frame.d3d11.source)
+        return S_OK;
+
+    /* Default vertex buffer, updated on first transfer call. */
+    buffer_desc.ByteWidth = sizeof(engine->video_frame.d3d11.quad);
+    buffer_desc.Usage = D3D11_USAGE_DEFAULT;
+    buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    buffer_desc.CPUAccessFlags = 0;
+    buffer_desc.MiscFlags = 0;
+    buffer_desc.StructureByteStride = 0;
+
+    resource_data.pSysMem = engine->video_frame.d3d11.quad;
+    resource_data.SysMemPitch = 0;
+    resource_data.SysMemSlicePitch = 0;
+
+    if (FAILED(hr = ID3D11Device_CreateBuffer(device, &buffer_desc, &resource_data, &engine->video_frame.d3d11.vb)))
+    {
+        WARN("Failed to create a vertex buffer, hr %#lx.\n", hr);
+        goto failed;
+    }
+
+    buffer_desc.ByteWidth = sizeof(engine->video_frame.d3d11.cb);
+    buffer_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+
+    if (FAILED(hr = ID3D11Device_CreateBuffer(device, &buffer_desc, NULL, &engine->video_frame.d3d11.ps_cb)))
+    {
+        WARN("Failed to create a buffer, hr %#lx.\n", hr);
+        goto failed;
+    }
+
+    /* Source texture. */
+    texture_desc.Width = engine->video_frame.size.cx;
+    texture_desc.Height = engine->video_frame.size.cy;
+    texture_desc.MipLevels = 1;
+    texture_desc.ArraySize = 1;
+    texture_desc.Format = engine->video_frame.output_format;
+    texture_desc.SampleDesc.Count = 1;
+    texture_desc.SampleDesc.Quality = 0;
+    texture_desc.Usage = D3D11_USAGE_DEFAULT;
+    texture_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    texture_desc.CPUAccessFlags = 0;
+    texture_desc.MiscFlags = 0;
+
+    if (FAILED(hr = ID3D11Device_CreateTexture2D(device, &texture_desc, NULL, &engine->video_frame.d3d11.source)))
+    {
+        WARN("Failed to create source texture, hr %#lx.\n", hr);
+        goto failed;
+    }
+
+    if (FAILED(hr = ID3D11Device_CreateShaderResourceView(device, (ID3D11Resource *)engine->video_frame.d3d11.source,
+            NULL, &engine->video_frame.d3d11.srv)))
+    {
+        WARN("Failed to create SRV, hr %#lx.\n", hr);
+        goto failed;
+    }
+
+    /* Sampler state. */
+    memset(&sampler_desc, 0, sizeof(sampler_desc));
+    sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    sampler_desc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sampler_desc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sampler_desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+
+    if (FAILED(hr = ID3D11Device_CreateSamplerState(device, &sampler_desc, &engine->video_frame.d3d11.sampler)))
+    {
+        WARN("Failed to create a sampler state, hr %#lx.\n", hr);
+        goto failed;
+    }
+
+    /* Input layout */
+    if (FAILED(hr = ID3D11Device_CreateInputLayout(device, layout_desc, ARRAY_SIZE(layout_desc), vs_code, sizeof(vs_code),
+            &engine->video_frame.d3d11.input_layout)))
+    {
+        WARN("Failed to create input layout, hr %#lx.\n", hr);
+        goto failed;
+    }
+
+    /* Shaders */
+    if (FAILED(hr = ID3D11Device_CreateVertexShader(device, vs_code, sizeof(vs_code), NULL, &engine->video_frame.d3d11.vs)))
+    {
+        WARN("Failed to create the vertex shader, hr %#lx.\n", hr);
+        goto failed;
+    }
+
+    if (FAILED(hr = ID3D11Device_CreatePixelShader(device, ps_code, sizeof(ps_code), NULL, &engine->video_frame.d3d11.ps)))
+    {
+        WARN("Failed to create the pixel shader, hr %#lx.\n", hr);
+        goto failed;
+    }
+
+failed:
+
+    return hr;
+}
+
+struct range
+{
+    double start;
+    double end;
+};
+
+struct time_range
+{
+    IMFMediaTimeRange IMFMediaTimeRange_iface;
+    LONG refcount;
+
+    struct range *ranges;
+    size_t count;
+    size_t capacity;
+};
+
+static struct time_range *impl_from_IMFMediaTimeRange(IMFMediaTimeRange *iface)
+{
+    return CONTAINING_RECORD(iface, struct time_range, IMFMediaTimeRange_iface);
+}
 
 struct media_error
 {
@@ -140,7 +474,7 @@ static ULONG WINAPI media_error_AddRef(IMFMediaError *iface)
     struct media_error *me = impl_from_IMFMediaError(iface);
     ULONG refcount = InterlockedIncrement(&me->refcount);
 
-    TRACE("%p, refcount %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -150,10 +484,10 @@ static ULONG WINAPI media_error_Release(IMFMediaError *iface)
     struct media_error *me = impl_from_IMFMediaError(iface);
     ULONG refcount = InterlockedDecrement(&me->refcount);
 
-    TRACE("%p, refcount %u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
-        heap_free(me);
+        free(me);
 
     return refcount;
 }
@@ -190,7 +524,7 @@ static HRESULT WINAPI media_error_SetExtendedErrorCode(IMFMediaError *iface, HRE
 {
     struct media_error *me = impl_from_IMFMediaError(iface);
 
-    TRACE("%p, %#x.\n", iface, code);
+    TRACE("%p, %#lx.\n", iface, code);
 
     me->extended_code = code;
 
@@ -214,13 +548,193 @@ static HRESULT create_media_error(IMFMediaError **ret)
 
     *ret = NULL;
 
-    if (!(object = heap_alloc_zero(sizeof(*object))))
+    if (!(object = calloc(1, sizeof(*object))))
         return E_OUTOFMEMORY;
 
     object->IMFMediaError_iface.lpVtbl = &media_error_vtbl;
     object->refcount = 1;
 
     *ret = &object->IMFMediaError_iface;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI time_range_QueryInterface(IMFMediaTimeRange *iface, REFIID riid, void **obj)
+{
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+
+    if (IsEqualIID(riid, &IID_IMFMediaTimeRange) ||
+            IsEqualIID(riid, &IID_IUnknown))
+    {
+        *obj = iface;
+        IMFMediaTimeRange_AddRef(iface);
+        return S_OK;
+    }
+
+    WARN("Unsupported interface %s.\n", debugstr_guid(riid));
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI time_range_AddRef(IMFMediaTimeRange *iface)
+{
+    struct time_range *range = impl_from_IMFMediaTimeRange(iface);
+    ULONG refcount = InterlockedIncrement(&range->refcount);
+
+    TRACE("%p, refcount %lu.\n", iface, refcount);
+
+    return refcount;
+}
+
+static ULONG WINAPI time_range_Release(IMFMediaTimeRange *iface)
+{
+    struct time_range *range = impl_from_IMFMediaTimeRange(iface);
+    ULONG refcount = InterlockedDecrement(&range->refcount);
+
+    TRACE("%p, refcount %lu.\n", iface, refcount);
+
+    if (!refcount)
+    {
+        free(range->ranges);
+        free(range);
+    }
+
+    return refcount;
+}
+
+static DWORD WINAPI time_range_GetLength(IMFMediaTimeRange *iface)
+{
+    struct time_range *range = impl_from_IMFMediaTimeRange(iface);
+
+    TRACE("%p.\n", iface);
+
+    return range->count;
+}
+
+static HRESULT WINAPI time_range_GetStart(IMFMediaTimeRange *iface, DWORD idx, double *start)
+{
+    struct time_range *range = impl_from_IMFMediaTimeRange(iface);
+
+    TRACE("%p, %lu, %p.\n", iface, idx, start);
+
+    if (idx >= range->count)
+        return E_INVALIDARG;
+
+    *start = range->ranges[idx].start;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI time_range_GetEnd(IMFMediaTimeRange *iface, DWORD idx, double *end)
+{
+    struct time_range *range = impl_from_IMFMediaTimeRange(iface);
+
+    TRACE("%p, %lu, %p.\n", iface, idx, end);
+
+    if (idx >= range->count)
+        return E_INVALIDARG;
+
+    *end = range->ranges[idx].end;
+
+    return S_OK;
+}
+
+static BOOL WINAPI time_range_ContainsTime(IMFMediaTimeRange *iface, double time)
+{
+    struct time_range *range = impl_from_IMFMediaTimeRange(iface);
+    size_t i;
+
+    TRACE("%p, %.8e.\n", iface, time);
+
+    for (i = 0; i < range->count; ++i)
+    {
+        if (time >= range->ranges[i].start && time <= range->ranges[i].end)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+static HRESULT WINAPI time_range_AddRange(IMFMediaTimeRange *iface, double start, double end)
+{
+    struct time_range *range = impl_from_IMFMediaTimeRange(iface);
+    struct range *c;
+    size_t i;
+
+    TRACE("%p, %.8e, %.8e.\n", iface, start, end);
+
+    for (i = 0; i < range->count; ++i)
+    {
+        c = &range->ranges[i];
+
+        /* New range is fully contained within existing one. */
+        if (c->start <= start && c->end >= end)
+            return S_OK;
+
+        /* New range fully contains existing one. */
+        if (c->start >= start && c->end <= end)
+        {
+            c->start = start;
+            c->end = end;
+            return S_OK;
+        }
+
+        /* Merge if ranges intersect. */
+        if ((start >= c->start && start <= c->end) ||
+                (end >= c->start && end <= c->end))
+        {
+            c->start = min(c->start, start);
+            c->end = max(c->end, end);
+            return S_OK;
+        }
+    }
+
+    if (!mf_array_reserve((void **)&range->ranges, &range->capacity, range->count + 1, sizeof(*range->ranges)))
+        return E_OUTOFMEMORY;
+
+    range->ranges[range->count].start = start;
+    range->ranges[range->count].end = end;
+    range->count++;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI time_range_Clear(IMFMediaTimeRange *iface)
+{
+    struct time_range *range = impl_from_IMFMediaTimeRange(iface);
+
+    TRACE("%p.\n", iface);
+
+    range->count = 0;
+
+    return S_OK;
+}
+
+static const IMFMediaTimeRangeVtbl time_range_vtbl =
+{
+    time_range_QueryInterface,
+    time_range_AddRef,
+    time_range_Release,
+    time_range_GetLength,
+    time_range_GetStart,
+    time_range_GetEnd,
+    time_range_ContainsTime,
+    time_range_AddRange,
+    time_range_Clear,
+};
+
+static HRESULT create_time_range(IMFMediaTimeRange **range)
+{
+    struct time_range *object;
+
+    object = calloc(1, sizeof(*object));
+    if (!object)
+        return E_OUTOFMEMORY;
+
+    object->IMFMediaTimeRange_iface.lpVtbl = &time_range_vtbl;
+    object->refcount = 1;
+
+    *range = &object->IMFMediaTimeRange_iface;
 
     return S_OK;
 }
@@ -233,9 +747,14 @@ static void media_engine_set_flag(struct media_engine *engine, unsigned int mask
         engine->flags &= ~mask;
 }
 
-static inline struct media_engine *impl_from_IMFMediaEngine(IMFMediaEngine *iface)
+static inline struct media_engine *impl_from_IMFMediaEngineEx(IMFMediaEngineEx *iface)
 {
-    return CONTAINING_RECORD(iface, struct media_engine, IMFMediaEngine_iface);
+    return CONTAINING_RECORD(iface, struct media_engine, IMFMediaEngineEx_iface);
+}
+
+static inline struct media_engine *impl_from_IMFGetService(IMFGetService *iface)
+{
+    return CONTAINING_RECORD(iface, struct media_engine, IMFGetService_iface);
 }
 
 static struct media_engine *impl_from_session_events_IMFAsyncCallback(IMFAsyncCallback *iface)
@@ -300,7 +819,7 @@ static void media_engine_get_frame_size(struct media_engine *engine, IMFTopology
     IMFMediaTypeHandler_Release(handler);
     if (FAILED(hr))
     {
-        WARN("Failed to get current media type %#x.\n", hr);
+        WARN("Failed to get current media type %#lx.\n", hr);
         return;
     }
 
@@ -336,13 +855,13 @@ static HRESULT WINAPI media_engine_callback_QueryInterface(IMFAsyncCallback *ifa
 static ULONG WINAPI media_engine_session_events_AddRef(IMFAsyncCallback *iface)
 {
     struct media_engine *engine = impl_from_session_events_IMFAsyncCallback(iface);
-    return IMFMediaEngine_AddRef(&engine->IMFMediaEngine_iface);
+    return IMFMediaEngineEx_AddRef(&engine->IMFMediaEngineEx_iface);
 }
 
 static ULONG WINAPI media_engine_session_events_Release(IMFAsyncCallback *iface)
 {
     struct media_engine *engine = impl_from_session_events_IMFAsyncCallback(iface);
-    return IMFMediaEngine_Release(&engine->IMFMediaEngine_iface);
+    return IMFMediaEngineEx_Release(&engine->IMFMediaEngineEx_iface);
 }
 
 static HRESULT WINAPI media_engine_callback_GetParameters(IMFAsyncCallback *iface, DWORD *flags, DWORD *queue)
@@ -359,13 +878,13 @@ static HRESULT WINAPI media_engine_session_events_Invoke(IMFAsyncCallback *iface
 
     if (FAILED(hr = IMFMediaSession_EndGetEvent(engine->session, result, &event)))
     {
-        WARN("Failed to get session event, hr %#x.\n", hr);
+        WARN("Failed to get session event, hr %#lx.\n", hr);
         goto failed;
     }
 
     if (FAILED(hr = IMFMediaEvent_GetType(event, &event_type)))
     {
-        WARN("Failed to get event type, hr %#x.\n", hr);
+        WARN("Failed to get event type, hr %#lx.\n", hr);
         goto failed;
     }
 
@@ -427,6 +946,7 @@ static HRESULT WINAPI media_engine_session_events_Invoke(IMFAsyncCallback *iface
 
             EnterCriticalSection(&engine->cs);
             media_engine_set_flag(engine, FLAGS_ENGINE_FIRST_FRAME, FALSE);
+            media_engine_set_flag(engine, FLAGS_ENGINE_IS_ENDED, TRUE);
             engine->video_frame.pts = MINLONGLONG;
             LeaveCriticalSection(&engine->cs);
 
@@ -440,7 +960,7 @@ failed:
         IMFMediaEvent_Release(event);
 
     if (FAILED(hr = IMFMediaSession_BeginGetEvent(engine->session, iface, NULL)))
-        WARN("Failed to subscribe to session events, hr %#x.\n", hr);
+        WARN("Failed to subscribe to session events, hr %#lx.\n", hr);
 
     return S_OK;
 }
@@ -457,13 +977,13 @@ static const IMFAsyncCallbackVtbl media_engine_session_events_vtbl =
 static ULONG WINAPI media_engine_load_handler_AddRef(IMFAsyncCallback *iface)
 {
     struct media_engine *engine = impl_from_load_handler_IMFAsyncCallback(iface);
-    return IMFMediaEngine_AddRef(&engine->IMFMediaEngine_iface);
+    return IMFMediaEngineEx_AddRef(&engine->IMFMediaEngineEx_iface);
 }
 
 static ULONG WINAPI media_engine_load_handler_Release(IMFAsyncCallback *iface)
 {
     struct media_engine *engine = impl_from_load_handler_IMFAsyncCallback(iface);
-    return IMFMediaEngine_Release(&engine->IMFMediaEngine_iface);
+    return IMFMediaEngineEx_Release(&engine->IMFMediaEngineEx_iface);
 }
 
 static HRESULT media_engine_create_source_node(IMFMediaSource *source, IMFPresentationDescriptor *pd, IMFStreamDescriptor *sd,
@@ -551,25 +1071,40 @@ static HRESULT media_engine_create_video_renderer(struct media_engine *engine, I
 
     IMFActivate_Release(activate);
 
+    engine->video_frame.output_format = output_format;
+
     return hr;
+}
+
+static void media_engine_clear_presentation(struct media_engine *engine)
+{
+    if (engine->presentation.source)
+    {
+        IMFMediaSource_Shutdown(engine->presentation.source);
+        IMFMediaSource_Release(engine->presentation.source);
+    }
+    if (engine->presentation.pd)
+        IMFPresentationDescriptor_Release(engine->presentation.pd);
+    memset(&engine->presentation, 0, sizeof(engine->presentation));
 }
 
 static HRESULT media_engine_create_topology(struct media_engine *engine, IMFMediaSource *source)
 {
     IMFStreamDescriptor *sd_audio = NULL, *sd_video = NULL;
-    unsigned int stream_count = 0, i;
     IMFPresentationDescriptor *pd;
+    DWORD stream_count = 0, i;
     IMFTopology *topology;
     UINT64 duration;
     HRESULT hr;
 
-    memset(&engine->video_frame, 0, sizeof(engine->video_frame));
+    media_engine_release_video_frame_resources(engine);
+    media_engine_clear_presentation(engine);
 
     if (FAILED(hr = IMFMediaSource_CreatePresentationDescriptor(source, &pd)))
         return hr;
 
     if (FAILED(hr = IMFPresentationDescriptor_GetStreamDescriptorCount(pd, &stream_count)))
-        WARN("Failed to get stream count, hr %#x.\n", hr);
+        WARN("Failed to get stream count, hr %#lx.\n", hr);
 
     /* Enable first video stream and first audio stream. */
 
@@ -607,6 +1142,8 @@ static HRESULT media_engine_create_topology(struct media_engine *engine, IMFMedi
 
             IMFMediaTypeHandler_Release(type_handler);
         }
+
+        IMFStreamDescriptor_Release(sd);
     }
 
     if (!sd_video && !sd_audio)
@@ -615,10 +1152,13 @@ static HRESULT media_engine_create_topology(struct media_engine *engine, IMFMedi
         return E_UNEXPECTED;
     }
 
-    if (sd_video)
-        engine->flags |= FLAGS_ENGINE_HAS_VIDEO;
-    if (sd_audio)
-        engine->flags |= FLAGS_ENGINE_HAS_AUDIO;
+    engine->presentation.source = source;
+    IMFMediaSource_AddRef(engine->presentation.source);
+    engine->presentation.pd = pd;
+    IMFPresentationDescriptor_AddRef(engine->presentation.pd);
+
+    media_engine_set_flag(engine, FLAGS_ENGINE_HAS_VIDEO, !!sd_video);
+    media_engine_set_flag(engine, FLAGS_ENGINE_HAS_AUDIO, !!sd_audio);
 
     /* Assume live source if duration was not provided. */
     if (SUCCEEDED(IMFPresentationDescriptor_GetUINT64(pd, &MF_PD_DURATION, &duration)))
@@ -634,13 +1174,16 @@ static HRESULT media_engine_create_topology(struct media_engine *engine, IMFMedi
         IMFTopologyNode *sar_node = NULL, *audio_src = NULL;
         IMFTopologyNode *grabber_node = NULL, *video_src = NULL;
 
+        if (engine->flags & MF_MEDIA_ENGINE_REAL_TIME_MODE)
+            IMFTopology_SetUINT32(topology, &MF_LOW_LATENCY, TRUE);
+
         if (sd_audio)
         {
             if (FAILED(hr = media_engine_create_source_node(source, pd, sd_audio, &audio_src)))
-                WARN("Failed to create audio source node, hr %#x.\n", hr);
+                WARN("Failed to create audio source node, hr %#lx.\n", hr);
 
             if (FAILED(hr = media_engine_create_audio_renderer(engine, &sar_node)))
-                WARN("Failed to create audio renderer node, hr %#x.\n", hr);
+                WARN("Failed to create audio renderer node, hr %#lx.\n", hr);
 
             if (sar_node && audio_src)
             {
@@ -658,10 +1201,10 @@ static HRESULT media_engine_create_topology(struct media_engine *engine, IMFMedi
         if (SUCCEEDED(hr) && sd_video)
         {
             if (FAILED(hr = media_engine_create_source_node(source, pd, sd_video, &video_src)))
-                WARN("Failed to create video source node, hr %#x.\n", hr);
+                WARN("Failed to create video source node, hr %#lx.\n", hr);
 
             if (FAILED(hr = media_engine_create_video_renderer(engine, &grabber_node)))
-                WARN("Failed to create video grabber node, hr %#x.\n", hr);
+                WARN("Failed to create video grabber node, hr %#lx.\n", hr);
 
             if (grabber_node && video_src)
             {
@@ -678,6 +1221,8 @@ static HRESULT media_engine_create_topology(struct media_engine *engine, IMFMedi
             if (video_src)
                 IMFTopologyNode_Release(video_src);
         }
+
+        IMFTopology_SetUINT32(topology, &MF_TOPOLOGY_ENUMERATE_SOURCE_TYPES, TRUE);
 
         if (SUCCEEDED(hr))
             hr = IMFMediaSession_SetTopology(engine->session, MFSESSION_SETTOPOLOGY_IMMEDIATE, topology);
@@ -696,20 +1241,41 @@ static HRESULT media_engine_create_topology(struct media_engine *engine, IMFMedi
     return hr;
 }
 
+static void media_engine_start_playback(struct media_engine *engine)
+{
+    PROPVARIANT var;
+
+    var.vt = VT_EMPTY;
+    IMFMediaSession_Start(engine->session, &GUID_NULL, &var);
+}
+
 static HRESULT WINAPI media_engine_load_handler_Invoke(IMFAsyncCallback *iface, IMFAsyncResult *result)
 {
     struct media_engine *engine = impl_from_load_handler_IMFAsyncCallback(iface);
+    IUnknown *object = NULL, *state;
+    unsigned int start_playback;
     MF_OBJECT_TYPE obj_type;
     IMFMediaSource *source;
-    IUnknown *object = NULL;
     HRESULT hr;
 
     EnterCriticalSection(&engine->cs);
 
+    engine->network_state = MF_MEDIA_ENGINE_NETWORK_LOADING;
     IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_LOADSTART, 0, 0);
 
-    if (FAILED(hr = IMFSourceResolver_EndCreateObjectFromURL(engine->resolver, result, &obj_type, &object)))
-        WARN("Failed to create source object, hr %#x.\n", hr);
+    start_playback = engine->flags & FLAGS_ENGINE_PLAY_PENDING;
+    media_engine_set_flag(engine, FLAGS_ENGINE_SOURCE_PENDING | FLAGS_ENGINE_PLAY_PENDING, FALSE);
+
+    if (SUCCEEDED(IMFAsyncResult_GetState(result, &state)))
+    {
+        hr = IMFSourceResolver_EndCreateObjectFromByteStream(engine->resolver, result, &obj_type, &object);
+        IUnknown_Release(state);
+    }
+    else
+        hr = IMFSourceResolver_EndCreateObjectFromURL(engine->resolver, result, &obj_type, &object);
+
+    if (FAILED(hr))
+        WARN("Failed to create source object, hr %#lx.\n", hr);
 
     if (object)
     {
@@ -721,8 +1287,15 @@ static HRESULT WINAPI media_engine_load_handler_Invoke(IMFAsyncCallback *iface, 
         IUnknown_Release(object);
     }
 
-    if (FAILED(hr))
+    if (SUCCEEDED(hr))
     {
+        engine->network_state = MF_MEDIA_ENGINE_NETWORK_IDLE;
+        if (start_playback)
+            media_engine_start_playback(engine);
+    }
+    else
+    {
+        engine->network_state = MF_MEDIA_ENGINE_NETWORK_NO_SOURCE;
         engine->error_code = MF_MEDIA_ENGINE_ERR_SRC_NOT_SUPPORTED;
         engine->extended_code = hr;
         IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_ERROR, engine->error_code,
@@ -743,29 +1316,39 @@ static const IMFAsyncCallbackVtbl media_engine_load_handler_vtbl =
     media_engine_load_handler_Invoke,
 };
 
-static HRESULT WINAPI media_engine_QueryInterface(IMFMediaEngine *iface, REFIID riid, void **obj)
+static HRESULT WINAPI media_engine_QueryInterface(IMFMediaEngineEx *iface, REFIID riid, void **obj)
 {
-    TRACE("(%p, %s, %p).\n", iface, debugstr_guid(riid), obj);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
 
-    if (IsEqualIID(riid, &IID_IMFMediaEngine) ||
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+
+    if (IsEqualIID(riid, &IID_IMFMediaEngineEx) ||
+        IsEqualIID(riid, &IID_IMFMediaEngine) ||
         IsEqualIID(riid, &IID_IUnknown))
     {
         *obj = iface;
-        IMFMediaEngine_AddRef(iface);
-        return S_OK;
+    }
+    else if (IsEqualIID(riid, &IID_IMFGetService))
+    {
+        *obj = &engine->IMFGetService_iface;
+    }
+    else
+    {
+        WARN("Unsupported interface %s.\n", debugstr_guid(riid));
+        *obj = NULL;
+        return E_NOINTERFACE;
     }
 
-    WARN("Unsupported interface %s.\n", debugstr_guid(riid));
-    *obj = NULL;
-    return E_NOINTERFACE;
+    IUnknown_AddRef((IUnknown *)*obj);
+    return S_OK;
 }
 
-static ULONG WINAPI media_engine_AddRef(IMFMediaEngine *iface)
+static ULONG WINAPI media_engine_AddRef(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     ULONG refcount = InterlockedIncrement(&engine->refcount);
 
-    TRACE("(%p) ref=%u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -774,23 +1357,33 @@ static void free_media_engine(struct media_engine *engine)
 {
     if (engine->callback)
         IMFMediaEngineNotify_Release(engine->callback);
+    if (engine->clock)
+        IMFPresentationClock_Release(engine->clock);
     if (engine->session)
         IMFMediaSession_Release(engine->session);
     if (engine->attributes)
         IMFAttributes_Release(engine->attributes);
     if (engine->resolver)
         IMFSourceResolver_Release(engine->resolver);
+    media_engine_release_video_frame_resources(engine);
+    media_engine_clear_presentation(engine);
+    if (engine->device_manager)
+    {
+        IMFDXGIDeviceManager_CloseDeviceHandle(engine->device_manager, engine->device_handle);
+        IMFDXGIDeviceManager_Release(engine->device_manager);
+    }
     SysFreeString(engine->current_source);
     DeleteCriticalSection(&engine->cs);
-    heap_free(engine);
+    free(engine->video_frame.buffer);
+    free(engine);
 }
 
-static ULONG WINAPI media_engine_Release(IMFMediaEngine *iface)
+static ULONG WINAPI media_engine_Release(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     ULONG refcount = InterlockedDecrement(&engine->refcount);
 
-    TRACE("(%p) ref=%u.\n", iface, refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
         free_media_engine(engine);
@@ -798,9 +1391,9 @@ static ULONG WINAPI media_engine_Release(IMFMediaEngine *iface)
     return refcount;
 }
 
-static HRESULT WINAPI media_engine_GetError(IMFMediaEngine *iface, IMFMediaError **error)
+static HRESULT WINAPI media_engine_GetError(IMFMediaEngineEx *iface, IMFMediaError **error)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     HRESULT hr = S_OK;
 
     TRACE("%p, %p.\n", iface, error);
@@ -823,9 +1416,9 @@ static HRESULT WINAPI media_engine_GetError(IMFMediaEngine *iface, IMFMediaError
     return hr;
 }
 
-static HRESULT WINAPI media_engine_SetErrorCode(IMFMediaEngine *iface, MF_MEDIA_ENGINE_ERR code)
+static HRESULT WINAPI media_engine_SetErrorCode(IMFMediaEngineEx *iface, MF_MEDIA_ENGINE_ERR code)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     HRESULT hr = S_OK;
 
     TRACE("%p, %u.\n", iface, code);
@@ -843,21 +1436,18 @@ static HRESULT WINAPI media_engine_SetErrorCode(IMFMediaEngine *iface, MF_MEDIA_
     return hr;
 }
 
-static HRESULT WINAPI media_engine_SetSourceElements(IMFMediaEngine *iface, IMFMediaEngineSrcElements *elements)
+static HRESULT WINAPI media_engine_SetSourceElements(IMFMediaEngineEx *iface, IMFMediaEngineSrcElements *elements)
 {
     FIXME("(%p, %p): stub.\n", iface, elements);
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI media_engine_SetSource(IMFMediaEngine *iface, BSTR url)
+static HRESULT media_engine_set_source(struct media_engine *engine, IMFByteStream *bytestream, BSTR url)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    IPropertyStore *props = NULL;
+    unsigned int flags;
     HRESULT hr = S_OK;
-
-    TRACE("%p, %s.\n", iface, debugstr_w(url));
-
-    EnterCriticalSection(&engine->cs);
 
     SysFreeString(engine->current_source);
     engine->current_source = NULL;
@@ -868,30 +1458,54 @@ static HRESULT WINAPI media_engine_SetSource(IMFMediaEngine *iface, BSTR url)
 
     IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_PURGEQUEUEDEVENTS, 0, 0);
 
-    if (url)
-    {
-        IPropertyStore *props = NULL;
-        unsigned int flags;
+    engine->network_state = MF_MEDIA_ENGINE_NETWORK_NO_SOURCE;
 
-        flags = MF_RESOLUTION_MEDIASOURCE;
+    if (url || bytestream)
+    {
+        flags = MF_RESOLUTION_MEDIASOURCE | MF_RESOLUTION_CONTENT_DOES_NOT_HAVE_TO_MATCH_EXTENSION_OR_MIME_TYPE;
         if (engine->flags & MF_MEDIA_ENGINE_DISABLE_LOCAL_PLUGINS)
             flags |= MF_RESOLUTION_DISABLE_LOCAL_PLUGINS;
 
         IMFAttributes_GetUnknown(engine->attributes, &MF_MEDIA_ENGINE_SOURCE_RESOLVER_CONFIG_STORE,
                 &IID_IPropertyStore, (void **)&props);
-        hr = IMFSourceResolver_BeginCreateObjectFromURL(engine->resolver, url, flags, props, NULL, &engine->load_handler, NULL);
+        if (bytestream)
+            hr = IMFSourceResolver_BeginCreateObjectFromByteStream(engine->resolver, bytestream, url, flags,
+                    props, NULL, &engine->load_handler, (IUnknown *)bytestream);
+        else
+            hr = IMFSourceResolver_BeginCreateObjectFromURL(engine->resolver, url, flags, props, NULL,
+                    &engine->load_handler, NULL);
+        if (SUCCEEDED(hr))
+            media_engine_set_flag(engine, FLAGS_ENGINE_SOURCE_PENDING, TRUE);
+
         if (props)
             IPropertyStore_Release(props);
     }
+
+    return hr;
+}
+
+static HRESULT WINAPI media_engine_SetSource(IMFMediaEngineEx *iface, BSTR url)
+{
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr;
+
+    TRACE("%p, %s.\n", iface, debugstr_w(url));
+
+    EnterCriticalSection(&engine->cs);
+
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else
+        hr = media_engine_set_source(engine, NULL, url);
 
     LeaveCriticalSection(&engine->cs);
 
     return hr;
 }
 
-static HRESULT WINAPI media_engine_GetCurrentSource(IMFMediaEngine *iface, BSTR *url)
+static HRESULT WINAPI media_engine_GetCurrentSource(IMFMediaEngineEx *iface, BSTR *url)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     HRESULT hr = S_OK;
 
     TRACE("%p, %p.\n", iface, url);
@@ -899,26 +1513,32 @@ static HRESULT WINAPI media_engine_GetCurrentSource(IMFMediaEngine *iface, BSTR 
     *url = NULL;
 
     EnterCriticalSection(&engine->cs);
+
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
     if (engine->current_source)
     {
         if (!(*url = SysAllocString(engine->current_source)))
             hr = E_OUTOFMEMORY;
     }
+
     LeaveCriticalSection(&engine->cs);
 
     return hr;
 }
 
-static USHORT WINAPI media_engine_GetNetworkState(IMFMediaEngine *iface)
+static USHORT WINAPI media_engine_GetNetworkState(IMFMediaEngineEx *iface)
 {
-    FIXME("(%p): stub.\n", iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
 
-    return 0;
+    TRACE("%p.\n", iface);
+
+    return engine->network_state;
 }
 
-static MF_MEDIA_ENGINE_PRELOAD WINAPI media_engine_GetPreload(IMFMediaEngine *iface)
+static MF_MEDIA_ENGINE_PRELOAD WINAPI media_engine_GetPreload(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     MF_MEDIA_ENGINE_PRELOAD preload;
 
     TRACE("%p.\n", iface);
@@ -930,9 +1550,9 @@ static MF_MEDIA_ENGINE_PRELOAD WINAPI media_engine_GetPreload(IMFMediaEngine *if
     return preload;
 }
 
-static HRESULT WINAPI media_engine_SetPreload(IMFMediaEngine *iface, MF_MEDIA_ENGINE_PRELOAD preload)
+static HRESULT WINAPI media_engine_SetPreload(IMFMediaEngineEx *iface, MF_MEDIA_ENGINE_PRELOAD preload)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
 
     TRACE("%p, %d.\n", iface, preload);
 
@@ -943,30 +1563,65 @@ static HRESULT WINAPI media_engine_SetPreload(IMFMediaEngine *iface, MF_MEDIA_EN
     return S_OK;
 }
 
-static HRESULT WINAPI media_engine_GetBuffered(IMFMediaEngine *iface, IMFMediaTimeRange **buffered)
+static HRESULT WINAPI media_engine_GetBuffered(IMFMediaEngineEx *iface, IMFMediaTimeRange **range)
 {
-    FIXME("(%p, %p): stub.\n", iface, buffered);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("%p, %p.\n", iface, range);
+
+    if (FAILED(hr = create_time_range(range)))
+        return hr;
+
+    EnterCriticalSection(&engine->cs);
+
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else if (!isnan(engine->duration))
+        hr = IMFMediaTimeRange_AddRange(*range, 0.0, engine->duration);
+
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
 }
 
-static HRESULT WINAPI media_engine_Load(IMFMediaEngine *iface)
+static HRESULT WINAPI media_engine_Load(IMFMediaEngineEx *iface)
 {
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr = E_NOTIMPL;
+
     FIXME("(%p): stub.\n", iface);
 
-    return E_NOTIMPL;
+    EnterCriticalSection(&engine->cs);
+
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
 }
 
-static HRESULT WINAPI media_engine_CanPlayType(IMFMediaEngine *iface, BSTR type, MF_MEDIA_ENGINE_CANPLAY *answer)
+static HRESULT WINAPI media_engine_CanPlayType(IMFMediaEngineEx *iface, BSTR type, MF_MEDIA_ENGINE_CANPLAY *answer)
 {
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr = E_NOTIMPL;
+
     FIXME("(%p, %s, %p): stub.\n", iface, debugstr_w(type), answer);
 
-    return E_NOTIMPL;
+    EnterCriticalSection(&engine->cs);
+
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
 }
 
-static USHORT WINAPI media_engine_GetReadyState(IMFMediaEngine *iface)
+static USHORT WINAPI media_engine_GetReadyState(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     unsigned short state;
 
     TRACE("%p.\n", iface);
@@ -978,37 +1633,62 @@ static USHORT WINAPI media_engine_GetReadyState(IMFMediaEngine *iface)
     return state;
 }
 
-static BOOL WINAPI media_engine_IsSeeking(IMFMediaEngine *iface)
+static BOOL WINAPI media_engine_IsSeeking(IMFMediaEngineEx *iface)
 {
     FIXME("(%p): stub.\n", iface);
 
     return FALSE;
 }
 
-static double WINAPI media_engine_GetCurrentTime(IMFMediaEngine *iface)
+static double WINAPI media_engine_GetCurrentTime(IMFMediaEngineEx *iface)
 {
-    FIXME("(%p): stub.\n", iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    double ret = 0.0;
+    MFTIME clocktime;
 
-    return 0.0;
+    TRACE("%p.\n", iface);
+
+    EnterCriticalSection(&engine->cs);
+    if (engine->flags & FLAGS_ENGINE_IS_ENDED)
+    {
+        ret = engine->duration;
+    }
+    else if (SUCCEEDED(IMFPresentationClock_GetTime(engine->clock, &clocktime)))
+    {
+        ret = (double)clocktime / 10000000.0;
+    }
+    LeaveCriticalSection(&engine->cs);
+
+    return ret;
 }
 
-static HRESULT WINAPI media_engine_SetCurrentTime(IMFMediaEngine *iface, double time)
+static HRESULT WINAPI media_engine_SetCurrentTime(IMFMediaEngineEx *iface, double time)
 {
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr = E_NOTIMPL;
+
     FIXME("(%p, %f): stub.\n", iface, time);
 
-    return E_NOTIMPL;
+    EnterCriticalSection(&engine->cs);
+
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
 }
 
-static double WINAPI media_engine_GetStartTime(IMFMediaEngine *iface)
+static double WINAPI media_engine_GetStartTime(IMFMediaEngineEx *iface)
 {
     FIXME("(%p): stub.\n", iface);
 
     return 0.0;
 }
 
-static double WINAPI media_engine_GetDuration(IMFMediaEngine *iface)
+static double WINAPI media_engine_GetDuration(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     double value;
 
     TRACE("%p.\n", iface);
@@ -1020,9 +1700,9 @@ static double WINAPI media_engine_GetDuration(IMFMediaEngine *iface)
     return value;
 }
 
-static BOOL WINAPI media_engine_IsPaused(IMFMediaEngine *iface)
+static BOOL WINAPI media_engine_IsPaused(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     BOOL value;
 
     TRACE("%p.\n", iface);
@@ -1034,9 +1714,9 @@ static BOOL WINAPI media_engine_IsPaused(IMFMediaEngine *iface)
     return value;
 }
 
-static double WINAPI media_engine_GetDefaultPlaybackRate(IMFMediaEngine *iface)
+static double WINAPI media_engine_GetDefaultPlaybackRate(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     double rate;
 
     TRACE("%p.\n", iface);
@@ -1048,9 +1728,9 @@ static double WINAPI media_engine_GetDefaultPlaybackRate(IMFMediaEngine *iface)
     return rate;
 }
 
-static HRESULT WINAPI media_engine_SetDefaultPlaybackRate(IMFMediaEngine *iface, double rate)
+static HRESULT WINAPI media_engine_SetDefaultPlaybackRate(IMFMediaEngineEx *iface, double rate)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     HRESULT hr = S_OK;
 
     TRACE("%p, %f.\n", iface, rate);
@@ -1068,9 +1748,9 @@ static HRESULT WINAPI media_engine_SetDefaultPlaybackRate(IMFMediaEngine *iface,
     return hr;
 }
 
-static double WINAPI media_engine_GetPlaybackRate(IMFMediaEngine *iface)
+static double WINAPI media_engine_GetPlaybackRate(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     double rate;
 
     TRACE("%p.\n", iface);
@@ -1082,9 +1762,9 @@ static double WINAPI media_engine_GetPlaybackRate(IMFMediaEngine *iface)
     return rate;
 }
 
-static HRESULT WINAPI media_engine_SetPlaybackRate(IMFMediaEngine *iface, double rate)
+static HRESULT WINAPI media_engine_SetPlaybackRate(IMFMediaEngineEx *iface, double rate)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     HRESULT hr = S_OK;
 
     TRACE("%p, %f.\n", iface, rate);
@@ -1102,30 +1782,57 @@ static HRESULT WINAPI media_engine_SetPlaybackRate(IMFMediaEngine *iface, double
     return hr;
 }
 
-static HRESULT WINAPI media_engine_GetPlayed(IMFMediaEngine *iface, IMFMediaTimeRange **played)
+static HRESULT WINAPI media_engine_GetPlayed(IMFMediaEngineEx *iface, IMFMediaTimeRange **played)
 {
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr = E_NOTIMPL;
+
     FIXME("(%p, %p): stub.\n", iface, played);
 
-    return E_NOTIMPL;
+    EnterCriticalSection(&engine->cs);
+
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
 }
 
-static HRESULT WINAPI media_engine_GetSeekable(IMFMediaEngine *iface, IMFMediaTimeRange **seekable)
+static HRESULT WINAPI media_engine_GetSeekable(IMFMediaEngineEx *iface, IMFMediaTimeRange **seekable)
 {
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr = E_NOTIMPL;
+
     FIXME("(%p, %p): stub.\n", iface, seekable);
 
-    return E_NOTIMPL;
+    EnterCriticalSection(&engine->cs);
+
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
 }
 
-static BOOL WINAPI media_engine_IsEnded(IMFMediaEngine *iface)
+static BOOL WINAPI media_engine_IsEnded(IMFMediaEngineEx *iface)
 {
-    FIXME("(%p): stub.\n", iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    BOOL value;
 
-    return FALSE;
+    TRACE("%p.\n", iface);
+
+    EnterCriticalSection(&engine->cs);
+    value = !!(engine->flags & FLAGS_ENGINE_IS_ENDED);
+    LeaveCriticalSection(&engine->cs);
+
+    return value;
 }
 
-static BOOL WINAPI media_engine_GetAutoPlay(IMFMediaEngine *iface)
+static BOOL WINAPI media_engine_GetAutoPlay(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     BOOL value;
 
     TRACE("%p.\n", iface);
@@ -1137,9 +1844,9 @@ static BOOL WINAPI media_engine_GetAutoPlay(IMFMediaEngine *iface)
     return value;
 }
 
-static HRESULT WINAPI media_engine_SetAutoPlay(IMFMediaEngine *iface, BOOL autoplay)
+static HRESULT WINAPI media_engine_SetAutoPlay(IMFMediaEngineEx *iface, BOOL autoplay)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
 
     FIXME("(%p, %d): stub.\n", iface, autoplay);
 
@@ -1150,9 +1857,9 @@ static HRESULT WINAPI media_engine_SetAutoPlay(IMFMediaEngine *iface, BOOL autop
     return S_OK;
 }
 
-static BOOL WINAPI media_engine_GetLoop(IMFMediaEngine *iface)
+static BOOL WINAPI media_engine_GetLoop(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     BOOL value;
 
     TRACE("%p.\n", iface);
@@ -1164,9 +1871,9 @@ static BOOL WINAPI media_engine_GetLoop(IMFMediaEngine *iface)
     return value;
 }
 
-static HRESULT WINAPI media_engine_SetLoop(IMFMediaEngine *iface, BOOL loop)
+static HRESULT WINAPI media_engine_SetLoop(IMFMediaEngineEx *iface, BOOL loop)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
 
     FIXME("(%p, %d): stub.\n", iface, loop);
 
@@ -1177,62 +1884,75 @@ static HRESULT WINAPI media_engine_SetLoop(IMFMediaEngine *iface, BOOL loop)
     return S_OK;
 }
 
-static HRESULT WINAPI media_engine_Play(IMFMediaEngine *iface)
+static HRESULT WINAPI media_engine_Play(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
-    PROPVARIANT var;
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr = S_OK;
 
     TRACE("%p.\n", iface);
 
     EnterCriticalSection(&engine->cs);
 
-    IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_PURGEQUEUEDEVENTS, 0, 0);
-
-    if (!(engine->flags & FLAGS_ENGINE_WAITING))
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else
     {
-        engine->flags &= ~FLAGS_ENGINE_PAUSED;
-        IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_PLAY, 0, 0);
+        IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_PURGEQUEUEDEVENTS, 0, 0);
 
-        var.vt = VT_EMPTY;
-        IMFMediaSession_Start(engine->session, &GUID_NULL, &var);
+        if (!(engine->flags & FLAGS_ENGINE_WAITING))
+        {
+            media_engine_set_flag(engine, FLAGS_ENGINE_PAUSED | FLAGS_ENGINE_IS_ENDED, FALSE);
+            IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_PLAY, 0, 0);
 
-        engine->flags |= FLAGS_ENGINE_WAITING;
+            if (!(engine->flags & FLAGS_ENGINE_SOURCE_PENDING))
+                media_engine_start_playback(engine);
+            else
+                media_engine_set_flag(engine, FLAGS_ENGINE_PLAY_PENDING, TRUE);
+
+            media_engine_set_flag(engine, FLAGS_ENGINE_WAITING, TRUE);
+        }
+
+        IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_WAITING, 0, 0);
     }
-
-    IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_WAITING, 0, 0);
 
     LeaveCriticalSection(&engine->cs);
 
-    return S_OK;
+    return hr;
 }
 
-static HRESULT WINAPI media_engine_Pause(IMFMediaEngine *iface)
+static HRESULT WINAPI media_engine_Pause(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr = S_OK;
 
     TRACE("%p.\n", iface);
 
     EnterCriticalSection(&engine->cs);
 
-    if (!(engine->flags & FLAGS_ENGINE_PAUSED))
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else
     {
-        engine->flags &= ~FLAGS_ENGINE_WAITING;
-        engine->flags |= FLAGS_ENGINE_PAUSED;
+        if (!(engine->flags & FLAGS_ENGINE_PAUSED))
+        {
+            media_engine_set_flag(engine, FLAGS_ENGINE_WAITING | FLAGS_ENGINE_IS_ENDED, FALSE);
+            media_engine_set_flag(engine, FLAGS_ENGINE_PAUSED, TRUE);
 
-        IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_TIMEUPDATE, 0, 0);
-        IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_PAUSE, 0, 0);
+            IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_TIMEUPDATE, 0, 0);
+            IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_PAUSE, 0, 0);
+        }
+
+        IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_PURGEQUEUEDEVENTS, 0, 0);
     }
-
-    IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_PURGEQUEUEDEVENTS, 0, 0);
 
     LeaveCriticalSection(&engine->cs);
 
-    return S_OK;
+    return hr;
 }
 
-static BOOL WINAPI media_engine_GetMuted(IMFMediaEngine *iface)
+static BOOL WINAPI media_engine_GetMuted(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     BOOL ret;
 
     TRACE("%p.\n", iface);
@@ -1244,9 +1964,9 @@ static BOOL WINAPI media_engine_GetMuted(IMFMediaEngine *iface)
     return ret;
 }
 
-static HRESULT WINAPI media_engine_SetMuted(IMFMediaEngine *iface, BOOL muted)
+static HRESULT WINAPI media_engine_SetMuted(IMFMediaEngineEx *iface, BOOL muted)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     HRESULT hr = S_OK;
 
     TRACE("%p, %d.\n", iface, muted);
@@ -1264,9 +1984,9 @@ static HRESULT WINAPI media_engine_SetMuted(IMFMediaEngine *iface, BOOL muted)
     return hr;
 }
 
-static double WINAPI media_engine_GetVolume(IMFMediaEngine *iface)
+static double WINAPI media_engine_GetVolume(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     double volume;
 
     TRACE("%p.\n", iface);
@@ -1278,9 +1998,9 @@ static double WINAPI media_engine_GetVolume(IMFMediaEngine *iface)
     return volume;
 }
 
-static HRESULT WINAPI media_engine_SetVolume(IMFMediaEngine *iface, double volume)
+static HRESULT WINAPI media_engine_SetVolume(IMFMediaEngineEx *iface, double volume)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     HRESULT hr = S_OK;
 
     TRACE("%p, %f.\n", iface, volume);
@@ -1298,9 +2018,9 @@ static HRESULT WINAPI media_engine_SetVolume(IMFMediaEngine *iface, double volum
     return hr;
 }
 
-static BOOL WINAPI media_engine_HasVideo(IMFMediaEngine *iface)
+static BOOL WINAPI media_engine_HasVideo(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     BOOL value;
 
     TRACE("%p.\n", iface);
@@ -1312,9 +2032,9 @@ static BOOL WINAPI media_engine_HasVideo(IMFMediaEngine *iface)
     return value;
 }
 
-static BOOL WINAPI media_engine_HasAudio(IMFMediaEngine *iface)
+static BOOL WINAPI media_engine_HasAudio(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     BOOL value;
 
     TRACE("%p.\n", iface);
@@ -1326,9 +2046,9 @@ static BOOL WINAPI media_engine_HasAudio(IMFMediaEngine *iface)
     return value;
 }
 
-static HRESULT WINAPI media_engine_GetNativeVideoSize(IMFMediaEngine *iface, DWORD *cx, DWORD *cy)
+static HRESULT WINAPI media_engine_GetNativeVideoSize(IMFMediaEngineEx *iface, DWORD *cx, DWORD *cy)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     HRESULT hr = S_OK;
 
     TRACE("%p, %p, %p.\n", iface, cx, cy);
@@ -1353,9 +2073,9 @@ static HRESULT WINAPI media_engine_GetNativeVideoSize(IMFMediaEngine *iface, DWO
     return hr;
 }
 
-static HRESULT WINAPI media_engine_GetVideoAspectRatio(IMFMediaEngine *iface, DWORD *cx, DWORD *cy)
+static HRESULT WINAPI media_engine_GetVideoAspectRatio(IMFMediaEngineEx *iface, DWORD *cx, DWORD *cy)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     HRESULT hr = S_OK;
 
     TRACE("%p, %p, %p.\n", iface, cx, cy);
@@ -1380,9 +2100,9 @@ static HRESULT WINAPI media_engine_GetVideoAspectRatio(IMFMediaEngine *iface, DW
     return hr;
 }
 
-static HRESULT WINAPI media_engine_Shutdown(IMFMediaEngine *iface)
+static HRESULT WINAPI media_engine_Shutdown(IMFMediaEngineEx *iface)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     HRESULT hr = S_OK;
 
     FIXME("(%p): stub.\n", iface);
@@ -1392,7 +2112,8 @@ static HRESULT WINAPI media_engine_Shutdown(IMFMediaEngine *iface)
         hr = MF_E_SHUTDOWN;
     else
     {
-        engine->flags |= FLAGS_ENGINE_SHUT_DOWN;
+        media_engine_set_flag(engine, FLAGS_ENGINE_SHUT_DOWN, TRUE);
+        media_engine_clear_presentation(engine);
         IMFMediaSession_Shutdown(engine->session);
     }
     LeaveCriticalSection(&engine->cs);
@@ -1400,18 +2121,259 @@ static HRESULT WINAPI media_engine_Shutdown(IMFMediaEngine *iface)
     return hr;
 }
 
-static HRESULT WINAPI media_engine_TransferVideoFrame(IMFMediaEngine *iface, IUnknown *surface,
-                                                      const MFVideoNormalizedRect *src,
-                                                      const RECT *dst, const MFARGB *color)
+static void set_rect(struct rect *rect, float left, float top, float right, float bottom)
 {
-    FIXME("(%p, %p, %p, %p, %p): stub.\n", iface, surface, src, dst, color);
-
-    return E_NOTIMPL;
+    rect->left = left;
+    rect->top = top;
+    rect->right = right;
+    rect->bottom = bottom;
 }
 
-static HRESULT WINAPI media_engine_OnVideoStreamTick(IMFMediaEngine *iface, LONGLONG *pts)
+static void media_engine_adjust_destination_for_ratio(const struct media_engine *engine,
+        struct rect *src_n, struct rect *dst)
 {
-    struct media_engine *engine = impl_from_IMFMediaEngine(iface);
+    float dst_width = dst->right - dst->left, dst_height = dst->bottom - dst->top;
+    D3D11_TEXTURE2D_DESC source_desc;
+    float src_width, src_height;
+    struct rect src;
+
+    ID3D11Texture2D_GetDesc(engine->video_frame.d3d11.source, &source_desc);
+    set_rect(&src, src_n->left * source_desc.Width, src_n->top * source_desc.Height,
+            src_n->right * source_desc.Width, src_n->bottom * source_desc.Height);
+
+    src_width = src.right - src.left;
+    src_height = src.bottom - src.top;
+
+    if (src_width * dst_height > dst_width * src_height)
+    {
+        /* src is "wider" than dst. */
+        float dst_center = (dst->top + dst->bottom) / 2.0f;
+        float scaled_height = src_height * dst_width / src_width;
+
+        dst->top = dst_center - scaled_height / 2.0f;
+        dst->bottom = dst->top + scaled_height;
+    }
+    else if (src_width * dst_height < dst_width * src_height)
+    {
+        /* src is "taller" than dst. */
+        float dst_center = (dst->left + dst->right) / 2.0f;
+        float scaled_width = src_width * dst_height / src_height;
+
+        dst->left = dst_center - scaled_width / 2.0f;
+        dst->right = dst->left + scaled_width;
+    }
+}
+
+static void media_engine_update_d3d11_frame_surface(ID3D11DeviceContext *context, struct media_engine *engine)
+{
+    D3D11_TEXTURE2D_DESC surface_desc;
+
+    if (!(engine->flags & FLAGS_ENGINE_NEW_FRAME))
+        return;
+
+    ID3D11Texture2D_GetDesc(engine->video_frame.d3d11.source, &surface_desc);
+
+    switch (surface_desc.Format)
+    {
+    case DXGI_FORMAT_B8G8R8A8_UNORM:
+    case DXGI_FORMAT_B8G8R8X8_UNORM:
+        surface_desc.Width *= 4;
+        break;
+    default:
+        FIXME("Unsupported format %#x.\n", surface_desc.Format);
+        surface_desc.Width = 0;
+    }
+
+    if (engine->video_frame.buffer_size == surface_desc.Width * surface_desc.Height)
+    {
+        ID3D11DeviceContext_UpdateSubresource(context, (ID3D11Resource *)engine->video_frame.d3d11.source,
+                0, NULL, engine->video_frame.buffer, surface_desc.Width, 0);
+    }
+
+    media_engine_set_flag(engine, FLAGS_ENGINE_NEW_FRAME, FALSE);
+}
+
+static HRESULT media_engine_transfer_to_d3d11_texture(struct media_engine *engine, ID3D11Texture2D *texture,
+        const MFVideoNormalizedRect *src_rect, const RECT *dst_rect, const MFARGB *color)
+{
+    static const float black[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    ID3D11Device *device, *dst_device;
+    ID3D11DeviceContext *context;
+    ID3D11RenderTargetView *rtv;
+    unsigned int stride, offset;
+    D3D11_TEXTURE2D_DESC desc;
+    BOOL device_mismatch;
+    struct vec3 quad[4];
+    D3D11_VIEWPORT vp;
+    struct rect src, dst;
+    struct color backcolor;
+    HRESULT hr;
+    RECT rect;
+
+    if (FAILED(hr = media_engine_lock_d3d_device(engine, &device)))
+        return hr;
+
+    if (FAILED(hr = media_engine_create_d3d11_video_frame_resources(engine, device)))
+    {
+        WARN("Failed to create d3d resources, hr %#lx.\n", hr);
+        goto done;
+    }
+
+    ID3D11Texture2D_GetDevice(texture, &dst_device);
+    device_mismatch = device != dst_device;
+    ID3D11Device_Release(dst_device);
+
+    if (device_mismatch)
+    {
+        WARN("Destination target from different device.\n");
+        hr = E_UNEXPECTED;
+        goto done;
+    }
+
+    ID3D11Texture2D_GetDesc(texture, &desc);
+
+    if (FAILED(hr = ID3D11Device_CreateRenderTargetView(device, (ID3D11Resource *)texture, NULL, &rtv)))
+    {
+        WARN("Failed to create an rtv, hr %#lx.\n", hr);
+        goto done;
+    }
+
+    ID3D11Device_GetImmediateContext(device, &context);
+
+    /* Whole destination is cleared, regardless of specified rectangle. */
+    ID3D11DeviceContext_ClearRenderTargetView(context, rtv, black);
+
+    if (dst_rect)
+    {
+        rect.left = max(0, dst_rect->left);
+        rect.top = max(0, dst_rect->top);
+        rect.right = min(desc.Width, dst_rect->right);
+        rect.bottom = min(desc.Height, dst_rect->bottom);
+
+        quad[0].x = 2.0f * rect.left / desc.Width - 1.0f;
+        quad[0].y = -2.0f * rect.bottom / desc.Height + 1.0f;
+        quad[0].z = 0.0f;
+
+        quad[1].x = quad[0].x;
+        quad[1].y = -2.0f * rect.top / desc.Height + 1.0f;
+        quad[1].z = 0.0f;
+
+        quad[2].x = 2.0f * rect.right / desc.Width - 1.0f;
+        quad[2].y = quad[0].y;
+        quad[2].z = 0.0f;
+
+        quad[3].x = quad[2].x;
+        quad[3].y = quad[1].y;
+        quad[3].z = 0.0f;
+
+        set_rect(&dst, dst_rect->left, dst_rect->top, dst_rect->right, dst_rect->bottom);
+    }
+    else
+    {
+        memcpy(quad, fullquad, sizeof(quad));
+        set_rect(&dst, 0.0f, 0.0f, desc.Width, desc.Height);
+    }
+
+    if (src_rect)
+        memcpy(&src, src_rect, sizeof(src));
+    else
+        set_rect(&src, 0.0f, 0.0f, 1.0f, 1.0f);
+
+    media_engine_adjust_destination_for_ratio(engine, &src, &dst);
+
+    if (memcmp(quad, engine->video_frame.d3d11.quad, sizeof(quad)))
+    {
+        memcpy(engine->video_frame.d3d11.quad, quad, sizeof(quad));
+        ID3D11DeviceContext_UpdateSubresource(context, (ID3D11Resource *)engine->video_frame.d3d11.vb, 0, NULL, quad, 0, 0);
+    }
+
+    if (color)
+    {
+        backcolor.r = color->rgbRed / 255.0f;
+        backcolor.g = color->rgbGreen / 255.0f;
+        backcolor.b = color->rgbBlue / 255.0f;
+        backcolor.a = color->rgbAlpha / 255.0f;
+    }
+    else
+        memcpy(&backcolor, black, sizeof(backcolor));
+
+    if (memcmp(&dst, &engine->video_frame.d3d11.cb.dst, sizeof(dst)) ||
+            memcmp(&src, &engine->video_frame.d3d11.cb.src, sizeof(src)) ||
+            memcmp(&backcolor, &engine->video_frame.d3d11.cb.backcolor, sizeof(backcolor)))
+    {
+        memcpy(&engine->video_frame.d3d11.cb.dst, &dst, sizeof(dst));
+        memcpy(&engine->video_frame.d3d11.cb.src, &src, sizeof(src));
+        memcpy(&engine->video_frame.d3d11.cb.backcolor, &backcolor, sizeof(backcolor));
+
+        ID3D11DeviceContext_UpdateSubresource(context, (ID3D11Resource *)engine->video_frame.d3d11.ps_cb, 0, NULL,
+                &engine->video_frame.d3d11.cb, 0, 0);
+    }
+
+    /* Update with new frame contents */
+    media_engine_update_d3d11_frame_surface(context, engine);
+
+    vp.TopLeftX = 0.0f;
+    vp.TopLeftY = 0.0f;
+    vp.Width = desc.Width;
+    vp.Height = desc.Height;
+    vp.MinDepth = 0.0f;
+    vp.MaxDepth = 1.0f;
+    ID3D11DeviceContext_RSSetViewports(context, 1, &vp);
+
+    ID3D11DeviceContext_IASetInputLayout(context, engine->video_frame.d3d11.input_layout);
+    ID3D11DeviceContext_IASetPrimitiveTopology(context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    stride = sizeof(*quad);
+    offset = 0;
+    ID3D11DeviceContext_IASetVertexBuffers(context, 0, 1, &engine->video_frame.d3d11.vb, &stride, &offset);
+    ID3D11DeviceContext_VSSetShader(context, engine->video_frame.d3d11.vs, NULL, 0);
+    ID3D11DeviceContext_PSSetShader(context, engine->video_frame.d3d11.ps, NULL, 0);
+    ID3D11DeviceContext_PSSetShaderResources(context, 0, 1, &engine->video_frame.d3d11.srv);
+    ID3D11DeviceContext_PSSetConstantBuffers(context, 0, 1, &engine->video_frame.d3d11.ps_cb);
+    ID3D11DeviceContext_PSSetSamplers(context, 0, 1, &engine->video_frame.d3d11.sampler);
+    ID3D11DeviceContext_OMSetRenderTargets(context, 1, &rtv, NULL);
+
+    ID3D11DeviceContext_Draw(context, 4, 0);
+
+    ID3D11RenderTargetView_Release(rtv);
+    ID3D11DeviceContext_Release(context);
+
+done:
+    media_engine_unlock_d3d_device(engine, device);
+
+    return hr;
+}
+
+static HRESULT WINAPI media_engine_TransferVideoFrame(IMFMediaEngineEx *iface, IUnknown *surface,
+        const MFVideoNormalizedRect *src_rect, const RECT *dst_rect, const MFARGB *color)
+{
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    ID3D11Texture2D *texture;
+    HRESULT hr = E_NOINTERFACE;
+
+    TRACE("%p, %p, %s, %s, %p.\n", iface, surface, src_rect ? wine_dbg_sprintf("(%f,%f)-(%f,%f)",
+            src_rect->left, src_rect->top, src_rect->right, src_rect->bottom) : "(null)",
+            wine_dbgstr_rect(dst_rect), color);
+
+    EnterCriticalSection(&engine->cs);
+
+    if (SUCCEEDED(IUnknown_QueryInterface(surface, &IID_ID3D11Texture2D, (void **)&texture)))
+    {
+        hr = media_engine_transfer_to_d3d11_texture(engine, texture, src_rect, dst_rect, color);
+        ID3D11Texture2D_Release(texture);
+    }
+    else
+    {
+        FIXME("Unsupported destination type.\n");
+    }
+
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
+}
+
+static HRESULT WINAPI media_engine_OnVideoStreamTick(IMFMediaEngineEx *iface, LONGLONG *pts)
+{
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     HRESULT hr;
 
     TRACE("%p, %p.\n", iface, pts);
@@ -1433,7 +2395,390 @@ static HRESULT WINAPI media_engine_OnVideoStreamTick(IMFMediaEngine *iface, LONG
     return hr;
 }
 
-static const IMFMediaEngineVtbl media_engine_vtbl =
+static HRESULT WINAPI media_engine_SetSourceFromByteStream(IMFMediaEngineEx *iface, IMFByteStream *bytestream, BSTR url)
+{
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr;
+
+    TRACE("%p, %p, %s.\n", iface, bytestream, debugstr_w(url));
+
+    EnterCriticalSection(&engine->cs);
+
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else if (!bytestream || !url)
+        hr = E_POINTER;
+    else
+        hr = media_engine_set_source(engine, bytestream, url);
+
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
+}
+
+static HRESULT WINAPI media_engine_GetStatistics(IMFMediaEngineEx *iface, MF_MEDIA_ENGINE_STATISTIC stat_id, PROPVARIANT *stat)
+{
+    FIXME("%p, %x, %p stub.\n", iface, stat_id, stat);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_UpdateVideoStream(IMFMediaEngineEx *iface, const MFVideoNormalizedRect *src,
+        const RECT *dst, const MFARGB *border_color)
+{
+    FIXME("%p, %p, %p, %p stub.\n", iface, src, dst, border_color);
+
+    return E_NOTIMPL;
+}
+
+static double WINAPI media_engine_GetBalance(IMFMediaEngineEx *iface)
+{
+    FIXME("%p stub.\n", iface);
+
+    return 0.0;
+}
+
+static HRESULT WINAPI media_engine_SetBalance(IMFMediaEngineEx *iface, double balance)
+{
+    FIXME("%p, %f stub.\n", iface, balance);
+
+    return E_NOTIMPL;
+}
+
+static BOOL WINAPI media_engine_IsPlaybackRateSupported(IMFMediaEngineEx *iface, double rate)
+{
+    FIXME("%p, %f stub.\n", iface, rate);
+
+    return FALSE;
+}
+
+static HRESULT WINAPI media_engine_FrameStep(IMFMediaEngineEx *iface, BOOL forward)
+{
+    FIXME("%p, %d stub.\n", iface, forward);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_GetResourceCharacteristics(IMFMediaEngineEx *iface, DWORD *flags)
+{
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr = E_FAIL;
+
+    TRACE("%p, %p.\n", iface, flags);
+
+    EnterCriticalSection(&engine->cs);
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else if (engine->presentation.source)
+        hr = IMFMediaSource_GetCharacteristics(engine->presentation.source, flags);
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
+}
+
+static HRESULT WINAPI media_engine_GetPresentationAttribute(IMFMediaEngineEx *iface, REFGUID attribute,
+        PROPVARIANT *value)
+{
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr = E_FAIL;
+
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(attribute), value);
+
+    EnterCriticalSection(&engine->cs);
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else if (engine->presentation.pd)
+        hr = IMFPresentationDescriptor_GetItem(engine->presentation.pd, attribute, value);
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
+}
+
+static HRESULT WINAPI media_engine_GetNumberOfStreams(IMFMediaEngineEx *iface, DWORD *stream_count)
+{
+    FIXME("%p, %p stub.\n", iface, stream_count);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_GetStreamAttribute(IMFMediaEngineEx *iface, DWORD stream_index, REFGUID attribute,
+        PROPVARIANT *value)
+{
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    IMFStreamDescriptor *sd;
+    HRESULT hr = E_FAIL;
+    BOOL selected;
+
+    TRACE("%p, %ld, %s, %p.\n", iface, stream_index, debugstr_guid(attribute), value);
+
+    EnterCriticalSection(&engine->cs);
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else if (engine->presentation.pd)
+    {
+        if (SUCCEEDED(hr = IMFPresentationDescriptor_GetStreamDescriptorByIndex(engine->presentation.pd,
+                stream_index, &selected, &sd)))
+        {
+            hr = IMFStreamDescriptor_GetItem(sd, attribute, value);
+            IMFStreamDescriptor_Release(sd);
+        }
+    }
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
+}
+
+static HRESULT WINAPI media_engine_GetStreamSelection(IMFMediaEngineEx *iface, DWORD stream_index, BOOL *enabled)
+{
+    FIXME("%p, %ld, %p stub.\n", iface, stream_index, enabled);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_SetStreamSelection(IMFMediaEngineEx *iface, DWORD stream_index, BOOL enabled)
+{
+    FIXME("%p, %ld, %d stub.\n", iface, stream_index, enabled);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_ApplyStreamSelections(IMFMediaEngineEx *iface)
+{
+    FIXME("%p stub.\n", iface);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_IsProtected(IMFMediaEngineEx *iface, BOOL *protected)
+{
+    FIXME("%p, %p stub.\n", iface, protected);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_InsertVideoEffect(IMFMediaEngineEx *iface, IUnknown *effect, BOOL is_optional)
+{
+    FIXME("%p, %p, %d stub.\n", iface, effect, is_optional);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_InsertAudioEffect(IMFMediaEngineEx *iface, IUnknown *effect, BOOL is_optional)
+{
+    FIXME("%p, %p, %d stub.\n", iface, effect, is_optional);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_RemoveAllEffects(IMFMediaEngineEx *iface)
+{
+    FIXME("%p stub.\n", iface);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_SetTimelineMarkerTimer(IMFMediaEngineEx *iface, double timeout)
+{
+    FIXME("%p, %f stub.\n", iface, timeout);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_GetTimelineMarkerTimer(IMFMediaEngineEx *iface, double *timeout)
+{
+    FIXME("%p, %p stub.\n", iface, timeout);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_CancelTimelineMarkerTimer(IMFMediaEngineEx *iface)
+{
+    FIXME("%p stub.\n", iface);
+
+    return E_NOTIMPL;
+}
+
+static BOOL WINAPI media_engine_IsStereo3D(IMFMediaEngineEx *iface)
+{
+    FIXME("%p stub.\n", iface);
+
+    return FALSE;
+}
+
+static HRESULT WINAPI media_engine_GetStereo3DFramePackingMode(IMFMediaEngineEx *iface, MF_MEDIA_ENGINE_S3D_PACKING_MODE *mode)
+{
+    FIXME("%p, %p stub.\n", iface, mode);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_SetStereo3DFramePackingMode(IMFMediaEngineEx *iface, MF_MEDIA_ENGINE_S3D_PACKING_MODE mode)
+{
+    FIXME("%p, %#x stub.\n", iface, mode);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_GetStereo3DRenderMode(IMFMediaEngineEx *iface, MF3DVideoOutputType *output_type)
+{
+    FIXME("%p, %p stub.\n", iface, output_type);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_SetStereo3DRenderMode(IMFMediaEngineEx *iface, MF3DVideoOutputType output_type)
+{
+    FIXME("%p, %#x stub.\n", iface, output_type);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_EnableWindowlessSwapchainMode(IMFMediaEngineEx *iface, BOOL enable)
+{
+    FIXME("%p, %d stub.\n", iface, enable);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_GetVideoSwapchainHandle(IMFMediaEngineEx *iface, HANDLE *swapchain)
+{
+    FIXME("%p, %p stub.\n", iface, swapchain);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_EnableHorizontalMirrorMode(IMFMediaEngineEx *iface, BOOL enable)
+{
+    FIXME("%p, %d stub.\n", iface, enable);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_GetAudioStreamCategory(IMFMediaEngineEx *iface, UINT32 *category)
+{
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr;
+
+    TRACE("%p, %p.\n", iface, category);
+
+    EnterCriticalSection(&engine->cs);
+
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else
+        hr = IMFAttributes_GetUINT32(engine->attributes, &MF_MEDIA_ENGINE_AUDIO_CATEGORY, category);
+
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
+}
+
+static HRESULT WINAPI media_engine_SetAudioStreamCategory(IMFMediaEngineEx *iface, UINT32 category)
+{
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr;
+
+    TRACE("%p, %u.\n", iface, category);
+
+    EnterCriticalSection(&engine->cs);
+
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else
+        hr = IMFAttributes_SetUINT32(engine->attributes, &MF_MEDIA_ENGINE_AUDIO_CATEGORY, category);
+
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
+}
+
+static HRESULT WINAPI media_engine_GetAudioEndpointRole(IMFMediaEngineEx *iface, UINT32 *role)
+{
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr;
+
+    TRACE("%p, %p.\n", iface, role);
+
+    EnterCriticalSection(&engine->cs);
+
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else
+        hr = IMFAttributes_GetUINT32(engine->attributes, &MF_MEDIA_ENGINE_AUDIO_ENDPOINT_ROLE, role);
+
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
+}
+
+static HRESULT WINAPI media_engine_SetAudioEndpointRole(IMFMediaEngineEx *iface, UINT32 role)
+{
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr;
+
+    TRACE("%p, %u.\n", iface, role);
+
+    EnterCriticalSection(&engine->cs);
+
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else
+        hr = IMFAttributes_SetUINT32(engine->attributes, &MF_MEDIA_ENGINE_AUDIO_ENDPOINT_ROLE, role);
+
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
+}
+
+static HRESULT WINAPI media_engine_GetRealTimeMode(IMFMediaEngineEx *iface, BOOL *enabled)
+{
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr = S_OK;
+
+    TRACE("%p, %p.\n", iface, enabled);
+
+    EnterCriticalSection(&engine->cs);
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else
+        *enabled = !!(engine->flags & MF_MEDIA_ENGINE_REAL_TIME_MODE);
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
+}
+
+static HRESULT WINAPI media_engine_SetRealTimeMode(IMFMediaEngineEx *iface, BOOL enable)
+{
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr = S_OK;
+
+    TRACE("%p, %d.\n", iface, enable);
+
+    EnterCriticalSection(&engine->cs);
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else
+        media_engine_set_flag(engine, MF_MEDIA_ENGINE_REAL_TIME_MODE, enable);
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
+}
+
+static HRESULT WINAPI media_engine_SetCurrentTimeEx(IMFMediaEngineEx *iface, double seektime, MF_MEDIA_ENGINE_SEEK_MODE mode)
+{
+    FIXME("%p, %f, %#x stub.\n", iface, seektime, mode);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI media_engine_EnableTimeUpdateTimer(IMFMediaEngineEx *iface, BOOL enable)
+{
+    FIXME("%p, %d stub.\n", iface, enable);
+
+    return E_NOTIMPL;
+}
+
+static const IMFMediaEngineExVtbl media_engine_vtbl =
 {
     media_engine_QueryInterface,
     media_engine_AddRef,
@@ -1480,6 +2825,77 @@ static const IMFMediaEngineVtbl media_engine_vtbl =
     media_engine_Shutdown,
     media_engine_TransferVideoFrame,
     media_engine_OnVideoStreamTick,
+    media_engine_SetSourceFromByteStream,
+    media_engine_GetStatistics,
+    media_engine_UpdateVideoStream,
+    media_engine_GetBalance,
+    media_engine_SetBalance,
+    media_engine_IsPlaybackRateSupported,
+    media_engine_FrameStep,
+    media_engine_GetResourceCharacteristics,
+    media_engine_GetPresentationAttribute,
+    media_engine_GetNumberOfStreams,
+    media_engine_GetStreamAttribute,
+    media_engine_GetStreamSelection,
+    media_engine_SetStreamSelection,
+    media_engine_ApplyStreamSelections,
+    media_engine_IsProtected,
+    media_engine_InsertVideoEffect,
+    media_engine_InsertAudioEffect,
+    media_engine_RemoveAllEffects,
+    media_engine_SetTimelineMarkerTimer,
+    media_engine_GetTimelineMarkerTimer,
+    media_engine_CancelTimelineMarkerTimer,
+    media_engine_IsStereo3D,
+    media_engine_GetStereo3DFramePackingMode,
+    media_engine_SetStereo3DFramePackingMode,
+    media_engine_GetStereo3DRenderMode,
+    media_engine_SetStereo3DRenderMode,
+    media_engine_EnableWindowlessSwapchainMode,
+    media_engine_GetVideoSwapchainHandle,
+    media_engine_EnableHorizontalMirrorMode,
+    media_engine_GetAudioStreamCategory,
+    media_engine_SetAudioStreamCategory,
+    media_engine_GetAudioEndpointRole,
+    media_engine_SetAudioEndpointRole,
+    media_engine_GetRealTimeMode,
+    media_engine_SetRealTimeMode,
+    media_engine_SetCurrentTimeEx,
+    media_engine_EnableTimeUpdateTimer,
+};
+
+static HRESULT WINAPI media_engine_gs_QueryInterface(IMFGetService *iface, REFIID riid, void **obj)
+{
+    struct media_engine *engine = impl_from_IMFGetService(iface);
+    return IMFMediaEngineEx_QueryInterface(&engine->IMFMediaEngineEx_iface, riid, obj);
+}
+
+static ULONG WINAPI media_engine_gs_AddRef(IMFGetService *iface)
+{
+    struct media_engine *engine = impl_from_IMFGetService(iface);
+    return IMFMediaEngineEx_AddRef(&engine->IMFMediaEngineEx_iface);
+}
+
+static ULONG WINAPI media_engine_gs_Release(IMFGetService *iface)
+{
+    struct media_engine *engine = impl_from_IMFGetService(iface);
+    return IMFMediaEngineEx_Release(&engine->IMFMediaEngineEx_iface);
+}
+
+static HRESULT WINAPI media_engine_gs_GetService(IMFGetService *iface, REFGUID service,
+        REFIID riid, void **object)
+{
+    FIXME("%p, %s, %s, %p stub.\n", iface, debugstr_guid(service), debugstr_guid(riid), object);
+
+    return E_NOTIMPL;
+}
+
+static const IMFGetServiceVtbl media_engine_get_service_vtbl =
+{
+    media_engine_gs_QueryInterface,
+    media_engine_gs_AddRef,
+    media_engine_gs_Release,
+    media_engine_gs_GetService,
 };
 
 static HRESULT WINAPI media_engine_grabber_callback_QueryInterface(IMFSampleGrabberSinkCallback *iface,
@@ -1500,13 +2916,13 @@ static HRESULT WINAPI media_engine_grabber_callback_QueryInterface(IMFSampleGrab
 static ULONG WINAPI media_engine_grabber_callback_AddRef(IMFSampleGrabberSinkCallback *iface)
 {
     struct media_engine *engine = impl_from_IMFSampleGrabberSinkCallback(iface);
-    return IMFMediaEngine_AddRef(&engine->IMFMediaEngine_iface);
+    return IMFMediaEngineEx_AddRef(&engine->IMFMediaEngineEx_iface);
 }
 
 static ULONG WINAPI media_engine_grabber_callback_Release(IMFSampleGrabberSinkCallback *iface)
 {
     struct media_engine *engine = impl_from_IMFSampleGrabberSinkCallback(iface);
-    return IMFMediaEngine_Release(&engine->IMFMediaEngine_iface);
+    return IMFMediaEngineEx_Release(&engine->IMFMediaEngineEx_iface);
 }
 
 static HRESULT WINAPI media_engine_grabber_callback_OnClockStart(IMFSampleGrabberSinkCallback *iface,
@@ -1554,7 +2970,7 @@ static HRESULT WINAPI media_engine_grabber_callback_OnSetPresentationClock(IMFSa
 
 static HRESULT WINAPI media_engine_grabber_callback_OnProcessSample(IMFSampleGrabberSinkCallback *iface,
         REFGUID major_type, DWORD sample_flags, LONGLONG sample_time, LONGLONG sample_duration,
-        const BYTE *buffer, DWORD sample_size)
+        const BYTE *buffer, DWORD buffer_size)
 {
     struct media_engine *engine = impl_from_IMFSampleGrabberSinkCallback(iface);
 
@@ -1563,9 +2979,20 @@ static HRESULT WINAPI media_engine_grabber_callback_OnProcessSample(IMFSampleGra
     if (!(engine->flags & FLAGS_ENGINE_FIRST_FRAME))
     {
         IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_FIRSTFRAMEREADY, 0, 0);
-        engine->flags |= FLAGS_ENGINE_FIRST_FRAME;
+        media_engine_set_flag(engine, FLAGS_ENGINE_FIRST_FRAME, TRUE);
     }
     engine->video_frame.pts = sample_time;
+    if (engine->video_frame.buffer_size < buffer_size)
+    {
+        free(engine->video_frame.buffer);
+        if ((engine->video_frame.buffer = malloc(buffer_size)))
+            engine->video_frame.buffer_size = buffer_size;
+    }
+    if (engine->video_frame.buffer)
+    {
+        memcpy(engine->video_frame.buffer, buffer, buffer_size);
+        engine->flags |= FLAGS_ENGINE_NEW_FRAME;
+    }
 
     LeaveCriticalSection(&engine->cs);
 
@@ -1621,9 +3048,11 @@ static HRESULT init_media_engine(DWORD flags, IMFAttributes *attributes, struct 
 {
     DXGI_FORMAT output_format;
     UINT64 playback_hwnd;
+    IMFClock *clock;
     HRESULT hr;
 
-    engine->IMFMediaEngine_iface.lpVtbl = &media_engine_vtbl;
+    engine->IMFMediaEngineEx_iface.lpVtbl = &media_engine_vtbl;
+    engine->IMFGetService_iface.lpVtbl = &media_engine_get_service_vtbl;
     engine->session_events.lpVtbl = &media_engine_session_events_vtbl;
     engine->load_handler.lpVtbl = &media_engine_load_handler_vtbl;
     engine->grabber_callback.lpVtbl = &media_engine_grabber_callback_vtbl;
@@ -1641,7 +3070,18 @@ static HRESULT init_media_engine(DWORD flags, IMFAttributes *attributes, struct 
     if (FAILED(hr))
         return hr;
 
+    IMFAttributes_GetUnknown(attributes, &MF_MEDIA_ENGINE_DXGI_MANAGER, &IID_IMFDXGIDeviceManager,
+            (void **)&engine->device_manager);
+
     if (FAILED(hr = MFCreateMediaSession(NULL, &engine->session)))
+        return hr;
+
+    if (FAILED(hr = IMFMediaSession_GetClock(engine->session, &clock)))
+        return hr;
+
+    hr = IMFClock_QueryInterface(clock, &IID_IMFPresentationClock, (void **)&engine->clock);
+    IMFClock_Release(clock);
+    if (FAILED(hr))
         return hr;
 
     if (FAILED(hr = IMFMediaSession_BeginGetEvent(engine->session, &engine->session_events, NULL)))
@@ -1655,6 +3095,12 @@ static HRESULT init_media_engine(DWORD flags, IMFAttributes *attributes, struct 
 
     if (FAILED(hr = IMFAttributes_CopyAllItems(attributes, engine->attributes)))
         return hr;
+
+    /* Set default audio configuration */
+    if (FAILED(IMFAttributes_GetItem(engine->attributes, &MF_MEDIA_ENGINE_AUDIO_CATEGORY, NULL)))
+        IMFAttributes_SetUINT32(engine->attributes, &MF_MEDIA_ENGINE_AUDIO_CATEGORY, AudioCategory_Other);
+    if (FAILED(IMFAttributes_GetItem(engine->attributes, &MF_MEDIA_ENGINE_AUDIO_ENDPOINT_ROLE, NULL)))
+        IMFAttributes_SetUINT32(engine->attributes, &MF_MEDIA_ENGINE_AUDIO_ENDPOINT_ROLE, eMultimedia);
 
     IMFAttributes_GetUINT64(attributes, &MF_MEDIA_ENGINE_PLAYBACK_HWND, &playback_hwnd);
     hr = IMFAttributes_GetUINT32(attributes, &MF_MEDIA_ENGINE_VIDEO_OUTPUT_FORMAT, &output_format);
@@ -1677,12 +3123,12 @@ static HRESULT WINAPI media_engine_factory_CreateInstance(IMFMediaEngineClassFac
     struct media_engine *object;
     HRESULT hr;
 
-    TRACE("%p, %#x, %p, %p.\n", iface, flags, attributes, engine);
+    TRACE("%p, %#lx, %p, %p.\n", iface, flags, attributes, engine);
 
     if (!attributes || !engine)
         return E_POINTER;
 
-    object = heap_alloc_zero(sizeof(*object));
+    object = calloc(1, sizeof(*object));
     if (!object)
         return E_OUTOFMEMORY;
 
@@ -1693,17 +3139,17 @@ static HRESULT WINAPI media_engine_factory_CreateInstance(IMFMediaEngineClassFac
         return hr;
     }
 
-    *engine = &object->IMFMediaEngine_iface;
+    *engine = (IMFMediaEngine *)&object->IMFMediaEngineEx_iface;
 
     return S_OK;
 }
 
 static HRESULT WINAPI media_engine_factory_CreateTimeRange(IMFMediaEngineClassFactory *iface,
-                                                           IMFMediaTimeRange **range)
+        IMFMediaTimeRange **range)
 {
-    FIXME("(%p, %p): stub.\n", iface, range);
+    TRACE("%p, %p.\n", iface, range);
 
-    return E_NOTIMPL;
+    return create_time_range(range);
 }
 
 static HRESULT WINAPI media_engine_factory_CreateError(IMFMediaEngineClassFactory *iface, IMFMediaError **error)
@@ -1727,7 +3173,7 @@ static IMFMediaEngineClassFactory media_engine_factory = { &media_engine_factory
 
 static HRESULT WINAPI classfactory_QueryInterface(IClassFactory *iface, REFIID riid, void **obj)
 {
-    TRACE("(%s, %p).\n", debugstr_guid(riid), obj);
+    TRACE("%s, %p.\n", debugstr_guid(riid), obj);
 
     if (IsEqualGUID(riid, &IID_IClassFactory) ||
         IsEqualGUID(riid, &IID_IUnknown))
@@ -1754,7 +3200,7 @@ static ULONG WINAPI classfactory_Release(IClassFactory *iface)
 
 static HRESULT WINAPI classfactory_CreateInstance(IClassFactory *iface, IUnknown *outer, REFIID riid, void **obj)
 {
-    TRACE("(%p, %s, %p).\n", outer, debugstr_guid(riid), obj);
+    TRACE("%p, %s, %p.\n", outer, debugstr_guid(riid), obj);
 
     *obj = NULL;
 
@@ -1770,7 +3216,7 @@ static HRESULT WINAPI classfactory_LockServer(IClassFactory *iface, BOOL dolock)
     return S_OK;
 }
 
-static const struct IClassFactoryVtbl class_factory_vtbl =
+static const IClassFactoryVtbl class_factory_vtbl =
 {
     classfactory_QueryInterface,
     classfactory_AddRef,
@@ -1783,7 +3229,7 @@ static IClassFactory classfactory = { &class_factory_vtbl };
 
 HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID riid, void **obj)
 {
-    TRACE("(%s, %s, %p).\n", debugstr_guid(clsid), debugstr_guid(riid), obj);
+    TRACE("%s, %s, %p.\n", debugstr_guid(clsid), debugstr_guid(riid), obj);
 
     if (IsEqualGUID(clsid, &CLSID_MFMediaEngineClassFactory))
         return IClassFactory_QueryInterface(&classfactory, riid, obj);
@@ -1791,9 +3237,4 @@ HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID riid, void **obj)
     WARN("Unsupported class %s.\n", debugstr_guid(clsid));
     *obj = NULL;
     return CLASS_E_CLASSNOTAVAILABLE;
-}
-
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
 }

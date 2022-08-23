@@ -1,8 +1,7 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE    = d3d11.dll
 IMPORTLIB = d3d11
 IMPORTS   = dxguid uuid dxgi wined3d
-
-EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	async.c \

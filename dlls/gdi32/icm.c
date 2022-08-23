@@ -19,16 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-#include <string.h>
-
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winnls.h"
-#include "winreg.h"
-
 #include "gdi_private.h"
+#include "winnls.h"
 
 #include "wine/debug.h"
 
@@ -76,19 +68,15 @@ INT WINAPI EnumICMProfilesA(HDC hdc, ICMENUMPROCA func, LPARAM lparam)
  */
 INT WINAPI EnumICMProfilesW(HDC hdc, ICMENUMPROCW func, LPARAM lparam)
 {
-    DC *dc;
-    INT ret = -1;
+    WCHAR profile[MAX_PATH];
+    DWORD size = ARRAYSIZE(profile);
 
-    TRACE("%p, %p, 0x%08lx\n", hdc, func, lparam);
+    TRACE( "%p, %p, 0x%08Ix\n", hdc, func, lparam );
 
     if (!func) return -1;
-    if ((dc = get_dc_ptr(hdc)))
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pEnumICMProfiles );
-        ret = physdev->funcs->pEnumICMProfiles( physdev, func, lparam );
-        release_dc_ptr(dc);
-    }
-    return ret;
+    if (!__wine_get_icm_profile( hdc, FALSE, &size, profile )) return -1;
+    /* FIXME: support multiple profiles */
+    return func( profile, lparam );
 }
 
 /**********************************************************************
@@ -141,18 +129,9 @@ BOOL WINAPI GetICMProfileA(HDC hdc, LPDWORD size, LPSTR filename)
  */
 BOOL WINAPI GetICMProfileW(HDC hdc, LPDWORD size, LPWSTR filename)
 {
-    BOOL ret = FALSE;
-    DC *dc = get_dc_ptr(hdc);
-
     TRACE("%p, %p, %p\n", hdc, size, filename);
 
-    if (dc)
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pGetICMProfile );
-        ret = physdev->funcs->pGetICMProfile( physdev, size, filename );
-        release_dc_ptr(dc);
-    }
-    return ret;
+    return __wine_get_icm_profile( hdc, TRUE, size, filename );
 }
 
 /**********************************************************************
@@ -160,7 +139,7 @@ BOOL WINAPI GetICMProfileW(HDC hdc, LPDWORD size, LPWSTR filename)
  */
 BOOL WINAPI GetLogColorSpaceA(HCOLORSPACE colorspace, LPLOGCOLORSPACEA buffer, DWORD size)
 {
-    FIXME("%p %p 0x%08x stub\n", colorspace, buffer, size);
+    FIXME("%p %p 0x%08lx stub\n", colorspace, buffer, size);
     return FALSE;
 }
 
@@ -169,7 +148,7 @@ BOOL WINAPI GetLogColorSpaceA(HCOLORSPACE colorspace, LPLOGCOLORSPACEA buffer, D
  */
 BOOL WINAPI GetLogColorSpaceW(HCOLORSPACE colorspace, LPLOGCOLORSPACEW buffer, DWORD size)
 {
-    FIXME("%p %p 0x%08x stub\n", colorspace, buffer, size);
+    FIXME("%p %p 0x%08lx stub\n", colorspace, buffer, size);
     return FALSE;
 }
 
@@ -218,7 +197,7 @@ BOOL WINAPI SetICMProfileW(HDC hdc, LPWSTR filename)
  */
 BOOL WINAPI UpdateICMRegKeyA(DWORD reserved, LPSTR cmid, LPSTR filename, UINT command)
 {
-    FIXME("0x%08x, %s, %s, 0x%08x stub\n", reserved, debugstr_a(cmid), debugstr_a(filename), command);
+    FIXME("0x%08lx, %s, %s, 0x%08x stub\n", reserved, debugstr_a(cmid), debugstr_a(filename), command);
     return TRUE;
 }
 
@@ -227,6 +206,6 @@ BOOL WINAPI UpdateICMRegKeyA(DWORD reserved, LPSTR cmid, LPSTR filename, UINT co
  */
 BOOL WINAPI UpdateICMRegKeyW(DWORD reserved, LPWSTR cmid, LPWSTR filename, UINT command)
 {
-    FIXME("0x%08x, %s, %s, 0x%08x stub\n", reserved, debugstr_w(cmid), debugstr_w(filename), command);
+    FIXME("0x%08lx, %s, %s, 0x%08x stub\n", reserved, debugstr_w(cmid), debugstr_w(filename), command);
     return TRUE;
 }

@@ -394,7 +394,7 @@ static BOOL do_reg_operation( HKEY hkey, const WCHAR *value, INFCONTEXT *context
         if (type == REG_DWORD)
         {
             DWORD dw = str ? wcstoul( str, NULL, 0 ) : 0;
-            TRACE( "setting dword %s to %x\n", debugstr_w(value), dw );
+            TRACE( "setting dword %s to %lx\n", debugstr_w(value), dw );
             RegSetValueExW( hkey, value, 0, type, (BYTE *)&dw, sizeof(dw) );
         }
         else
@@ -414,7 +414,7 @@ static BOOL do_reg_operation( HKEY hkey, const WCHAR *value, INFCONTEXT *context
         if (size)
         {
             if (!(data = HeapAlloc( GetProcessHeap(), 0, size ))) return FALSE;
-            TRACE( "setting binary data %s len %d\n", debugstr_w(value), size );
+            TRACE( "setting binary data %s len %ld\n", debugstr_w(value), size );
             SetupGetBinaryField( context, 5, data, size, NULL );
         }
         RegSetValueExW( hkey, value, 0, type, data, size );
@@ -601,7 +601,7 @@ static BOOL do_register_dll( struct register_dll_info *info, const WCHAR *path,
 
         if (FAILED(res))
         {
-            WARN( "calling %s in %s returned error %x\n", entry_point, debugstr_w(path), res );
+            WARN( "calling %s in %s returned error %lx\n", entry_point, debugstr_w(path), res );
             status.FailureCode = SPREG_REGSVR;
             status.Win32Error = res;
             goto done;
@@ -625,7 +625,7 @@ static BOOL do_register_dll( struct register_dll_info *info, const WCHAR *path,
 
         if (FAILED(res))
         {
-            WARN( "calling DllInstall in %s returned error %x\n", debugstr_w(path), res );
+            WARN( "calling DllInstall in %s returned error %lx\n", debugstr_w(path), res );
             status.FailureCode = SPREG_REGSVR;
             status.Win32Error = res;
             goto done;
@@ -826,7 +826,7 @@ static BOOL profile_items_callback( HINF hinf, PCWSTR field, void *arg )
 {
     WCHAR lnkpath[MAX_PATH];
     LPWSTR cmdline=NULL, lnkpath_end;
-    unsigned int name_size;
+    DWORD name_size;
     INFCONTEXT name_context, context;
     int attrs=0;
 
@@ -846,7 +846,7 @@ static BOOL profile_items_callback( HINF hinf, PCWSTR field, void *arg )
 
     if (!(attrs & FLG_PROFITEM_GROUP) && SetupFindFirstLineW( hinf, field, L"SubDir", &context ))
     {
-        unsigned int subdir_size;
+        DWORD subdir_size;
 
         if (!SetupGetStringFieldW( &context, 1, lnkpath_end, (lnkpath+MAX_PATH)-lnkpath_end, &subdir_size ))
             return TRUE;
@@ -878,7 +878,8 @@ static BOOL profile_items_callback( HINF hinf, PCWSTR field, void *arg )
         /* calculate command line */
         if (SetupFindFirstLineW( hinf, field, L"CmdLine", &context ))
         {
-            unsigned int dir_len=0, subdir_size=0, filename_size=0;
+            unsigned int dir_len=0;
+            DWORD subdir_size=0, filename_size=0;
             int dirid=0;
             LPCWSTR dir;
             LPWSTR cmdline_end;
@@ -967,7 +968,7 @@ static BOOL iterate_section_fields( HINF hinf, PCWSTR section, PCWSTR key,
                 goto done;
             if (!callback( hinf, buffer, arg ))
             {
-                WARN("callback failed for %s %s err %d\n",
+                WARN("callback failed for %s %s err %ld\n",
                      debugstr_w(section), debugstr_w(buffer), GetLastError() );
                 goto done;
             }
@@ -1026,7 +1027,9 @@ BOOL WINAPI SetupInstallFilesFromInfSectionW( HINF hinf, HINF hlayout, HSPFILEQ 
     info.src_root   = src_root;
     info.copy_flags = flags;
     info.layout     = hlayout;
-    return iterate_section_fields( hinf, section, L"CopyFiles", copy_files_callback, &info );
+    return iterate_section_fields( hinf, section, L"CopyFiles", copy_files_callback, &info ) &&
+           iterate_section_fields( hinf, section, L"DelFiles", delete_files_callback, &info ) &&
+           iterate_section_fields( hinf, section, L"RenFiles", rename_files_callback, &info );
 }
 
 
@@ -1076,28 +1079,17 @@ BOOL WINAPI SetupInstallFromInfSectionW( HWND owner, HINF hinf, PCWSTR section, 
     BOOL ret;
     int i;
 
-    if (flags & SPINST_REGISTRY)
-    {
-        struct registry_callback_info info;
+    if (iterate_section_fields( hinf, section, L"WineFakeDlls", fake_dlls_callback, NULL ))
+        cleanup_fake_dlls();
+    else
+        return FALSE;
 
-        info.default_root = key_root;
-        info.delete = FALSE;
-        if (!iterate_section_fields( hinf, section, L"WinePreInstall", registry_callback, &info ))
-            return FALSE;
-    }
     if (flags & SPINST_FILES)
     {
-        struct files_callback_info info;
         HSPFILEQ queue;
 
         if (!(queue = SetupOpenFileQueue())) return FALSE;
-        info.queue      = queue;
-        info.src_root   = src_root;
-        info.copy_flags = copy_flags;
-        info.layout     = hinf;
-        ret = (iterate_section_fields( hinf, section, L"CopyFiles", copy_files_callback, &info ) &&
-               iterate_section_fields( hinf, section, L"DelFiles", delete_files_callback, &info ) &&
-               iterate_section_fields( hinf, section, L"RenFiles", rename_files_callback, &info ) &&
+        ret = (SetupInstallFilesFromInfSectionW( hinf, NULL, queue, section, src_root, copy_flags ) &&
                SetupCommitFileQueueW( owner, queue, callback, context ));
         SetupCloseFileQueue( queue );
         if (!ret) return FALSE;
@@ -1121,24 +1113,14 @@ BOOL WINAPI SetupInstallFromInfSectionW( HWND owner, HINF hinf, PCWSTR section, 
     }
     if (flags & SPINST_REGSVR)
     {
-        struct register_dll_info info;
+        struct register_dll_info info = { .unregister = FALSE };
         HRESULT hr;
 
-        info.unregister    = FALSE;
-        info.modules_size  = 0;
-        info.modules_count = 0;
-        info.modules       = NULL;
         if (flags & SPINST_REGISTERCALLBACKAWARE)
         {
             info.callback         = callback;
             info.callback_context = context;
         }
-        else info.callback = NULL;
-
-        if (iterate_section_fields( hinf, section, L"WineFakeDlls", fake_dlls_callback, NULL ))
-            cleanup_fake_dlls();
-        else
-            return FALSE;
 
         hr = CoInitialize(NULL);
 
@@ -1153,19 +1135,14 @@ BOOL WINAPI SetupInstallFromInfSectionW( HWND owner, HINF hinf, PCWSTR section, 
     }
     if (flags & SPINST_UNREGSVR)
     {
-        struct register_dll_info info;
+        struct register_dll_info info = { .unregister = TRUE };
         HRESULT hr;
 
-        info.unregister    = TRUE;
-        info.modules_size  = 0;
-        info.modules_count = 0;
-        info.modules       = NULL;
         if (flags & SPINST_REGISTERCALLBACKAWARE)
         {
             info.callback         = callback;
             info.callback_context = context;
         }
-        else info.callback = NULL;
 
         hr = CoInitialize(NULL);
 
@@ -1352,7 +1329,7 @@ static BOOL add_service( SC_HANDLE scm, HINF hinf, const WCHAR *name, const WCHA
     /* FIXME: Dependencies field */
     /* FIXME: Security field */
 
-    TRACE( "service %s display %s type %x start %x error %x binary %s order %s startname %s flags %x\n",
+    TRACE( "service %s display %s type %x start %x error %x binary %s order %s startname %s flags %lx\n",
            debugstr_w(name), debugstr_w(display_name), service_type, start_type, error_control,
            debugstr_w(binary_path), debugstr_w(load_order), debugstr_w(start_name), flags );
 
@@ -1427,7 +1404,7 @@ static BOOL add_service( SC_HANDLE scm, HINF hinf, const WCHAR *name, const WCHA
     CloseServiceHandle( service );
 
 done:
-    if (!service) WARN( "failed err %u\n", GetLastError() );
+    if (!service) WARN( "failed err %lu\n", GetLastError() );
     HeapFree( GetProcessHeap(), 0, binary_path );
     HeapFree( GetProcessHeap(), 0, display_name );
     HeapFree( GetProcessHeap(), 0, start_name );
@@ -1451,7 +1428,7 @@ static BOOL del_service( SC_HANDLE scm, HINF hinf, const WCHAR *name, DWORD flag
     if (!(service = OpenServiceW( scm, name, SERVICE_STOP | DELETE )))
     {
         if (GetLastError() == ERROR_SERVICE_DOES_NOT_EXIST) return TRUE;
-        WARN( "cannot open %s err %u\n", debugstr_w(name), GetLastError() );
+        WARN( "cannot open %s err %lu\n", debugstr_w(name), GetLastError() );
         return FALSE;
     }
     if (flags & SPSVCINST_STOPSERVICE) ControlService( service, SERVICE_CONTROL_STOP, &status );
@@ -1579,7 +1556,7 @@ BOOL WINAPI SetupGetInfFileListW(PCWSTR dir, DWORD style, PWSTR buffer,
     if (style & ~( INF_STYLE_OLDNT | INF_STYLE_WIN4 |
                    INF_STYLE_CACHE_ENABLE | INF_STYLE_CACHE_DISABLE ))
     {
-        FIXME( "unknown inf_style(s) 0x%x\n",
+        FIXME( "unknown inf_style(s) 0x%lx\n",
                style & ~( INF_STYLE_OLDNT | INF_STYLE_WIN4 |
                          INF_STYLE_CACHE_ENABLE | INF_STYLE_CACHE_DISABLE ));
         if( outsize ) *outsize = 1;

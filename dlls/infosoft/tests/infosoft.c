@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <ole2.h>
 #include "indexsrv.h"
+#include "cierror.h"
 
 #include "wine/test.h"
 
@@ -70,11 +71,29 @@ static ULONG WINAPI ws_Release(IWordSink *iface)
 static HRESULT WINAPI ws_PutWord(IWordSink *iface, ULONG cwc, const WCHAR *pwcInBuf,
                                  ULONG cwcSrcLen, ULONG cwcSrcPos)
 {
-    ok(testres[wordnum].len == cwcSrcLen, "wrong length\n");
-    ok(!cwcSrcPos ||(testres[wordnum].ofs == cwcSrcPos), "wrong offset\n");
-    ok(!memcmp(testres[wordnum].data, pwcInBuf, cwcSrcLen), "wrong data\n");
+    HRESULT rc = S_OK;
+
+    winetest_push_context("word %d", wordnum);
+    if (wordnum < ARRAY_SIZE(testres))
+    {
+        ok(testres[wordnum].len == cwcSrcLen, "expected length %d, got %ld\n",
+           testres[wordnum].len, cwcSrcLen);
+        ok(!cwcSrcPos || (testres[wordnum].ofs == cwcSrcPos),
+           "expected offset %d, got %ld\n", testres[wordnum].ofs, cwcSrcPos);
+        ok(!memcmp(testres[wordnum].data, pwcInBuf, cwcSrcLen),
+           "expected data %s, got %s\n",
+           wine_dbgstr_wn(testres[wordnum].data, cwcSrcLen),
+           wine_dbgstr_wn(pwcInBuf, cwcSrcLen));
+    }
+    else
+    {
+        ok(0, "found too many words: %d\n", wordnum + 1);
+        rc = E_FAIL;
+    }
+    winetest_pop_context();
+
     wordnum++;
-    return S_OK;
+    return rc;
 }
 
 static HRESULT WINAPI ws_PutAltWord(IWordSink *iface, ULONG cwc, const WCHAR *pwcInBuf,
@@ -123,7 +142,7 @@ static wordsink_impl wordsink = { { &wsvt } };
 
 static HRESULT WINAPI fillbuf_none(TEXT_SOURCE *ts)
 {
-    return E_FAIL;
+    return WBREAK_E_END_OF_TEXT;
 }
 
 static HRESULT WINAPI fillbuf_many(TEXT_SOURCE *ts)
@@ -133,10 +152,10 @@ static HRESULT WINAPI fillbuf_many(TEXT_SOURCE *ts)
     if (ts->awcBuffer == NULL)
         ts->awcBuffer = teststring;
     else
-        ts->awcBuffer += ts->iCur;
+        ts->awcBuffer += ts->iEnd;
 
     if (!ts->awcBuffer[0])
-        return E_FAIL;
+        return WBREAK_E_END_OF_TEXT;
 
     for( i=0; ts->awcBuffer[i] && ts->awcBuffer[i] != ' '; i++)
         ;
@@ -157,7 +176,7 @@ START_TEST(infosoft)
     TEXT_SOURCE ts;
 
     r = CoInitialize(NULL);
-    ok( r == S_OK, "failed\n");
+    ok( r == S_OK, "failed: %08lx\n", r);
 
     r = CoCreateInstance( &CLSID_wb_neutral, NULL, CLSCTX_INPROC_SERVER,
                         &_IID_IWordBreaker, (LPVOID)&wb);
@@ -175,9 +194,9 @@ START_TEST(infosoft)
     ts.iEnd = lstrlenW(ts.awcBuffer);
     ts.iCur = 0;
     r = IWordBreaker_BreakText(wb, &ts, &wordsink.IWordSink_iface, NULL);
-    ok( r == S_OK, "failed\n");
+    ok( r == S_OK, "failed: %08lx\n", r);
 
-    ok(wordnum == 4, "words not processed\n");
+    ok(wordnum == 4, "expected 4 words, got %d\n", wordnum);
 
     wordnum = 0;
     ts.pfnFillTextBuffer = fillbuf_many;
@@ -186,12 +205,12 @@ START_TEST(infosoft)
     ts.iCur = 0;
 
     r = fillbuf_many(&ts);
-    ok( r == S_OK, "failed\n");
+    ok( r == S_OK, "failed: %08lx\n", r);
 
     r = IWordBreaker_BreakText(wb, &ts, &wordsink.IWordSink_iface, NULL);
-    ok( r == S_OK, "failed\n");
+    ok( r == S_OK, "failed: %08lx\n", r);
 
-    ok(wordnum == 4, "words not processed\n");
+    ok(wordnum == 4, "expected 4 words, got %d\n", wordnum);
     IWordBreaker_Release( wb );
 
     CoUninitialize();

@@ -85,7 +85,7 @@
 @ stdcall CoCreateInstanceFromApp(ptr ptr long ptr long ptr)
 @ stub CoCreateObjectInContext
 @ stub CoDeactivateObject
-@ stub CoDecodeProxy
+@ stdcall CoDecodeProxy(long int64 ptr)
 @ stdcall CoDecrementMTAUsage(ptr)
 @ stdcall CoDisableCallCancellation(ptr)
 @ stub CoDisconnectContext
@@ -178,7 +178,7 @@
 @ stub DcomChannelSetHResult
 @ stdcall DllDebugObjectRPCHook(long ptr)
 @ stdcall DllGetActivationFactory(ptr ptr)
-@ stdcall -private DllGetClassObject(ptr ptr ptr) ole32.DllGetClassObject
+@ stdcall -private DllGetClassObject(ptr ptr ptr)
 @ stub EnableHookObject
 @ stdcall FreePropVariantArray(long ptr)
 @ stub FreePropVariantArrayWorker
@@ -301,7 +301,7 @@
 @ stdcall RoInitialize(long)
 @ stub RoInspectCapturedStackBackTrace
 @ stub RoInspectThreadErrorInfo
-@ stub RoOriginateError
+@ stdcall RoOriginateError(long ptr)
 @ stub RoOriginateErrorW
 @ stdcall RoOriginateLanguageException(long ptr ptr)
 @ stub RoParameterizedTypeExtraGetTypeSignature
@@ -312,7 +312,7 @@
 @ stub RoReportUnhandledError
 @ stub RoResolveRestrictedErrorInfoReference
 @ stub RoRevokeActivationFactories
-@ stub RoSetErrorReportingFlags
+@ stdcall RoSetErrorReportingFlags(long)
 @ stub RoTransformError
 @ stub RoTransformErrorW
 @ stdcall RoUninitialize()

@@ -20,8 +20,14 @@
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
+#include "winnls.h"
 #include "dhcpcsdk.h"
 #include "winioctl.h"
+#include "winternl.h"
+#include "ws2def.h"
+#include "ws2ipdef.h"
+#include "iphlpapi.h"
+#include "netioapi.h"
 #define WINE_MOUNTMGR_EXTENSIONS
 #include "ddk/mountmgr.h"
 
@@ -29,21 +35,6 @@
 #include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dhcpcsvc);
-
-BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
-{
-    TRACE("%p, %u, %p\n", hinst, reason, reserved);
-
-    switch (reason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls( hinst );
-            break;
-    }
-    return TRUE;
-}
 
 void WINAPI DhcpCApiCleanup(void)
 {
@@ -57,34 +48,68 @@ DWORD WINAPI DhcpCApiInitialize(LPDWORD version)
     return ERROR_SUCCESS;
 }
 
+static DWORD get_adapter_luid( const WCHAR *adapter, NET_LUID *luid )
+{
+    UNICODE_STRING ustr;
+    NTSTATUS status;
+    GUID guid;
+
+    if (adapter[0] == '{')
+    {
+        RtlInitUnicodeString( &ustr, adapter );
+        status = RtlGUIDFromString( &ustr, &guid );
+        if (!status) return ConvertInterfaceGuidToLuid( &guid, luid );
+    }
+    return ConvertInterfaceNameToLuidW( adapter, luid );
+}
+
+#define IF_NAMESIZE 16
+static DWORD get_adapter_name( const WCHAR *adapter, char *unix_name, DWORD len )
+{
+    WCHAR unix_nameW[IF_NAMESIZE];
+    NET_LUID luid;
+    DWORD ret;
+
+    if ((ret = get_adapter_luid( adapter, &luid ))) return ret;
+    if ((ret = ConvertInterfaceLuidToAlias( &luid, unix_nameW, ARRAY_SIZE(unix_nameW) ))) return ret;
+    if (!WideCharToMultiByte( CP_UNIXCP, 0, unix_nameW, -1, unix_name, len, NULL, NULL ))
+        return ERROR_INVALID_PARAMETER;
+    return ERROR_SUCCESS;
+}
+
 DWORD WINAPI DhcpRequestParams( DWORD flags, void *reserved, WCHAR *adapter, DHCPCAPI_CLASSID *class_id,
                                 DHCPCAPI_PARAMS_ARRAY send_params, DHCPCAPI_PARAMS_ARRAY recv_params, BYTE *buf,
                                 DWORD *buflen, WCHAR *request_id )
 {
     struct mountmgr_dhcp_request_params *query;
-    DWORD i, size, err = ERROR_OUTOFMEMORY;
+    DWORD i, size, err;
     BYTE *src, *dst;
     HANDLE mgr;
+    char unix_name[IF_NAMESIZE];
 
-    TRACE( "(%08x, %p, %s, %p, %u, %u, %p, %p, %s)\n", flags, reserved, debugstr_w(adapter), class_id,
+    TRACE( "(%08lx, %p, %s, %p, %lu, %lu, %p, %p, %s)\n", flags, reserved, debugstr_w(adapter), class_id,
            send_params.nParams, recv_params.nParams, buf, buflen, debugstr_w(request_id) );
 
-    if (!adapter || lstrlenW(adapter) > IF_MAX_STRING_SIZE || !buflen) return ERROR_INVALID_PARAMETER;
-    if (flags != DHCPCAPI_REQUEST_SYNCHRONOUS) FIXME( "unsupported flags %08x\n", flags );
+    if (!adapter || !buflen) return ERROR_INVALID_PARAMETER;
+    if (flags != DHCPCAPI_REQUEST_SYNCHRONOUS) FIXME( "unsupported flags %08lx\n", flags );
+    if ((err = get_adapter_name( adapter, unix_name, sizeof(unix_name) ))) return err;
 
     for (i = 0; i < send_params.nParams; i++)
-        FIXME( "send option %u not supported\n", send_params.Params->OptionId );
+        FIXME( "send option %lu not supported\n", send_params.Params->OptionId );
 
     mgr = CreateFileW( MOUNTMGR_DOS_DEVICE_NAME, GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL,
                        OPEN_EXISTING, 0, 0 );
     if (mgr == INVALID_HANDLE_VALUE) return GetLastError();
 
     size = FIELD_OFFSET(struct mountmgr_dhcp_request_params, params[recv_params.nParams]) + *buflen;
-    if (!(query = heap_alloc_zero( size ))) goto done;
-
+    if (!(query = heap_alloc_zero( size )))
+    {
+        err = ERROR_OUTOFMEMORY;
+        goto done;
+    }
     for (i = 0; i < recv_params.nParams; i++) query->params[i].id = recv_params.Params[i].OptionId;
     query->count = recv_params.nParams;
-    lstrcpyW( query->adapter, adapter );
+    strcpy( query->unix_name, unix_name );
 
     if (!DeviceIoControl( mgr, IOCTL_MOUNTMGR_QUERY_DHCP_REQUEST_PARAMS, query, size, query, size, NULL, NULL ))
     {

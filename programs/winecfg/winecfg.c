@@ -29,16 +29,11 @@
 
 #define WIN32_LEAN_AND_MEAN
 
-#include <stdarg.h>
-#ifndef _VA_LIST_T /* Clang's stdarg.h guards with _VA_LIST, while Xcode's uses _VA_LIST_T */
-#define _VA_LIST_T
-#endif
 #include <assert.h>
 #include <stdio.h>
 #include <limits.h>
 #include <windows.h>
 #include <winreg.h>
-#include <wine/unicode.h>
 #include <wine/debug.h>
 #include <wine/list.h>
 
@@ -46,6 +41,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(winecfg);
 
 #include "winecfg.h"
 #include "resource.h"
+
+static const BOOL is_win64 = (sizeof(void *) > sizeof(int));
 
 HKEY config_key = NULL;
 HMENU hPopupMenus = 0;
@@ -65,7 +62,7 @@ void set_window_title(HWND dialog)
     {
         WCHAR apptitle[256];
         LoadStringW(GetModuleHandleW(NULL), IDS_WINECFG_TITLE_APP, apptitle, ARRAY_SIZE(apptitle));
-        wsprintfW (newtitle, apptitle, current_app);
+        swprintf(newtitle, ARRAY_SIZE(newtitle), apptitle, current_app);
     }
     else
     {
@@ -123,7 +120,7 @@ static WCHAR *get_config_key (HKEY root, const WCHAR *subkey, const WCHAR *name,
         }
         else
         {
-            WINE_ERR("RegOpenKey failed on wine config key (res=%d)\n", res);
+            WINE_ERR("RegOpenKey failed on wine config key (res=%ld)\n", res);
         }
         goto end;
     }
@@ -136,7 +133,7 @@ static WCHAR *get_config_key (HKEY root, const WCHAR *subkey, const WCHAR *name,
 	goto end;
     } else if (res != ERROR_SUCCESS)
     {
-        WINE_ERR("Couldn't query value's length (res=%d)\n", res);
+        WINE_ERR("Couldn't query value's length (res=%ld)\n", res);
         goto end;
     }
 
@@ -167,7 +164,7 @@ static int set_config_key(HKEY root, const WCHAR *subkey, REGSAM access, const W
     DWORD res = 1;
     HKEY key = NULL;
 
-    WINE_TRACE("subkey=%s: name=%s, value=%p, type=%d\n", wine_dbgstr_w(subkey),
+    WINE_TRACE("subkey=%s: name=%s, value=%p, type=%ld\n", wine_dbgstr_w(subkey),
                wine_dbgstr_w(name), value, type);
 
     assert( subkey != NULL );
@@ -192,7 +189,7 @@ static int set_config_key(HKEY root, const WCHAR *subkey, REGSAM access, const W
 end:
     if (key && key != root) RegCloseKey(key);
     if (res != 0)
-        WINE_ERR("Unable to set configuration key %s in section %s, res=%d\n",
+        WINE_ERR("Unable to set configuration key %s in section %s, res=%ld\n",
                  wine_dbgstr_w(name), wine_dbgstr_w(subkey), res);
     return res;
 }
@@ -248,7 +245,7 @@ static void free_setting(struct setting *setting)
  * If already in the list, the contents as given there will be
  * returned. You are expected to HeapFree the result.
  */
-WCHAR *get_reg_keyW(HKEY root, const WCHAR *path, const WCHAR *name, const WCHAR *def)
+WCHAR *get_reg_key(HKEY root, const WCHAR *path, const WCHAR *name, const WCHAR *def)
 {
     struct list *cursor;
     struct setting *s;
@@ -279,43 +276,6 @@ WCHAR *get_reg_keyW(HKEY root, const WCHAR *path, const WCHAR *name, const WCHAR
     WINE_TRACE("returning %s\n", wine_dbgstr_w(val));
 
     return val;
-}
-
-char *get_reg_key(HKEY root, const char *path, const char *name, const char *def)
-{
-    WCHAR *wpath, *wname, *wdef = NULL, *wRet = NULL;
-    char *szRet = NULL;
-    int len;
-
-    WINE_TRACE("path=%s, name=%s, def=%s\n", path, name, def);
-
-    wpath = HeapAlloc(GetProcessHeap(), 0, (strlen(path)+1)*sizeof(WCHAR));
-    wname = HeapAlloc(GetProcessHeap(), 0, (strlen(name)+1)*sizeof(WCHAR));
-
-    MultiByteToWideChar(CP_ACP, 0, path, -1, wpath, strlen(path)+1);
-    MultiByteToWideChar(CP_ACP, 0, name, -1, wname, strlen(name)+1);
-
-    if (def)
-    {
-        wdef = HeapAlloc(GetProcessHeap(), 0, (strlen(def)+1)*sizeof(WCHAR));
-        MultiByteToWideChar(CP_ACP, 0, def, -1, wdef, strlen(def)+1);
-    }
-
-    wRet = get_reg_keyW(root, wpath, wname, wdef);
-
-    len = WideCharToMultiByte(CP_ACP, 0, wRet, -1, NULL, 0, NULL, NULL);
-    if (len)
-    {
-        szRet = HeapAlloc(GetProcessHeap(), 0, len);
-        WideCharToMultiByte(CP_ACP, 0, wRet, -1, szRet, len, NULL, NULL);
-    }
-
-    HeapFree(GetProcessHeap(), 0, wpath);
-    HeapFree(GetProcessHeap(), 0, wname);
-    HeapFree(GetProcessHeap(), 0, wdef);
-    HeapFree(GetProcessHeap(), 0, wRet);
-
-    return szRet;
 }
 
 /**
@@ -405,54 +365,12 @@ static void set_reg_key_ex(HKEY root, const WCHAR *path, const WCHAR *name, cons
     list_add_tail(&settings, &s->entry);
 }
 
-void set_reg_key(HKEY root, const char *path, const char *name, const char *value)
-{
-    WCHAR *wpath, *wname = NULL, *wvalue = NULL;
-
-    wpath = HeapAlloc(GetProcessHeap(), 0, (strlen(path)+1)*sizeof(WCHAR));
-    MultiByteToWideChar(CP_ACP, 0, path, -1, wpath, strlen(path)+1);
-
-    if (name)
-    {
-        wname = HeapAlloc(GetProcessHeap(), 0, (strlen(name)+1)*sizeof(WCHAR));
-        MultiByteToWideChar(CP_ACP, 0, name, -1, wname, strlen(name)+1);
-    }
-
-    if (value)
-    {
-        wvalue = HeapAlloc(GetProcessHeap(), 0, (strlen(value)+1)*sizeof(WCHAR));
-        MultiByteToWideChar(CP_ACP, 0, value, -1, wvalue, strlen(value)+1);
-    }
-
-    set_reg_key_ex(root, wpath, wname, wvalue, REG_SZ);
-
-    HeapFree(GetProcessHeap(), 0, wpath);
-    HeapFree(GetProcessHeap(), 0, wname);
-    HeapFree(GetProcessHeap(), 0, wvalue);
-}
-
-void set_reg_key_dword(HKEY root, const char *path, const char *name, DWORD value)
-{
-    WCHAR *wpath, *wname;
-
-    wpath = HeapAlloc(GetProcessHeap(), 0, (strlen(path)+1)*sizeof(WCHAR));
-    wname = HeapAlloc(GetProcessHeap(), 0, (strlen(name)+1)*sizeof(WCHAR));
-
-    MultiByteToWideChar(CP_ACP, 0, path, -1, wpath, strlen(path)+1);
-    MultiByteToWideChar(CP_ACP, 0, name, -1, wname, strlen(name)+1);
-
-    set_reg_key_ex(root, wpath, wname, &value, REG_DWORD);
-
-    HeapFree(GetProcessHeap(), 0, wpath);
-    HeapFree(GetProcessHeap(), 0, wname);
-}
-
-void set_reg_keyW(HKEY root, const WCHAR *path, const WCHAR *name, const WCHAR *value)
+void set_reg_key(HKEY root, const WCHAR *path, const WCHAR *name, const WCHAR *value)
 {
     set_reg_key_ex(root, path, name, value, REG_SZ);
 }
 
-void set_reg_key_dwordW(HKEY root, const WCHAR *path, const WCHAR *name, DWORD value)
+void set_reg_key_dword(HKEY root, const WCHAR *path, const WCHAR *name, DWORD value)
 {
     set_reg_key_ex(root, path, name, &value, REG_DWORD);
 }
@@ -464,7 +382,7 @@ void set_reg_key_dwordW(HKEY root, const WCHAR *path, const WCHAR *name, DWORD v
  * you are expected to HeapFree each element of the array, which is null
  * terminated, as well as the array itself.
  */
-static WCHAR **enumerate_valuesW(HKEY root, WCHAR *path)
+WCHAR **enumerate_values(HKEY root, const WCHAR *path)
 {
     HKEY key;
     DWORD res, i = 0, valueslen = 0;
@@ -512,13 +430,13 @@ static WCHAR **enumerate_valuesW(HKEY root, WCHAR *path)
             else values = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR*));
 
             values[valueslen++] = strdupW(name);
-            WINE_TRACE("valueslen is now %d\n", valueslen);
+            WINE_TRACE("valueslen is now %ld\n", valueslen);
             i++;
         }
     }
     else
     {
-        WINE_WARN("failed opening registry key %s, res=0x%x\n",
+        WINE_WARN("failed opening registry key %s, res=0x%lx\n",
                   wine_dbgstr_w(path), res);
     }
 
@@ -566,66 +484,23 @@ static WCHAR **enumerate_valuesW(HKEY root, WCHAR *path)
     return values;
 }
 
-char **enumerate_values(HKEY root, char *path)
-{
-    WCHAR *wpath;
-    WCHAR **wret;
-    char **ret=NULL;
-    int i=0, len=0, size;
-
-    wpath = HeapAlloc(GetProcessHeap(), 0, (strlen(path)+1)*sizeof(WCHAR));
-    MultiByteToWideChar(CP_ACP, 0, path, -1, wpath, strlen(path)+1);
-
-    wret = enumerate_valuesW(root, wpath);
-
-    if (wret)
-    {
-        for(len=0; wret[len]; len++);
-        ret = HeapAlloc(GetProcessHeap(), 0, (len+1)*sizeof(char*));
-
-        /* convert WCHAR ** to char ** and HeapFree each WCHAR * element on our way */
-        for (i=0; i<len; i++)
-        {
-            size = WideCharToMultiByte(CP_ACP, 0, wret[i], -1, NULL, 0, NULL, NULL);
-            if(size)
-            {
-                ret[i] = HeapAlloc(GetProcessHeap(), 0, size);
-                WideCharToMultiByte(CP_ACP, 0, wret[i], -1, ret[i], size, NULL, NULL);
-                HeapFree(GetProcessHeap(), 0, wret[i]);
-            }
-        }
-        ret[len] = NULL;
-    }
-
-    HeapFree(GetProcessHeap(), 0, wpath);
-    HeapFree(GetProcessHeap(), 0, wret);
-
-    return ret;
-}
-
 /**
  * returns true if the given key/value pair exists in the registry or
  * has been written to.
  */
-BOOL reg_key_exists(HKEY root, const char *path, const char *name)
+BOOL reg_key_exists(HKEY root, const WCHAR *path, const WCHAR *name)
 {
-    char *val = get_reg_key(root, path, name, NULL);
+    WCHAR *val = get_reg_key(root, path, name, NULL);
 
-    if (val)
-    {
-        HeapFree(GetProcessHeap(), 0, val);
-        return TRUE;
-    }
-
-    return FALSE;
+    HeapFree(GetProcessHeap(), 0, val);
+    return val != NULL;
 }
 
 static void process_setting(struct setting *s)
 {
-    static const WCHAR softwareW[] = {'S','o','f','t','w','a','r','e','\\'};
     HKEY key;
-    BOOL needs_wow64 = (wine_is_64bit() && s->root == HKEY_LOCAL_MACHINE && s->path &&
-                        !strncmpiW(s->path, softwareW, ARRAY_SIZE(softwareW)));
+    BOOL needs_wow64 = (is_win64 && s->root == HKEY_LOCAL_MACHINE && s->path &&
+                        !wcsnicmp(s->path, L"Software\\", wcslen(L"Software\\")));
 
     if (s->value)
     {
@@ -689,38 +564,17 @@ void apply(void)
 WCHAR* current_app = NULL; /* the app we are currently editing, or NULL if editing global */
 
 /* returns a registry key path suitable for passing to addTransaction  */
-char *keypath(const char *section)
+WCHAR *keypath(const WCHAR *section)
 {
-    static char *result = NULL;
-
-    HeapFree(GetProcessHeap(), 0, result);
-
-    if (current_app)
-    {
-        result = HeapAlloc(GetProcessHeap(), 0, strlen("AppDefaults\\") + lstrlenW(current_app)*2 + 2 /* \\ */ + strlen(section) + 1 /* terminator */);
-        wsprintfA(result, "AppDefaults\\%ls", current_app);
-        if (section[0]) sprintf( result + strlen(result), "\\%s", section );
-    }
-    else
-    {
-        result = strdupA(section);
-    }
-
-    return result;
-}
-
-WCHAR *keypathW(const WCHAR *section)
-{
-    static const WCHAR appdefaultsW[] = {'A','p','p','D','e','f','a','u','l','t','s','\\',0};
     static WCHAR *result = NULL;
 
     HeapFree(GetProcessHeap(), 0, result);
 
     if (current_app)
     {
-        DWORD len = sizeof(appdefaultsW) + (lstrlenW(current_app) + lstrlenW(section) + 1) * sizeof(WCHAR);
+        DWORD len = sizeof(L"AppDefaults\\") + (lstrlenW(current_app) + lstrlenW(section) + 1) * sizeof(WCHAR);
         result = HeapAlloc(GetProcessHeap(), 0, len );
-        lstrcpyW( result, appdefaultsW );
+        lstrcpyW( result, L"AppDefaults\\" );
         lstrcatW( result, current_app );
         if (section[0])
         {
@@ -753,10 +607,10 @@ void PRINTERROR(void)
 
 BOOL initialize(HINSTANCE hInstance)
 {
-    DWORD res = RegCreateKeyA(HKEY_CURRENT_USER, WINE_KEY_ROOT, &config_key);
+    DWORD res = RegCreateKeyW(HKEY_CURRENT_USER, WINE_KEY_ROOT, &config_key);
 
     if (res != ERROR_SUCCESS) {
-	WINE_ERR("RegOpenKey failed on wine config key (%d)\n", res);
+	WINE_ERR("RegOpenKey failed on wine config key (%ld)\n", res);
         return TRUE;
     }
 

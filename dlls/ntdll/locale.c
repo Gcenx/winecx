@@ -30,136 +30,21 @@
 #include "winbase.h"
 #include "winnls.h"
 #include "ntdll_misc.h"
+#include "locale_private.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(nls);
-
-/* NLS codepage file format:
- *
- * header:
- *   WORD      offset to cp2uni table in words
- *   WORD      CodePage
- *   WORD      MaximumCharacterSize
- *   BYTE[2]   DefaultChar
- *   WORD      UniDefaultChar
- *   WORD      TransDefaultChar
- *   WORD      TransUniDefaultChar
- *   BYTE[12]  LeadByte
- * cp2uni table:
- *   WORD      offset to uni2cp table in words
- *   WORD[256] cp2uni table
- *   WORD      glyph table size
- *   WORD[glyph_table_size] glyph table
- *   WORD      number of lead byte ranges
- *   WORD[256] lead byte offsets in words
- *   WORD[leadbytes][256] cp2uni table for lead bytes
- * uni2cp table:
- *   WORD      0 / 4
- *   BYTE[65536] / WORD[65536]  uni2cp table
- */
-
-enum nls_section_type
-{
-    NLS_SECTION_SORTKEYS = 9,
-    NLS_SECTION_CASEMAP = 10,
-    NLS_SECTION_CODEPAGE = 11,
-    NLS_SECTION_NORMALIZE = 12
-};
 
 UINT NlsAnsiCodePage = 0;
 BYTE NlsMbCodePageTag = 0;
 BYTE NlsMbOemCodePageTag = 0;
 
-/* NLS normalization file */
-struct norm_table
-{
-    WCHAR   name[13];      /* 00 file name */
-    USHORT  checksum[3];   /* 1a checksum? */
-    USHORT  version[4];    /* 20 Unicode version */
-    USHORT  form;          /* 28 normalization form */
-    USHORT  len_factor;    /* 2a factor for length estimates */
-    USHORT  unknown1;      /* 2c */
-    USHORT  decomp_size;   /* 2e decomposition hash size */
-    USHORT  comp_size;     /* 30 composition hash size */
-    USHORT  unknown2;      /* 32 */
-    USHORT  classes;       /* 34 combining classes table offset */
-    USHORT  props_level1;  /* 36 char properties table level 1 offset */
-    USHORT  props_level2;  /* 38 char properties table level 2 offset */
-    USHORT  decomp_hash;   /* 3a decomposition hash table offset */
-    USHORT  decomp_map;    /* 3c decomposition character map table offset */
-    USHORT  decomp_seq;    /* 3e decomposition character sequences offset */
-    USHORT  comp_hash;     /* 40 composition hash table offset */
-    USHORT  comp_seq;      /* 42 composition character sequences offset */
-    /* BYTE[]       combining class values */
-    /* BYTE[0x2200] char properties index level 1 */
-    /* BYTE[]       char properties index level 2 */
-    /* WORD[]       decomposition hash table */
-    /* WORD[]       decomposition character map */
-    /* WORD[]       decomposition character sequences */
-    /* WORD[]       composition hash table */
-    /* WORD[]       composition character sequences */
-};
-
-LCID user_lcid = 0, system_lcid = 0;
-
-static NLSTABLEINFO nls_info;
-static HMODULE kernel32_handle;
-static CPTABLEINFO unix_table;
+static const WCHAR *locale_strings;
+static NLSTABLEINFO nls_info = { { CP_UTF8 }, { CP_UTF8 } };
 static struct norm_table *norm_tables[16];
-
-
-static NTSTATUS load_string( ULONG id, LANGID lang, WCHAR *buffer, ULONG len )
-{
-    const IMAGE_RESOURCE_DATA_ENTRY *data;
-    LDR_RESOURCE_INFO info;
-    NTSTATUS status;
-    WCHAR *p;
-    int i;
-
-    info.Type = 6; /* RT_STRING */
-    info.Name = (id >> 4) + 1;
-    info.Language = lang;
-    if ((status = LdrFindResource_U( kernel32_handle, &info, 3, &data ))) return status;
-    p = (WCHAR *)((char *)kernel32_handle + data->OffsetToData);
-    for (i = 0; i < (id & 0x0f); i++) p += *p + 1;
-    if (*p >= len) return STATUS_BUFFER_TOO_SMALL;
-    memcpy( buffer, p + 1, *p * sizeof(WCHAR) );
-    buffer[*p] = 0;
-    return STATUS_SUCCESS;
-}
-
-
-static DWORD mbtowc_size( const CPTABLEINFO *info, LPCSTR str, UINT len )
-{
-    DWORD res;
-
-    if (!info->DBCSCodePage) return len;
-
-    for (res = 0; len; len--, str++, res++)
-    {
-        if (info->DBCSOffsets[(unsigned char)*str] && len > 1)
-        {
-            str++;
-            len--;
-        }
-    }
-    return res;
-}
-
-
-static DWORD wctomb_size( const CPTABLEINFO *info, LPCWSTR str, UINT len )
-{
-    if (info->DBCSCodePage)
-    {
-        WCHAR *uni2cp = info->WideCharTable;
-        DWORD res;
-
-        for (res = 0; len; len--, str++, res++)
-            if (uni2cp[*str] & 0xff00) res++;
-        return res;
-    }
-    else return len;
-}
+static const NLS_LOCALE_LCID_INDEX *lcids_index;
+static const NLS_LOCALE_LCNAME_INDEX *lcnames_index;
+static const NLS_LOCALE_HEADER *locale_table;
 
 
 static WCHAR casemap( USHORT *table, WCHAR ch )
@@ -172,32 +57,6 @@ static WCHAR casemap_ascii( WCHAR ch )
 {
     if (ch >= 'a' && ch <= 'z') ch -= 'a' - 'A';
     return ch;
-}
-
-
-static int get_utf16( const WCHAR *src, unsigned int srclen, unsigned int *ch )
-{
-    if (IS_HIGH_SURROGATE( src[0] ))
-    {
-        if (srclen <= 1) return 0;
-        if (!IS_LOW_SURROGATE( src[1] )) return 0;
-        *ch = 0x10000 + ((src[0] & 0x3ff) << 10) + (src[1] & 0x3ff);
-        return 2;
-    }
-    if (IS_LOW_SURROGATE( src[0] )) return 0;
-    *ch = src[0];
-    return 1;
-}
-
-static void put_utf16( WCHAR *dst, unsigned int ch )
-{
-    if (ch >= 0x10000)
-    {
-        ch -= 0x10000;
-        dst[0] = 0xd800 | (ch >> 10);
-        dst[1] = 0xdc00 | (ch & 0x3ff);
-    }
-    else dst[0] = ch;
 }
 
 
@@ -239,327 +98,56 @@ invalid:
 }
 
 
-static BYTE rol( BYTE val, BYTE count )
+static int compare_locale_names( const WCHAR *n1, const WCHAR *n2 )
 {
-    return (val << count) | (val >> (8 - count));
-}
-
-
-static BYTE get_char_props( const struct norm_table *info, unsigned int ch )
-{
-    const BYTE *level1 = (const BYTE *)((const USHORT *)info + info->props_level1);
-    const BYTE *level2 = (const BYTE *)((const USHORT *)info + info->props_level2);
-    BYTE off = level1[ch / 128];
-
-    if (!off || off >= 0xfb) return rol( off, 5 );
-    return level2[(off - 1) * 128 + ch % 128];
-}
-
-
-#define HANGUL_SBASE  0xac00
-#define HANGUL_LBASE  0x1100
-#define HANGUL_VBASE  0x1161
-#define HANGUL_TBASE  0x11a7
-#define HANGUL_LCOUNT 19
-#define HANGUL_VCOUNT 21
-#define HANGUL_TCOUNT 28
-#define HANGUL_NCOUNT (HANGUL_VCOUNT * HANGUL_TCOUNT)
-#define HANGUL_SCOUNT (HANGUL_LCOUNT * HANGUL_NCOUNT)
-
-static const WCHAR *get_decomposition( const struct norm_table *info, unsigned int ch,
-                                       BYTE props, WCHAR *buffer, unsigned int *ret_len )
-{
-    const struct pair { WCHAR src; USHORT dst; } *pairs;
-    const USHORT *hash_table = (const USHORT *)info + info->decomp_hash;
-    const WCHAR *ret;
-    unsigned int i, pos, end, len, hash;
-
-    /* default to no decomposition */
-    put_utf16( buffer, ch );
-    *ret_len = 1 + (ch >= 0x10000);
-    if (!props || props == 0x7f) return buffer;
-
-    if (props == 0xff)  /* Hangul or invalid char */
+    for (;;)
     {
-        if (ch >= HANGUL_SBASE && ch < HANGUL_SBASE + HANGUL_SCOUNT)
-        {
-            unsigned short sindex = ch - HANGUL_SBASE;
-            unsigned short tindex = sindex % HANGUL_TCOUNT;
-            buffer[0] = HANGUL_LBASE + sindex / HANGUL_NCOUNT;
-            buffer[1] = HANGUL_VBASE + (sindex % HANGUL_NCOUNT) / HANGUL_TCOUNT;
-            if (tindex) buffer[2] = HANGUL_TBASE + tindex;
-            *ret_len = 2 + !!tindex;
-            return buffer;
-        }
-        /* ignore other chars in Hangul range */
-        if (ch >= HANGUL_LBASE && ch < HANGUL_LBASE + 0x100) return buffer;
-        if (ch >= HANGUL_SBASE && ch < HANGUL_SBASE + 0x2c00) return buffer;
-        return NULL;
+        WCHAR ch1 = casemap_ascii( *n1++ );
+        WCHAR ch2 = casemap_ascii( *n2++ );
+        if (ch1 == '_') ch1 = '-';
+        if (ch2 == '_') ch2 = '-';
+        if (!ch1 || ch1 != ch2) return ch1 - ch2;
     }
+}
 
-    hash = ch % info->decomp_size;
-    pos = hash_table[hash];
-    if (pos >> 13)
+
+static const NLS_LOCALE_LCNAME_INDEX *find_lcname_entry( const WCHAR *name )
+{
+    int min = 0, max = locale_table->nb_lcnames - 1;
+
+    if (!name) return NULL;
+    while (min <= max)
     {
-        if (props != 0xbf) return buffer;
-        ret = (const USHORT *)info + info->decomp_seq + (pos & 0x1fff);
-        len = pos >> 13;
+        int res, pos = (min + max) / 2;
+        const WCHAR *str = locale_strings + lcnames_index[pos].name;
+        res = compare_locale_names( name, str + 1 );
+        if (res < 0) max = pos - 1;
+        else if (res > 0) min = pos + 1;
+        else return &lcnames_index[pos];
     }
-    else
+    return NULL;
+}
+
+
+static const NLS_LOCALE_LCID_INDEX *find_lcid_entry( LCID lcid )
+{
+    int min = 0, max = locale_table->nb_lcids - 1;
+
+    while (min <= max)
     {
-        pairs = (const struct pair *)((const USHORT *)info + info->decomp_map);
-
-        /* find the end of the hash bucket */
-        for (i = hash + 1; i < info->decomp_size; i++) if (!(hash_table[i] >> 13)) break;
-        if (i < info->decomp_size) end = hash_table[i];
-        else for (end = pos; pairs[end].src; end++) ;
-
-        for ( ; pos < end; pos++)
-        {
-            if (pairs[pos].src != (WCHAR)ch) continue;
-            ret = (const USHORT *)info + info->decomp_seq + (pairs[pos].dst & 0x1fff);
-            len = pairs[pos].dst >> 13;
-            break;
-        }
-        if (pos >= end) return buffer;
+        int pos = (min + max) / 2;
+        if (lcid < lcids_index[pos].id) max = pos - 1;
+        else if (lcid > lcids_index[pos].id) min = pos + 1;
+        else return &lcids_index[pos];
     }
-
-    if (len == 7) while (ret[len]) len++;
-    if (!ret[0]) len = 0;  /* ignored char */
-    *ret_len = len;
-    return ret;
+    return NULL;
 }
 
 
-static BYTE get_combining_class( const struct norm_table *info, unsigned int c )
+static const NLS_LOCALE_DATA *get_locale_data( UINT idx )
 {
-    const BYTE *classes = (const BYTE *)((const USHORT *)info + info->classes);
-    BYTE class = get_char_props( info, c ) & 0x3f;
-
-    if (class == 0x3f) return 0;
-    return classes[class];
-}
-
-
-static BOOL is_starter( const struct norm_table *info, unsigned int c )
-{
-    return !get_combining_class( info, c );
-}
-
-
-static BOOL reorderable_pair( const struct norm_table *info, unsigned int c1, unsigned int c2 )
-{
-    BYTE ccc1, ccc2;
-
-    /* reorderable if ccc1 > ccc2 > 0 */
-    ccc1 = get_combining_class( info, c1 );
-    if (ccc1 < 2) return FALSE;
-    ccc2 = get_combining_class( info, c2 );
-    return ccc2 && (ccc1 > ccc2);
-}
-
-static void canonical_order_substring( const struct norm_table *info, WCHAR *str, unsigned int len )
-{
-    unsigned int i, ch1, ch2, len1, len2;
-    BOOL swapped;
-
-    do
-    {
-        swapped = FALSE;
-        for (i = 0; i < len - 1; i += len1)
-        {
-            if (!(len1 = get_utf16( str + i, len - i, &ch1 ))) break;
-            if (i + len1 >= len) break;
-            if (!(len2 = get_utf16( str + i + len1, len - i - len1, &ch2 ))) break;
-            if (reorderable_pair( info, ch1, ch2 ))
-            {
-                WCHAR tmp[2];
-                memcpy( tmp, str + i, len1 * sizeof(WCHAR) );
-                memcpy( str + i, str + i + len1, len2 * sizeof(WCHAR) );
-                memcpy( str + i + len2, tmp, len1 * sizeof(WCHAR) );
-                swapped = TRUE;
-                i += len2 - len1;
-            }
-        }
-    } while (swapped);
-}
-
-
-/****************************************************************************
- *             canonical_order_string
- *
- * Reorder the string into canonical order - D108/D109.
- *
- * Starters (chars with combining class == 0) don't move, so look for continuous
- * substrings of non-starters and only reorder those.
- */
-static void canonical_order_string( const struct norm_table *info, WCHAR *str, unsigned int len )
-{
-    unsigned int ch, i, r, next = 0;
-
-    for (i = 0; i < len; i += r)
-    {
-        if (!(r = get_utf16( str + i, len - i, &ch ))) return;
-        if (i && is_starter( info, ch ))
-        {
-            if (i > next + 1) /* at least two successive non-starters */
-                canonical_order_substring( info, str + next, i - next );
-            next = i + r;
-        }
-    }
-    if (i > next + 1) canonical_order_substring( info, str + next, i - next );
-}
-
-
-static NTSTATUS decompose_string( const struct norm_table *info, const WCHAR *src, int src_len,
-                                  WCHAR *dst, int *dst_len )
-{
-    BYTE props;
-    int src_pos, dst_pos;
-    unsigned int ch, len, decomp_len;
-    WCHAR buffer[3];
-    const WCHAR *decomp;
-
-    for (src_pos = dst_pos = 0; src_pos < src_len; src_pos += len)
-    {
-        if (!(len = get_utf16( src + src_pos, src_len - src_pos, &ch )))
-        {
-            *dst_len = src_pos + IS_HIGH_SURROGATE( src[src_pos] );
-            return STATUS_NO_UNICODE_TRANSLATION;
-        }
-        props = get_char_props( info, ch );
-        if (!(decomp = get_decomposition( info, ch, props, buffer, &decomp_len )))
-        {
-            /* allow final null */
-            if (!ch && src_pos == src_len - 1 && dst_pos < *dst_len)
-            {
-                dst[dst_pos++] = 0;
-                break;
-            }
-            *dst_len = src_pos;
-            return STATUS_NO_UNICODE_TRANSLATION;
-        }
-        if (dst_pos + decomp_len > *dst_len)
-        {
-            *dst_len += (src_len - src_pos) * info->len_factor;
-            return STATUS_BUFFER_TOO_SMALL;
-        }
-        memcpy( dst + dst_pos, decomp, decomp_len * sizeof(WCHAR) );
-        dst_pos += decomp_len;
-    }
-
-    canonical_order_string( info, dst, dst_pos );
-    *dst_len = dst_pos;
-    return STATUS_SUCCESS;
-}
-
-
-static unsigned int compose_hangul( unsigned int ch1, unsigned int ch2 )
-{
-    if (ch1 >= HANGUL_LBASE && ch1 < HANGUL_LBASE + HANGUL_LCOUNT)
-    {
-        int lindex = ch1 - HANGUL_LBASE;
-        int vindex = ch2 - HANGUL_VBASE;
-        if (vindex >= 0 && vindex < HANGUL_VCOUNT)
-            return HANGUL_SBASE + (lindex * HANGUL_VCOUNT + vindex) * HANGUL_TCOUNT;
-    }
-    if (ch1 >= HANGUL_SBASE && ch1 < HANGUL_SBASE + HANGUL_SCOUNT)
-    {
-        int sindex = ch1 - HANGUL_SBASE;
-        if (!(sindex % HANGUL_TCOUNT))
-        {
-            int tindex = ch2 - HANGUL_TBASE;
-            if (tindex > 0 && tindex < HANGUL_TCOUNT) return ch1 + tindex;
-        }
-    }
-    return 0;
-}
-
-
-static unsigned int compose_chars( const struct norm_table *info, unsigned int ch1, unsigned int ch2 )
-{
-    const USHORT *table = (const USHORT *)info + info->comp_hash;
-    const WCHAR *chars = (const USHORT *)info + info->comp_seq;
-    unsigned int hash, start, end, i, len, ch[3];
-
-    hash = (ch1 + 95 * ch2) % info->comp_size;
-    start = table[hash];
-    end = table[hash + 1];
-    while (start < end)
-    {
-        for (i = 0; i < 3; i++, start += len) len = get_utf16( chars + start, end - start, ch + i );
-        if (ch[0] == ch1 && ch[1] == ch2) return ch[2];
-    }
-    return 0;
-}
-
-static unsigned int compose_string( const struct norm_table *info, WCHAR *str, unsigned int srclen )
-{
-    unsigned int i, ch, comp, len, start_ch = 0, last_starter = srclen;
-    BYTE class, prev_class = 0;
-
-    for (i = 0; i < srclen; i += len)
-    {
-        if (!(len = get_utf16( str + i, srclen - i, &ch ))) return 0;
-        class = get_combining_class( info, ch );
-        if (last_starter == srclen || (prev_class && prev_class >= class) ||
-            (!(comp = compose_hangul( start_ch, ch )) &&
-             !(comp = compose_chars( info, start_ch, ch ))))
-        {
-            if (!class)
-            {
-                last_starter = i;
-                start_ch = ch;
-            }
-            prev_class = class;
-        }
-        else
-        {
-            int comp_len = 1 + (comp >= 0x10000);
-            int start_len = 1 + (start_ch >= 0x10000);
-
-            if (comp_len != start_len)
-                memmove( str + last_starter + comp_len, str + last_starter + start_len,
-                         (i - (last_starter + start_len)) * sizeof(WCHAR) );
-            memmove( str + i + comp_len - start_len, str + i + len, (srclen - i - len) * sizeof(WCHAR) );
-            srclen += comp_len - start_len - len;
-            start_ch = comp;
-            i = last_starter;
-            len = comp_len;
-            prev_class = 0;
-            put_utf16( str + i, comp );
-        }
-    }
-    return srclen;
-}
-
-
-void init_unix_codepage(void)
-{
-    USHORT *data = unix_funcs->get_unix_codepage_data();
-    if (data) RtlInitCodePageTable( data, &unix_table );
-}
-
-
-static LCID locale_to_lcid( WCHAR *win_name )
-{
-    WCHAR *p;
-    LCID lcid;
-
-    if (!RtlLocaleNameToLcid( win_name, &lcid, 0 )) return lcid;
-
-    /* try neutral name */
-    if ((p = wcsrchr( win_name, '-' )))
-    {
-        *p = 0;
-        if (!RtlLocaleNameToLcid( win_name, &lcid, 2 ))
-        {
-            if (SUBLANGID(lcid) == SUBLANG_NEUTRAL)
-                lcid = MAKELANGID( PRIMARYLANGID(lcid), SUBLANG_DEFAULT );
-            return lcid;
-        }
-    }
-    return 0;
+    ULONG offset = locale_table->locales_offset + idx * locale_table->locale_size;
+    return (const NLS_LOCALE_DATA *)((const char *)locale_table + offset);
 }
 
 
@@ -567,19 +155,13 @@ static LCID locale_to_lcid( WCHAR *win_name )
  * Windows format is: lang[-script][-country][_modifier] */
 static LCID unix_locale_to_lcid( WCHAR *buffer )
 {
-    static const WCHAR sepW[] = {'_','.','@',0};
-    static const WCHAR posixW[] = {'P','O','S','I','X',0};
-    static const WCHAR cW[] = {'C',0};
-    static const WCHAR euroW[] = {'e','u','r','o',0};
-    static const WCHAR latinW[] = {'l','a','t','i','n',0};
-    static const WCHAR latnW[] = {'-','L','a','t','n',0};
     WCHAR win_name[LOCALE_NAME_MAX_LENGTH];
     WCHAR *p, *country = NULL, *modifier = NULL;
     LCID lcid;
 
-    if (!(p = wcspbrk( buffer, sepW )))
+    if (!(p = wcspbrk( buffer, L"_.@" )))
     {
-        if (!wcscmp( buffer, posixW ) || !wcscmp( buffer, cW ))
+        if (!wcscmp( buffer, L"POSIX" ) || !wcscmp( buffer, L"C" ))
             return MAKELCID( MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT), SORT_DEFAULT );
         wcscpy( win_name, buffer );
     }
@@ -589,7 +171,7 @@ static LCID unix_locale_to_lcid( WCHAR *buffer )
         {
             *p++ = 0;
             country = p;
-            p = wcspbrk( p, sepW + 1 );
+            p = wcspbrk( p, L".@" );
         }
         if (p && *p == '.')
         {
@@ -609,8 +191,8 @@ static LCID unix_locale_to_lcid( WCHAR *buffer )
     wcscpy( win_name, buffer );
     if (modifier)
     {
-        if (!wcscmp( modifier, latinW )) wcscat( win_name, latnW );
-        else if (!wcscmp( modifier, euroW )) {} /* ignore */
+        if (!wcscmp( modifier, L"latin" )) wcscat( win_name, L"-Latn" );
+        else if (!wcscmp( modifier, L"euro" )) {} /* ignore */
         else return 0;
     }
     if (country)
@@ -619,38 +201,53 @@ static LCID unix_locale_to_lcid( WCHAR *buffer )
         *p++ = '-';
         wcscpy( p, country );
     }
-
-    if (!RtlLocaleNameToLcid( win_name, &lcid, 0 )) return lcid;
-
-    /* try neutral name */
-    if (country)
-    {
-        p[-1] = 0;
-        if (!RtlLocaleNameToLcid( win_name, &lcid, 2 ))
-        {
-            if (SUBLANGID(lcid) == SUBLANG_NEUTRAL)
-                lcid = MAKELANGID( PRIMARYLANGID(lcid), SUBLANG_DEFAULT );
-            return lcid;
-        }
-    }
-    return 0;
+    RtlLocaleNameToLcid( win_name, &lcid, 2 );
+    return lcid;
 }
 
 
-/******************************************************************
- *		init_locale
- */
-void init_locale( HMODULE module )
+void locale_init(void)
 {
-    WCHAR system_locale[LOCALE_NAME_MAX_LENGTH];
-    WCHAR user_locale[LOCALE_NAME_MAX_LENGTH];
+    USHORT utf8[2] = { 0, CP_UTF8 };
+    WCHAR locale[LOCALE_NAME_MAX_LENGTH];
+    UNICODE_STRING name, value;
+    LARGE_INTEGER unused;
+    SIZE_T size;
+    LCID system_lcid, user_lcid = 0;
+    UINT ansi_cp = 1252, oem_cp = 437;
+    void *ansi_ptr = utf8, *oem_ptr = utf8, *case_ptr;
+    NTSTATUS status;
+    struct
+    {
+        UINT ctypes;
+        UINT unknown1;
+        UINT unknown2;
+        UINT unknown3;
+        UINT locales;
+        UINT charmaps;
+        UINT geoids;
+        UINT scripts;
+    } *header;
 
-    kernel32_handle = module;
+    status = RtlGetLocaleFileMappingAddress( (void **)&header, &system_lcid, &unused );
+    if (status)
+    {
+        ERR( "locale init failed %x\n", status );
+        return;
+    }
+    locale_table = (const NLS_LOCALE_HEADER *)((char *)header + header->locales);
+    lcids_index = (const NLS_LOCALE_LCID_INDEX *)((char *)locale_table + locale_table->lcids_offset);
+    lcnames_index = (const NLS_LOCALE_LCNAME_INDEX *)((char *)locale_table + locale_table->lcnames_offset);
+    locale_strings = (const WCHAR *)((char *)locale_table + locale_table->strings_offset);
 
-    unix_funcs->get_locales( system_locale, user_locale );
-    system_lcid = locale_to_lcid( system_locale );
-    user_lcid = locale_to_lcid( user_locale );
-    if (!system_lcid) system_lcid = MAKELCID( MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT), SORT_DEFAULT );
+    value.Buffer = locale;
+    value.MaximumLength = sizeof(locale);
+    RtlInitUnicodeString( &name, L"WINEUSERLOCALE" );
+    if (!RtlQueryEnvironmentVariable_U( NULL, &name, &value ))
+    {
+        const NLS_LOCALE_LCNAME_INDEX *entry = find_lcname_entry( locale );
+        if (entry) user_lcid = get_locale_data( entry->idx )->idefaultlanguage;
+    }
     if (!user_lcid) user_lcid = system_lcid;
 
     {
@@ -663,28 +260,19 @@ void init_locale( HMODULE module )
         stat = RtlOpenCurrentUser( KEY_ALL_ACCESS, &user_key );
         if (stat == STATUS_SUCCESS)
         {
-            static const WCHAR wineW[] = {'S','o','f','t','w','a','r','e','\\','W','i','n','e',0};
-            attr.Length = sizeof(attr);
-            attr.RootDirectory = user_key;
-            RtlInitUnicodeString( &nameW, wineW );
-            attr.ObjectName = &nameW;
-            attr.Attributes = 0;
-            attr.SecurityDescriptor = NULL;
-            attr.SecurityQualityOfService = NULL;
+            RtlInitUnicodeString( &nameW, L"Software\\Wine" );
+            InitializeObjectAttributes( &attr, &nameW, 0, user_key, NULL );
             stat = NtCreateKey( &wine_key, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL );
             NtClose( user_key );
         }
         if (stat == STATUS_SUCCESS)
         {
-            static const WCHAR lcallW[] = {'L','C','_','A','L','L',0};
-            static const WCHAR lcctypeW[] = {'L','C','_','C','T','Y','P','E',0};
-            static const WCHAR lcmessagesW[] = {'L','C','_','M','E','S','S','A','G','E','S',0};
             UNICODE_STRING categorystr;
             WCHAR bufferW[46];
             const KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION*)bufferW;
             DWORD count;
 
-            RtlInitUnicodeString( &categorystr, lcallW );
+            RtlInitUnicodeString( &categorystr, L"LC_ALL" );
             count = sizeof(bufferW);
             if (!NtQueryValueKey( wine_key, &categorystr, KeyValuePartialInformation, bufferW, count, &count ))
             {
@@ -692,11 +280,11 @@ void init_locale( HMODULE module )
             }
             else
             {
-                RtlInitUnicodeString( &categorystr, lcctypeW );
+                RtlInitUnicodeString( &categorystr, L"LC_CTYPE" );
                 count = sizeof(bufferW);
                 if (!NtQueryValueKey( wine_key, &categorystr, KeyValuePartialInformation, bufferW, count, &count ))
                     system_lcid = unix_locale_to_lcid( bufferW );
-                RtlInitUnicodeString( &categorystr, lcmessagesW );
+                RtlInitUnicodeString( &categorystr, L"LC_MESSAGES" );
                 count = sizeof(bufferW);
                 if (!NtQueryValueKey( wine_key, &categorystr, KeyValuePartialInformation, bufferW, count, &count ))
                     system_lcid = unix_locale_to_lcid( bufferW );
@@ -705,86 +293,58 @@ void init_locale( HMODULE module )
         }
     }
 
-    NtSetDefaultUILanguage( LANGIDFROMLCID(user_lcid) );
+    NtSetDefaultUILanguage( user_lcid );
     NtSetDefaultLocale( TRUE, user_lcid );
-    NtSetDefaultLocale( FALSE, system_lcid );
-    TRACE( "system=%04x user=%04x\n", system_lcid, user_lcid );
-}
 
-
-/******************************************************************
- *      ntdll_umbstowcs
- */
-DWORD ntdll_umbstowcs( const char *src, DWORD srclen, WCHAR *dst, DWORD dstlen )
-{
-    DWORD reslen;
-
-    if (unix_table.CodePage)
-        RtlCustomCPToUnicodeN( &unix_table, dst, dstlen * sizeof(WCHAR), &reslen, src, srclen );
-    else
-        RtlUTF8ToUnicodeN( dst, dstlen * sizeof(WCHAR), &reslen, src, srclen );
-    return reslen / sizeof(WCHAR);
-}
-
-
-/******************************************************************
- *      ntdll_wcstoumbs
- */
-int ntdll_wcstoumbs( const WCHAR *src, DWORD srclen, char *dst, DWORD dstlen, BOOL strict )
-{
-    DWORD i, reslen;
-
-    if (!unix_table.CodePage)
-        RtlUnicodeToUTF8N( dst, dstlen, &reslen, src, srclen * sizeof(WCHAR) );
-    else if (!strict)
-        RtlUnicodeToCustomCPN( &unix_table, dst, dstlen, &reslen, src, srclen * sizeof(WCHAR) );
-    else  /* do it by hand to make sure every character roundtrips correctly */
+    if (system_lcid == LOCALE_CUSTOM_UNSPECIFIED)
     {
-        if (unix_table.DBCSOffsets)
+        system_lcid = MAKELANGID( LANG_ENGLISH, SUBLANG_DEFAULT );
+        ansi_cp = oem_cp = CP_UTF8;
+    }
+    else
+    {
+        const NLS_LOCALE_LCID_INDEX *entry = find_lcid_entry( system_lcid );
+        ansi_cp = get_locale_data( entry->idx )->idefaultansicodepage;
+        oem_cp = get_locale_data( entry->idx )->idefaultcodepage;
+    }
+
+    if (!RtlQueryActivationContextApplicationSettings( 0, NULL, L"http://schemas.microsoft.com/SMI/2019/WindowsSettings",
+                                                       L"activeCodePage", locale, ARRAY_SIZE(locale), NULL ))
+    {
+        const NLS_LOCALE_LCNAME_INDEX *entry = find_lcname_entry( locale );
+
+        if (!wcsicmp( locale, L"utf-8" ))
         {
-            const unsigned short *uni2cp = unix_table.WideCharTable;
-            for (i = dstlen; srclen && i; i--, srclen--, src++)
-            {
-                unsigned short ch = uni2cp[*src];
-                if (ch >> 8)
-                {
-                    if (unix_table.DBCSOffsets[unix_table.DBCSOffsets[ch >> 8] + (ch & 0xff)] != *src)
-                        return -1;
-                    if (i == 1) break;  /* do not output a partial char */
-                    i--;
-                    *dst++ = ch >> 8;
-                }
-                else
-                {
-                    if (unix_table.MultiByteTable[ch] != *src) return -1;
-                    *dst++ = (char)ch;
-                }
-            }
-            reslen = dstlen - i;
+            ansi_cp = oem_cp = CP_UTF8;
         }
-        else
+        else if (!wcsicmp( locale, L"legacy" ))
         {
-            const unsigned char *uni2cp = unix_table.WideCharTable;
-            reslen = min( srclen, dstlen );
-            for (i = 0; i < reslen; i++)
-            {
-                unsigned char ch = uni2cp[src[i]];
-                if (unix_table.MultiByteTable[ch] != src[i]) return -1;
-                dst[i] = ch;
-            }
+            if (ansi_cp == CP_UTF8) ansi_cp = 1252;
+            if (oem_cp == CP_UTF8) oem_cp = 437;
+        }
+        else if ((entry = find_lcname_entry( locale )))
+        {
+            ansi_cp = get_locale_data( entry->idx )->idefaultansicodepage;
+            oem_cp = get_locale_data( entry->idx )->idefaultcodepage;
         }
     }
-    return reslen;
-}
 
-
-/******************************************************************
- *      __wine_get_unix_codepage   (NTDLL.@)
- */
-UINT CDECL __wine_get_unix_codepage(void)
-{
-    if (!unix_table.CodePage) return CP_UTF8;
-    return unix_table.CodePage;
+    NtGetNlsSectionPtr( 10, 0, NULL, &case_ptr, &size );
+    NtCurrentTeb()->Peb->UnicodeCaseTableData = case_ptr;
+    if (ansi_cp != CP_UTF8)
+    {
+        NtGetNlsSectionPtr( 11, ansi_cp, NULL, &ansi_ptr, &size );
+        NtCurrentTeb()->Peb->AnsiCodePageData = ansi_ptr;
+    }
+    if (oem_cp != CP_UTF8)
+    {
+        NtGetNlsSectionPtr( 11, oem_cp, NULL, &oem_ptr, &size );
+        NtCurrentTeb()->Peb->OemCodePageData = oem_ptr;
+    }
+    RtlInitNlsTables( ansi_ptr, oem_ptr, case_ptr, &nls_info );
+    NlsAnsiCodePage     = nls_info.AnsiTableInfo.CodePage;
+    NlsMbCodePageTag    = nls_info.AnsiTableInfo.DBCSCodePage;
+    NlsMbOemCodePageTag = nls_info.OemTableInfo.DBCSCodePage;
 }
 
 
@@ -797,9 +357,16 @@ static NTSTATUS get_dummy_preferred_ui_language( DWORD flags, LANGID lang, ULONG
 
     FIXME("(0x%x %p %p %p) returning a dummy value (current locale)\n", flags, count, buffer, size);
 
-    status = load_string( (flags & MUI_LANGUAGE_ID) ? LOCALE_ILANGUAGE : LOCALE_SNAME,
-                          lang, name, ARRAY_SIZE(name) );
-    if (status) return status;
+    if (flags & MUI_LANGUAGE_ID) swprintf( name, ARRAY_SIZE(name), L"%04lX", lang );
+    else
+    {
+        UNICODE_STRING str;
+
+        str.Buffer = name;
+        str.MaximumLength = sizeof(name);
+        status = RtlLcidToLocaleName( lang, &str, 0, FALSE );
+        if (status) return status;
+    }
 
     len = wcslen( name ) + 2;
     name[len - 1] = 0;
@@ -906,32 +473,10 @@ NTSTATUS WINAPI RtlSetThreadPreferredUILanguages( DWORD flags, PCZZWSTR buffer, 
  */
 void WINAPI RtlInitCodePageTable( USHORT *ptr, CPTABLEINFO *info )
 {
-    USHORT hdr_size = ptr[0];
+    static const CPTABLEINFO utf8_cpinfo = { CP_UTF8, 4, '?', 0xfffd, '?', '?' };
 
-    info->CodePage             = ptr[1];
-    info->MaximumCharacterSize = ptr[2];
-    info->DefaultChar          = ptr[3];
-    info->UniDefaultChar       = ptr[4];
-    info->TransDefaultChar     = ptr[5];
-    info->TransUniDefaultChar  = ptr[6];
-    memcpy( info->LeadByte, ptr + 7, sizeof(info->LeadByte) );
-    ptr += hdr_size;
-
-    info->WideCharTable = ptr + ptr[0] + 1;
-    info->MultiByteTable = ++ptr;
-    ptr += 256;
-    if (*ptr++) ptr += 256;  /* glyph table */
-    info->DBCSRanges = ptr;
-    if (*ptr)  /* dbcs ranges */
-    {
-        info->DBCSCodePage = 1;
-        info->DBCSOffsets  = ptr + 1;
-    }
-    else
-    {
-        info->DBCSCodePage = 0;
-        info->DBCSOffsets  = NULL;
-    }
+    if (ptr[1] == CP_UTF8) *info = utf8_cpinfo;
+    else init_codepage_table( ptr, info );
 }
 
 
@@ -960,20 +505,49 @@ void WINAPI RtlResetRtlTranslations( const NLSTABLEINFO *info )
 
 
 /**************************************************************************
+ *      RtlGetLocaleFileMappingAddress   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlGetLocaleFileMappingAddress( void **ptr, LCID *lcid, LARGE_INTEGER *size )
+{
+    static void *cached_ptr;
+    static LCID cached_lcid;
+
+    if (!cached_ptr)
+    {
+        void *addr;
+        NTSTATUS status = NtInitializeNlsFiles( &addr, &cached_lcid, size );
+
+        if (status) return status;
+        if (InterlockedCompareExchangePointer( &cached_ptr, addr, NULL ))
+            NtUnmapViewOfSection( GetCurrentProcess(), addr );
+    }
+    *ptr = cached_ptr;
+    *lcid = cached_lcid;
+    return STATUS_SUCCESS;
+}
+
+
+/**************************************************************************
  *      RtlAnsiCharToUnicodeChar   (NTDLL.@)
  */
 WCHAR WINAPI RtlAnsiCharToUnicodeChar( char **ansi )
 {
+    unsigned char ch = *(*ansi)++;
+
+    if (nls_info.AnsiTableInfo.CodePage == CP_UTF8)
+    {
+        unsigned int res;
+
+        if (ch < 0x80) return ch;
+        if ((res = decode_utf8_char( ch, (const char **)ansi, *ansi + 3 )) > 0x10ffff) res = 0xfffd;
+        return res;
+    }
     if (nls_info.AnsiTableInfo.DBCSOffsets)
     {
-        USHORT off = nls_info.AnsiTableInfo.DBCSOffsets[(unsigned char)**ansi];
-        if (off)
-        {
-            (*ansi)++;
-            return nls_info.AnsiTableInfo.DBCSOffsets[off + (unsigned char)*(*ansi)++];
-        }
+        USHORT off = nls_info.AnsiTableInfo.DBCSOffsets[ch];
+        if (off) return nls_info.AnsiTableInfo.DBCSOffsets[off + (unsigned char)*(*ansi)++];
     }
-    return nls_info.AnsiTableInfo.MultiByteTable[(unsigned char)*(*ansi)++];
+    return nls_info.AnsiTableInfo.MultiByteTable[ch];
 }
 
 
@@ -1071,29 +645,7 @@ NTSTATUS WINAPI RtlHashUnicodeString( const UNICODE_STRING *string, BOOLEAN case
 NTSTATUS WINAPI RtlCustomCPToUnicodeN( CPTABLEINFO *info, WCHAR *dst, DWORD dstlen, DWORD *reslen,
                                        const char *src, DWORD srclen )
 {
-    DWORD i, ret;
-
-    dstlen /= sizeof(WCHAR);
-    if (info->DBCSOffsets)
-    {
-        for (i = dstlen; srclen && i; i--, srclen--, src++, dst++)
-        {
-            USHORT off = info->DBCSOffsets[(unsigned char)*src];
-            if (off && srclen > 1)
-            {
-                src++;
-                srclen--;
-                *dst = info->DBCSOffsets[off + (unsigned char)*src];
-            }
-            else *dst = info->MultiByteTable[(unsigned char)*src];
-        }
-        ret = dstlen - i;
-    }
-    else
-    {
-        ret = min( srclen, dstlen );
-        for (i = 0; i < ret; i++) dst[i] = info->MultiByteTable[(unsigned char)src[i]];
-    }
+    unsigned int ret = cp_mbstowcs( info, dst, dstlen / sizeof(WCHAR), src, srclen );
     if (reslen) *reslen = ret * sizeof(WCHAR);
     return STATUS_SUCCESS;
 }
@@ -1105,31 +657,7 @@ NTSTATUS WINAPI RtlCustomCPToUnicodeN( CPTABLEINFO *info, WCHAR *dst, DWORD dstl
 NTSTATUS WINAPI RtlUnicodeToCustomCPN( CPTABLEINFO *info, char *dst, DWORD dstlen, DWORD *reslen,
                                        const WCHAR *src, DWORD srclen )
 {
-    DWORD i, ret;
-
-    srclen /= sizeof(WCHAR);
-    if (info->DBCSCodePage)
-    {
-        WCHAR *uni2cp = info->WideCharTable;
-
-        for (i = dstlen; srclen && i; i--, srclen--, src++)
-        {
-            if (uni2cp[*src] & 0xff00)
-            {
-                if (i == 1) break;  /* do not output a partial char */
-                i--;
-                *dst++ = uni2cp[*src] >> 8;
-            }
-            *dst++ = (char)uni2cp[*src];
-        }
-        ret = dstlen - i;
-    }
-    else
-    {
-        char *uni2cp = info->WideCharTable;
-        ret = min( srclen, dstlen );
-        for (i = 0; i < ret; i++) dst[i] = uni2cp[src[i]];
-    }
+    unsigned int ret = cp_wcstombs( info, dst, dstlen, src, srclen / sizeof(WCHAR) );
     if (reslen) *reslen = ret;
     return STATUS_SUCCESS;
 }
@@ -1141,13 +669,14 @@ NTSTATUS WINAPI RtlUnicodeToCustomCPN( CPTABLEINFO *info, char *dst, DWORD dstle
 NTSTATUS WINAPI RtlMultiByteToUnicodeN( WCHAR *dst, DWORD dstlen, DWORD *reslen,
                                         const char *src, DWORD srclen )
 {
-    if (nls_info.AnsiTableInfo.WideCharTable)
-        return RtlCustomCPToUnicodeN( &nls_info.AnsiTableInfo, dst, dstlen, reslen, src, srclen );
+    unsigned int ret;
 
-    /* locale not setup yet */
-    dstlen = min( srclen, dstlen / sizeof(WCHAR) );
-    if (reslen) *reslen = dstlen * sizeof(WCHAR);
-    while (dstlen--) *dst++ = *src++ & 0x7f;
+    if (nls_info.AnsiTableInfo.CodePage != CP_UTF8)
+        ret = cp_mbstowcs( &nls_info.AnsiTableInfo, dst, dstlen / sizeof(WCHAR), src, srclen );
+    else
+        utf8_mbstowcs( dst, dstlen / sizeof(WCHAR), &ret, src, srclen );
+
+    if (reslen) *reslen = ret * sizeof(WCHAR);
     return STATUS_SUCCESS;
 }
 
@@ -1157,7 +686,14 @@ NTSTATUS WINAPI RtlMultiByteToUnicodeN( WCHAR *dst, DWORD dstlen, DWORD *reslen,
  */
 NTSTATUS WINAPI RtlMultiByteToUnicodeSize( DWORD *size, const char *str, DWORD len )
 {
-    *size = mbtowc_size( &nls_info.AnsiTableInfo, str, len ) * sizeof(WCHAR);
+    unsigned int ret;
+
+    if (nls_info.AnsiTableInfo.CodePage != CP_UTF8)
+        ret = cp_mbstowcs_size( &nls_info.AnsiTableInfo, str, len );
+    else
+        utf8_mbstowcs_size( str, len, &ret );
+
+    *size = ret * sizeof(WCHAR);
     return STATUS_SUCCESS;
 }
 
@@ -1168,7 +704,15 @@ NTSTATUS WINAPI RtlMultiByteToUnicodeSize( DWORD *size, const char *str, DWORD l
 NTSTATUS WINAPI RtlOemToUnicodeN( WCHAR *dst, DWORD dstlen, DWORD *reslen,
                                   const char *src, DWORD srclen )
 {
-    return RtlCustomCPToUnicodeN( &nls_info.OemTableInfo, dst, dstlen, reslen, src, srclen );
+    unsigned int ret;
+
+    if (nls_info.OemTableInfo.CodePage != CP_UTF8)
+        ret = cp_mbstowcs( &nls_info.OemTableInfo, dst, dstlen / sizeof(WCHAR), src, srclen );
+    else
+        utf8_mbstowcs( dst, dstlen / sizeof(WCHAR), &ret, src, srclen );
+
+    if (reslen) *reslen = ret * sizeof(WCHAR);
+    return STATUS_SUCCESS;
 }
 
 
@@ -1178,7 +722,14 @@ NTSTATUS WINAPI RtlOemToUnicodeN( WCHAR *dst, DWORD dstlen, DWORD *reslen,
  */
 DWORD WINAPI RtlOemStringToUnicodeSize( const STRING *str )
 {
-    return (mbtowc_size( &nls_info.OemTableInfo, str->Buffer, str->Length ) + 1) * sizeof(WCHAR);
+    unsigned int ret;
+
+    if (nls_info.OemTableInfo.CodePage != CP_UTF8)
+        ret = cp_mbstowcs_size( &nls_info.OemTableInfo, str->Buffer, str->Length );
+    else
+        utf8_mbstowcs_size( str->Buffer, str->Length, &ret );
+
+    return (ret + 1) * sizeof(WCHAR);
 }
 
 
@@ -1188,7 +739,14 @@ DWORD WINAPI RtlOemStringToUnicodeSize( const STRING *str )
  */
 DWORD WINAPI RtlUnicodeStringToOemSize( const UNICODE_STRING *str )
 {
-    return wctomb_size( &nls_info.OemTableInfo, str->Buffer, str->Length / sizeof(WCHAR) ) + 1;
+    unsigned int ret;
+
+    if (nls_info.OemTableInfo.CodePage != CP_UTF8)
+        ret = cp_wcstombs_size( &nls_info.OemTableInfo, str->Buffer, str->Length / sizeof(WCHAR) );
+    else
+        utf8_wcstombs_size( str->Buffer, str->Length / sizeof(WCHAR), &ret );
+
+    return ret + 1;
 }
 
 
@@ -1198,18 +756,14 @@ DWORD WINAPI RtlUnicodeStringToOemSize( const UNICODE_STRING *str )
 NTSTATUS WINAPI RtlUnicodeToMultiByteN( char *dst, DWORD dstlen, DWORD *reslen,
                                         const WCHAR *src, DWORD srclen )
 {
-    if (nls_info.AnsiTableInfo.WideCharTable)
-        return RtlUnicodeToCustomCPN( &nls_info.AnsiTableInfo, dst, dstlen, reslen, src, srclen );
+    unsigned int ret;
 
-    /* locale not setup yet */
-    dstlen = min( srclen / sizeof(WCHAR), dstlen );
-    if (reslen) *reslen = dstlen;
-    while (dstlen--)
-    {
-        WCHAR ch = *src++;
-        if (ch > 0x7f) ch = '?';
-        *dst++ = ch;
-    }
+    if (nls_info.AnsiTableInfo.CodePage != CP_UTF8)
+        ret = cp_wcstombs( &nls_info.AnsiTableInfo, dst, dstlen, src, srclen / sizeof(WCHAR) );
+    else
+        utf8_wcstombs( dst, dstlen, &ret, src, srclen / sizeof(WCHAR) );
+
+    if (reslen) *reslen = ret;
     return STATUS_SUCCESS;
 }
 
@@ -1219,7 +773,14 @@ NTSTATUS WINAPI RtlUnicodeToMultiByteN( char *dst, DWORD dstlen, DWORD *reslen,
  */
 NTSTATUS WINAPI RtlUnicodeToMultiByteSize( DWORD *size, const WCHAR *str, DWORD len )
 {
-    *size = wctomb_size( &nls_info.AnsiTableInfo, str, len / sizeof(WCHAR) );
+    unsigned int ret;
+
+    if (nls_info.AnsiTableInfo.CodePage != CP_UTF8)
+        ret = cp_wcstombs_size( &nls_info.AnsiTableInfo, str, len / sizeof(WCHAR) );
+    else
+        utf8_wcstombs_size( str, len / sizeof(WCHAR), &ret );
+
+    *size = ret;
     return STATUS_SUCCESS;
 }
 
@@ -1230,7 +791,15 @@ NTSTATUS WINAPI RtlUnicodeToMultiByteSize( DWORD *size, const WCHAR *str, DWORD 
 NTSTATUS WINAPI RtlUnicodeToOemN( char *dst, DWORD dstlen, DWORD *reslen,
                                   const WCHAR *src, DWORD srclen )
 {
-    return RtlUnicodeToCustomCPN( &nls_info.OemTableInfo, dst, dstlen, reslen, src, srclen );
+    unsigned int ret;
+
+    if (nls_info.OemTableInfo.CodePage != CP_UTF8)
+        ret = cp_wcstombs( &nls_info.OemTableInfo, dst, dstlen, src, srclen / sizeof(WCHAR) );
+    else
+        utf8_wcstombs( dst, dstlen, &ret, src, srclen / sizeof(WCHAR) );
+
+    if (reslen) *reslen = ret;
+    return STATUS_SUCCESS;
 }
 
 
@@ -1335,328 +904,18 @@ NTSTATUS WINAPI RtlUpcaseUnicodeToCustomCPN( CPTABLEINFO *info, char *dst, DWORD
 }
 
 
-/**************************************************************************
- *	RtlUpcaseUnicodeToMultiByteN   (NTDLL.@)
- */
-NTSTATUS WINAPI RtlUpcaseUnicodeToMultiByteN( char *dst, DWORD dstlen, DWORD *reslen,
-                                              const WCHAR *src, DWORD srclen )
-{
-    return RtlUpcaseUnicodeToCustomCPN( &nls_info.AnsiTableInfo, dst, dstlen, reslen, src, srclen );
-}
-
-
-/**************************************************************************
- *	RtlUpcaseUnicodeToOemN   (NTDLL.@)
- */
-NTSTATUS WINAPI RtlUpcaseUnicodeToOemN( char *dst, DWORD dstlen, DWORD *reslen,
+static NTSTATUS upcase_unicode_to_utf8( char *dst, DWORD dstlen, DWORD *reslen,
                                         const WCHAR *src, DWORD srclen )
 {
-    if (nls_info.OemTableInfo.WideCharTable)
-        return RtlUpcaseUnicodeToCustomCPN( &nls_info.OemTableInfo, dst, dstlen, reslen, src, srclen );
-
-    /* locale not setup yet */
-    dstlen = min( srclen / sizeof(WCHAR), dstlen );
-    if (reslen) *reslen = dstlen;
-    while (dstlen--)
-    {
-        WCHAR ch = *src++;
-        if (ch > 0x7f) ch = '?';
-        else ch = casemap_ascii( ch );
-        *dst++ = ch;
-    }
-    return STATUS_SUCCESS;
-}
-
-
-/*********************************************************************
- *	towlower   (NTDLL.@)
- */
-WCHAR __cdecl towlower( WCHAR ch )
-{
-    if (ch >= 0x100) return ch;
-    return casemap( nls_info.LowerCaseTable, ch );
-}
-
-
-/*********************************************************************
- *           towupper    (NTDLL.@)
- */
-WCHAR __cdecl towupper( WCHAR ch )
-{
-    if (nls_info.UpperCaseTable) return casemap( nls_info.UpperCaseTable, ch );
-    return casemap_ascii( ch );
-}
-
-
-/******************************************************************
- *      RtlLocaleNameToLcid   (NTDLL.@)
- */
-NTSTATUS WINAPI RtlLocaleNameToLcid( const WCHAR *name, LCID *lcid, ULONG flags )
-{
-    /* locale name format is: lang[-script][-country][_modifier] */
-
-    const IMAGE_RESOURCE_DIRECTORY *resdir;
-    const IMAGE_RESOURCE_DIRECTORY_ENTRY *et;
-    LDR_RESOURCE_INFO info;
-    WCHAR buf[LOCALE_NAME_MAX_LENGTH];
-    WCHAR lang[LOCALE_NAME_MAX_LENGTH]; /* language ("en") (note: buffer contains the other strings too) */
-    WCHAR *country = NULL; /* country ("US") */
-    WCHAR *script = NULL; /* script ("Latn") */
-    WCHAR *p;
-    int i;
-
-    if (!name) return STATUS_INVALID_PARAMETER_1;
-
-    if (!name[0])
-    {
-        *lcid = LANG_INVARIANT;
-        goto found;
-    }
-    if (wcslen( name ) >= LOCALE_NAME_MAX_LENGTH) return STATUS_INVALID_PARAMETER_1;
-    wcscpy( lang, name );
-
-    if ((p = wcspbrk( lang, L"-_" )) && *p == '-')
-    {
-        *p++ = 0;
-        country = p;
-        if ((p = wcspbrk( p, L"-_" )) && *p == '-')
-        {
-            *p++ = 0;
-            script = country;
-            country = p;
-            p = wcspbrk( p, L"-_" );
-        }
-        if (p) *p = 0;  /* FIXME: modifier is ignored */
-        /* second value can be script or country, check length to resolve the ambiguity */
-        if (!script && wcslen( country ) == 4)
-        {
-            script = country;
-            country = NULL;
-        }
-    }
-
-    info.Type = 6; /* RT_STRING */
-    info.Name = (LOCALE_SNAME >> 4) + 1;
-    if (LdrFindResourceDirectory_U( kernel32_handle, &info, 2, &resdir ))
-        return STATUS_INVALID_PARAMETER_1;
-
-    et = (const IMAGE_RESOURCE_DIRECTORY_ENTRY *)(resdir + 1);
-    for (i = 0; i < resdir->NumberOfNamedEntries + resdir->NumberOfIdEntries; i++)
-    {
-        LANGID id = et[i].u.Id;
-
-        if (PRIMARYLANGID(id) == LANG_NEUTRAL) continue;
-
-        if (!load_string( LOCALE_SNAME, id, buf, ARRAY_SIZE(buf) ) && !wcsicmp( name, buf ))
-        {
-            *lcid = MAKELCID( id, SORT_DEFAULT );  /* FIXME: handle sort order */
-            goto found;
-        }
-
-        if (load_string( LOCALE_SISO639LANGNAME, id, buf, ARRAY_SIZE(buf) ) || wcsicmp( lang, buf ))
-            continue;
-
-        if (script)
-        {
-            unsigned int len = wcslen( script );
-            if (load_string( LOCALE_SSCRIPTS, id, buf, ARRAY_SIZE(buf) )) continue;
-            p = buf;
-            while (*p)
-            {
-                if (!wcsnicmp( p, script, len ) && (!p[len] || p[len] == ';')) break;
-                if (!(p = wcschr( p, ';'))) break;
-                p++;
-            }
-            if (!p || !*p) continue;
-        }
-
-        if (!country && (flags & 2))
-        {
-            if (!script) id = MAKELANGID( PRIMARYLANGID(id), LANG_NEUTRAL );
-            switch (id)
-            {
-            case MAKELANGID( LANG_CHINESE, SUBLANG_NEUTRAL ):
-            case MAKELANGID( LANG_CHINESE, SUBLANG_CHINESE_SINGAPORE ):
-                *lcid = MAKELCID( 0x7804, SORT_DEFAULT );
-                break;
-            case MAKELANGID( LANG_CHINESE, SUBLANG_CHINESE_TRADITIONAL ):
-            case MAKELANGID( LANG_CHINESE, SUBLANG_CHINESE_MACAU ):
-            case MAKELANGID( LANG_CHINESE, SUBLANG_CHINESE_HONGKONG ):
-                *lcid = MAKELCID( 0x7c04, SORT_DEFAULT );
-                break;
-            default:
-                *lcid = MAKELANGID( PRIMARYLANGID(id), SUBLANG_NEUTRAL );
-                break;
-            }
-            goto found;
-        }
-    }
-    return STATUS_INVALID_PARAMETER_1;
-
-found:
-    TRACE( "%s -> %04x\n", debugstr_w(name), *lcid );
-    return STATUS_SUCCESS;
-}
-
-
-/* helper for the various utf8 mbstowcs functions */
-static unsigned int decode_utf8_char( unsigned char ch, const char **str, const char *strend )
-{
-    /* number of following bytes in sequence based on first byte value (for bytes above 0x7f) */
-    static const char utf8_length[128] =
-    {
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, /* 0x80-0x8f */
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, /* 0x90-0x9f */
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, /* 0xa0-0xaf */
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, /* 0xb0-0xbf */
-        0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1, /* 0xc0-0xcf */
-        1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, /* 0xd0-0xdf */
-        2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2, /* 0xe0-0xef */
-        3,3,3,3,3,0,0,0,0,0,0,0,0,0,0,0  /* 0xf0-0xff */
-    };
-
-    /* first byte mask depending on UTF-8 sequence length */
-    static const unsigned char utf8_mask[4] = { 0x7f, 0x1f, 0x0f, 0x07 };
-
-    unsigned int len = utf8_length[ch - 0x80];
-    unsigned int res = ch & utf8_mask[len];
-    const char *end = *str + len;
-
-    if (end > strend)
-    {
-        *str = end;
-        return ~0;
-    }
-    switch (len)
-    {
-    case 3:
-        if ((ch = end[-3] ^ 0x80) >= 0x40) break;
-        res = (res << 6) | ch;
-        (*str)++;
-        if (res < 0x10) break;
-    case 2:
-        if ((ch = end[-2] ^ 0x80) >= 0x40) break;
-        res = (res << 6) | ch;
-        if (res >= 0x110000 >> 6) break;
-        (*str)++;
-        if (res < 0x20) break;
-        if (res >= 0xd800 >> 6 && res <= 0xdfff >> 6) break;
-    case 1:
-        if ((ch = end[-1] ^ 0x80) >= 0x40) break;
-        res = (res << 6) | ch;
-        (*str)++;
-        if (res < 0x80) break;
-        return res;
-    }
-    return ~0;
-}
-
-
-/**************************************************************************
- *	RtlUTF8ToUnicodeN   (NTDLL.@)
- */
-NTSTATUS WINAPI RtlUTF8ToUnicodeN( WCHAR *dst, DWORD dstlen, DWORD *reslen, const char *src, DWORD srclen )
-{
-    unsigned int res, len;
-    NTSTATUS status = STATUS_SUCCESS;
-    const char *srcend = src + srclen;
-    WCHAR *dstend;
-
-    if (!src) return STATUS_INVALID_PARAMETER_4;
-    if (!reslen) return STATUS_INVALID_PARAMETER;
-
-    dstlen /= sizeof(WCHAR);
-    dstend = dst + dstlen;
-    if (!dst)
-    {
-        for (len = 0; src < srcend; len++)
-        {
-            unsigned char ch = *src++;
-            if (ch < 0x80) continue;
-            if ((res = decode_utf8_char( ch, &src, srcend )) > 0x10ffff)
-                status = STATUS_SOME_NOT_MAPPED;
-            else
-                if (res > 0xffff) len++;
-        }
-        *reslen = len * sizeof(WCHAR);
-        return status;
-    }
-
-    while ((dst < dstend) && (src < srcend))
-    {
-        unsigned char ch = *src++;
-        if (ch < 0x80)  /* special fast case for 7-bit ASCII */
-        {
-            *dst++ = ch;
-            continue;
-        }
-        if ((res = decode_utf8_char( ch, &src, srcend )) <= 0xffff)
-        {
-            *dst++ = res;
-        }
-        else if (res <= 0x10ffff)  /* we need surrogates */
-        {
-            res -= 0x10000;
-            *dst++ = 0xd800 | (res >> 10);
-            if (dst == dstend) break;
-            *dst++ = 0xdc00 | (res & 0x3ff);
-        }
-        else
-        {
-            *dst++ = 0xfffd;
-            status = STATUS_SOME_NOT_MAPPED;
-        }
-    }
-    if (src < srcend) status = STATUS_BUFFER_TOO_SMALL;  /* overflow */
-    *reslen = (dstlen - (dstend - dst)) * sizeof(WCHAR);
-    return status;
-}
-
-
-/**************************************************************************
- *	RtlUnicodeToUTF8N   (NTDLL.@)
- */
-NTSTATUS WINAPI RtlUnicodeToUTF8N( char *dst, DWORD dstlen, DWORD *reslen, const WCHAR *src, DWORD srclen )
-{
     char *end;
-    unsigned int val, len;
+    unsigned int val;
     NTSTATUS status = STATUS_SUCCESS;
-
-    if (!src) return STATUS_INVALID_PARAMETER_4;
-    if (!reslen) return STATUS_INVALID_PARAMETER;
-    if (dst && (srclen & 1)) return STATUS_INVALID_PARAMETER_5;
 
     srclen /= sizeof(WCHAR);
 
-    if (!dst)
-    {
-        for (len = 0; srclen; srclen--, src++)
-        {
-            if (*src < 0x80) len++;  /* 0x00-0x7f: 1 byte */
-            else if (*src < 0x800) len += 2;  /* 0x80-0x7ff: 2 bytes */
-            else
-            {
-                if (!get_utf16( src, srclen, &val ))
-                {
-                    val = 0xfffd;
-                    status = STATUS_SOME_NOT_MAPPED;
-                }
-                if (val < 0x10000) len += 3; /* 0x800-0xffff: 3 bytes */
-                else   /* 0x10000-0x10ffff: 4 bytes */
-                {
-                    len += 4;
-                    src++;
-                    srclen--;
-                }
-            }
-        }
-        *reslen = len;
-        return status;
-    }
-
     for (end = dst + dstlen; srclen; srclen--, src++)
     {
-        WCHAR ch = *src;
+        WCHAR ch = casemap( nls_info.UpperCaseTable, *src );
 
         if (ch < 0x80)  /* 0x00-0x7f: 1 byte */
         {
@@ -1704,7 +963,171 @@ NTSTATUS WINAPI RtlUnicodeToUTF8N( char *dst, DWORD dstlen, DWORD *reslen, const
         }
     }
     if (srclen) status = STATUS_BUFFER_TOO_SMALL;
-    *reslen = dstlen - (end - dst);
+    if (reslen) *reslen = dstlen - (end - dst);
+    return status;
+}
+
+/**************************************************************************
+ *	RtlUpcaseUnicodeToMultiByteN   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlUpcaseUnicodeToMultiByteN( char *dst, DWORD dstlen, DWORD *reslen,
+                                              const WCHAR *src, DWORD srclen )
+{
+    if (nls_info.AnsiTableInfo.CodePage == CP_UTF8)
+        return upcase_unicode_to_utf8( dst, dstlen, reslen, src, srclen );
+    return RtlUpcaseUnicodeToCustomCPN( &nls_info.AnsiTableInfo, dst, dstlen, reslen, src, srclen );
+}
+
+
+/**************************************************************************
+ *	RtlUpcaseUnicodeToOemN   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlUpcaseUnicodeToOemN( char *dst, DWORD dstlen, DWORD *reslen,
+                                        const WCHAR *src, DWORD srclen )
+{
+    if (nls_info.OemTableInfo.CodePage == CP_UTF8)
+        return upcase_unicode_to_utf8( dst, dstlen, reslen, src, srclen );
+    return RtlUpcaseUnicodeToCustomCPN( &nls_info.OemTableInfo, dst, dstlen, reslen, src, srclen );
+}
+
+
+/*********************************************************************
+ *	towlower   (NTDLL.@)
+ */
+WCHAR __cdecl towlower( WCHAR ch )
+{
+    if (ch >= 0x100) return ch;
+    return casemap( nls_info.LowerCaseTable, ch );
+}
+
+
+/*********************************************************************
+ *           towupper    (NTDLL.@)
+ */
+WCHAR __cdecl towupper( WCHAR ch )
+{
+    if (nls_info.UpperCaseTable) return casemap( nls_info.UpperCaseTable, ch );
+    return casemap_ascii( ch );
+}
+
+
+/******************************************************************
+ *      RtlIsValidLocaleName   (NTDLL.@)
+ */
+BOOLEAN WINAPI RtlIsValidLocaleName( const WCHAR *name, ULONG flags )
+{
+    const NLS_LOCALE_LCNAME_INDEX *entry = find_lcname_entry( name );
+
+    if (!entry) return FALSE;
+    /* reject neutral locale unless flag 2 is set */
+    if (!(flags & 2) && !get_locale_data( entry->idx )->inotneutral) return FALSE;
+    return TRUE;
+}
+
+
+/******************************************************************
+ *      RtlLcidToLocaleName   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlLcidToLocaleName( LCID lcid, UNICODE_STRING *str, ULONG flags, BOOLEAN alloc )
+{
+    const NLS_LOCALE_LCID_INDEX *entry;
+    const WCHAR *name;
+    ULONG len;
+
+    if (!str) return STATUS_INVALID_PARAMETER_2;
+
+    switch (lcid)
+    {
+    case LOCALE_USER_DEFAULT:
+        NtQueryDefaultLocale( TRUE, &lcid );
+        break;
+    case LOCALE_SYSTEM_DEFAULT:
+    case LOCALE_CUSTOM_DEFAULT:
+        NtQueryDefaultLocale( FALSE, &lcid );
+        break;
+    case LOCALE_CUSTOM_UI_DEFAULT:
+        return STATUS_UNSUCCESSFUL;
+    case LOCALE_CUSTOM_UNSPECIFIED:
+        return STATUS_INVALID_PARAMETER_1;
+    }
+
+    if (!(entry = find_lcid_entry( lcid ))) return STATUS_INVALID_PARAMETER_1;
+    /* reject neutral locale unless flag 2 is set */
+    if (!(flags & 2) && !get_locale_data( entry->idx )->inotneutral) return STATUS_INVALID_PARAMETER_1;
+
+    name = locale_strings + entry->name;
+    len = *name++;
+
+    if (alloc)
+    {
+        if (!(str->Buffer = RtlAllocateHeap( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) )))
+            return STATUS_NO_MEMORY;
+        str->MaximumLength = (len + 1) * sizeof(WCHAR);
+    }
+    else if (str->MaximumLength < (len + 1) * sizeof(WCHAR)) return STATUS_BUFFER_TOO_SMALL;
+
+    wcscpy( str->Buffer, name );
+    str->Length = len * sizeof(WCHAR);
+    TRACE( "%04x -> %s\n", lcid, debugstr_us(str) );
+    return STATUS_SUCCESS;
+}
+
+
+/******************************************************************
+ *      RtlLocaleNameToLcid   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlLocaleNameToLcid( const WCHAR *name, LCID *lcid, ULONG flags )
+{
+    const NLS_LOCALE_LCNAME_INDEX *entry = find_lcname_entry( name );
+
+    if (!entry) return STATUS_INVALID_PARAMETER_1;
+    /* reject neutral locale unless flag 2 is set */
+    if (!(flags & 2) && !get_locale_data( entry->idx )->inotneutral) return STATUS_INVALID_PARAMETER_1;
+    *lcid = entry->id;
+    TRACE( "%s -> %04x\n", debugstr_w(name), *lcid );
+    return STATUS_SUCCESS;
+}
+
+
+/**************************************************************************
+ *	RtlUTF8ToUnicodeN   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlUTF8ToUnicodeN( WCHAR *dst, DWORD dstlen, DWORD *reslen, const char *src, DWORD srclen )
+{
+    unsigned int ret;
+    NTSTATUS status;
+
+    if (!src) return STATUS_INVALID_PARAMETER_4;
+    if (!reslen) return STATUS_INVALID_PARAMETER;
+
+    if (!dst)
+        status = utf8_mbstowcs_size( src, srclen, &ret );
+    else
+        status = utf8_mbstowcs( dst, dstlen / sizeof(WCHAR), &ret, src, srclen );
+
+    *reslen = ret * sizeof(WCHAR);
+    return status;
+}
+
+
+/**************************************************************************
+ *	RtlUnicodeToUTF8N   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlUnicodeToUTF8N( char *dst, DWORD dstlen, DWORD *reslen, const WCHAR *src, DWORD srclen )
+{
+    unsigned int ret;
+    NTSTATUS status;
+
+    if (!src) return STATUS_INVALID_PARAMETER_4;
+    if (!reslen) return STATUS_INVALID_PARAMETER;
+    if (dst && (srclen & 1)) return STATUS_INVALID_PARAMETER_5;
+
+    if (!dst)
+        status = utf8_wcstombs_size( src, srclen / sizeof(WCHAR), &ret );
+    else
+        status = utf8_wcstombs( dst, dstlen, &ret, src, srclen / sizeof(WCHAR) );
+
+    *reslen = ret;
     return status;
 }
 

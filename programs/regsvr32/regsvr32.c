@@ -23,6 +23,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <winternl.h>
 #include <ole2.h>
 #include "regsvr32.h"
 #include "wine/debug.h"
@@ -38,7 +39,7 @@ static BOOL Silent = FALSE;
 static void WINAPIV output_write(UINT id, ...)
 {
     WCHAR fmt[1024];
-    __ms_va_list va_args;
+    va_list va_args;
     WCHAR *str;
     DWORD len, nOut, ret;
 
@@ -46,17 +47,17 @@ static void WINAPIV output_write(UINT id, ...)
 
     if (!LoadStringW(GetModuleHandleW(NULL), id, fmt, ARRAY_SIZE(fmt)))
     {
-        WINE_FIXME("LoadString failed with %d\n", GetLastError());
+        WINE_FIXME("LoadString failed with %ld\n", GetLastError());
         return;
     }
 
-    __ms_va_start(va_args, id);
+    va_start(va_args, id);
     len = FormatMessageW(FORMAT_MESSAGE_FROM_STRING|FORMAT_MESSAGE_ALLOCATE_BUFFER,
                          fmt, 0, 0, (LPWSTR)&str, 0, &va_args);
-    __ms_va_end(va_args);
+    va_end(va_args);
     if (len == 0 && GetLastError() != ERROR_NO_WORK_DONE)
     {
-        WINE_FIXME("Could not format string: le=%u, fmt=%s\n", GetLastError(), wine_dbgstr_w(fmt));
+        WINE_FIXME("Could not format string: le=%lu, fmt=%s\n", GetLastError(), wine_dbgstr_w(fmt));
         return;
     }
 
@@ -111,46 +112,39 @@ static LPCWSTR find_arg_start(LPCWSTR cmdline)
     return s;
 }
 
-static void reexec_self(void)
+static void reexec_self( WORD machine )
 {
-    /* restart current process as 32-bit or 64-bit with same command line */
-#ifndef _WIN64
-    BOOL wow64;
-#endif
-    WCHAR systemdir[MAX_PATH];
+    WCHAR app[MAX_PATH];
     LPCWSTR args;
     WCHAR *cmdline;
+    ULONG i, machines[8];
+    HANDLE process = 0;
     STARTUPINFOW si = {0};
     PROCESS_INFORMATION pi;
+    void *cookie;
 
-#ifdef _WIN64
-    TRACE("restarting as 32-bit\n");
-    GetSystemWow64DirectoryW(systemdir, MAX_PATH);
-#else
-    TRACE("restarting as 64-bit\n");
+    NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
+                                machines, sizeof(machines), NULL );
+    for (i = 0; machines[i]; i++) if (LOWORD(machines[i]) == machine) break;
+    if (!machines[i]) return;
+    if (HIWORD(machines[i]) & 4 /* native machine */) machine = IMAGE_FILE_MACHINE_TARGET_HOST;
+    if (!GetSystemWow64Directory2W( app, MAX_PATH, machine )) return;
+    wcscat( app, L"\\regsvr32.exe" );
 
-    if (!IsWow64Process(GetCurrentProcess(), &wow64) || !wow64)
-    {
-        TRACE("not running in wow64, can't restart as 64-bit\n");
-        return;
-    }
-
-    GetWindowsDirectoryW(systemdir, MAX_PATH);
-    wcscat(systemdir, L"\\SysNative");
-#endif
+    TRACE( "restarting as %s\n", debugstr_w(app) );
 
     args = find_arg_start(GetCommandLineW());
 
     cmdline = HeapAlloc(GetProcessHeap(), 0,
-        (wcslen(systemdir)+wcslen(L"\\regsvr32.exe")+wcslen(args)+1)*sizeof(WCHAR));
+                        (wcslen(app)+wcslen(args)+1)*sizeof(WCHAR));
 
-    wcscpy(cmdline, systemdir);
-    wcscat(cmdline, L"\\regsvr32.exe");
+    wcscpy(cmdline, app);
     wcscat(cmdline, args);
 
     si.cb = sizeof(si);
 
-    if (CreateProcessW(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+    Wow64DisableWow64FsRedirection(&cookie);
+    if (CreateProcessW(app, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
     {
         DWORD exit_code;
         WaitForSingleObject(pi.hProcess, INFINITE);
@@ -159,17 +153,11 @@ static void reexec_self(void)
     }
     else
     {
-        WINE_TRACE("failed to restart, err=%d\n", GetLastError());
+        WINE_TRACE("failed to restart, err=%ld\n", GetLastError());
     }
-
+    Wow64RevertWow64FsRedirection(cookie);
     HeapFree(GetProcessHeap(), 0, cmdline);
 }
-
-#ifdef _WIN64
-# define ALT_BINARY_TYPE SCS_32BIT_BINARY
-#else
-# define ALT_BINARY_TYPE SCS_64BIT_BINARY
-#endif
 
 /**
  * Loads procedure.
@@ -187,12 +175,12 @@ static VOID *LoadProc(const WCHAR* strDll, const char* procName, HMODULE* DllHan
     *DllHandle = LoadLibraryExW(strDll, 0, LOAD_WITH_ALTERED_SEARCH_PATH);
     if(!*DllHandle)
     {
-        DWORD binary_type;
+        HMODULE module;
         if (firstDll && GetLastError() == ERROR_BAD_EXE_FORMAT &&
-            GetBinaryTypeW(strDll, &binary_type) &&
-            binary_type == ALT_BINARY_TYPE)
+            (module = LoadLibraryExW(strDll, 0, LOAD_LIBRARY_AS_IMAGE_RESOURCE)))
         {
-            reexec_self();
+            IMAGE_NT_HEADERS *nt = RtlImageNtHeader( (HMODULE)((ULONG_PTR)module & ~3) );
+            reexec_self( nt->FileHeader.Machine );
         }
         output_write(STRING_DLL_LOAD_FAILED, strDll);
         ExitProcess(LOADLIBRARY_FAILED);

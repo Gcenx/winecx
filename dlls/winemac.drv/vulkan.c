@@ -22,15 +22,12 @@
  * the other drivers. */
 
 #include "config.h"
-#include "wine/port.h"
-#include "macdrv.h"
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <dlfcn.h>
 
-#include "windef.h"
-#include "winbase.h"
-
+#include "macdrv.h"
 #include "wine/debug.h"
 #include "wine/heap.h"
 
@@ -420,11 +417,31 @@ static VkResult macdrv_vkEnumerateInstanceExtensionProperties(const char *layer_
     return res;
 }
 
+static const char *wine_vk_native_fn_name(const char *name)
+{
+    const char *create_surface_name =
+        pvkCreateMetalSurfaceEXT ? "vkCreateMetalSurfaceEXT" : "vkCreateMacOSSurfaceMVK";
+
+    if (!strcmp(name, "vkCreateWin32SurfaceKHR"))
+        return create_surface_name;
+    /* We just need something where non-NULL is returned if the correct extension is enabled.
+     * So since there is no native equivalent of this function check for the create
+     * surface function.
+     */
+    if (!strcmp(name, "vkGetPhysicalDeviceWin32PresentationSupportKHR"))
+        return create_surface_name;
+
+    return name;
+}
+
 static void *macdrv_vkGetDeviceProcAddr(VkDevice device, const char *name)
 {
     void *proc_addr;
 
     TRACE("%p, %s\n", device, debugstr_a(name));
+
+    if (!pvkGetDeviceProcAddr(device, wine_vk_native_fn_name(name)))
+        return NULL;
 
     if ((proc_addr = macdrv_get_vk_device_proc_addr(name)))
         return proc_addr;
@@ -437,6 +454,9 @@ static void *macdrv_vkGetInstanceProcAddr(VkInstance instance, const char *name)
     void *proc_addr;
 
     TRACE("%p, %s\n", instance, debugstr_a(name));
+
+    if (!pvkGetInstanceProcAddr(instance, wine_vk_native_fn_name(name)))
+        return NULL;
 
     if ((proc_addr = macdrv_get_vk_instance_proc_addr(instance, name)))
         return proc_addr;
@@ -558,6 +578,15 @@ static VkResult macdrv_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *
     return res;
 }
 
+static VkSurfaceKHR macdrv_wine_get_native_surface(VkSurfaceKHR surface)
+{
+    struct wine_vk_surface *mac_surface = surface_from_handle(surface);
+
+    TRACE("0x%s\n", wine_dbgstr_longlong(surface));
+
+    return mac_surface->surface;
+}
+
 static const struct vulkan_funcs vulkan_funcs =
 {
     macdrv_vkCreateInstance,
@@ -580,6 +609,8 @@ static const struct vulkan_funcs vulkan_funcs =
     macdrv_vkGetPhysicalDeviceWin32PresentationSupportKHR,
     macdrv_vkGetSwapchainImagesKHR,
     macdrv_vkQueuePresentKHR,
+
+    macdrv_wine_get_native_surface,
 };
 
 static void *macdrv_get_vk_device_proc_addr(const char *name)
@@ -619,14 +650,7 @@ static const struct vulkan_funcs *get_vulkan_driver(UINT version)
 
 #endif /* SONAME_LIBMOLTENVK */
 
-const struct vulkan_funcs * CDECL macdrv_wine_get_vulkan_driver(PHYSDEV dev, UINT version)
+const struct vulkan_funcs *macdrv_wine_get_vulkan_driver(UINT version)
 {
-    const struct vulkan_funcs *ret;
-
-    if (!(ret = get_vulkan_driver( version )))
-    {
-        dev = GET_NEXT_PHYSDEV( dev, wine_get_vulkan_driver );
-        ret = dev->funcs->wine_get_vulkan_driver( dev, version );
-    }
-    return ret;
+    return get_vulkan_driver( version );
 }

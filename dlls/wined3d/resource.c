@@ -21,8 +21,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
@@ -237,7 +235,6 @@ static void wined3d_resource_destroy_object(void *object)
 
     wined3d_resource_free_sysmem(resource);
     context_resource_released(resource->device, resource);
-    wined3d_resource_release(resource);
 }
 
 void resource_cleanup(struct wined3d_resource *resource)
@@ -256,7 +253,7 @@ void resource_cleanup(struct wined3d_resource *resource)
 
         device_resource_released(resource->device, resource);
     }
-    wined3d_resource_acquire(resource);
+    wined3d_resource_reference(resource);
     wined3d_cs_destroy_object(resource->device->cs, wined3d_resource_destroy_object, resource);
 }
 
@@ -592,7 +589,7 @@ VkPipelineStageFlags vk_pipeline_stage_mask_from_bind_flags(uint32_t bind_flags)
 }
 
 void *resource_offset_map_pointer(struct wined3d_resource *resource, unsigned int sub_resource_idx,
-        uint8_t * WIN32PTR base_memory, const struct wined3d_box *box)
+        uint8_t *base_memory, const struct wined3d_box *box)
 {
     const struct wined3d_format *format = resource->format;
     unsigned int row_pitch, slice_pitch;

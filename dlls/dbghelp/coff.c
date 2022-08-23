@@ -41,7 +41,6 @@
 #include "winbase.h"
 #include "winternl.h"
 
-#include "wine/exception.h"
 #include "wine/debug.h"
 #include "dbghelp_private.h"
 #include "wine/mscvpdb.h"
@@ -224,12 +223,12 @@ DECLSPEC_HIDDEN BOOL coff_process_info(const struct msc_debug_info* msc_dbg)
                 fn = source_get(msc_dbg->module,
                                 coff_files.files[curr_file_idx].compiland->source);
 
-                TRACE("Duplicating sect from %s: %x %x %x %d %d\n",
+                TRACE("Duplicating sect from %s: %lx %x %x %d %d\n",
                       fn, aux->Section.Length,
                       aux->Section.NumberOfRelocations,
                       aux->Section.NumberOfLinenumbers,
                       aux->Section.Number, aux->Section.Selection);
-                TRACE("More sect %d %s %08x %d %d %d\n",
+                TRACE("More sect %d %s %08lx %d %d %d\n",
                       coff_sym->SectionNumber,
                       coff_get_name(coff_sym, coff_strtab),
                       coff_sym->Value, coff_sym->Type,
@@ -243,7 +242,7 @@ DECLSPEC_HIDDEN BOOL coff_process_info(const struct msc_debug_info* msc_dbg)
 	    }
             else
 	    {
-                TRACE("New text sect from %s: %x %x %x %d %d\n",
+                TRACE("New text sect from %s: %lx %x %x %d %d\n",
                       source_get(msc_dbg->module, coff_files.files[curr_file_idx].compiland->source),
                       aux->Section.Length,
                       aux->Section.NumberOfRelocations,
@@ -422,16 +421,11 @@ DECLSPEC_HIDDEN BOOL coff_process_info(const struct msc_debug_info* msc_dbg)
                         {
                             if (coff_files.files[j].entries[l+1]->tag == SymTagFunction)
                             {
-                                /*
-                                 * Add the line number.  This is always relative to the
-                                 * start of the function, so we need to subtract that offset
-                                 * first.
-                                 */
                                 symt_add_func_line(msc_dbg->module,
                                                    (struct symt_function*)coff_files.files[j].entries[l+1],
                                                    coff_files.files[j].compiland->source,
                                                    linepnt->Linenumber,
-                                                   msc_dbg->module->module.BaseOfImage + linepnt->Type.VirtualAddress - addr);
+                                                   msc_dbg->module->module.BaseOfImage + linepnt->Type.VirtualAddress);
                             }
                             break;
                         }

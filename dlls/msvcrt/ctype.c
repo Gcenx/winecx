@@ -144,6 +144,22 @@ const unsigned short* CDECL __pctype_func(void)
 }
 
 /*********************************************************************
+ *		__p__pwctype (MSVCRT.@)
+ */
+unsigned short** CDECL __p__pwctype(void)
+{
+    return &MSVCRT__pwctype;
+}
+
+/*********************************************************************
+ *		__pwctype_func (MSVCRT.@)
+ */
+const unsigned short* CDECL __pwctype_func(void)
+{
+    return MSVCRT__pwctype;
+}
+
+/*********************************************************************
  *		_isctype_l (MSVCRT.@)
  */
 int CDECL _isctype_l(int c, int type, _locale_t locale)
@@ -381,7 +397,10 @@ int CDECL isxdigit(int c)
  */
 int CDECL _isblank_l(int c, _locale_t locale)
 {
-  return c == '\t' || _isctype_l( c, _BLANK, locale );
+#if _MSVCR_VER < 140
+    if (c == '\t') return _BLANK;
+#endif
+    return _isctype_l( c, _BLANK, locale );
 }
 
 /*********************************************************************

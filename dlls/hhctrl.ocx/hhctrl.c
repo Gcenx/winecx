@@ -44,7 +44,7 @@ BOOL hh_process = FALSE;
 
 BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD fdwReason, LPVOID lpvReserved)
 {
-    TRACE("(%p,%d,%p)\n", hInstance, fdwReason, lpvReserved);
+    TRACE("(%p,%ld,%p)\n", hInstance, fdwReason, lpvReserved);
 
     switch (fdwReason)
     {
@@ -158,7 +158,7 @@ HWND WINAPI HtmlHelpW(HWND caller, LPCWSTR filename, UINT command, DWORD_PTR dat
 {
     WCHAR fullname[MAX_PATH];
 
-    TRACE("(%p, %s, command=%s, data=%lx)\n",
+    TRACE("(%p, %s, command=%s, data=%Ix)\n",
           caller, debugstr_w( filename ),
           command_to_string( command ), data);
 
@@ -345,7 +345,7 @@ HWND WINAPI HtmlHelpW(HWND caller, LPCWSTR filename, UINT command, DWORD_PTR dat
         else
             heap_free(window);
 
-        TRACE("Changing WINTYPE, fsValidMembers=0x%x\n", wintype->fsValidMembers);
+        TRACE("Changing WINTYPE, fsValidMembers=0x%lx\n", wintype->fsValidMembers);
 
         MergeChmProperties(wintype, info, TRUE);
         UpdateHelpWindow(info);
@@ -587,20 +587,4 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 {
     FIXME("(%s %s %p)\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
     return CLASS_E_CLASSNOTAVAILABLE;
-}
-
-/***********************************************************************
- *		DllRegisterServer (HHCTRL.OCX.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( hhctrl_hinstance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (HHCTRL.OCX.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( hhctrl_hinstance );
 }

@@ -1,4 +1,0 @@
-MODULE    = libmfuuid.a
-
-C_SRCS = \
-	mfuuid.c

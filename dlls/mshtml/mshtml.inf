@@ -127,6 +127,8 @@ HKCR,"MIME\Database\Content Type\text/html","CLSID",,"%CLSID_HTMLDocument%"
 HKCR,"MIME\Database\Content Type\text/html","Extension",,".htm"
 HKCR,"MIME\Database\Content Type\text/html","Encoding",1,08,00,00,00
 HKCR,"MIME\Database\Content Type\image/x-jg","CLSID",,"%CLSID_HTMLDocument%"
+HKCR,"InternetShortcut\shell\print\command",,,"rundll32.exe mshtml.dll,PrintHTML ""%%1"""
+HKCR,"InternetShortcut\shell\printto\command",,,"rundll32.exe mshtml.dll,PrintHTML ""%%1"" ""%%2"" ""%%3"" ""%%4"""
 HKCR,"htmlfile\shell\print\command",,,"rundll32.exe mshtml.dll,PrintHTML ""%%1"""
 HKCR,"htmlfile\shell\printto\command",,,"rundll32.exe mshtml.dll,PrintHTML ""%%1"" ""%%2"" ""%%3"" ""%%4"""
 HKCR,"htmlfile",,,"HTML Document"
@@ -264,11 +266,6 @@ HKCR,"MIME\Database\Content Type\text/plain","Extension",,".txt"
 HKCR,"MIME\Database\Content Type\text/plain","Encoding",1,07,00,00,00
 HKCR,".txt",,,"txtfile"
 HKCR,".txt","Content Type",,"text/plain"
-
-;; URL
-HKCR,".url",,,"InternetShortcut"
-HKCR,"InternetShortcut\shell\print\command",,,"rundll32.exe mshtml.dll,PrintHTML ""%%1"""
-HKCR,"InternetShortcut\shell\printto\command",,,"rundll32.exe mshtml.dll,PrintHTML ""%%1"" ""%%2"" ""%%3"" ""%%4"""
 
 ;; WAV
 HKCR,"MIME\Database\Content Type\audio/wav","CLSID",,"{CD3AFA7B-B84F-48F0-9393-7EDC34128127}"

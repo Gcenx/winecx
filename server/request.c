@@ -19,7 +19,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -35,12 +34,8 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#ifdef HAVE_SYS_SOCKET_H
-# include <sys/socket.h>
-#endif
-#ifdef HAVE_SYS_WAIT_H
-# include <sys/wait.h>
-#endif
+#include <sys/socket.h>
+#include <sys/wait.h>
 #ifdef HAVE_SYS_UIO_H
 #include <sys/uio.h>
 #endif
@@ -48,9 +43,7 @@
 #include <sys/un.h>
 #endif
 #include <unistd.h>
-#ifdef HAVE_POLL_H
 #include <poll.h>
-#endif
 #ifdef __APPLE__
 # include <mach/mach_time.h>
 #endif
@@ -92,8 +85,8 @@ static void master_socket_poll_event( struct fd *fd, int event );
 static const struct object_ops master_socket_ops =
 {
     sizeof(struct master_socket),  /* size */
+    &no_type,                      /* type */
     master_socket_dump,            /* dump */
-    no_get_type,                   /* get_type */
     no_add_queue,                  /* add_queue */
     NULL,                          /* remove_queue */
     NULL,                          /* signaled */
@@ -101,7 +94,7 @@ static const struct object_ops master_socket_ops =
     NULL,                          /* satisfied */
     no_signal,                     /* signal */
     no_get_fd,                     /* get_fd */
-    no_map_access,                 /* map_access */
+    default_map_access,            /* map_access */
     default_get_sd,                /* get_sd */
     default_set_sd,                /* set_sd */
     no_get_full_name,              /* get_full_name */

@@ -137,11 +137,11 @@ const char* wine_dbgstr_addr(const ADDRESS64* addr)
     case AddrModeFlat:
         return wine_dbg_sprintf("flat<%s>", wine_dbgstr_longlong(addr->Offset));
     case AddrMode1616:
-        return wine_dbg_sprintf("1616<%04x:%04x>", addr->Segment, (DWORD)addr->Offset);
+        return wine_dbg_sprintf("1616<%04x:%04lx>", addr->Segment, (DWORD)addr->Offset);
     case AddrMode1632:
-        return wine_dbg_sprintf("1632<%04x:%08x>", addr->Segment, (DWORD)addr->Offset);
+        return wine_dbg_sprintf("1632<%04x:%08lx>", addr->Segment, (DWORD)addr->Offset);
     case AddrModeReal:
-        return wine_dbg_sprintf("real<%04x:%04x>", addr->Segment, (DWORD)addr->Offset);
+        return wine_dbg_sprintf("real<%04x:%04lx>", addr->Segment, (DWORD)addr->Offset);
     default:
         return "unknown";
     }
@@ -175,6 +175,43 @@ struct cpu* cpu_find(DWORD machine)
     return NULL;
 }
 
+static WCHAR* make_default_search_path(void)
+{
+    WCHAR*      search_path;
+    WCHAR*      p;
+    unsigned    sym_path_len;
+    unsigned    alt_sym_path_len;
+
+    sym_path_len = GetEnvironmentVariableW(L"_NT_SYMBOL_PATH", NULL, 0);
+    alt_sym_path_len = GetEnvironmentVariableW(L"_NT_ALT_SYMBOL_PATH", NULL, 0);
+
+    /* The default symbol path is ".[;%_NT_SYMBOL_PATH%][;%_NT_ALT_SYMBOL_PATH%]".
+     * If the variables exist, the lengths include a null-terminator. We use that
+     * space for the semicolons, and only add the initial dot and the final null. */
+    search_path = HeapAlloc(GetProcessHeap(), 0,
+                            (1 + sym_path_len + alt_sym_path_len + 1) * sizeof(WCHAR));
+    if (!search_path) return NULL;
+
+    p = search_path;
+    *p++ = L'.';
+    if (sym_path_len)
+    {
+        *p++ = L';';
+        GetEnvironmentVariableW(L"_NT_SYMBOL_PATH", p, sym_path_len);
+        p += sym_path_len - 1;
+    }
+
+    if (alt_sym_path_len)
+    {
+        *p++ = L';';
+        GetEnvironmentVariableW(L"_NT_ALT_SYMBOL_PATH", p, alt_sym_path_len);
+        p += alt_sym_path_len - 1;
+    }
+    *p = L'\0';
+
+    return search_path;
+}
+
 /******************************************************************
  *		SymSetSearchPathW (DBGHELP.@)
  *
@@ -182,14 +219,24 @@ struct cpu* cpu_find(DWORD machine)
 BOOL WINAPI SymSetSearchPathW(HANDLE hProcess, PCWSTR searchPath)
 {
     struct process* pcs = process_find_by_handle(hProcess);
+    WCHAR*          search_path_buffer;
 
     if (!pcs) return FALSE;
-    if (!searchPath) return FALSE;
 
+    if (searchPath)
+    {
+        search_path_buffer = HeapAlloc(GetProcessHeap(), 0,
+                                       (lstrlenW(searchPath) + 1) * sizeof(WCHAR));
+        if (!search_path_buffer) return FALSE;
+        lstrcpyW(search_path_buffer, searchPath);
+    }
+    else
+    {
+        search_path_buffer = make_default_search_path();
+        if (!search_path_buffer) return FALSE;
+    }
     HeapFree(GetProcessHeap(), 0, pcs->search_path);
-    pcs->search_path = lstrcpyW(HeapAlloc(GetProcessHeap(), 0, 
-                                          (lstrlenW(searchPath) + 1) * sizeof(WCHAR)),
-                                searchPath);
+    pcs->search_path = search_path_buffer;
     return TRUE;
 }
 
@@ -201,16 +248,19 @@ BOOL WINAPI SymSetSearchPath(HANDLE hProcess, PCSTR searchPath)
 {
     BOOL        ret = FALSE;
     unsigned    len;
-    WCHAR*      sp;
+    WCHAR*      sp = NULL;
 
-    len = MultiByteToWideChar(CP_ACP, 0, searchPath, -1, NULL, 0);
-    if ((sp = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR))))
+    if (searchPath)
     {
+        len = MultiByteToWideChar(CP_ACP, 0, searchPath, -1, NULL, 0);
+        sp = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        if (!sp) return FALSE;
         MultiByteToWideChar(CP_ACP, 0, searchPath, -1, sp, len);
-
-        ret = SymSetSearchPathW(hProcess, sp);
-        HeapFree(GetProcessHeap(), 0, sp);
     }
+
+    ret = SymSetSearchPathW(hProcess, sp);
+
+    HeapFree(GetProcessHeap(), 0, sp);
     return ret;
 }
 
@@ -286,7 +336,7 @@ const WCHAR *process_getenv(const struct process *process, const WCHAR *name)
  *		check_live_target
  *
  */
-static BOOL check_live_target(struct process* pcs)
+static BOOL check_live_target(struct process* pcs, BOOL wow64, BOOL child_wow64)
 {
     PROCESS_BASIC_INFORMATION pbi;
     ULONG_PTR base = 0, env = 0;
@@ -300,11 +350,17 @@ static BOOL check_live_target(struct process* pcs)
 
     if (!pcs->is_64bit)
     {
+        const char* peb32_addr;
         DWORD env32;
         PEB32 peb32;
+
         C_ASSERT(sizeof(void*) != 4 || FIELD_OFFSET(RTL_USER_PROCESS_PARAMETERS, Environment) == 0x48);
-        if (!ReadProcessMemory(pcs->handle, pbi.PebBaseAddress, &peb32, sizeof(peb32), NULL)) return FALSE;
-        if (!ReadProcessMemory(pcs->handle, (char *)pbi.PebBaseAddress + 0x460 /* CloudFileFlags */, &base, sizeof(base), NULL)) return FALSE;
+        peb32_addr = (const char*)pbi.PebBaseAddress;
+        if (!wow64 && child_wow64)
+            /* current process is 64bit, while child process is 32 bit, need to read 32bit PEB */
+            peb32_addr += 0x1000;
+        if (!ReadProcessMemory(pcs->handle, peb32_addr, &peb32, sizeof(peb32), NULL)) return FALSE;
+        if (!ReadProcessMemory(pcs->handle, peb32_addr + 0x460 /* CloudFileFlags */, &base, sizeof(base), NULL)) return FALSE;
         if (read_process_memory(pcs, peb32.ProcessParameters + 0x48, &env32, sizeof(env32))) env = env32;
     }
     else
@@ -353,9 +409,9 @@ static BOOL check_live_target(struct process* pcs)
 
     if (!base) return FALSE;
 
-    TRACE("got debug info address %#lx from PEB %p\n", base, pbi.PebBaseAddress);
+    TRACE("got debug info address %#Ix from PEB %p\n", base, pbi.PebBaseAddress);
     if (!elf_read_wine_loader_dbg_info(pcs, base) && !macho_read_wine_loader_dbg_info(pcs, base))
-        WARN("couldn't load process debug info at %#lx\n", base);
+        WARN("couldn't load process debug info at %#Ix\n", base);
     return TRUE;
 }
 
@@ -422,31 +478,7 @@ BOOL WINAPI SymInitializeW(HANDLE hProcess, PCWSTR UserSearchPath, BOOL fInvadeP
     }
     else
     {
-        unsigned        size;
-        unsigned        len;
-        static const WCHAR      sym_path[] = {'_','N','T','_','S','Y','M','B','O','L','_','P','A','T','H',0};
-        static const WCHAR      alt_sym_path[] = {'_','N','T','_','A','L','T','E','R','N','A','T','E','_','S','Y','M','B','O','L','_','P','A','T','H',0};
-
-        pcs->search_path = HeapAlloc(GetProcessHeap(), 0, (len = MAX_PATH) * sizeof(WCHAR));
-        while ((size = GetCurrentDirectoryW(len, pcs->search_path)) >= len)
-            pcs->search_path = HeapReAlloc(GetProcessHeap(), 0, pcs->search_path, (len *= 2) * sizeof(WCHAR));
-        pcs->search_path = HeapReAlloc(GetProcessHeap(), 0, pcs->search_path, (size + 1) * sizeof(WCHAR));
-
-        len = GetEnvironmentVariableW(sym_path, NULL, 0);
-        if (len)
-        {
-            pcs->search_path = HeapReAlloc(GetProcessHeap(), 0, pcs->search_path, (size + 1 + len + 1) * sizeof(WCHAR));
-            pcs->search_path[size] = ';';
-            GetEnvironmentVariableW(sym_path, pcs->search_path + size + 1, len);
-            size += 1 + len;
-        }
-        len = GetEnvironmentVariableW(alt_sym_path, NULL, 0);
-        if (len)
-        {
-            pcs->search_path = HeapReAlloc(GetProcessHeap(), 0, pcs->search_path, (size + 1 + len + 1) * sizeof(WCHAR));
-            pcs->search_path[size] = ';';
-            GetEnvironmentVariableW(alt_sym_path, pcs->search_path + size + 1, len);
-        }
+        pcs->search_path = make_default_search_path();
     }
 
     pcs->lmodules = NULL;
@@ -454,7 +486,7 @@ BOOL WINAPI SymInitializeW(HANDLE hProcess, PCWSTR UserSearchPath, BOOL fInvadeP
     pcs->next = process_first;
     process_first = pcs;
     
-    if (check_live_target(pcs))
+    if (check_live_target(pcs, wow64, child_wow64))
     {
         if (fInvadeProcess)
             EnumerateLoadedModulesW64(hProcess, process_invade_cb, hProcess);
@@ -602,25 +634,100 @@ BOOL WINAPI SymSetParentWindow(HWND hwnd)
 BOOL WINAPI SymSetContext(HANDLE hProcess, PIMAGEHLP_STACK_FRAME StackFrame,
                           PIMAGEHLP_CONTEXT Context)
 {
-    struct process* pcs = process_find_by_handle(hProcess);
-    if (!pcs) return FALSE;
+    struct process* pcs;
 
-    if (pcs->ctx_frame.ReturnOffset == StackFrame->ReturnOffset &&
-        pcs->ctx_frame.FrameOffset  == StackFrame->FrameOffset  &&
-        pcs->ctx_frame.StackOffset  == StackFrame->StackOffset)
+    TRACE("(%p %p %p)\n", hProcess, StackFrame, Context);
+
+    if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
+    if (pcs->ctx_frame.ReturnOffset       == StackFrame->ReturnOffset &&
+        pcs->ctx_frame.FrameOffset        == StackFrame->FrameOffset  &&
+        pcs->ctx_frame.StackOffset        == StackFrame->StackOffset  &&
+        pcs->ctx_frame.InstructionOffset  == StackFrame->InstructionOffset)
     {
-        TRACE("Setting same frame {rtn=%s frm=%s stk=%s}\n",
-              wine_dbgstr_longlong(pcs->ctx_frame.ReturnOffset),
-              wine_dbgstr_longlong(pcs->ctx_frame.FrameOffset),
-              wine_dbgstr_longlong(pcs->ctx_frame.StackOffset));
-        pcs->ctx_frame.InstructionOffset = StackFrame->InstructionOffset;
-        SetLastError(ERROR_ACCESS_DENIED); /* latest MSDN says ERROR_SUCCESS */
+        TRACE("Setting same frame {rtn=%I64x frm=%I64x stk=%I64x}\n",
+              pcs->ctx_frame.ReturnOffset,
+              pcs->ctx_frame.FrameOffset,
+              pcs->ctx_frame.StackOffset);
+        SetLastError(ERROR_SUCCESS);
         return FALSE;
     }
 
+    if (!SymSetScopeFromAddr(hProcess, StackFrame->InstructionOffset))
+        return FALSE;
     pcs->ctx_frame = *StackFrame;
-    /* MSDN states that Context is not (no longer?) used */
+    /* Context is not (no longer?) used */
+
     return TRUE;
+}
+
+/******************************************************************
+ *		SymSetScopeFromAddr (DBGHELP.@)
+ */
+BOOL WINAPI SymSetScopeFromAddr(HANDLE hProcess, ULONG64 addr)
+{
+    struct module_pair pair;
+    struct symt_ht* sym;
+
+    TRACE("(%p %#I64x)\n", hProcess, addr);
+
+    if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
+    pair.pcs->localscope_pc = addr;
+    if ((sym = symt_find_nearest(pair.effective, addr)) != NULL && sym->symt.tag == SymTagFunction)
+        pair.pcs->localscope_symt = &sym->symt;
+    else
+        pair.pcs->localscope_symt = NULL;
+
+    return TRUE;
+}
+
+/******************************************************************
+ *		SymSetScopeFromIndex (DBGHELP.@)
+ */
+BOOL WINAPI SymSetScopeFromIndex(HANDLE hProcess, ULONG64 addr, DWORD index)
+{
+    struct module_pair pair;
+    struct symt* sym;
+
+    TRACE("(%p %#I64x %lu)\n", hProcess, addr, index);
+
+    if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
+    sym = symt_index2ptr(pair.effective, index);
+    if (!symt_check_tag(sym, SymTagFunction)) return FALSE;
+
+    pair.pcs->localscope_pc = ((struct symt_function*)sym)->address; /* FIXME of FuncDebugStart when it exists? */
+    pair.pcs->localscope_symt = sym;
+
+    return TRUE;
+}
+
+/******************************************************************
+ *		SymSetScopeFromInlineContext (DBGHELP.@)
+ */
+BOOL WINAPI SymSetScopeFromInlineContext(HANDLE hProcess, ULONG64 addr, DWORD inlinectx)
+{
+    struct module_pair pair;
+    struct symt_inlinesite* inlined;
+
+    TRACE("(%p %I64x %lx)\n", hProcess, addr, inlinectx);
+
+    switch (IFC_MODE(inlinectx))
+    {
+    case IFC_MODE_IGNORE:
+    case IFC_MODE_REGULAR: return SymSetScopeFromAddr(hProcess, addr);
+    case IFC_MODE_INLINE:
+        if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
+        inlined = symt_find_inlined_site(pair.effective, addr, inlinectx);
+        if (inlined)
+        {
+            pair.pcs->localscope_pc = addr;
+            pair.pcs->localscope_symt = &inlined->func.symt;
+            return TRUE;
+        }
+        return FALSE;
+    default:
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
 }
 
 /******************************************************************
@@ -663,7 +770,7 @@ static BOOL CALLBACK reg_cb64to32(HANDLE hProcess, ULONG action, ULONG64 data, U
     case CBA_EVENT:
     case CBA_READ_MEMORY:
     default:
-        FIXME("No mapping for action %u\n", action);
+        FIXME("No mapping for action %lu\n", action);
         return FALSE;
     }
     return pcs->reg_cb32(hProcess, action, data32, (PVOID)(DWORD_PTR)user);
@@ -676,7 +783,7 @@ BOOL pcs_callback(const struct process* pcs, ULONG action, void* data)
 {
     IMAGEHLP_DEFERRED_SYMBOL_LOAD64 idsl;
 
-    TRACE("%p %u %p\n", pcs, action, data);
+    TRACE("%p %lu %p\n", pcs, action, data);
 
     if (!pcs->reg_cb) return FALSE;
     if (!pcs->reg_is_unicode)
@@ -708,7 +815,7 @@ BOOL pcs_callback(const struct process* pcs, ULONG action, void* data)
         case CBA_EVENT:
         case CBA_READ_MEMORY:
         default:
-            FIXME("No mapping for action %u\n", action);
+            FIXME("No mapping for action %lu\n", action);
             return FALSE;
         }
     }

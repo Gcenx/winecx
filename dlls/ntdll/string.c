@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -140,13 +141,72 @@ void * __cdecl memmove( void *dst, const void *src, size_t n )
 }
 
 
+static inline void memset_aligned_32( unsigned char *d, uint64_t v, size_t n )
+{
+    unsigned char *end = d + n;
+    while (d < end)
+    {
+        *(uint64_t *)(d + 0) = v;
+        *(uint64_t *)(d + 8) = v;
+        *(uint64_t *)(d + 16) = v;
+        *(uint64_t *)(d + 24) = v;
+        d += 32;
+    }
+}
+
 /*********************************************************************
  *                  memset   (NTDLL.@)
  */
-void * __cdecl memset( void *dst, int c, size_t n )
+void *__cdecl memset( void *dst, int c, size_t n )
 {
-    volatile unsigned char *d = dst;  /* avoid gcc optimizations */
-    while (n--) *d++ = c;
+    typedef uint64_t DECLSPEC_ALIGN(1) unaligned_ui64;
+    typedef uint32_t DECLSPEC_ALIGN(1) unaligned_ui32;
+    typedef uint16_t DECLSPEC_ALIGN(1) unaligned_ui16;
+
+    uint64_t v = 0x101010101010101ull * (unsigned char)c;
+    unsigned char *d = (unsigned char *)dst;
+    size_t a = 0x20 - ((uintptr_t)d & 0x1f);
+
+    if (n >= 16)
+    {
+        *(unaligned_ui64 *)(d + 0) = v;
+        *(unaligned_ui64 *)(d + 8) = v;
+        *(unaligned_ui64 *)(d + n - 16) = v;
+        *(unaligned_ui64 *)(d + n - 8) = v;
+        if (n <= 32) return dst;
+        *(unaligned_ui64 *)(d + 16) = v;
+        *(unaligned_ui64 *)(d + 24) = v;
+        *(unaligned_ui64 *)(d + n - 32) = v;
+        *(unaligned_ui64 *)(d + n - 24) = v;
+        if (n <= 64) return dst;
+
+        n = (n - a) & ~0x1f;
+        memset_aligned_32( d + a, v, n );
+        return dst;
+    }
+    if (n >= 8)
+    {
+        *(unaligned_ui64 *)d = v;
+        *(unaligned_ui64 *)(d + n - 8) = v;
+        return dst;
+    }
+    if (n >= 4)
+    {
+        *(unaligned_ui32 *)d = v;
+        *(unaligned_ui32 *)(d + n - 4) = v;
+        return dst;
+    }
+    if (n >= 2)
+    {
+        *(unaligned_ui16 *)d = v;
+        *(unaligned_ui16 *)(d + n - 2) = v;
+        return dst;
+    }
+    if (n >= 1)
+    {
+        *(uint8_t *)d = v;
+        return dst;
+    }
     return dst;
 }
 
@@ -446,15 +506,13 @@ LPSTR __cdecl _strlwr( LPSTR str )
  */
 int __cdecl toupper( int c )
 {
-    char str[2], *p = str;
+    char str[4], *p = str;
     WCHAR wc;
     DWORD len;
 
-    str[0] = c;
-    str[1] = c >> 8;
+    memcpy( str, &c, sizeof(c) );
     wc = RtlAnsiCharToUnicodeChar( &p );
-    wc = RtlUpcaseUnicodeChar( wc );
-    RtlUnicodeToMultiByteN( str, sizeof(str), &len, &wc, sizeof(wc) );
+    if (RtlUpcaseUnicodeToMultiByteN( str, 2, &len, &wc, sizeof(wc) )) return c;
     if (len == 2) return ((unsigned char)str[0] << 8) + (unsigned char)str[1];
     return (unsigned char)str[0];
 }
@@ -1007,7 +1065,7 @@ static int char2digit( char c, int base )
 }
 
 
-static int vsscanf( const char *str, const char *format, __ms_va_list ap)
+static int vsscanf( const char *str, const char *format, va_list ap)
 {
     int rd = 0, consumed = 0;
     int nch;
@@ -1445,10 +1503,10 @@ static int vsscanf( const char *str, const char *format, __ms_va_list ap)
 int WINAPIV sscanf( const char *str, const char *format, ... )
 {
     int ret;
-    __ms_va_list valist;
-    __ms_va_start( valist, format );
+    va_list valist;
+    va_start( valist, format );
     ret = vsscanf( str, format, valist );
-    __ms_va_end( valist );
+    va_end( valist );
     return ret;
 }
 

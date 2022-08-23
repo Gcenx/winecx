@@ -77,7 +77,7 @@ extern "C" {
 #  else
 #   define __stdcall __attribute__((ms_abi))
 #  endif
-# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(_WIN32)
+# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(__MINGW32__) && !defined(__CYGWIN__)
 #   define __stdcall __attribute__((pcs("aapcs-vfp")))
 # elif defined(__aarch64__) && defined (__GNUC__) && __has_attribute(ms_abi)
 #  define __stdcall __attribute__((ms_abi))
@@ -140,7 +140,7 @@ extern "C" {
 # endif
 #endif
 
-#if defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(_WIN32)
+#if defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(__MINGW32__) && !defined(__CYGWIN__)
 # define WINAPIV __attribute__((pcs("aapcs")))
 #else
 # define WINAPIV __cdecl
@@ -257,7 +257,7 @@ extern "C" {
 #define BASETYPES
 typedef unsigned char UCHAR, *PUCHAR;
 typedef unsigned short USHORT, *PUSHORT;
-#ifdef WINE_USE_LONG
+#if !defined(__LP64__) && !defined(WINE_NO_LONG_TYPES)
 typedef unsigned long ULONG, *PULONG;
 #else
 typedef unsigned int ULONG, *PULONG;
@@ -273,7 +273,7 @@ typedef int             INT,        *PINT,     *LPINT;
 typedef unsigned int    UINT,       *PUINT;
 typedef float           FLOAT,      *PFLOAT;
 typedef char                        *PSZ;
-#ifdef WINE_USE_LONG
+#if !defined(__LP64__) && !defined(WINE_NO_LONG_TYPES)
 typedef long                                   *LPLONG;
 typedef unsigned long   DWORD,      *PDWORD,   *LPDWORD;
 #else
@@ -482,15 +482,6 @@ typedef enum DPI_AWARENESS
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE    ((DPI_AWARENESS_CONTEXT)-3)
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((DPI_AWARENESS_CONTEXT)-4)
 #define DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED    ((DPI_AWARENESS_CONTEXT)-5)
-
-static inline int wine_is_64bit(void)
-{
-#ifdef __i386_on_x86_64__
-    return 0;
-#else
-    return sizeof(void*) > sizeof(int);
-#endif
-}
 
 #ifdef __cplusplus
 }

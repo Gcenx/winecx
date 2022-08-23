@@ -38,6 +38,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
 HINSTANCE hProxyDll;
 
+static ULONG_PTR global_options[COMGLB_PROPERTIES_RESERVED3 + 1];
+
 /* Ole32 exports */
 extern void WINAPI DestroyRunningObjectTable(void);
 extern HRESULT WINAPI Ole32DllGetClassObject(REFCLSID rclsid, REFIID riid, void **obj);
@@ -313,7 +315,7 @@ HRESULT open_key_for_clsid(REFCLSID clsid, const WCHAR *keyname, REGSAM access, 
 
     lstrcpyW(path, clsidW);
     StringFromGUID2(clsid, path + lstrlenW(clsidW), CHARS_IN_GUID);
-    res = open_classes_key(HKEY_CLASSES_ROOT, path, keyname ? KEY_READ : access, &key);
+    res = open_classes_key(HKEY_CLASSES_ROOT, path, access, &key);
     if (res == ERROR_FILE_NOT_FOUND)
         return REGDB_E_CLASSNOTREG;
     else if (res != ERROR_SUCCESS)
@@ -348,7 +350,7 @@ HRESULT open_appidkey_from_clsid(REFCLSID clsid, REGSAM access, HKEY *subkey)
     HRESULT hr;
 
     /* read the AppID value under the class's key */
-    hr = open_key_for_clsid(clsid, NULL, KEY_READ, &hkey);
+    hr = open_key_for_clsid(clsid, NULL, access, &hkey);
     if (FAILED(hr))
         return hr;
 
@@ -429,6 +431,155 @@ static void com_cleanup_tlsdata(void)
     NtCurrentTeb()->ReservedForOle = NULL;
 }
 
+struct global_options
+{
+    IGlobalOptions IGlobalOptions_iface;
+    LONG refcount;
+};
+
+static inline struct global_options *impl_from_IGlobalOptions(IGlobalOptions *iface)
+{
+    return CONTAINING_RECORD(iface, struct global_options, IGlobalOptions_iface);
+}
+
+static HRESULT WINAPI global_options_QueryInterface(IGlobalOptions *iface, REFIID riid, void **ppv)
+{
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), ppv);
+
+    if (IsEqualGUID(&IID_IGlobalOptions, riid) || IsEqualGUID(&IID_IUnknown, riid))
+    {
+        *ppv = iface;
+    }
+    else
+    {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown *)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI global_options_AddRef(IGlobalOptions *iface)
+{
+    struct global_options *options = impl_from_IGlobalOptions(iface);
+    LONG refcount = InterlockedIncrement(&options->refcount);
+
+    TRACE("%p, refcount %ld.\n", iface, refcount);
+
+    return refcount;
+}
+
+static ULONG WINAPI global_options_Release(IGlobalOptions *iface)
+{
+    struct global_options *options = impl_from_IGlobalOptions(iface);
+    LONG refcount = InterlockedDecrement(&options->refcount);
+
+    TRACE("%p, refcount %ld.\n", iface, refcount);
+
+    if (!refcount)
+        heap_free(options);
+
+    return refcount;
+}
+
+static HRESULT WINAPI global_options_Set(IGlobalOptions *iface, GLOBALOPT_PROPERTIES property, ULONG_PTR value)
+{
+    FIXME("%p, %u, %Ix.\n", iface, property, value);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI global_options_Query(IGlobalOptions *iface, GLOBALOPT_PROPERTIES property, ULONG_PTR *value)
+{
+    TRACE("%p, %u, %p.\n", iface, property, value);
+
+    if (property < COMGLB_EXCEPTION_HANDLING || property > COMGLB_PROPERTIES_RESERVED3)
+        return E_INVALIDARG;
+
+    *value = global_options[property];
+
+    return S_OK;
+}
+
+static const IGlobalOptionsVtbl global_options_vtbl =
+{
+    global_options_QueryInterface,
+    global_options_AddRef,
+    global_options_Release,
+    global_options_Set,
+    global_options_Query
+};
+
+static HRESULT WINAPI class_factory_QueryInterface(IClassFactory *iface, REFIID riid, void **ppv)
+{
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), ppv);
+
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IClassFactory))
+    {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI class_factory_AddRef(IClassFactory *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI class_factory_Release(IClassFactory *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI class_factory_LockServer(IClassFactory *iface, BOOL fLock)
+{
+    TRACE("%d\n", fLock);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI global_options_CreateInstance(IClassFactory *iface, IUnknown *outer, REFIID riid, void **ppv)
+{
+    struct global_options *object;
+    HRESULT hr;
+
+    TRACE("%p, %s, %p.\n", outer, debugstr_guid(riid), ppv);
+
+    if (outer)
+        return E_INVALIDARG;
+
+    if (!(object = heap_alloc(sizeof(*object))))
+        return E_OUTOFMEMORY;
+    object->IGlobalOptions_iface.lpVtbl = &global_options_vtbl;
+    object->refcount = 1;
+
+    hr = IGlobalOptions_QueryInterface(&object->IGlobalOptions_iface, riid, ppv);
+    IGlobalOptions_Release(&object->IGlobalOptions_iface);
+    return hr;
+}
+
+static const IClassFactoryVtbl global_options_factory_vtbl =
+{
+    class_factory_QueryInterface,
+    class_factory_AddRef,
+    class_factory_Release,
+    global_options_CreateInstance,
+    class_factory_LockServer
+};
+
+static IClassFactory global_options_factory = { &global_options_factory_vtbl };
+
+static HRESULT get_builtin_class_factory(REFCLSID rclsid, REFIID riid, void **obj)
+{
+    if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions))
+        return IClassFactory_QueryInterface(&global_options_factory, riid, obj);
+    return E_UNEXPECTED;
+}
+
 /***********************************************************************
  *           FreePropVariantArray    (combase.@)
  */
@@ -436,7 +587,7 @@ HRESULT WINAPI FreePropVariantArray(ULONG count, PROPVARIANT *rgvars)
 {
     ULONG i;
 
-    TRACE("%u, %p.\n", count, rgvars);
+    TRACE("%lu, %p.\n", count, rgvars);
 
     if (!rgvars)
         return E_INVALIDARG;
@@ -585,28 +736,28 @@ HRESULT WINAPI PropVariantClear(PROPVARIANT *pvar)
     case VT_STREAMED_OBJECT:
     case VT_STORAGE:
     case VT_STORED_OBJECT:
-        if (pvar->u.pStream)
-            IStream_Release(pvar->u.pStream);
+        if (pvar->pStream)
+            IStream_Release(pvar->pStream);
         break;
     case VT_CLSID:
     case VT_LPSTR:
     case VT_LPWSTR:
         /* pick an arbitrary typed pointer - we don't care about the type
          * as we are just freeing it */
-        CoTaskMemFree(pvar->u.puuid);
+        CoTaskMemFree(pvar->puuid);
         break;
     case VT_BLOB:
     case VT_BLOB_OBJECT:
-        CoTaskMemFree(pvar->u.blob.pBlobData);
+        CoTaskMemFree(pvar->blob.pBlobData);
         break;
     case VT_BSTR:
-        SysFreeString(pvar->u.bstrVal);
+        SysFreeString(pvar->bstrVal);
         break;
     case VT_CF:
-        if (pvar->u.pclipdata)
+        if (pvar->pclipdata)
         {
-            propvar_free_cf_array(1, pvar->u.pclipdata);
-            CoTaskMemFree(pvar->u.pclipdata);
+            propvar_free_cf_array(1, pvar->pclipdata);
+            CoTaskMemFree(pvar->pclipdata);
         }
         break;
     default:
@@ -617,33 +768,33 @@ HRESULT WINAPI PropVariantClear(PROPVARIANT *pvar)
             switch (pvar->vt & ~VT_VECTOR)
             {
             case VT_VARIANT:
-                FreePropVariantArray(pvar->u.capropvar.cElems, pvar->u.capropvar.pElems);
+                FreePropVariantArray(pvar->capropvar.cElems, pvar->capropvar.pElems);
                 break;
             case VT_CF:
-                propvar_free_cf_array(pvar->u.caclipdata.cElems, pvar->u.caclipdata.pElems);
+                propvar_free_cf_array(pvar->caclipdata.cElems, pvar->caclipdata.pElems);
                 break;
             case VT_BSTR:
-                for (i = 0; i < pvar->u.cabstr.cElems; i++)
-                    SysFreeString(pvar->u.cabstr.pElems[i]);
+                for (i = 0; i < pvar->cabstr.cElems; i++)
+                    SysFreeString(pvar->cabstr.pElems[i]);
                 break;
             case VT_LPSTR:
-                for (i = 0; i < pvar->u.calpstr.cElems; i++)
-                    CoTaskMemFree(pvar->u.calpstr.pElems[i]);
+                for (i = 0; i < pvar->calpstr.cElems; i++)
+                    CoTaskMemFree(pvar->calpstr.pElems[i]);
                 break;
             case VT_LPWSTR:
-                for (i = 0; i < pvar->u.calpwstr.cElems; i++)
-                    CoTaskMemFree(pvar->u.calpwstr.pElems[i]);
+                for (i = 0; i < pvar->calpwstr.cElems; i++)
+                    CoTaskMemFree(pvar->calpwstr.pElems[i]);
                 break;
             }
             if (pvar->vt & ~VT_VECTOR)
             {
                 /* pick an arbitrary VT_VECTOR structure - they all have the same
                  * memory layout */
-                CoTaskMemFree(pvar->u.capropvar.pElems);
+                CoTaskMemFree(pvar->capropvar.pElems);
             }
         }
         else if (pvar->vt & VT_ARRAY)
-            hr = SafeArrayDestroy(pvar->u.parray);
+            hr = SafeArrayDestroy(pvar->parray);
         else
         {
             WARN("Invalid/unsupported type %d\n", pvar->vt);
@@ -701,50 +852,50 @@ HRESULT WINAPI PropVariantCopy(PROPVARIANT *pvarDest, const PROPVARIANT *pvarSrc
     case VT_STREAMED_OBJECT:
     case VT_STORAGE:
     case VT_STORED_OBJECT:
-        if (pvarDest->u.pStream)
-            IStream_AddRef(pvarDest->u.pStream);
+        if (pvarDest->pStream)
+            IStream_AddRef(pvarDest->pStream);
         break;
     case VT_CLSID:
-        pvarDest->u.puuid = CoTaskMemAlloc(sizeof(CLSID));
-        *pvarDest->u.puuid = *pvarSrc->u.puuid;
+        pvarDest->puuid = CoTaskMemAlloc(sizeof(CLSID));
+        *pvarDest->puuid = *pvarSrc->puuid;
         break;
     case VT_LPSTR:
-        if (pvarSrc->u.pszVal)
+        if (pvarSrc->pszVal)
         {
-            len = strlen(pvarSrc->u.pszVal);
-            pvarDest->u.pszVal = CoTaskMemAlloc((len+1)*sizeof(CHAR));
-            CopyMemory(pvarDest->u.pszVal, pvarSrc->u.pszVal, (len+1)*sizeof(CHAR));
+            len = strlen(pvarSrc->pszVal);
+            pvarDest->pszVal = CoTaskMemAlloc((len+1)*sizeof(CHAR));
+            CopyMemory(pvarDest->pszVal, pvarSrc->pszVal, (len+1)*sizeof(CHAR));
         }
         break;
     case VT_LPWSTR:
-        if (pvarSrc->u.pwszVal)
+        if (pvarSrc->pwszVal)
         {
-            len = lstrlenW(pvarSrc->u.pwszVal);
-            pvarDest->u.pwszVal = CoTaskMemAlloc((len+1)*sizeof(WCHAR));
-            CopyMemory(pvarDest->u.pwszVal, pvarSrc->u.pwszVal, (len+1)*sizeof(WCHAR));
+            len = lstrlenW(pvarSrc->pwszVal);
+            pvarDest->pwszVal = CoTaskMemAlloc((len+1)*sizeof(WCHAR));
+            CopyMemory(pvarDest->pwszVal, pvarSrc->pwszVal, (len+1)*sizeof(WCHAR));
         }
         break;
     case VT_BLOB:
     case VT_BLOB_OBJECT:
-        if (pvarSrc->u.blob.pBlobData)
+        if (pvarSrc->blob.pBlobData)
         {
-            len = pvarSrc->u.blob.cbSize;
-            pvarDest->u.blob.pBlobData = CoTaskMemAlloc(len);
-            CopyMemory(pvarDest->u.blob.pBlobData, pvarSrc->u.blob.pBlobData, len);
+            len = pvarSrc->blob.cbSize;
+            pvarDest->blob.pBlobData = CoTaskMemAlloc(len);
+            CopyMemory(pvarDest->blob.pBlobData, pvarSrc->blob.pBlobData, len);
         }
         break;
     case VT_BSTR:
-        pvarDest->u.bstrVal = SysAllocString(pvarSrc->u.bstrVal);
+        pvarDest->bstrVal = SysAllocString(pvarSrc->bstrVal);
         break;
     case VT_CF:
-        if (pvarSrc->u.pclipdata)
+        if (pvarSrc->pclipdata)
         {
-            len = pvarSrc->u.pclipdata->cbSize - sizeof(pvarSrc->u.pclipdata->ulClipFmt);
-            pvarDest->u.pclipdata = CoTaskMemAlloc(sizeof (CLIPDATA));
-            pvarDest->u.pclipdata->cbSize = pvarSrc->u.pclipdata->cbSize;
-            pvarDest->u.pclipdata->ulClipFmt = pvarSrc->u.pclipdata->ulClipFmt;
-            pvarDest->u.pclipdata->pClipData = CoTaskMemAlloc(len);
-            CopyMemory(pvarDest->u.pclipdata->pClipData, pvarSrc->u.pclipdata->pClipData, len);
+            len = pvarSrc->pclipdata->cbSize - sizeof(pvarSrc->pclipdata->ulClipFmt);
+            pvarDest->pclipdata = CoTaskMemAlloc(sizeof (CLIPDATA));
+            pvarDest->pclipdata->cbSize = pvarSrc->pclipdata->cbSize;
+            pvarDest->pclipdata->ulClipFmt = pvarSrc->pclipdata->ulClipFmt;
+            pvarDest->pclipdata->pClipData = CoTaskMemAlloc(len);
+            CopyMemory(pvarDest->pclipdata->pClipData, pvarSrc->pclipdata->pClipData, len);
         }
         break;
     default:
@@ -755,38 +906,38 @@ HRESULT WINAPI PropVariantCopy(PROPVARIANT *pvarDest, const PROPVARIANT *pvarSrc
 
             switch (pvarSrc->vt & ~VT_VECTOR)
             {
-            case VT_I1:       elemSize = sizeof(pvarSrc->u.cVal); break;
-            case VT_UI1:      elemSize = sizeof(pvarSrc->u.bVal); break;
-            case VT_I2:       elemSize = sizeof(pvarSrc->u.iVal); break;
-            case VT_UI2:      elemSize = sizeof(pvarSrc->u.uiVal); break;
-            case VT_BOOL:     elemSize = sizeof(pvarSrc->u.boolVal); break;
-            case VT_I4:       elemSize = sizeof(pvarSrc->u.lVal); break;
-            case VT_UI4:      elemSize = sizeof(pvarSrc->u.ulVal); break;
-            case VT_R4:       elemSize = sizeof(pvarSrc->u.fltVal); break;
-            case VT_R8:       elemSize = sizeof(pvarSrc->u.dblVal); break;
-            case VT_ERROR:    elemSize = sizeof(pvarSrc->u.scode); break;
-            case VT_I8:       elemSize = sizeof(pvarSrc->u.hVal); break;
-            case VT_UI8:      elemSize = sizeof(pvarSrc->u.uhVal); break;
-            case VT_CY:       elemSize = sizeof(pvarSrc->u.cyVal); break;
-            case VT_DATE:     elemSize = sizeof(pvarSrc->u.date); break;
-            case VT_FILETIME: elemSize = sizeof(pvarSrc->u.filetime); break;
-            case VT_CLSID:    elemSize = sizeof(*pvarSrc->u.puuid); break;
-            case VT_CF:       elemSize = sizeof(*pvarSrc->u.pclipdata); break;
-            case VT_BSTR:     elemSize = sizeof(pvarSrc->u.bstrVal); break;
-            case VT_LPSTR:    elemSize = sizeof(pvarSrc->u.pszVal); break;
-            case VT_LPWSTR:   elemSize = sizeof(pvarSrc->u.pwszVal); break;
-            case VT_VARIANT:  elemSize = sizeof(*pvarSrc->u.pvarVal); break;
+            case VT_I1:       elemSize = sizeof(pvarSrc->cVal); break;
+            case VT_UI1:      elemSize = sizeof(pvarSrc->bVal); break;
+            case VT_I2:       elemSize = sizeof(pvarSrc->iVal); break;
+            case VT_UI2:      elemSize = sizeof(pvarSrc->uiVal); break;
+            case VT_BOOL:     elemSize = sizeof(pvarSrc->boolVal); break;
+            case VT_I4:       elemSize = sizeof(pvarSrc->lVal); break;
+            case VT_UI4:      elemSize = sizeof(pvarSrc->ulVal); break;
+            case VT_R4:       elemSize = sizeof(pvarSrc->fltVal); break;
+            case VT_R8:       elemSize = sizeof(pvarSrc->dblVal); break;
+            case VT_ERROR:    elemSize = sizeof(pvarSrc->scode); break;
+            case VT_I8:       elemSize = sizeof(pvarSrc->hVal); break;
+            case VT_UI8:      elemSize = sizeof(pvarSrc->uhVal); break;
+            case VT_CY:       elemSize = sizeof(pvarSrc->cyVal); break;
+            case VT_DATE:     elemSize = sizeof(pvarSrc->date); break;
+            case VT_FILETIME: elemSize = sizeof(pvarSrc->filetime); break;
+            case VT_CLSID:    elemSize = sizeof(*pvarSrc->puuid); break;
+            case VT_CF:       elemSize = sizeof(*pvarSrc->pclipdata); break;
+            case VT_BSTR:     elemSize = sizeof(pvarSrc->bstrVal); break;
+            case VT_LPSTR:    elemSize = sizeof(pvarSrc->pszVal); break;
+            case VT_LPWSTR:   elemSize = sizeof(pvarSrc->pwszVal); break;
+            case VT_VARIANT:  elemSize = sizeof(*pvarSrc->pvarVal); break;
 
             default:
                 FIXME("Invalid element type: %ul\n", pvarSrc->vt & ~VT_VECTOR);
                 return E_INVALIDARG;
             }
-            len = pvarSrc->u.capropvar.cElems;
-            pvarDest->u.capropvar.pElems = len ? CoTaskMemAlloc(len * elemSize) : NULL;
+            len = pvarSrc->capropvar.cElems;
+            pvarDest->capropvar.pElems = len ? CoTaskMemAlloc(len * elemSize) : NULL;
             if (pvarSrc->vt == (VT_VECTOR | VT_VARIANT))
             {
                 for (i = 0; i < len; i++)
-                    PropVariantCopy(&pvarDest->u.capropvar.pElems[i], &pvarSrc->u.capropvar.pElems[i]);
+                    PropVariantCopy(&pvarDest->capropvar.pElems[i], &pvarSrc->capropvar.pElems[i]);
             }
             else if (pvarSrc->vt == (VT_VECTOR | VT_CF))
             {
@@ -795,17 +946,17 @@ HRESULT WINAPI PropVariantCopy(PROPVARIANT *pvarDest, const PROPVARIANT *pvarSrc
             else if (pvarSrc->vt == (VT_VECTOR | VT_BSTR))
             {
                 for (i = 0; i < len; i++)
-                    pvarDest->u.cabstr.pElems[i] = SysAllocString(pvarSrc->u.cabstr.pElems[i]);
+                    pvarDest->cabstr.pElems[i] = SysAllocString(pvarSrc->cabstr.pElems[i]);
             }
             else if (pvarSrc->vt == (VT_VECTOR | VT_LPSTR))
             {
                 size_t strLen;
                 for (i = 0; i < len; i++)
                 {
-                    strLen = lstrlenA(pvarSrc->u.calpstr.pElems[i]) + 1;
-                    pvarDest->u.calpstr.pElems[i] = CoTaskMemAlloc(strLen);
-                    memcpy(pvarDest->u.calpstr.pElems[i],
-                     pvarSrc->u.calpstr.pElems[i], strLen);
+                    strLen = lstrlenA(pvarSrc->calpstr.pElems[i]) + 1;
+                    pvarDest->calpstr.pElems[i] = CoTaskMemAlloc(strLen);
+                    memcpy(pvarDest->calpstr.pElems[i],
+                     pvarSrc->calpstr.pElems[i], strLen);
                 }
             }
             else if (pvarSrc->vt == (VT_VECTOR | VT_LPWSTR))
@@ -813,20 +964,20 @@ HRESULT WINAPI PropVariantCopy(PROPVARIANT *pvarDest, const PROPVARIANT *pvarSrc
                 size_t strLen;
                 for (i = 0; i < len; i++)
                 {
-                    strLen = (lstrlenW(pvarSrc->u.calpwstr.pElems[i]) + 1) *
+                    strLen = (lstrlenW(pvarSrc->calpwstr.pElems[i]) + 1) *
                      sizeof(WCHAR);
-                    pvarDest->u.calpstr.pElems[i] = CoTaskMemAlloc(strLen);
-                    memcpy(pvarDest->u.calpstr.pElems[i],
-                     pvarSrc->u.calpstr.pElems[i], strLen);
+                    pvarDest->calpstr.pElems[i] = CoTaskMemAlloc(strLen);
+                    memcpy(pvarDest->calpstr.pElems[i],
+                     pvarSrc->calpstr.pElems[i], strLen);
                 }
             }
             else
-                CopyMemory(pvarDest->u.capropvar.pElems, pvarSrc->u.capropvar.pElems, len * elemSize);
+                CopyMemory(pvarDest->capropvar.pElems, pvarSrc->capropvar.pElems, len * elemSize);
         }
         else if (pvarSrc->vt & VT_ARRAY)
         {
-            pvarDest->u.uhVal.QuadPart = 0;
-            return SafeArrayCopy(pvarSrc->u.parray, &pvarDest->u.parray);
+            pvarDest->uhVal.QuadPart = 0;
+            return SafeArrayCopy(pvarSrc->parray, &pvarDest->parray);
         }
         else
             WARN("Invalid/unsupported type %d\n", pvarSrc->vt);
@@ -879,7 +1030,7 @@ HRESULT WINAPI CoQueryProxyBlanket(IUnknown *proxy, DWORD *authn_service,
         IClientSecurity_Release(client_security);
     }
 
-    if (FAILED(hr)) ERR("-- failed with %#x.\n", hr);
+    if (FAILED(hr)) ERR("-- failed with %#lx.\n", hr);
     return hr;
 }
 
@@ -892,7 +1043,7 @@ HRESULT WINAPI CoSetProxyBlanket(IUnknown *proxy, DWORD authn_service, DWORD aut
     IClientSecurity *client_security;
     HRESULT hr;
 
-    TRACE("%p, %u, %u, %p, %u, %u, %p, %#x.\n", proxy, authn_service, authz_service, servername,
+    TRACE("%p, %lu, %lu, %p, %lu, %lu, %p, %#lx.\n", proxy, authn_service, authz_service, servername,
             authn_level, imp_level, auth_info, capabilities);
 
     hr = IUnknown_QueryInterface(proxy, &IID_IClientSecurity, (void **)&client_security);
@@ -903,7 +1054,7 @@ HRESULT WINAPI CoSetProxyBlanket(IUnknown *proxy, DWORD authn_service, DWORD aut
         IClientSecurity_Release(client_security);
     }
 
-    if (FAILED(hr)) ERR("-- failed with %#x.\n", hr);
+    if (FAILED(hr)) ERR("-- failed with %#lx.\n", hr);
     return hr;
 }
 
@@ -924,7 +1075,7 @@ HRESULT WINAPI CoCopyProxy(IUnknown *proxy, IUnknown **proxy_copy)
         IClientSecurity_Release(client_security);
     }
 
-    if (FAILED(hr)) ERR("-- failed with %#x.\n", hr);
+    if (FAILED(hr)) ERR("-- failed with %#lx.\n", hr);
     return hr;
 }
 
@@ -998,7 +1149,7 @@ HRESULT WINAPI CoInitializeSecurity(PSECURITY_DESCRIPTOR sd, LONG cAuthSvc,
         SOLE_AUTHENTICATION_SERVICE *asAuthSvc, void *reserved1, DWORD authn_level,
         DWORD imp_level, void *reserved2, DWORD capabilities, void *reserved3)
 {
-    FIXME("%p, %d, %p, %p, %d, %d, %p, %d, %p stub\n", sd, cAuthSvc, asAuthSvc, reserved1, authn_level,
+    FIXME("%p, %ld, %p, %p, %ld, %ld, %p, %ld, %p stub\n", sd, cAuthSvc, asAuthSvc, reserved1, authn_level,
             imp_level, reserved2, capabilities, reserved3);
 
     return S_OK;
@@ -1047,7 +1198,7 @@ HRESULT WINAPI CoGetCallState(int arg1, ULONG *arg2)
  */
 HRESULT WINAPI CoGetActivationState(GUID guid, DWORD arg2, DWORD *arg3)
 {
-    FIXME("%s, %x, %p.\n", debugstr_guid(&guid), arg2, arg3);
+    FIXME("%s, %lx, %p.\n", debugstr_guid(&guid), arg2, arg3);
 
     return E_NOTIMPL;
 }
@@ -1084,7 +1235,7 @@ HRESULT WINAPI CoGetTreatAsClass(REFCLSID clsidOld, CLSID *clsidNew)
 
     hr = CLSIDFromString(buffW, clsidNew);
     if (FAILED(hr))
-        ERR("Failed to get CLSID from string %s, hr %#x.\n", debugstr_w(buffW), hr);
+        ERR("Failed to get CLSID from string %s, hr %#lx.\n", debugstr_w(buffW), hr);
 done:
     if (hkey) RegCloseKey(hkey);
     return hr;
@@ -1098,6 +1249,8 @@ HRESULT WINAPI DECLSPEC_HOTPATCH ProgIDFromCLSID(REFCLSID clsid, LPOLESTR *progi
     ACTCTX_SECTION_KEYED_DATA data;
     LONG progidlen = 0;
     HKEY hkey;
+    REGSAM opposite = (sizeof(void *) > sizeof(int)) ? KEY_WOW64_32KEY : KEY_WOW64_64KEY;
+    BOOL is_wow64;
     HRESULT hr;
 
     if (!progid)
@@ -1126,8 +1279,12 @@ HRESULT WINAPI DECLSPEC_HOTPATCH ProgIDFromCLSID(REFCLSID clsid, LPOLESTR *progi
     }
 
     hr = open_key_for_clsid(clsid, L"ProgID", KEY_READ, &hkey);
-    if (FAILED(hr))
-        return hr;
+    if (FAILED(hr) && (opposite == KEY_WOW64_32KEY || (IsWow64Process(GetCurrentProcess(), &is_wow64) && is_wow64)))
+    {
+        hr = open_key_for_clsid(clsid, L"ProgID", opposite | KEY_READ, &hkey);
+        if (FAILED(hr))
+            return hr;
+    }
 
     if (RegQueryValueW(hkey, NULL, NULL, &progidlen))
         hr = REGDB_E_CLASSNOTREG;
@@ -1516,7 +1673,7 @@ HRESULT WINAPI DECLSPEC_HOTPATCH CoCreateInstance(REFCLSID rclsid, IUnknown *out
     MULTI_QI multi_qi = { .pIID = riid };
     HRESULT hr;
 
-    TRACE("%s, %p, %#x, %s, %p.\n", debugstr_guid(rclsid), outer, cls_context, debugstr_guid(riid), obj);
+    TRACE("%s, %p, %#lx, %s, %p.\n", debugstr_guid(rclsid), outer, cls_context, debugstr_guid(riid), obj);
 
     if (!obj)
         return E_POINTER;
@@ -1532,7 +1689,7 @@ HRESULT WINAPI DECLSPEC_HOTPATCH CoCreateInstance(REFCLSID rclsid, IUnknown *out
 HRESULT WINAPI CoCreateInstanceFromApp(REFCLSID rclsid, IUnknown *outer, DWORD cls_context,
         void *server_info, ULONG count, MULTI_QI *results)
 {
-    TRACE("%s, %p, %#x, %p, %u, %p\n", debugstr_guid(rclsid), outer, cls_context, server_info,
+    TRACE("%s, %p, %#lx, %p, %lu, %p\n", debugstr_guid(rclsid), outer, cls_context, server_info,
             count, results);
 
     return CoCreateInstanceEx(rclsid, outer, cls_context | CLSCTX_APPCONTAINER, server_info,
@@ -1569,7 +1726,11 @@ static HRESULT com_get_class_object(REFCLSID rclsid, DWORD clscontext,
                 IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable))
         {
             apartment_release(apt);
-            return Ole32DllGetClassObject(rclsid, riid, obj);
+
+            if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions))
+                return get_builtin_class_factory(rclsid, riid, obj);
+            else
+                return Ole32DllGetClassObject(rclsid, riid, obj);
         }
     }
 
@@ -1695,7 +1856,7 @@ static HRESULT com_get_class_object(REFCLSID rclsid, DWORD clscontext,
     }
 
     if (FAILED(hr))
-        ERR("no class object %s could be created for context %#x\n", debugstr_guid(rclsid), clscontext);
+        ERR("no class object %s could be created for context %#lx\n", debugstr_guid(rclsid), clscontext);
 
     return hr;
 }
@@ -1711,7 +1872,7 @@ HRESULT WINAPI DECLSPEC_HOTPATCH CoCreateInstanceEx(REFCLSID rclsid, IUnknown *o
     CLSID clsid;
     HRESULT hr;
 
-    TRACE("%s, %p, %#x, %p, %u, %p\n", debugstr_guid(rclsid), outer, cls_context, server_info, count, results);
+    TRACE("%s, %p, %#lx, %p, %lu, %p\n", debugstr_guid(rclsid), outer, cls_context, server_info, count, results);
 
     if (!count || !results)
         return E_INVALIDARG;
@@ -1735,7 +1896,7 @@ HRESULT WINAPI DECLSPEC_HOTPATCH CoCreateInstanceEx(REFCLSID rclsid, IUnknown *o
         if (hr == CLASS_E_NOAGGREGATION && outer)
             FIXME("Class %s does not support aggregation\n", debugstr_guid(&clsid));
         else
-            FIXME("no instance created for interface %s of class %s, hr %#x.\n",
+            FIXME("no instance created for interface %s of class %s, hr %#lx.\n",
                     debugstr_guid(results[0].pIID), debugstr_guid(&clsid), hr);
         return hr;
     }
@@ -1749,7 +1910,7 @@ HRESULT WINAPI DECLSPEC_HOTPATCH CoCreateInstanceEx(REFCLSID rclsid, IUnknown *o
 HRESULT WINAPI DECLSPEC_HOTPATCH CoGetClassObject(REFCLSID rclsid, DWORD clscontext,
         COSERVERINFO *server_info, REFIID riid, void **obj)
 {
-    TRACE("%s, %#x, %s\n", debugstr_guid(rclsid), clscontext, debugstr_guid(riid));
+    TRACE("%s, %#lx, %s\n", debugstr_guid(rclsid), clscontext, debugstr_guid(riid));
 
     return com_get_class_object(rclsid, clscontext, server_info, riid, obj);
 }
@@ -1898,7 +2059,7 @@ HRESULT WINAPI CoWaitForMultipleHandles(DWORD flags, DWORD timeout, ULONG handle
     UINT exit_code;
     HRESULT hr;
 
-    TRACE("%#x, %#x, %u, %p, %p\n", flags, timeout, handle_count, handles, index);
+    TRACE("%#lx, %#lx, %lu, %p, %p\n", flags, timeout, handle_count, handles, index);
 
     if (!index)
         return E_INVALIDARG;
@@ -1963,7 +2124,7 @@ HRESULT WINAPI CoWaitForMultipleHandles(DWORD flags, DWORD timeout, ULONG handle
                     PENDINGTYPE pendingtype = tlsdata->pending_call_count_server ? PENDINGTYPE_NESTED : PENDINGTYPE_TOPLEVEL;
                     DWORD be_handled = IMessageFilter_MessagePending(apt->filter, 0 /* FIXME */, now - start_time, pendingtype);
 
-                    TRACE("IMessageFilter_MessagePending returned %d\n", be_handled);
+                    TRACE("IMessageFilter_MessagePending returned %ld\n", be_handled);
 
                     switch (be_handled)
                     {
@@ -2033,7 +2194,7 @@ HRESULT WINAPI CoWaitForMultipleHandles(DWORD flags, DWORD timeout, ULONG handle
     }
     if (post_quit) PostQuitMessage(exit_code);
 
-    TRACE("-- 0x%08x\n", hr);
+    TRACE("-- %#lx\n", hr);
 
     return hr;
 }
@@ -2165,9 +2326,9 @@ HRESULT WINAPI CoGetPSClsid(REFIID riid, CLSID *pclsid)
     StringFromGUID2(riid, path + ARRAY_SIZE(interfaceW) - 1, CHARS_IN_GUID);
     lstrcpyW(path + ARRAY_SIZE(interfaceW) - 1 + CHARS_IN_GUID - 1, psW);
 
-    hr = get_ps_clsid_from_registry(path, 0, pclsid);
+    hr = get_ps_clsid_from_registry(path, KEY_READ, pclsid);
     if (FAILED(hr) && (opposite == KEY_WOW64_32KEY || (IsWow64Process(GetCurrentProcess(), &is_wow64) && is_wow64)))
-        hr = get_ps_clsid_from_registry(path, opposite, pclsid);
+        hr = get_ps_clsid_from_registry(path, opposite | KEY_READ, pclsid);
 
     if (hr == S_OK)
         TRACE("() Returning CLSID %s\n", debugstr_guid(pclsid));
@@ -2407,7 +2568,7 @@ static ULONG WINAPI thread_object_context_Release(IObjContext *iface)
 
 static HRESULT WINAPI thread_object_context_SetProperty(IObjContext *iface, REFGUID propid, CPFLAGS flags, IUnknown *punk)
 {
-    FIXME("%p, %s, %x, %p\n", iface, debugstr_guid(propid), flags, punk);
+    FIXME("%p, %s, %lx, %p\n", iface, debugstr_guid(propid), flags, punk);
 
     return E_NOTIMPL;
 }
@@ -2619,7 +2780,7 @@ static void unlock_init_spies(struct tlsdata *tlsdata)
  */
 HRESULT WINAPI CoInitializeWOW(DWORD arg1, DWORD arg2)
 {
-    FIXME("%#x, %#x\n", arg1, arg2);
+    FIXME("%#lx, %#lx\n", arg1, arg2);
 
     return S_OK;
 }
@@ -2633,7 +2794,7 @@ HRESULT WINAPI DECLSPEC_HOTPATCH CoInitializeEx(void *reserved, DWORD model)
     struct init_spy *cursor;
     HRESULT hr;
 
-    TRACE("%p, %#x\n", reserved, model);
+    TRACE("%p, %#lx\n", reserved, model);
 
     if (reserved)
         WARN("Unexpected reserved argument %p\n", reserved);
@@ -2716,7 +2877,7 @@ void WINAPI DECLSPEC_HOTPATCH CoUninitialize(void)
     }
     else if (lockcount < 1)
     {
-        ERR("Unbalanced lock count %d\n", lockcount);
+        ERR("Unbalanced lock count %ld\n", lockcount);
         InterlockedExchangeAdd(&com_lockcount, 1);
     }
 
@@ -2804,7 +2965,7 @@ HRESULT WINAPI CoRegisterClassObject(REFCLSID rclsid, IUnknown *object, DWORD cl
     struct apartment *apt;
     HRESULT hr = S_OK;
 
-    TRACE("%s, %p, %#x, %#x, %p\n", debugstr_guid(rclsid), object, clscontext, flags, cookie);
+    TRACE("%s, %p, %#lx, %#lx, %p\n", debugstr_guid(rclsid), object, clscontext, flags, cookie);
 
     if (!cookie || !object)
         return E_INVALIDARG;
@@ -2937,7 +3098,7 @@ HRESULT WINAPI DECLSPEC_HOTPATCH CoRevokeClassObject(DWORD cookie)
     struct registered_class *cur;
     struct apartment *apt;
 
-    TRACE("%#x\n", cookie);
+    TRACE("%#lx\n", cookie);
 
     if (!(apt = apartment_get_current_or_mta()))
     {
@@ -2985,7 +3146,7 @@ ULONG WINAPI CoAddRefServerProcess(void)
     refs = ++com_server_process_refcount;
     LeaveCriticalSection(&registered_classes_cs);
 
-    TRACE("refs before: %d\n", refs - 1);
+    TRACE("refs before: %ld\n", refs - 1);
 
     return refs;
 }
@@ -3006,7 +3167,7 @@ ULONG WINAPI CoReleaseServerProcess(void)
 
     LeaveCriticalSection(&registered_classes_cs);
 
-    TRACE("refs after: %d\n", refs);
+    TRACE("refs after: %ld\n", refs);
 
     return refs;
 }
@@ -3021,7 +3182,7 @@ HRESULT WINAPI CoDisconnectObject(IUnknown *object, DWORD reserved)
     IMarshal *marshal;
     HRESULT hr;
 
-    TRACE("%p, %#x\n", object, reserved);
+    TRACE("%p, %#lx\n", object, reserved);
 
     if (!object)
         return E_INVALIDARG;
@@ -3208,7 +3369,7 @@ HRESULT WINAPI CoRegisterSurrogateEx(REFGUID guid, void *reserved)
  */
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved)
 {
-    TRACE("%p 0x%x %p\n", hinstDLL, reason, reserved);
+    TRACE("%p, %#lx, %p\n", hinstDLL, reason, reserved);
 
     switch (reason)
     {
@@ -3228,4 +3389,16 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved)
     }
 
     return TRUE;
+}
+
+HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **obj)
+{
+    TRACE("%s, %s, %p.\n", debugstr_guid(rclsid), debugstr_guid(riid), obj);
+
+    *obj = NULL;
+
+    if (IsEqualCLSID(rclsid, &CLSID_GlobalOptions))
+        return IClassFactory_QueryInterface(&global_options_factory, riid, obj);
+
+    return CLASS_E_CLASSNOTAVAILABLE;
 }

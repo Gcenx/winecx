@@ -209,7 +209,7 @@ static void test_enumerate_physical_device2(void)
 
             pfn_vkGetPhysicalDeviceProperties2(vk_physical_devices[j], &properties2);
             luid = (const LUID *)id.deviceLUID;
-            trace("Device '%s', device UUID: %s, driver UUID: %s, device LUID: %08x:%08x.\n",
+            trace("Device '%s', device UUID: %s, driver UUID: %s, device LUID: %08lx:%08lx.\n",
                   properties2.properties.deviceName, wine_dbgstr_guid((const GUID *)id.deviceUUID),
                   wine_dbgstr_guid((const GUID *)id.driverUUID), luid->HighPart, luid->LowPart);
             ok(id.deviceLUIDValid == VK_TRUE, "Expected valid device LUID.\n");
@@ -437,7 +437,447 @@ static void test_private_data(VkPhysicalDevice vk_physical_device)
     vkDestroyDevice(vk_device, NULL);
 }
 
-static void for_each_device(void (*test_func)(VkPhysicalDevice))
+static const char *test_null_hwnd_extensions[] =
+{
+    "VK_KHR_surface",
+    "VK_KHR_win32_surface",
+    "VK_KHR_device_group_creation",
+};
+
+static void test_null_hwnd(VkInstance vk_instance, VkPhysicalDevice vk_physical_device)
+{
+    PFN_vkGetPhysicalDeviceSurfacePresentModesKHR pvkGetPhysicalDeviceSurfacePresentModesKHR;
+    PFN_vkGetPhysicalDevicePresentRectanglesKHR pvkGetPhysicalDevicePresentRectanglesKHR;
+    VkDeviceGroupPresentModeFlagsKHR present_mode_flags;
+    VkWin32SurfaceCreateInfoKHR surface_create_info;
+    VkSurfaceCapabilitiesKHR surf_caps;
+    VkSurfaceFormatKHR *formats;
+    uint32_t queue_family_index;
+    VkPresentModeKHR *modes;
+    VkSurfaceKHR surface;
+    uint32_t count;
+    VkRect2D rect;
+    VkBool32 bval;
+    VkResult vr;
+
+    pvkGetPhysicalDeviceSurfacePresentModesKHR = (void *)vkGetInstanceProcAddr(vk_instance,
+            "vkGetPhysicalDeviceSurfacePresentModesKHR");
+    pvkGetPhysicalDevicePresentRectanglesKHR = (void *)vkGetInstanceProcAddr(vk_instance,
+            "vkGetPhysicalDevicePresentRectanglesKHR");
+
+    surface_create_info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+    surface_create_info.pNext = NULL;
+    surface_create_info.flags = 0;
+    surface_create_info.hinstance = NULL;
+    surface_create_info.hwnd = NULL;
+
+    bval = find_queue_family(vk_physical_device, VK_QUEUE_GRAPHICS_BIT, &queue_family_index);
+    ok(bval, "Could not find presentation queue.\n");
+
+    surface = 0xdeadbeef;
+    vr = vkCreateWin32SurfaceKHR(vk_instance, &surface_create_info, NULL, &surface);
+    ok(vr == VK_SUCCESS, "Got unexpected vr %d.\n", vr);
+    ok(surface != 0xdeadbeef, "Surface not created.\n");
+
+    count = 0;
+    vr = vkGetPhysicalDeviceSurfaceFormatsKHR(vk_physical_device, surface, &count, NULL);
+    ok(vr == VK_SUCCESS, "Got unexpected vr %d.\n", vr);
+    ok(count, "Got zero count.\n");
+    formats = heap_alloc(sizeof(*formats) * count);
+    vr = vkGetPhysicalDeviceSurfaceFormatsKHR(vk_physical_device, surface, &count, formats);
+    ok(vr == VK_SUCCESS, "Got unexpected vr %d.\n", vr);
+    heap_free(formats);
+
+    vr = vkGetPhysicalDeviceSurfaceSupportKHR(vk_physical_device, queue_family_index, surface, &bval);
+    ok(vr == VK_SUCCESS, "Got unexpected vr %d.\n", vr);
+
+    vr = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vk_physical_device, surface, &surf_caps);
+    ok(vr, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR succeeded.\n");
+
+    count = 0;
+    vr = pvkGetPhysicalDeviceSurfacePresentModesKHR(vk_physical_device, surface, &count, NULL);
+    ok(vr == VK_SUCCESS, "Got unexpected vr %d.\n", vr);
+    ok(count, "Got zero count.\n");
+    modes = heap_alloc(sizeof(*modes) * count);
+    vr = pvkGetPhysicalDeviceSurfacePresentModesKHR(vk_physical_device, surface, &count, modes);
+    ok(vr == VK_SUCCESS, "Got unexpected vr %d.\n", vr);
+    heap_free(modes);
+
+    if (pvkGetPhysicalDevicePresentRectanglesKHR)
+    {
+        VkDevice vk_device;
+
+        count = 0;
+        vr = pvkGetPhysicalDevicePresentRectanglesKHR(vk_physical_device, surface, &count, NULL);
+        ok(vr == VK_SUCCESS, "Got unexpected vr %d.\n", vr);
+        ok(count == 1, "Got unexpected count %u.\n", count);
+        memset(&rect, 0xcc, sizeof(rect));
+        vr = pvkGetPhysicalDevicePresentRectanglesKHR(vk_physical_device, surface, &count, &rect);
+        if (vr == VK_SUCCESS) /* Fails on AMD, succeeds on Nvidia. */
+        {
+            ok(count == 1, "Got unexpected count %u.\n", count);
+            ok(!rect.offset.x && !rect.offset.y && !rect.extent.width && !rect.extent.height,
+                    "Got unexpected rect %d, %d, %u, %u.\n",
+                    rect.offset.x, rect.offset.y, rect.extent.width, rect.extent.height);
+        }
+
+        if ((vr = create_device(vk_physical_device, 0, NULL, NULL, &vk_device)) < 0)
+        {
+            skip("Failed to create device, vr %d.\n", vr);
+            vkDestroySurfaceKHR(vk_instance, surface, NULL);
+            return;
+        }
+
+        if (0)
+        {
+            /* Causes access violation on Windows. */
+            vr = vkGetDeviceGroupSurfacePresentModesKHR(vk_device, surface, &present_mode_flags);
+            ok(vr == VK_SUCCESS, "Got unexpected vr %d.\n", vr);
+        }
+
+        vkDestroyDevice(vk_device, NULL);
+    }
+    else
+    {
+        /* The function should be available in practice with VK_KHR_device_group_creation, but spec lists
+         * it as a part of VK_KHR_device_group device extension which we don't check, so consider the
+         * absence of the function. */
+        win_skip("pvkGetPhysicalDevicePresentRectanglesKHR is no available.\n");
+    }
+
+    vkDestroySurfaceKHR(vk_instance, surface, NULL);
+}
+
+static uint32_t find_memory_type(VkPhysicalDevice vk_physical_device, VkMemoryPropertyFlagBits flags, uint32_t mask)
+{
+    VkPhysicalDeviceMemoryProperties properties = {0};
+    unsigned int i;
+
+    vkGetPhysicalDeviceMemoryProperties(vk_physical_device, &properties);
+
+    for(i = 0; i < properties.memoryTypeCount; i++)
+    {
+        if ((1u << i) & mask && properties.memoryTypes[i].propertyFlags & flags)
+            return i;
+    }
+    return -1;
+}
+
+static void test_cross_process_resource(VkPhysicalDeviceIDPropertiesKHR *device_id_properties, BOOL kmt, HANDLE handle)
+{
+    char driver_uuid[VK_UUID_SIZE * 2 + 1], device_uuid[VK_UUID_SIZE * 2 + 1];
+    STARTUPINFOA si = { sizeof(si) };
+    PROCESS_INFORMATION info;
+    char **argv, buf[MAX_PATH];
+    unsigned int i;
+    BOOL res;
+
+    for (i = 0; i < VK_UUID_SIZE; i++)
+    {
+        sprintf(&driver_uuid[i * 2], "%02X",  device_id_properties->driverUUID[i]);
+        sprintf(&device_uuid[i * 2], "%02X",  device_id_properties->deviceUUID[i]);
+    }
+    driver_uuid[i * 2] = 0;
+    device_uuid[i * 2] = 0;
+
+    winetest_get_mainargs(&argv);
+    sprintf(buf, "\"%s\" vulkan resource %s %s %s %p", argv[0], driver_uuid, device_uuid,
+                                                        kmt ? "kmt" : "nt", handle);
+    res = CreateProcessA(NULL, buf, NULL, NULL, TRUE, 0L, NULL, NULL, &si, &info);
+    ok(res, "CreateProcess failed: %lu\n", GetLastError());
+    CloseHandle(info.hThread);
+
+    wait_child_process(info.hProcess);
+}
+
+static void import_memory(VkDevice vk_device, VkMemoryAllocateInfo alloc_info, VkExternalMemoryHandleTypeFlagBits handle_type, HANDLE handle)
+{
+    VkImportMemoryWin32HandleInfoKHR import_handle_info;
+    VkDeviceMemory memory;
+    VkResult vr;
+
+    import_handle_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
+    import_handle_info.pNext = alloc_info.pNext;
+    import_handle_info.handleType = handle_type;
+    import_handle_info.handle = handle;
+    import_handle_info.name = NULL;
+
+    alloc_info.pNext = &import_handle_info;
+
+    vr = vkAllocateMemory(vk_device, &alloc_info, NULL, &memory);
+    ok(vr == VK_SUCCESS, "vkAllocateMemory failed, VkResult %d. type=%#x\n", vr, handle_type);
+    vkFreeMemory(vk_device, memory, NULL);
+
+    /* KMT-exportable objects can't be named */
+    if (handle_type != VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT_KHR)
+    {
+        import_handle_info.handle = NULL;
+        import_handle_info.name = L"wine_test_buffer_export_name";
+
+        vr = vkAllocateMemory(vk_device, &alloc_info, NULL, &memory);
+        ok(vr == VK_SUCCESS, "vkAllocateMemory failed, VkResult %d.\n", vr);
+        vkFreeMemory(vk_device, memory, NULL);
+    }
+}
+
+static const char *test_external_memory_extensions[] =
+{
+    "VK_KHR_external_memory_capabilities",
+    "VK_KHR_get_physical_device_properties2",
+};
+
+static void test_external_memory(VkInstance vk_instance, VkPhysicalDevice vk_physical_device)
+{
+    PFN_vkGetPhysicalDeviceExternalBufferPropertiesKHR pfn_vkGetPhysicalDeviceExternalBufferPropertiesKHR;
+    PFN_vkGetPhysicalDeviceProperties2 pfn_vkGetPhysicalDeviceProperties2;
+    VkExternalMemoryBufferCreateInfoKHR buffer_external_memory_info;
+    PFN_vkGetMemoryWin32HandleKHR pfn_vkGetMemoryWin32HandleKHR;
+    VkPhysicalDeviceExternalBufferInfoKHR external_buffer_info;
+    VkExternalBufferPropertiesKHR external_buffer_properties;
+    VkMemoryDedicatedAllocateInfoKHR dedicated_alloc_info;
+    VkPhysicalDeviceIDPropertiesKHR device_id_properties;
+    VkExportMemoryWin32HandleInfoKHR export_handle_info;
+    VkPhysicalDeviceProperties2KHR device_properties;
+    VkExportMemoryAllocateInfoKHR export_memory_info;
+    VkMemoryGetWin32HandleInfoKHR get_handle_info;
+    VkExternalMemoryHandleTypeFlagBits handle_type;
+    VkMemoryRequirements memory_requirements;
+    VkBufferCreateInfo buffer_create_info;
+    VkMemoryAllocateInfo alloc_info;
+    VkDeviceMemory vk_memory;
+    SECURITY_ATTRIBUTES sa;
+    unsigned int val, i;
+    VkBuffer vk_buffer;
+    VkDevice vk_device;
+    HANDLE handle;
+    VkResult vr;
+    char **argv;
+    int argc;
+
+    static const char *extensions[] =
+    {
+        "VK_KHR_get_memory_requirements2",
+        "VK_KHR_dedicated_allocation",
+        "VK_KHR_external_memory",
+        "VK_KHR_external_memory_win32",
+    };
+
+    pfn_vkGetPhysicalDeviceExternalBufferPropertiesKHR =
+        (void*) vkGetInstanceProcAddr(vk_instance, "vkGetPhysicalDeviceExternalBufferPropertiesKHR");
+
+    pfn_vkGetPhysicalDeviceProperties2 =
+        (void*) vkGetInstanceProcAddr(vk_instance, "vkGetPhysicalDeviceProperties2KHR");
+
+    if (pfn_vkGetPhysicalDeviceProperties2)
+    {
+        device_id_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES_KHR;
+        device_id_properties.pNext = NULL;
+
+        device_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
+        device_properties.pNext = &device_id_properties;
+
+        pfn_vkGetPhysicalDeviceProperties2(vk_physical_device, &device_properties);
+    }
+
+    argc = winetest_get_mainargs(&argv);
+    if (argc > 3 && !strcmp(argv[2], "resource"))
+    {
+        for (i = 0; i < VK_UUID_SIZE; i++)
+        {
+            sscanf(&argv[3][i * 2], "%02X", &val);
+            if (val != device_id_properties.driverUUID[i])
+                break;
+
+            sscanf(&argv[4][i * 2], "%02X", &val);
+            if (val != device_id_properties.deviceUUID[i])
+                break;
+        }
+
+        if (i != VK_UUID_SIZE)
+            return;
+    }
+
+    if ((vr = create_device(vk_physical_device, ARRAY_SIZE(extensions), extensions, NULL, &vk_device)))
+    {
+        skip("Failed to create device with external memory extensions, VkResult %d.\n", vr);
+        return;
+    }
+
+    pfn_vkGetMemoryWin32HandleKHR = (void *) vkGetDeviceProcAddr(vk_device, "vkGetMemoryWin32HandleKHR");
+
+    buffer_external_memory_info.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO_KHR;
+    buffer_external_memory_info.pNext = NULL;
+    buffer_external_memory_info.handleTypes = 0;
+
+    external_buffer_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_BUFFER_INFO_KHR;
+    external_buffer_info.pNext = NULL;
+    external_buffer_info.flags = 0;
+    external_buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    external_buffer_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR;
+
+    memset(&external_buffer_properties, 0, sizeof(external_buffer_properties));
+    external_buffer_properties.sType = VK_STRUCTURE_TYPE_EXTERNAL_BUFFER_PROPERTIES_KHR;
+
+    pfn_vkGetPhysicalDeviceExternalBufferPropertiesKHR(vk_physical_device, &external_buffer_info, &external_buffer_properties);
+
+    if (!(~external_buffer_properties.externalMemoryProperties.externalMemoryFeatures &
+            (VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT_KHR|VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT_KHR)))
+    {
+        ok(external_buffer_properties.externalMemoryProperties.compatibleHandleTypes & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR,
+            "Unexpected compatibleHandleTypes %#x.\n", external_buffer_properties.externalMemoryProperties.compatibleHandleTypes);
+
+        buffer_external_memory_info.handleTypes |= VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR;
+    }
+
+    external_buffer_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT_KHR;
+
+    memset(&external_buffer_properties, 0, sizeof(external_buffer_properties));
+    external_buffer_properties.sType = VK_STRUCTURE_TYPE_EXTERNAL_BUFFER_PROPERTIES_KHR;
+
+    pfn_vkGetPhysicalDeviceExternalBufferPropertiesKHR(vk_physical_device, &external_buffer_info, &external_buffer_properties);
+
+    if (!(~external_buffer_properties.externalMemoryProperties.externalMemoryFeatures &
+            (VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT_KHR|VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT_KHR)))
+    {
+        ok(external_buffer_properties.externalMemoryProperties.compatibleHandleTypes & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT_KHR,
+            "Unexpected compatibleHandleTypes %#x.\n", external_buffer_properties.externalMemoryProperties.compatibleHandleTypes);
+
+        buffer_external_memory_info.handleTypes |= VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT_KHR;
+    }
+
+    buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_create_info.pNext = &buffer_external_memory_info;
+    buffer_create_info.flags = 0;
+    buffer_create_info.size = 1;
+    buffer_create_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    buffer_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    buffer_create_info.queueFamilyIndexCount = 0;
+    buffer_create_info.pQueueFamilyIndices = NULL;
+    if ((vr = vkCreateBuffer(vk_device, &buffer_create_info, NULL, &vk_buffer)))
+    {
+        skip("Failed to create generic buffer, VkResult %d.\n", vr);
+        vkDestroyDevice(vk_device, NULL);
+        return;
+    }
+
+    vkGetBufferMemoryRequirements(vk_device, vk_buffer, &memory_requirements);
+
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = memory_requirements.size;
+    alloc_info.memoryTypeIndex = find_memory_type(vk_physical_device, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memory_requirements.memoryTypeBits);
+
+    /* Most implementations only support exporting dedicated allocations */
+
+    dedicated_alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO_KHR;
+    dedicated_alloc_info.pNext = NULL;
+    dedicated_alloc_info.image = VK_NULL_HANDLE;
+    dedicated_alloc_info.buffer = vk_buffer;
+
+    if (argc > 3 && !strcmp(argv[2], "resource"))
+    {
+        handle_type = strcmp(argv[5], "kmt") ?
+            VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR :
+            VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT_KHR;
+
+        sscanf(argv[6], "%p", &handle);
+
+        ok(handle_type & buffer_external_memory_info.handleTypes,
+            "External memory capabilities for handleType %#x do not match on child process.\n", handle_type);
+
+        alloc_info.pNext = &dedicated_alloc_info;
+        import_memory(vk_device, alloc_info, handle_type, handle);
+
+        vkDestroyBuffer(vk_device, vk_buffer, NULL);
+        vkDestroyDevice(vk_device, NULL);
+
+        return;
+    }
+
+    if (!(buffer_external_memory_info.handleTypes & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR))
+        skip("With desired parameters, buffers are not exportable to and importable from an NT handle.\n");
+    else
+    {
+        export_memory_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR;
+        export_memory_info.pNext = &dedicated_alloc_info;
+        export_memory_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR;
+
+        sa.nLength = sizeof(sa);
+        sa.lpSecurityDescriptor = NULL;
+        sa.bInheritHandle = TRUE;
+
+        export_handle_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
+        export_handle_info.pNext = &export_memory_info;
+        export_handle_info.name = L"wine_test_buffer_export_name";
+        export_handle_info.dwAccess = GENERIC_ALL;
+        export_handle_info.pAttributes = &sa;
+
+        alloc_info.pNext = &export_handle_info;
+
+        ok(alloc_info.memoryTypeIndex != -1, "Device local memory type index was not found.\n");
+
+        vr = vkAllocateMemory(vk_device, &alloc_info, NULL, &vk_memory);
+        ok(vr == VK_SUCCESS, "vkAllocateMemory failed, VkResult %d.\n", vr);
+
+        get_handle_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR;
+        get_handle_info.pNext = NULL;
+        get_handle_info.memory = vk_memory;
+        get_handle_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR;
+
+        vr = pfn_vkGetMemoryWin32HandleKHR(vk_device, &get_handle_info, &handle);
+        ok(vr == VK_SUCCESS, "vkGetMemoryWin32HandleKHR failed, VkResult %d.\n", vr);
+
+        alloc_info.pNext = &dedicated_alloc_info;
+        import_memory(vk_device, alloc_info, VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR, handle);
+
+        if (pfn_vkGetPhysicalDeviceProperties2)
+            test_cross_process_resource(&device_id_properties, FALSE, handle);
+        else
+            skip("Skipping cross process shared resource test due to lack of VK_KHR_get_physical_device_properties2.\n");
+
+        vkFreeMemory(vk_device, vk_memory, NULL);
+        CloseHandle(handle);
+    }
+
+    if (!(buffer_external_memory_info.handleTypes & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT_KHR))
+        skip("With desired parameters, buffers are not exportable to and importable from a KMT handle.\n");
+    else
+    {
+        export_memory_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR;
+        export_memory_info.pNext = &dedicated_alloc_info;
+        export_memory_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT_KHR;
+
+        alloc_info.pNext = &export_memory_info;
+
+        ok(alloc_info.memoryTypeIndex != -1, "Device local memory type index was not found.\n");
+
+        vr = vkAllocateMemory(vk_device, &alloc_info, NULL, &vk_memory);
+        ok(vr == VK_SUCCESS, "vkAllocateMemory failed, VkResult %d.\n", vr);
+
+        get_handle_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR;
+        get_handle_info.pNext = NULL;
+        get_handle_info.memory = vk_memory;
+        get_handle_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT_KHR;
+
+        vr = pfn_vkGetMemoryWin32HandleKHR(vk_device, &get_handle_info, &handle);
+        ok(vr == VK_SUCCESS, "vkGetMemoryWin32HandleKHR failed, VkResult %d.\n", vr);
+
+        alloc_info.pNext = &dedicated_alloc_info;
+        import_memory(vk_device, alloc_info, VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT_KHR, handle);
+
+        if (pfn_vkGetPhysicalDeviceProperties2)
+            test_cross_process_resource(&device_id_properties, TRUE, handle);
+        else
+            skip("Skipping cross process shared resource test due to lack of VK_KHR_get_physical_device_properties2.\n");
+
+        vkFreeMemory(vk_device, vk_memory, NULL);
+    }
+
+    vkDestroyBuffer(vk_device, vk_buffer, NULL);
+    vkDestroyDevice(vk_device, NULL);
+}
+
+static void for_each_device_instance(uint32_t extension_count, const char * const *enabled_extensions,
+        void (*test_func_instance)(VkInstance, VkPhysicalDevice), void (*test_func)(VkPhysicalDevice))
 {
     VkPhysicalDevice *vk_physical_devices;
     VkInstance vk_instance;
@@ -445,7 +885,7 @@ static void for_each_device(void (*test_func)(VkPhysicalDevice))
     uint32_t count;
     VkResult vr;
 
-    if ((vr = create_instance_skip(0, NULL, &vk_instance)) < 0)
+    if ((vr = create_instance_skip(extension_count, enabled_extensions, &vk_instance)) < 0)
         return;
     ok(vr == VK_SUCCESS, "Got unexpected VkResult %d.\n", vr);
 
@@ -463,15 +903,37 @@ static void for_each_device(void (*test_func)(VkPhysicalDevice))
     ok(vr == VK_SUCCESS, "Got unexpected VkResult %d.\n", vr);
 
     for (i = 0; i < count; ++i)
-        test_func(vk_physical_devices[i]);
+    {
+        if (test_func_instance)
+            test_func_instance(vk_instance, vk_physical_devices[i]);
+        else
+            test_func(vk_physical_devices[i]);
+    }
 
     heap_free(vk_physical_devices);
 
     vkDestroyInstance(vk_instance, NULL);
 }
 
+static void for_each_device(void (*test_func)(VkPhysicalDevice))
+{
+    for_each_device_instance(0, NULL, NULL, test_func);
+}
+
 START_TEST(vulkan)
 {
+    char **argv;
+    int argc;
+
+    argc = winetest_get_mainargs(&argv);
+
+    if (argc > 3 && !strcmp(argv[2], "resource"))
+    {
+        ok(argc >= 7, "Missing launch arguments\n");
+        for_each_device_instance(ARRAY_SIZE(test_external_memory_extensions), test_external_memory_extensions, test_external_memory, NULL);
+        return;
+    }
+
     test_instance_version();
     for_each_device(enumerate_physical_device);
     test_enumerate_physical_device2();
@@ -481,4 +943,6 @@ START_TEST(vulkan)
     test_unsupported_instance_extensions();
     for_each_device(test_unsupported_device_extensions);
     for_each_device(test_private_data);
+    for_each_device_instance(ARRAY_SIZE(test_null_hwnd_extensions), test_null_hwnd_extensions, test_null_hwnd, NULL);
+    for_each_device_instance(ARRAY_SIZE(test_external_memory_extensions), test_external_memory_extensions, test_external_memory, NULL);
 }

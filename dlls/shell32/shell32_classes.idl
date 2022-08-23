@@ -75,6 +75,12 @@ coclass KnownFolderManager { interface IKnownFolderManager; }
 ] coclass ApplicationDestinations { interface IApplicationDestinations; }
 
 [
+    helpstring("Application Document List"),
+    threading(apartment),
+    uuid(86bec222-30f2-47e0-9f25-60d11cd75c28)
+] coclass ApplicationDocumentLists { interface IApplicationDocumentLists; }
+
+[
     helpstring("Shell Drag and Drop Helper"),
     threading(apartment),
     uuid(4657278a-411b-11d2-839a-00c04fd918d0)
@@ -166,3 +172,9 @@ coclass KnownFolderManager { interface IKnownFolderManager; }
     threading(apartment),
     uuid(66e4e4fb-f385-4dd0-8d74-a2efd1bc6178)
 ] coclass ShellImageDataFactory { interface IShellImageDataFactory; }
+
+[
+    helpstring("Copy/Move/Rename/Delete/Link Object"),
+    threading(apartment),
+    uuid(3ad05575-8857-4850-9277-11b85bdb8e09)
+] coclass FileOperation { interface IFileOperation; }

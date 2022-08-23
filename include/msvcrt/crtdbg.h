@@ -74,7 +74,7 @@ typedef struct _CrtMemState
 #define _ASSERTE(expr)                  assert(expr)
 #if defined(_MSC_VER)
 #define _CrtDbgBreak()                  __debugbreak()
-#elif defined(__GNUC__) && (defined(__i386__) || (defined(__i386__) || defined(__i386_on_x86_64__))
+#elif defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
 #define _CrtDbgBreak()                  __asm__ ("\tint $0x3\n")
 #else
 #define _CrtDbgBreak()                  ((void)0)
@@ -90,7 +90,7 @@ extern int _crtDbgFlag;
 
 _ACRTIMP int   __cdecl _CrtCheckMemory(void);
 _ACRTIMP int   WINAPIV _CrtDbgReport(int reportType, const char *filename, int linenumber,
-                                     const char *moduleName, const char *format, ...);
+                                     const char *moduleName, const char *format, ...) __WINE_CRT_PRINTF_ATTR(5, 6);
 _ACRTIMP int   __cdecl _CrtDumpMemoryLeaks(void);
 _ACRTIMP int   __cdecl _CrtSetBreakAlloc(int);
 _ACRTIMP int   __cdecl _CrtSetDbgFlag(int);

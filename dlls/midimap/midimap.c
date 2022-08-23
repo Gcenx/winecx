@@ -36,7 +36,15 @@
 /*
  * Here's how Windows stores the midiOut mapping information.
  *
- * Full form (in HKU) is:
+ * Windows XP form (in HKU) is:
+ *
+ * [Software\\Microsoft\\Windows\\CurrentVersion\\Multimedia\\MIDIMap]
+ * "szPname"="TiMidity port 0"
+ * (incomplete)
+ *
+ * szPname:             name of midiOut device to use.
+ *
+ * If szPname isn't defined, we use Windows 2000 form (also in HKU):
  *
  * [Software\\Microsoft\\Windows\\CurrentVersion\\Multimedia\\MIDIMap] 988836060
  * "AutoScheme"=dword:00000000
@@ -75,7 +83,7 @@
  * This last part isn't implemented (.idf file support).
  */
 
-WINE_DEFAULT_DEBUG_CHANNEL(msacm);
+WINE_DEFAULT_DEBUG_CHANNEL(midi);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 typedef struct tagMIDIOUTPORT
@@ -214,39 +222,47 @@ static BOOL	MIDIMAP_LoadSettings(MIDIMAPDATA* mom)
     else
     {
 	DWORD	type, size, out;
-	WCHAR   buffer[256];
+	WCHAR	buffer[256];
 
-	ret = 2;
-	size = sizeof(out);
-	if (!RegQueryValueExA(hKey, "UseScheme", 0, &type, (void*)&out, &size) && out)
+	size = sizeof(buffer);
+	if (!RegQueryValueExW(hKey, L"szPname", 0, &type, (void*)buffer, &size))
 	{
-	    size = sizeof(buffer);
-            if (!RegQueryValueExW(hKey, L"CurrentScheme", 0, &type, (void*)buffer, &size))
-	    {
-		if (!(ret = MIDIMAP_LoadSettingsScheme(mom, buffer)))
-		    ret = MIDIMAP_LoadSettingsDefault(mom, NULL);
-	    }
-	    else
-	    {
-		ERR("Wrong registry: UseScheme is active, but no CurrentScheme found\n");
-	    }
+	    ret = MIDIMAP_LoadSettingsDefault(mom, buffer);
 	}
-	if (ret == 2)
+	else
 	{
-	    size = sizeof(buffer);
-            if (!RegQueryValueExW(hKey, L"CurrentInstrument", 0, &type, (void*)buffer, &size) && *buffer)
+	    ret = 2;
+	    size = sizeof(out);
+	    if (!RegQueryValueExA(hKey, "UseScheme", 0, &type, (void*)&out, &size) && out)
 	    {
-		ret = MIDIMAP_LoadSettingsDefault(mom, buffer);
+		size = sizeof(buffer);
+		if (!RegQueryValueExW(hKey, L"CurrentScheme", 0, &type, (void*)buffer, &size))
+		{
+		    if (!(ret = MIDIMAP_LoadSettingsScheme(mom, buffer)))
+			ret = MIDIMAP_LoadSettingsDefault(mom, NULL);
+		}
+		else
+		{
+		    ERR("Wrong registry: UseScheme is active, but no CurrentScheme found\n");
+		}
 	    }
-	    else
+	    if (ret == 2)
 	    {
-		ret = MIDIMAP_LoadSettingsDefault(mom, NULL);
+		size = sizeof(buffer);
+		if (!RegQueryValueExW(hKey, L"CurrentInstrument", 0, &type, (void*)buffer, &size) && *buffer)
+		{
+		    ret = MIDIMAP_LoadSettingsDefault(mom, buffer);
+		}
+		else
+		{
+		    ret = MIDIMAP_LoadSettingsDefault(mom, NULL);
+		}
 	    }
 	}
     }
     RegCloseKey(hKey);
 
-    if (ret && TRACE_ON(msacm))
+    if (ret && TRACE_ON(midi))
     {
 	unsigned	i;
 
@@ -270,7 +286,7 @@ static DWORD modOpen(DWORD_PTR *lpdwUser, LPMIDIOPENDESC lpDesc, DWORD dwFlags)
 {
     MIDIMAPDATA*	mom = HeapAlloc(GetProcessHeap(), 0, sizeof(MIDIMAPDATA));
 
-    TRACE("(%p %p %08x)\n", lpdwUser, lpDesc, dwFlags);
+    TRACE("(%p %p %08lx)\n", lpdwUser, lpDesc, dwFlags);
 
     if (!mom) return MMSYSERR_NOMEM;
     if (!lpDesc) {
@@ -416,7 +432,7 @@ static DWORD modData(MIDIMAPDATA* mom, DWORD_PTR dwParam)
 	}
 	break;
     default:
-	FIXME("ooch %lx\n", dwParam);
+	FIXME("ooch %Ix\n", dwParam);
     }
 
     return ret;
@@ -507,7 +523,7 @@ static LRESULT MIDIMAP_drvClose(void);
 DWORD WINAPI MIDIMAP_modMessage(UINT wDevID, UINT wMsg, DWORD_PTR dwUser,
 				DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
-    TRACE("(%u, %04X, %08lX, %08lX, %08lX);\n",
+    TRACE("(%u, %04X, %08IX, %08IX, %08IX);\n",
 	  wDevID, wMsg, dwUser, dwParam1, dwParam2);
 
     switch (wMsg)

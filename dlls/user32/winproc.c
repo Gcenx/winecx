@@ -29,67 +29,31 @@
 #include "wingdi.h"
 #include "controls.h"
 #include "win.h"
+#include "dbt.h"
 #include "user_private.h"
 #include "wine/asm.h"
 #include "wine/debug.h"
 
-WINE_DECLARE_DEBUG_CHANNEL(msg);
+WINE_DEFAULT_DEBUG_CHANNEL(msg);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
-WINE_DEFAULT_DEBUG_CHANNEL(win);
 
-typedef struct tagWINDOWPROC
+#define WINPROC_PROC16  ((void *)1)  /* placeholder for 16-bit window procs */
+
+union packed_structs
 {
-    WNDPROC        procA;    /* ASCII window proc */
-    WNDPROC        procW;    /* Unicode window proc */
-} WINDOWPROC;
-
-#define MAX_WINPROCS  4096
-#define MAX_WINPROC_RECURSION  64
-#define WINPROC_PROC16  ((WINDOWPROC *)1)  /* placeholder for 16-bit window procs */
-
-static LRESULT WINAPI ButtonWndProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );
-static LRESULT WINAPI ButtonWndProcW( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );
-static LRESULT WINAPI ComboWndProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );
-static LRESULT WINAPI ComboWndProcW( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );
-LRESULT WINAPI EditWndProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );
-static LRESULT WINAPI EditWndProcW( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );
-static LRESULT WINAPI ListBoxWndProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );
-static LRESULT WINAPI ListBoxWndProcW( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );
-static LRESULT WINAPI MDIClientWndProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );
-static LRESULT WINAPI MDIClientWndProcW( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );
-static LRESULT WINAPI ScrollBarWndProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );
-static LRESULT WINAPI ScrollBarWndProcW( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );
-static LRESULT WINAPI StaticWndProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );
-static LRESULT WINAPI StaticWndProcW( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );
-
-static WINDOWPROC winproc_array[MAX_WINPROCS] =
-{
-    { ButtonWndProcA, ButtonWndProcW },        /* WINPROC_BUTTON */
-    { ComboWndProcA, ComboWndProcW },          /* WINPROC_COMBO */
-    { DefWindowProcA, DefWindowProcW },        /* WINPROC_DEFWND */
-    { DefDlgProcA, DefDlgProcW },              /* WINPROC_DIALOG */
-    { EditWndProcA, EditWndProcW },            /* WINPROC_EDIT */
-    { ListBoxWndProcA, ListBoxWndProcW },      /* WINPROC_LISTBOX */
-    { MDIClientWndProcA, MDIClientWndProcW },  /* WINPROC_MDICLIENT */
-    { ScrollBarWndProcA, ScrollBarWndProcW },  /* WINPROC_SCROLLBAR */
-    { StaticWndProcA, StaticWndProcW },        /* WINPROC_STATIC */
-    { ImeWndProcA, ImeWndProcW },              /* WINPROC_IME */
-    { NULL, DesktopWndProc },                  /* WINPROC_DESKTOP */
-    { NULL, IconTitleWndProc },                /* WINPROC_ICONTITLE */
-    { NULL, PopupMenuWndProc },                /* WINPROC_MENU */
-    { NULL, MessageWndProc },                  /* WINPROC_MESSAGE */
+    struct packed_CREATESTRUCTW cs;
+    struct packed_DRAWITEMSTRUCT dis;
+    struct packed_MEASUREITEMSTRUCT mis;
+    struct packed_DELETEITEMSTRUCT dls;
+    struct packed_COMPAREITEMSTRUCT cis;
+    struct packed_WINDOWPOS wp;
+    struct packed_COPYDATASTRUCT cds;
+    struct packed_HELPINFO hi;
+    struct packed_NCCALCSIZE_PARAMS ncp;
+    struct packed_MSG msg;
+    struct packed_MDINEXTMENU mnm;
+    struct packed_MDICREATESTRUCTW mcs;
 };
-
-static UINT winproc_used = NB_BUILTIN_WINPROCS;
-
-static CRITICAL_SECTION winproc_cs;
-static CRITICAL_SECTION_DEBUG critsect_debug =
-{
-    0, 0, &winproc_cs,
-    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": winproc_cs") }
-};
-static CRITICAL_SECTION winproc_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 static inline void *get_buffer( void *static_buffer, size_t size, size_t need )
 {
@@ -102,77 +66,15 @@ static inline void free_buffer( void *static_buffer, void *buffer )
     if (buffer != static_buffer) HeapFree( GetProcessHeap(), 0, buffer );
 }
 
-/* find an existing winproc for a given function and type */
-/* FIXME: probably should do something more clever than a linear search */
-static inline WINDOWPROC *find_winproc( WNDPROC func, BOOL unicode )
-{
-    unsigned int i;
-
-    for (i = 0; i < NB_BUILTIN_AW_WINPROCS; i++)
-    {
-        /* match either proc, some apps confuse A and W */
-        if (winproc_array[i].procA != func && winproc_array[i].procW != func) continue;
-        return &winproc_array[i];
-    }
-    for (i = NB_BUILTIN_AW_WINPROCS; i < winproc_used; i++)
-    {
-        if (!unicode && winproc_array[i].procA != func) continue;
-        if (unicode && winproc_array[i].procW != func) continue;
-        return &winproc_array[i];
-    }
-    return NULL;
-}
-
 /* return the window proc for a given handle, or NULL for an invalid handle,
  * or WINPROC_PROC16 for a handle to a 16-bit proc. */
 static inline WINDOWPROC *handle_to_proc( WNDPROC handle )
 {
-    UINT index = LOWORD(handle);
-    if ((ULONG_PTR)handle >> 16 != WINPROC_HANDLE) return NULL;
-    if (index >= MAX_WINPROCS) return WINPROC_PROC16;
-    if (index >= winproc_used) return NULL;
-    return &winproc_array[index];
-}
-
-/* create a handle for a given window proc */
-static inline WNDPROC proc_to_handle( WINDOWPROC *proc )
-{
-    return (WNDPROC)(ULONG_PTR)((proc - winproc_array) | (WINPROC_HANDLE << 16));
-}
-
-/* allocate and initialize a new winproc */
-static inline WINDOWPROC *alloc_winproc( WNDPROC func, BOOL unicode )
-{
-    WINDOWPROC *proc;
-
-    /* check if the function is already a win proc */
-    if (!func) return NULL;
-    if ((proc = handle_to_proc( func ))) return proc;
-
-    EnterCriticalSection( &winproc_cs );
-
-    /* check if we already have a winproc for that function */
-    if (!(proc = find_winproc( func, unicode )))
-    {
-        if (winproc_used < MAX_WINPROCS)
-        {
-            proc = &winproc_array[winproc_used++];
-            if (unicode) proc->procW = func;
-            else proc->procA = func;
-            TRACE( "allocated %p for %c %p (%d/%d used)\n",
-                   proc_to_handle(proc), unicode ? 'W' : 'A', func,
-                   winproc_used, MAX_WINPROCS );
-        }
-        else WARN( "too many winprocs, cannot allocate one for %p\n", func );
-    }
-    else TRACE( "reusing %p for %p\n", proc_to_handle(proc), func );
-
-    LeaveCriticalSection( &winproc_cs );
-    return proc;
+    return (WINDOWPROC *)NtUserCallOneParam( HandleToUlong(handle), NtUserGetWinProcPtr );
 }
 
 #ifdef __i386__
-/* Some window procedures modify register they shouldn't, or are not
+/* Some window procedures modify registers they shouldn't, or are not
  * properly declared stdcall; so we need a small assembly wrapper to
  * call them. */
 extern LRESULT WINPROC_wrapper( WNDPROC proc, HWND hwnd, UINT msg,
@@ -209,49 +111,6 @@ __ASM_GLOBAL_FUNC( WINPROC_wrapper,
                    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
                    __ASM_CFI(".cfi_same_value %ebp\n\t")
                    "ret" )
-#elif defined(__i386_on_x86_64__)
-/* Some window procedures modify register they shouldn't, or are not
- * properly declared stdcall; so we need a small assembly wrapper to
- * call them. */
-__ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(WINPROC_wrapper),
-                     "pushl %ebp\n\t"
-                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                     __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
-                     "movl %esp,%ebp\n\t"
-                     __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
-                     "pushl %edi\n\t"
-                     __ASM_CFI(".cfi_rel_offset %edi,-4\n\t")
-                     "pushl %esi\n\t"
-                     __ASM_CFI(".cfi_rel_offset %esi,-8\n\t")
-                     "pushl %ebx\n\t"
-                     __ASM_CFI(".cfi_rel_offset %ebx,-12\n\t")
-                     /* TreePad X Enterprise assumes that edi is < 0x80000000 in WM_TIMER messages */
-                     "xorl %edi,%edi\n\t"
-                     "subl $("__ASM_EXTRA_DIST"-4),%esp\n\t"
-                     "pushl 24(%ebp)\n\t"
-                     "pushl 20(%ebp)\n\t"
-                     "pushl 16(%ebp)\n\t"
-                     "pushl 12(%ebp)\n\t"
-                     "movl 8(%ebp),%eax\n\t"
-                     "call *%eax\n\t"
-                     "leal -12(%ebp),%esp\n\t"
-                     "popl %ebx\n\t"
-                     __ASM_CFI(".cfi_same_value %ebx\n\t")
-                     "popl %esi\n\t"
-                     __ASM_CFI(".cfi_same_value %esi\n\t")
-                     "popl %edi\n\t"
-                     __ASM_CFI(".cfi_same_value %edi\n\t")
-                     "leave\n\t"
-                     __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
-                     __ASM_CFI(".cfi_same_value %ebp\n\t")
-                     "ret" )
-LRESULT CDECL DECLSPEC_HIDDEN WINPROC_wrapper( WNDPROC proc, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
-{
-    if (wine_is_thunk32to64( proc ))
-        return proc( hwnd, msg, wParam, lParam );
-    else
-        return WINE_CALL_IMPL32(WINPROC_wrapper)( proc, hwnd, msg, wParam, lParam );
-}
 #else
 static inline LRESULT WINPROC_wrapper( WNDPROC proc, HWND hwnd, UINT msg,
                                        WPARAM wParam, LPARAM lParam )
@@ -276,18 +135,12 @@ static WPARAM map_wparam_char_WtoA( WPARAM wParam, DWORD len )
 /* call a 32-bit window procedure */
 static LRESULT call_window_proc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT *result, void *arg )
 {
-    DPI_AWARENESS_CONTEXT context;
     WNDPROC proc = arg;
 
-    USER_CheckNotLock();
-
-    hwnd = WIN_GetFullHandle( hwnd );
     TRACE_(relay)( "\1Call window proc %p (hwnd=%p,msg=%s,wp=%08lx,lp=%08lx)\n",
                    proc, hwnd, SPY_GetMsgName(msg, hwnd), wp, lp );
 
-    context = SetThreadDpiAwarenessContext( GetWindowDpiAwarenessContext( hwnd ));
     *result = WINPROC_wrapper( proc, hwnd, msg, wp, lp );
-    SetThreadDpiAwarenessContext( context );
 
     TRACE_(relay)( "\1Ret  window proc %p (hwnd=%p,msg=%s,wp=%08lx,lp=%08lx) retval=%08lx\n",
                    proc, hwnd, SPY_GetMsgName(msg, hwnd), wp, lp, *result );
@@ -319,29 +172,6 @@ static LRESULT call_dialog_proc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRES
 
 
 /**********************************************************************
- *	     WINPROC_GetProc
- *
- * Get a window procedure pointer that can be passed to the Windows program.
- */
-WNDPROC WINPROC_GetProc( WNDPROC proc, BOOL unicode )
-{
-    WINDOWPROC *ptr = handle_to_proc( proc );
-
-    if (!ptr || ptr == WINPROC_PROC16) return proc;
-    if (unicode)
-    {
-        if (ptr->procW) return ptr->procW;
-        return proc;
-    }
-    else
-    {
-        if (ptr->procA) return ptr->procA;
-        return proc;
-    }
-}
-
-
-/**********************************************************************
  *	     WINPROC_AllocProc
  *
  * Allocate a window procedure for a window or class.
@@ -350,29 +180,9 @@ WNDPROC WINPROC_GetProc( WNDPROC proc, BOOL unicode )
  * lot of windows, it will usually only have a limited number of window procedures, so the
  * array won't grow too large, and this way we avoid the need to track allocations per window.
  */
-WNDPROC WINPROC_AllocProc( WNDPROC func, BOOL unicode )
+static WNDPROC WINPROC_AllocProc( WNDPROC func, BOOL unicode )
 {
-    WINDOWPROC *proc;
-
-    if (!(proc = alloc_winproc( func, unicode ))) return func;
-    if (proc == WINPROC_PROC16) return func;
-    return proc_to_handle( proc );
-}
-
-
-/**********************************************************************
- *	     WINPROC_IsUnicode
- *
- * Return the window procedure type, or the default value if not a winproc handle.
- */
-BOOL WINPROC_IsUnicode( WNDPROC proc, BOOL def_val )
-{
-    WINDOWPROC *ptr = handle_to_proc( proc );
-
-    if (!ptr) return def_val;
-    if (ptr == WINPROC_PROC16) return FALSE;  /* 16-bit is always A */
-    if (ptr->procA && ptr->procW) return def_val;  /* can be both */
-    return (ptr->procW != NULL);
+    return (WNDPROC)NtUserCallTwoParam( (UINT_PTR)func, !unicode, NtUserAllocWinProc );
 }
 
 
@@ -536,7 +346,7 @@ LRESULT WINPROC_CallProcAtoW( winproc_callback_t callback, HWND hwnd, UINT msg, 
     case LB_DIR:
     case LB_ADDFILE:
     case EM_REPLACESEL:
-        if (!HIWORD(lParam)) ret = callback( hwnd, msg, wParam, lParam, result, arg );
+        if (!lParam) ret = callback( hwnd, msg, wParam, lParam, result, arg );
         else
         {
             WCHAR *ptr, buffer[512];
@@ -563,7 +373,7 @@ LRESULT WINPROC_CallProcAtoW( winproc_callback_t callback, HWND hwnd, UINT msg, 
             if (*result >= 0)
             {
                 DWORD len;
-                RtlUnicodeToMultiByteN( (LPSTR)lParam, ~0u, &len,
+                RtlUnicodeToMultiByteN( (LPSTR)lParam, 512 * 3, &len,
                                         buffer, (lstrlenW(buffer) + 1) * sizeof(WCHAR) );
                 *result = len - 1;
             }
@@ -823,7 +633,7 @@ static LRESULT WINPROC_CallProcWtoA( winproc_callback_t callback, HWND hwnd, UIN
             if (*result >= 0)
             {
                 DWORD len;
-                RtlMultiByteToUnicodeN( (LPWSTR)lParam, ~0u, &len, buffer, strlen(buffer) + 1 );
+                RtlMultiByteToUnicodeN( (LPWSTR)lParam, 512 * 3, &len, buffer, strlen(buffer) + 1 );
                 *result = len / sizeof(WCHAR) - 1;
             }
         }
@@ -909,100 +719,587 @@ static LRESULT WINPROC_CallProcWtoA( winproc_callback_t callback, HWND hwnd, UIN
 }
 
 
-/**********************************************************************
- *		WINPROC_call_window
- *
- * Call the window procedure of the specified window.
- */
-BOOL WINPROC_call_window( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
-                          LRESULT *result, BOOL unicode, enum wm_char_mapping mapping )
+static void dispatch_win_proc_params( struct win_proc_params *params )
 {
-    struct user_thread_info *thread_info = get_user_thread_info();
-    BOOL unicode_win, is_dialog;
-    WND *wndPtr;
-    WNDPROC func;
-    WINDOWPROC *proc;
+    DPI_AWARENESS_CONTEXT context = SetThreadDpiAwarenessContext( params->dpi_awareness );
 
-    if (!(wndPtr = WIN_GetPtr( hwnd ))) return FALSE;
-    if (wndPtr == WND_OTHER_PROCESS || wndPtr == WND_DESKTOP) return FALSE;
-    if (wndPtr->tid != GetCurrentThreadId())
+    if (!params->ansi)
     {
-        WIN_ReleasePtr( wndPtr );
-        return FALSE;
-    }
-    func = wndPtr->winproc;
-    proc = handle_to_proc( wndPtr->winproc );
-    unicode_win = wndPtr->flags & WIN_ISUNICODE;
-    is_dialog = wndPtr->dlgInfo != NULL;
-    WIN_ReleasePtr( wndPtr );
-
-    if (thread_info->recursion_count > MAX_WINPROC_RECURSION) return FALSE;
-    thread_info->recursion_count++;
-
-    if (unicode)
-    {
-        if (proc == WINPROC_PROC16)
-            WINPROC_CallProcWtoA( wow_handlers.call_window_proc, hwnd, msg, wParam, lParam, result, func );
-        else if (is_dialog)
+        if (params->procW == WINPROC_PROC16)
+            WINPROC_CallProcWtoA( wow_handlers.call_window_proc, params->hwnd, params->msg, params->wparam,
+                                  params->lparam, params->result, params->func );
+        else if (params->is_dialog)
         {
-            if (unicode_win)
+            if (!params->ansi_dst)
             {
-                if (proc && proc->procW)
-                    call_window_proc( hwnd, msg, wParam, lParam, result, proc->procW );
+                if (params->procW)
+                    call_window_proc( params->hwnd, params->msg, params->wparam, params->lparam,
+                                      params->result, params->procW );
                 else
-                    call_window_proc( hwnd, msg, wParam, lParam, result, func );
+                    call_window_proc( params->hwnd, params->msg, params->wparam, params->lparam,
+                                      params->result, params->func );
             }
             else
             {
-                if (proc && proc->procA)
-                    WINPROC_CallProcWtoA( call_window_proc, hwnd, msg, wParam, lParam, result, proc->procA );
+                if (params->procA)
+                    WINPROC_CallProcWtoA( call_window_proc, params->hwnd, params->msg, params->wparam,
+                                          params->lparam, params->result, params->procA );
                 else
-                    WINPROC_CallProcWtoA( call_window_proc, hwnd, msg, wParam, lParam, result, func );
+                    WINPROC_CallProcWtoA( call_window_proc, params->hwnd, params->msg, params->wparam,
+                                          params->lparam, params->result, params->func );
             }
         }
-        else if (proc && proc->procW)
-            call_window_proc( hwnd, msg, wParam, lParam, result, proc->procW );
-        else if (proc)
-            WINPROC_CallProcWtoA( call_window_proc, hwnd, msg, wParam, lParam, result, proc->procA );
-        else if (unicode_win)
-            call_window_proc( hwnd, msg, wParam, lParam, result, func );
+        else if (params->procW)
+            call_window_proc( params->hwnd, params->msg, params->wparam, params->lparam,
+                              params->result, params->procW );
+        else if (params->procA)
+            WINPROC_CallProcWtoA( call_window_proc, params->hwnd, params->msg, params->wparam,
+                                  params->lparam, params->result, params->procA );
+        else if (!params->ansi_dst)
+            call_window_proc( params->hwnd, params->msg, params->wparam, params->lparam,
+                              params->result, params->func );
         else
-            WINPROC_CallProcWtoA( call_window_proc, hwnd, msg, wParam, lParam, result, func );
+            WINPROC_CallProcWtoA( call_window_proc, params->hwnd, params->msg, params->wparam,
+                                  params->lparam, params->result, params->func );
     }
     else
     {
-        if (proc == WINPROC_PROC16)
-            wow_handlers.call_window_proc( hwnd, msg, wParam, lParam, result, func );
-        else if (is_dialog)
+        if (params->procA == WINPROC_PROC16)
+            wow_handlers.call_window_proc( params->hwnd, params->msg, params->wparam, params->lparam,
+                                           params->result, params->func );
+        else if (params->is_dialog)
         {
-            if (unicode_win)
+            if (!params->ansi_dst)
             {
-                if (proc && proc->procW)
-                    WINPROC_CallProcAtoW( call_window_proc, hwnd, msg, wParam, lParam, result, proc->procW, mapping );
+                if (params->procW)
+                    WINPROC_CallProcAtoW( call_window_proc, params->hwnd, params->msg, params->wparam,
+                                          params->lparam, params->result, params->procW, params->mapping );
                 else
-                    WINPROC_CallProcAtoW( call_window_proc, hwnd, msg, wParam, lParam, result, func, mapping );
+                    WINPROC_CallProcAtoW( call_window_proc, params->hwnd, params->msg, params->wparam,
+                                          params->lparam, params->result, params->func, params->mapping );
             }
             else
             {
-                if (proc && proc->procA)
-                    call_window_proc( hwnd, msg, wParam, lParam, result, proc->procA );
+                if (params->procA)
+                    call_window_proc( params->hwnd, params->msg, params->wparam, params->lparam,
+                                      params->result, params->procA );
                 else
-                    call_window_proc( hwnd, msg, wParam, lParam, result, func );
+                    call_window_proc( params->hwnd, params->msg, params->wparam, params->lparam,
+                                      params->result, params->func );
             }
         }
-        else if (proc && proc->procA)
-            call_window_proc( hwnd, msg, wParam, lParam, result, proc->procA );
-        else if (proc)
-            WINPROC_CallProcAtoW( call_window_proc, hwnd, msg, wParam, lParam, result, proc->procW, mapping );
-        else if (unicode_win)
-            WINPROC_CallProcAtoW( call_window_proc, hwnd, msg, wParam, lParam, result, func, mapping );
+        else if (params->procA)
+            call_window_proc( params->hwnd, params->msg, params->wparam, params->lparam,
+                              params->result, params->procA );
+        else if (params->procW)
+            WINPROC_CallProcAtoW( call_window_proc, params->hwnd, params->msg, params->wparam,
+                                  params->lparam, params->result, params->procW, params->mapping );
+        else if (!params->ansi_dst)
+            WINPROC_CallProcAtoW( call_window_proc, params->hwnd, params->msg, params->wparam,
+                                  params->lparam, params->result, params->func, params->mapping );
         else
-            call_window_proc( hwnd, msg, wParam, lParam, result, func );
+            call_window_proc( params->hwnd, params->msg, params->wparam, params->lparam,
+                              params->result, params->func );
     }
-    thread_info->recursion_count--;
+
+    SetThreadDpiAwarenessContext( context );
+}
+
+/* make sure that there is space for 'size' bytes in buffer, growing it if needed */
+static inline void *get_buffer_space( void **buffer, size_t size, size_t prev_size )
+{
+    if (prev_size > size && !(*buffer = HeapAlloc( GetProcessHeap(), 0, size ))) return NULL;
+    return *buffer;
+}
+
+/* check whether a combobox expects strings or ids in CB_ADDSTRING/CB_INSERTSTRING */
+static inline BOOL combobox_has_strings( HWND hwnd )
+{
+    DWORD style = GetWindowLongA( hwnd, GWL_STYLE );
+    return (!(style & (CBS_OWNERDRAWFIXED | CBS_OWNERDRAWVARIABLE)) || (style & CBS_HASSTRINGS));
+}
+
+/* check whether a listbox expects strings or ids in LB_ADDSTRING/LB_INSERTSTRING */
+static inline BOOL listbox_has_strings( HWND hwnd )
+{
+    DWORD style = GetWindowLongA( hwnd, GWL_STYLE );
+    return (!(style & (LBS_OWNERDRAWFIXED | LBS_OWNERDRAWVARIABLE)) || (style & LBS_HASSTRINGS));
+}
+
+/* unpack a potentially 64-bit pointer, returning 0 when truncated */
+static inline void *unpack_ptr( ULONGLONG ptr64 )
+{
+    if ((ULONG_PTR)ptr64 != ptr64) return 0;
+    return (void *)(ULONG_PTR)ptr64;
+}
+
+/* convert a server handle to a generic handle */
+static inline HANDLE unpack_handle( UINT handle )
+{
+    return (HANDLE)(INT_PTR)(int)handle;
+}
+
+/* make sure that the buffer contains a valid null-terminated Unicode string */
+static inline BOOL check_string( LPCWSTR str, size_t size )
+{
+    for (size /= sizeof(WCHAR); size; size--, str++)
+        if (!*str) return TRUE;
+    return FALSE;
+}
+
+/***********************************************************************
+ *		unpack_message
+ *
+ * Unpack a message received from another process.
+ */
+static BOOL unpack_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam,
+                            void **buffer, size_t size )
+{
+    size_t minsize = 0, prev_size = size;
+    union packed_structs *ps = *buffer;
+
+    switch(message)
+    {
+    case WM_NCCREATE:
+    case WM_CREATE:
+    {
+        CREATESTRUCTW cs;
+        WCHAR *str = (WCHAR *)(&ps->cs + 1);
+        if (size < sizeof(ps->cs)) return FALSE;
+        size -= sizeof(ps->cs);
+        cs.lpCreateParams = unpack_ptr( ps->cs.lpCreateParams );
+        cs.hInstance      = unpack_ptr( ps->cs.hInstance );
+        cs.hMenu          = unpack_handle( ps->cs.hMenu );
+        cs.hwndParent     = unpack_handle( ps->cs.hwndParent );
+        cs.cy             = ps->cs.cy;
+        cs.cx             = ps->cs.cx;
+        cs.y              = ps->cs.y;
+        cs.x              = ps->cs.x;
+        cs.style          = ps->cs.style;
+        cs.dwExStyle      = ps->cs.dwExStyle;
+        cs.lpszName       = unpack_ptr( ps->cs.lpszName );
+        cs.lpszClass      = unpack_ptr( ps->cs.lpszClass );
+        if (ps->cs.lpszName >> 16)
+        {
+            if (!check_string( str, size )) return FALSE;
+            cs.lpszName = str;
+            size -= (lstrlenW(str) + 1) * sizeof(WCHAR);
+            str += lstrlenW(str) + 1;
+        }
+        if (ps->cs.lpszClass >> 16)
+        {
+            if (!check_string( str, size )) return FALSE;
+            cs.lpszClass = str;
+        }
+        memcpy( &ps->cs, &cs, sizeof(cs) );
+        break;
+    }
+    case WM_GETTEXT:
+    case WM_ASKCBFORMATNAME:
+        if (!get_buffer_space( buffer, (*wparam * sizeof(WCHAR)), size )) return FALSE;
+        break;
+    case WM_WININICHANGE:
+        if (!*lparam) return TRUE;
+        /* fall through */
+    case WM_SETTEXT:
+    case WM_DEVMODECHANGE:
+    case CB_DIR:
+    case LB_DIR:
+    case LB_ADDFILE:
+    case EM_REPLACESEL:
+        if (!check_string( *buffer, size )) return FALSE;
+        break;
+    case WM_GETMINMAXINFO:
+        minsize = sizeof(MINMAXINFO);
+        break;
+    case WM_DRAWITEM:
+    {
+        DRAWITEMSTRUCT dis;
+        if (size < sizeof(ps->dis)) return FALSE;
+        dis.CtlType    = ps->dis.CtlType;
+        dis.CtlID      = ps->dis.CtlID;
+        dis.itemID     = ps->dis.itemID;
+        dis.itemAction = ps->dis.itemAction;
+        dis.itemState  = ps->dis.itemState;
+        dis.hwndItem   = unpack_handle( ps->dis.hwndItem );
+        dis.hDC        = unpack_handle( ps->dis.hDC );
+        dis.rcItem     = ps->dis.rcItem;
+        dis.itemData   = (ULONG_PTR)unpack_ptr( ps->dis.itemData );
+        memcpy( &ps->dis, &dis, sizeof(dis) );
+        break;
+    }
+    case WM_MEASUREITEM:
+    {
+        MEASUREITEMSTRUCT mis;
+        if (size < sizeof(ps->mis)) return FALSE;
+        mis.CtlType    = ps->mis.CtlType;
+        mis.CtlID      = ps->mis.CtlID;
+        mis.itemID     = ps->mis.itemID;
+        mis.itemWidth  = ps->mis.itemWidth;
+        mis.itemHeight = ps->mis.itemHeight;
+        mis.itemData   = (ULONG_PTR)unpack_ptr( ps->mis.itemData );
+        memcpy( &ps->mis, &mis, sizeof(mis) );
+        break;
+    }
+    case WM_DELETEITEM:
+    {
+        DELETEITEMSTRUCT dls;
+        if (size < sizeof(ps->dls)) return FALSE;
+        dls.CtlType    = ps->dls.CtlType;
+        dls.CtlID      = ps->dls.CtlID;
+        dls.itemID     = ps->dls.itemID;
+        dls.hwndItem   = unpack_handle( ps->dls.hwndItem );
+        dls.itemData   = (ULONG_PTR)unpack_ptr( ps->dls.itemData );
+        memcpy( &ps->dls, &dls, sizeof(dls) );
+        break;
+    }
+    case WM_COMPAREITEM:
+    {
+        COMPAREITEMSTRUCT cis;
+        if (size < sizeof(ps->cis)) return FALSE;
+        cis.CtlType    = ps->cis.CtlType;
+        cis.CtlID      = ps->cis.CtlID;
+        cis.hwndItem   = unpack_handle( ps->cis.hwndItem );
+        cis.itemID1    = ps->cis.itemID1;
+        cis.itemData1  = (ULONG_PTR)unpack_ptr( ps->cis.itemData1 );
+        cis.itemID2    = ps->cis.itemID2;
+        cis.itemData2  = (ULONG_PTR)unpack_ptr( ps->cis.itemData2 );
+        cis.dwLocaleId = ps->cis.dwLocaleId;
+        memcpy( &ps->cis, &cis, sizeof(cis) );
+        break;
+    }
+    case WM_WINDOWPOSCHANGING:
+    case WM_WINDOWPOSCHANGED:
+    {
+        WINDOWPOS wp;
+        if (size < sizeof(ps->wp)) return FALSE;
+        wp.hwnd            = unpack_handle( ps->wp.hwnd );
+        wp.hwndInsertAfter = unpack_handle( ps->wp.hwndInsertAfter );
+        wp.x               = ps->wp.x;
+        wp.y               = ps->wp.y;
+        wp.cx              = ps->wp.cx;
+        wp.cy              = ps->wp.cy;
+        wp.flags           = ps->wp.flags;
+        memcpy( &ps->wp, &wp, sizeof(wp) );
+        break;
+    }
+    case WM_COPYDATA:
+    {
+        COPYDATASTRUCT cds;
+        if (size < sizeof(ps->cds)) return FALSE;
+        cds.dwData = (ULONG_PTR)unpack_ptr( ps->cds.dwData );
+        if (ps->cds.lpData)
+        {
+            cds.cbData = ps->cds.cbData;
+            cds.lpData = &ps->cds + 1;
+            minsize = sizeof(ps->cds) + cds.cbData;
+        }
+        else
+        {
+            cds.cbData = 0;
+            cds.lpData = 0;
+        }
+        memcpy( &ps->cds, &cds, sizeof(cds) );
+        break;
+    }
+    case WM_NOTIFY:
+        /* WM_NOTIFY cannot be sent across processes (MSDN) */
+        return FALSE;
+    case WM_HELP:
+    {
+        HELPINFO hi;
+        if (size < sizeof(ps->hi)) return FALSE;
+        hi.cbSize       = sizeof(hi);
+        hi.iContextType = ps->hi.iContextType;
+        hi.iCtrlId      = ps->hi.iCtrlId;
+        hi.hItemHandle  = unpack_handle( ps->hi.hItemHandle );
+        hi.dwContextId  = (ULONG_PTR)unpack_ptr( ps->hi.dwContextId );
+        hi.MousePos     = ps->hi.MousePos;
+        memcpy( &ps->hi, &hi, sizeof(hi) );
+        break;
+    }
+    case WM_STYLECHANGING:
+    case WM_STYLECHANGED:
+        minsize = sizeof(STYLESTRUCT);
+        break;
+    case WM_NCCALCSIZE:
+        if (!*wparam) minsize = sizeof(RECT);
+        else
+        {
+            NCCALCSIZE_PARAMS ncp;
+            WINDOWPOS wp;
+            if (size < sizeof(ps->ncp)) return FALSE;
+            ncp.rgrc[0]        = ps->ncp.rgrc[0];
+            ncp.rgrc[1]        = ps->ncp.rgrc[1];
+            ncp.rgrc[2]        = ps->ncp.rgrc[2];
+            wp.hwnd            = unpack_handle( ps->ncp.hwnd );
+            wp.hwndInsertAfter = unpack_handle( ps->ncp.hwndInsertAfter );
+            wp.x               = ps->ncp.x;
+            wp.y               = ps->ncp.y;
+            wp.cx              = ps->ncp.cx;
+            wp.cy              = ps->ncp.cy;
+            wp.flags           = ps->ncp.flags;
+            ncp.lppos = (WINDOWPOS *)((NCCALCSIZE_PARAMS *)&ps->ncp + 1);
+            memcpy( &ps->ncp, &ncp, sizeof(ncp) );
+            *ncp.lppos = wp;
+        }
+        break;
+    case WM_GETDLGCODE:
+        if (*lparam)
+        {
+            MSG msg;
+            if (size < sizeof(ps->msg)) return FALSE;
+            msg.hwnd    = unpack_handle( ps->msg.hwnd );
+            msg.message = ps->msg.message;
+            msg.wParam  = (ULONG_PTR)unpack_ptr( ps->msg.wParam );
+            msg.lParam  = (ULONG_PTR)unpack_ptr( ps->msg.lParam );
+            msg.time    = ps->msg.time;
+            msg.pt      = ps->msg.pt;
+            memcpy( &ps->msg, &msg, sizeof(msg) );
+            break;
+        }
+        return TRUE;
+    case SBM_SETSCROLLINFO:
+        minsize = sizeof(SCROLLINFO);
+        break;
+    case SBM_GETSCROLLINFO:
+        if (!get_buffer_space( buffer, sizeof(SCROLLINFO), size )) return FALSE;
+        break;
+    case SBM_GETSCROLLBARINFO:
+        if (!get_buffer_space( buffer, sizeof(SCROLLBARINFO), size )) return FALSE;
+        break;
+    case EM_GETSEL:
+    case SBM_GETRANGE:
+    case CB_GETEDITSEL:
+        if (*wparam || *lparam)
+        {
+            if (!get_buffer_space( buffer, 2*sizeof(DWORD), size )) return FALSE;
+            if (*wparam) *wparam = (WPARAM)*buffer;
+            if (*lparam) *lparam = (LPARAM)((DWORD *)*buffer + 1);
+        }
+        return TRUE;
+    case EM_GETRECT:
+    case LB_GETITEMRECT:
+    case CB_GETDROPPEDCONTROLRECT:
+        if (!get_buffer_space( buffer, sizeof(RECT), size )) return FALSE;
+        break;
+    case EM_SETRECT:
+    case EM_SETRECTNP:
+        minsize = sizeof(RECT);
+        break;
+    case EM_GETLINE:
+    {
+        WORD len;
+        if (size < sizeof(WORD)) return FALSE;
+        len = *(WORD *)*buffer;
+        if (!get_buffer_space( buffer, (len + 1) * sizeof(WCHAR), size )) return FALSE;
+        *lparam = (LPARAM)*buffer + sizeof(WORD);  /* don't erase WORD at start of buffer */
+        return TRUE;
+    }
+    case EM_SETTABSTOPS:
+    case LB_SETTABSTOPS:
+        if (!*wparam) return TRUE;
+        minsize = *wparam * sizeof(UINT);
+        break;
+    case CB_ADDSTRING:
+    case CB_INSERTSTRING:
+    case CB_FINDSTRING:
+    case CB_FINDSTRINGEXACT:
+    case CB_SELECTSTRING:
+    case LB_ADDSTRING:
+    case LB_INSERTSTRING:
+    case LB_FINDSTRING:
+    case LB_FINDSTRINGEXACT:
+    case LB_SELECTSTRING:
+        if (!*buffer) return TRUE;
+        if (!check_string( *buffer, size )) return FALSE;
+        break;
+    case CB_GETLBTEXT:
+    {
+        size = sizeof(ULONG_PTR);
+        if (combobox_has_strings( hwnd ))
+            size = (SendMessageW( hwnd, CB_GETLBTEXTLEN, *wparam, 0 ) + 1) * sizeof(WCHAR);
+        if (!get_buffer_space( buffer, size, prev_size )) return FALSE;
+        break;
+    }
+    case LB_GETTEXT:
+    {
+        size = sizeof(ULONG_PTR);
+        if (listbox_has_strings( hwnd ))
+            size = (SendMessageW( hwnd, LB_GETTEXTLEN, *wparam, 0 ) + 1) * sizeof(WCHAR);
+        if (!get_buffer_space( buffer, size, prev_size )) return FALSE;
+        break;
+    }
+    case LB_GETSELITEMS:
+        if (!get_buffer_space( buffer, *wparam * sizeof(UINT), size )) return FALSE;
+        break;
+    case WM_NEXTMENU:
+    {
+        MDINEXTMENU mnm;
+        if (size < sizeof(ps->mnm)) return FALSE;
+        mnm.hmenuIn   = unpack_handle( ps->mnm.hmenuIn );
+        mnm.hmenuNext = unpack_handle( ps->mnm.hmenuNext );
+        mnm.hwndNext  = unpack_handle( ps->mnm.hwndNext );
+        memcpy( &ps->mnm, &mnm, sizeof(mnm) );
+        break;
+    }
+    case WM_SIZING:
+    case WM_MOVING:
+        minsize = sizeof(RECT);
+        if (!get_buffer_space( buffer, sizeof(RECT), size )) return FALSE;
+        break;
+    case WM_MDICREATE:
+    {
+        MDICREATESTRUCTW mcs;
+        WCHAR *str = (WCHAR *)(&ps->mcs + 1);
+        if (size < sizeof(ps->mcs)) return FALSE;
+        size -= sizeof(ps->mcs);
+
+        mcs.szClass = unpack_ptr( ps->mcs.szClass );
+        mcs.szTitle = unpack_ptr( ps->mcs.szTitle );
+        mcs.hOwner  = unpack_ptr( ps->mcs.hOwner );
+        mcs.x       = ps->mcs.x;
+        mcs.y       = ps->mcs.y;
+        mcs.cx      = ps->mcs.cx;
+        mcs.cy      = ps->mcs.cy;
+        mcs.style   = ps->mcs.style;
+        mcs.lParam  = (LPARAM)unpack_ptr( ps->mcs.lParam );
+        if (ps->mcs.szClass >> 16)
+        {
+            if (!check_string( str, size )) return FALSE;
+            mcs.szClass = str;
+            size -= (lstrlenW(str) + 1) * sizeof(WCHAR);
+            str += lstrlenW(str) + 1;
+        }
+        if (ps->mcs.szTitle >> 16)
+        {
+            if (!check_string( str, size )) return FALSE;
+            mcs.szTitle = str;
+        }
+        memcpy( &ps->mcs, &mcs, sizeof(mcs) );
+        break;
+    }
+    case WM_MDIGETACTIVE:
+        if (!*lparam) return TRUE;
+        if (!get_buffer_space( buffer, sizeof(BOOL), size )) return FALSE;
+        break;
+    case WM_DEVICECHANGE:
+        if (!(*wparam & 0x8000)) return TRUE;
+        minsize = sizeof(DEV_BROADCAST_HDR);
+        break;
+    case WM_NCPAINT:
+        if (*wparam <= 1) return TRUE;
+        FIXME( "WM_NCPAINT hdc unpacking not supported\n" );
+        return FALSE;
+    case WM_PAINT:
+        if (!*wparam) return TRUE;
+        /* fall through */
+
+    /* these contain an HFONT */
+    case WM_SETFONT:
+    case WM_GETFONT:
+    /* these contain an HDC */
+    case WM_ERASEBKGND:
+    case WM_ICONERASEBKGND:
+    case WM_CTLCOLORMSGBOX:
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX:
+    case WM_CTLCOLORBTN:
+    case WM_CTLCOLORDLG:
+    case WM_CTLCOLORSCROLLBAR:
+    case WM_CTLCOLORSTATIC:
+    case WM_PRINT:
+    case WM_PRINTCLIENT:
+    /* these contain an HGLOBAL */
+    case WM_PAINTCLIPBOARD:
+    case WM_SIZECLIPBOARD:
+    /* these contain HICON */
+    case WM_GETICON:
+    case WM_SETICON:
+    case WM_QUERYDRAGICON:
+    case WM_QUERYPARKICON:
+    /* these contain pointers */
+    case WM_DROPOBJECT:
+    case WM_QUERYDROPOBJECT:
+    case WM_DRAGLOOP:
+    case WM_DRAGSELECT:
+    case WM_DRAGMOVE:
+        FIXME( "msg %x (%s) not supported yet\n", message, SPY_GetMsgName(message, hwnd) );
+        return FALSE;
+
+    default:
+        return TRUE; /* message doesn't need any unpacking */
+    }
+
+    /* default exit for most messages: check minsize and store buffer in lparam */
+    if (size < minsize) return FALSE;
+    *lparam = (LPARAM)*buffer;
     return TRUE;
 }
 
+BOOL WINAPI User32CallWindowProc( struct win_proc_params *params, ULONG size )
+{
+
+    if (params->needs_unpack)
+    {
+        char stack_buffer[128];
+        void *buffer;
+        LRESULT result;
+        MSG msg;
+
+        if (size > sizeof(*params))
+        {
+            size -= sizeof(*params);
+            buffer = params + 1;
+        }
+        else
+        {
+            size = sizeof(stack_buffer);
+            buffer = stack_buffer;
+        }
+        if (!unpack_message( params->hwnd, params->msg, &params->wparam,
+                             &params->lparam, &buffer, size ))
+            return 0;
+        params->result = &result;
+
+        msg.hwnd    = params->hwnd;
+        msg.message = params->msg;
+        msg.wParam  = params->wparam;
+        msg.lParam  = params->lparam;
+        dispatch_win_proc_params( params );
+
+        NtUserReplyMessage( result, &msg );
+        if (buffer != stack_buffer && buffer != params + 1)
+            HeapFree( GetProcessHeap(), 0, buffer );
+    }
+    else dispatch_win_proc_params( params );
+    return TRUE;
+}
+
+void get_winproc_params( struct win_proc_params *params )
+{
+    WINDOWPROC *proc = handle_to_proc( params->func );
+
+    if (!proc)
+    {
+        params->procW = params->procA = NULL;
+    }
+    else if (proc == WINPROC_PROC16)
+    {
+        params->procW = params->procA = WINPROC_PROC16;
+    }
+    else
+    {
+        params->procA = proc->procA;
+        params->procW = proc->procW;
+    }
+}
+
+BOOL WINAPI User32CallSendAsyncCallback( const struct send_async_params *params, ULONG size )
+{
+    params->callback( params->hwnd, params->msg, params->data, params->result );
+    return TRUE;
+}
 
 /**********************************************************************
  *		CallWindowProcA (USER32.@)
@@ -1028,27 +1325,16 @@ BOOL WINPROC_call_window( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
  *
  *   ECMA-234, Win32
  */
-LRESULT WINAPI CallWindowProcA(
-    WNDPROC func,  /* [in] window procedure */
-    HWND hwnd,     /* [in] target window */
-    UINT msg,      /* [in] message */
-    WPARAM wParam, /* [in] message dependent parameter */
-    LPARAM lParam  /* [in] message dependent parameter */
-) {
-    WINDOWPROC *proc;
+LRESULT WINAPI CallWindowProcA( WNDPROC func, HWND hwnd, UINT msg, WPARAM wParam,  LPARAM lParam )
+{
+    struct win_proc_params params;
     LRESULT result;
 
-    if (!func) return 0;
-
-    if (!(proc = handle_to_proc( func )))
-        call_window_proc( hwnd, msg, wParam, lParam, &result, func );
-    else if (proc == WINPROC_PROC16)
-        wow_handlers.call_window_proc( hwnd, msg, wParam, lParam, &result, func );
-    else if (proc->procA)
-        call_window_proc( hwnd, msg, wParam, lParam, &result, proc->procA );
-    else
-        WINPROC_CallProcAtoW( call_window_proc, hwnd, msg, wParam, lParam, &result,
-                              proc->procW, WMCHAR_MAP_CALLWINDOWPROC );
+    params.func = func;
+    params.result = &result;
+    if (!NtUserMessageCall( hwnd, msg, wParam, lParam, &params, NtUserCallWindowProc, TRUE ))
+        return 0;
+    dispatch_win_proc_params( &params );
     return result;
 }
 
@@ -1058,22 +1344,16 @@ LRESULT WINAPI CallWindowProcA(
  *
  * See CallWindowProcA.
  */
-LRESULT WINAPI CallWindowProcW( WNDPROC func, HWND hwnd, UINT msg,
-                                  WPARAM wParam, LPARAM lParam )
+LRESULT WINAPI CallWindowProcW( WNDPROC func, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
 {
-    WINDOWPROC *proc;
+    struct win_proc_params params;
     LRESULT result;
 
-    if (!func) return 0;
-
-    if (!(proc = handle_to_proc( func )))
-        call_window_proc( hwnd, msg, wParam, lParam, &result, func );
-    else if (proc == WINPROC_PROC16)
-        WINPROC_CallProcWtoA( wow_handlers.call_window_proc, hwnd, msg, wParam, lParam, &result, func );
-    else if (proc->procW)
-        call_window_proc( hwnd, msg, wParam, lParam, &result, proc->procW );
-    else
-        WINPROC_CallProcWtoA( call_window_proc, hwnd, msg, wParam, lParam, &result, proc->procA );
+    params.func = func;
+    params.result = &result;
+    if (!NtUserMessageCall( hwnd, msg, wParam, lParam, &params, NtUserCallWindowProc, FALSE ))
+        return 0;
+    dispatch_win_proc_params( &params );
     return result;
 }
 
@@ -1089,7 +1369,7 @@ INT_PTR WINPROC_CallDlgProcA( DLGPROC func, HWND hwnd, UINT msg, WPARAM wParam, 
 
     if (!func) return 0;
 
-    if (!(proc = handle_to_proc( func )))
+    if (!(proc = handle_to_proc( (WNDPROC)func )))
         ret = call_dialog_proc( hwnd, msg, wParam, lParam, &result, func );
     else if (proc == WINPROC_PROC16)
     {
@@ -1114,7 +1394,7 @@ INT_PTR WINPROC_CallDlgProcW( DLGPROC func, HWND hwnd, UINT msg, WPARAM wParam, 
 
     if (!func) return 0;
 
-    if (!(proc = handle_to_proc( func )))
+    if (!(proc = handle_to_proc( (WNDPROC)func )))
         ret = call_dialog_proc( hwnd, msg, wParam, lParam, &result, func );
     else if (proc == WINPROC_PROC16)
     {
@@ -1202,14 +1482,6 @@ static LRESULT WINAPI StaticWndProcW( HWND hwnd, UINT msg, WPARAM wParam, LPARAM
     return wow_handlers.static_proc( hwnd, msg, wParam, lParam, TRUE );
 }
 
-static DWORD wait_message( DWORD count, const HANDLE *handles, DWORD timeout, DWORD mask, DWORD flags )
-{
-    DWORD ret = USER_Driver->pMsgWaitForMultipleObjectsEx( count, handles, timeout, mask, flags );
-    if (ret == WAIT_TIMEOUT && !count && !timeout) NtYieldExecution();
-    if ((mask & QS_INPUT) == QS_INPUT) get_user_thread_info()->message_count = 0;
-    return ret;
-}
-
 /**********************************************************************
  *		UserRegisterWowHandlers (USER32.@)
  *
@@ -1225,14 +1497,11 @@ void WINAPI UserRegisterWowHandlers( const struct wow_handlers16 *new, struct wo
     orig->mdiclient_proc  = MDIClientWndProc_common;
     orig->scrollbar_proc  = ScrollBarWndProc_common;
     orig->static_proc     = StaticWndProc_common;
-    orig->wait_message    = wait_message;
     orig->create_window   = WIN_CreateWindowEx;
     orig->get_win_handle  = WIN_GetFullHandle;
     orig->alloc_winproc   = WINPROC_AllocProc;
     orig->get_dialog_info = DIALOG_get_info;
     orig->dialog_box_loop = DIALOG_DoDialogBox;
-    orig->get_icon_param  = get_icon_param;
-    orig->set_icon_param  = set_icon_param;
 
     wow_handlers = *new;
 }
@@ -1246,9 +1515,44 @@ struct wow_handlers16 wow_handlers =
     MDIClientWndProc_common,
     ScrollBarWndProc_common,
     StaticWndProc_common,
-    wait_message,
     WIN_CreateWindowEx,
     NULL,  /* call_window_proc */
     NULL,  /* call_dialog_proc */
-    NULL,  /* free_icon_param */
 };
+
+static const struct user_client_procs client_procsA =
+{
+    .pButtonWndProc = ButtonWndProcA,
+    .pComboWndProc = ComboWndProcA,
+    .pDefWindowProc = DefWindowProcA,
+    .pDefDlgProc = DefDlgProcA,
+    .pEditWndProc = EditWndProcA,
+    .pListBoxWndProc = ListBoxWndProcA,
+    .pMDIClientWndProc = MDIClientWndProcA,
+    .pScrollBarWndProc = ScrollBarWndProcA,
+    .pStaticWndProc = StaticWndProcA,
+    .pImeWndProc = ImeWndProcA,
+};
+
+static const struct user_client_procs client_procsW =
+{
+    .pButtonWndProc = ButtonWndProcW,
+    .pComboWndProc = ComboWndProcW,
+    .pDefWindowProc = DefWindowProcW,
+    .pDefDlgProc = DefDlgProcW,
+    .pEditWndProc = EditWndProcW,
+    .pListBoxWndProc = ListBoxWndProcW,
+    .pMDIClientWndProc = MDIClientWndProcW,
+    .pScrollBarWndProc = ScrollBarWndProcW,
+    .pStaticWndProc = StaticWndProcW,
+    .pImeWndProc = ImeWndProcW,
+    .pDesktopWndProc = DesktopWndProc,
+    .pIconTitleWndProc = IconTitleWndProc,
+    .pPopupMenuWndProc = PopupMenuWndProc,
+    .pMessageWndProc = MessageWndProc,
+};
+
+void winproc_init(void)
+{
+    NtUserInitializeClientPfnArrays( &client_procsA, &client_procsW, NULL, user32_module );
+}

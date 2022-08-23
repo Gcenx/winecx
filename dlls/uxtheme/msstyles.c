@@ -28,7 +28,7 @@
 #include "winnls.h"
 #include "vfwmsgs.h"
 #include "uxtheme.h"
-#include "tmschema.h"
+#include "vssym32.h"
 
 #include "msstyles.h"
 
@@ -42,11 +42,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(uxtheme);
  */
 
 static BOOL MSSTYLES_GetNextInteger(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, int *value);
+static BOOL MSSTYLES_GetNextLong(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, LONG *value);
 static BOOL MSSTYLES_GetNextToken(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, LPWSTR lpBuff, DWORD buffSize);
 static void MSSTYLES_ParseThemeIni(PTHEME_FILE tf, BOOL setMetrics);
 static HRESULT MSSTYLES_GetFont (LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, LOGFONTW* logfont);
-
-extern int alphaBlendMode;
 
 #define MSSTYLES_VERSION 0x0003
 
@@ -99,7 +98,7 @@ HRESULT MSSTYLES_OpenThemeFile(LPCWSTR lpThemeFile, LPCWSTR pszColorName, LPCWST
     }
     if((versize = SizeofResource(hTheme, hrsc)) != 2)
     {
-        TRACE("Version resource found, but wrong size: %d\n", versize);
+        TRACE("Version resource found, but wrong size: %ld\n", versize);
         hr = HRESULT_FROM_WIN32(ERROR_BAD_FORMAT);
         goto invalid_theme;
     }
@@ -247,6 +246,16 @@ HRESULT MSSTYLES_SetActiveTheme(PTHEME_FILE tf, BOOL setMetrics)
 PUXINI_FILE MSSTYLES_GetThemeIni(PTHEME_FILE tf)
 {
     return UXINI_LoadINI(tf->hTheme, L"themes_ini");
+}
+
+/***********************************************************************
+ *      MSSTYLES_GetThemeDPI
+ *
+ * Retrieves the DPI from a theme handle when it was opened
+ */
+UINT MSSTYLES_GetThemeDPI(PTHEME_CLASS tc)
+{
+    return tc->dpi;
 }
 
 /***********************************************************************
@@ -441,6 +450,36 @@ static PTHEME_CLASS MSSTYLES_AddClass(PTHEME_FILE tf, LPCWSTR pszAppName, LPCWST
     cur->overrides = NULL;
     tf->classes = cur;
     return cur;
+}
+
+/***********************************************************************
+ *      MSSTYLES_FindPart
+ *
+ * Find a part
+ *
+ * PARAMS
+ *     tc                  Class to search
+ *     iPartId             Part ID to find
+ *
+ * RETURNS
+ *  The part found, or NULL
+ */
+PTHEME_PARTSTATE MSSTYLES_FindPart(PTHEME_CLASS tc, int iPartId)
+{
+    PTHEME_PARTSTATE cur = tc->partstate;
+
+    while (cur)
+    {
+        if (cur->iPartId == iPartId)
+            return cur;
+
+        cur = cur->next;
+    }
+
+    if (tc->overrides)
+        return MSSTYLES_FindPart(tc->overrides, iPartId);
+
+    return NULL;
 }
 
 /***********************************************************************
@@ -725,12 +764,18 @@ struct PARSENONCLIENTSTATE
 
 static inline void parse_init_nonclient (struct PARSENONCLIENTSTATE* state)
 {
+    DPI_AWARENESS_CONTEXT old_context;
+
+    old_context = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_UNAWARE);
+
     memset (state, 0, sizeof (*state));
     state->metrics.cbSize = sizeof (NONCLIENTMETRICSW);
     SystemParametersInfoW (SPI_GETNONCLIENTMETRICS, sizeof (NONCLIENTMETRICSW),
         &state->metrics, 0);
     SystemParametersInfoW (SPI_GETICONTITLELOGFONT, sizeof (LOGFONTW),
         &state->iconTitleFont, 0);
+
+    SetThreadDpiAwarenessContext(old_context);
 }
 
 static BOOL parse_handle_nonclient_font (struct PARSENONCLIENTSTATE* state, 
@@ -830,12 +875,16 @@ static BOOL parse_handle_nonclient_size (struct PARSENONCLIENTSTATE* state,
 
 static void parse_apply_nonclient (struct PARSENONCLIENTSTATE* state)
 {
+    DPI_AWARENESS_CONTEXT old_context;
+
     if (state->metricsDirty)
     {
+        old_context = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_UNAWARE);
         SystemParametersInfoW (SPI_SETNONCLIENTMETRICS, sizeof (state->metrics),
             &state->metrics, 0);
         SystemParametersInfoW (SPI_SETICONTITLELOGFONT, sizeof (state->iconTitleFont),
             &state->iconTitleFont, 0);
+        SetThreadDpiAwarenessContext(old_context);
     }
 }
 
@@ -973,8 +1022,9 @@ static void MSSTYLES_ParseThemeIni(PTHEME_FILE tf, BOOL setMetrics)
  *     pszAppName          Application name, for theme styles specific
  *                         to a particular application
  *     pszClassList        List of requested classes, semicolon delimited
+ *     dpi                 DPI for theme parts
  */
-PTHEME_CLASS MSSTYLES_OpenThemeClass(LPCWSTR pszAppName, LPCWSTR pszClassList)
+PTHEME_CLASS MSSTYLES_OpenThemeClass(LPCWSTR pszAppName, LPCWSTR pszClassList, UINT dpi)
 {
     PTHEME_CLASS cls = NULL;
     WCHAR szClassName[MAX_THEME_CLASS_NAME];
@@ -1006,6 +1056,7 @@ PTHEME_CLASS MSSTYLES_OpenThemeClass(LPCWSTR pszAppName, LPCWSTR pszClassList)
         TRACE("Opened app %s, class %s from list %s\n", debugstr_w(cls->szAppName), debugstr_w(cls->szClassName), debugstr_w(pszClassList));
 	cls->tf = tfActiveTheme;
 	cls->tf->dwRefCount++;
+        cls->dpi = dpi;
     }
     return cls;
 }
@@ -1074,11 +1125,18 @@ static BOOL prepare_alpha (HBITMAP bmp, BOOL* hasAlpha)
     if (!bmp || GetObjectW( bmp, sizeof(dib), &dib ) != sizeof(dib))
         return FALSE;
 
-    if(dib.dsBm.bmBitsPixel != 32)
+    if (dib.dsBm.bmBitsPixel != 32 || dib.dsBmih.biCompression != BI_RGB)
         /* nothing to do */
         return TRUE;
 
-    *hasAlpha = TRUE;
+    /* If all alpha values are 0xff, don't use alpha blending */
+    for (n = 0, p = dib.dsBm.bmBits; n < dib.dsBmih.biWidth * dib.dsBmih.biHeight; n++, p += 4)
+        if ((*hasAlpha = (p[3] != 0xff)))
+            break;
+
+    if (!*hasAlpha)
+        return TRUE;
+
     p = dib.dsBm.bmBits;
     n = dib.dsBmih.biHeight * dib.dsBmih.biWidth;
     /* AlphaBlend() wants premultiplied alpha, so do that now */
@@ -1132,10 +1190,10 @@ HBITMAP MSSTYLES_LoadBitmap (PTHEME_CLASS tc, LPCWSTR lpFilename, BOOL* hasAlpha
     return img->image;
 }
 
-static BOOL MSSTYLES_GetNextInteger(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, int *value)
+static BOOL MSSTYLES_GetNextLong(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, LONG *value)
 {
     LPCWSTR cur = lpStringStart;
-    int total = 0;
+    LONG total = 0;
     BOOL gotNeg = FALSE;
 
     while(cur < lpStringEnd && (*cur < '0' || *cur > '9' || *cur == '-')) cur++;
@@ -1154,6 +1212,11 @@ static BOOL MSSTYLES_GetNextInteger(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, 
     *value = total;
     if(lpValEnd) *lpValEnd = cur;
     return TRUE;
+}
+
+static BOOL MSSTYLES_GetNextInteger(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, int *value)
+{
+    return MSSTYLES_GetNextLong(lpStringStart, lpStringEnd, lpValEnd, (LONG *)value);
 }
 
 static inline BOOL isSpace(WCHAR c)
@@ -1350,10 +1413,10 @@ HRESULT MSSTYLES_GetPropertyRect(PTHEME_PROPERTY tp, RECT *pRect)
     LPCWSTR lpCur = tp->lpValue;
     LPCWSTR lpEnd = tp->lpValue + tp->dwValueLen;
 
-    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->left);
-    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->top);
-    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->right);
-    if(!MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->bottom)) {
+    MSSTYLES_GetNextLong(lpCur, lpEnd, &lpCur, &pRect->left);
+    MSSTYLES_GetNextLong(lpCur, lpEnd, &lpCur, &pRect->top);
+    MSSTYLES_GetNextLong(lpCur, lpEnd, &lpCur, &pRect->right);
+    if(!MSSTYLES_GetNextLong(lpCur, lpEnd, &lpCur, &pRect->bottom)) {
         TRACE("Could not parse rect property\n");
         return E_PROP_ID_UNSUPPORTED;
     }

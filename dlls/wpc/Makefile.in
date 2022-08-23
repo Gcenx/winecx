@@ -1,6 +1,6 @@
 MODULE = wpc.dll
 
-EXTRADLLFLAGS = -mno-cygwin
+EXTRADLLFLAGS = -Wb,--prefer-native
 
 C_SRCS = \
 	wpc.c

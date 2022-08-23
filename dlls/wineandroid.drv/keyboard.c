@@ -660,7 +660,7 @@ static BOOL get_async_key_state( BYTE state[256] )
 
     SERVER_START_REQ( get_key_state )
     {
-        req->tid = 0;
+        req->async = 1;
         req->key = -1;
         wine_server_set_reply( req, state, 256 );
         ret = !wine_server_call( req );
@@ -680,41 +680,7 @@ static void send_keyboard_input( HWND hwnd, WORD vkey, WORD scan, DWORD flags )
     input.u.ki.time        = 0;
     input.u.ki.dwExtraInfo = 0;
 
-    __wine_send_input( hwnd, &input );
-}
-
-static void clear_key_state( int key, int state,
-                             int alt_key, int alt_state )
-{
-    int key_down = state & 0x80;
-    int alt_key_down = alt_state & 0x80;
-
-    if (key_down)
-        send_keyboard_input( 0, key, vkey_to_scancode[key], KEYEVENTF_KEYUP );
-
-    if (alt_key_down)
-        send_keyboard_input( 0, alt_key, vkey_to_scancode[alt_key], KEYEVENTF_KEYUP );
-}
-
-void handle_clear_meta_key_states( int states )
-{
-    BYTE keystate[256];
-
-    TRACE( " states : 0x%0x\n", states );
-
-    if (get_async_key_state( keystate ))
-    {
-        if (states & AMETA_SHIFT_ON)
-        {
-            clear_key_state( VK_LSHIFT, keystate[VK_LSHIFT],
-                             VK_RSHIFT, keystate[VK_RSHIFT] );
-        }
-        if (states & AMETA_ALT_ON)
-        {
-            clear_key_state( VK_LMENU, keystate[VK_LMENU],
-                             VK_RMENU, keystate[VK_RMENU] );
-        }
-    }
+    __wine_send_input( hwnd, &input, NULL );
 }
 
 /***********************************************************************
@@ -776,118 +742,18 @@ jboolean keyboard_event( JNIEnv *env, jobject obj, jint win, jint action, jint k
     data.kbd.input.u.ki.dwFlags     = (data.kbd.input.u.ki.wScan & 0x100) ? KEYEVENTF_EXTENDEDKEY : 0;
     if (action == AKEY_EVENT_ACTION_UP) data.kbd.input.u.ki.dwFlags |= KEYEVENTF_KEYUP;
 
+    p__android_log_print( ANDROID_LOG_INFO, "wine",
+                          "keyboard_event: win %x code %u vkey %x scan %x meta %x",
+                          win, keycode, data.kbd.input.u.ki.wVk, data.kbd.input.u.ki.wScan, state );
     send_event( &data );
     return JNI_TRUE;
-}
-
-jboolean clear_meta_key_states( JNIEnv *env, jobject obj, jint states )
-{
-    union event_data data;
-    data.type = CLEAR_META;
-    data.clearmeta.states = states;
-    send_event( &data );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *           ANDROID_ToUnicodeEx
- */
-INT CDECL ANDROID_ToUnicodeEx( UINT virt, UINT scan, const BYTE *state,
-                               LPWSTR buf, int size, UINT flags, HKL hkl )
-{
-    WCHAR buffer[2];
-    BOOL shift = state[VK_SHIFT] & 0x80;
-    BOOL ctrl = state[VK_CONTROL] & 0x80;
-    BOOL numlock = state[VK_NUMLOCK] & 0x01;
-
-    buffer[0] = buffer[1] = 0;
-
-    if (scan & 0x8000) return 0;  /* key up */
-
-    /* FIXME: hardcoded layout */
-
-    if (!ctrl)
-    {
-        switch (virt)
-        {
-        case VK_BACK:       buffer[0] = '\b'; break;
-        case VK_OEM_1:      buffer[0] = shift ? ':' : ';'; break;
-        case VK_OEM_2:      buffer[0] = shift ? '?' : '/'; break;
-        case VK_OEM_3:      buffer[0] = shift ? '~' : '`'; break;
-        case VK_OEM_4:      buffer[0] = shift ? '{' : '['; break;
-        case VK_OEM_5:      buffer[0] = shift ? '|' : '\\'; break;
-        case VK_OEM_6:      buffer[0] = shift ? '}' : ']'; break;
-        case VK_OEM_7:      buffer[0] = shift ? '"' : '\''; break;
-        case VK_OEM_COMMA:  buffer[0] = shift ? '<' : ','; break;
-        case VK_OEM_MINUS:  buffer[0] = shift ? '_' : '-'; break;
-        case VK_OEM_PERIOD: buffer[0] = shift ? '>' : '.'; break;
-        case VK_OEM_PLUS:   buffer[0] = shift ? '+' : '='; break;
-        case VK_RETURN:     buffer[0] = '\r'; break;
-        case VK_SPACE:      buffer[0] = ' '; break;
-        case VK_TAB:        buffer[0] = '\t'; break;
-        case VK_MULTIPLY:   buffer[0] = '*'; break;
-        case VK_ADD:        buffer[0] = '+'; break;
-        case VK_SUBTRACT:   buffer[0] = '-'; break;
-        case VK_DIVIDE:     buffer[0] = '/'; break;
-        default:
-            if (virt >= '0' && virt <= '9')
-            {
-                buffer[0] = shift ? ")!@#$%^&*("[virt - '0'] : virt;
-                break;
-            }
-            if (virt >= 'A' && virt <= 'Z')
-            {
-                buffer[0] =  shift || (state[VK_CAPITAL] & 0x01) ? virt : virt + 'a' - 'A';
-                break;
-            }
-            if (virt >= VK_NUMPAD0 && virt <= VK_NUMPAD9 && numlock && !shift)
-            {
-                buffer[0] = '0' + virt - VK_NUMPAD0;
-                break;
-            }
-            if (virt == VK_DECIMAL && numlock && !shift)
-            {
-                buffer[0] = '.';
-                break;
-            }
-            break;
-        }
-    }
-    else /* Control codes */
-    {
-        if (virt >= 'A' && virt <= 'Z')
-            buffer[0] = virt - 'A' + 1;
-        else
-        {
-            switch (virt)
-            {
-            case VK_OEM_4:
-                buffer[0] = 0x1b;
-                break;
-            case VK_OEM_5:
-                buffer[0] = 0x1c;
-                break;
-            case VK_OEM_6:
-                buffer[0] = 0x1d;
-                break;
-            case VK_SUBTRACT:
-                buffer[0] = 0x1e;
-                break;
-            }
-        }
-    }
-
-    lstrcpynW( buf, buffer, size );
-    TRACE( "returning %d / %s\n", strlenW( buffer ), debugstr_wn(buf, strlenW( buffer )));
-    return strlenW( buffer );
 }
 
 
 /***********************************************************************
  *           ANDROID_GetKeyNameText
  */
-INT CDECL ANDROID_GetKeyNameText( LONG lparam, LPWSTR buffer, INT size )
+INT ANDROID_GetKeyNameText( LONG lparam, LPWSTR buffer, INT size )
 {
     int scancode, vkey, len;
     const char *name;
@@ -947,7 +813,7 @@ INT CDECL ANDROID_GetKeyNameText( LONG lparam, LPWSTR buffer, INT size )
 /***********************************************************************
  *           ANDROID_MapVirtualKeyEx
  */
-UINT CDECL ANDROID_MapVirtualKeyEx( UINT code, UINT maptype, HKL hkl )
+UINT ANDROID_MapVirtualKeyEx( UINT code, UINT maptype, HKL hkl )
 {
     UINT ret = 0;
     const char *s;
@@ -1013,29 +879,9 @@ UINT CDECL ANDROID_MapVirtualKeyEx( UINT code, UINT maptype, HKL hkl )
 
 
 /***********************************************************************
- *           ANDROID_GetKeyboardLayout
- */
-HKL CDECL ANDROID_GetKeyboardLayout( DWORD thread_id )
-{
-    ULONG_PTR layout = GetUserDefaultLCID();
-    LANGID langid;
-    static int once;
-
-    langid = PRIMARYLANGID(LANGIDFROMLCID( layout ));
-    if (langid == LANG_CHINESE || langid == LANG_JAPANESE || langid == LANG_KOREAN)
-        layout = MAKELONG( layout, 0xe001 ); /* IME */
-    else
-        layout |= layout << 16;
-
-    if (!once++) FIXME( "returning %lx\n", layout );
-    return (HKL)layout;
-}
-
-
-/***********************************************************************
  *           ANDROID_VkKeyScanEx
  */
-SHORT CDECL ANDROID_VkKeyScanEx( WCHAR ch, HKL hkl )
+SHORT ANDROID_VkKeyScanEx( WCHAR ch, HKL hkl )
 {
     SHORT ret = -1;
     if (ch < ARRAY_SIZE( char_vkey_map )) ret = char_vkey_map[ch];

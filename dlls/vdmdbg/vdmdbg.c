@@ -30,7 +30,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(vdmdbg);
  */
 INT WINAPI VDMEnumTaskWOW(DWORD dwProcessId, TASKENUMPROC fp, LPARAM lparam)
 {
-    FIXME("(%d, %p): stub!\n", dwProcessId, fp);
+    FIXME("(%ld, %p): stub!\n", dwProcessId, fp);
     return 0;
 }
 
@@ -41,20 +41,4 @@ INT WINAPI VDMEnumProcessWOW(PROCESSENUMPROC fp, LPARAM lparam)
 {
     FIXME("%p: stub!\n", fp);
     return 0;
-}
-
-/***********************************************************************
- *		DllMain  (VDMDBG.@)
- */
-BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
-{
-    switch(reason)
-    {
-    case DLL_WINE_PREATTACH:
-        return FALSE;  /* prefer native version */
-    case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls( inst );
-        break;
-    }
-    return TRUE;
 }

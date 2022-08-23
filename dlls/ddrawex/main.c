@@ -34,8 +34,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ddrawex);
 
-static HINSTANCE instance;
-
 struct ddrawex_class_factory
 {
     IClassFactory IClassFactory_iface;
@@ -71,7 +69,7 @@ static ULONG WINAPI ddrawex_class_factory_AddRef(IClassFactory *iface)
     struct ddrawex_class_factory *factory = impl_from_IClassFactory(iface);
     ULONG refcount = InterlockedIncrement(&factory->ref);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -81,7 +79,7 @@ static ULONG WINAPI ddrawex_class_factory_Release(IClassFactory *iface)
     struct ddrawex_class_factory *factory = impl_from_IClassFactory(iface);
     ULONG refcount = InterlockedDecrement(&factory->ref);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
         heap_free(factory);
@@ -150,7 +148,7 @@ static ULONG WINAPI ddrawex_factory_AddRef(IDirectDrawFactory *iface)
     struct ddrawex_factory *factory = impl_from_IDirectDrawFactory(iface);
     ULONG refcount = InterlockedIncrement(&factory->ref);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -160,7 +158,7 @@ static ULONG WINAPI ddrawex_factory_Release(IDirectDrawFactory *iface)
     struct ddrawex_factory *factory = impl_from_IDirectDrawFactory(iface);
     ULONG refcount = InterlockedDecrement(&factory->ref);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
         heap_free(factory);
@@ -207,15 +205,6 @@ static HRESULT ddrawex_factory_create(IUnknown *outer_unknown, REFIID riid, void
 }
 
 /*******************************************************************************
- * DllCanUnloadNow [DDRAWEX.@]  Determines whether the DLL is in use.
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
-}
-
-
-/*******************************************************************************
  * DllGetClassObject [DDRAWEX.@]
  */
 HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **out)
@@ -245,36 +234,4 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **out)
     *out = factory;
 
     return S_OK;
-}
-
-
-/***********************************************************************
- * DllMain
- */
-BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
-{
-    switch (reason)
-    {
-    case DLL_PROCESS_ATTACH:
-        instance = inst;
-        DisableThreadLibraryCalls( inst );
-        break;
-    }
-    return TRUE;
-}
-
-/***********************************************************************
- *		DllRegisterServer (DDRAWEX.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( instance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (DDRAWEX.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( instance );
 }

@@ -425,21 +425,16 @@ extern BOOL CDECL PSDRV_Arc( PHYSDEV dev, INT left, INT top, INT right, INT bott
                              INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
 extern BOOL CDECL PSDRV_Chord( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
                                INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
-extern DWORD CDECL PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszPort,
-                                            WORD fwCapability, LPSTR lpszOutput, LPDEVMODEA lpDevMode) DECLSPEC_HIDDEN;
 extern BOOL CDECL PSDRV_Ellipse( PHYSDEV dev, INT left, INT top, INT right, INT bottom) DECLSPEC_HIDDEN;
 extern INT CDECL PSDRV_EndDoc( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern INT CDECL PSDRV_EndPage( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern BOOL CDECL PSDRV_EnumFonts( PHYSDEV dev, LPLOGFONTW plf, FONTENUMPROCW proc, LPARAM lp ) DECLSPEC_HIDDEN;
-extern INT CDECL PSDRV_ExtDeviceMode(LPSTR lpszDriver, HWND hwnd, LPDEVMODEA lpdmOutput,
-                                     LPSTR lpszDevice, LPSTR lpszPort, LPDEVMODEA lpdmInput,
-                                     LPSTR lpszProfile, DWORD dwMode) DECLSPEC_HIDDEN;
 extern INT CDECL PSDRV_ExtEscape( PHYSDEV dev, INT nEscape, INT cbInput, LPCVOID in_data,
                             INT cbOutput, LPVOID out_data ) DECLSPEC_HIDDEN;
 extern BOOL CDECL PSDRV_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags,
                                     const RECT *lprect, LPCWSTR str, UINT count, const INT *lpDx ) DECLSPEC_HIDDEN;
 extern BOOL CDECL PSDRV_FillPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
-extern BOOL CDECL PSDRV_GetCharWidth(PHYSDEV dev, UINT firstChar, UINT lastChar, LPINT buffer) DECLSPEC_HIDDEN;
+extern BOOL CDECL PSDRV_GetCharWidth(PHYSDEV dev, UINT first, UINT count, const WCHAR *chars, INT *buffer) DECLSPEC_HIDDEN;
 extern BOOL CDECL PSDRV_GetTextExtentExPoint(PHYSDEV dev, LPCWSTR str, INT count, LPINT alpDx) DECLSPEC_HIDDEN;
 extern BOOL CDECL PSDRV_GetTextMetrics(PHYSDEV dev, TEXTMETRICW *metrics) DECLSPEC_HIDDEN;
 extern BOOL CDECL PSDRV_LineTo(PHYSDEV dev, INT x, INT y) DECLSPEC_HIDDEN;

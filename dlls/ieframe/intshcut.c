@@ -224,9 +224,9 @@ static HRESULT WINAPI UniformResourceLocatorW_SetUrl(IUniformResourceLocatorW *u
 {
     WCHAR *newURL = NULL;
     InternetShortcut *This = impl_from_IUniformResourceLocatorW(url);
-    TRACE("(%p, %s, 0x%x)\n", url, debugstr_w(pcszURL), dwInFlags);
+    TRACE("(%p, %s, 0x%lx)\n", url, debugstr_w(pcszURL), dwInFlags);
     if (dwInFlags != 0)
-        FIXME("ignoring unsupported flags 0x%x\n", dwInFlags);
+        FIXME("ignoring unsupported flags 0x%lx\n", dwInFlags);
     if (pcszURL != NULL)
     {
         newURL = co_strdupW(pcszURL);
@@ -327,9 +327,9 @@ static HRESULT WINAPI UniformResourceLocatorA_SetUrl(IUniformResourceLocatorA *u
 {
     WCHAR *newURL = NULL;
     InternetShortcut *This = impl_from_IUniformResourceLocatorA(url);
-    TRACE("(%p, %s, 0x%x)\n", url, debugstr_a(pcszURL), dwInFlags);
+    TRACE("(%p, %s, 0x%lx)\n", url, debugstr_a(pcszURL), dwInFlags);
     if (dwInFlags != 0)
-        FIXME("ignoring unsupported flags 0x%x\n", dwInFlags);
+        FIXME("ignoring unsupported flags 0x%lx\n", dwInFlags);
     if (pcszURL != NULL)
     {
         newURL = co_strdupAtoW(pcszURL);
@@ -468,10 +468,10 @@ static HRESULT WINAPI PersistFile_Load(IPersistFile *pFile, LPCOLESTR pszFileNam
     WCHAR *iconfile;
     WCHAR *iconindexstring;
 
-    TRACE("(%p, %s, 0x%x)\n", pFile, debugstr_w(pszFileName), dwMode);
+    TRACE("(%p, %s, 0x%lx)\n", pFile, debugstr_w(pszFileName), dwMode);
 
     if (dwMode != 0)
-        FIXME("ignoring unimplemented mode 0x%x\n", dwMode);
+        FIXME("ignoring unimplemented mode 0x%lx\n", dwMode);
 
     filename = co_strdupW(pszFileName);
     if (!filename)
@@ -509,10 +509,10 @@ static HRESULT WINAPI PersistFile_Load(IPersistFile *pFile, LPCOLESTR pszFileNam
         ps.ulKind = PRSPEC_PROPID;
         ps.u.propid = PID_IS_ICONFILE;
         pv.vt = VT_LPWSTR;
-        pv.u.pwszVal = iconfile;
+        pv.pwszVal = iconfile;
         hr = IPropertyStorage_WriteMultiple(pPropStg, 1, &ps, &pv, 0);
         if (FAILED(hr))
-            TRACE("Failed to store the iconfile to our property storage.  hr = 0x%x\n", hr);
+            TRACE("Failed to store the iconfile to our property storage.  hr = 0x%lx\n", hr);
     }
     CoTaskMemFree(iconfile);
 
@@ -525,10 +525,10 @@ static HRESULT WINAPI PersistFile_Load(IPersistFile *pFile, LPCOLESTR pszFileNam
         ps.ulKind = PRSPEC_PROPID;
         ps.u.propid = PID_IS_ICONINDEX;
         pv.vt = VT_I4;
-        pv.u.iVal = iconindex;
+        pv.iVal = iconindex;
         hr = IPropertyStorage_WriteMultiple(pPropStg, 1, &ps, &pv, 0);
         if (FAILED(hr))
-           TRACE("Failed to store the iconindex to our property storage.  hr = 0x%x\n", hr);
+           TRACE("Failed to store the iconindex to our property storage.  hr = 0x%lx\n", hr);
     }
     CoTaskMemFree(iconindexstring);
 
@@ -606,18 +606,18 @@ static HRESULT WINAPI PersistFile_Save(IPersistFile *pFile, LPCOLESTR pszFileNam
                 else if (SUCCEEDED(hr))
                 {
                     char indexString[50];
-                    len = WideCharToMultiByte(CP_UTF8, 0, pvread[0].u.pwszVal, -1, NULL, 0, 0, 0);
+                    len = WideCharToMultiByte(CP_UTF8, 0, pvread[0].pwszVal, -1, NULL, 0, 0, 0);
                     iconfile = heap_alloc(len);
                     if (iconfile != NULL)
                     {
-                        WideCharToMultiByte(CP_UTF8, 0, pvread[0].u.pwszVal, -1, iconfile, len, 0, 0);
+                        WideCharToMultiByte(CP_UTF8, 0, pvread[0].pwszVal, -1, iconfile, len, 0, 0);
                         WriteFile(file, str_ICONFILE, lstrlenA(str_ICONFILE), &bytesWritten, NULL);
                         WriteFile(file, iconfile, lstrlenA(iconfile), &bytesWritten, NULL);
                         WriteFile(file, str_eol, lstrlenA(str_eol), &bytesWritten, NULL);
                         heap_free(iconfile);
                     }
 
-                    sprintf(indexString, "ICONINDEX=%d", pvread[1].u.iVal);
+                    sprintf(indexString, "ICONINDEX=%d", pvread[1].iVal);
                     WriteFile(file, indexString, lstrlenA(indexString), &bytesWritten, NULL);
                     WriteFile(file, str_eol, lstrlenA(str_eol), &bytesWritten, NULL);
 
@@ -702,7 +702,7 @@ static HRESULT WINAPI PropertySetStorage_Create(
         IPropertyStorage **ppprstg)
 {
     InternetShortcut *This = impl_from_IPropertySetStorage(iface);
-    TRACE("(%s, %p, 0x%x, 0x%x, %p)\n", debugstr_guid(rfmtid), pclsid, grfFlags, grfMode, ppprstg);
+    TRACE("(%s, %p, 0x%lx, 0x%lx, %p)\n", debugstr_guid(rfmtid), pclsid, grfFlags, grfMode, ppprstg);
 
     return IPropertySetStorage_Create(This->property_set_storage,
                                       rfmtid,
@@ -719,7 +719,7 @@ static HRESULT WINAPI PropertySetStorage_Open(
         IPropertyStorage **ppprstg)
 {
     InternetShortcut *This = impl_from_IPropertySetStorage(iface);
-    TRACE("(%s, 0x%x, %p)\n", debugstr_guid(rfmtid), grfMode, ppprstg);
+    TRACE("(%s, 0x%lx, %p)\n", debugstr_guid(rfmtid), grfMode, ppprstg);
 
     /* Note:  The |STGM_SHARE_EXCLUSIVE is to cope with a bug in the implementation.  Should be fixed in ole32. */
     return IPropertySetStorage_Open(This->property_set_storage,

@@ -7,7 +7,7 @@
 #define _WSTRING_DEFINED
 
 #include <corecrt.h>
-#include <wine/asm.h>
+#include "wine/asm.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,6 +51,7 @@ _ACRTIMP wchar_t* __cdecl _wcsrev(wchar_t*);
 _ACRTIMP wchar_t* __cdecl _wcsset(wchar_t*,wchar_t);
 _ACRTIMP wchar_t* __cdecl _wcsupr(wchar_t*);
 _ACRTIMP errno_t  __cdecl _wcsupr_s(wchar_t*, size_t);
+_ACRTIMP size_t   __cdecl _wcsxfrm_l(wchar_t*,const wchar_t*,size_t,_locale_t);
 
 _ACRTIMP wchar_t* __cdecl wcscat(wchar_t*,const wchar_t*);
 _ACRTIMP errno_t  __cdecl wcscat_s(wchar_t*,size_t,const wchar_t*);

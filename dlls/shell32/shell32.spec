@@ -332,6 +332,7 @@
 @ stdcall SHAddToRecentDocs (long ptr)
 @ stdcall SHAppBarMessage(long ptr)
 @ stdcall SHAssocEnumHandlers(wstr long ptr)
+@ stdcall SHBindToObject(ptr ptr ptr ptr ptr)
 @ stdcall SHBindToParent(ptr ptr ptr ptr)
 @ stdcall SHBrowseForFolder(ptr) SHBrowseForFolderA
 @ stdcall SHBrowseForFolderA(ptr)
@@ -486,4 +487,4 @@
 @ stdcall -private StrStrW(wstr wstr) shlwapi.StrStrW
 @ stdcall WOWShellExecute(long str str str str long ptr)
 
-@ stdcall wine_update_symbolic_links()
+@ stdcall wine_update_symbolic_links(long long wstr long)

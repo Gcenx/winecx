@@ -335,12 +335,8 @@ static BOOL process_attach(void)
         return FALSE;
     }
 
+    init_user_driver();
     macdrv_init_display_devices(FALSE);
-
-    /* CrossOver Hack 10188: Actually, this disables that hack.  Don't pass
-                             system tray icons to our launcher since the Mac
-                             driver handles them itself. */
-    unsetenv("CX_SYSTRAY_SOCKET");
 
     return TRUE;
 }
@@ -349,7 +345,7 @@ static BOOL process_attach(void)
 /***********************************************************************
  *              ThreadDetach   (MACDRV.@)
  */
-void CDECL macdrv_ThreadDetach(void)
+void macdrv_ThreadDetach(void)
 {
     struct macdrv_thread_data *data = macdrv_thread_data();
 
@@ -425,6 +421,7 @@ struct macdrv_thread_data *macdrv_init_thread_data(void)
     set_queue_display_fd(macdrv_get_event_queue_fd(data->queue));
     TlsSetValue(thread_data_tls_index, data);
 
+    ActivateKeyboardLayout(data->active_keyboard_layout, 0);
     return data;
 }
 
@@ -450,7 +447,7 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
 /***********************************************************************
  *              SystemParametersInfo (MACDRV.@)
  */
-BOOL CDECL macdrv_SystemParametersInfo( UINT action, UINT int_param, void *ptr_param, UINT flags )
+BOOL macdrv_SystemParametersInfo( UINT action, UINT int_param, void *ptr_param, UINT flags )
 {
     switch (action)
     {

@@ -242,7 +242,7 @@ static ULONG STDMETHODCALLTYPE d2d_device_context_inner_AddRef(IUnknown *iface)
     struct d2d_device_context *context = impl_from_IUnknown(iface);
     ULONG refcount = InterlockedIncrement(&context->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -252,7 +252,7 @@ static ULONG STDMETHODCALLTYPE d2d_device_context_inner_Release(IUnknown *iface)
     struct d2d_device_context *context = impl_from_IUnknown(iface);
     ULONG refcount = InterlockedDecrement(&context->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -519,7 +519,7 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateCompatibleRenderTarget
     if (FAILED(hr = d2d_bitmap_render_target_init(object, render_target, size, pixel_size,
             format, options)))
     {
-        WARN("Failed to initialize render target, hr %#x.\n", hr);
+        WARN("Failed to initialise render target, hr %#lx.\n", hr);
         heap_free(object);
         return hr;
     }
@@ -572,13 +572,13 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawLine(ID2D1DeviceContext *if
 
     if (FAILED(hr = ID2D1Factory_CreatePathGeometry(render_target->factory, &geometry)))
     {
-        WARN("Failed to create path geometry, %#x.\n", hr);
+        WARN("Failed to create path geometry, hr %#lx.\n", hr);
         return;
     }
 
     if (FAILED(hr = ID2D1PathGeometry_Open(geometry, &sink)))
     {
-        WARN("Open() failed, %#x.\n", hr);
+        WARN("Failed to open geometry sink, hr %#lx.\n", hr);
         ID2D1PathGeometry_Release(geometry);
         return;
     }
@@ -587,7 +587,7 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawLine(ID2D1DeviceContext *if
     ID2D1GeometrySink_AddLine(sink, p1);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
     if (FAILED(hr = ID2D1GeometrySink_Close(sink)))
-        WARN("Close() failed, %#x.\n", hr);
+        WARN("Failed to close geometry sink, hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     ID2D1DeviceContext_DrawGeometry(iface, (ID2D1Geometry *)geometry, brush, stroke_width, stroke_style);
@@ -606,7 +606,7 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawRectangle(ID2D1DeviceContex
 
     if (FAILED(hr = ID2D1Factory_CreateRectangleGeometry(render_target->factory, rect, &geometry)))
     {
-        ERR("Failed to create geometry, hr %#x.\n", hr);
+        ERR("Failed to create geometry, hr %#lx.\n", hr);
         return;
     }
 
@@ -625,7 +625,7 @@ static void STDMETHODCALLTYPE d2d_device_context_FillRectangle(ID2D1DeviceContex
 
     if (FAILED(hr = ID2D1Factory_CreateRectangleGeometry(render_target->factory, rect, &geometry)))
     {
-        ERR("Failed to create geometry, hr %#x.\n", hr);
+        ERR("Failed to create geometry, hr %#lx.\n", hr);
         return;
     }
 
@@ -645,7 +645,7 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawRoundedRectangle(ID2D1Devic
 
     if (FAILED(hr = ID2D1Factory_CreateRoundedRectangleGeometry(render_target->factory, rect, &geometry)))
     {
-        ERR("Failed to create geometry, hr %#x.\n", hr);
+        ERR("Failed to create geometry, hr %#lx.\n", hr);
         return;
     }
 
@@ -664,7 +664,7 @@ static void STDMETHODCALLTYPE d2d_device_context_FillRoundedRectangle(ID2D1Devic
 
     if (FAILED(hr = ID2D1Factory_CreateRoundedRectangleGeometry(render_target->factory, rect, &geometry)))
     {
-        ERR("Failed to create geometry, hr %#x.\n", hr);
+        ERR("Failed to create geometry, hr %#lx.\n", hr);
         return;
     }
 
@@ -684,7 +684,7 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawEllipse(ID2D1DeviceContext 
 
     if (FAILED(hr = ID2D1Factory_CreateEllipseGeometry(render_target->factory, ellipse, &geometry)))
     {
-        ERR("Failed to create geometry, hr %#x.\n", hr);
+        ERR("Failed to create geometry, hr %#lx.\n", hr);
         return;
     }
 
@@ -703,7 +703,7 @@ static void STDMETHODCALLTYPE d2d_device_context_FillEllipse(ID2D1DeviceContext 
 
     if (FAILED(hr = ID2D1Factory_CreateEllipseGeometry(render_target->factory, ellipse, &geometry)))
     {
-        ERR("Failed to create geometry, hr %#x.\n", hr);
+        ERR("Failed to create geometry, hr %#lx.\n", hr);
         return;
     }
 
@@ -724,7 +724,7 @@ static HRESULT d2d_device_context_update_ps_cb(struct d2d_device_context *contex
     if (FAILED(hr = ID3D11DeviceContext_Map(d3d_context, (ID3D11Resource *)context->ps_cb,
             0, D3D11_MAP_WRITE_DISCARD, 0, &map_desc)))
     {
-        WARN("Failed to map constant buffer, hr %#x.\n", hr);
+        WARN("Failed to map constant buffer, hr %#lx.\n", hr);
         ID3D11DeviceContext_Release(d3d_context);
         return hr;
     }
@@ -760,7 +760,7 @@ static HRESULT d2d_device_context_update_vs_cb(struct d2d_device_context *contex
     if (FAILED(hr = ID3D11DeviceContext_Map(d3d_context, (ID3D11Resource *)context->vs_cb,
             0, D3D11_MAP_WRITE_DISCARD, 0, &map_desc)))
     {
-        WARN("Failed to map constant buffer, hr %#x.\n", hr);
+        WARN("Failed to map constant buffer, hr %#lx.\n", hr);
         ID3D11DeviceContext_Release(d3d_context);
         return hr;
     }
@@ -805,13 +805,13 @@ static void d2d_device_context_draw_geometry(struct d2d_device_context *render_t
 
     if (FAILED(hr = d2d_device_context_update_vs_cb(render_target, &geometry->transform, stroke_width)))
     {
-        WARN("Failed to update vs constant buffer, hr %#x.\n", hr);
+        WARN("Failed to update vs constant buffer, hr %#lx.\n", hr);
         return;
     }
 
     if (FAILED(hr = d2d_device_context_update_ps_cb(render_target, brush, NULL, TRUE, FALSE)))
     {
-        WARN("Failed to update ps constant buffer, hr %#x.\n", hr);
+        WARN("Failed to update ps constant buffer, hr %#lx.\n", hr);
         return;
     }
 
@@ -830,7 +830,7 @@ static void d2d_device_context_draw_geometry(struct d2d_device_context *render_t
 
         if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &ib)))
         {
-            WARN("Failed to create index buffer, hr %#x.\n", hr);
+            WARN("Failed to create index buffer, hr %#lx.\n", hr);
             return;
         }
 
@@ -840,7 +840,7 @@ static void d2d_device_context_draw_geometry(struct d2d_device_context *render_t
 
         if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
         {
-            ERR("Failed to create vertex buffer, hr %#x.\n", hr);
+            ERR("Failed to create vertex buffer, hr %#lx.\n", hr);
             ID3D11Buffer_Release(ib);
             return;
         }
@@ -860,7 +860,7 @@ static void d2d_device_context_draw_geometry(struct d2d_device_context *render_t
 
         if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &ib)))
         {
-            WARN("Failed to create beziers index buffer, hr %#x.\n", hr);
+            WARN("Failed to create curves index buffer, hr %#lx.\n", hr);
             return;
         }
 
@@ -870,7 +870,7 @@ static void d2d_device_context_draw_geometry(struct d2d_device_context *render_t
 
         if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
         {
-            ERR("Failed to create beziers vertex buffer, hr %#x.\n", hr);
+            ERR("Failed to create curves vertex buffer, hr %#lx.\n", hr);
             ID3D11Buffer_Release(ib);
             return;
         }
@@ -891,7 +891,7 @@ static void d2d_device_context_draw_geometry(struct d2d_device_context *render_t
 
         if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &ib)))
         {
-            WARN("Failed to create arcs index buffer, hr %#x.\n", hr);
+            WARN("Failed to create arcs index buffer, hr %#lx.\n", hr);
             return;
         }
 
@@ -901,7 +901,7 @@ static void d2d_device_context_draw_geometry(struct d2d_device_context *render_t
 
         if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
         {
-            ERR("Failed to create arcs vertex buffer, hr %#x.\n", hr);
+            ERR("Failed to create arcs vertex buffer, hr %#lx.\n", hr);
             ID3D11Buffer_Release(ib);
             return;
         }
@@ -949,13 +949,13 @@ static void d2d_device_context_fill_geometry(struct d2d_device_context *render_t
 
     if (FAILED(hr = d2d_device_context_update_vs_cb(render_target, &geometry->transform, 0.0f)))
     {
-        WARN("Failed to update vs constant buffer, hr %#x.\n", hr);
+        WARN("Failed to update vs constant buffer, hr %#lx.\n", hr);
         return;
     }
 
     if (FAILED(hr = d2d_device_context_update_ps_cb(render_target, brush, opacity_brush, FALSE, FALSE)))
     {
-        WARN("Failed to update ps constant buffer, hr %#x.\n", hr);
+        WARN("Failed to update ps constant buffer, hr %#lx.\n", hr);
         return;
     }
 
@@ -967,7 +967,7 @@ static void d2d_device_context_fill_geometry(struct d2d_device_context *render_t
 
         if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &ib)))
         {
-            WARN("Failed to create index buffer, hr %#x.\n", hr);
+            WARN("Failed to create index buffer, hr %#lx.\n", hr);
             return;
         }
 
@@ -977,7 +977,7 @@ static void d2d_device_context_fill_geometry(struct d2d_device_context *render_t
 
         if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
         {
-            ERR("Failed to create vertex buffer, hr %#x.\n", hr);
+            ERR("Failed to create vertex buffer, hr %#lx.\n", hr);
             ID3D11Buffer_Release(ib);
             return;
         }
@@ -997,7 +997,7 @@ static void d2d_device_context_fill_geometry(struct d2d_device_context *render_t
 
         if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
         {
-            ERR("Failed to create beziers vertex buffer, hr %#x.\n", hr);
+            ERR("Failed to create curves vertex buffer, hr %#lx.\n", hr);
             return;
         }
 
@@ -1015,7 +1015,7 @@ static void d2d_device_context_fill_geometry(struct d2d_device_context *render_t
 
         if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
         {
-            ERR("Failed to create arc vertex buffer, hr %#x.\n", hr);
+            ERR("Failed to create arc vertex buffer, hr %#lx.\n", hr);
             return;
         }
 
@@ -1123,7 +1123,7 @@ static void d2d_device_context_draw_bitmap(struct d2d_device_context *context, I
 
     if (FAILED(hr = d2d_bitmap_brush_create(context->factory, bitmap, &bitmap_brush_desc, &brush_desc, &brush)))
     {
-        ERR("Failed to create bitmap brush, hr %#x.\n", hr);
+        ERR("Failed to create bitmap brush, hr %#lx.\n", hr);
         return;
     }
 
@@ -1170,7 +1170,7 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawText(ID2D1DeviceContext *if
     if (FAILED(hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
             &IID_IDWriteFactory, (IUnknown **)&dwrite_factory)))
     {
-        ERR("Failed to create dwrite factory, hr %#x.\n", hr);
+        ERR("Failed to create dwrite factory, hr %#lx.\n", hr);
         return;
     }
 
@@ -1186,7 +1186,7 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawText(ID2D1DeviceContext *if
     IDWriteFactory_Release(dwrite_factory);
     if (FAILED(hr))
     {
-        ERR("Failed to create text layout, hr %#x.\n", hr);
+        ERR("Failed to create text layout, hr %#lx.\n", hr);
         return;
     }
 
@@ -1210,7 +1210,7 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawTextLayout(ID2D1DeviceConte
 
     if (FAILED(hr = IDWriteTextLayout_Draw(layout,
             &ctx, &render_target->IDWriteTextRenderer_iface, origin.x, origin.y)))
-        FIXME("Failed to draw text layout, hr %#x.\n", hr);
+        FIXME("Failed to draw text layout, hr %#lx.\n", hr);
 }
 
 static D2D1_ANTIALIAS_MODE d2d_device_context_set_aa_mode_from_text_aa_mode(struct d2d_device_context *rt)
@@ -1232,13 +1232,13 @@ static void d2d_device_context_draw_glyph_run_outline(struct d2d_device_context 
 
     if (FAILED(hr = ID2D1Factory_CreatePathGeometry(render_target->factory, &geometry)))
     {
-        ERR("Failed to create geometry, hr %#x.\n", hr);
+        ERR("Failed to create geometry, hr %#lx.\n", hr);
         return;
     }
 
     if (FAILED(hr = ID2D1PathGeometry_Open(geometry, &sink)))
     {
-        ERR("Failed to open geometry sink, hr %#x.\n", hr);
+        ERR("Failed to open geometry sink, hr %#lx.\n", hr);
         ID2D1PathGeometry_Release(geometry);
         return;
     }
@@ -1247,14 +1247,14 @@ static void d2d_device_context_draw_glyph_run_outline(struct d2d_device_context 
             glyph_run->glyphIndices, glyph_run->glyphAdvances, glyph_run->glyphOffsets, glyph_run->glyphCount,
             glyph_run->isSideways, glyph_run->bidiLevel & 1, (IDWriteGeometrySink *)sink)))
     {
-        ERR("Failed to get glyph run outline, hr %#x.\n", hr);
+        ERR("Failed to get glyph run outline, hr %#lx.\n", hr);
         ID2D1GeometrySink_Release(sink);
         ID2D1PathGeometry_Release(geometry);
         return;
     }
 
     if (FAILED(hr = ID2D1GeometrySink_Close(sink)))
-        ERR("Failed to close geometry sink, hr %#x.\n", hr);
+        ERR("Failed to close geometry sink, hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     transform = &render_target->drawing_state.transform;
@@ -1295,7 +1295,7 @@ static void d2d_device_context_draw_glyph_run_bitmap(struct d2d_device_context *
     if (FAILED(hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
             &IID_IDWriteFactory2, (IUnknown **)&dwrite_factory)))
     {
-        ERR("Failed to create dwrite factory, hr %#x.\n", hr);
+        ERR("Failed to create dwrite factory, hr %#lx.\n", hr);
         return;
     }
 
@@ -1317,7 +1317,7 @@ static void d2d_device_context_draw_glyph_run_bitmap(struct d2d_device_context *
     IDWriteFactory2_Release(dwrite_factory);
     if (FAILED(hr))
     {
-        ERR("Failed to create glyph run analysis, hr %#x.\n", hr);
+        ERR("Failed to create glyph run analysis, hr %#lx.\n", hr);
         return;
     }
 
@@ -1328,7 +1328,7 @@ static void d2d_device_context_draw_glyph_run_bitmap(struct d2d_device_context *
 
     if (FAILED(hr = IDWriteGlyphRunAnalysis_GetAlphaTextureBounds(analysis, texture_type, &bounds)))
     {
-        ERR("Failed to get alpha texture bounds, hr %#x.\n", hr);
+        ERR("Failed to get alpha texture bounds, hr %#lx.\n", hr);
         goto done;
     }
 
@@ -1351,7 +1351,7 @@ static void d2d_device_context_draw_glyph_run_bitmap(struct d2d_device_context *
     if (FAILED(hr = IDWriteGlyphRunAnalysis_CreateAlphaTexture(analysis,
             texture_type, &bounds, opacity_values, opacity_values_size)))
     {
-        ERR("Failed to create alpha texture, hr %#x.\n", hr);
+        ERR("Failed to create alpha texture, hr %#lx.\n", hr);
         goto done;
     }
 
@@ -1364,7 +1364,7 @@ static void d2d_device_context_draw_glyph_run_bitmap(struct d2d_device_context *
     if (FAILED(hr = d2d_device_context_CreateBitmap(&render_target->ID2D1DeviceContext_iface,
             bitmap_size, opacity_values, bitmap_size.width, &bitmap_desc, &opacity_bitmap)))
     {
-        ERR("Failed to create opacity bitmap, hr %#x.\n", hr);
+        ERR("Failed to create opacity bitmap, hr %#lx.\n", hr);
         goto done;
     }
 
@@ -1381,13 +1381,13 @@ static void d2d_device_context_draw_glyph_run_bitmap(struct d2d_device_context *
     if (FAILED(hr = d2d_device_context_CreateBitmapBrush(&render_target->ID2D1DeviceContext_iface,
             opacity_bitmap, NULL, &brush_desc, &opacity_brush)))
     {
-        ERR("Failed to create opacity bitmap brush, hr %#x.\n", hr);
+        ERR("Failed to create opacity bitmap brush, hr %#lx.\n", hr);
         goto done;
     }
 
     if (FAILED(hr = ID2D1Factory_CreateRectangleGeometry(render_target->factory, &run_rect, &geometry)))
     {
-        ERR("Failed to create geometry, hr %#x.\n", hr);
+        ERR("Failed to create geometry, hr %#lx.\n", hr);
         goto done;
     }
 
@@ -1634,7 +1634,7 @@ static void STDMETHODCALLTYPE d2d_device_context_Clear(ID2D1DeviceContext *iface
     if (FAILED(hr = ID3D11DeviceContext_Map(d3d_context, (ID3D11Resource *)render_target->vs_cb,
             0, D3D11_MAP_WRITE_DISCARD, 0, &map_desc)))
     {
-        WARN("Failed to map vs constant buffer, hr %#x.\n", hr);
+        WARN("Failed to map vs constant buffer, hr %#lx.\n", hr);
         ID3D11DeviceContext_Release(d3d_context);
         return;
     }
@@ -1662,7 +1662,7 @@ static void STDMETHODCALLTYPE d2d_device_context_Clear(ID2D1DeviceContext *iface
     if (FAILED(hr = ID3D11DeviceContext_Map(d3d_context, (ID3D11Resource *)render_target->ps_cb,
             0, D3D11_MAP_WRITE_DISCARD, 0, &map_desc)))
     {
-        WARN("Failed to map ps constant buffer, hr %#x.\n", hr);
+        WARN("Failed to map ps constant buffer, hr %#lx.\n", hr);
         ID3D11DeviceContext_Release(d3d_context);
         return;
     }
@@ -1869,7 +1869,7 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateBitmapFromDxgiSurface(
 
         if (FAILED(hr = IDXGISurface_GetDesc(surface, &surface_desc)))
         {
-            WARN("Failed to get surface desc, hr %#x.\n", hr);
+            WARN("Failed to get surface desc, hr %#lx.\n", hr);
             return hr;
         }
 
@@ -1900,7 +1900,7 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateEffect(ID2D1DeviceCont
 
     if (FAILED(hr = d2d_effect_init(object, context->factory, effect_id)))
     {
-        WARN("Failed to initialize effect, hr %#x.\n", hr);
+        WARN("Failed to initialise effect, hr %#lx.\n", hr);
         heap_free(object);
         return hr;
     }
@@ -1978,7 +1978,41 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsBufferPrecisionSupported(ID2D
 static void STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1DeviceContext *iface,
         ID2D1Image *image, D2D1_RECT_F *local_bounds)
 {
-    FIXME("iface %p, image %p, local_bounds %p stub!\n", iface, image, local_bounds);
+    struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
+    D2D_SIZE_U pixel_size;
+    ID2D1Bitmap *bitmap;
+    D2D_SIZE_F size;
+
+    TRACE("iface %p, image %p, local_bounds %p.\n", iface, image, local_bounds);
+
+    if (SUCCEEDED(ID2D1Image_QueryInterface(image, &IID_ID2D1Bitmap, (void **)&bitmap)))
+    {
+        local_bounds->left = 0.0f;
+        local_bounds->top  = 0.0f;
+        switch (context->drawing_state.unitMode)
+        {
+            case D2D1_UNIT_MODE_DIPS:
+                size = ID2D1Bitmap_GetSize(bitmap);
+                local_bounds->right  = size.width;
+                local_bounds->bottom = size.height;
+                break;
+
+            case D2D1_UNIT_MODE_PIXELS:
+                pixel_size = ID2D1Bitmap_GetPixelSize(bitmap);
+                local_bounds->right  = pixel_size.width;
+                local_bounds->bottom = pixel_size.height;
+                break;
+
+            default:
+                WARN("Unknown unit mode %#x.\n", context->drawing_state.unitMode);
+                break;
+        }
+        ID2D1Bitmap_Release(bitmap);
+    }
+    else
+    {
+        FIXME("Unable to get local bounds of image %p.\n", image);
+    }
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageWorldBounds(ID2D1DeviceContext *iface,
@@ -2051,6 +2085,7 @@ static void STDMETHODCALLTYPE d2d_device_context_SetTarget(ID2D1DeviceContext *i
 
     if (!(bitmap_impl->options & D2D1_BITMAP_OPTIONS_TARGET))
     {
+        ID2D1Bitmap_Release(bitmap);
         d2d_device_context_set_error(context, D2DERR_INVALID_TARGET);
         return;
     }
@@ -2068,20 +2103,12 @@ static void STDMETHODCALLTYPE d2d_device_context_SetTarget(ID2D1DeviceContext *i
     blend_desc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
     blend_desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
     blend_desc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
-    if (context->desc.pixelFormat.alphaMode == D2D1_ALPHA_MODE_IGNORE)
-    {
-        blend_desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ZERO;
-        blend_desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
-    }
-    else
-    {
-        blend_desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
-        blend_desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
-    }
+    blend_desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+    blend_desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
     blend_desc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
     blend_desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
     if (FAILED(hr = ID3D11Device1_CreateBlendState(context->d3d_device, &blend_desc, &context->bs)))
-        WARN("Failed to create blend state, hr %#x.\n", hr);
+        WARN("Failed to create blend state, hr %#lx.\n", hr);
 }
 
 static void STDMETHODCALLTYPE d2d_device_context_GetTarget(ID2D1DeviceContext *iface, ID2D1Image **target)
@@ -2122,14 +2149,26 @@ static D2D1_PRIMITIVE_BLEND STDMETHODCALLTYPE d2d_device_context_GetPrimitiveBle
 
 static void STDMETHODCALLTYPE d2d_device_context_SetUnitMode(ID2D1DeviceContext *iface, D2D1_UNIT_MODE unit_mode)
 {
-    FIXME("iface %p, unit_mode %#x stub!\n", iface, unit_mode);
+    struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
+
+    TRACE("iface %p, unit_mode %#x.\n", iface, unit_mode);
+
+    if (unit_mode != D2D1_UNIT_MODE_DIPS && unit_mode != D2D1_UNIT_MODE_PIXELS)
+    {
+        WARN("Unknown unit mode %#x.\n", unit_mode);
+        return;
+    }
+
+    context->drawing_state.unitMode = unit_mode;
 }
 
 static D2D1_UNIT_MODE STDMETHODCALLTYPE d2d_device_context_GetUnitMode(ID2D1DeviceContext *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
 
-    return D2D1_UNIT_MODE_DIPS;
+    TRACE("iface %p.\n", iface);
+
+    return context->drawing_state.unitMode;
 }
 
 static void STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_DrawGlyphRun(ID2D1DeviceContext *iface,
@@ -2207,7 +2246,7 @@ static void STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_DrawGlyphRun
                 max(context->desc.dpiX, context->desc.dpiY) / 96.0f,
                 measuring_mode, rendering_params, &rendering_mode)))
         {
-            ERR("Failed to get recommended rendering mode, hr %#x.\n", hr);
+            ERR("Failed to get recommended rendering mode, hr %#lx.\n", hr);
             rendering_mode = DWRITE_RENDERING_MODE_OUTLINE;
         }
     }
@@ -2533,7 +2572,7 @@ static HRESULT STDMETHODCALLTYPE d2d_text_renderer_DrawGlyphRun(IDWriteTextRende
         if (FAILED(hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWriteFactory2,
                 (IUnknown **)&dwrite_factory)))
         {
-            ERR("Failed to create dwrite factory, hr %#x.\n", hr);
+            ERR("Failed to create dwrite factory, hr %#lx.\n", hr);
             ID2D1Brush_Release(brush);
             return hr;
         }
@@ -2543,7 +2582,7 @@ static HRESULT STDMETHODCALLTYPE d2d_text_renderer_DrawGlyphRun(IDWriteTextRende
         IDWriteFactory2_Release(dwrite_factory);
         if (FAILED(hr))
         {
-            ERR("Failed to create color glyph run enumerator, hr %#x.\n", hr);
+            ERR("Failed to create colour glyph run enumerator, hr %#lx.\n", hr);
             ID2D1Brush_Release(brush);
             return hr;
         }
@@ -2557,7 +2596,7 @@ static HRESULT STDMETHODCALLTYPE d2d_text_renderer_DrawGlyphRun(IDWriteTextRende
 
             if (FAILED(hr = IDWriteColorGlyphRunEnumerator_MoveNext(layers, &has_run)))
             {
-                ERR("Failed to switch color glyph layer, hr %#x.\n", hr);
+                ERR("Failed to switch colour glyph layer, hr %#lx.\n", hr);
                 break;
             }
 
@@ -2566,7 +2605,7 @@ static HRESULT STDMETHODCALLTYPE d2d_text_renderer_DrawGlyphRun(IDWriteTextRende
 
             if (FAILED(hr = IDWriteColorGlyphRunEnumerator_GetCurrentRun(layers, &color_run)))
             {
-                ERR("Failed to get current color run, hr %#x.\n", hr);
+                ERR("Failed to get current colour run, hr %#lx.\n", hr);
                 break;
             }
 
@@ -2577,7 +2616,7 @@ static HRESULT STDMETHODCALLTYPE d2d_text_renderer_DrawGlyphRun(IDWriteTextRende
                 if (FAILED(hr = d2d_device_context_CreateSolidColorBrush(&render_target->ID2D1DeviceContext_iface,
                         &color_run->runColor, NULL, (ID2D1SolidColorBrush **)&color_brush)))
                 {
-                    ERR("Failed to create solid color brush, hr %#x.\n", hr);
+                    ERR("Failed to create solid colour brush, hr %#lx.\n", hr);
                     break;
                 }
             }
@@ -2751,7 +2790,7 @@ static HRESULT d2d_device_context_get_surface(struct d2d_device_context *render_
     if (FAILED(hr))
     {
         *surface = NULL;
-        WARN("Failed to get DXGI surface, %#x.\n", hr);
+        WARN("Failed to get DXGI surface, %#lx.\n", hr);
         return hr;
     }
 
@@ -3388,7 +3427,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
 
         SamplerState s0, s1;
         Texture2D t0, t1;
-        Texture2D<float4> b0, b1;
+        Buffer<float4> b0, b1;
 
         struct input
         {
@@ -3397,14 +3436,14 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
             nointerpolation float2x2 stroke_transform : STROKE_TRANSFORM;
         };
 
-        float4 sample_gradient(Texture2D<float4> gradient, uint stop_count, float position)
+        float4 sample_gradient(Buffer<float4> gradient, uint stop_count, float position)
         {
             float4 c_low, c_high;
             float p_low, p_high;
             uint i;
 
-            p_low = gradient.Load(int3(0, 0, 0)).x;
-            c_low = gradient.Load(int3(1, 0, 0));
+            p_low = gradient.Load(0).x;
+            c_low = gradient.Load(1);
             c_high = c_low;
 
             if (position < p_low)
@@ -3412,8 +3451,8 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
 
             for (i = 1; i < stop_count; ++i)
             {
-                p_high = gradient.Load(int3(i * 2, 0, 0)).x;
-                c_high = gradient.Load(int3(i * 2 + 1, 0, 0));
+                p_high = gradient.Load(i * 2).x;
+                c_high = gradient.Load(i * 2 + 1);
 
                 if (position >= p_low && position <= p_high)
                     return lerp(c_low, c_high, (position - p_low) / (p_high - p_low));
@@ -3425,7 +3464,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
             return c_high;
         }
 
-        float4 brush_linear(struct brush brush, Texture2D<float4> gradient, float2 position)
+        float4 brush_linear(struct brush brush, Buffer<float4> gradient, float2 position)
         {
             float2 start, end, v_p, v_q;
             uint stop_count;
@@ -3442,7 +3481,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
             return sample_gradient(gradient, stop_count, p);
         }
 
-        float4 brush_radial(struct brush brush, Texture2D<float4> gradient, float2 position)
+        float4 brush_radial(struct brush brush, Buffer<float4> gradient, float2 position)
         {
             float2 centre, offset, ra, rb, v_p, v_q, r;
             float b, c, l, t;
@@ -3494,7 +3533,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
             return colour;
         }
 
-        float4 sample_brush(struct brush brush, Texture2D t, SamplerState s, Texture2D<float4> b, float2 position)
+        float4 sample_brush(struct brush brush, Texture2D t, SamplerState s, Buffer<float4> b, float2 position)
         {
             if (brush.type == BRUSH_TYPE_SOLID)
                 return brush.data[0] * brush.opacity;
@@ -3573,20 +3612,20 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
             return colour;
         }
 #endif
-        0x43425844, 0xf4151298, 0x4ea58c1d, 0x53513cc1, 0x11bfa0ac, 0x00000001, 0x00002100, 0x00000003,
+        0x43425844, 0xa8fee730, 0x92fa2196, 0xaf9f3eff, 0x888d4048, 0x00000001, 0x00002000, 0x00000003,
         0x0000002c, 0x000000c4, 0x000000f8, 0x4e475349, 0x00000090, 0x00000004, 0x00000008, 0x00000068,
         0x00000000, 0x00000000, 0x00000003, 0x00000000, 0x00000303, 0x00000077, 0x00000000, 0x00000000,
         0x00000003, 0x00000001, 0x00000f0f, 0x0000007e, 0x00000000, 0x00000000, 0x00000003, 0x00000002,
         0x00000303, 0x0000007e, 0x00000001, 0x00000000, 0x00000003, 0x00000003, 0x00000303, 0x4c524f57,
         0x4f505f44, 0x49544953, 0x42004e4f, 0x45495a45, 0x54530052, 0x454b4f52, 0x4152545f, 0x4f46534e,
         0xab004d52, 0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000,
-        0x00000003, 0x00000000, 0x0000000f, 0x545f5653, 0x65677261, 0xabab0074, 0x52444853, 0x00002000,
-        0x00000040, 0x00000800, 0x04000059, 0x00208e46, 0x00000000, 0x00000009, 0x0300005a, 0x00106000,
+        0x00000003, 0x00000000, 0x0000000f, 0x545f5653, 0x65677261, 0xabab0074, 0x52444853, 0x00001f00,
+        0x00000040, 0x000007c0, 0x04000059, 0x00208e46, 0x00000000, 0x00000009, 0x0300005a, 0x00106000,
         0x00000000, 0x0300005a, 0x00106000, 0x00000001, 0x04001858, 0x00107000, 0x00000000, 0x00005555,
-        0x04001858, 0x00107000, 0x00000001, 0x00005555, 0x04001858, 0x00107000, 0x00000002, 0x00005555,
-        0x04001858, 0x00107000, 0x00000003, 0x00005555, 0x03001062, 0x00101032, 0x00000000, 0x03001062,
+        0x04001858, 0x00107000, 0x00000001, 0x00005555, 0x04000858, 0x00107000, 0x00000002, 0x00005555,
+        0x04000858, 0x00107000, 0x00000003, 0x00005555, 0x03001062, 0x00101032, 0x00000000, 0x03001062,
         0x001010f2, 0x00000001, 0x03000862, 0x00101032, 0x00000002, 0x03000862, 0x00101032, 0x00000003,
-        0x03000065, 0x001020f2, 0x00000000, 0x02000068, 0x0000000c, 0x09000038, 0x001000f2, 0x00000000,
+        0x03000065, 0x001020f2, 0x00000000, 0x02000068, 0x0000000a, 0x09000038, 0x001000f2, 0x00000000,
         0x00208556, 0x00000000, 0x00000001, 0x00208e46, 0x00000000, 0x00000002, 0x0404001f, 0x0020800a,
         0x00000000, 0x00000001, 0x08000020, 0x00100012, 0x00000001, 0x0020800a, 0x00000000, 0x00000001,
         0x00004001, 0x00000001, 0x0304001f, 0x0010000a, 0x00000001, 0x09000000, 0x00100062, 0x00000001,
@@ -3596,35 +3635,33 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
         0x00100042, 0x00000001, 0x00100046, 0x00000002, 0x00100046, 0x00000002, 0x0700000e, 0x00100022,
         0x00000001, 0x0010001a, 0x00000001, 0x0010002a, 0x00000001, 0x0a00002d, 0x001000f2, 0x00000002,
         0x00004002, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00107e46, 0x00000002, 0x0a00002d,
-        0x001000f2, 0x00000003, 0x00004002, 0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00107e46,
+        0x001000f2, 0x00000003, 0x00004002, 0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00107e46,
         0x00000002, 0x0700001d, 0x00100042, 0x00000001, 0x0010001a, 0x00000001, 0x0010000a, 0x00000002,
-        0x0304001f, 0x0010002a, 0x00000001, 0x08000036, 0x001000e2, 0x00000004, 0x00004002, 0x00000000,
-        0x00000000, 0x00000000, 0x00000000, 0x08000036, 0x001000e2, 0x00000005, 0x00004002, 0x00000000,
-        0x00000000, 0x00000000, 0x00000000, 0x05000036, 0x001000f2, 0x00000006, 0x00100e46, 0x00000003,
-        0x05000036, 0x001000f2, 0x00000007, 0x00100e46, 0x00000003, 0x05000036, 0x001000f2, 0x00000008,
+        0x0304001f, 0x0010002a, 0x00000001, 0x05000036, 0x001000f2, 0x00000004, 0x00100e46, 0x00000003,
+        0x05000036, 0x001000f2, 0x00000005, 0x00100e46, 0x00000003, 0x05000036, 0x001000f2, 0x00000006,
         0x00100e46, 0x00000003, 0x05000036, 0x00100042, 0x00000001, 0x0010000a, 0x00000002, 0x05000036,
         0x00100082, 0x00000001, 0x00004001, 0x00000001, 0x05000036, 0x00100022, 0x00000002, 0x00004001,
         0x00000000, 0x01000030, 0x08000050, 0x00100042, 0x00000002, 0x0010003a, 0x00000001, 0x0020800a,
         0x00000000, 0x00000003, 0x05000036, 0x00100022, 0x00000002, 0x00004001, 0x00000000, 0x03040003,
-        0x0010002a, 0x00000002, 0x07000029, 0x00100012, 0x00000004, 0x0010003a, 0x00000001, 0x00004001,
-        0x00000001, 0x0700002d, 0x001000f2, 0x00000009, 0x00100e46, 0x00000004, 0x00107e46, 0x00000002,
-        0x0700001e, 0x00100012, 0x00000005, 0x0010000a, 0x00000004, 0x00004001, 0x00000001, 0x0700002d,
-        0x001000f2, 0x0000000a, 0x00100e46, 0x00000005, 0x00107e46, 0x00000002, 0x0700001d, 0x00100042,
+        0x0010002a, 0x00000002, 0x07000029, 0x00100042, 0x00000002, 0x0010003a, 0x00000001, 0x00004001,
+        0x00000001, 0x0700002d, 0x001000f2, 0x00000007, 0x00100aa6, 0x00000002, 0x00107e46, 0x00000002,
+        0x0700001e, 0x00100042, 0x00000002, 0x0010002a, 0x00000002, 0x00004001, 0x00000001, 0x0700002d,
+        0x001000f2, 0x00000008, 0x00100aa6, 0x00000002, 0x00107e46, 0x00000002, 0x0700001d, 0x00100042,
         0x00000002, 0x0010001a, 0x00000001, 0x0010002a, 0x00000001, 0x0700001d, 0x00100082, 0x00000002,
-        0x0010000a, 0x00000009, 0x0010001a, 0x00000001, 0x07000001, 0x00100042, 0x00000002, 0x0010003a,
+        0x0010000a, 0x00000007, 0x0010001a, 0x00000001, 0x07000001, 0x00100042, 0x00000002, 0x0010003a,
         0x00000002, 0x0010002a, 0x00000002, 0x0304001f, 0x0010002a, 0x00000002, 0x08000000, 0x00100082,
-        0x00000002, 0x8010002a, 0x00000041, 0x00000001, 0x0010001a, 0x00000001, 0x08000000, 0x00100012,
-        0x00000004, 0x8010002a, 0x00000041, 0x00000001, 0x0010000a, 0x00000009, 0x0700000e, 0x00100082,
-        0x00000002, 0x0010003a, 0x00000002, 0x0010000a, 0x00000004, 0x08000000, 0x001000f2, 0x0000000b,
-        0x80100e46, 0x00000041, 0x00000007, 0x00100e46, 0x0000000a, 0x09000032, 0x001000f2, 0x0000000b,
-        0x00100ff6, 0x00000002, 0x00100e46, 0x0000000b, 0x00100e46, 0x00000007, 0x05000036, 0x001000f2,
-        0x00000008, 0x00100e46, 0x0000000a, 0x05000036, 0x00100022, 0x00000002, 0x00004001, 0xffffffff,
-        0x05000036, 0x001000f2, 0x00000006, 0x00100e46, 0x0000000b, 0x01000002, 0x01000015, 0x05000036,
-        0x001000f2, 0x00000007, 0x00100e46, 0x0000000a, 0x05000036, 0x00100042, 0x00000001, 0x0010000a,
-        0x00000009, 0x0700001e, 0x00100082, 0x00000001, 0x0010003a, 0x00000001, 0x00004001, 0x00000001,
-        0x05000036, 0x001000f2, 0x00000008, 0x00100e46, 0x0000000a, 0x05000036, 0x00100022, 0x00000002,
+        0x00000002, 0x8010002a, 0x00000041, 0x00000001, 0x0010001a, 0x00000001, 0x08000000, 0x00100022,
+        0x00000007, 0x8010002a, 0x00000041, 0x00000001, 0x0010000a, 0x00000007, 0x0700000e, 0x00100082,
+        0x00000002, 0x0010003a, 0x00000002, 0x0010001a, 0x00000007, 0x08000000, 0x001000f2, 0x00000009,
+        0x80100e46, 0x00000041, 0x00000005, 0x00100e46, 0x00000008, 0x09000032, 0x001000f2, 0x00000009,
+        0x00100ff6, 0x00000002, 0x00100e46, 0x00000009, 0x00100e46, 0x00000005, 0x05000036, 0x001000f2,
+        0x00000006, 0x00100e46, 0x00000008, 0x05000036, 0x00100022, 0x00000002, 0x00004001, 0xffffffff,
+        0x05000036, 0x001000f2, 0x00000004, 0x00100e46, 0x00000009, 0x01000002, 0x01000015, 0x05000036,
+        0x001000f2, 0x00000005, 0x00100e46, 0x00000008, 0x05000036, 0x00100042, 0x00000001, 0x0010000a,
+        0x00000007, 0x0700001e, 0x00100082, 0x00000001, 0x0010003a, 0x00000001, 0x00004001, 0x00000001,
+        0x05000036, 0x001000f2, 0x00000006, 0x00100e46, 0x00000008, 0x05000036, 0x00100022, 0x00000002,
         0x0010002a, 0x00000002, 0x01000016, 0x09000037, 0x001000f2, 0x00000003, 0x00100556, 0x00000002,
-        0x00100e46, 0x00000006, 0x00100e46, 0x00000008, 0x01000015, 0x08000038, 0x001000f2, 0x00000000,
+        0x00100e46, 0x00000004, 0x00100e46, 0x00000006, 0x01000015, 0x08000038, 0x001000f2, 0x00000000,
         0x00100e46, 0x00000003, 0x00208556, 0x00000000, 0x00000001, 0x01000015, 0x0300001f, 0x0010000a,
         0x00000001, 0x08000020, 0x00100012, 0x00000001, 0x0020800a, 0x00000000, 0x00000001, 0x00004001,
         0x00000002, 0x0304001f, 0x0010000a, 0x00000001, 0x0900000f, 0x00100012, 0x00000002, 0x00208046,
@@ -3648,35 +3685,33 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
         0x00000001, 0x0010002a, 0x00000001, 0x8010001a, 0x00000041, 0x00000001, 0x0700000e, 0x00100022,
         0x00000001, 0x0010003a, 0x00000001, 0x0010001a, 0x00000001, 0x0a00002d, 0x001000f2, 0x00000002,
         0x00004002, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00107e46, 0x00000002, 0x0a00002d,
-        0x001000f2, 0x00000003, 0x00004002, 0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00107e46,
+        0x001000f2, 0x00000003, 0x00004002, 0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00107e46,
         0x00000002, 0x0700001d, 0x00100042, 0x00000001, 0x0010001a, 0x00000001, 0x0010000a, 0x00000002,
-        0x0304001f, 0x0010002a, 0x00000001, 0x08000036, 0x001000e2, 0x00000004, 0x00004002, 0x00000000,
-        0x00000000, 0x00000000, 0x00000000, 0x08000036, 0x001000e2, 0x00000005, 0x00004002, 0x00000000,
-        0x00000000, 0x00000000, 0x00000000, 0x05000036, 0x001000f2, 0x00000006, 0x00100e46, 0x00000003,
-        0x05000036, 0x001000f2, 0x00000007, 0x00100e46, 0x00000003, 0x05000036, 0x001000f2, 0x00000008,
+        0x0304001f, 0x0010002a, 0x00000001, 0x05000036, 0x001000f2, 0x00000004, 0x00100e46, 0x00000003,
+        0x05000036, 0x001000f2, 0x00000005, 0x00100e46, 0x00000003, 0x05000036, 0x001000f2, 0x00000006,
         0x00100e46, 0x00000003, 0x05000036, 0x00100042, 0x00000001, 0x0010000a, 0x00000002, 0x05000036,
         0x00100082, 0x00000001, 0x00004001, 0x00000001, 0x05000036, 0x00100022, 0x00000002, 0x00004001,
         0x00000000, 0x01000030, 0x08000050, 0x00100042, 0x00000002, 0x0010003a, 0x00000001, 0x0020800a,
         0x00000000, 0x00000004, 0x05000036, 0x00100022, 0x00000002, 0x00004001, 0x00000000, 0x03040003,
-        0x0010002a, 0x00000002, 0x07000029, 0x00100012, 0x00000004, 0x0010003a, 0x00000001, 0x00004001,
-        0x00000001, 0x0700002d, 0x001000f2, 0x00000009, 0x00100e46, 0x00000004, 0x00107e46, 0x00000002,
-        0x0700001e, 0x00100012, 0x00000005, 0x0010000a, 0x00000004, 0x00004001, 0x00000001, 0x0700002d,
-        0x001000f2, 0x0000000a, 0x00100e46, 0x00000005, 0x00107e46, 0x00000002, 0x0700001d, 0x00100042,
+        0x0010002a, 0x00000002, 0x07000029, 0x00100042, 0x00000002, 0x0010003a, 0x00000001, 0x00004001,
+        0x00000001, 0x0700002d, 0x001000f2, 0x00000007, 0x00100aa6, 0x00000002, 0x00107e46, 0x00000002,
+        0x0700001e, 0x00100042, 0x00000002, 0x0010002a, 0x00000002, 0x00004001, 0x00000001, 0x0700002d,
+        0x001000f2, 0x00000008, 0x00100aa6, 0x00000002, 0x00107e46, 0x00000002, 0x0700001d, 0x00100042,
         0x00000002, 0x0010001a, 0x00000001, 0x0010002a, 0x00000001, 0x0700001d, 0x00100082, 0x00000002,
-        0x0010000a, 0x00000009, 0x0010001a, 0x00000001, 0x07000001, 0x00100042, 0x00000002, 0x0010003a,
+        0x0010000a, 0x00000007, 0x0010001a, 0x00000001, 0x07000001, 0x00100042, 0x00000002, 0x0010003a,
         0x00000002, 0x0010002a, 0x00000002, 0x0304001f, 0x0010002a, 0x00000002, 0x08000000, 0x00100082,
-        0x00000002, 0x8010002a, 0x00000041, 0x00000001, 0x0010001a, 0x00000001, 0x08000000, 0x00100012,
-        0x00000004, 0x8010002a, 0x00000041, 0x00000001, 0x0010000a, 0x00000009, 0x0700000e, 0x00100082,
-        0x00000002, 0x0010003a, 0x00000002, 0x0010000a, 0x00000004, 0x08000000, 0x001000f2, 0x0000000b,
-        0x80100e46, 0x00000041, 0x00000007, 0x00100e46, 0x0000000a, 0x09000032, 0x001000f2, 0x0000000b,
-        0x00100ff6, 0x00000002, 0x00100e46, 0x0000000b, 0x00100e46, 0x00000007, 0x05000036, 0x001000f2,
-        0x00000008, 0x00100e46, 0x0000000a, 0x05000036, 0x00100022, 0x00000002, 0x00004001, 0xffffffff,
-        0x05000036, 0x001000f2, 0x00000006, 0x00100e46, 0x0000000b, 0x01000002, 0x01000015, 0x05000036,
-        0x001000f2, 0x00000007, 0x00100e46, 0x0000000a, 0x05000036, 0x00100042, 0x00000001, 0x0010000a,
-        0x00000009, 0x0700001e, 0x00100082, 0x00000001, 0x0010003a, 0x00000001, 0x00004001, 0x00000001,
-        0x05000036, 0x001000f2, 0x00000008, 0x00100e46, 0x0000000a, 0x05000036, 0x00100022, 0x00000002,
+        0x00000002, 0x8010002a, 0x00000041, 0x00000001, 0x0010001a, 0x00000001, 0x08000000, 0x00100022,
+        0x00000007, 0x8010002a, 0x00000041, 0x00000001, 0x0010000a, 0x00000007, 0x0700000e, 0x00100082,
+        0x00000002, 0x0010003a, 0x00000002, 0x0010001a, 0x00000007, 0x08000000, 0x001000f2, 0x00000009,
+        0x80100e46, 0x00000041, 0x00000005, 0x00100e46, 0x00000008, 0x09000032, 0x001000f2, 0x00000009,
+        0x00100ff6, 0x00000002, 0x00100e46, 0x00000009, 0x00100e46, 0x00000005, 0x05000036, 0x001000f2,
+        0x00000006, 0x00100e46, 0x00000008, 0x05000036, 0x00100022, 0x00000002, 0x00004001, 0xffffffff,
+        0x05000036, 0x001000f2, 0x00000004, 0x00100e46, 0x00000009, 0x01000002, 0x01000015, 0x05000036,
+        0x001000f2, 0x00000005, 0x00100e46, 0x00000008, 0x05000036, 0x00100042, 0x00000001, 0x0010000a,
+        0x00000007, 0x0700001e, 0x00100082, 0x00000001, 0x0010003a, 0x00000001, 0x00004001, 0x00000001,
+        0x05000036, 0x001000f2, 0x00000006, 0x00100e46, 0x00000008, 0x05000036, 0x00100022, 0x00000002,
         0x0010002a, 0x00000002, 0x01000016, 0x09000037, 0x001000f2, 0x00000003, 0x00100556, 0x00000002,
-        0x00100e46, 0x00000006, 0x00100e46, 0x00000008, 0x01000015, 0x08000038, 0x001000f2, 0x00000000,
+        0x00100e46, 0x00000004, 0x00100e46, 0x00000006, 0x01000015, 0x08000038, 0x001000f2, 0x00000000,
         0x00100e46, 0x00000003, 0x00208556, 0x00000000, 0x00000001, 0x01000015, 0x0300001f, 0x0010000a,
         0x00000001, 0x08000020, 0x00100012, 0x00000001, 0x0020800a, 0x00000000, 0x00000001, 0x00004001,
         0x00000003, 0x0304001f, 0x0010000a, 0x00000001, 0x0800000f, 0x00100022, 0x00000001, 0x00101046,
@@ -3701,32 +3736,30 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
         0x00000002, 0x00100046, 0x00000002, 0x0700000e, 0x00100042, 0x00000001, 0x0010002a, 0x00000001,
         0x0010003a, 0x00000001, 0x0a00002d, 0x001000f2, 0x00000002, 0x00004002, 0x00000000, 0x00000000,
         0x00000000, 0x00000000, 0x00107e46, 0x00000003, 0x0a00002d, 0x001000f2, 0x00000003, 0x00004002,
-        0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00107e46, 0x00000003, 0x0700001d, 0x00100082,
+        0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00107e46, 0x00000003, 0x0700001d, 0x00100082,
         0x00000001, 0x0010002a, 0x00000001, 0x0010000a, 0x00000002, 0x0304001f, 0x0010003a, 0x00000001,
-        0x08000036, 0x001000e2, 0x00000004, 0x00004002, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-        0x08000036, 0x001000e2, 0x00000005, 0x00004002, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
         0x05000036, 0x00100082, 0x00000001, 0x0010003a, 0x00000003, 0x05000036, 0x00100062, 0x00000002,
         0x00100ff6, 0x00000003, 0x05000036, 0x00100082, 0x00000002, 0x0010000a, 0x00000002, 0x08000036,
         0x00100032, 0x00000003, 0x00004002, 0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x01000030,
         0x08000050, 0x00100042, 0x00000003, 0x0010000a, 0x00000003, 0x0020800a, 0x00000000, 0x00000007,
         0x05000036, 0x00100022, 0x00000003, 0x00004001, 0x00000000, 0x03040003, 0x0010002a, 0x00000003,
-        0x07000029, 0x00100012, 0x00000004, 0x0010000a, 0x00000003, 0x00004001, 0x00000001, 0x0700002d,
-        0x001000f2, 0x00000006, 0x00100e46, 0x00000004, 0x00107e46, 0x00000003, 0x0700001e, 0x00100012,
-        0x00000005, 0x0010000a, 0x00000004, 0x00004001, 0x00000001, 0x0700002d, 0x001000f2, 0x00000007,
-        0x00100e46, 0x00000005, 0x00107e46, 0x00000003, 0x0700001d, 0x00100042, 0x00000003, 0x0010002a,
-        0x00000001, 0x0010003a, 0x00000002, 0x0700001d, 0x00100012, 0x00000004, 0x0010000a, 0x00000006,
-        0x0010002a, 0x00000001, 0x07000001, 0x00100042, 0x00000003, 0x0010002a, 0x00000003, 0x0010000a,
-        0x00000004, 0x0304001f, 0x0010002a, 0x00000003, 0x08000000, 0x00100012, 0x00000004, 0x0010002a,
-        0x00000001, 0x8010003a, 0x00000041, 0x00000002, 0x08000000, 0x00100012, 0x00000005, 0x8010003a,
-        0x00000041, 0x00000002, 0x0010000a, 0x00000006, 0x0700000e, 0x00100012, 0x00000004, 0x0010000a,
-        0x00000004, 0x0010000a, 0x00000005, 0x08000000, 0x00100012, 0x00000005, 0x8010001a, 0x00000041,
-        0x00000002, 0x0010003a, 0x00000007, 0x09000032, 0x00100012, 0x00000004, 0x0010000a, 0x00000004,
-        0x0010000a, 0x00000005, 0x0010001a, 0x00000002, 0x05000036, 0x00100042, 0x00000002, 0x0010003a,
-        0x00000007, 0x05000036, 0x00100022, 0x00000003, 0x00004001, 0xffffffff, 0x05000036, 0x00100082,
-        0x00000001, 0x0010000a, 0x00000004, 0x01000002, 0x01000015, 0x05000036, 0x00100022, 0x00000002,
-        0x0010003a, 0x00000007, 0x05000036, 0x00100082, 0x00000002, 0x0010000a, 0x00000006, 0x0700001e,
+        0x07000029, 0x00100042, 0x00000003, 0x0010000a, 0x00000003, 0x00004001, 0x00000001, 0x0700002d,
+        0x001000f2, 0x00000004, 0x00100aa6, 0x00000003, 0x00107e46, 0x00000003, 0x0700001e, 0x00100042,
+        0x00000003, 0x0010002a, 0x00000003, 0x00004001, 0x00000001, 0x0700002d, 0x001000f2, 0x00000005,
+        0x00100aa6, 0x00000003, 0x00107e46, 0x00000003, 0x0700001d, 0x00100042, 0x00000003, 0x0010002a,
+        0x00000001, 0x0010003a, 0x00000002, 0x0700001d, 0x00100022, 0x00000004, 0x0010000a, 0x00000004,
+        0x0010002a, 0x00000001, 0x07000001, 0x00100042, 0x00000003, 0x0010002a, 0x00000003, 0x0010001a,
+        0x00000004, 0x0304001f, 0x0010002a, 0x00000003, 0x08000000, 0x00100022, 0x00000004, 0x0010002a,
+        0x00000001, 0x8010003a, 0x00000041, 0x00000002, 0x08000000, 0x00100042, 0x00000004, 0x8010003a,
+        0x00000041, 0x00000002, 0x0010000a, 0x00000004, 0x0700000e, 0x00100022, 0x00000004, 0x0010001a,
+        0x00000004, 0x0010002a, 0x00000004, 0x08000000, 0x00100042, 0x00000004, 0x8010001a, 0x00000041,
+        0x00000002, 0x0010003a, 0x00000005, 0x09000032, 0x00100022, 0x00000004, 0x0010001a, 0x00000004,
+        0x0010002a, 0x00000004, 0x0010001a, 0x00000002, 0x05000036, 0x00100042, 0x00000002, 0x0010003a,
+        0x00000005, 0x05000036, 0x00100022, 0x00000003, 0x00004001, 0xffffffff, 0x05000036, 0x00100082,
+        0x00000001, 0x0010001a, 0x00000004, 0x01000002, 0x01000015, 0x05000036, 0x00100022, 0x00000002,
+        0x0010003a, 0x00000005, 0x05000036, 0x00100082, 0x00000002, 0x0010000a, 0x00000004, 0x0700001e,
         0x00100012, 0x00000003, 0x0010000a, 0x00000003, 0x00004001, 0x00000001, 0x05000036, 0x00100042,
-        0x00000002, 0x0010003a, 0x00000007, 0x05000036, 0x00100032, 0x00000003, 0x00100086, 0x00000003,
+        0x00000002, 0x0010003a, 0x00000005, 0x05000036, 0x00100032, 0x00000003, 0x00100086, 0x00000003,
         0x01000016, 0x09000037, 0x00100042, 0x00000001, 0x0010001a, 0x00000003, 0x0010003a, 0x00000001,
         0x0010002a, 0x00000002, 0x01000012, 0x05000036, 0x00100042, 0x00000001, 0x0010003a, 0x00000003,
         0x01000015, 0x08000038, 0x00100012, 0x00000001, 0x0010002a, 0x00000001, 0x0020801a, 0x00000000,
@@ -3753,32 +3786,30 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
         0x00000041, 0x00000001, 0x0700000e, 0x00100042, 0x00000001, 0x0010002a, 0x00000002, 0x0010002a,
         0x00000001, 0x0a00002d, 0x001000f2, 0x00000002, 0x00004002, 0x00000000, 0x00000000, 0x00000000,
         0x00000000, 0x00107e46, 0x00000003, 0x0a00002d, 0x001000f2, 0x00000003, 0x00004002, 0x00000001,
-        0x00000000, 0x00000000, 0x00000000, 0x00107e46, 0x00000003, 0x0700001d, 0x00100082, 0x00000001,
-        0x0010002a, 0x00000001, 0x0010000a, 0x00000002, 0x0304001f, 0x0010003a, 0x00000001, 0x08000036,
-        0x001000e2, 0x00000004, 0x00004002, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x08000036,
-        0x001000e2, 0x00000005, 0x00004002, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x05000036,
+        0x00000001, 0x00000001, 0x00000001, 0x00107e46, 0x00000003, 0x0700001d, 0x00100082, 0x00000001,
+        0x0010002a, 0x00000001, 0x0010000a, 0x00000002, 0x0304001f, 0x0010003a, 0x00000001, 0x05000036,
         0x00100082, 0x00000001, 0x0010003a, 0x00000003, 0x05000036, 0x00100062, 0x00000002, 0x00100ff6,
         0x00000003, 0x05000036, 0x00100082, 0x00000002, 0x0010000a, 0x00000002, 0x08000036, 0x00100032,
         0x00000003, 0x00004002, 0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x01000030, 0x08000050,
         0x00100042, 0x00000003, 0x0010000a, 0x00000003, 0x0020800a, 0x00000000, 0x00000008, 0x05000036,
         0x00100022, 0x00000003, 0x00004001, 0x00000000, 0x03040003, 0x0010002a, 0x00000003, 0x07000029,
-        0x00100012, 0x00000004, 0x0010000a, 0x00000003, 0x00004001, 0x00000001, 0x0700002d, 0x001000f2,
-        0x00000006, 0x00100e46, 0x00000004, 0x00107e46, 0x00000003, 0x0700001e, 0x00100012, 0x00000005,
-        0x0010000a, 0x00000004, 0x00004001, 0x00000001, 0x0700002d, 0x001000f2, 0x00000007, 0x00100e46,
-        0x00000005, 0x00107e46, 0x00000003, 0x0700001d, 0x00100042, 0x00000003, 0x0010002a, 0x00000001,
-        0x0010003a, 0x00000002, 0x0700001d, 0x00100012, 0x00000004, 0x0010000a, 0x00000006, 0x0010002a,
-        0x00000001, 0x07000001, 0x00100042, 0x00000003, 0x0010002a, 0x00000003, 0x0010000a, 0x00000004,
-        0x0304001f, 0x0010002a, 0x00000003, 0x08000000, 0x00100012, 0x00000004, 0x0010002a, 0x00000001,
-        0x8010003a, 0x00000041, 0x00000002, 0x08000000, 0x00100012, 0x00000005, 0x8010003a, 0x00000041,
-        0x00000002, 0x0010000a, 0x00000006, 0x0700000e, 0x00100012, 0x00000004, 0x0010000a, 0x00000004,
-        0x0010000a, 0x00000005, 0x08000000, 0x00100012, 0x00000005, 0x8010001a, 0x00000041, 0x00000002,
-        0x0010003a, 0x00000007, 0x09000032, 0x00100012, 0x00000004, 0x0010000a, 0x00000004, 0x0010000a,
-        0x00000005, 0x0010001a, 0x00000002, 0x05000036, 0x00100042, 0x00000002, 0x0010003a, 0x00000007,
+        0x00100042, 0x00000003, 0x0010000a, 0x00000003, 0x00004001, 0x00000001, 0x0700002d, 0x001000f2,
+        0x00000004, 0x00100aa6, 0x00000003, 0x00107e46, 0x00000003, 0x0700001e, 0x00100042, 0x00000003,
+        0x0010002a, 0x00000003, 0x00004001, 0x00000001, 0x0700002d, 0x001000f2, 0x00000005, 0x00100aa6,
+        0x00000003, 0x00107e46, 0x00000003, 0x0700001d, 0x00100042, 0x00000003, 0x0010002a, 0x00000001,
+        0x0010003a, 0x00000002, 0x0700001d, 0x00100022, 0x00000004, 0x0010000a, 0x00000004, 0x0010002a,
+        0x00000001, 0x07000001, 0x00100042, 0x00000003, 0x0010002a, 0x00000003, 0x0010001a, 0x00000004,
+        0x0304001f, 0x0010002a, 0x00000003, 0x08000000, 0x00100022, 0x00000004, 0x0010002a, 0x00000001,
+        0x8010003a, 0x00000041, 0x00000002, 0x08000000, 0x00100042, 0x00000004, 0x8010003a, 0x00000041,
+        0x00000002, 0x0010000a, 0x00000004, 0x0700000e, 0x00100022, 0x00000004, 0x0010001a, 0x00000004,
+        0x0010002a, 0x00000004, 0x08000000, 0x00100042, 0x00000004, 0x8010001a, 0x00000041, 0x00000002,
+        0x0010003a, 0x00000005, 0x09000032, 0x00100022, 0x00000004, 0x0010001a, 0x00000004, 0x0010002a,
+        0x00000004, 0x0010001a, 0x00000002, 0x05000036, 0x00100042, 0x00000002, 0x0010003a, 0x00000005,
         0x05000036, 0x00100022, 0x00000003, 0x00004001, 0xffffffff, 0x05000036, 0x00100082, 0x00000001,
-        0x0010000a, 0x00000004, 0x01000002, 0x01000015, 0x05000036, 0x00100022, 0x00000002, 0x0010003a,
-        0x00000007, 0x05000036, 0x00100082, 0x00000002, 0x0010000a, 0x00000006, 0x0700001e, 0x00100012,
+        0x0010001a, 0x00000004, 0x01000002, 0x01000015, 0x05000036, 0x00100022, 0x00000002, 0x0010003a,
+        0x00000005, 0x05000036, 0x00100082, 0x00000002, 0x0010000a, 0x00000004, 0x0700001e, 0x00100012,
         0x00000003, 0x0010000a, 0x00000003, 0x00004001, 0x00000001, 0x05000036, 0x00100042, 0x00000002,
-        0x0010003a, 0x00000007, 0x05000036, 0x00100032, 0x00000003, 0x00100086, 0x00000003, 0x01000016,
+        0x0010003a, 0x00000005, 0x05000036, 0x00100032, 0x00000003, 0x00100086, 0x00000003, 0x01000016,
         0x09000037, 0x00100042, 0x00000001, 0x0010001a, 0x00000003, 0x0010003a, 0x00000001, 0x0010002a,
         0x00000002, 0x01000012, 0x05000036, 0x00100042, 0x00000001, 0x0010003a, 0x00000003, 0x01000015,
         0x08000038, 0x00100012, 0x00000001, 0x0010002a, 0x00000001, 0x0020801a, 0x00000000, 0x00000005,
@@ -3889,7 +3920,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
     if (FAILED(hr = IDXGIDevice_QueryInterface(device_impl->dxgi_device,
             &IID_ID3D11Device1, (void **)&render_target->d3d_device)))
     {
-        WARN("Failed to query ID3D11Device1 interface, hr %#x.\n", hr);
+        WARN("Failed to query ID3D11Device1 interface, hr %#lx.\n", hr);
         goto err;
     }
 
@@ -3897,7 +3928,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
             0, &feature_levels, 1, D3D11_SDK_VERSION, &IID_ID3D11Device1, NULL,
             &render_target->d3d_state)))
     {
-        WARN("Failed to create device context state, hr %#x.\n", hr);
+        WARN("Failed to create device context state, hr %#lx.\n", hr);
         goto err;
     }
 
@@ -3908,14 +3939,14 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
         if (FAILED(hr = ID3D11Device1_CreateInputLayout(render_target->d3d_device, si->il_desc, si->il_element_count,
                 si->vs_code, si->vs_code_size, &render_target->shape_resources[si->shape_type].il)))
         {
-            WARN("Failed to create input layout for shape type %#x, hr %#x.\n", si->shape_type, hr);
+            WARN("Failed to create input layout for shape type %#x, hr %#lx.\n", si->shape_type, hr);
             goto err;
         }
 
         if (FAILED(hr = ID3D11Device1_CreateVertexShader(render_target->d3d_device, si->vs_code,
                 si->vs_code_size, NULL, &render_target->shape_resources[si->shape_type].vs)))
         {
-            WARN("Failed to create vertex shader for shape type %#x, hr %#x.\n", si->shape_type, hr);
+            WARN("Failed to create vertex shader for shape type %#x, hr %#lx.\n", si->shape_type, hr);
             goto err;
         }
 
@@ -3930,14 +3961,14 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
     if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, NULL,
             &render_target->vs_cb)))
     {
-        WARN("Failed to create constant buffer, hr %#x.\n", hr);
+        WARN("Failed to create constant buffer, hr %#lx.\n", hr);
         goto err;
     }
 
     if (FAILED(hr = ID3D11Device1_CreatePixelShader(render_target->d3d_device,
             ps_code, sizeof(ps_code), NULL, &render_target->ps)))
     {
-        WARN("Failed to create pixel shader, hr %#x.\n", hr);
+        WARN("Failed to create pixel shader, hr %#lx.\n", hr);
         goto err;
     }
 
@@ -3950,7 +3981,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
     if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, NULL,
             &render_target->ps_cb)))
     {
-        WARN("Failed to create constant buffer, hr %#x.\n", hr);
+        WARN("Failed to create constant buffer, hr %#lx.\n", hr);
         goto err;
     }
 
@@ -3967,7 +3998,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
     if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device,
             &buffer_desc, &buffer_data, &render_target->ib)))
     {
-        WARN("Failed to create clear index buffer, hr %#x.\n", hr);
+        WARN("Failed to create clear index buffer, hr %#lx.\n", hr);
         goto err;
     }
 
@@ -3979,7 +4010,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
     if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device,
             &buffer_desc, &buffer_data, &render_target->vb)))
     {
-        WARN("Failed to create clear vertex buffer, hr %#x.\n", hr);
+        WARN("Failed to create clear vertex buffer, hr %#lx.\n", hr);
         goto err;
     }
 
@@ -3995,14 +4026,14 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
     rs_desc.AntialiasedLineEnable = FALSE;
     if (FAILED(hr = ID3D11Device1_CreateRasterizerState(render_target->d3d_device, &rs_desc, &render_target->rs)))
     {
-        WARN("Failed to create clear rasterizer state, hr %#x.\n", hr);
+        WARN("Failed to create clear rasteriser state, hr %#lx.\n", hr);
         goto err;
     }
 
     if (FAILED(hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
             &IID_IDWriteFactory, (IUnknown **)&dwrite_factory)))
     {
-        ERR("Failed to create dwrite factory, hr %#x.\n", hr);
+        ERR("Failed to create dwrite factory, hr %#lx.\n", hr);
         goto err;
     }
 
@@ -4010,7 +4041,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
     IDWriteFactory_Release(dwrite_factory);
     if (FAILED(hr))
     {
-        ERR("Failed to create default text rendering parameters, hr %#x.\n", hr);
+        ERR("Failed to create default text rendering parameters, hr %#lx.\n", hr);
         goto err;
     }
 
@@ -4090,7 +4121,7 @@ HRESULT d2d_d3d_create_render_target(ID2D1Device *device, IDXGISurface *surface,
 
     if (FAILED(hr = d2d_device_context_init(object, device, outer_unknown, ops)))
     {
-        WARN("Failed to initialize render target, hr %#x.\n", hr);
+        WARN("Failed to initialise render target, hr %#lx.\n", hr);
         heap_free(object);
         return hr;
     }
@@ -4106,7 +4137,7 @@ HRESULT d2d_d3d_create_render_target(ID2D1Device *device, IDXGISurface *surface,
         if (FAILED(hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(&object->ID2D1DeviceContext_iface,
                 surface, &bitmap_desc, &bitmap)))
         {
-            WARN("Failed to create target bitmap, hr %#x.\n", hr);
+            WARN("Failed to create target bitmap, hr %#lx.\n", hr);
             IUnknown_Release(&object->IUnknown_iface);
             heap_free(object);
             return hr;
@@ -4148,7 +4179,7 @@ static ULONG WINAPI d2d_device_AddRef(ID2D1Device *iface)
     struct d2d_device *device = impl_from_ID2D1Device(iface);
     ULONG refcount = InterlockedIncrement(&device->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -4158,7 +4189,7 @@ static ULONG WINAPI d2d_device_Release(ID2D1Device *iface)
     struct d2d_device *device = impl_from_ID2D1Device(iface);
     ULONG refcount = InterlockedDecrement(&device->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -4196,7 +4227,7 @@ static HRESULT WINAPI d2d_device_CreateDeviceContext(ID2D1Device *iface, D2D1_DE
 
     if (FAILED(hr = d2d_device_context_init(object, iface, NULL, NULL)))
     {
-        WARN("Failed to initialize device context, hr %#x.\n", hr);
+        WARN("Failed to initialise device context, hr %#lx.\n", hr);
         heap_free(object);
         return hr;
     }

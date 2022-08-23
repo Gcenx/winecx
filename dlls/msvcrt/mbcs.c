@@ -220,7 +220,7 @@ threadmbcinfo* create_mbcinfo(int cp, LCID lcid, threadmbcinfo *old_mbcinfo)
   WORD chartypes[256];
   char bufA[256];
   WCHAR bufW[256], lowW[256], upW[256];
-  int charcount;
+  int charcount, maxchar;
   int ret;
   int i;
 
@@ -288,7 +288,7 @@ threadmbcinfo* create_mbcinfo(int cp, LCID lcid, threadmbcinfo *old_mbcinfo)
     bytes += 2;
   }
 
-  if (cpi.MaxCharSize > 1)
+  if (cpi.MaxCharSize == 2)
   {
     /* trail bytes not available through kernel32 but stored in a structure in msvcrt */
     struct cp_extra_info_t *cpextra = g_cpextrainfo;
@@ -316,23 +316,28 @@ threadmbcinfo* create_mbcinfo(int cp, LCID lcid, threadmbcinfo *old_mbcinfo)
   else
     mbcinfo->ismbcodepage = 0;
 
+  maxchar = (newcp == CP_UTF8) ? 128 : 256;
+
   /* we can't use GetStringTypeA directly because we don't have a locale - only a code page
    */
   charcount = 0;
-  for (i = 0; i < 256; i++)
+  for (i = 0; i < maxchar; i++)
     if (!(mbcinfo->mbctype[i + 1] & _M1))
       bufA[charcount++] = i;
 
   ret = MultiByteToWideChar(newcp, 0, bufA, charcount, bufW, charcount);
   if (ret != charcount)
-    ERR("MultiByteToWideChar of chars failed for cp %d, ret=%d (exp %d), error=%d\n", newcp, ret, charcount, GetLastError());
+  {
+    ERR("MultiByteToWideChar of chars failed for cp %d, ret=%d (exp %d), error=%ld\n",
+            newcp, ret, charcount, GetLastError());
+  }
 
   GetStringTypeW(CT_CTYPE1, bufW, charcount, chartypes);
   LCMapStringW(lcid, LCMAP_LOWERCASE, bufW, charcount, lowW, charcount);
   LCMapStringW(lcid, LCMAP_UPPERCASE, bufW, charcount, upW, charcount);
 
   charcount = 0;
-  for (i = 0; i < 256; i++)
+  for (i = 0; i < maxchar; i++)
     if (!(mbcinfo->mbctype[i + 1] & _M1))
     {
       if (chartypes[charcount] & C1_UPPER)
@@ -350,10 +355,13 @@ threadmbcinfo* create_mbcinfo(int cp, LCID lcid, threadmbcinfo *old_mbcinfo)
 
   ret = WideCharToMultiByte(newcp, 0, bufW, charcount, bufA, charcount, NULL, NULL);
   if (ret != charcount)
-    ERR("WideCharToMultiByte failed for cp %d, ret=%d (exp %d), error=%d\n", newcp, ret, charcount, GetLastError());
+  {
+    ERR("WideCharToMultiByte failed for cp %d, ret=%d (exp %d), error=%ld\n",
+            newcp, ret, charcount, GetLastError());
+  }
 
   charcount = 0;
-  for (i = 0; i < 256; i++)
+  for (i = 0; i < maxchar; i++)
   {
     if(!(mbcinfo->mbctype[i + 1] & _M1))
     {

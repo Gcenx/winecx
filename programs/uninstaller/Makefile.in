@@ -1,8 +1,8 @@
 MODULE    = uninstaller.exe
 IMPORTS   = advapi32
-DELAYIMPORTS = shlwapi shell32 user32 gdi32
+DELAYIMPORTS = shlwapi shell32 user32 gdi32 comctl32
 
-EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+EXTRADLLFLAGS = -mwindows -municode
 
 C_SRCS = \
 	main.c

@@ -33,19 +33,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3dx);
 
-BOOL WINAPI DllMain(HINSTANCE hdll, DWORD reason, LPVOID reserved)
-{
-    switch (reason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;       /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(hdll);
-    }
-
-   return TRUE;
-}
-
 BOOL WINAPI D3DX11CheckVersion(UINT d3d_sdk_ver, UINT d3dx_sdk_ver)
 {
     return d3d_sdk_ver == D3D11_SDK_VERSION && d3dx_sdk_ver == D3DX11_SDK_VERSION;
@@ -83,7 +70,7 @@ HRESULT WINAPI D3DX11GetImageInfoFromFileW(const WCHAR *filename, ID3DX11ThreadP
 HRESULT WINAPI D3DX11GetImageInfoFromMemory(const void *src_data, SIZE_T src_data_size, ID3DX11ThreadPump *pump,
         D3DX11_IMAGE_INFO *img_info, HRESULT *hresult)
 {
-    FIXME("src_data %p, src_data_size %lu, pump %p, img_info %p, hresult %p stub!\n",
+    FIXME("src_data %p, src_data_size %Iu, pump %p, img_info %p, hresult %p stub!\n",
             src_data, src_data_size, pump, img_info, hresult);
 
     return E_NOTIMPL;

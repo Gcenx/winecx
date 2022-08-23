@@ -45,7 +45,7 @@ static HRESULT load_typelib(void)
 
     hr = LoadRegTypeLib(&LIBID_WMPLib, 1, 0, LOCALE_SYSTEM_DEFAULT, &tl);
     if (FAILED(hr)) {
-        ERR("LoadRegTypeLib failed: %08x\n", hr);
+        ERR("LoadRegTypeLib failed: %08lx\n", hr);
         return hr;
     }
 
@@ -68,7 +68,7 @@ HRESULT get_typeinfo(typeinfo_id tid, ITypeInfo **typeinfo)
 
         hr = ITypeLib_GetTypeInfoOfGuid(typelib, tid_ids[tid], &ti);
         if (FAILED(hr)) {
-            ERR("GetTypeInfoOfGuid (%s) failed: %08x\n", debugstr_guid(tid_ids[tid]), hr);
+            ERR("GetTypeInfoOfGuid (%s) failed: %08lx\n", debugstr_guid(tid_ids[tid]), hr);
             return hr;
         }
 
@@ -146,11 +146,9 @@ static IClassFactory WMPFactory = { &WMPFactoryVtbl };
  */
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
 {
-    TRACE("(%p %d %p)\n", hInstDLL, fdwReason, lpv);
+    TRACE("(%p %ld %p)\n", hInstDLL, fdwReason, lpv);
 
     switch(fdwReason) {
-    case DLL_WINE_PREATTACH:
-        return FALSE;  /* prefer native version */
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hInstDLL);
         wmp_instance = hInstDLL;
@@ -177,31 +175,4 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 
     FIXME("Unknown object %s\n", debugstr_guid(rclsid));
     return CLASS_E_CLASSNOTAVAILABLE;
-}
-
-/***********************************************************************
- *          DllCanUnloadNow (wmp.@)
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    TRACE("\n");
-    return S_FALSE;
-}
-
-/***********************************************************************
- *          DllRegisterServer (wmp.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    TRACE("()\n");
-    return __wine_register_resources(wmp_instance);
-}
-
-/***********************************************************************
- *          DllUnregisterServer (wmp.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    TRACE("()\n");
-    return __wine_unregister_resources(wmp_instance);
 }

@@ -1,10 +1,7 @@
 MODULE    = windowscodecs.dll
 IMPORTLIB = windowscodecs
-IMPORTS   = windowscodecs uuid ole32 oleaut32 propsys rpcrt4 shlwapi user32 gdi32 advapi32
-EXTRAINCL = $(JPEG_CFLAGS) $(PNG_CFLAGS) $(TIFF_CFLAGS)
-EXTRALIBS = $(APPLICATIONSERVICES_LIBS)
-
-EXTRADLLFLAGS = -mno-cygwin
+IMPORTS   = $(TIFF_PE_LIBS) $(JPEG_PE_LIBS) $(PNG_PE_LIBS) windowscodecs uuid ole32 oleaut32 propsys rpcrt4 shlwapi user32 gdi32 advapi32
+EXTRAINCL = $(TIFF_PE_CFLAGS) $(JPEG_PE_CFLAGS) $(PNG_PE_CFLAGS)
 
 C_SRCS = \
 	bitmap.c \
@@ -20,7 +17,6 @@ C_SRCS = \
 	encoder.c \
 	fliprotate.c \
 	gifformat.c \
-	icnsencoder.c \
 	icoformat.c \
 	imgfactory.c \
 	info.c \
@@ -39,9 +35,8 @@ C_SRCS = \
 	stream.c \
 	tgaformat.c \
 	ungif.c \
-	unix_iface.c \
-	unix_lib.c \
-	uuid.c
+	uuid.c \
+	wincodecs_common.c
 
 RC_SRCS = version.rc
 

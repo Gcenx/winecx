@@ -54,14 +54,14 @@ static int output_write(const WCHAR* str, int len)
     return count;
 }
 
-static int output_vprintf(const WCHAR* fmt, __ms_va_list va_args)
+static int output_vprintf(const WCHAR* fmt, va_list va_args)
 {
     WCHAR str[8192];
     int len;
 
     len = FormatMessageW(FORMAT_MESSAGE_FROM_STRING, fmt, 0, 0, str, ARRAY_SIZE(str), &va_args);
     if (len == 0 && GetLastError() != ERROR_NO_WORK_DONE)
-        WINE_FIXME("Could not format string: le=%u, fmt=%s\n", GetLastError(), wine_dbgstr_w(fmt));
+        WINE_FIXME("Could not format string: le=%lu, fmt=%s\n", GetLastError(), wine_dbgstr_w(fmt));
     else
         output_write(str, len);
     return 0;
@@ -69,23 +69,23 @@ static int output_vprintf(const WCHAR* fmt, __ms_va_list va_args)
 
 static int WINAPIV output_printf(const WCHAR* fmt, ...)
 {
-    __ms_va_list arguments;
+    va_list arguments;
 
-    __ms_va_start(arguments, fmt);
+    va_start(arguments, fmt);
     output_vprintf(fmt, arguments);
-    __ms_va_end(arguments);
+    va_end(arguments);
     return 0;
 }
 
 static int WINAPIV output_string(int msg, ...)
 {
     WCHAR fmt[8192];
-    __ms_va_list arguments;
+    va_list arguments;
 
     LoadStringW(GetModuleHandleW(NULL), msg, fmt, ARRAY_SIZE(fmt));
-    __ms_va_start(arguments, msg);
+    va_start(arguments, msg);
     output_vprintf(fmt, arguments);
-    __ms_va_end(arguments);
+    va_end(arguments);
     return 0;
 }
 
@@ -184,7 +184,7 @@ static BOOL net_enum_services(void)
     for(i = 0; i < count; i++)
     {
         output_printf(L"    %1\n", services[i].lpDisplayName);
-        WINE_TRACE("service=%s state=%d controls=%x\n",
+        WINE_TRACE("service=%s state=%ld controls=%lx\n",
                    wine_dbgstr_w(services[i].lpServiceName),
                    services[i].ServiceStatusProcess.dwCurrentState,
                    services[i].ServiceStatusProcess.dwControlsAccepted);

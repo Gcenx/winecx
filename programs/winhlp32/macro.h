@@ -39,7 +39,7 @@ BOOL            MACRO_ExecuteMacro(struct tagWinHelp*, LPCSTR);
 int             MACRO_Lookup(const char* name, struct lexret* lr);
 struct tagWinHelp* MACRO_CurrentWindow(void);
 
-enum token_types {EMPTY, VOID_FUNCTION, BOOL_FUNCTION, INTEGER, HLPSTRING, IDENTIFIER};
+enum token_types {EMPTY, VOID_FUNCTION, BOOL_FUNCTION, INTEGER, STRING, IDENTIFIER};
 void CALLBACK MACRO_About(void);
 void CALLBACK MACRO_Annotate(void);
 void CALLBACK MACRO_BookmarkDefine(void);

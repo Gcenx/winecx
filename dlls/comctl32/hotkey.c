@@ -37,6 +37,7 @@
 #include "winnls.h"
 #include "commctrl.h"
 #include "comctl32.h"
+#include "uxtheme.h"
 #include "wine/debug.h"
 #include "wine/heap.h"
 
@@ -289,7 +290,7 @@ HOTKEY_KeyDown (HOTKEY_INFO *infoPtr, DWORD key, DWORD flags)
     if (GetWindowLongW(infoPtr->hwndSelf, GWL_STYLE) & WS_DISABLED)
         return 0;
 
-    TRACE("() Key: %d\n", key);
+    TRACE("() Key: %ld\n", key);
 
     wOldHotKey = infoPtr->HotKey;
     bOldMod = infoPtr->CurrMod;
@@ -349,7 +350,7 @@ HOTKEY_KeyUp (HOTKEY_INFO *infoPtr, DWORD key)
     if (GetWindowLongW(infoPtr->hwndSelf, GWL_STYLE) & WS_DISABLED)
         return 0;
 
-    TRACE("() Key: %d\n", key);
+    TRACE("() Key: %ld\n", key);
 
     bOldMod = infoPtr->CurrMod;
 
@@ -424,6 +425,50 @@ HOTKEY_NCCreate (HWND hwnd, const CREATESTRUCTW *lpcs)
 }
 
 static LRESULT
+HOTKEY_NCPaint (HWND hwnd, HRGN region)
+{
+    INT cxEdge, cyEdge;
+    HRGN clipRgn;
+    HTHEME theme;
+    LONG exStyle;
+    RECT r;
+    HDC dc;
+
+    theme = OpenThemeDataForDpi(NULL, WC_EDITW, GetDpiForWindow(hwnd));
+    if (!theme)
+        return DefWindowProcW(hwnd, WM_NCPAINT, (WPARAM)region, 0);
+
+    exStyle = GetWindowLongW(hwnd, GWL_EXSTYLE);
+    if (!(exStyle & WS_EX_CLIENTEDGE))
+    {
+        CloseThemeData(theme);
+        return DefWindowProcW(hwnd, WM_NCPAINT, (WPARAM)region, 0);
+    }
+
+    cxEdge = GetSystemMetrics(SM_CXEDGE);
+    cyEdge = GetSystemMetrics(SM_CYEDGE);
+    GetWindowRect(hwnd, &r);
+
+    /* New clipping region passed to default proc to exclude border */
+    clipRgn = CreateRectRgn(r.left + cxEdge, r.top + cyEdge, r.right - cxEdge, r.bottom - cyEdge);
+    if (region != (HRGN)1)
+        CombineRgn(clipRgn, clipRgn, region, RGN_AND);
+    OffsetRect(&r, -r.left, -r.top);
+
+    dc = GetDCEx(hwnd, region, DCX_WINDOW | DCX_INTERSECTRGN);
+    if (IsThemeBackgroundPartiallyTransparent(theme, 0, 0))
+        DrawThemeParentBackground(hwnd, dc, &r);
+    DrawThemeBackground(theme, dc, 0, 0, &r, 0);
+    ReleaseDC(hwnd, dc);
+    CloseThemeData(theme);
+
+    /* Call default proc to get the scrollbars etc. also painted */
+    DefWindowProcW(hwnd, WM_NCPAINT, (WPARAM)clipRgn, 0);
+    DeleteObject(clipRgn);
+    return 0;
+}
+
+static LRESULT
 HOTKEY_SetFocus (HOTKEY_INFO *infoPtr)
 {
     infoPtr->bFocus = TRUE;
@@ -466,7 +511,9 @@ static LRESULT WINAPI
 HOTKEY_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     HOTKEY_INFO *infoPtr = (HOTKEY_INFO *)GetWindowLongPtrW (hwnd, 0);
-    TRACE("hwnd=%p msg=%x wparam=%lx lparam=%lx\n", hwnd, uMsg, wParam, lParam);
+
+    TRACE("hwnd %p, msg %x, wparam %Ix, lparam %Ix\n", hwnd, uMsg, wParam, lParam);
+
     if (!infoPtr && (uMsg != WM_NCCREATE))
         return DefWindowProcW (hwnd, uMsg, wParam, lParam);
     switch (uMsg)
@@ -516,6 +563,9 @@ HOTKEY_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	case WM_NCCREATE:
 	    return HOTKEY_NCCreate (hwnd, (LPCREATESTRUCTW)lParam);
 
+        case WM_NCPAINT:
+            return HOTKEY_NCPaint (hwnd, (HRGN)wParam);
+
 	case WM_PRINTCLIENT:
 	case WM_PAINT:
 	    HOTKEY_Paint(infoPtr, (HDC)wParam);
@@ -529,8 +579,7 @@ HOTKEY_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 	default:
 	    if ((uMsg >= WM_USER) && (uMsg < WM_APP) && !COMCTL32_IsReflectedMessage(uMsg))
-		ERR("unknown msg %04x wp=%08lx lp=%08lx\n",
-		     uMsg, wParam, lParam);
+		ERR("unknown msg %04x, wp %Ix, lp %Ix\n", uMsg, wParam, lParam);
 	    return DefWindowProcW (hwnd, uMsg, wParam, lParam);
     }
     return 0;

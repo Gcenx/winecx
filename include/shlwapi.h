@@ -484,6 +484,14 @@ BOOL WINAPI PathMatchSpecA(LPCSTR,LPCSTR);
 BOOL WINAPI PathMatchSpecW(LPCWSTR,LPCWSTR);
 #define PathMatchSpec WINELIB_NAME_AW(PathMatchSpec)
 
+#define PMSF_NORMAL             0x00000000
+#define PMSF_MULTIPLE           0x00000001
+#define PMSF_DONT_STRIP_SPACES  0x00010000
+
+HRESULT WINAPI PathMatchSpecExA(LPCSTR,LPCSTR,DWORD);
+HRESULT WINAPI PathMatchSpecExW(LPCWSTR,LPCWSTR,DWORD);
+#define PathMatchSpecEx WINELIB_NAME_AW(PathMatchSpecEx)
+
 int WINAPI PathParseIconLocationA(LPSTR);
 int WINAPI PathParseIconLocationW(LPWSTR);
 #define PathParseIconLocation WINELIB_NAME_AW(PathParseIconLocation)
@@ -642,28 +650,34 @@ typedef enum {
 /* The following are used by UrlEscape..., UrlUnEscape...,
  * UrlCanonicalize..., and UrlCombine... routines
  */
-#define URL_WININET_COMPATIBILITY    0x80000000
-#define URL_PLUGGABLE_PROTOCOL       0x40000000
-#define URL_ESCAPE_UNSAFE            0x20000000
-#define URL_UNESCAPE                 0x10000000
+#define URL_WININET_COMPATIBILITY       0x80000000
+#define URL_PLUGGABLE_PROTOCOL          0x40000000
+#define URL_ESCAPE_UNSAFE               0x20000000
+#define URL_UNESCAPE                    0x10000000
 
-#define URL_DONT_SIMPLIFY            0x08000000
-#define URL_NO_META                  URL_DONT_SIMPLIFY
-#define URL_ESCAPE_SPACES_ONLY       0x04000000
-#define URL_DONT_ESCAPE_EXTRA_INFO   0x02000000
-#define URL_DONT_UNESCAPE_EXTRA_INFO URL_DONT_ESCAPE_EXTRA_INFO
-#define URL_BROWSER_MODE             URL_DONT_ESCAPE_EXTRA_INFO
+#define URL_DONT_SIMPLIFY               0x08000000
+#define URL_ESCAPE_SPACES_ONLY          0x04000000
+#define URL_DONT_ESCAPE_EXTRA_INFO      0x02000000
 
-#define URL_INTERNAL_PATH            0x00800000  /* Will escape #'s in paths */
-#define URL_UNESCAPE_HIGH_ANSI_ONLY  0x00400000
-#define URL_CONVERT_IF_DOSPATH       0x00200000
-#define URL_UNESCAPE_INPLACE         0x00100000
+#define URL_INTERNAL_PATH               0x00800000
+#define URL_UNESCAPE_HIGH_ANSI_ONLY     0x00400000
+#define URL_CONVERT_IF_DOSPATH          0x00200000
+#define URL_UNESCAPE_INPLACE            0x00100000
 
-#define URL_FILE_USE_PATHURL         0x00010000
-#define URL_ESCAPE_AS_UTF8           0x00040000
+#define URL_ESCAPE_ASCII_URI_COMPONENT  0x00080000
+#define URL_ESCAPE_AS_UTF8              0x00040000
+#define URL_DONT_UNESCAPE               0x00020000
+#define URL_FILE_USE_PATHURL            0x00010000
 
-#define URL_ESCAPE_SEGMENT_ONLY      0x00002000
-#define URL_ESCAPE_PERCENT           0x00001000
+#define URL_ESCAPE_SEGMENT_ONLY         0x00002000
+#define URL_ESCAPE_PERCENT              0x00001000
+
+#define URL_BROWSER_MODE                URL_DONT_ESCAPE_EXTRA_INFO
+#define URL_DONT_UNESCAPE_EXTRA_INFO    URL_DONT_ESCAPE_EXTRA_INFO
+#define URL_ESCAPE_URI_COMPONENT        (URL_ESCAPE_ASCII_URI_COMPONENT | URL_ESCAPE_AS_UTF8)
+#define URL_NO_META                     URL_DONT_SIMPLIFY
+#define URL_UNESCAPE_AS_UTF8            URL_ESCAPE_AS_UTF8
+#define URL_UNESCAPE_URI_COMPONENT      URL_UNESCAPE_AS_UTF8
 
 HRESULT WINAPI UrlApplySchemeA(LPCSTR,LPSTR,LPDWORD,DWORD);
 HRESULT WINAPI UrlApplySchemeW(LPCWSTR,LPWSTR,LPDWORD,DWORD);
@@ -1173,7 +1187,12 @@ HRESULT WINAPI SHGetViewStatePropertyBag(PCIDLIST_ABSOLUTE pidl, PCWSTR bagname,
 
 BOOL WINAPI SHIsLowMemoryMachine(DWORD type);
 
-#include <poppack.h> 
+#include <poppack.h>
+
+HANDLE WINAPI SHAllocShared(const void *data, DWORD size, DWORD pid);
+BOOL WINAPI SHFreeShared(HANDLE handle, DWORD pid);
+void * WINAPI SHLockShared(HANDLE handle, DWORD pid);
+BOOL WINAPI SHUnlockShared(void *data);
 
 #ifdef __cplusplus
 } /* extern "C" */

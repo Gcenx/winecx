@@ -57,7 +57,7 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
 static CRITICAL_SECTION device_data_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 
-static const struct gdi_dc_funcs macdrv_funcs;
+static const struct user_driver_funcs macdrv_funcs;
 
 /***********************************************************************
  *              compute_desktop_rect
@@ -68,7 +68,7 @@ static void compute_desktop_rect(void)
     uint32_t count, i;
 
     desktop_rect = CGRectNull;
-    if (CGGetActiveDisplayList(ARRAY_SIZE(displayIDs), displayIDs, &count) != kCGErrorSuccess ||
+    if (CGGetOnlineDisplayList(ARRAY_SIZE(displayIDs), displayIDs, &count) != kCGErrorSuccess ||
         !count)
     {
         displayIDs[0] = CGMainDisplayID();
@@ -174,18 +174,17 @@ static MACDRV_PDEVICE *create_mac_physdev(void)
 /**********************************************************************
  *              CreateDC (MACDRV.@)
  */
-static BOOL CDECL macdrv_CreateDC(PHYSDEV *pdev, LPCWSTR driver, LPCWSTR device,
-                                  LPCWSTR output, const DEVMODEW* initData)
+static BOOL CDECL macdrv_CreateDC(PHYSDEV *pdev, LPCWSTR device, LPCWSTR output,
+                                  const DEVMODEW* initData)
 {
     MACDRV_PDEVICE *physDev = create_mac_physdev();
 
-    TRACE("pdev %p hdc %p driver %s device %s output %s initData %p\n", pdev,
-          (*pdev)->hdc, debugstr_w(driver),debugstr_w(device), debugstr_w(output),
-          initData);
+    TRACE("pdev %p hdc %p device %s output %s initData %p\n", pdev,
+          (*pdev)->hdc, debugstr_w(device), debugstr_w(output), initData);
 
     if (!physDev) return FALSE;
 
-    push_dc_driver(pdev, &physDev->dev, &macdrv_funcs);
+    push_dc_driver(pdev, &physDev->dev, &macdrv_funcs.dc_funcs);
     return TRUE;
 }
 
@@ -202,7 +201,7 @@ static BOOL CDECL macdrv_CreateCompatibleDC(PHYSDEV orig, PHYSDEV *pdev)
 
     if (!physDev) return FALSE;
 
-    push_dc_driver(pdev, &physDev->dev, &macdrv_funcs);
+    push_dc_driver(pdev, &physDev->dev, &macdrv_funcs.dc_funcs);
     return TRUE;
 }
 
@@ -261,152 +260,59 @@ static INT CDECL macdrv_GetDeviceCaps(PHYSDEV dev, INT cap)
 }
 
 
-static const struct gdi_dc_funcs macdrv_funcs =
+static const struct user_driver_funcs macdrv_funcs =
 {
-    NULL,                                   /* pAbortDoc */
-    NULL,                                   /* pAbortPath */
-    NULL,                                   /* pAlphaBlend */
-    NULL,                                   /* pAngleArc */
-    NULL,                                   /* pArc */
-    NULL,                                   /* pArcTo */
-    NULL,                                   /* pBeginPath */
-    NULL,                                   /* pBlendImage */
-    NULL,                                   /* pChord */
-    NULL,                                   /* pCloseFigure */
-    macdrv_CreateCompatibleDC,              /* pCreateCompatibleDC */
-    macdrv_CreateDC,                        /* pCreateDC */
-    macdrv_DeleteDC,                        /* pDeleteDC */
-    NULL,                                   /* pDeleteObject */
-    NULL,                                   /* pDeviceCapabilities */
-    NULL,                                   /* pEllipse */
-    NULL,                                   /* pEndDoc */
-    NULL,                                   /* pEndPage */
-    NULL,                                   /* pEndPath */
-    NULL,                                   /* pEnumFonts */
-    NULL,                                   /* pEnumICMProfiles */
-    NULL,                                   /* pExcludeClipRect */
-    NULL,                                   /* pExtDeviceMode */
-    NULL,                                   /* pExtEscape */
-    NULL,                                   /* pExtFloodFill */
-    NULL,                                   /* pExtSelectClipRgn */
-    NULL,                                   /* pExtTextOut */
-    NULL,                                   /* pFillPath */
-    NULL,                                   /* pFillRgn */
-    NULL,                                   /* pFlattenPath */
-    NULL,                                   /* pFontIsLinked */
-    NULL,                                   /* pFrameRgn */
-    NULL,                                   /* pGdiComment */
-    NULL,                                   /* pGetBoundsRect */
-    NULL,                                   /* pGetCharABCWidths */
-    NULL,                                   /* pGetCharABCWidthsI */
-    NULL,                                   /* pGetCharWidth */
-    NULL,                                   /* pGetCharWidthInfo */
-    macdrv_GetDeviceCaps,                   /* pGetDeviceCaps */
-    macdrv_GetDeviceGammaRamp,              /* pGetDeviceGammaRamp */
-    NULL,                                   /* pGetFontData */
-    NULL,                                   /* pGetFontRealizationInfo */
-    NULL,                                   /* pGetFontUnicodeRanges */
-    NULL,                                   /* pGetGlyphIndices */
-    NULL,                                   /* pGetGlyphOutline */
-    NULL,                                   /* pGetICMProfile */
-    NULL,                                   /* pGetImage */
-    NULL,                                   /* pGetKerningPairs */
-    NULL,                                   /* pGetNearestColor */
-    NULL,                                   /* pGetOutlineTextMetrics */
-    NULL,                                   /* pGetPixel */
-    NULL,                                   /* pGetSystemPaletteEntries */
-    NULL,                                   /* pGetTextCharsetInfo */
-    NULL,                                   /* pGetTextExtentExPoint */
-    NULL,                                   /* pGetTextExtentExPointI */
-    NULL,                                   /* pGetTextFace */
-    NULL,                                   /* pGetTextMetrics */
-    NULL,                                   /* pGradientFill */
-    NULL,                                   /* pIntersectClipRect */
-    NULL,                                   /* pInvertRgn */
-    NULL,                                   /* pLineTo */
-    NULL,                                   /* pModifyWorldTransform */
-    NULL,                                   /* pMoveTo */
-    NULL,                                   /* pOffsetClipRgn */
-    NULL,                                   /* pOffsetViewportOrg */
-    NULL,                                   /* pOffsetWindowOrg */
-    NULL,                                   /* pPaintRgn */
-    NULL,                                   /* pPatBlt */
-    NULL,                                   /* pPie */
-    NULL,                                   /* pPolyBezier */
-    NULL,                                   /* pPolyBezierTo */
-    NULL,                                   /* pPolyDraw */
-    NULL,                                   /* pPolyPolygon */
-    NULL,                                   /* pPolyPolyline */
-    NULL,                                   /* pPolygon */
-    NULL,                                   /* pPolyline */
-    NULL,                                   /* pPolylineTo */
-    NULL,                                   /* pPutImage */
-    NULL,                                   /* pRealizeDefaultPalette */
-    NULL,                                   /* pRealizePalette */
-    NULL,                                   /* pRectangle */
-    NULL,                                   /* pResetDC */
-    NULL,                                   /* pRestoreDC */
-    NULL,                                   /* pRoundRect */
-    NULL,                                   /* pSaveDC */
-    NULL,                                   /* pScaleViewportExt */
-    NULL,                                   /* pScaleWindowExt */
-    NULL,                                   /* pSelectBitmap */
-    NULL,                                   /* pSelectBrush */
-    NULL,                                   /* pSelectClipPath */
-    NULL,                                   /* pSelectFont */
-    NULL,                                   /* pSelectPalette */
-    NULL,                                   /* pSelectPen */
-    NULL,                                   /* pSetArcDirection */
-    NULL,                                   /* pSetBkColor */
-    NULL,                                   /* pSetBkMode */
-    NULL,                                   /* pSetBoundsRect */
-    NULL,                                   /* pSetDCBrushColor */
-    NULL,                                   /* pSetDCPenColor */
-    NULL,                                   /* pSetDIBitsToDevice */
-    NULL,                                   /* pSetDeviceClipping */
-    macdrv_SetDeviceGammaRamp,              /* pSetDeviceGammaRamp */
-    NULL,                                   /* pSetLayout */
-    NULL,                                   /* pSetMapMode */
-    NULL,                                   /* pSetMapperFlags */
-    NULL,                                   /* pSetPixel */
-    NULL,                                   /* pSetPolyFillMode */
-    NULL,                                   /* pSetROP2 */
-    NULL,                                   /* pSetRelAbs */
-    NULL,                                   /* pSetStretchBltMode */
-    NULL,                                   /* pSetTextAlign */
-    NULL,                                   /* pSetTextCharacterExtra */
-    NULL,                                   /* pSetTextColor */
-    NULL,                                   /* pSetTextJustification */
-    NULL,                                   /* pSetViewportExt */
-    NULL,                                   /* pSetViewportOrg */
-    NULL,                                   /* pSetWindowExt */
-    NULL,                                   /* pSetWindowOrg */
-    NULL,                                   /* pSetWorldTransform */
-    NULL,                                   /* pStartDoc */
-    NULL,                                   /* pStartPage */
-    NULL,                                   /* pStretchBlt */
-    NULL,                                   /* pStretchDIBits */
-    NULL,                                   /* pStrokeAndFillPath */
-    NULL,                                   /* pStrokePath */
-    NULL,                                   /* pUnrealizePalette */
-    NULL,                                   /* pWidenPath */
-    NULL,                                   /* pD3DKMTCheckVidPnExclusiveOwnership */
-    NULL,                                   /* pD3DKMTSetVidPnSourceOwner */
-    macdrv_wine_get_wgl_driver,             /* wine_get_wgl_driver */
-    macdrv_wine_get_vulkan_driver,          /* wine_get_vulkan_driver */
-    GDI_PRIORITY_GRAPHICS_DRV               /* priority */
+    .dc_funcs.pCreateCompatibleDC = macdrv_CreateCompatibleDC,
+    .dc_funcs.pCreateDC = macdrv_CreateDC,
+    .dc_funcs.pDeleteDC = macdrv_DeleteDC,
+    .dc_funcs.pGetDeviceCaps = macdrv_GetDeviceCaps,
+    .dc_funcs.pGetDeviceGammaRamp = macdrv_GetDeviceGammaRamp,
+    .dc_funcs.pSetDeviceGammaRamp = macdrv_SetDeviceGammaRamp,
+    .dc_funcs.priority = GDI_PRIORITY_GRAPHICS_DRV,
+
+    .pActivateKeyboardLayout = macdrv_ActivateKeyboardLayout,
+    .pBeep = macdrv_Beep,
+    .pChangeDisplaySettingsEx = macdrv_ChangeDisplaySettingsEx,
+    .pClipCursor = macdrv_ClipCursor,
+    .pCreateDesktopWindow = macdrv_CreateDesktopWindow,
+    .pCreateWindow = macdrv_CreateWindow,
+    .pDestroyCursorIcon = macdrv_DestroyCursorIcon,
+    .pDestroyWindow = macdrv_DestroyWindow,
+    .pEnumDisplaySettingsEx = macdrv_EnumDisplaySettingsEx,
+    .pUpdateDisplayDevices = macdrv_UpdateDisplayDevices,
+    .pGetCursorPos = macdrv_GetCursorPos,
+    .pGetKeyboardLayoutList = macdrv_GetKeyboardLayoutList,
+    .pGetKeyNameText = macdrv_GetKeyNameText,
+    .pMapVirtualKeyEx = macdrv_MapVirtualKeyEx,
+    .pMsgWaitForMultipleObjectsEx = macdrv_MsgWaitForMultipleObjectsEx,
+    .pRegisterHotKey = macdrv_RegisterHotKey,
+    .pSetCapture = macdrv_SetCapture,
+    .pSetCursor = macdrv_SetCursor,
+    .pSetCursorPos = macdrv_SetCursorPos,
+    .pSetFocus = macdrv_SetFocus,
+    .pSetLayeredWindowAttributes = macdrv_SetLayeredWindowAttributes,
+    .pSetParent = macdrv_SetParent,
+    .pSetWindowRgn = macdrv_SetWindowRgn,
+    .pSetWindowStyle = macdrv_SetWindowStyle,
+    .pSetWindowText = macdrv_SetWindowText,
+    .pShowWindow = macdrv_ShowWindow,
+    .pSysCommand =macdrv_SysCommand,
+    .pSystemParametersInfo = macdrv_SystemParametersInfo,
+    .pThreadDetach = macdrv_ThreadDetach,
+    .pToUnicodeEx = macdrv_ToUnicodeEx,
+    .pUnregisterHotKey = macdrv_UnregisterHotKey,
+    .pUpdateClipboard = macdrv_UpdateClipboard,
+    .pUpdateLayeredWindow = macdrv_UpdateLayeredWindow,
+    .pVkKeyScanEx = macdrv_VkKeyScanEx,
+    .pWindowMessage = macdrv_WindowMessage,
+    .pWindowPosChanged = macdrv_WindowPosChanged,
+    .pWindowPosChanging = macdrv_WindowPosChanging,
+    .pwine_get_vulkan_driver = macdrv_wine_get_vulkan_driver,
+    .pwine_get_wgl_driver = macdrv_wine_get_wgl_driver,
 };
 
 
-/******************************************************************************
- *              macdrv_get_gdi_driver
- */
-const struct gdi_dc_funcs * CDECL macdrv_get_gdi_driver(unsigned int version)
+void init_user_driver(void)
 {
-    if (version != WINE_GDI_DRIVER_VERSION)
-    {
-        ERR("version mismatch, gdi32 wants %u but winemac has %u\n", version, WINE_GDI_DRIVER_VERSION);
-        return NULL;
-    }
-    return &macdrv_funcs;
+    __wine_set_user_driver( &macdrv_funcs, WINE_GDI_DRIVER_VERSION );
 }

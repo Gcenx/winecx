@@ -19,13 +19,9 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 #include <string.h>
 #include <ctype.h>
 
@@ -373,9 +369,9 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset)
         }
         case STMT_TYPEDEF:
         {
-            const type_list_t *type_entry;
-            for (type_entry = stmt->u.type_list; type_entry; type_entry = type_entry->next)
-                write_serialize_functions(client, type_entry->type, iface);
+            typeref_t *ref;
+            if (stmt->u.type_list) LIST_FOR_EACH_ENTRY(ref, stmt->u.type_list, typeref_t, entry)
+                write_serialize_functions(client, ref->type, iface);
             break;
         }
         default:
@@ -441,7 +437,7 @@ static void write_stubdescriptor(type_t *iface, int expr_eval_routines)
 static void write_clientinterfacedecl(type_t *iface)
 {
     unsigned int ver = get_attrv(iface->attrs, ATTR_VERSION);
-    const UUID *uuid = get_attrp(iface->attrs, ATTR_UUID);
+    const struct uuid *uuid = get_attrp(iface->attrs, ATTR_UUID);
     const str_list_t *endpoints = get_attrp(iface->attrs, ATTR_ENDPOINT);
 
     if (endpoints) write_endpoints( client, iface->name, endpoints );
@@ -539,11 +535,11 @@ static void write_client_ifaces(const statement_list_t *stmts, int expr_eval_rou
                 }
                 if (stmt2->type == STMT_TYPEDEF)
                 {
-                    const type_list_t *type_entry;
-                    for (type_entry = stmt2->u.type_list; type_entry; type_entry = type_entry->next)
+                    typeref_t *ref;
+                    if (stmt2->u.type_list) LIST_FOR_EACH_ENTRY(ref, stmt2->u.type_list, typeref_t, entry)
                     {
-                        if (is_attr(type_entry->type->attrs, ATTR_ENCODE)
-                            || is_attr(type_entry->type->attrs, ATTR_DECODE))
+                        if (is_attr(ref->type->attrs, ATTR_ENCODE)
+                            || is_attr(ref->type->attrs, ATTR_DECODE))
                         {
                             needs_stub = 1;
                             break;

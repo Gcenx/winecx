@@ -19,7 +19,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -27,10 +26,6 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
-#ifdef HAVE_SYS_TYPES_H
-# include <sys/types.h>
-#endif
-#include <fcntl.h>
 
 #include "build.h"
 
@@ -40,6 +35,7 @@ typedef unsigned short WCHAR;
 struct string_id
 {
     WCHAR *str;  /* ptr to Unicode string */
+    unsigned int len;    /* len in characters */
     unsigned short id;   /* integer id if str is NULL */
 };
 
@@ -97,19 +93,6 @@ static inline struct resource *add_resource( DLLSPEC *spec )
     return &spec->resources[spec->nb_resources++];
 }
 
-static inline unsigned int strlenW( const WCHAR *str )
-{
-    const WCHAR *s = str;
-    while (*s) s++;
-    return s - str;
-}
-
-static inline int strcmpW( const WCHAR *str1, const WCHAR *str2 )
-{
-    while (*str1 && (*str1 == *str2)) { str1++; str2++; }
-    return *str1 - *str2;
-}
-
 static struct res_name *add_name( struct res_type *type, struct resource *res )
 {
     struct res_name *name;
@@ -137,8 +120,11 @@ static struct res_type *add_type( struct res_tree *tree, struct resource *res )
 /* get a string from the current resource file */
 static void get_string( struct string_id *str )
 {
+    unsigned int i = 0;
+    size_t start_pos = input_buffer_pos;
     WCHAR wc = get_word();
 
+    str->len = 0;
     if (wc == 0xffff)
     {
         str->str = NULL;
@@ -146,10 +132,11 @@ static void get_string( struct string_id *str )
     }
     else
     {
-        WCHAR *p = xmalloc( (strlenW( (const WCHAR *)(input_buffer + input_buffer_pos) - 1) + 1) * sizeof(WCHAR) );
-        str->str = p;
-        str->id  = 0;
-        if ((*p++ = wc)) while ((*p++ = get_word()));
+        input_buffer_pos = start_pos;
+        while (get_word()) str->len++;
+        str->str = xmalloc( str->len * sizeof(WCHAR) );
+        input_buffer_pos = start_pos;
+        while ((wc = get_word())) str->str[i++] = wc;
     }
 }
 
@@ -158,8 +145,8 @@ static void put_string( const struct string_id *str )
 {
     if (str->str)
     {
-        const WCHAR *p = str->str;
-        while (*p) put_word( *p++ );
+        unsigned int i;
+        for (i = 0; i < str->len; i++) put_word( str->str[i] );
         put_word( 0 );
     }
     else
@@ -258,13 +245,18 @@ int load_res32_file( const char *name, DLLSPEC *spec )
 /* compare two unicode strings/ids */
 static int cmp_string( const struct string_id *str1, const struct string_id *str2 )
 {
+    unsigned int i;
+
     if (!str1->str)
     {
         if (!str2->str) return str1->id - str2->id;
         return 1;  /* an id compares larger than a string */
     }
     if (!str2->str) return -1;
-    return strcmpW( str1->str, str2->str );
+
+    for (i = 0; i < str1->len && i < str2->len; i++)
+        if (str1->str[i] != str2->str[i]) return str1->str[i] - str2->str[i];
+    return str1->len - str2->len;
 }
 
 /* compare two resources for sorting the resource directory */
@@ -283,11 +275,13 @@ static int cmp_res( const void *ptr1, const void *ptr2 )
 
 static char *format_res_string( const struct string_id *str )
 {
-    int i, len = str->str ? strlenW(str->str) + 1 : 5;
-    char *ret = xmalloc( len );
+    unsigned int i;
+    char *ret;
 
-    if (!str->str) sprintf( ret, "%04x", str->id );
-    else for (i = 0; i < len; i++) ret[i] = str->str[i];  /* dumb W->A conversion */
+    if (!str->str) return strmake( "#%04x", str->id );
+    ret = xmalloc( str->len + 1 );
+    for (i = 0; i < str->len; i++) ret[i] = str->str[i];  /* dumb W->A conversion */
+    ret[i] = 0;
     return ret;
 }
 
@@ -370,7 +364,7 @@ static struct res_tree *build_resource_tree( DLLSPEC *spec, unsigned int *dir_si
         if (type->type->str)
         {
             type->name_offset = offset | 0x80000000;
-            offset += (strlenW(type->type->str)+1) * sizeof(WCHAR);
+            offset += (type->type->len + 1) * sizeof(WCHAR);
         }
         else type->name_offset = type->type->id;
 
@@ -379,7 +373,7 @@ static struct res_tree *build_resource_tree( DLLSPEC *spec, unsigned int *dir_si
             if (name->name->str)
             {
                 name->name_offset = offset | 0x80000000;
-                offset += (strlenW(name->name->str)+1) * sizeof(WCHAR);
+                offset += (name->name->len + 1) * sizeof(WCHAR);
             }
             else name->name_offset = name->name->id;
             for (k = 0, res = name->res; k < name->nb_languages; k++, res++)
@@ -404,13 +398,13 @@ static void free_resource_tree( struct res_tree *tree )
 }
 
 /* output a Unicode string */
-static void output_string( const WCHAR *name )
+static void output_string( const struct string_id *str )
 {
-    int i, len = strlenW(name);
-    output( "\t.short 0x%04x", len );
-    for (i = 0; i < len; i++) output( ",0x%04x", name[i] );
+    unsigned int i;
+    output( "\t.short 0x%04x", str->len );
+    for (i = 0; i < str->len; i++) output( ",0x%04x", str->str[i] );
     output( " /* " );
-    for (i = 0; i < len; i++) output( "%c", isprint((char)name[i]) ? (char)name[i] : '?' );
+    for (i = 0; i < str->len; i++) output( "%c", isprint((char)str->str[i]) ? (char)str->str[i] : '?' );
     output( " */\n" );
 }
 
@@ -485,9 +479,9 @@ void output_resources( DLLSPEC *spec )
 
     for (i = 0, type = tree->types; i < tree->nb_types; i++, type++)
     {
-        if (type->type->str) output_string( type->type->str );
+        if (type->type->str) output_string( type->type );
         for (n = 0, name = type->names; n < type->nb_names; n++, name++)
-            if (name->name->str) output_string( name->name->str );
+            if (name->name->str) output_string( name->name );
     }
 
     /* resource data */
@@ -499,7 +493,7 @@ void output_resources( DLLSPEC *spec )
         dump_res_data( res );
     }
 
-    if (target_platform != PLATFORM_WINDOWS)
+    if (!is_pe())
     {
         output( ".L__wine_spec_resources_end:\n" );
         output( "\t.byte 0\n" );
@@ -508,11 +502,12 @@ void output_resources( DLLSPEC *spec )
 }
 
 /* output a Unicode string in binary format */
-static void output_bin_string( const WCHAR *name )
+static void output_bin_string( const struct string_id *str )
 {
-    int i, len = strlenW(name);
-    put_word( len );
-    for (i = 0; i < len; i++) put_word( name[i] );
+    unsigned int i;
+
+    put_word( str->len );
+    for (i = 0; i < str->len; i++) put_word( str->str[i] );
 }
 
 /* output a resource directory in binary format */
@@ -593,9 +588,9 @@ void output_bin_resources( DLLSPEC *spec, unsigned int start_rva )
 
     for (i = 0, type = tree->types; i < tree->nb_types; i++, type++)
     {
-        if (type->type->str) output_bin_string( type->type->str );
+        if (type->type->str) output_bin_string( type->type );
         for (n = 0, name = type->names; n < type->nb_names; n++, name++)
-            if (name->name->str) output_bin_string( name->name->str );
+            if (name->name->str) output_bin_string( name->name );
     }
 
     /* resource data */
@@ -615,10 +610,10 @@ static unsigned int get_resource_header_size( const struct resource *res )
     unsigned int size  = 5 * sizeof(unsigned int) + 2 * sizeof(unsigned short);
 
     if (!res->type.str) size += 2 * sizeof(unsigned short);
-    else size += (strlenW(res->type.str) + 1) * sizeof(WCHAR);
+    else size += (res->type.len + 1) * sizeof(WCHAR);
 
     if (!res->name.str) size += 2 * sizeof(unsigned short);
-    else size += (strlenW(res->name.str) + 1) * sizeof(WCHAR);
+    else size += (res->name.len + 1) * sizeof(WCHAR);
 
     return size;
 }
@@ -628,8 +623,6 @@ void output_res_o_file( DLLSPEC *spec )
 {
     unsigned int i;
     char *res_file = NULL;
-    const char *format;
-    int fd;
     struct strarray args;
 
     if (!spec->nb_resources) fatal_error( "--resources mode needs at least one resource file as input\n" );
@@ -674,34 +667,31 @@ void output_res_o_file( DLLSPEC *spec )
     /* if the output file name is a .res too, don't run the results through windres */
     if (strendswith( output_file_name, ".res"))
     {
-        flush_output_buffer();
+        flush_output_buffer( output_file_name );
         return;
     }
 
     res_file = get_temp_file_name( output_file_name, ".res" );
-    if ((fd = open( res_file, O_WRONLY|O_CREAT|O_TRUNC|O_BINARY, 0600 )) == -1)
-        fatal_error( "Cannot create %s\n", res_file );
-    if (write( fd, output_buffer, output_buffer_pos ) != output_buffer_pos)
-        fatal_error( "Error writing to %s\n", res_file );
-    close( fd );
-    free( output_buffer );
+    flush_output_buffer( res_file );
 
     args = find_tool( "windres", NULL );
-    switch (target_cpu)
+    strarray_add( &args, "-i" );
+    strarray_add( &args, res_file );
+    strarray_add( &args, "-o" );
+    strarray_add( &args, output_file_name );
+    switch (target.cpu)
     {
-        case CPU_x86:
+        case CPU_i386:
         case CPU_x86_32on64:
-            format = "pe-i386";
+            strarray_add( &args, "-F" );
+            strarray_add( &args, "pe-i386" );
             break;
         case CPU_x86_64:
-            format = "pe-x86-64";
+            strarray_add( &args, "-F" );
+            strarray_add( &args, "pe-x86-64" );
             break;
         default:
-            format = NULL;
             break;
     }
-    strarray_add( &args, "-i", res_file, "-o", output_file_name, NULL );
-    if (format)
-        strarray_add( &args, "-F", format, NULL );
     spawn( args );
 }

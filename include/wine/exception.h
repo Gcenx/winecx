@@ -24,6 +24,7 @@
 #include "wine/winheader_enter.h"
 
 #include <windef.h>
+#include <winternl.h>
 #include <excpt.h>
 
 #ifdef __cplusplus
@@ -95,7 +96,7 @@ extern "C" {
 
 #ifdef __i386__
 typedef struct { int reg[16]; } __wine_jmp_buf;
-#elif defined(__x86_64__) || defined(__i386_on_x86_64__)
+#elif defined(__x86_64__)
 typedef struct { DECLSPEC_ALIGN(16) struct { unsigned __int64 Part[2]; } reg[16]; } __wine_jmp_buf;
 #elif defined(__arm__)
 typedef struct { int reg[28]; } __wine_jmp_buf;
@@ -109,7 +110,7 @@ extern int __cdecl __attribute__ ((__nothrow__,__returns_twice__)) __wine_setjmp
                                                    EXCEPTION_REGISTRATION_RECORD *frame ) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN __cdecl __wine_longjmp( __wine_jmp_buf *buf, int retval ) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN __cdecl __wine_rtl_unwind( EXCEPTION_REGISTRATION_RECORD* frame, EXCEPTION_RECORD *record,
-                                                         void (__cdecl *target)(void) ) DECLSPEC_HIDDEN;
+                                                         void (*target)(void) ) DECLSPEC_HIDDEN;
 extern DWORD __cdecl __wine_exception_handler( EXCEPTION_RECORD *record,
                                                EXCEPTION_REGISTRATION_RECORD *frame,
                                                CONTEXT *context,
@@ -247,7 +248,7 @@ typedef struct __tagWINE_FRAME
 
 static inline EXCEPTION_REGISTRATION_RECORD *__wine_push_frame( EXCEPTION_REGISTRATION_RECORD *frame )
 {
-#if defined(__GNUC__) && (defined(__i386__) || defined(__i386_on_x86_64__))
+#if defined(__GNUC__) && defined(__i386__)
     EXCEPTION_REGISTRATION_RECORD *prev;
     __asm__ __volatile__(".byte 0x64\n\tmovl (0),%0"
                          "\n\tmovl %0,(%1)"
@@ -264,7 +265,7 @@ static inline EXCEPTION_REGISTRATION_RECORD *__wine_push_frame( EXCEPTION_REGIST
 
 static inline EXCEPTION_REGISTRATION_RECORD *__wine_pop_frame( EXCEPTION_REGISTRATION_RECORD *frame )
 {
-#if defined(__GNUC__) && (defined(__i386__) || defined(__i386_on_x86_64__))
+#if defined(__GNUC__) && defined(__i386__)
     __asm__ __volatile__(".byte 0x64\n\tmovl %0,(0)"
                          : : "r" (frame->Prev) : "memory" );
     return frame->Prev;
@@ -278,7 +279,7 @@ static inline EXCEPTION_REGISTRATION_RECORD *__wine_pop_frame( EXCEPTION_REGISTR
 
 static inline EXCEPTION_REGISTRATION_RECORD *__wine_get_frame(void)
 {
-#if defined(__GNUC__) && (defined(__i386__) || defined(__i386_on_x86_64__))
+#if defined(__GNUC__) && defined(__i386__)
     EXCEPTION_REGISTRATION_RECORD *ret;
     __asm__ __volatile__(".byte 0x64\n\tmovl (0),%0" : "=r" (ret) );
     return ret;
@@ -287,22 +288,6 @@ static inline EXCEPTION_REGISTRATION_RECORD *__wine_get_frame(void)
     return teb->ExceptionList;
 #endif
 }
-
-/* Exception handling flags - from OS/2 2.0 exception handling */
-
-/* Win32 seems to use the same flags as ExceptionFlags in an EXCEPTION_RECORD */
-#define EH_NONCONTINUABLE   0x01
-#define EH_UNWINDING        0x02
-#define EH_EXIT_UNWIND      0x04
-#define EH_STACK_INVALID    0x08
-#define EH_NESTED_CALL      0x10
-#define EH_TARGET_UNWIND    0x20
-#define EH_COLLIDED_UNWIND  0x40
-
-/* Wine-specific exceptions codes */
-
-#define EXCEPTION_WINE_STUB       0x80000100  /* stub entry point called */
-#define EXCEPTION_WINE_ASSERTION  0x80000101  /* assertion failed */
 
 #ifdef __cplusplus
 }

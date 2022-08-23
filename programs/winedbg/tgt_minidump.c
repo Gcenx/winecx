@@ -21,9 +21,6 @@
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -59,7 +56,7 @@ void minidump_write(const char* file, const EXCEPTION_RECORD* rec)
     MINIDUMP_EXCEPTION_INFORMATION      mei;
     EXCEPTION_POINTERS                  ep;
 
-#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
+#ifdef __x86_64__
     if (dbg_curr_process->be_cpu->machine != IMAGE_FILE_MACHINE_AMD64)
     {
         FIXME("Cannot write minidump for 32-bit process using 64-bit winedbg\n");
@@ -100,8 +97,8 @@ static inline struct tgt_process_minidump_data* private_data(struct dbg_process*
     return pcs->pio_data;
 }
 
-static BOOL tgt_process_minidump_read(HANDLE hProcess, const void* HOSTPTR addr,
-                                      void* buffer, SIZE_T len, SIZE_T* HOSTPTR rlen)
+static BOOL tgt_process_minidump_read(HANDLE hProcess, const void* addr,
+                                      void* buffer, SIZE_T len, SIZE_T* rlen)
 {
     void*               stream;
 
@@ -121,11 +118,11 @@ static BOOL tgt_process_minidump_read(HANDLE hProcess, const void* HOSTPTR addr,
          */
         for (i = 0; i < mml->NumberOfMemoryRanges; i++, mmd++)
         {
-            if (get_addr64(mmd->StartOfMemoryRange) <= (ULONG_HOSTPTR)addr &&
-                (ULONG_HOSTPTR)addr < get_addr64(mmd->StartOfMemoryRange) + mmd->Memory.DataSize)
+            if (get_addr64(mmd->StartOfMemoryRange) <= (DWORD_PTR)addr &&
+                (DWORD_PTR)addr < get_addr64(mmd->StartOfMemoryRange) + mmd->Memory.DataSize)
             {
                 ilen = min(len,
-                           get_addr64(mmd->StartOfMemoryRange) + mmd->Memory.DataSize - (ULONG_HOSTPTR)addr);
+                           get_addr64(mmd->StartOfMemoryRange) + mmd->Memory.DataSize - (DWORD_PTR)addr);
                 if (ilen == len) /* whole range is matched */
                 {
                     found = i;
@@ -143,7 +140,7 @@ static BOOL tgt_process_minidump_read(HANDLE hProcess, const void* HOSTPTR addr,
         {
             mmd = &mml->MemoryRanges[found];
             memcpy(buffer,
-                   (char*)private_data(dbg_curr_process)->mapping + mmd->Memory.Rva + (ULONG_HOSTPTR)addr - get_addr64(mmd->StartOfMemoryRange),
+                   (char*)private_data(dbg_curr_process)->mapping + mmd->Memory.Rva + (DWORD_PTR)addr - get_addr64(mmd->StartOfMemoryRange),
                    prev_len);
             if (rlen) *rlen = prev_len;
             return TRUE;
@@ -153,7 +150,7 @@ static BOOL tgt_process_minidump_read(HANDLE hProcess, const void* HOSTPTR addr,
      * However, we need to check who's to blame, this code or the current 
      * dbghelp!StackWalk implementation
      */
-    if ((ULONG_HOSTPTR)addr < 32)
+    if ((DWORD_PTR)addr < 32)
     {
         memset(buffer, 0, len); 
         if (rlen) *rlen = len;
@@ -162,7 +159,7 @@ static BOOL tgt_process_minidump_read(HANDLE hProcess, const void* HOSTPTR addr,
     return FALSE;
 }
 
-static BOOL tgt_process_minidump_write(HANDLE hProcess, void* HOSTPTR addr,
+static BOOL tgt_process_minidump_write(HANDLE hProcess, void* addr,
                                        const void* buffer, SIZE_T len, SIZE_T* wlen)
 {
     return FALSE;
@@ -207,7 +204,6 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
     WCHAR                       exec_name[1024];
     WCHAR                       nameW[1024];
     unsigned                    len;
-    static const WCHAR          default_exec_name[] = {'<','m','i','n','i','d','u','m','p','-','e','x','e','c','>',0};
 
     /* fetch PID */
     if (MiniDumpReadDumpStream(data->mapping, MiscInfoStream, NULL, &stream, NULL))
@@ -218,7 +214,8 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
     }
 
     /* fetch executable name (it's normally the first one in module list) */
-    lstrcpyW(exec_name, default_exec_name);
+    lstrcpyW(exec_name, L"<minidump-exec>");
+
     if (MiniDumpReadDumpStream(data->mapping, ModuleListStream, NULL, &stream, NULL))
     {
         mml = stream;
@@ -248,7 +245,7 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
         const char *str;
         char tmp[128];
 
-        dbg_printf("WineDbg starting on minidump on pid %04x\n", pid);
+        dbg_printf("WineDbg starting on minidump on pid %04lx\n", pid);
         switch (msi->ProcessorArchitecture)
         {
         case PROCESSOR_ARCHITECTURE_UNKNOWN:
@@ -310,8 +307,8 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
             str = "???";
             break;
         }
-        dbg_printf("  %s was running on #%d %s CPU%s",
-                   dbg_W2A(exec_name, -1), msi->u.s.NumberOfProcessors, str,
+        dbg_printf("  %ls was running on #%d %s CPU%s",
+                   exec_name, msi->u.s.NumberOfProcessors, str,
                    msi->u.s.NumberOfProcessors < 2 ? "" : "s");
         switch (msi->MajorVersion)
         {
@@ -382,7 +379,7 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
             break;
         default: str = "???"; break;
         }
-        dbg_printf(" on Windows %s (%u)\n", str, msi->BuildNumber);
+        dbg_printf(" on Windows %s (%lu)\n", str, msi->BuildNumber);
         /* FIXME CSD: msi->CSDVersionRva */
 
         if (sizeof(MINIDUMP_SYSTEM_INFO) + 4 > dir->Location.DataSize &&

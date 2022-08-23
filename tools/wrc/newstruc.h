@@ -42,13 +42,7 @@ res_count_t *new_res_count(void);
 string_t *new_string(void);
 toolbar_item_t *new_toolbar_item(void);
 ani_any_t *new_ani_any(void);
-resource_t *new_resource(enum res_e t, void *res, int memopt, language_t *lan);
-version_t *new_version(DWORD v);
-characts_t *new_characts(DWORD c);
-language_t *new_language(int id, int sub);
-language_t *dup_language(language_t *l);
-version_t *dup_version(version_t *v);
-characts_t *dup_characts(characts_t *c);
+resource_t *new_resource(enum res_e t, void *res, int memopt, language_t lan);
 html_t *new_html(raw_data_t *rd, int *memopt);
 rcdata_t *new_rcdata(raw_data_t *rd, int *memopt);
 font_id_t *new_font_id(int size, string_t *face, int weight, int italic);
@@ -68,6 +62,6 @@ int *new_int(int i);
 stringtable_t *new_stringtable(lvc_t *lvc);
 toolbar_t *new_toolbar(int button_width, int button_Height, toolbar_item_t *items, int nitems);
 style_pair_t *new_style_pair(style_t *style, style_t *exstyle);
-style_t *new_style(DWORD or_mask, DWORD and_mask);
+style_t *new_style(unsigned int or_mask, unsigned int and_mask);
 
 #endif

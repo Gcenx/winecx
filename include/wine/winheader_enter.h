@@ -18,7 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifdef __i386_on_x86_64__
+#if defined(__i386_on_x86_64__) && !defined(WINE_UNIX_LIB)
 #pragma clang default_addr_space(push, ptr32)
 #pragma clang storage_addr_space(push, ptr32)
 #endif

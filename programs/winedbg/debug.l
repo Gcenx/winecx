@@ -19,16 +19,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-%top{
-#ifdef __i386_on_x86_64__
-#pragma clang default_addr_space(default)
-#endif
-}
-
 %option noinput nounput always-interactive 8bit prefix="dbg_"
 
 %{
-#include "config.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
@@ -39,7 +32,7 @@
 
 #undef YY_INPUT
 
-static char* WIN32PTR * WIN32PTR local_lexemes /* = NULL */;
+static char** local_lexemes /* = NULL */;
 static int next_lexeme /* = 0 */;
 static int alloc_lexeme /* = 0 */;
 
@@ -67,53 +60,36 @@ void lexeme_flush(void)
     next_lexeme = 0;
 }
 
-static size_t read_input(const char* WIN32PTR pfx, char* buf, int size)
+/* called with quoted string, unescape all elements inside the quotes */
+static char* unescape_string(const char* str)
 {
-    int len;
-    static char* WIN32PTR last_line = NULL;
-    static size_t last_line_idx = 0;
-
-    /* try first to fetch the remaining of an existing line */
-    if (last_line_idx == 0)
+    size_t len = strlen(str) - 2;
+    char* ret = lexeme_alloc_size(len + 1);
+    char* dst = ret;
+    const char* ptr;
+    for (ptr = str + 1; ptr < str + 1 + len; ptr++)
     {
-        char* WIN32PTR tmp = NULL;
-        /* no remaining chars to be read from last line, grab a brand new line up to '\n' */
-        lexeme_flush();
-        len = input_fetch_entire_line(pfx, &tmp);
-        if (len < 0) return 0;  /* eof */
-
-        /* remove carriage return in newline */
-        if (len >= 2 && tmp[len - 2] == '\r')
+        if (*ptr == '\\')
         {
-            tmp[len - 2] = '\n';
-            tmp[len - 1] = '\0';
-            len--;
-        }
-
-        /* FIXME: should have a pair of buffers, and switch between the two, instead of
-         * reallocating a new one for each line
-         */
-        if (last_line && (len == 0 || (len == 1 && tmp[0] == '\n')))
-        {
-            HeapFree(GetProcessHeap(), 0, tmp);
+            switch (*++ptr)
+            {
+            case 't':  *dst++ = '\t'; break;
+            case 'r':  *dst++ = '\r'; break;
+            case 'n':  *dst++ = '\n'; break;
+            case '\\': *dst++ = '\\'; break;
+            case '"':  *dst++ = '"';  break;
+            default: *dst++ = '\\'; *dst++ = *ptr; /* not handled, don't change */
+            }
         }
         else
-        {
-            HeapFree(GetProcessHeap(), 0, last_line);
-            last_line = tmp;
-        }
+            *dst++ = *ptr;
     }
-
-    len = min(strlen(last_line + last_line_idx), size - 1);
-    memcpy(buf, last_line + last_line_idx, len);
-    buf[len] = '\0';
-    if ((last_line_idx += len) >= strlen(last_line))
-        last_line_idx = 0;
-    return len;
+    *dst = '\0';
+    return ret;
 }
 
 #define YY_INPUT(buf,result,max_size) \
-        (result = read_input("Wine-dbg>", buf, max_size))
+        (result = input_lex_read_buffer(buf, max_size))
 
 static int syntax_error;
 %}
@@ -123,8 +99,10 @@ DIGIT	   [0-9]
 HEXDIGIT   [0-9a-fA-F]
 FORMAT     [ubcdgiswxa]
 IDENTIFIER [_a-zA-Z~?][_a-zA-Z0-9~?@]*
+SCOPED_IDENTIFIER [_a-zA-Z~?][_a-zA-Z0-9~?@]*"::"
+MODULE_IDENTIFIER [_a-zA-Z~?\*][_a-zA-Z0-9~?\*@]*"!"
 PATHNAME   [\\/_a-zA-Z0-9\.~@][\\/\-_a-zA-Z0-9\.~@]*
-STRING     \"[^\n"]+\"
+STRING     \"(\\[^\n]|[^\\"\n])*\"
 
 %s FORMAT_EXPECTED
 %s INFO_CMD
@@ -139,12 +117,14 @@ STRING     \"[^\n"]+\"
 
 %x PATH_EXPECTED
 %x ASTRING_EXPECTED
+%x AWORD_EXPECTED
 %x NOPROCESS
 %%
                                         /* set to special state when no process is loaded. */
                                         if (!dbg_num_processes() && YYSTATE == INITIAL) {BEGIN(NOPROCESS);}
 
 <<EOF>>                                 { return tEOF; }
+<*>"#"[^\n]*                            /* Skip comments */
 <*>\n		                        { BEGIN(INITIAL); syntax_error = 0; return tEOL; }
                                         /* Indicates end of command. Reset state. */
 
@@ -157,15 +137,14 @@ STRING     \"[^\n"]+\"
 "<<"					{ return OP_SHL; }
 ">>"					{ return OP_SHR; }
 "->"					{ return OP_DRF; }
-"::"					{ return OP_SCOPE; }
 "["					{ return *yytext; }
 "]"					{ return *yytext; }
 
-"0x"{HEXDIGIT}+      			{ unsigned long temp; sscanf(yytext, "%lx", &temp); dbg_lval.integer = temp; return tNUM; }
-{DIGIT}+             			{ long temp; sscanf(yytext, "%ld", &temp); dbg_lval.integer = temp; return tNUM; }
+"0x"{HEXDIGIT}+      			{ sscanf(yytext, "%I64x", &dbg_lval.integer); return tNUM; }
+{DIGIT}+             			{ sscanf(yytext, "%I64d", &dbg_lval.integer); return tNUM; }
 "'\\''"                                 { dbg_lval.integer = '\''; return tNUM;}
-"'\\0"{OCTDIGIT}*"'"                    { unsigned long temp; sscanf(yytext + 3, "%lo", &temp); dbg_lval.integer = temp; return tNUM;}
-"'\\x"{HEXDIGIT}+"'"                    { unsigned long temp; sscanf(yytext + 3, "%lx", &temp); dbg_lval.integer = temp; return tNUM;}
+"'\\0"{OCTDIGIT}*"'"                    { sscanf(yytext + 3, "%I64o", &dbg_lval.integer); return tNUM;}
+"'\\x"{HEXDIGIT}+"'"                    { sscanf(yytext + 3, "%I64x", &dbg_lval.integer); return tNUM;}
 "'\\"[a-z]"'"                           { dbg_lval.integer = yytext[2] - 'a'; return tNUM;}
 "'"."'"                                 { dbg_lval.integer = yytext[1]; return tNUM;}
 
@@ -176,10 +155,11 @@ STRING     \"[^\n"]+\"
 
 <FORMAT_EXPECTED>"/"{FORMAT}          	{ dbg_lval.integer = (1 << 8) | yytext[1]; return tFORMAT; }
 
-{STRING} 				{ dbg_lval.string = lexeme_alloc(yytext + 1); dbg_lval.string[strlen(dbg_lval.string) - 1] = '\0'; return tSTRING; }
+<*>{STRING}	                        { dbg_lval.string = unescape_string(yytext); return tSTRING;}
 <ASTRING_EXPECTED>[^\n]+                { char* p = yytext; while (*p == ' ' || *p == '\t') p++;
                                           dbg_lval.string = lexeme_alloc(p); return tSTRING; }
-
+<AWORD_EXPECTED>[^ \t\n]+               { char* p = yytext; while (*p == ' ' || *p == '\t') p++;
+                                          dbg_lval.string = lexeme_alloc(p); return tSTRING; }
 <INITIAL,NOPROCESS>info|inf|in		{ BEGIN(INFO_CMD); return tINFO; }
 <INITIAL>up				{ BEGIN(NOCMD); return tUP; }
 <INITIAL>down|dow|do			{ BEGIN(NOCMD); return tDOWN; }
@@ -202,7 +182,7 @@ STRING     \"[^\n"]+\"
 <INITIAL,NOPROCESS>backtrace|backtrac|backtra|backt|back|bac|ba|bt { BEGIN(NOCMD); return tBACKTRACE; }
 <INITIAL,NOPROCESS>where|wher|whe       { BEGIN(NOCMD); return tBACKTRACE; }
 
-<INITIAL>cont|con|co|c   		{ BEGIN(NOCMD); return tCONT; }
+<INITIAL>continue|continu|contin|conti|cont|con|co|c	{ BEGIN(NOCMD); return tCONT; }
 <INITIAL>pass|pas|pa   			{ BEGIN(NOCMD); return tPASS; }
 <INITIAL>condition|conditio|conditi|condit|condi|cond	{ BEGIN(NOCMD); return tCOND; }
 <INITIAL>step|ste|st|s   		{ BEGIN(NOCMD); return tSTEP; }
@@ -223,7 +203,7 @@ STRING     \"[^\n"]+\"
 <INITIAL>watch|watc|wat			{ BEGIN(NOCMD); return tWATCH; }
 <INITIAL>rwatch|rwatc|rwat		{ BEGIN(NOCMD); return tRWATCH; }
 <INITIAL>whatis|whati|what		{ BEGIN(NOCMD); return tWHATIS; }
-<INITIAL,NOPROCESS>run|ru|r     	{ BEGIN(ASTRING_EXPECTED); return tRUN;}
+<INITIAL,NOPROCESS>run|ru|r     	{ BEGIN(AWORD_EXPECTED); return tRUN;}
 <INITIAL>detach|detac|deta|det   	{ BEGIN(NOCMD); return tDETACH; }
 <INITIAL>kill|kil|ki|k                  { BEGIN(NOCMD); return tKILL; }
 <INITIAL,NOPROCESS>maintenance|maint    { BEGIN(MAINT_CMD); return tMAINTENANCE; }
@@ -264,7 +244,7 @@ union					{ return tUNION; }
 enum					{ return tENUM; }
 all                                     { return tALL; }
 
-{IDENTIFIER}				{ dbg_lval.string = lexeme_alloc(yytext); return tIDENTIFIER; }
+{MODULE_IDENTIFIER}?{SCOPED_IDENTIFIER}*{IDENTIFIER}	{ dbg_lval.string = lexeme_alloc(yytext); return tIDENTIFIER; }
 "$"{IDENTIFIER}				{ dbg_lval.string = lexeme_alloc(yytext+1); return tINTVAR; }
 
 <PATH_EXPECTED,PATH_ACCEPTED>{PATHNAME}	{ dbg_lval.string = lexeme_alloc(yytext); return tPATH; }

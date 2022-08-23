@@ -64,6 +64,36 @@ typedef enum _EVT_SUBSCRIBE_NOTIFY_ACTION {
     EvtSubscribeActionDeliver
 } EVT_SUBSCRIBE_NOTIFY_ACTION;
 
+typedef enum _EVT_VARIANT_TYPE {
+    EvtVarTypeNull,
+    EvtVarTypeString,
+    EvtVarTypeAnsiString,
+    EvtVarTypeSByte,
+    EvtVarTypeByte,
+    EvtVarTypeInt16,
+    EvtVarTypeUInt16,
+    EvtVarTypeInt32,
+    EvtVarTypeUInt32,
+    EvtVarTypeInt64,
+    EvtVarTypeUInt64,
+    EvtVarTypeSingle,
+    EvtVarTypeDouble,
+    EvtVarTypeBoolean,
+    EvtVarTypeBinary,
+    EvtVarTypeGuid,
+    EvtVarTypeSizeT,
+    EvtVarTypeFileTime,
+    EvtVarTypeSysTime,
+    EvtVarTypeSid,
+    EvtVarTypeHexInt32,
+    EvtVarTypeHexInt64,
+    EvtVarTypeEvtHandle = 32,
+    EvtVarTypeEvtXml = 35
+} EVT_VARIANT_TYPE;
+
+#define EVT_VARIANT_TYPE_MASK  0x7f
+#define EVT_VARIANT_TYPE_ARRAY 128
+
 typedef struct _EVT_VARIANT {
     union {
         BOOL        BooleanVal;
@@ -116,6 +146,7 @@ typedef struct _EVT_VARIANT {
 
 typedef DWORD (WINAPI *EVT_SUBSCRIBE_CALLBACK)(EVT_SUBSCRIBE_NOTIFY_ACTION Action,
                                                PVOID UserContext, EVT_HANDLE Event);
+BOOL WINAPI EvtClose(EVT_HANDLE);
 BOOL WINAPI EvtExportLog(EVT_HANDLE session, const WCHAR *path, const WCHAR *query,
                          const WCHAR *file, DWORD flags);
 BOOL WINAPI EvtGetChannelConfigProperty(EVT_HANDLE ChannelConfig,
@@ -130,7 +161,7 @@ EVT_HANDLE WINAPI EvtSubscribe(EVT_HANDLE Session, HANDLE SignalEvent, LPCWSTR C
                                LPCWSTR Query, EVT_HANDLE Bookmark, PVOID context,
                                EVT_SUBSCRIBE_CALLBACK Callback, DWORD Flags);
 EVT_HANDLE WINAPI EvtOpenChannelConfig(EVT_HANDLE Session, LPCWSTR ChannelPath, DWORD Flags);
-
+BOOL WINAPI EvtSaveChannelConfig(EVT_HANDLE, DWORD);
 
 #ifdef __cplusplus
 } /* extern "C" */

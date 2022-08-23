@@ -28,13 +28,10 @@
 #include "rpcproxy.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wbemdisp_private.h"
 #include "wbemdisp_classes.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wbemdisp);
-
-static HINSTANCE instance;
 
 static HRESULT WINAPI WinMGMTS_QueryInterface(IParseDisplayName *iface, REFIID riid, void **ppv)
 {
@@ -211,7 +208,7 @@ static HRESULT WINAPI factory_QueryInterface( IClassFactory *iface, REFIID riid,
         *obj = iface;
         return S_OK;
     }
-    FIXME( "interface %s not implemented\n", debugstr_guid(riid) );
+    WARN( "interface %s not implemented\n", debugstr_guid(riid) );
     return E_NOINTERFACE;
 }
 
@@ -262,22 +259,8 @@ static const struct IClassFactoryVtbl factory_vtbl =
 };
 
 static struct factory swbem_locator_cf = { { &factory_vtbl }, SWbemLocator_create };
+static struct factory swbem_namedvalueset_cf = { { &factory_vtbl }, SWbemNamedValueSet_create };
 static struct factory winmgmts_cf = { { &factory_vtbl }, WinMGMTS_create };
-
-BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
-{
-
-    switch (reason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            instance = hinst;
-            DisableThreadLibraryCalls( hinst );
-            break;
-    }
-    return TRUE;
-}
 
 HRESULT WINAPI DllGetClassObject( REFCLSID rclsid, REFIID iid, LPVOID *obj )
 {
@@ -289,32 +272,10 @@ HRESULT WINAPI DllGetClassObject( REFCLSID rclsid, REFIID iid, LPVOID *obj )
         cf = &swbem_locator_cf.IClassFactory_iface;
     else if (IsEqualGUID( rclsid, &CLSID_WinMGMTS ))
         cf = &winmgmts_cf.IClassFactory_iface;
+    else if (IsEqualGUID( rclsid, &CLSID_SWbemNamedValueSet ))
+        cf = &swbem_namedvalueset_cf.IClassFactory_iface;
     else
         return CLASS_E_CLASSNOTAVAILABLE;
 
     return IClassFactory_QueryInterface( cf, iid, obj );
-}
-
-/***********************************************************************
- *      DllCanUnloadNow (WBEMDISP.@)
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
-}
-
-/***********************************************************************
- *      DllRegisterServer (WBEMDISP.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( instance );
-}
-
-/***********************************************************************
- *      DllUnregisterServer (WBEMDISP.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( instance );
 }

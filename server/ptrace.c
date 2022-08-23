@@ -19,7 +19,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -28,14 +27,12 @@
 #include <signal.h>
 #include <stdarg.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #ifdef HAVE_SYS_PTRACE_H
 # include <sys/ptrace.h>
 #endif
 #ifdef HAVE_SYS_PARAM_H
 # include <sys/param.h>
-#endif
-#ifdef HAVE_SYS_WAIT_H
-# include <sys/wait.h>
 #endif
 #ifdef HAVE_SYS_SYSCALL_H
 # include <sys/syscall.h>
@@ -410,10 +407,10 @@ int read_process_memory( struct process *process, client_ptr_t ptr, data_size_t 
 }
 
 /* make sure we can write to the whole address range */
-/* len is the total size (in ints) */
+/* len is the total size (in longs) */
 static int check_process_write_access( struct thread *thread, long *addr, data_size_t len )
 {
-    int page = get_page_size() / sizeof(int);
+    int page = get_page_size() / sizeof(long);
 
     for (;;)
     {
@@ -544,7 +541,7 @@ void get_selector_entry( struct thread *thread, int entry, unsigned int *base,
 
 
 #if defined(linux) && (defined(HAVE_SYS_USER_H) || defined(HAVE_ASM_USER_H)) \
-    && (defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__))
+    && (defined(__i386__) || defined(__x86_64__))
 
 #ifdef HAVE_SYS_USER_H
 #include <sys/user.h>
@@ -571,14 +568,14 @@ void get_thread_context( struct thread *thread, context_t *context, unsigned int
     /* all other regs are handled on the client side */
     assert( flags == SERVER_CTX_DEBUG_REGISTERS );
 
-    if (!suspend_for_ptrace( thread )) return;
-
     if (!(thread->system_regs & SERVER_CTX_DEBUG_REGISTERS))
     {
         /* caller has initialized everything to 0 already, just return */
         context->flags |= SERVER_CTX_DEBUG_REGISTERS;
-        goto done;
+        return;
     }
+
+    if (!suspend_for_ptrace( thread )) return;
 
     for (i = 0; i < 8; i++)
     {
@@ -591,9 +588,9 @@ void get_thread_context( struct thread *thread, context_t *context, unsigned int
             goto done;
         }
     }
-    switch (context->cpu)
+    switch (context->machine)
     {
-    case CPU_x86:
+    case IMAGE_FILE_MACHINE_I386:
         context->debug.i386_regs.dr0 = data[0];
         context->debug.i386_regs.dr1 = data[1];
         context->debug.i386_regs.dr2 = data[2];
@@ -601,7 +598,7 @@ void get_thread_context( struct thread *thread, context_t *context, unsigned int
         context->debug.i386_regs.dr6 = data[6];
         context->debug.i386_regs.dr7 = data[7];
         break;
-    case CPU_x86_64:
+    case IMAGE_FILE_MACHINE_AMD64:
         context->debug.x86_64_regs.dr0 = data[0];
         context->debug.x86_64_regs.dr1 = data[1];
         context->debug.x86_64_regs.dr2 = data[2];
@@ -628,14 +625,10 @@ void set_thread_context( struct thread *thread, const context_t *context, unsign
 
     if (!suspend_for_ptrace( thread )) return;
 
-    /* force all breakpoint lengths to 1, workaround for kernel bug 200965 */
-    ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(7), 0x11110055 );
-
-    switch (context->cpu)
+    switch (context->machine)
     {
-    case CPU_x86:
-        /* Linux 2.6.33+ does DR0-DR3 alignment validation, so it has to know LEN bits first */
-        if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(7), context->debug.i386_regs.dr7 & 0xffff0000 ) == -1) goto error;
+    case IMAGE_FILE_MACHINE_I386:
+        if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(7), 0 ) == -1) goto error;
         if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(0), context->debug.i386_regs.dr0 ) == -1) goto error;
         if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(1), context->debug.i386_regs.dr1 ) == -1) goto error;
         if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(2), context->debug.i386_regs.dr2 ) == -1) goto error;
@@ -646,8 +639,8 @@ void set_thread_context( struct thread *thread, const context_t *context, unsign
         if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(7), context->debug.i386_regs.dr7 ) == -1) goto error;
         thread->system_regs |= SERVER_CTX_DEBUG_REGISTERS;
         break;
-    case CPU_x86_64:
-        if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(7), context->debug.x86_64_regs.dr7 & 0xffff0000 ) == -1) goto error;
+    case IMAGE_FILE_MACHINE_AMD64:
+        if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(7), 0 ) == -1) goto error;
         if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(0), context->debug.x86_64_regs.dr0 ) == -1) goto error;
         if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(1), context->debug.x86_64_regs.dr1 ) == -1) goto error;
         if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(2), context->debug.x86_64_regs.dr2 ) == -1) goto error;

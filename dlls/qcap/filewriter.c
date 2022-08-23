@@ -20,7 +20,7 @@
 
 #include "qcap_private.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(qcap);
+WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
 struct file_writer
 {
@@ -68,26 +68,27 @@ static HRESULT WINAPI file_writer_sink_receive(struct strmbase_sink *iface, IMed
     struct file_writer *filter = impl_from_strmbase_pin(&iface->pin);
     REFERENCE_TIME start, stop;
     LARGE_INTEGER offset;
+    DWORD size, ret_size;
     HRESULT hr;
-    DWORD size;
     BYTE *data;
 
     if ((hr = IMediaSample_GetTime(sample, &start, &stop)) != S_OK)
-        ERR("Failed to get sample time, hr %#x.\n", hr);
+        ERR("Failed to get sample time, hr %#lx.\n", hr);
+    size = stop - start;
 
     if ((hr = IMediaSample_GetPointer(sample, &data)) != S_OK)
-        ERR("Failed to get sample pointer, hr %#x.\n", hr);
+        ERR("Failed to get sample pointer, hr %#lx.\n", hr);
 
     offset.QuadPart = start;
     if (!SetFilePointerEx(filter->file, offset, NULL, FILE_BEGIN)
-            || !WriteFile(filter->file, data, stop - start, &size, NULL))
+            || !WriteFile(filter->file, data, size, &ret_size, NULL))
     {
-        ERR("Failed to write file, error %u.\n", GetLastError());
+        ERR("Failed to write file, error %lu.\n", GetLastError());
         return HRESULT_FROM_WIN32(hr);
     }
 
-    if (size != stop - start)
-        ERR("Short write, %u/%u.\n", size, (DWORD)(stop - start));
+    if (ret_size != size)
+        ERR("Short write, %lu/%lu.\n", ret_size, size);
 
     return S_OK;
 }
@@ -109,14 +110,14 @@ static HRESULT file_writer_sink_eos(struct strmbase_sink *iface)
 {
     struct file_writer *filter = impl_from_strmbase_pin(&iface->pin);
 
-    EnterCriticalSection(&filter->filter.csFilter);
+    EnterCriticalSection(&filter->filter.filter_cs);
 
     if (filter->filter.state == State_Running)
         deliver_ec_complete(filter);
     else
         filter->eos = TRUE;
 
-    LeaveCriticalSection(&filter->filter.csFilter);
+    LeaveCriticalSection(&filter->filter.filter_cs);
     return S_OK;
 }
 
@@ -175,7 +176,7 @@ static HRESULT file_writer_init_stream(struct strmbase_filter *iface)
     if ((file = CreateFileW(filter->filename, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
             NULL, CREATE_ALWAYS, 0, NULL)) == INVALID_HANDLE_VALUE)
     {
-        ERR("Failed to create %s, error %u.\n", debugstr_w(filter->filename), GetLastError());
+        ERR("Failed to create %s, error %lu.\n", debugstr_w(filter->filename), GetLastError());
         return HRESULT_FROM_WIN32(GetLastError());
     }
     filter->file = file;

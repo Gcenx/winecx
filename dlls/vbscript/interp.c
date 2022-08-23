@@ -134,7 +134,8 @@ static HRESULT lookup_identifier(exec_ctx_t *ctx, BSTR name, vbdisp_invoke_type_
     DISPID id;
     HRESULT hres;
 
-    if((ctx->func->type == FUNC_FUNCTION || ctx->func->type == FUNC_PROPGET)
+    if(invoke_type != VBDISP_CALLGET
+       && (ctx->func->type == FUNC_FUNCTION || ctx->func->type == FUNC_PROPGET)
        && !wcsicmp(name, ctx->func->name)) {
         ref->type = REF_VAR;
         ref->u.v = &ctx->ret_val;
@@ -416,6 +417,7 @@ static int stack_pop_bool(exec_ctx_t *ctx, BOOL *b)
 {
     variant_val_t val;
     HRESULT hres;
+    VARIANT_BOOL vb;
 
     hres = stack_pop_val(ctx, &val);
     if(FAILED(hres))
@@ -435,6 +437,12 @@ static int stack_pop_bool(exec_ctx_t *ctx, BOOL *b)
         break;
     case VT_I4:
         *b = V_I4(val.v);
+        break;
+    case VT_BSTR:
+        hres = VarBoolFromStr(V_BSTR(val.v), ctx->script->lcid, 0, &vb);
+        if(FAILED(hres))
+            return hres;
+        *b=vb;
         break;
     default:
         FIXME("unsupported for %s\n", debugstr_variant(val.v));
@@ -555,7 +563,7 @@ static HRESULT array_access(exec_ctx_t *ctx, SAFEARRAY *array, DISPPARAMS *dp, V
     }
 
     for(i=0; i<argc; i++) {
-        hres = to_int(get_arg(dp, i), indices+i);
+        hres = to_int(get_arg(dp, i), (int *)(indices+i));
         if(FAILED(hres)) {
             heap_free(indices);
             SafeArrayUnlock(array);
@@ -615,10 +623,8 @@ static HRESULT variant_call(exec_ctx_t *ctx, VARIANT *v, unsigned arg_cnt, VARIA
     return S_OK;
 }
 
-static HRESULT do_icall(exec_ctx_t *ctx, VARIANT *res)
+static HRESULT do_icall(exec_ctx_t *ctx, VARIANT *res, BSTR identifier, unsigned arg_cnt)
 {
-    BSTR identifier = ctx->instr->arg1.bstr;
-    const unsigned arg_cnt = ctx->instr->arg2.uint;
     DISPPARAMS dp;
     ref_t ref;
     HRESULT hres;
@@ -687,12 +693,14 @@ static HRESULT do_icall(exec_ctx_t *ctx, VARIANT *res)
 
 static HRESULT interp_icall(exec_ctx_t *ctx)
 {
+    BSTR identifier = ctx->instr->arg1.bstr;
+    const unsigned arg_cnt = ctx->instr->arg2.uint;
     VARIANT v;
     HRESULT hres;
 
     TRACE("\n");
 
-    hres = do_icall(ctx, &v);
+    hres = do_icall(ctx, &v, identifier, arg_cnt);
     if(FAILED(hres))
         return hres;
 
@@ -701,8 +709,12 @@ static HRESULT interp_icall(exec_ctx_t *ctx)
 
 static HRESULT interp_icallv(exec_ctx_t *ctx)
 {
+    BSTR identifier = ctx->instr->arg1.bstr;
+    const unsigned arg_cnt = ctx->instr->arg2.uint;
+
     TRACE("\n");
-    return do_icall(ctx, NULL);
+
+    return do_icall(ctx, NULL, identifier, arg_cnt);
 }
 
 static HRESULT interp_vcall(exec_ctx_t *ctx)
@@ -786,6 +798,28 @@ static HRESULT interp_mcallv(exec_ctx_t *ctx)
     TRACE("\n");
 
     return do_mcall(ctx, NULL);
+}
+
+static HRESULT interp_ident(exec_ctx_t *ctx)
+{
+    BSTR identifier = ctx->instr->arg1.bstr;
+    VARIANT v;
+    HRESULT hres;
+
+    TRACE("%s\n", debugstr_w(identifier));
+
+    if((ctx->func->type == FUNC_FUNCTION || ctx->func->type == FUNC_PROPGET)
+       && !wcsicmp(identifier, ctx->func->name)) {
+        V_VT(&v) = VT_BYREF|VT_VARIANT;
+        V_BYREF(&v) = &ctx->ret_val;
+        return stack_push(ctx, &v);
+    }
+
+    hres = do_icall(ctx, &v, identifier, 0);
+    if(FAILED(hres))
+        return hres;
+
+    return stack_push(ctx, &v);
 }
 
 static HRESULT assign_value(exec_ctx_t *ctx, VARIANT *dst, VARIANT *src, WORD flags)
@@ -1189,7 +1223,7 @@ static HRESULT interp_dim(exec_ctx_t *ctx)
 
         hres = lookup_identifier(ctx, ident, VBDISP_LET, &ref);
         if(FAILED(hres)) {
-            FIXME("lookup %s failed: %08x\n", debugstr_w(ident), hres);
+            FIXME("lookup %s failed: %08lx\n", debugstr_w(ident), hres);
             return hres;
         }
 
@@ -1258,7 +1292,7 @@ static HRESULT interp_redim(exec_ctx_t *ctx)
 
     hres = lookup_identifier(ctx, identifier, VBDISP_LET, &ref);
     if(FAILED(hres)) {
-        FIXME("lookup %s failed: %08x\n", debugstr_w(identifier), hres);
+        FIXME("lookup %s failed: %08lx\n", debugstr_w(identifier), hres);
         return hres;
     }
 
@@ -1298,7 +1332,7 @@ static HRESULT interp_redim_preserve(exec_ctx_t *ctx)
 
     hres = lookup_identifier(ctx, identifier, VBDISP_LET, &ref);
     if(FAILED(hres)) {
-        FIXME("lookup %s failed: %08x\n", debugstr_w(identifier), hres);
+        FIXME("lookup %s failed: %08lx\n", debugstr_w(identifier), hres);
         return hres;
     }
 
@@ -1333,7 +1367,7 @@ static HRESULT interp_redim_preserve(exec_ctx_t *ctx)
         /* can resize the last dimensions (if others match */
         for(i = 0; i+1 < dim_cnt; ++i) {
             if(array->rgsabound[array->cDims - 1 - i].cElements != bounds[i].cElements) {
-                TRACE("Can't resize %s, bound[%d] %d != %d\n", debugstr_w(identifier), i, array->rgsabound[i].cElements, bounds[i].cElements);
+                TRACE("Can't resize %s, bound[%d] %ld != %ld\n", debugstr_w(identifier), i, array->rgsabound[i].cElements, bounds[i].cElements);
                 return MAKE_VBSERROR(VBSE_OUT_OF_BOUNDS);
             }
         }
@@ -1414,7 +1448,7 @@ static HRESULT interp_newenum(exec_ctx_t *ctx)
         hres = IUnknown_QueryInterface(V_UNKNOWN(&iterv), &IID_IEnumVARIANT, (void**)&iter);
         IUnknown_Release(V_UNKNOWN(&iterv));
         if(FAILED(hres)) {
-            FIXME("Could not get IEnumVARIANT iface: %08x\n", hres);
+            FIXME("Could not get IEnumVARIANT iface: %08lx\n", hres);
             return hres;
         }
 
@@ -1637,12 +1671,25 @@ static HRESULT interp_string(exec_ctx_t *ctx)
     return stack_push(ctx, &v);
 }
 
+static HRESULT interp_date(exec_ctx_t *ctx)
+{
+    const DATE *d = ctx->instr->arg1.date;
+    VARIANT v;
+
+    TRACE("%lf\n",*d);
+
+    V_VT(&v) = VT_DATE;
+    V_DATE(&v) = *d;
+
+    return stack_push(ctx, &v);
+}
+
 static HRESULT interp_int(exec_ctx_t *ctx)
 {
     const LONG arg = ctx->instr->arg1.lng;
     VARIANT v;
 
-    TRACE("%d\n", arg);
+    TRACE("%ld\n", arg);
 
     if(arg == (INT16)arg) {
         V_VT(&v) = VT_I2;
@@ -2454,7 +2501,7 @@ HRESULT exec_script(script_ctx_t *ctx, BOOL extern_caller, function_t *func, vbd
             if(exec.resume_next) {
                 unsigned stack_off;
 
-                WARN("Failed %08x in resume next mode\n", hres);
+                WARN("Failed %08lx in resume next mode\n", hres);
 
                 /*
                  * Unwinding here is simple. We need to find the next OP_catch, which contains

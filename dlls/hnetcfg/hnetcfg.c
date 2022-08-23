@@ -32,8 +32,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(hnetcfg);
 
-static HINSTANCE instance;
-
 typedef HRESULT (*fnCreateInstance)( IUnknown *pUnkOuter, LPVOID *ppObj );
 
 typedef struct
@@ -120,13 +118,10 @@ static hnetcfg_cf upnpnat_cf = { { &hnetcfg_cf_vtbl }, IUPnPNAT_create };
 
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID reserved)
 {
-    TRACE("(0x%p, %d, %p)\n", hInstDLL, fdwReason, reserved);
+    TRACE("(0x%p, %ld, %p)\n", hInstDLL, fdwReason, reserved);
 
     switch(fdwReason) {
-        case DLL_WINE_PREATTACH:
-            return FALSE;
         case DLL_PROCESS_ATTACH:
-            instance = hInstDLL;
             DisableThreadLibraryCalls(hInstDLL);
             break;
         case DLL_PROCESS_DETACH:
@@ -166,25 +161,4 @@ HRESULT WINAPI DllGetClassObject( REFCLSID rclsid, REFIID iid, LPVOID *ppv )
 
     if (!cf) return CLASS_E_CLASSNOTAVAILABLE;
     return IClassFactory_QueryInterface( cf, iid, ppv );
-}
-
-HRESULT WINAPI DllCanUnloadNow( void )
-{
-    return S_FALSE;
-}
-
-/***********************************************************************
- *		DllRegisterServer (HNETCFG.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( instance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (HNETCFG.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( instance );
 }
