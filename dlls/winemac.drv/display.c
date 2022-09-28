@@ -564,10 +564,9 @@ static int get_default_bpp(void)
 static BOOL display_mode_is_supported(CGDisplayModeRef display_mode)
 {
     uint32_t io_flags = CGDisplayModeGetIOFlags(display_mode);
-    /* CrossOver Hack #18576: don't check for kDisplayModeSafeFlag for builtin display on Apple Silicon. */
+    /* CrossOver Hack #18576: don't check for kDisplayModeSafeFlag on Apple Silicon. */
     return (io_flags & kDisplayModeValidFlag) &&
-            ((io_flags & kDisplayModeSafeFlag) ||
-             (is_apple_silicon() && CGDisplayIsBuiltin(CGMainDisplayID())));
+            ((io_flags & kDisplayModeSafeFlag) || is_apple_silicon());
 }
 
 

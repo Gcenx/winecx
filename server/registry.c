@@ -2147,7 +2147,10 @@ void flush_registry(void)
 /* determine if the thread is wow64 (32-bit client running on 64-bit prefix) */
 static int is_wow64_thread( struct thread *thread )
 {
-    return (is_machine_64bit( native_machine ) && !is_machine_64bit( thread->process->machine ));
+    /* CX HACK 21221: Apps in 32-bit prefixes running in Wow64 mode should not
+     * be subject to Wow6432Node redirections. */
+    return !wow64_using_32bit_prefix &&
+           (is_machine_64bit( native_machine ) && !is_machine_64bit( thread->process->machine ));
 }
 
 

@@ -2084,8 +2084,9 @@ BOOL WINAPI OpenPrinterW(LPWSTR lpPrinterName,HANDLE *phPrinter, LPPRINTER_DEFAU
     }
 
     /* CrossOver hack for bug 21116 */
-    if (!wcsncmp(lpPrinterName, L"progeCAD PDF Virtual Printer", 28) ||
-            !wcsncmp(lpPrinterName, L"progeCAD Image Virtual Printer", 30))
+    if (lpPrinterName &&
+        (!wcsncmp(lpPrinterName, L"progeCAD PDF Virtual Printer", 28) ||
+            !wcsncmp(lpPrinterName, L"progeCAD Image Virtual Printer", 30)))
     {
         TRACE("Crossover hack: Return error for %s printer\n", debugstr_w(lpPrinterName));
         *phPrinter = NULL;
