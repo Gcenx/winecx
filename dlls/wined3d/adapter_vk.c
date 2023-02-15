@@ -18,8 +18,6 @@
 
 #include "wined3d_private.h"
 
-#include "wine/vulkan_driver.h"
-
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 
 static const struct wined3d_state_entry_template misc_state_template_vk[] =
@@ -214,7 +212,6 @@ static HRESULT hresult_from_vk_result(VkResult vr)
     }
 }
 
-#ifdef USE_WIN32_VULKAN
 static BOOL wined3d_load_vulkan(struct wined3d_vk_info *vk_info)
 {
     struct vulkan_ops *vk_ops = &vk_info->vk_ops;
@@ -244,23 +241,6 @@ static void wined3d_unload_vulkan(struct wined3d_vk_info *vk_info)
         vk_info->vulkan_lib = NULL;
     }
 }
-#else
-static BOOL wined3d_load_vulkan(struct wined3d_vk_info *vk_info)
-{
-    struct vulkan_ops *vk_ops = &vk_info->vk_ops;
-    const struct vulkan_funcs *vk_funcs;
-
-    vk_funcs = __wine_get_vulkan_driver(WINE_VULKAN_DRIVER_VERSION);
-
-    if (!vk_funcs)
-        return FALSE;
-
-    vk_ops->vkGetInstanceProcAddr = (void *)vk_funcs->p_vkGetInstanceProcAddr;
-    return TRUE;
-}
-
-static void wined3d_unload_vulkan(struct wined3d_vk_info *vk_info) {}
-#endif
 
 static void adapter_vk_destroy(struct wined3d_adapter *adapter)
 {
@@ -1084,6 +1064,8 @@ static void adapter_vk_unmap_bo_address(struct wined3d_context *context,
         return;
     bo = wined3d_bo_vk(data->buffer_object);
 
+    assert(bo->b.map_ptr);
+
     if (!bo->b.coherent)
     {
         for (i = 0; i < range_count; ++i)
@@ -1183,9 +1165,12 @@ void adapter_vk_copy_bo_address(struct wined3d_context *context,
         return;
     }
 
+    for (i = 0; i < range_count; ++i)
+        size = max(size, ranges[i].offset + ranges[i].size);
+
     if (src_bo && !(src_bo->memory_type & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
     {
-        if (!(wined3d_context_vk_create_bo(context_vk, src_bo->size, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        if (!(wined3d_context_vk_create_bo(context_vk, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &staging_bo)))
         {
             ERR("Failed to create staging bo.\n");
@@ -1205,7 +1190,7 @@ void adapter_vk_copy_bo_address(struct wined3d_context *context,
     if (dst_bo && (!(dst_bo->memory_type & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) || (!(map_flags & WINED3D_MAP_DISCARD)
             && dst_bo->command_buffer_id > context_vk->completed_command_buffer_id)))
     {
-        if (!(wined3d_context_vk_create_bo(context_vk, dst_bo->size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        if (!(wined3d_context_vk_create_bo(context_vk, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &staging_bo)))
         {
             ERR("Failed to create staging bo.\n");
@@ -1221,9 +1206,6 @@ void adapter_vk_copy_bo_address(struct wined3d_context *context,
 
         return;
     }
-
-    for (i = 0; i < range_count; ++i)
-        size = max(size, ranges[i].offset + ranges[i].size);
 
     src_ptr = adapter_vk_map_bo_address(context, src, size, WINED3D_MAP_READ);
     dst_ptr = adapter_vk_map_bo_address(context, dst, size, map_flags);
@@ -1831,23 +1813,14 @@ static void adapter_vk_draw_primitive(struct wined3d_device *device,
     if (parameters->indirect)
     {
         struct wined3d_bo_vk *bo = wined3d_bo_vk(indirect_vk->b.buffer_object);
-        uint32_t stride, size;
 
         wined3d_context_vk_reference_bo(context_vk, bo);
-        size = indirect_vk->b.resource.size - parameters->u.indirect.offset;
-
         if (parameters->indexed)
-        {
-            stride = sizeof(VkDrawIndexedIndirectCommand);
             VK_CALL(vkCmdDrawIndexedIndirect(vk_command_buffer, bo->vk_buffer,
-                    bo->b.buffer_offset + parameters->u.indirect.offset, size / stride, stride));
-        }
+                    bo->b.buffer_offset + parameters->u.indirect.offset, 1, sizeof(VkDrawIndexedIndirectCommand)));
         else
-        {
-            stride = sizeof(VkDrawIndirectCommand);
             VK_CALL(vkCmdDrawIndirect(vk_command_buffer, bo->vk_buffer,
-                    bo->b.buffer_offset + parameters->u.indirect.offset, size / stride, stride));
-        }
+                    bo->b.buffer_offset + parameters->u.indirect.offset, 1, sizeof(VkDrawIndirectCommand)));
     }
     else
     {

@@ -24,6 +24,7 @@
 #include "ddraw_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ddraw);
+WINE_DECLARE_DEBUG_CHANNEL(fps);
 
 static struct ddraw_surface *unsafe_impl_from_IDirectDrawSurface2(IDirectDrawSurface2 *iface);
 static struct ddraw_surface *unsafe_impl_from_IDirectDrawSurface3(IDirectDrawSurface3 *iface);
@@ -86,6 +87,21 @@ HRESULT ddraw_surface_update_frontbuffer(struct ddraw_surface *surface,
 
     if (w <= 0 || h <= 0)
         return DD_OK;
+
+    if (!read && TRACE_ON(fps))
+    {
+        DWORD time = GetTickCount();
+        ++ddraw->frames;
+
+        /* every 1.5 seconds */
+        if (time - ddraw->prev_frame_time > 1500)
+        {
+            TRACE_(fps)("%p @ approx %.2ffps\n",
+                    ddraw, 1000.0 * ddraw->frames / (time - ddraw->prev_frame_time));
+            ddraw->prev_frame_time = time;
+            ddraw->frames = 0;
+        }
+    }
 
     /* The interaction between ddraw and GDI drawing is not all that well
      * documented, and somewhat arcane. In ddraw exclusive mode, GDI draws
@@ -3787,6 +3803,7 @@ static HRESULT WINAPI ddraw_surface1_IsLost(IDirectDrawSurface *iface)
 static HRESULT WINAPI ddraw_surface7_Restore(IDirectDrawSurface7 *iface)
 {
     struct ddraw_surface *surface = impl_from_IDirectDrawSurface7(iface);
+    struct ddraw_surface *attachment;
     unsigned int i;
 
     TRACE("iface %p.\n", iface);
@@ -3832,10 +3849,17 @@ static HRESULT WINAPI ddraw_surface7_Restore(IDirectDrawSurface7 *iface)
         return DDERR_WRONGMODE;
 
     surface->is_lost = FALSE;
+
     for(i = 0; i < MAX_COMPLEX_ATTACHED; i++)
     {
-        if (surface->complex_array[i])
-            surface->complex_array[i]->is_lost = FALSE;
+        attachment = surface->complex_array[i];
+        while (attachment)
+        {
+            attachment->is_lost = FALSE;
+            attachment = attachment->complex_array[0];
+            if (attachment == surface->complex_array[i])
+                break;
+        }
     }
 
     return DD_OK;
@@ -6433,6 +6457,7 @@ HRESULT ddraw_surface_create(struct ddraw *ddraw, const DDSURFACEDESC2 *surface_
                     | WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
             /* Managed textures have the system memory flag set. */
             desc->ddsCaps.dwCaps |= DDSCAPS_SYSTEMMEMORY;
+            wined3d_desc.usage |= WINED3DUSAGE_MANAGED;
         }
         else if (desc->ddsCaps.dwCaps & DDSCAPS_VIDEOMEMORY)
         {

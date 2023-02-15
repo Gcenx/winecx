@@ -1237,7 +1237,7 @@ static struct unix_face *unix_face_create( const char *unix_name, void * HOSTPTR
         data_size = st.st_size;
         data_ptr = mmap( NULL, data_size, PROT_READ, MAP_PRIVATE, fd, 0 );
         close( fd );
-        if (data_ptr == MAP_FAILED) return NULL;
+        if (data_ptr == MAP_FAILED_HOSTPTR) return NULL;
     }
 
     if (!(This = calloc( 1, sizeof(*This) ))) goto done;
@@ -1775,6 +1775,15 @@ static void load_mac_font_callback(const void *value, void *context)
     path = malloc( len );
     if (path && CFStringGetFileSystemRepresentation(pathStr, path, len))
     {
+        /* CX HACK 21380: Skip resource-fork-only fonts. */
+        struct stat statbuf;
+        if (stat(path, &statbuf) == 0 && statbuf.st_size == 0)
+        {
+            TRACE("font file %s has 0 length; assuming it's a resource fork font and skipping it\n", path);
+            free(path);
+            return;
+        }
+
         TRACE("font file %s\n", path);
         AddFontToList(NULL, path, NULL, 0, ADDFONT_EXTERNAL_FONT);
     }
@@ -2057,7 +2066,7 @@ static struct font_mapping *map_font_file( const char *name )
     mapping->data = mmap( NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0 );
     close( fd );
 
-    if (mapping->data == MAP_FAILED)
+    if (mapping->data == MAP_FAILED_HOSTPTR)
     {
         free( mapping );
         return NULL;

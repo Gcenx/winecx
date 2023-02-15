@@ -5132,6 +5132,22 @@ static BOOL is_quickenpatch(void)
     return (len <= len2 && !wcsicmp( path + len2 - len, qkn ));
 }
 
+static BOOL is_red_launcher(void)
+{
+    static const WCHAR red_launcher[] = {'R','E','D','L','a','u','n','c','h','e','r','.','e','x','e',0};
+    WCHAR *path = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+    DWORD len = sizeof(red_launcher) / sizeof(red_launcher[0]) - 1, len2 = wcslen(path);
+    return (len <= len2 && !wcsicmp( path + len2 - len, red_launcher ));
+}
+
+static void replace_dx12_string(char *buffer, ULONG length)
+{
+    static const char dx12_string[] = "\"fallback\": \"DirectX 12\"";
+    static const char dx11_string[] = "\"fallback\": \"DirectX 11\"";
+    char *dst = strstr(buffer, dx12_string);
+    if (dst)
+        memcpy(dst, dx11_string, sizeof(dx11_string) - 1);
+}
 
 /* CW HACK 14391 */
 NTSTATUS WINAPI __wine_rpc_NtReadFile( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
@@ -5325,6 +5341,9 @@ err:
     {
         set_async_iosb( io, status, total );
         TRACE("= SUCCESS (%u)\n", total);
+        /* CrossOver hack for bug 21786 */
+        if (!apc && !event && length == 0x1000 && status == STATUS_SUCCESS && is_red_launcher())
+            replace_dx12_string(buffer, length);
         if (event) NtSetEvent( event, NULL );
         if (apc && (!status || async_read)) NtQueueApcThread( GetCurrentThread(), (PNTAPCFUNC)apc,
                                                               (ULONG_PTR)apc_user, io, 0 );

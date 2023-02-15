@@ -1529,6 +1529,7 @@ cards_nvidia_binary[] =
 {
     /* Direct 3D 11 */
     {"Tesla T4",                    CARD_NVIDIA_TESLA_T4},
+    {"Ampere A10",                  CARD_NVIDIA_AMPERE_A10},
     {"RTX 2080 Ti",                 CARD_NVIDIA_GEFORCE_RTX2080TI}, /* GeForce 2000 - highend */
     {"RTX 2080",                    CARD_NVIDIA_GEFORCE_RTX2080},   /* GeForce 2000 - highend */
     {"RTX 2070",                    CARD_NVIDIA_GEFORCE_RTX2070},   /* GeForce 2000 - highend */
@@ -2972,12 +2973,6 @@ static void load_gl_funcs(struct wined3d_gl_info *gl_info)
     USE_GL_FUNC(glVertexAttribIPointer)                        /* OpenGL 3.0 */
     USE_GL_FUNC(glVertexAttribPointer)                         /* OpenGL 2.0 */
 #undef USE_GL_FUNC
-
-#ifndef USE_WIN32_OPENGL
-    /* hack: use the functions directly from the TEB table to bypass the thunks */
-    /* note that we still need the above wglGetProcAddress calls to initialize the table */
-    gl_info->gl_ops.ext = ((struct opengl_funcs *)NtCurrentTeb()->glTable)->ext;
-#endif
 
 #define MAP_GL_FUNCTION(core_func, ext_func)                                          \
         do                                                                            \
@@ -4692,7 +4687,7 @@ static BOOL wined3d_check_pixel_format_color(const struct wined3d_pixel_format *
         const struct wined3d_format *format)
 {
     /* Float formats need FBOs. If FBOs are used this function isn't called */
-    if (format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_FLOAT)
+    if (format->attrs & WINED3D_FORMAT_ATTR_FLOAT)
         return FALSE;
 
     /* Probably a RGBA_float or color index mode. */
@@ -4714,7 +4709,7 @@ static BOOL wined3d_check_pixel_format_depth(const struct wined3d_pixel_format *
     BOOL lockable = FALSE;
 
     /* Float formats need FBOs. If FBOs are used this function isn't called */
-    if (format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_FLOAT)
+    if (format->attrs & WINED3D_FORMAT_ATTR_FLOAT)
         return FALSE;
 
     if ((format->id == WINED3DFMT_D16_LOCKABLE) || (format->id == WINED3DFMT_D32_FLOAT))
@@ -5531,7 +5526,6 @@ static BOOL wined3d_adapter_gl_init(struct wined3d_adapter_gl *adapter_gl,
         return FALSE;
 
     /* Dynamically load all GL core functions */
-#ifdef USE_WIN32_OPENGL
     {
         HMODULE mod_gl = GetModuleHandleA("opengl32.dll");
 #define USE_GL_FUNC(f) gl_info->gl_ops.gl.p_##f = (void *)GetProcAddress(mod_gl, #f);
@@ -5540,17 +5534,6 @@ static BOOL wined3d_adapter_gl_init(struct wined3d_adapter_gl *adapter_gl,
         gl_info->gl_ops.wgl.p_wglSwapBuffers = (void *)GetProcAddress(mod_gl, "wglSwapBuffers");
         gl_info->gl_ops.wgl.p_wglGetPixelFormat = (void *)GetProcAddress(mod_gl, "wglGetPixelFormat");
     }
-#else
-    /* To bypass the opengl32 thunks retrieve functions from the WGL driver instead of opengl32 */
-    {
-        HDC hdc = GetDC( 0 );
-        const struct opengl_funcs *wgl_driver = __wine_get_wgl_driver( hdc, WINE_WGL_DRIVER_VERSION );
-        ReleaseDC( 0, hdc );
-        if (!wgl_driver || wgl_driver == (void *)-1) return FALSE;
-        gl_info->gl_ops.wgl = wgl_driver->wgl;
-        gl_info->gl_ops.gl = wgl_driver->gl;
-    }
-#endif
 
     gl_info->p_glEnableWINE = gl_info->gl_ops.gl.p_glEnable;
     gl_info->p_glDisableWINE = gl_info->gl_ops.gl.p_glDisable;

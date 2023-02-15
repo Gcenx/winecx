@@ -225,8 +225,8 @@ struct midi_in_message_params
 
 struct midi_notify_wait_params
 {
-    struct notify_context *notify;
     BOOL *quit;
+    struct notify_context *notify;
 };
 
 enum unix_funcs

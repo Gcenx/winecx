@@ -49,6 +49,7 @@ static struct enum_device_entry
     char interface_name[100];
     char device_name[100];
     const GUID *device_guid;
+    DWORD unsupported_caps;
 } device_list7[] =
 {
     /* T&L HAL device */
@@ -56,6 +57,7 @@ static struct enum_device_entry
         "WINE Direct3D7 Hardware Transform and Lighting acceleration using WineD3D",
         "Wine D3D7 T&L HAL",
         &IID_IDirect3DTnLHalDevice,
+        0,
     },
 
     /* HAL device */
@@ -63,6 +65,7 @@ static struct enum_device_entry
         "WINE Direct3D7 Hardware acceleration using WineD3D",
         "Direct3D HAL",
         &IID_IDirect3DHALDevice,
+        D3DDEVCAPS_HWTRANSFORMANDLIGHT,
     },
 
     /* RGB device */
@@ -70,6 +73,7 @@ static struct enum_device_entry
         "WINE Direct3D7 RGB Software Emulation using WineD3D",
         "Wine D3D7 RGB",
         &IID_IDirect3DRGBDevice,
+        D3DDEVCAPS_HWTRANSFORMANDLIGHT | D3DDEVCAPS_DRAWPRIMITIVES2EX,
     },
 };
 
@@ -2454,7 +2458,7 @@ static HRESULT WINAPI ddraw7_EnumDisplayModes(IDirectDraw7 *iface, DWORD Flags,
     {
         modenum = 0;
         while (wined3d_output_get_mode(ddraw->wined3d_output, checkFormatList[fmt],
-                WINED3D_SCANLINE_ORDERING_UNKNOWN, modenum++, &mode) == WINED3D_OK)
+                WINED3D_SCANLINE_ORDERING_UNKNOWN, modenum++, &mode, false) == WINED3D_OK)
         {
             BOOL found = FALSE;
             unsigned i;
@@ -3764,6 +3768,7 @@ static HRESULT WINAPI d3d7_EnumDevices(IDirect3D7 *iface, LPD3DENUMDEVICESCALLBA
 {
     struct ddraw *ddraw = impl_from_IDirect3D7(iface);
     D3DDEVICEDESC7 device_desc7;
+    DWORD dev_caps;
     HRESULT hr;
     size_t i;
 
@@ -3779,12 +3784,14 @@ static HRESULT WINAPI d3d7_EnumDevices(IDirect3D7 *iface, LPD3DENUMDEVICESCALLBA
         wined3d_mutex_unlock();
         return hr;
     }
+    dev_caps = device_desc7.dwDevCaps;
 
     for (i = 0; i < ARRAY_SIZE(device_list7); i++)
     {
         HRESULT ret;
 
         device_desc7.deviceGUID = *device_list7[i].device_guid;
+        device_desc7.dwDevCaps = dev_caps & ~device_list7[i].unsupported_caps;
         ret = callback(device_list7[i].interface_name, device_list7[i].device_name, &device_desc7, context);
         if (ret != DDENUMRET_OK)
         {
@@ -3882,6 +3889,9 @@ static HRESULT WINAPI d3d3_EnumDevices(IDirect3D3 *iface, LPD3DENUMDEVICESCALLBA
         hal_desc.dcmColorModel = 0;
         /* RGB, RAMP and MMX devices cannot report HAL hardware flags */
         hal_desc.dwFlags = 0;
+        /* RGB, REF, RAMP and MMX devices don't report hardware transform and lighting capability */
+        hal_desc.dwDevCaps &= ~(D3DDEVCAPS_HWTRANSFORMANDLIGHT | D3DDEVCAPS_DRAWPRIMITIVES2EX);
+        hel_desc.dwDevCaps &= ~(D3DDEVCAPS_HWTRANSFORMANDLIGHT | D3DDEVCAPS_DRAWPRIMITIVES2EX);
 
         hr = callback((GUID *)&IID_IDirect3DRGBDevice, reference_description,
                 device_name, &hal_desc, &hel_desc, context);
@@ -3906,6 +3916,8 @@ static HRESULT WINAPI d3d3_EnumDevices(IDirect3D3 *iface, LPD3DENUMDEVICESCALLBA
             | D3DPTEXTURECAPS_NONPOW2CONDITIONAL | D3DPTEXTURECAPS_PERSPECTIVE);
     /* HAL devices have a HEL dcmColorModel of 0 */
     hel_desc.dcmColorModel = 0;
+    /* HAL devices report hardware transform and lighting capability, but not in hel */
+    hel_desc.dwDevCaps &= ~(D3DDEVCAPS_HWTRANSFORMANDLIGHT | D3DDEVCAPS_DRAWPRIMITIVES2EX);
 
     hr = callback((GUID *)&IID_IDirect3DHALDevice, wined3d_description,
             device_name, &hal_desc, &hel_desc, context);

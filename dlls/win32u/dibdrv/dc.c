@@ -236,8 +236,16 @@ DWORD convert_bitmapinfo( const BITMAPINFO *src_info, void *src_bits, struct bit
 
 #ifdef __i386_on_x86_64__
 /* BKS HACK */
-    dst_dib.funcs->convert_to( &dst_dib, &src_dib, &src->visrect, FALSE );
-    ret = TRUE;
+    if (IsBadReadPtr(src_bits, 1))
+    {
+        WARN( "invalid bits pointer %p\n", src_bits );
+        ret = FALSE;
+    }
+    else
+    {
+        dst_dib.funcs->convert_to( &dst_dib, &src_dib, &src->visrect, FALSE );
+        ret = TRUE;
+    }
 #else
     __TRY
     {

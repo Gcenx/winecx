@@ -40,6 +40,7 @@
 #include "wine/unixlib.h"
 #include "wine/rbtree.h"
 #include "wine/debug.h"
+#include "wine/server.h"
 
 #ifdef __WINESRC__
 #include "wine/exception.h"
@@ -520,6 +521,46 @@ static void get_fonts_win_dir_path( const WCHAR *file, WCHAR *path )
     if (file) lstrcatW( path, file );
 }
 
+static NTSTATUS validate_open_object_attributes( const OBJECT_ATTRIBUTES *attr )
+{
+    if (!attr || attr->Length != sizeof(*attr)) return STATUS_INVALID_PARAMETER;
+
+    if (attr->ObjectName)
+    {
+        if (attr->ObjectName->Length & (sizeof(WCHAR) - 1)) return STATUS_OBJECT_NAME_INVALID;
+    }
+    else if (attr->RootDirectory) return STATUS_OBJECT_NAME_INVALID;
+
+    return STATUS_SUCCESS;
+}
+
+/* Copied from NtOpenKeyEx */
+static NTSTATUS nt_open_key( PHANDLE retkey, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr, ULONG options )
+{
+    NTSTATUS ret;
+
+    if (!retkey || !attr || !attr->ObjectName) return STATUS_ACCESS_VIOLATION;
+    if ((ret = validate_open_object_attributes( attr ))) return ret;
+
+    TRACE( "(%p,%s,%x,%p)\n", attr->RootDirectory,
+           debugstr_us(attr->ObjectName), access, retkey );
+    if (options & ~REG_OPTION_OPEN_LINK)
+        FIXME("options %x not implemented\n", options);
+
+    SERVER_START_REQ( open_key )
+    {
+        req->parent     = wine_server_obj_handle( attr->RootDirectory );
+        req->access     = access;
+        req->attributes = attr->Attributes;
+        wine_server_add_data( req, attr->ObjectName->Buffer, attr->ObjectName->Length );
+        ret = wine_server_call( req );
+        *retkey = wine_server_ptr_handle( reply->hkey );
+    }
+    SERVER_END_REQ;
+    TRACE("<- %p\n", *retkey);
+    return ret;
+}
+
 HKEY reg_open_key( HKEY root, const WCHAR *name, ULONG name_len )
 {
     UNICODE_STRING nameW = { name_len, name_len, (WCHAR *)name };
@@ -533,7 +574,9 @@ HKEY reg_open_key( HKEY root, const WCHAR *name, ULONG name_len )
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
 
-    if (NtOpenKeyEx( &ret, MAXIMUM_ALLOWED, &attr, 0 )) return 0;
+    /* CW Bug 17646 HACK: Office 2016/365 hooks NtOpenKeyEx to filter out some
+     * registry keys that Wine needs */
+    if (nt_open_key( &ret, MAXIMUM_ALLOWED, &attr, 0 )) return 0;
     return ret;
 }
 
@@ -3472,7 +3515,7 @@ static DWORD get_glyph_outline( struct gdi_font *font, UINT glyph, UINT format,
     ret = font_funcs->get_glyph_outline( font, index, format, &gm, &abc, buflen, buf, mat, tategaki );
     if (ret == GDI_ERROR) return ret;
 
-    if ((format == GGO_METRICS || format == GGO_BITMAP || format ==  WINE_GGO_GRAY16_BITMAP) && !mat)
+    if (format == GGO_METRICS && !mat)
         set_gdi_font_glyph_metrics( font, index, &gm, &abc );
 
 done:

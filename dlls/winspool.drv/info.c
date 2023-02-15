@@ -1864,7 +1864,7 @@ LONG WINAPI DocumentPropertiesA(HWND hwnd, HANDLE printer, char *device_name, DE
         outputW = HeapAlloc(GetProcessHeap(), 0, ret);
     }
 
-    if (input) inputW = GdiConvertToDevmodeW(input);
+    if (input && (mode & DM_IN_BUFFER)) inputW = GdiConvertToDevmodeW(input);
 
     ret = DocumentPropertiesW(hwnd, printer, device, outputW, inputW, mode);
 

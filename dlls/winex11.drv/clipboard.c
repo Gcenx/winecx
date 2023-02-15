@@ -1317,8 +1317,8 @@ static BOOL export_text_html( Display *display, Window win, Atom prop, Atom targ
          * any classes/styles defined outside the fragment are in the text/html
          * export. Ideally, we should parse the HTML to find them and ensure that
          * they are included but that "real" elements outside the fragment are not. */
-        if (!strncmp( p, "StartHTML:", 14 )) start = atoi( p + 14 );
-        else if (!strncmp( p, "EndHTML:", 12 )) end = atoi( p + 12 );
+        if (!strncmp( p, "StartHTML:", 10 )) start = atoi( p + 10 );
+        else if (!strncmp( p, "EndHTML:", 8 )) end = atoi( p + 8 );
         if (!(p = strpbrk( p, "\r\n" ))) break;
         while (*p == '\r' || *p == '\n') p++;
     }

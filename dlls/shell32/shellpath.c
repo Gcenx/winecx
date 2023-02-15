@@ -3317,6 +3317,7 @@ static HRESULT _SHRegisterCommonShellFolders(void)
     return hr;
 }
 
+/* CROSSOVER HACK for bug 13237 - allows updating symlinks in stub bottles */
 void WINAPI wine_update_symbolic_links(HWND hwnd, HINSTANCE handle, LPCWSTR cmdline, INT show)
 {
     static const int ids[] =
@@ -3333,7 +3334,18 @@ void WINAPI wine_update_symbolic_links(HWND hwnd, HINSTANCE handle, LPCWSTR cmdl
         SHGetFolderPathW( 0, CSIDL_DESKTOPDIRECTORY | CSIDL_FLAG_DONT_VERIFY, 0, 0, path );
         _SHCreateDesktopSymbolicLink( path );
     }
-    for (i = 0; i < ARRAY_SIZE(ids); i++) SHGetFolderPathW( 0, ids[i] | CSIDL_FLAG_CREATE, 0, 0, path );
+    for (i = 0; i < ARRAY_SIZE(ids); i++) {
+        /* Calculate the Windows path for this folder */
+        SHGetFolderPathW( 0, ids[i], 0, 0, path );
+
+        if (!path[0]) {
+            /* SHGetFolderPathW encountered some error before calculating the path */
+            continue;
+        }
+
+        /* Replace the link. We have to do this manually because SHGetFolderPathW only updates broken links */
+        _SHCreateSymbolicLink( ids[i], path );
+    }
 }
 
 /******************************************************************************

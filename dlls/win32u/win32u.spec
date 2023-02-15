@@ -1329,6 +1329,7 @@
 
 # Vulkan
 @ cdecl __wine_get_vulkan_driver(long)
+@ stdcall __wine_direct_unix_call(int64 long ptr)
 
 # gdi32
 @ stdcall SetDIBits(long long long long ptr ptr long)
