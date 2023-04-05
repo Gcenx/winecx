@@ -623,6 +623,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
         static const WCHAR UplayW[] = {'U','p','l','a','y','W','e','b','C','o','r','e','.','e','x','e',0};
         static const WCHAR qwSubprocessW[] = {'q','w','S','u','b','p','r','o','c','e','s','s','.','e','x','e',0};
         static const WCHAR paradoxlauncherW[] = {'P','a','r','a','d','o','x',' ','L','a','u','n','c','h','e','r','.','e','x','e',0};
+        static const WCHAR wechatW[] = {'W','e','C','h','a','t','.','e','x','e',0};
 
         static const WCHAR inprocessgpuW[] = {' ','-','-','i','n','-','p','r','o','c','e','s','s','-','g','p','u',0};
         static const WCHAR nosandboxW[] = {' ','-','-','n','o','-','s','a','n','d','b','o','x',0};
@@ -634,6 +635,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
                 || wcsstr(app_name, BattlenetW) || (wcsstr(app_name, rundll32W) && wcsstr(tidy_cmdline, nosandboxW))
                 || wcsstr(app_name, UplayW)
                 || wcsstr(app_name, qwSubprocessW)
+                || wcsstr(app_name, wechatW)
                 || wcsstr(app_name, paradoxlauncherW)
            )
         {
