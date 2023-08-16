@@ -59,6 +59,10 @@
     Search for "Bitmap Structures" in MSDN
 */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -77,12 +81,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(bitmap);
 
-#ifdef __i386_on_x86_64__
-#undef free
-#define heapfree(x) HeapFree(GetProcessHeap(), 0, x)
-#else
-#define heapfree(x) free(x)
-#endif
 
 static INT DIB_GetObject( HGDIOBJ handle, INT count, LPVOID buffer );
 static BOOL DIB_DeleteObject( HGDIOBJ handle );
@@ -183,7 +181,7 @@ static BOOL bitmapinfoheader_from_user_bitmapinfo( BITMAPINFOHEADER *dst, const 
     }
     else
     {
-        WARN( "(%u): unknown/wrong size for header\n", info->biSize );
+        WARN( "(%u): unknown/wrong size for header\n", (int)info->biSize );
         return FALSE;
     }
 
@@ -207,9 +205,11 @@ static BOOL bitmapinfo_from_user_bitmapinfo( BITMAPINFO *dst, const BITMAPINFO *
 {
     void *src_colors;
 
-    if (coloruse > DIB_PAL_COLORS + 1) return FALSE;  /* FIXME: handle DIB_PAL_COLORS+1 format */
+    if (coloruse > DIB_PAL_INDICES) return FALSE;
     if (!bitmapinfoheader_from_user_bitmapinfo( &dst->bmiHeader, &info->bmiHeader )) return FALSE;
     if (!is_valid_dib_format( &dst->bmiHeader, allow_compression )) return FALSE;
+    if (coloruse == DIB_PAL_INDICES && (dst->bmiHeader.biBitCount != 1 ||
+                dst->bmiHeader.biCompression != BI_RGB)) return FALSE;
 
     src_colors = (char *)info + info->bmiHeader.biSize;
 
@@ -231,6 +231,18 @@ static BOOL bitmapinfo_from_user_bitmapinfo( BITMAPINFO *dst, const BITMAPINFO *
         {
             memcpy( dst->bmiColors, src_colors, colors * sizeof(WORD) );
             max_colors = colors;
+        }
+        else if (coloruse == DIB_PAL_INDICES)
+        {
+            dst->bmiColors[0].rgbRed = 0;
+            dst->bmiColors[0].rgbGreen = 0;
+            dst->bmiColors[0].rgbBlue = 0;
+            dst->bmiColors[0].rgbReserved = 0;
+            dst->bmiColors[1].rgbRed = 0xff;
+            dst->bmiColors[1].rgbGreen = 0xff;
+            dst->bmiColors[1].rgbBlue = 0xff;
+            dst->bmiColors[1].rgbReserved = 0;
+            colors = max_colors;
         }
         else if (info->bmiHeader.biSize != sizeof(BITMAPCOREHEADER))
         {
@@ -458,7 +470,7 @@ done:
 fail:
     if (run) NtGdiDeleteObjectApp( run );
     if (clip && *clip) NtGdiDeleteObjectApp( *clip );
-    heapfree( out_bits );
+    free( out_bits );
     return FALSE;
 }
 
@@ -481,7 +493,7 @@ INT CDECL nulldrv_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst, 
     RECT rect;
 
     TRACE("%d %d %d %d <- %d %d %d %d rop %08x\n", xDst, yDst, widthDst, heightDst,
-          xSrc, ySrc, widthSrc, heightSrc, rop);
+          xSrc, ySrc, widthSrc, heightSrc, (int)rop);
 
     src_bits.ptr = (void*)bits;
     src_bits.is_copy = FALSE;
@@ -627,7 +639,7 @@ INT WINAPI NtGdiStretchDIBitsInternal( HDC hdc, INT xDst, INT yDst, INT widthDst
     if (!bits) return 0;
     if (!bitmapinfo_from_user_bitmapinfo( info, bmi, coloruse, TRUE ))
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
     }
 
@@ -677,9 +689,9 @@ INT WINAPI SetDIBits( HDC hdc, HBITMAP hbitmap, UINT startscan,
     INT src_to_dst_offset;
     HRGN clip = 0;
 
-    if (!bitmapinfo_from_user_bitmapinfo( src_info, info, coloruse, TRUE ) || coloruse > DIB_PAL_COLORS)
+    if (!bitmapinfo_from_user_bitmapinfo( src_info, info, coloruse, TRUE ))
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
     }
     if (src_info->bmiHeader.biCompression == BI_BITFIELDS)
@@ -687,7 +699,7 @@ INT WINAPI SetDIBits( HDC hdc, HBITMAP hbitmap, UINT startscan,
         DWORD *masks = (DWORD *)src_info->bmiColors;
         if (!masks[0] || !masks[1] || !masks[2])
         {
-            SetLastError( ERROR_INVALID_PARAMETER );
+            RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
             return 0;
         }
     }
@@ -700,6 +712,8 @@ INT WINAPI SetDIBits( HDC hdc, HBITMAP hbitmap, UINT startscan,
     if (coloruse == DIB_PAL_COLORS && !fill_color_table_from_pal_colors( src_info, hdc )) return 0;
 
     if (!(bitmap = GDI_GetObjPtr( hbitmap, NTGDI_OBJ_BITMAP ))) return 0;
+
+    if (coloruse == DIB_PAL_INDICES && bitmap->dib.dsBm.bmBitsPixel != 1) return 0;
 
     if (src_info->bmiHeader.biCompression == BI_RLE4 || src_info->bmiHeader.biCompression == BI_RLE8)
     {
@@ -902,7 +916,7 @@ INT WINAPI NtGdiSetDIBitsToDeviceInternal( HDC hdc, INT xDest, INT yDest, DWORD 
     if (!bits) return 0;
     if (!bitmapinfo_from_user_bitmapinfo( info, bmi, coloruse, TRUE ))
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
     }
 
@@ -1229,7 +1243,7 @@ INT WINAPI NtGdiGetDIBitsInternal( HDC hdc, HBITMAP hbitmap, UINT startscan, UIN
 
     if (!(dc = get_dc_ptr( hdc )))
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
     }
     update_dc( dc );
@@ -1443,7 +1457,7 @@ HBITMAP WINAPI NtGdiCreateDIBitmapInternal( HDC hdc, INT width, INT height, DWOR
     height = abs( height );
 
     TRACE( "hdc=%p, init=%u, bits=%p, data=%p, coloruse=%u (bitmap: width=%d, height=%d)\n",
-           hdc, init, bits, data, coloruse, width, height );
+           hdc, (int)init, bits, data, coloruse, width, height );
 
     if (hdc == NULL)
         handle = NtGdiCreateBitmap( width, height, 1, 1, NULL );
@@ -1491,10 +1505,10 @@ HBITMAP WINAPI NtGdiCreateDIBSection( HDC hdc, HANDLE section, DWORD offset, con
     if (!(bmp = calloc( 1, sizeof(*bmp) ))) return 0;
 
     TRACE("format (%d,%d), planes %d, bpp %d, %s, size %d %s\n",
-          info->bmiHeader.biWidth, info->bmiHeader.biHeight,
+          (int)info->bmiHeader.biWidth, (int)info->bmiHeader.biHeight,
           info->bmiHeader.biPlanes, info->bmiHeader.biBitCount,
           info->bmiHeader.biCompression == BI_BITFIELDS? "BI_BITFIELDS" : "BI_RGB",
-          info->bmiHeader.biSizeImage, usage == DIB_PAL_COLORS? "PAL" : "RGB");
+          (int)info->bmiHeader.biSizeImage, usage == DIB_PAL_COLORS? "PAL" : "RGB");
 
     bmp->dib.dsBm.bmType       = 0;
     bmp->dib.dsBm.bmWidth      = info->bmiHeader.biWidth;
@@ -1550,8 +1564,8 @@ HBITMAP WINAPI NtGdiCreateDIBSection( HDC hdc, HANDLE section, DWORD offset, con
     {
         SIZE_T size = bmp->dib.dsBmih.biSizeImage;
         offset = 0;
-        if (NtAllocateVirtualMemory( GetCurrentProcess(), &bmp->dib.dsBm.bmBits, 0, &size,
-                                     MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE ))
+        if (NtAllocateVirtualMemory( GetCurrentProcess(), &bmp->dib.dsBm.bmBits, zero_bits,
+                                     &size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE ))
             goto error;
     }
     bmp->dib.dshSection = section;
@@ -1570,8 +1584,8 @@ HBITMAP WINAPI NtGdiCreateDIBSection( HDC hdc, HANDLE section, DWORD offset, con
         NtFreeVirtualMemory( GetCurrentProcess(), &bmp->dib.dsBm.bmBits, &size, MEM_RELEASE );
     }
 error:
-    heapfree( bmp->color_table );
-    heapfree( bmp );
+    free( bmp->color_table );
+    free( bmp );
     return 0;
 }
 
@@ -1582,8 +1596,8 @@ static BOOL memory_dib_DeleteObject( HGDIOBJ handle )
 
     if (!(bmp = free_gdi_handle( handle ))) return FALSE;
 
-    heapfree( bmp->color_table );
-    heapfree( bmp );
+    free( bmp->color_table );
+    free( bmp );
     return TRUE;
 }
 
@@ -1701,8 +1715,8 @@ NTSTATUS WINAPI NtGdiDdDDICreateDCFromMemory( D3DKMT_CREATEDCFROMMEMORY *desc )
     return STATUS_SUCCESS;
 
 error:
-    if (bmp) heapfree( bmp->color_table );
-    heapfree( bmp );
+    if (bmp) free( bmp->color_table );
+    free( bmp );
     NtGdiDeleteObjectApp( dc );
     return STATUS_INVALID_PARAMETER;
 }
@@ -1778,7 +1792,7 @@ static BOOL DIB_DeleteObject( HGDIOBJ handle )
         NtFreeVirtualMemory( GetCurrentProcess(), &bmp->dib.dsBm.bmBits, &size, MEM_RELEASE );
     }
 
-    heapfree( bmp->color_table );
-    heapfree( bmp );
+    free( bmp->color_table );
+    free( bmp );
     return TRUE;
 }

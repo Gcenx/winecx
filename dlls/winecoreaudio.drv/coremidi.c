@@ -103,6 +103,7 @@ struct midi_dest
 
     MIDIOUTCAPSW caps;
     MIDIOPENDESC midiDesc;
+    BYTE runningStatus;
     WORD wFlags;
 };
 
@@ -116,7 +117,7 @@ struct midi_src
     MIDIOPENDESC midiDesc;
     LPMIDIHDR lpQueueHdr;
     WORD wFlags;
-    DWORD startTime;
+    UINT startTime;
 };
 
 static MIDIClientRef midi_client;
@@ -163,7 +164,7 @@ static void midi_in_lock(BOOL lock)
 }
 
 static void set_in_notify(struct notify_context *notify, struct midi_src *src, WORD dev_id, WORD msg,
-                          DWORD_PTR param_1, DWORD_PTR param_2)
+                          UINT_PTR param_1, UINT_PTR param_2)
 {
     notify->send_notify = TRUE;
     notify->dev_id = dev_id;
@@ -240,7 +241,7 @@ static uint64_t get_time_ms(void)
 static void process_sysex_packet(struct midi_src *src, MIDIPacket *packet)
 {
     unsigned int pos = 0, len = packet->length, copy_len;
-    DWORD current_time = get_time_ms() - src->startTime;
+    UINT current_time = get_time_ms() - src->startTime;
     struct notify_context notify;
 
     src->state |= 2;
@@ -264,7 +265,7 @@ static void process_sysex_packet(struct midi_src *src, MIDIPacket *packet)
             src->lpQueueHdr = hdr->lpNext;
             hdr->dwFlags &= ~MHDR_INQUEUE;
             hdr->dwFlags |= MHDR_DONE;
-            set_in_notify(&notify, src, src->wDevID, MIM_LONGDATA, (DWORD_PTR)hdr, current_time);
+            set_in_notify(&notify, src, src->wDevID, MIM_LONGDATA, (UINT_PTR)hdr, current_time);
             notify_post(&notify);
             src->state &= ~2;
         }
@@ -275,7 +276,7 @@ static void process_sysex_packet(struct midi_src *src, MIDIPacket *packet)
 
 static void process_small_packet(struct midi_src *src, MIDIPacket *packet)
 {
-    DWORD current_time = get_time_ms() - src->startTime, data;
+    UINT current_time = get_time_ms() - src->startTime, data;
     struct notify_context notify;
     unsigned int pos = 0;
 
@@ -327,7 +328,7 @@ static void midi_in_read_proc(const MIDIPacketList *pktlist, void *refCon, void 
     }
 }
 
-NTSTATUS midi_init(void *args)
+NTSTATUS unix_midi_init(void *args)
 {
     CFStringRef name = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("wineMIDIClient.%d"), getpid());
     struct midi_init_params *params = args;
@@ -449,7 +450,7 @@ NTSTATUS midi_init(void *args)
     return STATUS_SUCCESS;
 }
 
-NTSTATUS midi_release(void *args)
+NTSTATUS unix_midi_release(void *args)
 {
     /* stop the notify_wait thread */
     notify_post(NULL);
@@ -575,7 +576,7 @@ static BOOL synth_unit_close(AUGraph graph)
 }
 
 static void set_out_notify(struct notify_context *notify, struct midi_dest *dest, WORD dev_id, WORD msg,
-                           DWORD_PTR param_1, DWORD_PTR param_2)
+                           UINT_PTR param_1, UINT_PTR param_2)
 {
     notify->send_notify = TRUE;
     notify->dev_id = dev_id;
@@ -588,7 +589,7 @@ static void set_out_notify(struct notify_context *notify, struct midi_dest *dest
     notify->instance = dest->midiDesc.dwInstance;
 }
 
-static DWORD midi_out_open(WORD dev_id, MIDIOPENDESC *midi_desc, DWORD flags, struct notify_context *notify)
+static UINT midi_out_open(WORD dev_id, MIDIOPENDESC *midi_desc, UINT flags, struct notify_context *notify)
 {
     struct midi_dest *dest;
 
@@ -626,6 +627,7 @@ static DWORD midi_out_open(WORD dev_id, MIDIOPENDESC *midi_desc, DWORD flags, st
             return MMSYSERR_ERROR;
         }
     }
+    dest->runningStatus = 0;
     dest->wFlags = HIWORD(flags & CALLBACK_TYPEMASK);
     dest->midiDesc = *midi_desc;
 
@@ -634,7 +636,7 @@ static DWORD midi_out_open(WORD dev_id, MIDIOPENDESC *midi_desc, DWORD flags, st
     return MMSYSERR_NOERROR;
 }
 
-static DWORD midi_out_close(WORD dev_id, struct notify_context *notify)
+static UINT midi_out_close(WORD dev_id, struct notify_context *notify)
 {
     struct midi_dest *dest;
 
@@ -670,7 +672,7 @@ static void midi_send(MIDIPortRef port, MIDIEndpointRef dest, UInt8 *buffer, uns
     if (packet) MIDISend(port, dest, packet_list);
 }
 
-static DWORD midi_out_data(WORD dev_id, DWORD data)
+static UINT midi_out_data(WORD dev_id, UINT data)
 {
     struct midi_dest *dest;
     UInt8 bytes[3];
@@ -683,12 +685,30 @@ static DWORD midi_out_data(WORD dev_id, DWORD data)
         WARN("bad device ID : %d\n", dev_id);
         return MMSYSERR_BADDEVICEID;
     }
+    dest = dests + dev_id;
 
     bytes[0] = data & 0xff;
-    bytes[1] = (data >> 8) & 0xff;
-    bytes[2] = (data >> 16) & 0xff;
+    if (bytes[0] & 0x80)
+    {
+        bytes[1] = (data >> 8) & 0xff;
+        bytes[2] = (data >> 16) & 0xff;
+        if (bytes[0] < 0xF0)
+            dest->runningStatus = bytes[0];
+        else if (bytes[0] <= 0xF7)
+            dest->runningStatus = 0;
+    }
+    else if (dest->runningStatus)
+    {
+        bytes[0] = dest->runningStatus;
+        bytes[1] = data & 0xff;
+        bytes[2] = (data >> 8) & 0xff;
+    }
+    else
+    {
+        FIXME("ooch %x\n", data);
+        return MMSYSERR_NOERROR;
+    }
 
-    dest = dests + dev_id;
     if (dest->caps.wTechnology == MOD_SYNTH)
     {
         sc = MusicDeviceMIDIEvent(dest->synth, bytes[0], bytes[1], bytes[2], 0);
@@ -706,7 +726,7 @@ static DWORD midi_out_data(WORD dev_id, DWORD data)
     return MMSYSERR_NOERROR;
 }
 
-static DWORD midi_out_long_data(WORD dev_id, MIDIHDR *hdr, DWORD hdr_size, struct notify_context *notify)
+static UINT midi_out_long_data(WORD dev_id, MIDIHDR *hdr, UINT hdr_size, struct notify_context *notify)
 {
     struct midi_dest *dest;
     OSStatus sc;
@@ -754,15 +774,16 @@ static DWORD midi_out_long_data(WORD dev_id, MIDIHDR *hdr, DWORD hdr_size, struc
     else if (dest->caps.wTechnology == MOD_MIDIPORT)
         midi_send(midi_out_port, dest->dest, (UInt8 *)hdr->lpData, hdr->dwBufferLength);
 
+    dest->runningStatus = 0;
     hdr->dwFlags &= ~MHDR_INQUEUE;
     hdr->dwFlags |= MHDR_DONE;
 
-    set_out_notify(notify, dest, dev_id, MOM_DONE, (DWORD_PTR)hdr, 0);
+    set_out_notify(notify, dest, dev_id, MOM_DONE, (UINT_PTR)hdr, 0);
 
     return MMSYSERR_NOERROR;
 }
 
-static DWORD midi_out_prepare(WORD dev_id, MIDIHDR *hdr, DWORD hdr_size)
+static UINT midi_out_prepare(WORD dev_id, MIDIHDR *hdr, UINT hdr_size)
 {
     TRACE("dev_id = %d midi_hdr = %p hdr_size = %d\n", dev_id, hdr, hdr_size);
 
@@ -777,7 +798,7 @@ static DWORD midi_out_prepare(WORD dev_id, MIDIHDR *hdr, DWORD hdr_size)
     return MMSYSERR_NOERROR;
 }
 
-static DWORD midi_out_unprepare(WORD dev_id, MIDIHDR *hdr, DWORD hdr_size)
+static UINT midi_out_unprepare(WORD dev_id, MIDIHDR *hdr, UINT hdr_size)
 {
     TRACE("dev_id = %d midi_hdr = %p hdr_size = %d\n", dev_id, hdr, hdr_size);
 
@@ -792,7 +813,7 @@ static DWORD midi_out_unprepare(WORD dev_id, MIDIHDR *hdr, DWORD hdr_size)
     return MMSYSERR_NOERROR;
 }
 
-static DWORD midi_out_get_devcaps(WORD dev_id, MIDIOUTCAPSW *caps, DWORD size)
+static UINT midi_out_get_devcaps(WORD dev_id, MIDIOUTCAPSW *caps, UINT size)
 {
     TRACE("dev_id = %d caps = %p size = %d\n", dev_id, caps, size);
 
@@ -811,13 +832,13 @@ static DWORD midi_out_get_devcaps(WORD dev_id, MIDIOUTCAPSW *caps, DWORD size)
     return MMSYSERR_NOERROR;
 }
 
-static DWORD midi_out_get_num_devs(void)
+static UINT midi_out_get_num_devs(void)
 {
     TRACE("\n");
     return num_dests;
 }
 
-static DWORD midi_out_get_volume(WORD dev_id, DWORD *volume)
+static UINT midi_out_get_volume(WORD dev_id, UINT *volume)
 {
     TRACE("%d\n", dev_id);
 
@@ -846,7 +867,7 @@ static DWORD midi_out_get_volume(WORD dev_id, DWORD *volume)
     return MMSYSERR_NOTSUPPORTED;
 }
 
-static DWORD midi_out_set_volume(WORD dev_id, DWORD volume)
+static UINT midi_out_set_volume(WORD dev_id, UINT volume)
 {
     TRACE("dev_id = %d vol = %08x\n", dev_id, volume);
 
@@ -871,7 +892,7 @@ static DWORD midi_out_set_volume(WORD dev_id, DWORD volume)
     return MMSYSERR_NOTSUPPORTED;
 }
 
-static DWORD midi_out_reset(WORD dev_id)
+static UINT midi_out_reset(WORD dev_id)
 {
     unsigned chn;
 
@@ -894,11 +915,13 @@ static DWORD midi_out_reset(WORD dev_id)
     }
     else FIXME("MOD_MIDIPORT\n");
 
+    dests[dev_id].runningStatus = 0;
+
     /* FIXME: the LongData buffers must also be returned to the app */
     return MMSYSERR_NOERROR;
 }
 
-static DWORD midi_in_open(WORD dev_id, MIDIOPENDESC *midi_desc, DWORD flags, struct notify_context *notify)
+static UINT midi_in_open(WORD dev_id, MIDIOPENDESC *midi_desc, UINT flags, struct notify_context *notify)
 {
     struct midi_src *src;
 
@@ -943,7 +966,7 @@ static DWORD midi_in_open(WORD dev_id, MIDIOPENDESC *midi_desc, DWORD flags, str
     return MMSYSERR_NOERROR;
 }
 
-static DWORD midi_in_close(WORD dev_id, struct notify_context *notify)
+static UINT midi_in_close(WORD dev_id, struct notify_context *notify)
 {
     struct midi_src *src;
 
@@ -969,7 +992,7 @@ static DWORD midi_in_close(WORD dev_id, struct notify_context *notify)
     return MMSYSERR_NOERROR;
 }
 
-static DWORD midi_in_add_buffer(WORD dev_id, MIDIHDR *hdr, DWORD hdr_size)
+static UINT midi_in_add_buffer(WORD dev_id, MIDIHDR *hdr, UINT hdr_size)
 {
     MIDIHDR **next;
 
@@ -1012,7 +1035,7 @@ static DWORD midi_in_add_buffer(WORD dev_id, MIDIHDR *hdr, DWORD hdr_size)
     return MMSYSERR_NOERROR;
 }
 
-static DWORD midi_in_prepare(WORD dev_id, MIDIHDR *hdr, DWORD hdr_size)
+static UINT midi_in_prepare(WORD dev_id, MIDIHDR *hdr, UINT hdr_size)
 {
     TRACE("dev_id = %d hdr = %p hdr_size = %d\n", dev_id, hdr, hdr_size);
 
@@ -1027,7 +1050,7 @@ static DWORD midi_in_prepare(WORD dev_id, MIDIHDR *hdr, DWORD hdr_size)
     return MMSYSERR_NOERROR;
 }
 
-static DWORD midi_in_unprepare(WORD dev_id, MIDIHDR *hdr, DWORD hdr_size)
+static UINT midi_in_unprepare(WORD dev_id, MIDIHDR *hdr, UINT hdr_size)
 {
     TRACE("dev_id = %d hdr = %p hdr_size = %d\n", dev_id, hdr, hdr_size);
 
@@ -1042,7 +1065,7 @@ static DWORD midi_in_unprepare(WORD dev_id, MIDIHDR *hdr, DWORD hdr_size)
     return MMSYSERR_NOERROR;
 }
 
-static DWORD midi_in_get_devcaps(WORD dev_id, MIDIINCAPSW *caps, DWORD size)
+static UINT midi_in_get_devcaps(WORD dev_id, MIDIINCAPSW *caps, UINT size)
 {
     TRACE("dev_id = %d caps = %p size = %d\n", dev_id, caps, size);
 
@@ -1061,13 +1084,13 @@ static DWORD midi_in_get_devcaps(WORD dev_id, MIDIINCAPSW *caps, DWORD size)
     return MMSYSERR_NOERROR;
 }
 
-static DWORD midi_in_get_num_devs(void)
+static UINT midi_in_get_num_devs(void)
 {
     TRACE("\n");
     return num_srcs;
 }
 
-static DWORD midi_in_start(WORD dev_id)
+static UINT midi_in_start(WORD dev_id)
 {
     TRACE("%d\n", dev_id);
 
@@ -1081,7 +1104,7 @@ static DWORD midi_in_start(WORD dev_id)
     return MMSYSERR_NOERROR;
 }
 
-static DWORD midi_in_stop(WORD dev_id)
+static UINT midi_in_stop(WORD dev_id)
 {
     TRACE("%d\n", dev_id);
 
@@ -1094,10 +1117,10 @@ static DWORD midi_in_stop(WORD dev_id)
     return MMSYSERR_NOERROR;
 }
 
-static DWORD midi_in_reset(WORD dev_id, struct notify_context *notify)
+static UINT midi_in_reset(WORD dev_id, struct notify_context *notify)
 {
-    DWORD cur_time = get_time_ms();
-    DWORD err = MMSYSERR_NOERROR;
+    UINT cur_time = get_time_ms();
+    UINT err = MMSYSERR_NOERROR;
     struct midi_src *src;
     MIDIHDR *hdr;
 
@@ -1118,7 +1141,7 @@ static DWORD midi_in_reset(WORD dev_id, struct notify_context *notify)
         src->lpQueueHdr = hdr->lpNext;
         hdr->dwFlags &= ~MHDR_INQUEUE;
         hdr->dwFlags |= MHDR_DONE;
-        set_in_notify(notify, src, dev_id, MIM_LONGDATA, (DWORD_PTR)hdr, cur_time - src->startTime);
+        set_in_notify(notify, src, dev_id, MIM_LONGDATA, (UINT_PTR)hdr, cur_time - src->startTime);
         if (src->lpQueueHdr) err = ERROR_RETRY; /* ask the client to call again */
     }
 
@@ -1127,7 +1150,7 @@ static DWORD midi_in_reset(WORD dev_id, struct notify_context *notify)
     return err;
 }
 
-NTSTATUS midi_out_message(void *args)
+NTSTATUS unix_midi_out_message(void *args)
 {
     struct midi_out_message_params *params = args;
 
@@ -1171,7 +1194,7 @@ NTSTATUS midi_out_message(void *args)
         *params->err = midi_out_get_num_devs();
         break;
     case MODM_GETVOLUME:
-        *params->err = midi_out_get_volume(params->dev_id, (DWORD *)params->param_1);
+        *params->err = midi_out_get_volume(params->dev_id, (UINT *)params->param_1);
         break;
     case MODM_SETVOLUME:
         *params->err = midi_out_set_volume(params->dev_id, params->param_1);
@@ -1187,7 +1210,7 @@ NTSTATUS midi_out_message(void *args)
     return STATUS_SUCCESS;
 }
 
-NTSTATUS midi_in_message(void *args)
+NTSTATUS unix_midi_in_message(void *args)
 {
     struct midi_in_message_params *params = args;
 
@@ -1244,7 +1267,7 @@ NTSTATUS midi_in_message(void *args)
     return STATUS_SUCCESS;
 }
 
-NTSTATUS midi_notify_wait(void *args)
+NTSTATUS unix_midi_notify_wait(void *args)
 {
     struct midi_notify_wait_params *params = args;
 
@@ -1265,7 +1288,7 @@ NTSTATUS midi_notify_wait(void *args)
 
 typedef UINT PTR32;
 
-NTSTATUS wow64_midi_init(void *args)
+NTSTATUS unix_wow64_midi_init(void *args)
 {
     struct
     {
@@ -1275,7 +1298,7 @@ NTSTATUS wow64_midi_init(void *args)
     {
         .err = ULongToPtr(params32->err)
     };
-    return midi_init(&params);
+    return unix_midi_init(&params);
 }
 
 struct notify_context32
@@ -1358,7 +1381,7 @@ static UINT wow64_midi_out_unprepare(WORD dev_id, struct midi_hdr32 *hdr, UINT h
     return MMSYSERR_NOERROR;
 }
 
-NTSTATUS wow64_midi_out_message(void *args)
+NTSTATUS unix_wow64_midi_out_message(void *args)
 {
     struct
     {
@@ -1429,7 +1452,7 @@ NTSTATUS wow64_midi_out_message(void *args)
         return STATUS_SUCCESS;
     }
 
-    midi_out_message(&params);
+    unix_midi_out_message(&params);
 
     switch (params32->msg)
     {
@@ -1482,7 +1505,7 @@ static UINT wow64_midi_in_unprepare(WORD dev_id, struct midi_hdr32 *hdr, UINT hd
     return MMSYSERR_NOERROR;
 }
 
-NTSTATUS wow64_midi_in_message(void *args)
+NTSTATUS unix_wow64_midi_in_message(void *args)
 {
     struct
     {
@@ -1554,7 +1577,7 @@ NTSTATUS wow64_midi_in_message(void *args)
         return STATUS_SUCCESS;
     }
 
-    midi_in_message(&params);
+    unix_midi_in_message(&params);
 
     switch (params32->msg)
     {
@@ -1589,7 +1612,7 @@ NTSTATUS wow64_midi_in_message(void *args)
     return STATUS_SUCCESS;
 }
 
-NTSTATUS wow64_midi_notify_wait(void *args)
+NTSTATUS unix_wow64_midi_notify_wait(void *args)
 {
     struct
     {
@@ -1607,7 +1630,7 @@ NTSTATUS wow64_midi_notify_wait(void *args)
     };
     notify32->send_notify = FALSE;
 
-    midi_notify_wait(&params);
+    unix_midi_notify_wait(&params);
 
     if (!*params.quit && notify.send_notify)
     {

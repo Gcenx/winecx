@@ -19,6 +19,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,12 +35,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(bitmap);
 
-#ifdef __i386_on_x86_64__
-#undef free
-#define heapfree(x) HeapFree(GetProcessHeap(), 0, x)
-#else
-#define heapfree(x) free(x)
-#endif
 
 static INT BITMAP_GetObject( HGDIOBJ handle, INT count, LPVOID buffer );
 static BOOL BITMAP_DeleteObject( HGDIOBJ handle );
@@ -106,7 +104,7 @@ HBITMAP WINAPI NtGdiCreateBitmap( INT width, INT height, UINT planes,
 
     if (width > 0x7ffffff || height > 0x7ffffff)
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
     }
 
@@ -121,7 +119,7 @@ HBITMAP WINAPI NtGdiCreateBitmap( INT width, INT height, UINT planes,
     if (planes != 1)
     {
         FIXME("planes = %d\n", planes);
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return NULL;
     }
 
@@ -135,7 +133,7 @@ HBITMAP WINAPI NtGdiCreateBitmap( INT width, INT height, UINT planes,
     else
     {
         WARN("Invalid bmBitsPixel %d, returning ERROR_INVALID_PARAMETER\n", bpp);
-        SetLastError(ERROR_INVALID_PARAMETER);
+        RtlSetLastWin32Error(ERROR_INVALID_PARAMETER);
         return NULL;
     }
 
@@ -144,14 +142,14 @@ HBITMAP WINAPI NtGdiCreateBitmap( INT width, INT height, UINT planes,
     /* Check for overflow (dib_stride itself must be ok because of the constraint on bm.bmWidth above). */
     if (dib_stride != size / height)
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
     }
 
     /* Create the BITMAPOBJ */
     if (!(bmpobj = calloc( 1, sizeof(*bmpobj) )))
     {
-        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        RtlSetLastWin32Error( ERROR_NOT_ENOUGH_MEMORY );
         return 0;
     }
 
@@ -164,15 +162,15 @@ HBITMAP WINAPI NtGdiCreateBitmap( INT width, INT height, UINT planes,
     bmpobj->dib.dsBm.bmBits       = calloc( 1, size );
     if (!bmpobj->dib.dsBm.bmBits)
     {
-        heapfree( bmpobj );
-        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        free( bmpobj );
+        RtlSetLastWin32Error( ERROR_NOT_ENOUGH_MEMORY );
         return 0;
     }
 
     if (!(hbitmap = alloc_gdi_handle( &bmpobj->obj, NTGDI_OBJ_BITMAP, &bitmap_funcs )))
     {
-        heapfree( bmpobj->dib.dsBm.bmBits );
-        heapfree( bmpobj );
+        free( bmpobj->dib.dsBm.bmBits );
+        free( bmpobj );
         return 0;
     }
 
@@ -282,7 +280,7 @@ LONG WINAPI NtGdiSetBitmapBits(
     if (!bmp) return 0;
 
     if (count < 0) {
-	WARN("(%d): Negative number of bytes passed???\n", count );
+	WARN("(%d): Negative number of bytes passed???\n", (int)count );
 	count = -count;
     }
 
@@ -313,7 +311,7 @@ LONG WINAPI NtGdiSetBitmapBits(
     }
 
     TRACE("(%p, %d, %p) %dx%d %d bpp fetched height: %d\n",
-          hbitmap, count, bits, bmp->dib.dsBm.bmWidth, bmp->dib.dsBm.bmHeight,
+          hbitmap, (int)count, bits, bmp->dib.dsBm.bmWidth, bmp->dib.dsBm.bmHeight,
           bmp->dib.dsBm.bmBitsPixel, src.height );
 
     if (src_stride == dst_stride)
@@ -393,7 +391,7 @@ HGDIOBJ WINAPI NtGdiSelectBitmap( HDC hdc, HGDIOBJ handle )
         goto done;
     }
 
-    if (handle != get_stock_object( DEFAULT_BITMAP ) && GDI_get_ref_count( handle ))
+    if (handle != GetStockObject( DEFAULT_BITMAP ) && GDI_get_ref_count( handle ))
     {
         WARN( "Bitmap already selected in another DC\n" );
         GDI_ReleaseObj( handle );
@@ -448,8 +446,8 @@ static BOOL BITMAP_DeleteObject( HGDIOBJ handle )
     BITMAPOBJ *bmp = free_gdi_handle( handle );
 
     if (!bmp) return FALSE;
-    heapfree( bmp->dib.dsBm.bmBits );
-    heapfree( bmp );
+    free( bmp->dib.dsBm.bmBits );
+    free( bmp );
     return TRUE;
 }
 

@@ -18,9 +18,6 @@
 
 #ifndef _WDMDDK_
 #define _WDMDDK_
-
-#include "wine/winheader_enter.h"
-
 #define _NTDDK_
 
 #include <ntstatus.h>
@@ -255,6 +252,23 @@ typedef struct _FAST_MUTEX
     KEVENT Event;
     ULONG OldIrql;
 } FAST_MUTEX, *PFAST_MUTEX;
+
+typedef struct _KGUARDED_MUTEX
+{
+     LONG Count;
+     PKTHREAD Owner;
+     ULONG Contention;
+     KEVENT Event;
+     union
+     {
+          struct
+          {
+               SHORT KernelApcDisable;
+               SHORT SpecialApcDisable;
+          };
+          ULONG CombinedApcDisable;
+     };
+} KGUARDED_MUTEX, *PKGUARDED_MUTEX;
 
 #define MAXIMUM_VOLUME_LABEL_LENGTH       (32 * sizeof(WCHAR))
 
@@ -1659,15 +1673,15 @@ BOOLEAN   WINAPI ExAcquireResourceExclusiveLite(ERESOURCE*,BOOLEAN);
 BOOLEAN   WINAPI ExAcquireResourceSharedLite(ERESOURCE*,BOOLEAN);
 BOOLEAN   WINAPI ExAcquireSharedStarveExclusive(ERESOURCE*,BOOLEAN);
 BOOLEAN   WINAPI ExAcquireSharedWaitForExclusive(ERESOURCE*,BOOLEAN);
-PVOID     WINAPI ExAllocatePool(POOL_TYPE,SIZE_T);
-PVOID     WINAPI ExAllocatePoolWithQuota(POOL_TYPE,SIZE_T);
-PVOID     WINAPI ExAllocatePoolWithTag(POOL_TYPE,SIZE_T,ULONG);
-PVOID     WINAPI ExAllocatePoolWithQuotaTag(POOL_TYPE,SIZE_T,ULONG);
+void      WINAPI ExFreePool(PVOID);
+PVOID     WINAPI ExAllocatePool(POOL_TYPE,SIZE_T) __WINE_ALLOC_SIZE(2) __WINE_DEALLOC(ExFreePool) __WINE_MALLOC;
+PVOID     WINAPI ExAllocatePoolWithQuota(POOL_TYPE,SIZE_T) __WINE_ALLOC_SIZE(2) __WINE_DEALLOC(ExFreePool) __WINE_MALLOC;
+void      WINAPI ExFreePoolWithTag(PVOID,ULONG);
+PVOID     WINAPI ExAllocatePoolWithTag(POOL_TYPE,SIZE_T,ULONG) __WINE_ALLOC_SIZE(2) __WINE_DEALLOC(ExFreePoolWithTag) __WINE_MALLOC;
+PVOID     WINAPI ExAllocatePoolWithQuotaTag(POOL_TYPE,SIZE_T,ULONG) __WINE_ALLOC_SIZE(2) __WINE_DEALLOC(ExFreePoolWithTag) __WINE_MALLOC;
 void      WINAPI ExDeleteNPagedLookasideList(PNPAGED_LOOKASIDE_LIST);
 void      WINAPI ExDeletePagedLookasideList(PPAGED_LOOKASIDE_LIST);
 NTSTATUS  WINAPI ExDeleteResourceLite(ERESOURCE*);
-void      WINAPI ExFreePool(PVOID);
-void      WINAPI ExFreePoolWithTag(PVOID,ULONG);
 ULONG     WINAPI ExGetExclusiveWaiterCount(ERESOURCE*);
 ULONG     WINAPI ExGetSharedWaiterCount(ERESOURCE*);
 void      WINAPI ExInitializeNPagedLookasideList(PNPAGED_LOOKASIDE_LIST,PALLOCATE_FUNCTION,PFREE_FUNCTION,ULONG,SIZE_T,ULONG,USHORT);
@@ -1794,12 +1808,12 @@ BOOLEAN   WINAPI KeSignalCallDpcSynchronize(void*);
 NTSTATUS  WINAPI KeWaitForMultipleObjects(ULONG,void*[],WAIT_TYPE,KWAIT_REASON,KPROCESSOR_MODE,BOOLEAN,LARGE_INTEGER*,KWAIT_BLOCK*);
 NTSTATUS  WINAPI KeWaitForSingleObject(void*,KWAIT_REASON,KPROCESSOR_MODE,BOOLEAN,LARGE_INTEGER*);
 
-PVOID     WINAPI MmAllocateContiguousMemory(SIZE_T,PHYSICAL_ADDRESS);
-PVOID     WINAPI MmAllocateNonCachedMemory(SIZE_T);
+PVOID     WINAPI MmAllocateContiguousMemory(SIZE_T,PHYSICAL_ADDRESS) __WINE_ALLOC_SIZE(1) __WINE_MALLOC;
+void      WINAPI MmFreeNonCachedMemory(PVOID,SIZE_T);
+PVOID     WINAPI MmAllocateNonCachedMemory(SIZE_T) __WINE_ALLOC_SIZE(1) __WINE_DEALLOC(MmFreeNonCachedMemory) __WINE_MALLOC;
 PMDL      WINAPI MmAllocatePagesForMdl(PHYSICAL_ADDRESS,PHYSICAL_ADDRESS,PHYSICAL_ADDRESS,SIZE_T);
 void      WINAPI MmBuildMdlForNonPagedPool(MDL*);
 NTSTATUS  WINAPI MmCopyVirtualMemory(PEPROCESS,void*,PEPROCESS,void*,SIZE_T,KPROCESSOR_MODE,SIZE_T*);
-void      WINAPI MmFreeNonCachedMemory(PVOID,SIZE_T);
 void *    WINAPI MmGetSystemRoutineAddress(UNICODE_STRING*);
 PVOID     WINAPI MmMapLockedPagesSpecifyCache(PMDLX,KPROCESSOR_MODE,MEMORY_CACHING_TYPE,PVOID,ULONG,MM_PAGE_PRIORITY);
 MM_SYSTEMSIZE WINAPI MmQuerySystemSize(void);
@@ -1929,7 +1943,7 @@ NTSTATUS  WINAPI ZwSetEvent(HANDLE,PULONG);
 NTSTATUS  WINAPI ZwSetInformationFile(HANDLE,PIO_STATUS_BLOCK,PVOID,ULONG,FILE_INFORMATION_CLASS);
 NTSTATUS  WINAPI ZwSetInformationKey(HANDLE,const int,PVOID,ULONG);
 NTSTATUS  WINAPI ZwSetInformationObject(HANDLE, OBJECT_INFORMATION_CLASS, PVOID, ULONG);
-NTSTATUS  WINAPI ZwSetInformationProcess(HANDLE,PROCESS_INFORMATION_CLASS,PVOID,ULONG);
+NTSTATUS  WINAPI ZwSetInformationProcess(HANDLE,PROCESSINFOCLASS,PVOID,ULONG);
 NTSTATUS  WINAPI ZwSetInformationThread(HANDLE,THREADINFOCLASS,LPCVOID,ULONG);
 NTSTATUS  WINAPI ZwSetIoCompletion(HANDLE,ULONG,ULONG,NTSTATUS,ULONG);
 NTSTATUS  WINAPI ZwSetLdtEntries(ULONG,ULONG,ULONG,ULONG,ULONG,ULONG);
@@ -1956,7 +1970,5 @@ static inline void ExInitializeFastMutex( FAST_MUTEX *mutex )
     mutex->Contention = 0;
     KeInitializeEvent( &mutex->Event, SynchronizationEvent, FALSE );
 }
-
-#include "wine/winheader_exit.h"
 
 #endif

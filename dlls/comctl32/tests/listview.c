@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <windows.h>
 #include <commctrl.h>
+#include <objbase.h>
 
 #include "wine/test.h"
 #include "v6util.h"
@@ -37,6 +38,7 @@ enum seq_index {
     PARENT_SEQ_INDEX,
     PARENT_FULL_SEQ_INDEX,
     PARENT_CD_SEQ_INDEX,
+    PARENT_ODSTATECHANGED_SEQ_INDEX,
     LISTVIEW_SEQ_INDEX,
     EDITBOX_SEQ_INDEX,
     COMBINED_SEQ_INDEX,
@@ -254,6 +256,80 @@ static const struct message ownerdata_deselect_all_parent_seq[] = {
     { 0 }
 };
 
+static const struct message ownerdata_multiselect_select_0_to_1_odstatechanged_seq[] = {
+    { WM_NOTIFY, sent|id|wparam, -1, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ODSTATECHANGED },
+    { WM_NOTIFY, sent|id|wparam, 0, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 1, 0, LVN_ITEMCHANGED },
+    { 0 }
+};
+
+static const struct message ownerdata_multiselect_select_0_odstatechanged_seq[] = {
+    { WM_NOTIFY, sent|id|wparam, -1, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 1, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 0, 0, LVN_ITEMCHANGED },
+    { 0 }
+};
+
+static const struct message ownerdata_multiselect_select_0_modkey_odstatechanged_seq[] = {
+    { WM_NOTIFY, sent|id|wparam, -1, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 0, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 1, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 0, 0, LVN_ITEMCHANGED },
+    { 0 }
+};
+
+static const struct message ownerdata_multiselect_move_0_to_1_odstatechanged_seq[] = {
+    { WM_NOTIFY, sent|id|wparam, 0, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 1, 0, LVN_ITEMCHANGED },
+    { 0 }
+};
+
+static const struct message ownerdata_multiselect_select_0_to_2_odstatechanged_seq[] = {
+    { WM_NOTIFY, sent|id|wparam, -1, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ODSTATECHANGED },
+    { WM_NOTIFY, sent|id|wparam, 1, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 2, 0, LVN_ITEMCHANGED },
+    { 0 }
+};
+
+static const struct message ownerdata_multiselect_select_3_odstatechanged_seq[] = {
+    { WM_NOTIFY, sent|id|wparam, -1, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 2, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 3, 0, LVN_ITEMCHANGED },
+    { 0 }
+};
+
+static const struct message ownerdata_multiselect_select_3_modkey_odstatechanged_seq[] = {
+    { WM_NOTIFY, sent|id|wparam, -1, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 3, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 2, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 3, 0, LVN_ITEMCHANGED },
+    { 0 }
+};
+
+static const struct message ownerdata_multiselect_select_3_to_2_odstatechanged_seq[] = {
+    { WM_NOTIFY, sent|id|wparam, -1, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ODSTATECHANGED },
+    { WM_NOTIFY, sent|id|wparam, 3, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 2, 0, LVN_ITEMCHANGED },
+    { 0 }
+};
+
+static const struct message ownerdata_multiselect_move_3_to_2_odstatechanged_seq[] = {
+    { WM_NOTIFY, sent|id|wparam, 3, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 2, 0, LVN_ITEMCHANGED },
+    { 0 }
+};
+
+static const struct message ownerdata_multiselect_select_3_to_1_odstatechanged_seq[] = {
+    { WM_NOTIFY, sent|id|wparam, -1, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ODSTATECHANGED },
+    { WM_NOTIFY, sent|id|wparam, 2, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id|wparam, 1, 0, LVN_ITEMCHANGED },
+    { 0 }
+};
+
 static const struct message change_all_parent_seq[] = {
     { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGING },
     { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
@@ -462,6 +538,30 @@ static const struct message listview_end_label_edit_kill_focus[] = {
     { 0 }
 };
 
+static void hold_key(int vk)
+{
+    BYTE kstate[256];
+    BOOL res;
+
+    res = GetKeyboardState(kstate);
+    ok(res, "GetKeyboardState failed.\n");
+    kstate[vk] |= 0x80;
+    res = SetKeyboardState(kstate);
+    ok(res, "SetKeyboardState failed.\n");
+}
+
+static void release_key(int vk)
+{
+    BYTE kstate[256];
+    BOOL res;
+
+    res = GetKeyboardState(kstate);
+    ok(res, "GetKeyboardState failed.\n");
+    kstate[vk] &= ~0x80;
+    res = SetKeyboardState(kstate);
+    ok(res, "SetKeyboardState failed.\n");
+}
+
 static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     static LONG defwndproc_counter = 0;
@@ -499,6 +599,10 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
         add_message(sequences, PARENT_SEQ_INDEX, &msg);
         add_message(sequences, COMBINED_SEQ_INDEX, &msg);
     }
+    /* log change messages for single and multiple items changing in ownerdata listviews */
+    if (message == WM_NOTIFY && (msg.id == LVN_ITEMCHANGED || msg.id == LVN_ODSTATECHANGED))
+        add_message(sequences, PARENT_ODSTATECHANGED_SEQ_INDEX, &msg);
+
     add_message(sequences, PARENT_FULL_SEQ_INDEX, &msg);
 
     switch (message)
@@ -2356,7 +2460,6 @@ static void test_multiselect(void)
     int i, j;
     static const int items=5;
     DWORD item_count;
-    BYTE kstate[256];
     select_task task;
     LONG_PTR style;
     LVITEMA item;
@@ -2423,10 +2526,7 @@ static void test_multiselect(void)
 	selected_count = SendMessageA(hwnd, LVM_GETSELECTEDCOUNT, 0, 0);
 	ok(selected_count == 1, "expected 1, got %ld\n", selected_count);
 
-	/* Set SHIFT key pressed */
-        GetKeyboardState(kstate);
-        kstate[VK_SHIFT]=0x80;
-        SetKeyboardState(kstate);
+        hold_key(VK_SHIFT);
 
 	for (j=1;j<=(task.count == -1 ? item_count : task.count);j++) {
 	    r = SendMessageA(hwnd, WM_KEYDOWN, task.loopVK, 0);
@@ -2441,10 +2541,7 @@ static void test_multiselect(void)
             "Failed multiple selection %s. There should be %ld selected items (is %ld)\n",
             task.descr, item_count, selected_count);
 
-	/* Set SHIFT key released */
-	GetKeyboardState(kstate);
-        kstate[VK_SHIFT]=0x00;
-        SetKeyboardState(kstate);
+        release_key(VK_SHIFT);
     }
     DestroyWindow(hwnd);
 
@@ -3510,6 +3607,106 @@ static void test_ownerdata(void)
 
     res = SendMessageA(hwnd, LVM_GETNEXTITEM, -1, LVNI_FOCUSED);
     expect(-1, res);
+    DestroyWindow(hwnd);
+}
+
+static void test_ownerdata_multiselect(void)
+{
+    HWND hwnd;
+    DWORD res;
+    LVITEMA item;
+    unsigned int i;
+    char buf[256];
+
+    static const struct
+    {
+        BOOL hold_shift;
+        BOOL hold_control;
+        UINT press_key;
+        UINT selected_count;
+        const char *context;
+        const struct message *expected;
+        BOOL todo;
+    }
+    key_tests[] =
+    {
+        /* First down then up */
+        { TRUE,  FALSE, VK_DOWN, 2, "select multiple via SHIFT+DOWN",
+          ownerdata_multiselect_select_0_to_1_odstatechanged_seq, FALSE },
+        { TRUE,  FALSE, VK_UP,   1, "select one item via SHIFT+UP",
+          ownerdata_multiselect_select_0_modkey_odstatechanged_seq, TRUE },
+        { TRUE,  TRUE,  VK_DOWN, 2, "select multiple via SHIFT+CONTROL+DOWN",
+          ownerdata_multiselect_select_0_to_1_odstatechanged_seq, FALSE },
+        { TRUE,  TRUE,  VK_UP,   1, "select one item via SHIFT+CONTROL+UP",
+          ownerdata_multiselect_select_0_modkey_odstatechanged_seq, TRUE },
+        { FALSE, TRUE,  VK_DOWN, 1, "keep selection but move cursor via CONTROL+DOWN",
+          ownerdata_multiselect_move_0_to_1_odstatechanged_seq, FALSE },
+        { TRUE,  TRUE,  VK_DOWN, 3, "select multiple after skip via SHIFT+CONTROL+DOWN",
+          ownerdata_multiselect_select_0_to_2_odstatechanged_seq, FALSE },
+        { FALSE, FALSE, VK_DOWN, 1, "deselect all, select item 3 via DOWN",
+          ownerdata_multiselect_select_3_odstatechanged_seq, FALSE },
+        /* First up then down */
+        { TRUE,  FALSE, VK_UP,   2, "select multiple via SHIFT+UP",
+          ownerdata_multiselect_select_3_to_2_odstatechanged_seq, FALSE },
+        { TRUE,  FALSE, VK_DOWN, 1, "select one item via SHIFT+DOWN",
+          ownerdata_multiselect_select_3_modkey_odstatechanged_seq, TRUE },
+        { TRUE,  TRUE,  VK_UP,   2, "select multiple via SHIFT+CONTROL+UP",
+          ownerdata_multiselect_select_3_to_2_odstatechanged_seq, FALSE },
+        { TRUE,  TRUE,  VK_DOWN, 1, "select one item via SHIFT+CONTROL+DOWN",
+          ownerdata_multiselect_select_3_modkey_odstatechanged_seq, TRUE },
+        { FALSE, TRUE,  VK_UP,   1, "keep selection but move cursor via CONTROL+UP",
+          ownerdata_multiselect_move_3_to_2_odstatechanged_seq, FALSE },
+        { TRUE,  TRUE,  VK_UP,   3, "select multiple after skip via SHIFT+CONTROL+UP",
+          ownerdata_multiselect_select_3_to_1_odstatechanged_seq, FALSE },
+        { FALSE, FALSE, VK_UP,   1, "deselect all, select item 0 via UP",
+          ownerdata_multiselect_select_0_odstatechanged_seq, FALSE },
+    };
+
+    hwnd = create_listview_control(LVS_OWNERDATA | LVS_REPORT);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    res = SendMessageA(hwnd, LVM_SETITEMCOUNT, 20, 0);
+    expect(1, res);
+    res = SendMessageA(hwnd, LVM_GETSELECTEDCOUNT, 0, 0);
+    expect(0, res);
+
+    /* Select and focus the first row */
+    memset(&item, 0, sizeof(item));
+    item.state = LVIS_SELECTED | LVIS_FOCUSED;
+    item.stateMask = LVIS_SELECTED | LVIS_FOCUSED;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, 0, (LPARAM)&item);
+    expect(TRUE, res);
+    res = SendMessageA(hwnd, LVM_GETSELECTEDCOUNT, 0, 0);
+    expect(1, res);
+    res = SendMessageA(hwnd, LVM_SETSELECTIONMARK, 0, 0);
+    expect(0, res);
+
+    /* Select/deselect rows using UP/DOWN and SHIFT/CONTROL keys */
+    for (i = 0; i < ARRAY_SIZE(key_tests); i++)
+    {
+        flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+        if (key_tests[i].hold_shift)
+            hold_key(VK_SHIFT);
+        if (key_tests[i].hold_control)
+            hold_key(VK_CONTROL);
+
+        res = SendMessageA(hwnd, WM_KEYDOWN, key_tests[i].press_key, 0);
+        expect(0, res);
+        sprintf(buf, "ownerdata multiselect: %s", key_tests[i].context);
+        ok_sequence(sequences, PARENT_ODSTATECHANGED_SEQ_INDEX, key_tests[i].expected,
+                    buf, key_tests[i].todo);
+        res = SendMessageA(hwnd, WM_KEYUP, key_tests[i].press_key, 0);
+        expect(0, res);
+
+        res = SendMessageA(hwnd, LVM_GETSELECTEDCOUNT, 0, 0);
+        expect(key_tests[i].selected_count, res);
+
+        if (key_tests[i].hold_shift)
+            release_key(VK_SHIFT);
+        if (key_tests[i].hold_control)
+            release_key(VK_CONTROL);
+    }
+
     DestroyWindow(hwnd);
 }
 
@@ -6830,6 +7027,81 @@ static void test_LVM_GETNEXTITEMINDEX(void)
     DestroyWindow(hwnd);
 }
 
+static void test_LVM_SETBKIMAGE(BOOL is_v6)
+{
+    LVBKIMAGEA image;
+    HBITMAP hbmp;
+    BITMAP bm;
+    HWND hwnd;
+    int ret;
+
+    CoInitialize(NULL);
+
+    hbmp = CreateBitmap(32, 32, 1, 1, NULL);
+    hwnd = create_listview_control(LVS_REPORT);
+
+    image.ulFlags = LVBKIF_SOURCE_NONE;
+    image.hbm = 0;
+    image.pszImage = NULL;
+    image.cchImageMax = 0;
+    image.xOffsetPercent = 0;
+    image.yOffsetPercent = 0;
+    ret = SendMessageA(hwnd, LVM_SETBKIMAGEA, 0, (LPARAM)&image);
+    ok(!ret, "got %d\n", ret);
+
+    ret = GetObjectA(hbmp, sizeof(bm), &bm);
+    ok(ret == sizeof(bm), "got %d\n", ret);
+
+    image.ulFlags = LVBKIF_SOURCE_HBITMAP;
+    image.hbm = hbmp;
+    ret = SendMessageA(hwnd, LVM_SETBKIMAGEA, 0, (LPARAM)&image);
+    if (is_v6)
+        ok(ret, "got %d\n", ret);
+    else
+        todo_wine ok(!ret, "got %d\n", ret);
+
+    ret = GetObjectA(hbmp, sizeof(bm), &bm);
+    ok(ret == sizeof(bm), "got %d\n", ret);
+
+    image.ulFlags = LVBKIF_SOURCE_NONE;
+    image.hbm = 0;
+    ret = SendMessageA(hwnd, LVM_SETBKIMAGEA, 0, (LPARAM)&image);
+    ok(!ret, "got %d\n", ret);
+
+    ret = GetObjectA(hbmp, sizeof(bm), &bm);
+    ok(!ret, "got %d\n", ret);
+
+    hbmp = CreateBitmap(32, 32, 1, 1, NULL);
+
+    image.ulFlags = LVBKIF_SOURCE_HBITMAP;
+    image.hbm = hbmp;
+    ret = SendMessageA(hwnd, LVM_SETBKIMAGEA, 0, (LPARAM)&image);
+    if (is_v6)
+        ok(ret, "got %d\n", ret);
+    else
+        todo_wine ok(!ret, "got %d\n", ret);
+
+    ret = GetObjectA(hbmp, sizeof(bm), &bm);
+    ok(ret == sizeof(bm), "got %d\n", ret);
+
+    image.ulFlags = LVBKIF_SOURCE_HBITMAP;
+    image.hbm = hbmp;
+    ret = SendMessageA(hwnd, LVM_SETBKIMAGEA, 0, (LPARAM)&image);
+    ok(!ret, "got %d\n", ret);
+
+    ret = GetObjectA(hbmp, sizeof(bm), &bm);
+    ok(!ret, "got %d\n", ret);
+
+    image.ulFlags = LVBKIF_SOURCE_NONE;
+    image.hbm = 0;
+    ret = SendMessageA(hwnd, LVM_SETBKIMAGEA, 0, (LPARAM)&image);
+    ok(!ret, "got %d\n", ret);
+
+    DestroyWindow(hwnd);
+
+    CoUninitialize();
+}
+
 START_TEST(listview)
 {
     ULONG_PTR ctx_cookie;
@@ -6861,6 +7133,7 @@ START_TEST(listview)
     test_subitem_rect();
     test_sorting();
     test_ownerdata();
+    test_ownerdata_multiselect();
     test_norecompute();
     test_nosortheader();
     test_setredraw();
@@ -6892,6 +7165,7 @@ START_TEST(listview)
     test_LVN_ENDLABELEDIT();
     test_LVM_GETCOUNTPERPAGE();
     test_item_state_change();
+    test_LVM_SETBKIMAGE(FALSE);
 
     if (!load_v6_module(&ctx_cookie, &hCtx))
     {
@@ -6920,6 +7194,7 @@ START_TEST(listview)
     test_columns();
     test_sorting();
     test_ownerdata();
+    test_ownerdata_multiselect();
     test_norecompute();
     test_nosortheader();
     test_indentation();
@@ -6938,6 +7213,7 @@ START_TEST(listview)
     test_item_state_change();
     test_selected_column();
     test_LVM_GETNEXTITEMINDEX();
+    test_LVM_SETBKIMAGE(TRUE);
 
     unload_v6_module(ctx_cookie, hCtx);
 

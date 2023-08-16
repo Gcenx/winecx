@@ -23,6 +23,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <X11/Xatom.h>
@@ -40,16 +44,14 @@
 
 #define NONAMELESSUNION
 
-#include "windef.h"
-#include "winbase.h"
+#include "x11drv.h"
+
 #include "wingdi.h"
 #include "winuser.h"
 #include "winreg.h"
 #include "winnls.h"
 #include "ime.h"
-#include "x11drv.h"
 #include "wine/server.h"
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 /* log format (add 0-padding as appropriate):
@@ -60,6 +62,8 @@
 */
 WINE_DEFAULT_DEBUG_CHANNEL(keyboard);
 WINE_DECLARE_DEBUG_CHANNEL(key);
+
+static const unsigned int ControlMask = 1 << 2;
 
 static int min_keycode, max_keycode, keysyms_per_keycode;
 static KeySym *key_mapping;
@@ -1128,7 +1132,7 @@ static WORD EVENT_event_to_vkey( XIC xic, XKeyEvent *e)
 /***********************************************************************
  *           X11DRV_send_keyboard_input
  */
-static void X11DRV_send_keyboard_input( HWND hwnd, WORD vkey, WORD scan, DWORD flags, DWORD time )
+static void X11DRV_send_keyboard_input( HWND hwnd, WORD vkey, WORD scan, UINT flags, UINT time )
 {
     INPUT input;
 
@@ -1271,7 +1275,7 @@ static void adjust_lock_state( BYTE *keystate, HWND hwnd, WORD vkey, WORD scan, 
     }
 }
 
-static void update_lock_state( HWND hwnd, WORD vkey, UINT state, DWORD time )
+static void update_lock_state( HWND hwnd, WORD vkey, UINT state, UINT time )
 {
     BYTE keystate[256];
 
@@ -1338,7 +1342,7 @@ BOOL X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
         TRACE_(key)("XmbLookupString needs %i byte(s)\n", ascii_chars);
         if (status == XBufferOverflow)
         {
-            Str = HeapAlloc(GetProcessHeap(), 0, ascii_chars);
+            Str = malloc( ascii_chars );
             if (Str == NULL)
             {
                 ERR_(key)("Failed to allocate memory!\n");
@@ -1356,7 +1360,7 @@ BOOL X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
     {
         X11DRV_XIMLookupChars( Str, ascii_chars );
         if (buf != Str)
-            HeapFree(GetProcessHeap(), 0, Str);
+            free( Str );
         return TRUE;
     }
 
@@ -1385,7 +1389,7 @@ BOOL X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
                     keysym, ksname, ascii_chars, debugstr_an(Str, ascii_chars));
     }
     if (buf != Str)
-        HeapFree(GetProcessHeap(), 0, Str);
+        free( Str );
 
     vkey = EVENT_event_to_vkey(xic,event);
     /* X returns keycode 0 for composed characters */
@@ -1525,7 +1529,7 @@ X11DRV_KEYBOARD_DetectLayout( Display *display )
 
 static HKL get_locale_kbd_layout(void)
 {
-    ULONG_PTR layout;
+    LCID layout;
     LANGID langid;
 
     /* FIXME:
@@ -1539,7 +1543,7 @@ static HKL get_locale_kbd_layout(void)
      * locale id we return the US one.
      */
 
-    layout = GetUserDefaultLCID();
+    NtQueryDefaultLocale( TRUE, &layout );
 
     /*
      * Microsoft Office expects this value to be something specific
@@ -1553,7 +1557,7 @@ static HKL get_locale_kbd_layout(void)
     else
         layout |= layout << 16;
 
-    return (HKL)layout;
+    return (HKL)(UINT_PTR)layout;
 }
 
 
@@ -1853,14 +1857,14 @@ BOOL X11DRV_ActivateKeyboardLayout(HKL hkl, UINT flags)
 
     if (flags & KLF_SETFORPROCESS)
     {
-        SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+        RtlSetLastWin32Error( ERROR_CALL_NOT_IMPLEMENTED );
         FIXME("KLF_SETFORPROCESS not supported\n");
         return FALSE;
     }
 
     if (!match_x11_keyboard_layout(hkl))
     {
-        SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+        RtlSetLastWin32Error( ERROR_CALL_NOT_IMPLEMENTED );
         FIXME("setting keyboard of different locales not supported\n");
         return FALSE;
     }
@@ -1904,7 +1908,7 @@ SHORT X11DRV_VkKeyScanEx( WCHAR wChar, HKL hkl )
     /* FIXME: what happens if wChar is not a Latin1 character and CP_UNIXCP
      * is UTF-8 (multibyte encoding)?
      */
-    if (!WideCharToMultiByte(CP_UNIXCP, 0, &wChar, 1, &cChar, 1, NULL, NULL))
+    if (!ntdll_wcstoumbs( &wChar, 1, &cChar, 1, FALSE ))
     {
         WARN("no translation from unicode to CP_UNIXCP for 0x%02x\n", wChar);
         return -1;
@@ -2100,7 +2104,7 @@ UINT X11DRV_MapVirtualKeyEx( UINT wCode, UINT wMapType, HKL hkl )
             if (len)
             {
                 WCHAR wch;
-                if (MultiByteToWideChar(CP_UNIXCP, 0, s, len, &wch, 1)) ret = toupperW(wch);
+                if (ntdll_umbstowcs( s, len, &wch, 1 )) ret = RtlUpcaseUnicodeChar( wch );
             }
             break;
         }
@@ -2167,7 +2171,7 @@ INT X11DRV_GetKeyNameText( LONG lParam, LPWSTR lpBuffer, INT nSize )
       {
         if (nSize >= 2)
 	{
-          *lpBuffer = toupperW((WCHAR)ansi);
+          *lpBuffer = RtlUpcaseUnicodeChar( ansi );
           *(lpBuffer+1) = 0;
           return 1;
         }
@@ -2203,12 +2207,12 @@ INT X11DRV_GetKeyNameText( LONG lParam, LPWSTR lpBuffer, INT nSize )
       if (name && (vkey == VK_SHIFT || vkey == VK_CONTROL || vkey == VK_MENU))
       {
           char* idx = strrchr(name, '_');
-          if (idx && (_strnicmp(idx, "_r", -1) == 0 || _strnicmp(idx, "_l", -1) == 0))
+          if (idx && (idx[1] == 'r' || idx[1] == 'R' || idx[1] == 'l' || idx[1] == 'L') && !idx[2])
           {
               pthread_mutex_unlock( &kbd_mutex );
               TRACE("found scan=%04x keyc=%u keysym=%lx modified_string=%s\n",
                     scanCode, keyc, keys, debugstr_an(name,idx-name));
-              rc = MultiByteToWideChar(CP_UNIXCP, 0, name, idx-name+1, lpBuffer, nSize);
+              rc = ntdll_umbstowcs( name, idx - name + 1, lpBuffer, nSize );
               if (!rc) rc = nSize;
               lpBuffer[--rc] = 0;
               return rc;
@@ -2220,7 +2224,7 @@ INT X11DRV_GetKeyNameText( LONG lParam, LPWSTR lpBuffer, INT nSize )
           pthread_mutex_unlock( &kbd_mutex );
           TRACE("found scan=%04x keyc=%u keysym=%04x vkey=%04x string=%s\n",
                 scanCode, keyc, (int)keys, vkey, debugstr_a(name));
-          rc = MultiByteToWideChar(CP_UNIXCP, 0, name, -1, lpBuffer, nSize);
+          rc = ntdll_umbstowcs( name, strlen(name) + 1, lpBuffer, nSize );
           if (!rc) rc = nSize;
           lpBuffer[--rc] = 0;
           return rc;
@@ -2230,7 +2234,7 @@ INT X11DRV_GetKeyNameText( LONG lParam, LPWSTR lpBuffer, INT nSize )
   /* Finally issue WARN for unknown keys   */
 
   pthread_mutex_unlock( &kbd_mutex );
-  WARN("(%08x,%p,%d): unsupported key, vkey=%04X, ansi=%04x\n",lParam,lpBuffer,nSize,vkey,ansi);
+  WARN("(%08x,%p,%d): unsupported key, vkey=%04X, ansi=%04x\n",(int)lParam,lpBuffer,nSize,vkey,ansi);
   *lpBuffer = 0;
   return 0;
 }
@@ -2463,7 +2467,7 @@ INT X11DRV_ToUnicodeEx( UINT virtKey, UINT scanCode, const BYTE *lpKeyState,
         TRACE_(key)("XmbLookupString needs %d byte(s)\n", ret);
         if (status == XBufferOverflow)
         {
-            lpChar = HeapAlloc(GetProcessHeap(), 0, ret);
+            lpChar = malloc( ret );
             if (lpChar == NULL)
             {
                 ERR_(key)("Failed to allocate memory!\n");
@@ -2515,7 +2519,7 @@ INT X11DRV_ToUnicodeEx( UINT virtKey, UINT scanCode, const BYTE *lpKeyState,
 	dead_char = KEYBOARD_MapDeadKeysym(keysym);
 	if (dead_char)
         {
-	    MultiByteToWideChar(CP_UNIXCP, 0, &dead_char, 1, bufW, bufW_size);
+	    ntdll_umbstowcs( &dead_char, 1, bufW, bufW_size );
 	    ret = -1;
             goto found;
         }
@@ -2611,13 +2615,13 @@ INT X11DRV_ToUnicodeEx( UINT virtKey, UINT scanCode, const BYTE *lpKeyState,
 	if(ret)
 	{
 	    TRACE_(key)("Translating char 0x%02x to unicode\n", *(BYTE *)lpChar);
-	    ret = MultiByteToWideChar(CP_UNIXCP, 0, lpChar, ret, bufW, bufW_size);
+            ret = ntdll_umbstowcs( lpChar, ret, bufW, bufW_size );
 	}
     }
 
 found:
     if (buf != lpChar)
-        HeapFree(GetProcessHeap(), 0, lpChar);
+        free( lpChar );
 
     pthread_mutex_unlock( &kbd_mutex );
 

@@ -29,6 +29,367 @@
 
 #include "wine/test.h"
 
+struct test_fontenumerator
+{
+    IDWriteFontFileEnumerator IDWriteFontFileEnumerator_iface;
+    LONG refcount;
+
+    DWORD index;
+    IDWriteFontFile *file;
+};
+
+static inline struct test_fontenumerator *impl_from_IDWriteFontFileEnumerator(IDWriteFontFileEnumerator* iface)
+{
+    return CONTAINING_RECORD(iface, struct test_fontenumerator, IDWriteFontFileEnumerator_iface);
+}
+
+static HRESULT WINAPI singlefontfileenumerator_QueryInterface(IDWriteFontFileEnumerator *iface, REFIID riid, void **obj)
+{
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDWriteFontFileEnumerator))
+    {
+        *obj = iface;
+        IDWriteFontFileEnumerator_AddRef(iface);
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI singlefontfileenumerator_AddRef(IDWriteFontFileEnumerator *iface)
+{
+    struct test_fontenumerator *enumerator = impl_from_IDWriteFontFileEnumerator(iface);
+    return InterlockedIncrement(&enumerator->refcount);
+}
+
+static ULONG WINAPI singlefontfileenumerator_Release(IDWriteFontFileEnumerator *iface)
+{
+    struct test_fontenumerator *enumerator = impl_from_IDWriteFontFileEnumerator(iface);
+    ULONG refcount = InterlockedDecrement(&enumerator->refcount);
+
+    if (!refcount)
+    {
+        IDWriteFontFile_Release(enumerator->file);
+        free(enumerator);
+    }
+
+    return refcount;
+}
+
+static HRESULT WINAPI singlefontfileenumerator_GetCurrentFontFile(IDWriteFontFileEnumerator *iface,
+        IDWriteFontFile **file)
+{
+    struct test_fontenumerator *enumerator = impl_from_IDWriteFontFileEnumerator(iface);
+
+    IDWriteFontFile_AddRef((*file = enumerator->file));
+
+    return S_OK;
+}
+
+static HRESULT WINAPI singlefontfileenumerator_MoveNext(IDWriteFontFileEnumerator *iface, BOOL *current)
+{
+    struct test_fontenumerator *enumerator = impl_from_IDWriteFontFileEnumerator(iface);
+
+    if (enumerator->index > 1)
+    {
+        *current = FALSE;
+        return S_OK;
+    }
+
+    enumerator->index++;
+    *current = TRUE;
+    return S_OK;
+}
+
+static const struct IDWriteFontFileEnumeratorVtbl singlefontfileenumeratorvtbl =
+{
+    singlefontfileenumerator_QueryInterface,
+    singlefontfileenumerator_AddRef,
+    singlefontfileenumerator_Release,
+    singlefontfileenumerator_MoveNext,
+    singlefontfileenumerator_GetCurrentFontFile
+};
+
+static HRESULT create_enumerator(IDWriteFontFile *file, IDWriteFontFileEnumerator **ret)
+{
+    struct test_fontenumerator *enumerator;
+
+    if (!(enumerator = calloc(1, sizeof(*enumerator))))
+        return E_OUTOFMEMORY;
+
+    enumerator->IDWriteFontFileEnumerator_iface.lpVtbl = &singlefontfileenumeratorvtbl;
+    enumerator->refcount = 1;
+    enumerator->index = 0;
+    enumerator->file = file;
+    IDWriteFontFile_AddRef(file);
+
+    *ret = &enumerator->IDWriteFontFileEnumerator_iface;
+    return S_OK;
+}
+
+struct test_fontdatastream
+{
+    IDWriteFontFileStream IDWriteFontFileStream_iface;
+    LONG refcount;
+
+    void *data;
+    DWORD size;
+};
+
+static inline struct test_fontdatastream *impl_from_IDWriteFontFileStream(IDWriteFontFileStream* iface)
+{
+    return CONTAINING_RECORD(iface, struct test_fontdatastream, IDWriteFontFileStream_iface);
+}
+
+static HRESULT WINAPI fontdatastream_QueryInterface(IDWriteFontFileStream *iface, REFIID riid, void **obj)
+{
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDWriteFontFileStream))
+    {
+        *obj = iface;
+        IDWriteFontFileStream_AddRef(iface);
+        return S_OK;
+    }
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI fontdatastream_AddRef(IDWriteFontFileStream *iface)
+{
+    struct test_fontdatastream *stream = impl_from_IDWriteFontFileStream(iface);
+    return InterlockedIncrement(&stream->refcount);
+}
+
+static ULONG WINAPI fontdatastream_Release(IDWriteFontFileStream *iface)
+{
+    struct test_fontdatastream *stream = impl_from_IDWriteFontFileStream(iface);
+    ULONG refcount = InterlockedDecrement(&stream->refcount);
+
+    if (!refcount)
+        free(stream);
+
+    return refcount;
+}
+
+static HRESULT WINAPI fontdatastream_ReadFileFragment(IDWriteFontFileStream *iface, void const **fragment_start,
+        UINT64 offset, UINT64 fragment_size, void **fragment_context)
+{
+    struct test_fontdatastream *stream = impl_from_IDWriteFontFileStream(iface);
+
+    *fragment_context = NULL;
+
+    if (offset + fragment_size > stream->size)
+    {
+        *fragment_start = NULL;
+        return E_FAIL;
+    }
+    else
+    {
+        *fragment_start = (BYTE *)stream->data + offset;
+        return S_OK;
+    }
+}
+
+static void WINAPI fontdatastream_ReleaseFileFragment(IDWriteFontFileStream *iface, void *fragment_context)
+{
+}
+
+static HRESULT WINAPI fontdatastream_GetFileSize(IDWriteFontFileStream *iface, UINT64 *size)
+{
+    struct test_fontdatastream *stream = impl_from_IDWriteFontFileStream(iface);
+    *size = stream->size;
+    return S_OK;
+}
+
+static HRESULT WINAPI fontdatastream_GetLastWriteTime(IDWriteFontFileStream *iface, UINT64 *last_writetime)
+{
+    return E_NOTIMPL;
+}
+
+static const IDWriteFontFileStreamVtbl fontdatastreamvtbl =
+{
+    fontdatastream_QueryInterface,
+    fontdatastream_AddRef,
+    fontdatastream_Release,
+    fontdatastream_ReadFileFragment,
+    fontdatastream_ReleaseFileFragment,
+    fontdatastream_GetFileSize,
+    fontdatastream_GetLastWriteTime
+};
+
+static HRESULT create_fontdatastream(LPVOID data, UINT size, IDWriteFontFileStream** iface)
+{
+    struct test_fontdatastream *object;
+
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    object->IDWriteFontFileStream_iface.lpVtbl = &fontdatastreamvtbl;
+    object->refcount = 1;
+    object->data = data;
+    object->size = size;
+
+    *iface = &object->IDWriteFontFileStream_iface;
+
+    return S_OK;
+}
+
+struct resource_file_loader
+{
+    IDWriteFontFileLoader IDWriteFontFileLoader_iface;
+    LONG refcount;
+};
+
+static inline struct resource_file_loader *impl_from_IDWriteFontFileLoader(IDWriteFontFileLoader *iface)
+{
+    return CONTAINING_RECORD(iface, struct resource_file_loader, IDWriteFontFileLoader_iface);
+}
+
+static HRESULT WINAPI resourcefontfileloader_QueryInterface(IDWriteFontFileLoader *iface, REFIID riid, void **obj)
+{
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDWriteFontFileLoader))
+    {
+        *obj = iface;
+        return S_OK;
+    }
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI resourcefontfileloader_AddRef(IDWriteFontFileLoader *iface)
+{
+    struct resource_file_loader *loader = impl_from_IDWriteFontFileLoader(iface);
+    return InterlockedIncrement(&loader->refcount);
+}
+
+static ULONG WINAPI resourcefontfileloader_Release(IDWriteFontFileLoader *iface)
+{
+    struct resource_file_loader *loader = impl_from_IDWriteFontFileLoader(iface);
+    ULONG refcount = InterlockedDecrement(&loader->refcount);
+
+    if (!refcount)
+        free(loader);
+
+    return refcount;
+}
+
+static HRESULT WINAPI resourcefontfileloader_CreateStreamFromKey(IDWriteFontFileLoader *iface, const void *ref_key,
+        UINT32 key_size, IDWriteFontFileStream **stream)
+{
+    LPVOID data;
+    DWORD size;
+    HGLOBAL mem;
+
+    mem = LoadResource(GetModuleHandleA(NULL), *(HRSRC*)ref_key);
+    ok(mem != NULL, "Failed to lock font resource\n");
+    if (mem)
+    {
+        size = SizeofResource(GetModuleHandleA(NULL), *(HRSRC*)ref_key);
+        data = LockResource(mem);
+        return create_fontdatastream(data, size, stream);
+    }
+    return E_FAIL;
+}
+
+static const struct IDWriteFontFileLoaderVtbl resourcefontfileloadervtbl =
+{
+    resourcefontfileloader_QueryInterface,
+    resourcefontfileloader_AddRef,
+    resourcefontfileloader_Release,
+    resourcefontfileloader_CreateStreamFromKey
+};
+
+static IDWriteFontFileLoader *create_resource_file_loader(void)
+{
+    struct resource_file_loader *object;
+
+    object = calloc(1, sizeof(*object));
+
+    object->IDWriteFontFileLoader_iface.lpVtbl = &resourcefontfileloadervtbl;
+    object->refcount = 1;
+
+    return &object->IDWriteFontFileLoader_iface;
+}
+
+struct resource_collection_loader
+{
+    IDWriteFontCollectionLoader IDWriteFontCollectionLoader_iface;
+    LONG refcount;
+    IDWriteFontFileLoader *loader;
+};
+
+static inline struct resource_collection_loader *impl_from_IDWriteFontFileCollectionLoader(IDWriteFontCollectionLoader* iface)
+{
+    return CONTAINING_RECORD(iface, struct resource_collection_loader, IDWriteFontCollectionLoader_iface);
+}
+
+static HRESULT WINAPI resourcecollectionloader_QueryInterface(IDWriteFontCollectionLoader *iface, REFIID riid, void **obj)
+{
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDWriteFontCollectionLoader))
+    {
+        *obj = iface;
+        IDWriteFontCollectionLoader_AddRef(iface);
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI resourcecollectionloader_AddRef(IDWriteFontCollectionLoader *iface)
+{
+    struct resource_collection_loader *loader = impl_from_IDWriteFontFileCollectionLoader(iface);
+    return InterlockedIncrement(&loader->refcount);
+}
+
+static ULONG WINAPI resourcecollectionloader_Release(IDWriteFontCollectionLoader *iface)
+{
+    struct resource_collection_loader *loader = impl_from_IDWriteFontFileCollectionLoader(iface);
+    ULONG refcount = InterlockedDecrement(&loader->refcount);
+
+    if (!refcount)
+    {
+        IDWriteFontFileLoader_Release(loader->loader);
+        free(loader);
+    }
+
+    return refcount;
+}
+
+static HRESULT WINAPI resourcecollectionloader_CreateEnumeratorFromKey(IDWriteFontCollectionLoader *iface,
+        IDWriteFactory *factory, const void *key, UINT32 key_size, IDWriteFontFileEnumerator **enumerator)
+{
+    struct resource_collection_loader *loader = impl_from_IDWriteFontFileCollectionLoader(iface);
+    IDWriteFontFile *font_file;
+    HRESULT hr;
+
+    hr = IDWriteFactory_CreateCustomFontFileReference(factory, key, key_size, loader->loader, &font_file);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = create_enumerator(font_file, enumerator);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    IDWriteFontFile_Release(font_file);
+    return hr;
+}
+
+static const struct IDWriteFontCollectionLoaderVtbl resourcecollectionloadervtbl =
+{
+    resourcecollectionloader_QueryInterface,
+    resourcecollectionloader_AddRef,
+    resourcecollectionloader_Release,
+    resourcecollectionloader_CreateEnumeratorFromKey
+};
+
+static IDWriteFontCollectionLoader *create_resource_collection_loader(IDWriteFontFileLoader *loader)
+{
+    struct resource_collection_loader *object;
+
+    object = calloc(1, sizeof(*object));
+    object->IDWriteFontCollectionLoader_iface.lpVtbl = &resourcecollectionloadervtbl;
+    object->refcount = 1;
+    object->loader = loader;
+    IDWriteFontFileLoader_AddRef(object->loader);
+
+    return &object->IDWriteFontCollectionLoader_iface;
+}
+
 struct testanalysissink
 {
     IDWriteTextAnalysisSink IDWriteTextAnalysisSink_iface;
@@ -1194,6 +1555,10 @@ static void test_CreateTextFormat(void)
 
     hr = IDWriteFactory_CreateTextFormat(factory, L"Tahoma", NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_ITALIC,
             10, 10.0f, L"en-us", &format);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+
+    hr = IDWriteFactory_CreateTextFormat(factory, L"Tahoma", NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_ITALIC,
+            DWRITE_FONT_STRETCH_UNDEFINED, 10.0f, L"en-us", &format);
     ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
 
     /* empty family name */
@@ -2672,9 +3037,9 @@ if (0) { /* crashes on native */
     count = 0;
     hr = IDWriteTextLayout1_GetClusterMetrics(layout1, clusters, 4, &count);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(count == 3, "Unexpected cluster count %u.\n", count);
+    todo_wine ok(count == 3, "Unexpected cluster count %u.\n", count);
     ok(clusters[0].length == 1, "got %u\n", clusters[0].length);
-    ok(clusters[1].length == 2, "got %u\n", clusters[1].length);
+    todo_wine ok(clusters[1].length == 2, "got %u\n", clusters[1].length);
     ok(clusters[2].length == 1, "got %u\n", clusters[2].length);
 
     /* pair kerning flag participates in itemization - combining characters
@@ -4583,26 +4948,80 @@ static const IDWriteFontCollectionVtbl fallbackcollectionvtbl = {
 
 static IDWriteFontCollection fallbackcollection = { &fallbackcollectionvtbl };
 
+static void get_font_name(IDWriteFont *font, WCHAR *name, UINT32 size)
+{
+    IDWriteLocalizedStrings *names;
+    IDWriteFontFamily *family;
+    UINT32 index;
+    BOOL exists;
+    HRESULT hr;
+
+    hr = IDWriteFont_GetFontFamily(font, &family);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IDWriteFontFamily_GetFamilyNames(family, &names);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IDWriteLocalizedStrings_FindLocaleName(names, L"en-us", &index, &exists);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(index != UINT_MAX && exists, "Name was not found.\n");
+    hr = IDWriteLocalizedStrings_GetString(names, index, name, size);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    IDWriteLocalizedStrings_Release(names);
+    IDWriteFontFamily_Release(family);
+}
+
+static void utf32_to_utf16(UINT32 C, WCHAR **ptr)
+{
+    if (C > 0xffff)
+    {
+        WCHAR X = (WCHAR)C;
+        UINT32 U = (C >> 16) & ((1 << 5) - 1);
+        WCHAR W = (WCHAR)U - 1;
+
+        **ptr = 0xD800 | (W << 6) | X >> 10; *ptr += 1;
+        **ptr = (WCHAR)(0xDC00 | (X & ((1 << 10) - 1))); *ptr += 1;
+    }
+    else
+    {
+        **ptr = C; *ptr += 1;
+    }
+}
+
 static void test_MapCharacters(void)
 {
     static const WCHAR str2W[] = {'a',0x3058,'b',0};
+    static const UINT32 variation_selectors[] =
+    {
+        0x180b, 0x180c, 0x180d,
+
+        0xfe00, 0xfe01, 0xfe02, 0xfe03, 0xfe04, 0xfe05, 0xfe06, 0xfe07,
+        0xfe08, 0xfe09, 0xfe0a, 0xfe0b, 0xfe0c, 0xfe0d, 0xfe0e, 0xfe0f,
+
+        0xe0100, 0xe0121, 0xe01ef,
+    };
+    IDWriteFontCollectionLoader *resource_collection_loader;
+    IDWriteFontFileLoader *resource_loader;
+    IDWriteFontCollection *collection;
     IDWriteLocalizedStrings *strings;
+    UINT32 mappedlength, vs_length;
     IDWriteFontFallback *fallback;
     IDWriteFactory2 *factory2;
-    IDWriteFactory *factory;
-    UINT32 mappedlength;
     IDWriteFont *font;
     WCHAR buffW[50];
+    WCHAR name[64];
+    unsigned int i;
+    HRSRC hrsrc;
     BOOL exists;
     FLOAT scale;
+    WCHAR *ptr;
     HRESULT hr;
 
-    factory = create_factory();
-
-    hr = IDWriteFactory_QueryInterface(factory, &IID_IDWriteFactory2, (void**)&factory2);
-    IDWriteFactory_Release(factory);
-    if (hr != S_OK) {
-        win_skip("MapCharacters() is not supported\n");
+    factory2 = create_factory_iid(&IID_IDWriteFactory2);
+    if (!factory2)
+    {
+        win_skip("MapCharacters() is not supported.\n");
         return;
     }
 
@@ -4639,16 +5058,13 @@ static void test_MapCharacters(void)
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(mappedlength == 1, "got %u\n", mappedlength);
-}
     ok(scale == 1.0f, "got %f\n", scale);
-    todo_wine
     ok(font != NULL, "got %p\n", font);
-if (font) {
-    IDWriteFont_Release(font);
-}
+    if (font)
+        IDWriteFont_Release(font);
+
     /* same Latin text, full length */
     g_source = L"abc";
     mappedlength = 0;
@@ -4656,16 +5072,14 @@ if (font) {
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 3, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(mappedlength == 3, "got %u\n", mappedlength);
-}
+
     ok(scale == 1.0f, "got %f\n", scale);
-    todo_wine
     ok(font != NULL, "got %p\n", font);
-if (font) {
-    IDWriteFont_Release(font);
-}
+    if (font)
+        IDWriteFont_Release(font);
+
     /* string 'a\x3058b' */
     g_source = str2W;
     mappedlength = 0;
@@ -4673,32 +5087,26 @@ if (font) {
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 3, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(mappedlength == 1, "got %u\n", mappedlength);
-}
     ok(scale == 1.0f, "got %f\n", scale);
-    todo_wine
     ok(font != NULL, "got %p\n", font);
-if (font) {
-    IDWriteFont_Release(font);
-}
+    if (font)
+        IDWriteFont_Release(font);
+
     g_source = str2W;
     mappedlength = 0;
     scale = 0.0f;
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 1, 2, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(mappedlength == 1, "got %u\n", mappedlength);
-}
+    ok(mappedlength == 1, "Unexpected length %u.\n", mappedlength);
     ok(scale == 1.0f, "got %f\n", scale);
-    todo_wine
     ok(font != NULL, "got %p\n", font);
-if (font) {
-    IDWriteFont_Release(font);
-}
+    if (font)
+        IDWriteFont_Release(font);
+
     /* Try with explicit collection, Tahoma will be forced. */
     /* 1. Latin part */
     g_source = str2W;
@@ -4733,42 +5141,129 @@ if (font) {
     ok(scale == 1.0f, "got %f\n", scale);
     ok(font != NULL, "got %p\n", font);
 
-    exists = FALSE;
-    hr = IDWriteFont_GetInformationalStrings(font, DWRITE_INFORMATIONAL_STRING_WIN32_FAMILY_NAMES, &strings, &exists);
-    ok(hr == S_OK && exists, "Unexpected hr %#lx, exists %d.\n", hr, exists);
-    hr = IDWriteLocalizedStrings_GetString(strings, 0, buffW, ARRAY_SIZE(buffW));
+    if (font)
+    {
+        exists = FALSE;
+        hr = IDWriteFont_GetInformationalStrings(font, DWRITE_INFORMATIONAL_STRING_WIN32_FAMILY_NAMES, &strings, &exists);
+        ok(hr == S_OK && exists, "Unexpected hr %#lx, exists %d.\n", hr, exists);
+        hr = IDWriteLocalizedStrings_GetString(strings, 0, buffW, ARRAY_SIZE(buffW));
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        ok(lstrcmpW(buffW, L"Tahoma"), "Unexpected string %s.\n", wine_dbgstr_w(buffW));
+        IDWriteLocalizedStrings_Release(strings);
+        IDWriteFont_Release(font);
+    }
+
+    /* Control characters. The test is using a bundled font that does not support them. */
+    resource_loader = create_resource_file_loader();
+    resource_collection_loader = create_resource_collection_loader(resource_loader);
+
+    hr = IDWriteFactory2_RegisterFontFileLoader(factory2, resource_loader);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    todo_wine
-    ok(lstrcmpW(buffW, L"Tahoma"), "Unexpected string %s.\n", wine_dbgstr_w(buffW));
-    IDWriteLocalizedStrings_Release(strings);
-    IDWriteFont_Release(font);
+    hr = IDWriteFactory2_RegisterFontCollectionLoader(factory2, resource_collection_loader);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hrsrc = FindResourceA(GetModuleHandleA(NULL), (LPCSTR)MAKEINTRESOURCE(1), (LPCSTR)RT_RCDATA);
+    ok(!!hrsrc, "Failed to find font resource\n");
+
+    hr = IDWriteFactory2_CreateCustomFontCollection(factory2, resource_collection_loader, &hrsrc, sizeof(hrsrc), &collection);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n",hr);
+
+    /* Variation selectors are skipped. */
+    for (i = 0; i < ARRAY_SIZE(variation_selectors); ++i)
+    {
+        g_source = buffW;
+
+        vs_length = variation_selectors[i] > 0xffff ? 2 : 1;
+
+        winetest_push_context("Test %#x", variation_selectors[i]);
+
+        /* Selector within supported text. */
+
+        font = NULL;
+        ptr = buffW;
+
+        *ptr = 'A'; ptr++;
+        utf32_to_utf16(variation_selectors[i], &ptr);
+        *ptr = 'A';
+
+        hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, vs_length + 1, collection, L"wine_test",
+                DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        ok(mappedlength == vs_length + 1, "Unexpected mapped length %u.\n", mappedlength);
+        get_font_name(font, name, ARRAY_SIZE(name));
+        ok(!wcscmp(name, L"wine_test"), "Unexpected font %s.\n", debugstr_w(name));
+        IDWriteFont_Release(font);
+
+        /* Only selectors. */
+        font = NULL;
+        ptr = buffW;
+        utf32_to_utf16(variation_selectors[i], &ptr);
+        hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, vs_length, collection, L"wine_test",
+                DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        ok(mappedlength == vs_length, "Unexpected mapped length %u.\n", mappedlength);
+        if (variation_selectors[i] < 0xfe00)
+        {
+            /* Mongolian selectors belong to Mongolian range, and are mapped to a specific font. */
+            if (font) IDWriteFont_Release(font);
+        }
+        else
+        {
+            /* Variation selectors do not have a fallback mapping on their own. */
+            ok(!font, "Unexpected font instance.\n");
+        }
+
+        /* Leading selector. Only use VS-1..16 so we don't hit a valid mapping range. */
+        if (variation_selectors[i] >= 0xfe00)
+        {
+            ptr = buffW;
+            utf32_to_utf16(variation_selectors[i], &ptr);
+            utf32_to_utf16(variation_selectors[i], &ptr);
+            *ptr = 'A';
+
+            font = (void *)0xdeadbeef;
+            hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, vs_length * 2 + 1, collection, L"wine_test",
+                    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
+            ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+            ok(mappedlength == vs_length * 2, "Unexpected mapped length %u.\n", mappedlength);
+            ok(!font, "Unexpected font instance.\n");
+
+            hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, vs_length * 2 + 1, NULL, NULL,
+                    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
+            ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+            ok(mappedlength == vs_length * 2, "Unexpected mapped length %u.\n", mappedlength);
+            ok(!font, "Unexpected font instance.\n");
+        }
+
+        /* Trailing selector. */
+        ptr = buffW;
+        *ptr = 'A'; ptr++;
+        utf32_to_utf16(variation_selectors[i], &ptr);
+
+        font = (void *)0xdeadbeef;
+        hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, vs_length + 1, collection, L"wine_test",
+                DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        ok(mappedlength == vs_length + 1, "Unexpected mapped length %u.\n", mappedlength);
+        get_font_name(font, name, ARRAY_SIZE(name));
+        ok(!wcscmp(name, L"wine_test"), "Unexpected font %s.\n", debugstr_w(name));
+        IDWriteFont_Release(font);
+
+        winetest_pop_context();
+    }
+
+    IDWriteFontCollection_Release(collection);
+
+    hr = IDWriteFactory2_UnregisterFontCollectionLoader(factory2, resource_collection_loader);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IDWriteFactory2_UnregisterFontFileLoader(factory2, resource_loader);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    IDWriteFontCollectionLoader_Release(resource_collection_loader);
+    IDWriteFontFileLoader_Release(resource_loader);
 
     IDWriteFontFallback_Release(fallback);
     IDWriteFactory2_Release(factory2);
-}
-
-static void get_font_name(IDWriteFont *font, WCHAR *name, UINT32 size)
-{
-    IDWriteLocalizedStrings *names;
-    IDWriteFontFamily *family;
-    UINT32 index;
-    BOOL exists;
-    HRESULT hr;
-
-    hr = IDWriteFont_GetFontFamily(font, &family);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-
-    hr = IDWriteFontFamily_GetFamilyNames(family, &names);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-
-    hr = IDWriteLocalizedStrings_FindLocaleName(names, L"en-us", &index, &exists);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(index != UINT_MAX && exists, "Name was not found.\n");
-    hr = IDWriteLocalizedStrings_GetString(names, index, name, size);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-
-    IDWriteLocalizedStrings_Release(names);
-    IDWriteFontFamily_Release(family);
 }
 
 static void test_system_fallback(void)
@@ -4802,14 +5297,16 @@ static void test_system_fallback(void)
 
     for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
+        font = NULL;
+
         g_source = tests[i].text;
         hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
                 DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &length, &font, &scale);
-    todo_wine
         ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
         if (hr != S_OK) continue;
         ok(length == 1, "Unexpected length %u\n", length);
         ok(scale == 1.0f, "got %f\n", scale);
+        if (!font) continue;
 
         get_font_name(font, name, ARRAY_SIZE(name));
     todo_wine
@@ -4861,14 +5358,14 @@ static void test_FontFallbackBuilder(void)
     EXPECT_REF(builder, 1);
     hr = IDWriteFontFallbackBuilder_CreateFontFallback(builder, &fallback);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    EXPECT_REF(factory2, 3);
+    todo_wine EXPECT_REF(factory2, 3);
     EXPECT_REF(fallback, 1);
     EXPECT_REF(builder, 1);
 
     IDWriteFontFallback_AddRef(fallback);
     EXPECT_REF(builder, 1);
     EXPECT_REF(fallback, 2);
-    EXPECT_REF(factory2, 3);
+    todo_wine EXPECT_REF(factory2, 3);
     IDWriteFontFallback_Release(fallback);
 
     /* New instance is created every time, even if mappings have not changed. */
@@ -4937,12 +5434,11 @@ static void test_FontFallbackBuilder(void)
     font = (void*)0xdeadbeef;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(mappedlength == 1, "got %u\n", mappedlength);
-    ok(scale == 1.0f, "got %f\n", scale);
-    ok(font == NULL, "got %p\n", font);
-}
+    ok(mappedlength == 1, "Unexpected length %u.\n", mappedlength);
+    ok(scale == 1.0f, "Unexpected scale %f.\n", scale);
+    ok(!font, "Unexpected font instance %p.\n", font);
+
     IDWriteFontFallback_Release(fallback);
 
     /* remap with custom collection */
@@ -4959,12 +5455,10 @@ todo_wine {
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(mappedlength == 1, "got %u\n", mappedlength);
-    ok(scale == 5.0f, "got %f\n", scale);
-    ok(font != NULL, "got %p\n", font);
-}
+    ok(mappedlength == 1, "Unexpected length %u.\n", mappedlength);
+    ok(scale == 5.0f, "Unexpected scale %f.\n", scale);
+    ok(font != NULL, "Expected font instance %p.\n", font);
     if (font)
         IDWriteFont_Release(font);
 
@@ -4984,12 +5478,10 @@ todo_wine {
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(mappedlength == 1, "got %u\n", mappedlength);
-    ok(scale == 5.0f, "got %f\n", scale);
-    ok(font != NULL, "got %p\n", font);
-}
+    ok(mappedlength == 1, "Unexpected length %u.\n", mappedlength);
+    ok(scale == 5.0f, "Unexpected scale %f.\n", scale);
+    ok(font != NULL, "Expected font instance %p.\n", font);
     if (font)
         IDWriteFont_Release(font);
 
@@ -5010,12 +5502,10 @@ todo_wine {
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(mappedlength == 1, "got %u\n", mappedlength);
-    ok(scale == 5.0f, "got %f\n", scale);
-    ok(font != NULL, "got %p\n", font);
-}
+    ok(mappedlength == 1, "Unexpected length %u.\n", mappedlength);
+    ok(scale == 5.0f, "Unexpected scale %f.\n", scale);
+    ok(font != NULL, "Expected font instance %p.\n", font);
     if (font)
         IDWriteFont_Release(font);
 
@@ -5061,21 +5551,17 @@ static void test_fallback(void)
 
     count = 0;
     hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, 4, &count);
-todo_wine {
     ok(hr == S_OK, "Failed to get cluster metrics, hr %#lx.\n", hr);
     ok(count == 4, "Unexpected count %u.\n", count);
-}
     for (i = 0, width = 0.0; i < count; i++)
         width += clusters[i].width;
 
     memset(&metrics, 0xcc, sizeof(metrics));
     hr = IDWriteTextLayout_GetMetrics(layout, &metrics);
     ok(hr == S_OK, "Failed to get layout metrics, hr %#lx.\n", hr);
-todo_wine {
     ok(metrics.width > 0.0 && metrics.width == width, "Unexpected width %.2f, expected %.2f.\n", metrics.width, width);
     ok(metrics.height > 0.0, "Unexpected height %.2f.\n", metrics.height);
     ok(metrics.lineCount == 1, "Unexpected line count %u.\n", metrics.lineCount);
-}
     IDWriteTextLayout_Release(layout);
     IDWriteTextFormat_Release(format);
 
@@ -5374,6 +5860,7 @@ static void test_SetUnderline(void)
     count = 0;
     hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, ARRAY_SIZE(clusters), &count);
     ok(hr == S_OK, "Failed to get cluster metrics, hr %#lx.\n", hr);
+    todo_wine
     ok(count == 3, "Unexpected cluster count %u.\n", count);
 
     range.startPosition = 0;
@@ -5384,6 +5871,7 @@ static void test_SetUnderline(void)
     count = 0;
     hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, ARRAY_SIZE(clusters), &count);
     ok(hr == S_OK, "Failed to get cluster metrics, hr %#lx.\n", hr);
+    todo_wine
     ok(count == 3, "Unexpected cluster count %u.\n", count);
 
     flush_sequence(sequences, RENDERER_ID);
@@ -5986,11 +6474,8 @@ static void test_text_format_axes(void)
     }
 
     hr = IDWriteFactory6_CreateTextFormat(factory, L"test_family", NULL, NULL, 0, 10.0f, L"en-us", &format3);
-    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-if (SUCCEEDED(hr))
-{
     hr = IDWriteTextFormat3_GetFontCollection(format3, &collection);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
@@ -6025,7 +6510,7 @@ if (SUCCEEDED(hr))
     ok(weight == DWRITE_FONT_WEIGHT_NORMAL, "Unexpected font weight %d.\n", weight);
 
     IDWriteTextFormat3_Release(format3);
-}
+
     hr = IDWriteFactory_CreateTextFormat((IDWriteFactory *)factory, L"test_family", NULL,
             DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STRETCH_EXPANDED,
             10.0f, L"en-us", &format);

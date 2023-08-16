@@ -100,14 +100,63 @@ static inline BOOL is_version_nt(void)
 
 static BOOL is_wow6432node( const UNICODE_STRING *name )
 {
-    return (name->Length == 11 * sizeof(WCHAR) && !wcsnicmp( name->Buffer, L"Wow6432Node", 11 ));
+    DWORD len = name->Length / sizeof(WCHAR);
+    return (len >= 11 && !wcsnicmp( name->Buffer, L"Wow6432Node\\", min( len, 12 ) ));
 }
 
-/* open the Wow6432Node subkey of the specified key */
+static BOOL is_classes_root( const UNICODE_STRING *name )
+{
+    static const WCHAR classes_root[] = L"\\Registry\\Machine\\Software\\Classes\\";
+    DWORD classes_root_len = ARRAY_SIZE( classes_root ) - 1;
+    DWORD len = name->Length / sizeof(WCHAR);
+    return (len >= classes_root_len - 1 && !wcsnicmp( name->Buffer, classes_root, min( len, classes_root_len ) ));
+}
+
+static BOOL is_classes_wow6432node( HKEY key )
+{
+    char buffer[256], *buf_ptr = buffer;
+    KEY_NAME_INFORMATION *info = (KEY_NAME_INFORMATION *)buffer;
+    DWORD len = sizeof(buffer);
+    UNICODE_STRING name;
+    NTSTATUS status;
+    BOOL ret = FALSE;
+
+    /* Obtain the name of the root key */
+    status = NtQueryKey( key, KeyNameInformation, info, len, &len );
+    if (status && status != STATUS_BUFFER_OVERFLOW) return FALSE;
+
+    /* Retry with a dynamically allocated buffer */
+    while (status == STATUS_BUFFER_OVERFLOW)
+    {
+        if (buf_ptr != buffer) heap_free( buf_ptr );
+        if (!(buf_ptr = heap_alloc( len ))) return FALSE;
+        info = (KEY_NAME_INFORMATION *)buf_ptr;
+        status = NtQueryKey( key, KeyNameInformation, info, len, &len );
+    }
+
+    /* Check if the key ends in Wow6432Node and if the root is the Classes key*/
+    if (!status && info->NameLength / sizeof(WCHAR) >= 11)
+    {
+        name.Buffer = info->Name + info->NameLength / sizeof(WCHAR) - 11;
+        name.Length = 11 * sizeof(WCHAR);
+        if (is_wow6432node( &name ))
+        {
+            name.Buffer = info->Name;
+            name.Length = info->NameLength;
+            ret = is_classes_root( &name );
+        }
+    }
+
+    if (buf_ptr != buffer) heap_free( buf_ptr );
+
+    return ret;
+}
+
+/* Open the Wow6432Node subkey of the specified key */
 static HANDLE open_wow6432node( HANDLE key )
 {
+    UNICODE_STRING nameW = RTL_CONSTANT_STRING( L"Wow6432Node" );
     OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING nameW;
     HANDLE ret;
 
     attr.Length = sizeof(attr);
@@ -116,8 +165,25 @@ static HANDLE open_wow6432node( HANDLE key )
     attr.Attributes = 0;
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
-    RtlInitUnicodeString( &nameW, L"Wow6432Node" );
-    if (NtOpenKeyEx( &ret, MAXIMUM_ALLOWED, &attr, 0 )) ret = 0;
+    if (NtOpenKeyEx( &ret, MAXIMUM_ALLOWED, &attr, 0 )) return key;
+    return ret;
+}
+
+/* Open HKCR, which should already exist because it's used when we're in its Wow6432Node child */
+static HANDLE open_classes_root( void )
+{
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING nameW;
+    HANDLE ret = 0;
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &nameW;
+    attr.Attributes = 0;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+    RtlInitUnicodeString( &nameW, root_key_names[0] );
+    NtOpenKeyEx( &ret, MAXIMUM_ALLOWED, &attr, 0 );
     return ret;
 }
 
@@ -140,96 +206,132 @@ static HKEY get_perflib_key( HANDLE key )
     return key;
 }
 
-/* wrapper for NtCreateKey that creates the key recursively if necessary */
-static NTSTATUS create_key( HKEY *retkey, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
-                            const UNICODE_STRING *class, ULONG options, PULONG dispos )
+static NTSTATUS open_key( HKEY *retkey, HKEY root, UNICODE_STRING *name, DWORD options, ACCESS_MASK access, BOOL create );
+
+static NTSTATUS open_subkey( HKEY *subkey, HKEY root, UNICODE_STRING *name, DWORD options, ACCESS_MASK access )
 {
-    BOOL force_wow32 = is_win64 && (access & KEY_WOW64_32KEY);
-    NTSTATUS status = STATUS_OBJECT_NAME_NOT_FOUND;
-    HANDLE subkey, root = attr->RootDirectory;
+    BOOL is_wow64_key = (is_win64 && (access & KEY_WOW64_32KEY)) || (is_wow64 && !(access & KEY_WOW64_64KEY));
+    ACCESS_MASK access_64 = access & ~KEY_WOW64_32KEY;
+    DWORD i = 0, len = name->Length / sizeof(WCHAR);
+    WCHAR *buffer = name->Buffer;
+    UNICODE_STRING str;
+    NTSTATUS status;
 
-    if (!force_wow32) status = NtCreateKey( &subkey, access, attr, 0, class, options, dispos );
+    if (!root && len > 10 && !wcsnicmp( buffer, L"\\Registry\\", 10 )) i += 10;
+    if (i < len && buffer[i] == '\\') return STATUS_OBJECT_PATH_INVALID;
+    while (i < len && buffer[i] != '\\') i++;
 
-    if (status == STATUS_OBJECT_NAME_NOT_FOUND)
+    str.Buffer = name->Buffer;
+    str.Length = i * sizeof(WCHAR);
+
+    if (i < len)
+        options &= ~REG_OPTION_OPEN_LINK;
+
+    status = open_key( subkey, root, &str, options, access_64, FALSE );
+    if (status == STATUS_OBJECT_NAME_NOT_FOUND && root && is_wow64_key)
     {
-        WCHAR *buffer = attr->ObjectName->Buffer;
-        DWORD attrs, pos = 0, i = 0, len = attr->ObjectName->Length / sizeof(WCHAR);
-        UNICODE_STRING str;
+        /* Try to open the shared parent if we can't find the key in the Wow6432Node */
+        if (!is_classes_wow6432node( root ))
+            return STATUS_OBJECT_NAME_NOT_FOUND;
 
-        /* don't try to create registry root */
-        if (!attr->RootDirectory && len > 10 && !wcsnicmp( buffer, L"\\Registry\\", 10 )) i += 10;
+        root = open_classes_root();
+        status = open_key( subkey, root, &str, options, access_64, FALSE );
 
-        while (i < len && buffer[i] != '\\') i++;
-        if (i == len && !force_wow32) return status;
+        if (!status)
+            NtClose( root );
+        else
+            *subkey = root;
+    }
 
-        attrs = attr->Attributes;
-        attr->ObjectName = &str;
+    if (!status)
+    {
+        while (i < len && buffer[i] == '\\') i++;
 
-        for (;;)
+        name->Buffer += i;
+        name->Length -= i * sizeof(WCHAR);
+
+        if (is_wow64_key && !is_wow6432node( name ))
         {
-            str.Buffer = buffer + pos;
-            str.Length = (i - pos) * sizeof(WCHAR);
-            if (force_wow32 && pos)
+            HKEY wow6432node = open_wow6432node( *subkey );
+            if (wow6432node != *subkey)
             {
-                if (is_wow6432node( &str )) force_wow32 = FALSE;
-                else if ((subkey = open_wow6432node( attr->RootDirectory )))
-                {
-                    if (attr->RootDirectory != root) NtClose( attr->RootDirectory );
-                    attr->RootDirectory = subkey;
-                    force_wow32 = FALSE;
-                }
+                NtClose( *subkey );
+                *subkey = wow6432node;
             }
-            if (i == len)
-            {
-                attr->Attributes = attrs;
-                status = NtCreateKey( &subkey, access, attr, 0, class, options, dispos );
-            }
-            else
-            {
-                attr->Attributes = attrs & ~OBJ_OPENLINK;
-                status = NtCreateKey( &subkey, access, attr, 0, class,
-                                      options & ~REG_OPTION_CREATE_LINK, dispos );
-            }
-            if (attr->RootDirectory != root) NtClose( attr->RootDirectory );
-            if (!NT_SUCCESS(status)) return status;
-            if (i == len) break;
-            attr->RootDirectory = subkey;
-            while (i < len && buffer[i] == '\\') i++;
-            pos = i;
-            while (i < len && buffer[i] != '\\') i++;
         }
     }
-    attr->RootDirectory = subkey;
-    if (force_wow32 && (subkey = open_wow6432node( attr->RootDirectory )))
+
+    return status;
+}
+
+static NTSTATUS open_wow6432node_parent( HKEY *retkey, HKEY root, DWORD options, ACCESS_MASK access )
+{
+    char buffer[256], *buf_ptr = buffer;
+    KEY_NAME_INFORMATION *info = (KEY_NAME_INFORMATION *)buffer;
+    DWORD len = sizeof(buffer);
+    UNICODE_STRING name;
+    NTSTATUS status;
+
+    /* Obtain the name of the root key */
+    status = NtQueryKey( root, KeyNameInformation, info, len, &len );
+    if (status && status != STATUS_BUFFER_OVERFLOW) return status;
+
+    /* Retry with a dynamically allocated buffer */
+    while (status == STATUS_BUFFER_OVERFLOW)
     {
-        if (attr->RootDirectory != root) NtClose( attr->RootDirectory );
-        attr->RootDirectory = subkey;
+        if (buf_ptr != buffer) heap_free( buf_ptr );
+        if (!(buf_ptr = heap_alloc( len )))
+            return STATUS_NO_MEMORY;
+        info = (KEY_NAME_INFORMATION *)buf_ptr;
+        status = NtQueryKey( root, KeyNameInformation, info, len, &len );
     }
-    if (status == STATUS_PREDEFINED_HANDLE)
+
+    if (status)
     {
-        attr->RootDirectory = get_perflib_key( attr->RootDirectory );
-        status = STATUS_SUCCESS;
+        if (buf_ptr != buffer) heap_free( buf_ptr );
+        return status;
     }
-    *retkey = attr->RootDirectory;
+
+    name.Buffer = info->Name;
+    name.Length = info->NameLength;
+    root = 0;
+
+    /* Obtain the parent Wow6432Node if it exists */
+    while (!status && name.Length)
+    {
+        status = open_subkey( retkey, root, &name, options & ~REG_OPTION_OPEN_LINK, access );
+        if (root) NtClose( root );
+        root = *retkey;
+    }
+
+    if (buf_ptr != buffer) heap_free( buf_ptr );
+
     return status;
 }
 
 /* wrapper for NtOpenKeyEx to handle Wow6432 nodes */
-static NTSTATUS open_key( HKEY *retkey, DWORD options, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr )
+static NTSTATUS open_key( HKEY *retkey, HKEY root, UNICODE_STRING *name, DWORD options, ACCESS_MASK access, BOOL create )
 {
-    NTSTATUS status;
-    BOOL force_wow32 = is_win64 && (access & KEY_WOW64_32KEY);
-    HANDLE subkey, root = attr->RootDirectory;
-    WCHAR *buffer = attr->ObjectName->Buffer;
-    DWORD pos = 0, i = 0, len = attr->ObjectName->Length / sizeof(WCHAR);
-    UNICODE_STRING str;
+    BOOL is_wow64_key = (is_win64 && (access & KEY_WOW64_32KEY)) || (is_wow64 && !(access & KEY_WOW64_64KEY));
+    HKEY subkey = 0, subkey_root = root;
+    NTSTATUS status = STATUS_SUCCESS;
+    BOOL was_wow6432node = TRUE;
 
     *retkey = NULL;
 
-    if (!force_wow32)
+    if (!(is_win64 && (access & KEY_WOW64_32KEY)) && !create)
     {
-        if (options & REG_OPTION_OPEN_LINK) attr->Attributes |= OBJ_OPENLINK;
-        status = NtOpenKeyEx( (HANDLE *)retkey, access, attr, options );
+        OBJECT_ATTRIBUTES attr;
+
+        attr.Length = sizeof(attr);
+        attr.RootDirectory = root;
+        attr.ObjectName = name;
+        attr.Attributes = 0;
+        attr.SecurityDescriptor = NULL;
+        attr.SecurityQualityOfService = NULL;
+
+        if (options & REG_OPTION_OPEN_LINK) attr.Attributes |= OBJ_OPENLINK;
+        status = NtOpenKeyEx( (HANDLE *)retkey, access, &attr, options );
         if (status == STATUS_PREDEFINED_HANDLE)
         {
             *retkey = get_perflib_key( *retkey );
@@ -238,53 +340,130 @@ static NTSTATUS open_key( HKEY *retkey, DWORD options, ACCESS_MASK access, OBJEC
         return status;
     }
 
-    if (len && buffer[0] == '\\') return STATUS_OBJECT_PATH_INVALID;
-    while (i < len && buffer[i] != '\\') i++;
-    attr->ObjectName = &str;
+    if (root && (access & KEY_WOW64_32KEY) && !is_wow6432node( name ))
+        status = open_wow6432node_parent( &subkey_root, root, options, access );
+    else if (root && is_wow64 && !(access & KEY_WOW64_64KEY) && !is_wow6432node( name ))
+    {
+        subkey_root = open_wow6432node( root );
+        if (!is_classes_wow6432node( subkey_root ) && subkey_root != root)
+        {
+            NtClose( subkey_root );
+            subkey_root = root;
+        }
+    }
 
-    for (;;)
+    while (!status && (name->Length || !subkey))
     {
-        str.Buffer = buffer + pos;
-        str.Length = (i - pos) * sizeof(WCHAR);
-        if (force_wow32 && pos)
-        {
-            if (is_wow6432node( &str )) force_wow32 = FALSE;
-            else if ((subkey = open_wow6432node( attr->RootDirectory )))
-            {
-                if (attr->RootDirectory != root) NtClose( attr->RootDirectory );
-                attr->RootDirectory = subkey;
-                force_wow32 = FALSE;
-            }
-        }
-        if (i == len)
-        {
-            if (options & REG_OPTION_OPEN_LINK) attr->Attributes |= OBJ_OPENLINK;
-            status = NtOpenKeyEx( &subkey, access, attr, options );
-        }
-        else
-        {
-            if (!(options & REG_OPTION_OPEN_LINK)) attr->Attributes &= ~OBJ_OPENLINK;
-            status = NtOpenKeyEx( &subkey, access, attr, options & ~REG_OPTION_OPEN_LINK );
-        }
-        if (attr->RootDirectory != root) NtClose( attr->RootDirectory );
-        if (status) return status;
-        attr->RootDirectory = subkey;
-        if (i == len) break;
+        was_wow6432node = is_wow6432node( name );
+        status = open_subkey( &subkey, subkey_root, name, options, access );
+        if (subkey && subkey_root && subkey_root != root) NtClose( subkey_root );
+        if (subkey) subkey_root = subkey;
+    }
+
+    /* Return the shared parent if we didn't explicitly look for the Wow6432Node */
+    if (!status && !was_wow6432node && is_wow64_key && is_classes_wow6432node( subkey_root ))
+    {
+        if (subkey_root && subkey_root != root) NtClose( subkey_root );
+        subkey_root = open_classes_root();
+    }
+
+    if (!status || (status == STATUS_OBJECT_NAME_NOT_FOUND && create))
+        *retkey = subkey_root;
+    else if (subkey_root && subkey_root != root)
+        NtClose( subkey_root );
+
+    return status;
+}
+
+static NTSTATUS create_key( HKEY *retkey, HKEY root, UNICODE_STRING name, ULONG options, ACCESS_MASK access,
+                            const UNICODE_STRING *class, PULONG dispos );
+
+static NTSTATUS create_subkey( HKEY *subkey, HKEY root, UNICODE_STRING *name, DWORD options, ACCESS_MASK access,
+                               const UNICODE_STRING *class, PULONG dispos )
+{
+    ACCESS_MASK access_64 = access & ~KEY_WOW64_32KEY;
+    DWORD i = 0, len = name->Length / sizeof(WCHAR);
+    WCHAR *buffer = name->Buffer;
+    UNICODE_STRING str;
+    NTSTATUS status;
+
+    if (i < len && buffer[i] == '\\') return STATUS_OBJECT_PATH_INVALID;
+    while (i < len && buffer[i] != '\\') i++;
+
+    str.Buffer = name->Buffer;
+    str.Length = i * sizeof(WCHAR);
+
+    if (i < len)
+        options &= ~REG_OPTION_CREATE_LINK;
+
+    status = create_key( subkey, root, str, options, access_64, class, dispos );
+    if (!status)
+    {
         while (i < len && buffer[i] == '\\') i++;
-        pos = i;
-        while (i < len && buffer[i] != '\\') i++;
+
+        name->Buffer += i;
+        name->Length -= i * sizeof(WCHAR);
     }
-    if (force_wow32 && (subkey = open_wow6432node( attr->RootDirectory )))
+
+    return status;
+}
+
+/* wrapper for NtCreateKey that creates the key recursively if necessary */
+static NTSTATUS create_key( HKEY *retkey, HKEY root, UNICODE_STRING name, ULONG options, ACCESS_MASK access,
+                            const UNICODE_STRING *class, PULONG dispos )
+{
+    NTSTATUS status = STATUS_OBJECT_NAME_NOT_FOUND;
+    HKEY subkey, subkey_root = root;
+
+    *retkey = NULL;
+
+    if (!(is_win64 && (access & KEY_WOW64_32KEY)))
     {
-        if (attr->RootDirectory != root) NtClose( attr->RootDirectory );
-        attr->RootDirectory = subkey;
+        OBJECT_ATTRIBUTES attr;
+
+        attr.Length = sizeof(attr);
+        attr.RootDirectory = root;
+        attr.ObjectName = &name;
+        attr.Attributes = 0;
+        attr.SecurityDescriptor = NULL;
+        attr.SecurityQualityOfService = NULL;
+        if (options & REG_OPTION_OPEN_LINK) attr.Attributes |= OBJ_OPENLINK;
+
+        status = NtCreateKey( (HANDLE *)retkey, access, &attr, 0, class, options, dispos );
+        if (status == STATUS_PREDEFINED_HANDLE)
+        {
+            *retkey = get_perflib_key( *retkey );
+            status = STATUS_SUCCESS;
+        }
+
+        if (!status || status != STATUS_OBJECT_NAME_NOT_FOUND)
+            return status;
     }
-    if (status == STATUS_PREDEFINED_HANDLE)
+
+    status = open_key( &subkey_root, root, &name, options & REG_OPTION_OPEN_LINK, access, TRUE );
+    if (!status && (options & REG_OPTION_CREATE_LINK))
     {
-        attr->RootDirectory = get_perflib_key( attr->RootDirectory );
+        NtClose( subkey_root );
+        status = STATUS_OBJECT_NAME_COLLISION;
+    }
+
+    if (!status)
+        if (dispos) *dispos = REG_OPENED_EXISTING_KEY;
+
+    if (status == STATUS_OBJECT_NAME_NOT_FOUND)
+    {
         status = STATUS_SUCCESS;
+        while (!status && name.Length)
+        {
+            status = create_subkey( &subkey, subkey_root, &name, options, access, class, dispos );
+            if (subkey_root && subkey_root != root) NtClose( subkey_root );
+            subkey_root = subkey;
+        }
     }
-    *retkey = attr->RootDirectory;
+
+    if (!status)
+        *retkey = subkey_root;
+
     return status;
 }
 
@@ -301,21 +480,14 @@ static HKEY create_special_root_hkey( HKEY hkey, DWORD access )
     }
     else
     {
-        OBJECT_ATTRIBUTES attr;
         UNICODE_STRING name;
 
-        attr.Length = sizeof(attr);
-        attr.RootDirectory = 0;
-        attr.ObjectName = &name;
-        attr.Attributes = 0;
-        attr.SecurityDescriptor = NULL;
-        attr.SecurityQualityOfService = NULL;
         RtlInitUnicodeString( &name, root_key_names[idx] );
-        if (create_key( &hkey, access, &attr, NULL, 0, NULL )) return 0;
-        TRACE( "%s -> %p\n", debugstr_w(attr.ObjectName->Buffer), hkey );
+        if (create_key( &hkey, 0, name, 0, access, NULL, NULL )) return 0;
+        TRACE( "%s -> %p\n", debugstr_w(name.Buffer), hkey );
     }
 
-    if (!cache_disabled[idx] && !(access & (KEY_WOW64_64KEY | KEY_WOW64_32KEY)))
+    if (!cache_disabled[idx])
     {
         if (!(ret = InterlockedCompareExchangePointer( (void **)&special_root_keys[idx], hkey, 0 )))
             ret = hkey;
@@ -328,18 +500,13 @@ static HKEY create_special_root_hkey( HKEY hkey, DWORD access )
 }
 
 /* map the hkey from special root to normal key if necessary */
-static inline HKEY get_special_root_hkey( HKEY hkey, REGSAM access )
+static inline HKEY get_special_root_hkey( HKEY hkey )
 {
     unsigned int index = HandleToUlong(hkey) - HandleToUlong(HKEY_SPECIAL_ROOT_FIRST);
-    DWORD wow64_flags = access & (KEY_WOW64_32KEY | KEY_WOW64_64KEY);
 
     switch (HandleToUlong(hkey))
     {
         case (LONG)(LONG_PTR)HKEY_CLASSES_ROOT:
-            if (wow64_flags)
-                return create_special_root_hkey( hkey, MAXIMUM_ALLOWED | wow64_flags );
-            /* fall through */
-
         case (LONG)(LONG_PTR)HKEY_CURRENT_USER:
         case (LONG)(LONG_PTR)HKEY_LOCAL_MACHINE:
         case (LONG)(LONG_PTR)HKEY_USERS:
@@ -423,23 +590,15 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegCreateKeyExW( HKEY hkey, LPCWSTR name, DWORD
                              DWORD options, REGSAM access, SECURITY_ATTRIBUTES *sa,
                              PHKEY retkey, LPDWORD dispos )
 {
-    OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW, classW;
 
     if (reserved) return ERROR_INVALID_PARAMETER;
-    if (!(hkey = get_special_root_hkey( hkey, access ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
-    attr.Length = sizeof(attr);
-    attr.RootDirectory = hkey;
-    attr.ObjectName = &nameW;
-    attr.Attributes = 0;
-    attr.SecurityDescriptor = NULL;
-    attr.SecurityQualityOfService = NULL;
-    if (options & REG_OPTION_OPEN_LINK) attr.Attributes |= OBJ_OPENLINK;
     RtlInitUnicodeString( &nameW, name );
     RtlInitUnicodeString( &classW, class );
 
-    return RtlNtStatusToDosError( create_key( retkey, access, &attr, &classW, options, dispos ) );
+    return RtlNtStatusToDosError( create_key( retkey, hkey, nameW, options, access, &classW, dispos ) );
 }
 
 
@@ -470,7 +629,6 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegCreateKeyExA( HKEY hkey, LPCSTR name, DWORD 
                              DWORD options, REGSAM access, SECURITY_ATTRIBUTES *sa,
                              PHKEY retkey, LPDWORD dispos )
 {
-    OBJECT_ATTRIBUTES attr;
     UNICODE_STRING classW;
     ANSI_STRING nameA, classA;
     NTSTATUS status;
@@ -481,15 +639,8 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegCreateKeyExA( HKEY hkey, LPCSTR name, DWORD 
         access = MAXIMUM_ALLOWED;  /* Win95 ignores the access mask */
         if (name && *name == '\\') name++; /* win9x,ME ignores one (and only one) beginning backslash */
     }
-    if (!(hkey = get_special_root_hkey( hkey, access ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
-    attr.Length = sizeof(attr);
-    attr.RootDirectory = hkey;
-    attr.ObjectName = &NtCurrentTeb()->StaticUnicodeString;
-    attr.Attributes = 0;
-    attr.SecurityDescriptor = NULL;
-    attr.SecurityQualityOfService = NULL;
-    if (options & REG_OPTION_OPEN_LINK) attr.Attributes |= OBJ_OPENLINK;
     RtlInitAnsiString( &nameA, name );
     RtlInitAnsiString( &classA, class );
 
@@ -498,7 +649,7 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegCreateKeyExA( HKEY hkey, LPCSTR name, DWORD 
     {
         if (!(status = RtlAnsiStringToUnicodeString( &classW, &classA, TRUE )))
         {
-            status = create_key( retkey, access, &attr, &classW, options, dispos );
+            status = create_key( retkey, hkey, NtCurrentTeb()->StaticUnicodeString, options, access, &classW, dispos );
             RtlFreeUnicodeString( &classW );
         }
     }
@@ -513,7 +664,6 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegCreateKeyExA( HKEY hkey, LPCSTR name, DWORD 
  */
 LSTATUS WINAPI DECLSPEC_HOTPATCH RegOpenKeyExW( HKEY hkey, LPCWSTR name, DWORD options, REGSAM access, PHKEY retkey )
 {
-    OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW;
 
     if (retkey && (!name || !name[0]) &&
@@ -529,16 +679,10 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegOpenKeyExW( HKEY hkey, LPCWSTR name, DWORD o
 
     if (!retkey) return ERROR_INVALID_PARAMETER;
     *retkey = NULL;
-    if (!(hkey = get_special_root_hkey( hkey, access ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
-    attr.Length = sizeof(attr);
-    attr.RootDirectory = hkey;
-    attr.ObjectName = &nameW;
-    attr.Attributes = 0;
-    attr.SecurityDescriptor = NULL;
-    attr.SecurityQualityOfService = NULL;
     RtlInitUnicodeString( &nameW, name );
-    return RtlNtStatusToDosError( open_key( retkey, options, access, &attr ) );
+    return RtlNtStatusToDosError( open_key( retkey, hkey, &nameW, options, access, FALSE ) );
 }
 
 
@@ -564,7 +708,6 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegOpenKeyExW( HKEY hkey, LPCWSTR name, DWORD o
  */
 LSTATUS WINAPI DECLSPEC_HOTPATCH RegOpenKeyExA( HKEY hkey, LPCSTR name, DWORD options, REGSAM access, PHKEY retkey )
 {
-    OBJECT_ATTRIBUTES attr;
     STRING nameA;
     NTSTATUS status;
 
@@ -583,20 +726,14 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegOpenKeyExA( HKEY hkey, LPCSTR name, DWORD op
         if (HandleToUlong(hkey) == HandleToUlong(HKEY_CLASSES_ROOT) && name && *name == '\\') name++;
     }
 
-    if (!(hkey = get_special_root_hkey( hkey, access ))) return ERROR_INVALID_HANDLE;
-
-    attr.Length = sizeof(attr);
-    attr.RootDirectory = hkey;
-    attr.ObjectName = &NtCurrentTeb()->StaticUnicodeString;
-    attr.Attributes = 0;
-    attr.SecurityDescriptor = NULL;
-    attr.SecurityQualityOfService = NULL;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     RtlInitAnsiString( &nameA, name );
     if (!(status = RtlAnsiStringToUnicodeString( &NtCurrentTeb()->StaticUnicodeString,
                                                  &nameA, FALSE )))
     {
-        status = open_key( retkey, options, access, &attr );
+        UNICODE_STRING nameW = NtCurrentTeb()->StaticUnicodeString;
+        status = open_key( retkey, hkey, &nameW, options, access, FALSE );
     }
     return RtlNtStatusToDosError( status );
 }
@@ -694,7 +831,7 @@ LSTATUS WINAPI RegEnumKeyExW( HKEY hkey, DWORD index, LPWSTR name, LPDWORD name_
            name_len ? *name_len : 0, reserved, class, class_len, ft );
 
     if (reserved) return ERROR_INVALID_PARAMETER;
-    if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     status = NtEnumerateKey( hkey, index, KeyNodeInformation,
                              buffer, sizeof(buffer), &total_size );
@@ -758,7 +895,7 @@ LSTATUS WINAPI RegEnumKeyExA( HKEY hkey, DWORD index, LPSTR name, LPDWORD name_l
            name_len ? *name_len : 0, reserved, class, class_len, ft );
 
     if (reserved) return ERROR_INVALID_PARAMETER;
-    if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     status = NtEnumerateKey( hkey, index, KeyNodeInformation,
                              buffer, sizeof(buffer), &total_size );
@@ -852,7 +989,7 @@ LSTATUS WINAPI RegQueryInfoKeyW( HKEY hkey, LPWSTR class, LPDWORD class_len, LPD
            reserved, subkeys, max_subkey, values, max_value, max_data, security, modif );
 
     if (class && !class_len && is_version_nt()) return ERROR_INVALID_PARAMETER;
-    if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     status = NtQueryKey( hkey, KeyFullInformation, buffer, sizeof(buffer), &total_size );
     if (status && status != STATUS_BUFFER_OVERFLOW) goto done;
@@ -942,7 +1079,7 @@ LSTATUS WINAPI RegQueryInfoKeyA( HKEY hkey, LPSTR class, LPDWORD class_len, LPDW
            reserved, subkeys, max_subkey, values, max_value, max_data, security, modif );
 
     if (class && !class_len && is_version_nt()) return ERROR_INVALID_PARAMETER;
-    if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     status = NtQueryKey( hkey, KeyFullInformation, buffer, sizeof(buffer), &total_size );
     if (status && status != STATUS_BUFFER_OVERFLOW) goto done;
@@ -1028,7 +1165,7 @@ LSTATUS WINAPI RegDeleteKeyExW( HKEY hkey, LPCWSTR name, REGSAM access, DWORD re
 
     if (!name) return ERROR_INVALID_PARAMETER;
 
-    if (!(hkey = get_special_root_hkey( hkey, access ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     access &= KEY_WOW64_64KEY | KEY_WOW64_32KEY;
     if (!(ret = RegOpenKeyExW( hkey, name, 0, access | DELETE, &tmp )))
@@ -1051,7 +1188,7 @@ LSTATUS WINAPI RegDeleteKeyExA( HKEY hkey, LPCSTR name, REGSAM access, DWORD res
 
     if (!name) return ERROR_INVALID_PARAMETER;
 
-    if (!(hkey = get_special_root_hkey( hkey, access ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     access &= KEY_WOW64_64KEY | KEY_WOW64_32KEY;
     if (!(ret = RegOpenKeyExA( hkey, name, 0, access | DELETE, &tmp )))
@@ -1106,7 +1243,7 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegSetValueExW( HKEY hkey, LPCWSTR name, DWORD 
         if (str[count / sizeof(WCHAR) - 1] && !str[count / sizeof(WCHAR)])
             count += sizeof(WCHAR);
     }
-    if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     RtlInitUnicodeString( &nameW, name );
     return RtlNtStatusToDosError( NtSetValueKey( hkey, &nameW, 0, type, data, count ) );
@@ -1144,7 +1281,7 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegSetValueExA( HKEY hkey, LPCSTR name, DWORD r
         if (data[count-1] && !data[count]) count++;
     }
 
-    if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     if (is_string( type )) /* need to convert to Unicode */
     {
@@ -1536,7 +1673,7 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegQueryValueExW( HKEY hkey, LPCWSTR name, LPDW
     if (is_perf_key( hkey ))
         return query_perf_data( name, type, data, count, TRUE );
 
-    if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     RtlInitUnicodeString( &name_str, name );
 
@@ -1626,7 +1763,7 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegQueryValueExA( HKEY hkey, LPCSTR name, LPDWO
           hkey, debugstr_a(name), reserved, type, data, count, count ? *count : 0 );
 
     if ((data && !count) || reserved) return ERROR_INVALID_PARAMETER;
-    if (!(hkey = get_special_root_hkey( hkey, 0 )))
+    if (!(hkey = get_special_root_hkey( hkey )))
         return ERROR_INVALID_HANDLE;
 
     if (count) datalen = *count;
@@ -2019,7 +2156,7 @@ LSTATUS WINAPI RegEnumValueW( HKEY hkey, DWORD index, LPWSTR value, LPDWORD val_
 
     if ((data && !count) || reserved || !value || !val_count)
         return ERROR_INVALID_PARAMETER;
-    if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     total_size = info_size + (MAX_PATH + 1) * sizeof(WCHAR);
     if (data) total_size += *count;
@@ -2096,7 +2233,7 @@ LSTATUS WINAPI RegEnumValueA( HKEY hkey, DWORD index, LPSTR value, LPDWORD val_c
 
     if ((data && !count) || reserved || !value || !val_count)
         return ERROR_INVALID_PARAMETER;
-    if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     total_size = info_size + (MAX_PATH + 1) * sizeof(WCHAR);
     if (data) total_size += *count;
@@ -2214,7 +2351,7 @@ LONG WINAPI RegDeleteKeyValueW( HKEY hkey, LPCWSTR subkey, LPCWSTR name )
     HKEY hsubkey = 0;
     LONG ret;
 
-    if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     if (subkey)
     {
@@ -2239,7 +2376,7 @@ LONG WINAPI RegDeleteKeyValueA( HKEY hkey, LPCSTR subkey, LPCSTR name )
     ANSI_STRING nameA;
     NTSTATUS status;
 
-    if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     if (subkey)
     {
@@ -2281,7 +2418,7 @@ LSTATUS WINAPI RegLoadKeyW( HKEY hkey, LPCWSTR subkey, LPCWSTR filename )
     UNICODE_STRING subkeyW, filenameW;
     NTSTATUS status;
 
-    if (!(hkey = get_special_root_hkey(hkey, 0))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     destkey.Length = sizeof(destkey);
     destkey.RootDirectory = hkey;               /* root key: HKLM or HKU */
@@ -2312,7 +2449,7 @@ LSTATUS WINAPI RegLoadKeyW( HKEY hkey, LPCWSTR subkey, LPCWSTR filename )
  */
 LSTATUS WINAPI RegLoadKeyA( HKEY hkey, LPCSTR subkey, LPCSTR filename )
 {
-    UNICODE_STRING subkeyW, filenameW;
+    UNICODE_STRING subkeyW = { 0, 0, NULL }, filenameW = { 0, 0, NULL };
     STRING subkeyA, filenameA;
     NTSTATUS status;
     LONG ret;
@@ -2320,8 +2457,6 @@ LSTATUS WINAPI RegLoadKeyA( HKEY hkey, LPCSTR subkey, LPCSTR filename )
     RtlInitAnsiString(&subkeyA, subkey);
     RtlInitAnsiString(&filenameA, filename);
 
-    RtlInitUnicodeString(&subkeyW, NULL);
-    RtlInitUnicodeString(&filenameW, NULL);
     if (!(status = RtlAnsiStringToUnicodeString(&subkeyW, &subkeyA, TRUE)) &&
         !(status = RtlAnsiStringToUnicodeString(&filenameW, &filenameA, TRUE)))
     {
@@ -2348,7 +2483,7 @@ LSTATUS WINAPI RegSaveKeyExW( HKEY hkey, LPCWSTR file, SECURITY_ATTRIBUTES *sa, 
     TRACE( "(%p,%s,%p)\n", hkey, debugstr_w(file), sa );
 
     if (!file || !*file) return ERROR_INVALID_PARAMETER;
-    if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     if ((status = RtlDosPathNameToNtPathName_U_WithStatus( file, &nameW, NULL, NULL )))
         return RtlNtStatusToDosError( status );
@@ -2450,7 +2585,7 @@ LSTATUS WINAPI RegUnLoadKeyW( HKEY hkey, LPCWSTR lpSubKey )
 
     TRACE("(%p,%s)\n",hkey, debugstr_w(lpSubKey));
 
-    if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     RtlInitUnicodeString(&subkey, lpSubKey);
     InitializeObjectAttributes(&attr, &subkey, OBJ_CASE_INSENSITIVE, hkey, NULL);
@@ -2506,7 +2641,7 @@ LSTATUS WINAPI RegSetKeySecurity( HKEY hkey, SECURITY_INFORMATION SecurityInfo,
     if (!pSecurityDesc)
         return ERROR_INVALID_PARAMETER;
 
-    if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     return RtlNtStatusToDosError( NtSetSecurityObject( hkey, SecurityInfo, pSecurityDesc ) );
 }
@@ -2534,7 +2669,7 @@ LSTATUS WINAPI RegGetKeySecurity( HKEY hkey, SECURITY_INFORMATION SecurityInform
     TRACE("(%p,%ld,%p,%ld)\n",hkey,SecurityInformation,pSecurityDescriptor,
           *lpcbSecurityDescriptor);
 
-    if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
+    if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     return RtlNtStatusToDosError( NtQuerySecurityObject( hkey,
                 SecurityInformation, pSecurityDescriptor,
@@ -2556,7 +2691,7 @@ LSTATUS WINAPI RegGetKeySecurity( HKEY hkey, SECURITY_INFORMATION SecurityInform
  */
 LSTATUS WINAPI RegFlushKey( HKEY hkey )
 {
-    hkey = get_special_root_hkey( hkey, 0 );
+    hkey = get_special_root_hkey( hkey );
     if (!hkey) return ERROR_INVALID_HANDLE;
 
     return RtlNtStatusToDosError( NtFlushKey( hkey ) );
@@ -2586,7 +2721,7 @@ LSTATUS WINAPI RegNotifyChangeKeyValue( HKEY hkey, BOOL fWatchSubTree,
     NTSTATUS status;
     IO_STATUS_BLOCK iosb;
 
-    hkey = get_special_root_hkey( hkey, 0 );
+    hkey = get_special_root_hkey( hkey );
     if (!hkey) return ERROR_INVALID_HANDLE;
 
     TRACE("(%p,%i,%ld,%p,%i)\n", hkey, fWatchSubTree, fdwNotifyFilter,

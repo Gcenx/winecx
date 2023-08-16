@@ -118,6 +118,7 @@ struct connection_ops {
   RPC_STATUS (*impersonate_client)(RpcConnection *conn);
   RPC_STATUS (*revert_to_self)(RpcConnection *conn);
   RPC_STATUS (*inquire_auth_client)(RpcConnection *, RPC_AUTHZ_HANDLE *, RPC_WSTR *, ULONG *, ULONG *, ULONG *, ULONG);
+  RPC_STATUS (*inquire_client_pid)(RpcConnection *conn, ULONG *pid);
 };
 
 /* don't know what MS's structure looks like */
@@ -146,10 +147,6 @@ LPSTR RPCRT4_strndupA(LPCSTR src, INT len) DECLSPEC_HIDDEN;
 LPWSTR RPCRT4_strndupW(LPCWSTR src, INT len) DECLSPEC_HIDDEN;
 LPSTR RPCRT4_strdupWtoA(LPCWSTR src) DECLSPEC_HIDDEN;
 LPWSTR RPCRT4_strdupAtoW(LPCSTR src) DECLSPEC_HIDDEN;
-void RPCRT4_strfree(LPSTR src) DECLSPEC_HIDDEN;
-
-#define RPCRT4_strdupA(x) RPCRT4_strndupA((x),-1)
-#define RPCRT4_strdupW(x) RPCRT4_strndupW((x),-1)
 
 RPC_STATUS RpcAuthInfo_Create(ULONG AuthnLevel, ULONG AuthnSvc, CredHandle cred, TimeStamp exp, ULONG cbMaxToken, RPC_AUTH_IDENTITY_HANDLE identity, RpcAuthInfo **ret) DECLSPEC_HIDDEN;
 ULONG RpcAuthInfo_AddRef(RpcAuthInfo *AuthInfo) DECLSPEC_HIDDEN;

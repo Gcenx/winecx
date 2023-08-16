@@ -122,8 +122,17 @@ static HRESULT invoke_variant_prop(script_ctx_t *ctx, VARIANT *v, WORD flags, DI
     case DISPATCH_PROPERTYGET|DISPATCH_METHOD:
     case DISPATCH_PROPERTYGET:
         if(dp->cArgs) {
-            WARN("called with arguments\n");
-            return DISP_E_MEMBERNOTFOUND; /* That's what tests show */
+            if (!V_ISARRAY(v))
+            {
+                WARN("called with arguments for non-array property\n");
+                return DISP_E_MEMBERNOTFOUND; /* That's what tests show */
+            }
+
+            if (FAILED(hres = array_access(V_ARRAY(v), dp, &v)))
+            {
+                WARN("failed to access array element\n");
+                return hres;
+            }
         }
 
         hres = VariantCopyInd(res, v);
@@ -203,7 +212,7 @@ static HRESULT invoke_vbdisp(vbdisp_t *This, DISPID id, DWORD flags, BOOL extern
 
             dp.cArgs = arg_cnt(params) + 1;
             if(dp.cArgs > ARRAY_SIZE(buf)) {
-                dp.rgvarg = heap_alloc(dp.cArgs*sizeof(VARIANT));
+                dp.rgvarg = malloc(dp.cArgs*sizeof(VARIANT));
                 if(!dp.rgvarg)
                     return E_OUTOFMEMORY;
             }else {
@@ -213,7 +222,7 @@ static HRESULT invoke_vbdisp(vbdisp_t *This, DISPID id, DWORD flags, BOOL extern
             hres = get_propput_arg(This->desc->ctx, params, flags, dp.rgvarg, &needs_release);
             if(FAILED(hres)) {
                 if(dp.rgvarg != buf)
-                    heap_free(dp.rgvarg);
+                    free(dp.rgvarg);
                 return hres;
             }
 
@@ -221,7 +230,7 @@ static HRESULT invoke_vbdisp(vbdisp_t *This, DISPID id, DWORD flags, BOOL extern
             if(!func) {
                 FIXME("no letter/setter\n");
                 if(dp.rgvarg != buf)
-                    heap_free(dp.rgvarg);
+                    free(dp.rgvarg);
                 return DISP_E_MEMBERNOTFOUND;
             }
 
@@ -233,7 +242,7 @@ static HRESULT invoke_vbdisp(vbdisp_t *This, DISPID id, DWORD flags, BOOL extern
             if(needs_release)
                 VariantClear(dp.rgvarg);
             if(dp.rgvarg != buf)
-                heap_free(dp.rgvarg);
+                free(dp.rgvarg);
             return hres;
         }
         default:
@@ -332,8 +341,8 @@ static ULONG WINAPI DispatchEx_Release(IDispatchEx *iface)
     if(!ref && run_terminator(This)) {
         clean_props(This);
         list_remove(&This->entry);
-        heap_free(This->arrays);
-        heap_free(This);
+        free(This->arrays);
+        free(This);
     }
 
     return ref;
@@ -488,7 +497,7 @@ HRESULT create_vbdisp(const class_desc_t *desc, vbdisp_t **ret)
     vbdisp_t *vbdisp;
     HRESULT hres = S_OK;
 
-    vbdisp = heap_alloc_zero( FIELD_OFFSET( vbdisp_t, props[desc->prop_cnt] ));
+    vbdisp = calloc( 1, FIELD_OFFSET( vbdisp_t, props[desc->prop_cnt] ));
     if(!vbdisp)
         return E_OUTOFMEMORY;
 
@@ -499,7 +508,7 @@ HRESULT create_vbdisp(const class_desc_t *desc, vbdisp_t **ret)
     list_add_tail(&desc->ctx->objects, &vbdisp->entry);
 
     if(desc->array_cnt) {
-        vbdisp->arrays = heap_alloc_zero(desc->array_cnt * sizeof(*vbdisp->arrays));
+        vbdisp->arrays = calloc(desc->array_cnt, sizeof(*vbdisp->arrays));
         if(vbdisp->arrays) {
             unsigned i, j;
 
@@ -633,8 +642,8 @@ static ULONG WINAPI ScriptTypeInfo_Release(ITypeInfo *iface)
             release_vbscode(This->funcs[i].func->code_ctx);
 
         IDispatchEx_Release(&This->disp->IDispatchEx_iface);
-        heap_free(This->funcs);
-        heap_free(This);
+        free(This->funcs);
+        free(This);
     }
     return ref;
 }
@@ -648,7 +657,7 @@ static HRESULT WINAPI ScriptTypeInfo_GetTypeAttr(ITypeInfo *iface, TYPEATTR **pp
 
     if (!ppTypeAttr) return E_INVALIDARG;
 
-    attr = heap_alloc_zero(sizeof(*attr));
+    attr = calloc(1, sizeof(*attr));
     if (!attr) return E_OUTOFMEMORY;
 
     attr->guid = GUID_VBScriptTypeInfo;
@@ -697,7 +706,7 @@ static HRESULT WINAPI ScriptTypeInfo_GetFuncDesc(ITypeInfo *iface, UINT index, F
     func = This->funcs[index].func;
 
     /* Store the parameter array after the FUNCDESC structure */
-    desc = heap_alloc_zero(sizeof(*desc) + sizeof(ELEMDESC) * func->arg_cnt);
+    desc = calloc(1, sizeof(*desc) + sizeof(ELEMDESC) * func->arg_cnt);
     if (!desc) return E_OUTOFMEMORY;
 
     desc->memid = This->funcs[index].memid;
@@ -725,7 +734,7 @@ static HRESULT WINAPI ScriptTypeInfo_GetVarDesc(ITypeInfo *iface, UINT index, VA
     if (!ppVarDesc) return E_INVALIDARG;
     if (index >= This->num_vars) return TYPE_E_ELEMENTNOTFOUND;
 
-    desc = heap_alloc_zero(sizeof(*desc));
+    desc = calloc(1, sizeof(*desc));
     if (!desc) return E_OUTOFMEMORY;
 
     desc->memid = index + 1;
@@ -1061,7 +1070,7 @@ static void WINAPI ScriptTypeInfo_ReleaseTypeAttr(ITypeInfo *iface, TYPEATTR *pT
 
     TRACE("(%p)->(%p)\n", This, pTypeAttr);
 
-    heap_free(pTypeAttr);
+    free(pTypeAttr);
 }
 
 static void WINAPI ScriptTypeInfo_ReleaseFuncDesc(ITypeInfo *iface, FUNCDESC *pFuncDesc)
@@ -1070,7 +1079,7 @@ static void WINAPI ScriptTypeInfo_ReleaseFuncDesc(ITypeInfo *iface, FUNCDESC *pF
 
     TRACE("(%p)->(%p)\n", This, pFuncDesc);
 
-    heap_free(pFuncDesc);
+    free(pFuncDesc);
 }
 
 static void WINAPI ScriptTypeInfo_ReleaseVarDesc(ITypeInfo *iface, VARDESC *pVarDesc)
@@ -1079,7 +1088,7 @@ static void WINAPI ScriptTypeInfo_ReleaseVarDesc(ITypeInfo *iface, VARDESC *pVar
 
     TRACE("(%p)->(%p)\n", This, pVarDesc);
 
-    heap_free(pVarDesc);
+    free(pVarDesc);
 }
 
 static const ITypeInfoVtbl ScriptTypeInfoVtbl = {
@@ -1267,9 +1276,9 @@ static ULONG WINAPI ScriptDisp_Release(IDispatchEx *iface)
             release_dynamic_var(This->global_vars[i]);
 
         heap_pool_free(&This->heap);
-        heap_free(This->global_vars);
-        heap_free(This->global_funcs);
-        heap_free(This);
+        free(This->global_vars);
+        free(This->global_funcs);
+        free(This);
     }
 
     return ref;
@@ -1297,7 +1306,7 @@ static HRESULT WINAPI ScriptDisp_GetTypeInfo(IDispatchEx *iface, UINT iTInfo, LC
     if(iTInfo)
         return DISP_E_BADINDEX;
 
-    if(!(type_info = heap_alloc(sizeof(*type_info))))
+    if(!(type_info = calloc(1, sizeof(*type_info))))
         return E_OUTOFMEMORY;
 
     for(i = 0; i < This->global_funcs_cnt; i++)
@@ -1311,10 +1320,10 @@ static HRESULT WINAPI ScriptDisp_GetTypeInfo(IDispatchEx *iface, UINT iTInfo, LC
     type_info->num_vars = This->global_vars_cnt;
     type_info->disp = This;
 
-    type_info->funcs = heap_alloc(sizeof(*type_info->funcs) * num_funcs);
+    type_info->funcs = calloc(num_funcs, sizeof(*type_info->funcs));
     if(!type_info->funcs)
     {
-        heap_free(type_info);
+        free(type_info);
         return E_OUTOFMEMORY;
     }
 
@@ -1508,7 +1517,7 @@ HRESULT create_script_disp(script_ctx_t *ctx, ScriptDisp **ret)
 {
     ScriptDisp *script_disp;
 
-    script_disp = heap_alloc_zero(sizeof(*script_disp));
+    script_disp = calloc(1, sizeof(*script_disp));
     if(!script_disp)
         return E_OUTOFMEMORY;
 
@@ -1516,6 +1525,7 @@ HRESULT create_script_disp(script_ctx_t *ctx, ScriptDisp **ret)
     script_disp->ref = 1;
     script_disp->ctx = ctx;
     heap_pool_init(&script_disp->heap);
+    script_disp->rnd = 0x50000;
 
     *ret = script_disp;
     return S_OK;
@@ -1563,65 +1573,74 @@ HRESULT disp_get_id(IDispatch *disp, BSTR name, vbdisp_invoke_type_t invoke_type
 
 #define RPC_E_SERVER_UNAVAILABLE 0x800706ba
 
-HRESULT map_hres(HRESULT hres)
+void map_vbs_exception(EXCEPINFO *ei)
 {
-    if(SUCCEEDED(hres) || HRESULT_FACILITY(hres) == FACILITY_VBS)
-        return hres;
+    int vbse_number;
 
-    switch(hres) {
-    case E_NOTIMPL:                  return MAKE_VBSERROR(VBSE_ACTION_NOT_SUPPORTED);
-    case E_NOINTERFACE:              return MAKE_VBSERROR(VBSE_OLE_NOT_SUPPORTED);
-    case DISP_E_UNKNOWNINTERFACE:    return MAKE_VBSERROR(VBSE_OLE_NO_PROP_OR_METHOD);
-    case DISP_E_MEMBERNOTFOUND:      return MAKE_VBSERROR(VBSE_OLE_NO_PROP_OR_METHOD);
-    case DISP_E_PARAMNOTFOUND:       return MAKE_VBSERROR(VBSE_NAMED_PARAM_NOT_FOUND);
-    case DISP_E_TYPEMISMATCH:        return MAKE_VBSERROR(VBSE_TYPE_MISMATCH);
-    case DISP_E_UNKNOWNNAME:         return MAKE_VBSERROR(VBSE_OLE_NO_PROP_OR_METHOD);
-    case DISP_E_NONAMEDARGS:         return MAKE_VBSERROR(VBSE_NAMED_ARGS_NOT_SUPPORTED);
-    case DISP_E_BADVARTYPE:          return MAKE_VBSERROR(VBSE_INVALID_TYPELIB_VARIABLE);
-    case DISP_E_OVERFLOW:            return MAKE_VBSERROR(VBSE_OVERFLOW);
-    case DISP_E_BADINDEX:            return MAKE_VBSERROR(VBSE_OUT_OF_BOUNDS);
-    case DISP_E_UNKNOWNLCID:         return MAKE_VBSERROR(VBSE_LOCALE_SETTING_NOT_SUPPORTED);
-    case DISP_E_ARRAYISLOCKED:       return MAKE_VBSERROR(VBSE_ARRAY_LOCKED);
-    case DISP_E_BADPARAMCOUNT:       return MAKE_VBSERROR(VBSE_FUNC_ARITY_MISMATCH);
-    case DISP_E_PARAMNOTOPTIONAL:    return MAKE_VBSERROR(VBSE_PARAMETER_NOT_OPTIONAL);
-    case DISP_E_NOTACOLLECTION:      return MAKE_VBSERROR(VBSE_NOT_ENUM);
-    case TYPE_E_DLLFUNCTIONNOTFOUND: return MAKE_VBSERROR(VBSE_INVALID_DLL_FUNCTION_NAME);
-    case TYPE_E_TYPEMISMATCH:        return MAKE_VBSERROR(VBSE_TYPE_MISMATCH);
-    case TYPE_E_OUTOFBOUNDS:         return MAKE_VBSERROR(VBSE_OUT_OF_BOUNDS);
-    case TYPE_E_IOERROR:             return MAKE_VBSERROR(VBSE_IO_ERROR);
-    case TYPE_E_CANTCREATETMPFILE:   return MAKE_VBSERROR(VBSE_CANT_CREATE_TMP_FILE);
-    case STG_E_FILENOTFOUND:         return MAKE_VBSERROR(VBSE_OLE_FILE_NOT_FOUND);
-    case STG_E_PATHNOTFOUND:         return MAKE_VBSERROR(VBSE_PATH_NOT_FOUND);
-    case STG_E_TOOMANYOPENFILES:     return MAKE_VBSERROR(VBSE_TOO_MANY_FILES);
-    case STG_E_ACCESSDENIED:         return MAKE_VBSERROR(VBSE_PERMISSION_DENIED);
-    case STG_E_INSUFFICIENTMEMORY:   return MAKE_VBSERROR(VBSE_OUT_OF_MEMORY);
-    case STG_E_NOMOREFILES:          return MAKE_VBSERROR(VBSE_TOO_MANY_FILES);
-    case STG_E_DISKISWRITEPROTECTED: return MAKE_VBSERROR(VBSE_PERMISSION_DENIED);
-    case STG_E_WRITEFAULT:           return MAKE_VBSERROR(VBSE_IO_ERROR);
-    case STG_E_READFAULT:            return MAKE_VBSERROR(VBSE_IO_ERROR);
-    case STG_E_SHAREVIOLATION:       return MAKE_VBSERROR(VBSE_PATH_FILE_ACCESS);
-    case STG_E_LOCKVIOLATION:        return MAKE_VBSERROR(VBSE_PERMISSION_DENIED);
-    case STG_E_FILEALREADYEXISTS:    return MAKE_VBSERROR(VBSE_FILE_ALREADY_EXISTS);
-    case STG_E_MEDIUMFULL:           return MAKE_VBSERROR(VBSE_DISK_FULL);
-    case STG_E_INVALIDNAME:          return MAKE_VBSERROR(VBSE_FILE_NOT_FOUND);
-    case STG_E_INUSE:                return MAKE_VBSERROR(VBSE_PERMISSION_DENIED);
-    case STG_E_NOTCURRENT:           return MAKE_VBSERROR(VBSE_PERMISSION_DENIED);
-    case STG_E_CANTSAVE:             return MAKE_VBSERROR(VBSE_IO_ERROR);
-    case REGDB_E_CLASSNOTREG:        return MAKE_VBSERROR(VBSE_CANT_CREATE_OBJECT);
-    case MK_E_UNAVAILABLE:           return MAKE_VBSERROR(VBSE_CANT_CREATE_OBJECT);
-    case MK_E_INVALIDEXTENSION:      return MAKE_VBSERROR(VBSE_OLE_FILE_NOT_FOUND);
-    case MK_E_CANTOPENFILE:          return MAKE_VBSERROR(VBSE_OLE_FILE_NOT_FOUND);
-    case CO_E_CLASSSTRING:           return MAKE_VBSERROR(VBSE_CANT_CREATE_OBJECT);
-    case CO_E_APPNOTFOUND:           return MAKE_VBSERROR(VBSE_CANT_CREATE_OBJECT);
-    case CO_E_APPDIDNTREG:           return MAKE_VBSERROR(VBSE_CANT_CREATE_OBJECT);
-    case E_ACCESSDENIED:             return MAKE_VBSERROR(VBSE_PERMISSION_DENIED);
-    case E_OUTOFMEMORY:              return MAKE_VBSERROR(VBSE_OUT_OF_MEMORY);
-    case E_INVALIDARG:               return MAKE_VBSERROR(VBSE_ILLEGAL_FUNC_CALL);
-    case RPC_E_SERVER_UNAVAILABLE:   return MAKE_VBSERROR(VBSE_SERVER_NOT_FOUND);
-    case CO_E_SERVER_EXEC_FAILURE:   return MAKE_VBSERROR(VBSE_CANT_CREATE_OBJECT);
+    if(HRESULT_FACILITY(ei->scode) == FACILITY_VBS)
+        vbse_number = HRESULT_CODE(ei->scode);
+    else
+    {
+        switch(ei->scode) {
+        case E_NOTIMPL:                  vbse_number = VBSE_ACTION_NOT_SUPPORTED; break;
+        case E_NOINTERFACE:              vbse_number = VBSE_OLE_NOT_SUPPORTED; break;
+        case DISP_E_UNKNOWNINTERFACE:    vbse_number = VBSE_OLE_NO_PROP_OR_METHOD; break;
+        case DISP_E_MEMBERNOTFOUND:      vbse_number = VBSE_OLE_NO_PROP_OR_METHOD; break;
+        case DISP_E_PARAMNOTFOUND:       vbse_number = VBSE_NAMED_PARAM_NOT_FOUND; break;
+        case DISP_E_TYPEMISMATCH:        vbse_number = VBSE_TYPE_MISMATCH; break;
+        case DISP_E_UNKNOWNNAME:         vbse_number = VBSE_OLE_NO_PROP_OR_METHOD; break;
+        case DISP_E_NONAMEDARGS:         vbse_number = VBSE_NAMED_ARGS_NOT_SUPPORTED; break;
+        case DISP_E_BADVARTYPE:          vbse_number = VBSE_INVALID_TYPELIB_VARIABLE; break;
+        case DISP_E_OVERFLOW:            vbse_number = VBSE_OVERFLOW; break;
+        case DISP_E_BADINDEX:            vbse_number = VBSE_OUT_OF_BOUNDS; break;
+        case DISP_E_UNKNOWNLCID:         vbse_number = VBSE_LOCALE_SETTING_NOT_SUPPORTED; break;
+        case DISP_E_ARRAYISLOCKED:       vbse_number = VBSE_ARRAY_LOCKED; break;
+        case DISP_E_BADPARAMCOUNT:       vbse_number = VBSE_FUNC_ARITY_MISMATCH; break;
+        case DISP_E_PARAMNOTOPTIONAL:    vbse_number = VBSE_PARAMETER_NOT_OPTIONAL; break;
+        case DISP_E_NOTACOLLECTION:      vbse_number = VBSE_NOT_ENUM; break;
+        case TYPE_E_DLLFUNCTIONNOTFOUND: vbse_number = VBSE_INVALID_DLL_FUNCTION_NAME; break;
+        case TYPE_E_TYPEMISMATCH:        vbse_number = VBSE_TYPE_MISMATCH; break;
+        case TYPE_E_OUTOFBOUNDS:         vbse_number = VBSE_OUT_OF_BOUNDS; break;
+        case TYPE_E_IOERROR:             vbse_number = VBSE_IO_ERROR; break;
+        case TYPE_E_CANTCREATETMPFILE:   vbse_number = VBSE_CANT_CREATE_TMP_FILE; break;
+        case STG_E_FILENOTFOUND:         vbse_number = VBSE_OLE_FILE_NOT_FOUND; break;
+        case STG_E_PATHNOTFOUND:         vbse_number = VBSE_PATH_NOT_FOUND; break;
+        case STG_E_TOOMANYOPENFILES:     vbse_number = VBSE_TOO_MANY_FILES; break;
+        case STG_E_ACCESSDENIED:         vbse_number = VBSE_PERMISSION_DENIED; break;
+        case STG_E_INSUFFICIENTMEMORY:   vbse_number = VBSE_OUT_OF_MEMORY; break;
+        case STG_E_NOMOREFILES:          vbse_number = VBSE_TOO_MANY_FILES; break;
+        case STG_E_DISKISWRITEPROTECTED: vbse_number = VBSE_PERMISSION_DENIED; break;
+        case STG_E_WRITEFAULT:           vbse_number = VBSE_IO_ERROR; break;
+        case STG_E_READFAULT:            vbse_number = VBSE_IO_ERROR; break;
+        case STG_E_SHAREVIOLATION:       vbse_number = VBSE_PATH_FILE_ACCESS; break;
+        case STG_E_LOCKVIOLATION:        vbse_number = VBSE_PERMISSION_DENIED; break;
+        case STG_E_FILEALREADYEXISTS:    vbse_number = VBSE_FILE_ALREADY_EXISTS; break;
+        case STG_E_MEDIUMFULL:           vbse_number = VBSE_DISK_FULL; break;
+        case STG_E_INVALIDNAME:          vbse_number = VBSE_FILE_NOT_FOUND; break;
+        case STG_E_INUSE:                vbse_number = VBSE_PERMISSION_DENIED; break;
+        case STG_E_NOTCURRENT:           vbse_number = VBSE_PERMISSION_DENIED; break;
+        case STG_E_CANTSAVE:             vbse_number = VBSE_IO_ERROR; break;
+        case REGDB_E_CLASSNOTREG:        vbse_number = VBSE_CANT_CREATE_OBJECT; break;
+        case MK_E_UNAVAILABLE:           vbse_number = VBSE_CANT_CREATE_OBJECT; break;
+        case MK_E_INVALIDEXTENSION:      vbse_number = VBSE_OLE_FILE_NOT_FOUND; break;
+        case MK_E_CANTOPENFILE:          vbse_number = VBSE_OLE_FILE_NOT_FOUND; break;
+        case CO_E_CLASSSTRING:           vbse_number = VBSE_CANT_CREATE_OBJECT; break;
+        case CO_E_APPNOTFOUND:           vbse_number = VBSE_CANT_CREATE_OBJECT; break;
+        case CO_E_APPDIDNTREG:           vbse_number = VBSE_CANT_CREATE_OBJECT; break;
+        case E_ACCESSDENIED:             vbse_number = VBSE_PERMISSION_DENIED; break;
+        case E_OUTOFMEMORY:              vbse_number = VBSE_OUT_OF_MEMORY; break;
+        case E_INVALIDARG:               vbse_number = VBSE_ILLEGAL_FUNC_CALL; break;
+        case RPC_E_SERVER_UNAVAILABLE:   vbse_number = VBSE_SERVER_NOT_FOUND; break;
+        case CO_E_SERVER_EXEC_FAILURE:   vbse_number = VBSE_CANT_CREATE_OBJECT; break;
+        default: return; /* early return, all other HRESULT left as-is */
+        }
+        ei->scode = MAKE_VBSERROR(vbse_number);
     }
-
-    return hres;
+    if(!ei->bstrSource)
+        ei->bstrSource = get_vbscript_string(VBS_RUNTIME_ERROR);
+    if(!ei->bstrDescription)
+        if(!(ei->bstrDescription = get_vbscript_string(vbse_number)))
+            ei->bstrDescription = get_vbscript_string(VBS_UNKNOWN_RUNTIME_ERROR);
 }
 
 HRESULT disp_call(script_ctx_t *ctx, IDispatch *disp, DISPID id, DISPPARAMS *dp, VARIANT *retv)

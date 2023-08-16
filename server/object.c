@@ -233,6 +233,7 @@ static void free_object( struct object *obj )
 struct object *lookup_named_object( struct object *root, const struct unicode_str *name,
                                     unsigned int attr, struct unicode_str *name_left )
 {
+    static int recursion_count;
     struct object *obj, *parent;
     struct unicode_str name_tmp = *name, *ptr = &name_tmp;
 
@@ -261,6 +262,13 @@ struct object *lookup_named_object( struct object *root, const struct unicode_st
 
     if (!name_tmp.len) ptr = NULL;  /* special case for empty path */
 
+    if (recursion_count > 32)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        release_object( parent );
+        return NULL;
+    }
+    recursion_count++;
     clear_error();
 
     while ((obj = parent->ops->lookup_name( parent, ptr, attr, root )))
@@ -269,6 +277,8 @@ struct object *lookup_named_object( struct object *root, const struct unicode_st
         release_object ( parent );
         parent = obj;
     }
+
+    recursion_count--;
     if (get_error())
     {
         release_object( parent );
@@ -331,31 +341,31 @@ void *create_named_object( struct object *parent, const struct object_ops *ops,
             free_object( new_obj );
             return NULL;
         }
-        goto done;
     }
-
-    if (!(obj = lookup_named_object( parent, name, attributes, &new_name ))) return NULL;
-
-    if (!new_name.len)
+    else
     {
-        if (attributes & OBJ_OPENIF && obj->ops == ops)
-            set_error( STATUS_OBJECT_NAME_EXISTS );
-        else
+        if (!(obj = lookup_named_object( parent, name, attributes, &new_name ))) return NULL;
+
+        if (!new_name.len)
         {
+            if (attributes & OBJ_OPENIF && obj->ops == ops)
+            {
+                set_error( STATUS_OBJECT_NAME_EXISTS );
+                return obj;
+            }
             release_object( obj );
-            obj = NULL;
             if (attributes & OBJ_OPENIF)
                 set_error( STATUS_OBJECT_TYPE_MISMATCH );
             else
                 set_error( STATUS_OBJECT_NAME_COLLISION );
+            return NULL;
         }
-        return obj;
+
+        new_obj = create_object( obj, ops, &new_name, attributes, sd );
+        release_object( obj );
+        if (!new_obj) return NULL;
     }
 
-    new_obj = create_object( obj, ops, &new_name, attributes, sd );
-    release_object( obj );
-
-done:
     if (attributes & OBJ_PERMANENT)
     {
         make_object_permanent( new_obj );
@@ -564,7 +574,7 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     }
     else if (token)
     {
-        owner = token_get_user( token );
+        owner = token_get_owner( token );
         new_sd.owner_len = sid_len( owner );
     }
     else new_sd.owner_len = 0;

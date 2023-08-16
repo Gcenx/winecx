@@ -19,8 +19,6 @@
 #ifndef _NTDDNDIS_
 #define _NTDDNDIS_
 
-#include "wine/winheader_enter.h"
-
 #include <ifdef.h>
 #include <devpkey.h>
 /* #include <pciprop.h> */
@@ -276,7 +274,5 @@ typedef enum _NDIS_PHYSICAL_MEDIUM
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* _NTDDNDIS_ */

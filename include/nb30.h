@@ -19,8 +19,6 @@
 #ifndef NCB_INCLUDED
 #define NCB_INCLUDED
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -220,7 +218,5 @@ UCHAR WINAPI Netbios(PNCB pncb);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif  /* NCB_INCLUDED */

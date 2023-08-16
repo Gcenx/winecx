@@ -55,8 +55,8 @@ static DWORD64 WINAPI addr_to_linear(HANDLE hProcess, HANDLE hThread, ADDRESS64*
         FIXME("Unsupported (yet) mode (%x)\n", addr->Mode);
         return 0;
     }
-    FIXME("Failed to linearize address %04x:%s (mode %x)\n",
-          addr->Segment, wine_dbgstr_longlong(addr->Offset), addr->Mode);
+    FIXME("Failed to linearize address %04x:%I64x (mode %x)\n",
+          addr->Segment, addr->Offset, addr->Mode);
     return 0;
 }
 
@@ -312,7 +312,7 @@ BOOL WINAPI StackWalkEx(DWORD MachineType, HANDLE hProcess, HANDLE hThread,
 
     if (IFC_MODE(frame->InlineFrameContext) == IFC_MODE_INLINE)
     {
-        DWORD depth = symt_get_inlinesite_depth(hProcess, addr);
+        DWORD depth = SymAddrIncludeInlineTrace(hProcess, addr);
         if (IFC_DEPTH(frame->InlineFrameContext) + 1 < depth) /* move to next inlined function? */
         {
             TRACE("found inline ctx: depth=%lu current=%lu++\n",
@@ -330,7 +330,7 @@ BOOL WINAPI StackWalkEx(DWORD MachineType, HANDLE hProcess, HANDLE hThread,
         if (frame->InlineFrameContext != INLINE_FRAME_CONTEXT_IGNORE)
         {
             addr = sw_xlat_addr(&csw, &frame->AddrPC);
-            frame->InlineFrameContext = symt_get_inlinesite_depth(hProcess, addr) == 0 ? IFC_MODE_REGULAR : IFC_MODE_INLINE;
+            frame->InlineFrameContext = SymAddrIncludeInlineTrace(hProcess, addr) == 0 ? IFC_MODE_REGULAR : IFC_MODE_INLINE;
             TRACE("setting IFC mode to %lx\n", frame->InlineFrameContext);
         }
     }
@@ -362,7 +362,7 @@ BOOL WINAPI SymRegisterFunctionEntryCallback64(HANDLE hProc,
                                                PSYMBOL_FUNCENTRY_CALLBACK64 cb,
                                                ULONG64 user)
 {
-    FIXME("(%p %p %s): stub!\n", hProc, cb, wine_dbgstr_longlong(user));
+    FIXME("(%p %p %I64x): stub!\n", hProc, cb, user);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }

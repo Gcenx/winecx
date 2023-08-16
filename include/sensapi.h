@@ -19,8 +19,6 @@
 #ifndef __SENSAPI_H__
 #define __SENSAPI_H__
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -45,7 +43,5 @@ BOOL WINAPI IsNetworkAlive(LPDWORD lpdwFlags);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __SENSAPI_H__ */

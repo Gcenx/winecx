@@ -284,38 +284,36 @@ static HRESULT media_engine_create_d3d11_video_frame_resources(struct media_engi
             if (position.x < dst.x || position.x > dst.z) return backcolor;
             if (position.y < dst.y || position.y > dst.w) return backcolor;
             p.x = (position.x - dst.x) / (dst.z - dst.x);
-            p.y = 1.0f - (position.y - dst.y) / (dst.w - dst.y);
+            p.y = (position.y - dst.y) / (dst.w - dst.y);
             p.x = src.x + p.x * (src.z - src.x);
             p.y = src.y + p.y * (src.w - src.y);
             return t.Sample(s, p);
         }
 #endif
-        0x43425844, 0x5892e3b1, 0x24c17f7c, 0x9999f143, 0x49667872, 0x00000001, 0x0000032c, 0x00000003,
+        0x43425844, 0xae2162b7, 0x0fd69625, 0x6784c41a, 0x84ae95de, 0x00000001, 0x000002f8, 0x00000003,
         0x0000002c, 0x00000060, 0x00000094, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020,
         0x00000000, 0x00000001, 0x00000003, 0x00000000, 0x0000030f, 0x505f5653, 0x5449534f, 0x004e4f49,
         0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003,
-        0x00000000, 0x0000000f, 0x545f5653, 0x45475241, 0xabab0054, 0x52444853, 0x00000290, 0x00000040,
-        0x000000a4, 0x04000059, 0x00208e46, 0x00000000, 0x00000003, 0x0300005a, 0x00106000, 0x00000000,
+        0x00000000, 0x0000000f, 0x545f5653, 0x45475241, 0xabab0054, 0x52444853, 0x0000025c, 0x00000040,
+        0x00000097, 0x04000059, 0x00208e46, 0x00000000, 0x00000003, 0x0300005a, 0x00106000, 0x00000000,
         0x04001858, 0x00107000, 0x00000000, 0x00005555, 0x04002064, 0x00101032, 0x00000000, 0x00000001,
         0x03000065, 0x001020f2, 0x00000000, 0x02000068, 0x00000002, 0x08000031, 0x00100012, 0x00000000,
         0x0010100a, 0x00000000, 0x0020800a, 0x00000000, 0x00000000, 0x08000031, 0x00100022, 0x00000000,
         0x0020802a, 0x00000000, 0x00000000, 0x0010100a, 0x00000000, 0x0700003c, 0x00100012, 0x00000000,
-        0x0010001a, 0x00000000, 0x0010000a, 0x00000000, 0x0304001f, 0x0010000a, 0x00000000, 0x06000036,
-        0x001020f2, 0x00000000, 0x00208e46, 0x00000000, 0x00000002, 0x0100003e, 0x01000015, 0x08000031,
-        0x00100012, 0x00000000, 0x0010101a, 0x00000000, 0x0020801a, 0x00000000, 0x00000000, 0x08000031,
-        0x00100022, 0x00000000, 0x0020803a, 0x00000000, 0x00000000, 0x0010101a, 0x00000000, 0x0700003c,
-        0x00100012, 0x00000000, 0x0010001a, 0x00000000, 0x0010000a, 0x00000000, 0x0304001f, 0x0010000a,
-        0x00000000, 0x06000036, 0x001020f2, 0x00000000, 0x00208e46, 0x00000000, 0x00000002, 0x0100003e,
-        0x01000015, 0x09000000, 0x00100032, 0x00000000, 0x00101046, 0x00000000, 0x80208046, 0x00000041,
-        0x00000000, 0x00000000, 0x0a000000, 0x001000c2, 0x00000000, 0x80208406, 0x00000041, 0x00000000,
-        0x00000000, 0x00208ea6, 0x00000000, 0x00000000, 0x0700000e, 0x00100032, 0x00000000, 0x00100046,
-        0x00000000, 0x00100ae6, 0x00000000, 0x08000000, 0x00100022, 0x00000000, 0x8010001a, 0x00000041,
-        0x00000000, 0x00004001, 0x3f800000, 0x0a000000, 0x001000c2, 0x00000000, 0x80208406, 0x00000041,
-        0x00000000, 0x00000001, 0x00208ea6, 0x00000000, 0x00000001, 0x0a000032, 0x00100012, 0x00000001,
-        0x0010000a, 0x00000000, 0x0010002a, 0x00000000, 0x0020800a, 0x00000000, 0x00000001, 0x0a000032,
-        0x00100022, 0x00000001, 0x0010001a, 0x00000000, 0x0010003a, 0x00000000, 0x0020801a, 0x00000000,
-        0x00000001, 0x09000045, 0x001020f2, 0x00000000, 0x00100046, 0x00000001, 0x00107e46, 0x00000000,
-        0x00106000, 0x00000000, 0x0100003e,
+        0x0010001a, 0x00000000, 0x0010000a, 0x00000000, 0x09000000, 0x00100062, 0x00000000, 0x00101106,
+        0x00000000, 0x80208106, 0x00000041, 0x00000000, 0x00000000, 0x0a000000, 0x00100032, 0x00000001,
+        0x80208046, 0x00000041, 0x00000000, 0x00000000, 0x00208ae6, 0x00000000, 0x00000000, 0x0700000e,
+        0x00100062, 0x00000000, 0x00100656, 0x00000000, 0x00100106, 0x00000001, 0x0a000000, 0x00100032,
+        0x00000001, 0x80208046, 0x00000041, 0x00000000, 0x00000001, 0x00208ae6, 0x00000000, 0x00000001,
+        0x0a000032, 0x00100062, 0x00000000, 0x00100656, 0x00000000, 0x00100106, 0x00000001, 0x00208106,
+        0x00000000, 0x00000001, 0x09000045, 0x001000f2, 0x00000001, 0x00100596, 0x00000000, 0x00107e46,
+        0x00000000, 0x00106000, 0x00000000, 0x0304001f, 0x0010000a, 0x00000000, 0x06000036, 0x001020f2,
+        0x00000000, 0x00208e46, 0x00000000, 0x00000002, 0x0100003e, 0x01000015, 0x08000031, 0x00100012,
+        0x00000000, 0x0010101a, 0x00000000, 0x0020801a, 0x00000000, 0x00000000, 0x08000031, 0x00100022,
+        0x00000000, 0x0020803a, 0x00000000, 0x00000000, 0x0010101a, 0x00000000, 0x0700003c, 0x00100012,
+        0x00000000, 0x0010001a, 0x00000000, 0x0010000a, 0x00000000, 0x0304001f, 0x0010000a, 0x00000000,
+        0x06000036, 0x001020f2, 0x00000000, 0x00208e46, 0x00000000, 0x00000002, 0x0100003e, 0x01000015,
+        0x05000036, 0x001020f2, 0x00000000, 0x00100e46, 0x00000001, 0x0100003e,
     };
     D3D11_SUBRESOURCE_DATA resource_data;
     D3D11_TEXTURE2D_DESC texture_desc;
@@ -837,6 +835,23 @@ static void media_engine_get_frame_size(struct media_engine *engine, IMFTopology
     IMFMediaType_Release(media_type);
 }
 
+static void media_engine_apply_volume(const struct media_engine *engine)
+{
+    IMFSimpleAudioVolume *sa_volume;
+    HRESULT hr;
+
+    if (!engine->session)
+        return;
+
+    if (FAILED(MFGetService((IUnknown *)engine->session, &MR_POLICY_VOLUME_SERVICE, &IID_IMFSimpleAudioVolume, (void **)&sa_volume)))
+        return;
+
+    if (FAILED(hr = IMFSimpleAudioVolume_SetMasterVolume(sa_volume, engine->volume)))
+        WARN("Failed to set master volume, hr %#lx.\n", hr);
+
+    IMFSimpleAudioVolume_Release(sa_volume);
+}
+
 static HRESULT WINAPI media_engine_callback_QueryInterface(IMFAsyncCallback *iface, REFIID riid, void **obj)
 {
     if (IsEqualIID(riid, &IID_IMFAsyncCallback) ||
@@ -919,6 +934,8 @@ static HRESULT WINAPI media_engine_session_events_Invoke(IMFAsyncCallback *iface
             topology = (IMFTopology *)value.punkVal;
 
             EnterCriticalSection(&engine->cs);
+
+            media_engine_apply_volume(engine);
 
             engine->ready_state = MF_MEDIA_ENGINE_READY_HAVE_METADATA;
 
@@ -1935,11 +1952,14 @@ static HRESULT WINAPI media_engine_Pause(IMFMediaEngineEx *iface)
     {
         if (!(engine->flags & FLAGS_ENGINE_PAUSED))
         {
-            media_engine_set_flag(engine, FLAGS_ENGINE_WAITING | FLAGS_ENGINE_IS_ENDED, FALSE);
-            media_engine_set_flag(engine, FLAGS_ENGINE_PAUSED, TRUE);
+            if (SUCCEEDED(hr = IMFMediaSession_Pause(engine->session)))
+            {
+                media_engine_set_flag(engine, FLAGS_ENGINE_WAITING | FLAGS_ENGINE_IS_ENDED, FALSE);
+                media_engine_set_flag(engine, FLAGS_ENGINE_PAUSED, TRUE);
 
-            IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_TIMEUPDATE, 0, 0);
-            IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_PAUSE, 0, 0);
+                IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_TIMEUPDATE, 0, 0);
+                IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_PAUSE, 0, 0);
+            }
         }
 
         IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_PURGEQUEUEDEVENTS, 0, 0);
@@ -2011,6 +2031,7 @@ static HRESULT WINAPI media_engine_SetVolume(IMFMediaEngineEx *iface, double vol
     else if (volume != engine->volume)
     {
         engine->volume = volume;
+        media_engine_apply_volume(engine);
         IMFMediaEngineNotify_EventNotify(engine->callback, MF_MEDIA_ENGINE_EVENT_VOLUMECHANGE, 0, 0);
     }
     LeaveCriticalSection(&engine->cs);
@@ -2105,7 +2126,7 @@ static HRESULT WINAPI media_engine_Shutdown(IMFMediaEngineEx *iface)
     struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
     HRESULT hr = S_OK;
 
-    FIXME("(%p): stub.\n", iface);
+    TRACE("%p.\n", iface);
 
     EnterCriticalSection(&engine->cs);
     if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)

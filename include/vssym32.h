@@ -19,8 +19,6 @@
 #ifndef __VSSYM32_H__
 #define __VSSYM32_H__
 
-#include "wine/winheader_enter.h"
-
 #include "vsstyle.h"
 
 
@@ -662,7 +660,5 @@ enum MENUBANDSTATES {
     MDS_CHECKED = 5,
     MDS_HOTCHECKED = 6,
 };
-
-#include "wine/winheader_exit.h"
 
 #endif /* __VSSYM32_H__ */

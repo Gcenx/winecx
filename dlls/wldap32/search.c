@@ -23,7 +23,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
-#include "winldap.h"
+#include "winsock2.h"
 
 #include "wine/debug.h"
 #include "winldap_private.h"
@@ -32,12 +32,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
 
 /***********************************************************************
  *      ldap_searchA     (WLDAP32.@)
- *
- * See ldap_searchW.
  */
 ULONG CDECL ldap_searchA( LDAP *ld, char *base, ULONG scope, char *filter, char **attrs, ULONG attrsonly )
 {
-    ULONG ret = LDAP_NO_MEMORY;
+    ULONG ret = WLDAP32_LDAP_NO_MEMORY;
     WCHAR *baseW = NULL, *filterW = NULL, **attrsW = NULL;
 
     TRACE( "(%p, %s, %#lx, %s, %p, %#lx)\n", ld, debugstr_a(base), scope, debugstr_a(filter), attrs, attrsonly );
@@ -59,26 +57,6 @@ exit:
 
 /***********************************************************************
  *      ldap_searchW     (WLDAP32.@)
- *
- * Search a directory tree (asynchronous operation).
- *
- * PARAMS
- *  ld        [I] Pointer to an LDAP context.
- *  base      [I] Starting point for the search.
- *  scope     [I] Search scope. One of LDAP_SCOPE_BASE,
- *                LDAP_SCOPE_ONELEVEL and LDAP_SCOPE_SUBTREE.
- *  filter    [I] Search filter.
- *  attrs     [I] Attributes to return.
- *  attrsonly [I] Return no values, only attributes.
- *
- * RETURNS
- *  Success: Message ID of the search operation.
- *  Failure: ~0u
- *
- * NOTES
- *  Call ldap_result with the message ID to get the result of
- *  the operation. Cancel the operation by calling ldap_abandon
- *  with the message ID.
  */
 ULONG CDECL ldap_searchW( LDAP *ld, WCHAR *base, ULONG scope, WCHAR *filter, WCHAR **attrs, ULONG attrsonly )
 {
@@ -86,26 +64,25 @@ ULONG CDECL ldap_searchW( LDAP *ld, WCHAR *base, ULONG scope, WCHAR *filter, WCH
     TRACE( "(%p, %s, %#lx, %s, %p, %#lx)\n", ld, debugstr_w(base), scope, debugstr_w(filter), attrs, attrsonly );
 
     ret = ldap_search_extW( ld, base, scope, filter, attrs, attrsonly, NULL, NULL, 0, 0, &msg );
-    if (ret == LDAP_SUCCESS) return msg;
+    if (ret == WLDAP32_LDAP_SUCCESS) return msg;
     return ~0u;
 }
 
 /***********************************************************************
  *      ldap_search_extA     (WLDAP32.@)
- *
- * See ldap_search_extW.
  */
 ULONG CDECL ldap_search_extA( LDAP *ld, char *base, ULONG scope, char *filter, char **attrs, ULONG attrsonly,
-    LDAPControlA **serverctrls, LDAPControlA **clientctrls, ULONG timelimit, ULONG sizelimit, ULONG *message )
+                              LDAPControlA **serverctrls, LDAPControlA **clientctrls, ULONG timelimit,
+                              ULONG sizelimit, ULONG *message )
 {
-    ULONG ret = LDAP_NO_MEMORY;
+    ULONG ret = WLDAP32_LDAP_NO_MEMORY;
     WCHAR *baseW = NULL, *filterW = NULL, **attrsW = NULL;
     LDAPControlW **serverctrlsW = NULL, **clientctrlsW = NULL;
 
     TRACE( "(%p, %s, %#lx, %s, %p, %#lx, %p, %p, %#lx, %#lx, %p)\n", ld, debugstr_a(base), scope,
            debugstr_a(filter), attrs, attrsonly, serverctrls, clientctrls, timelimit, sizelimit, message );
 
-    if (!ld) return LDAP_PARAM_ERROR;
+    if (!ld) return WLDAP32_LDAP_PARAM_ERROR;
 
     if (base && !(baseW = strAtoW( base ))) goto exit;
     if (filter && !(filterW = strAtoW( filter ))) goto exit;
@@ -127,40 +104,15 @@ exit:
 
 /***********************************************************************
  *      ldap_search_extW     (WLDAP32.@)
- *
- * Search a directory tree (asynchronous operation).
- *
- * PARAMS
- *  ld          [I] Pointer to an LDAP context.
- *  base        [I] Starting point for the search.
- *  scope       [I] Search scope. One of LDAP_SCOPE_BASE,
- *                  LDAP_SCOPE_ONELEVEL and LDAP_SCOPE_SUBTREE.
- *  filter      [I] Search filter.
- *  attrs       [I] Attributes to return.
- *  attrsonly   [I] Return no values, only attributes.
- *  serverctrls [I] Array of LDAP server controls.
- *  clientctrls [I] Array of LDAP client controls.
- *  timelimit   [I] Timeout in seconds.
- *  sizelimit   [I] Maximum number of entries to return. Zero means unlimited.
- *  message     [O] Message ID of the search operation.
- *
- * RETURNS
- *  Success: LDAP_SUCCESS
- *  Failure: An LDAP error code.
- *
- * NOTES
- *  Call ldap_result with the message ID to get the result of
- *  the operation. Cancel the operation by calling ldap_abandon
- *  with the message ID.
  */
-ULONG CDECL ldap_search_extW( LDAP *ld, WCHAR *base, ULONG scope, WCHAR *filter, WCHAR **attrs,
-    ULONG attrsonly, LDAPControlW **serverctrls, LDAPControlW **clientctrls, ULONG timelimit, ULONG sizelimit,
-    ULONG *message )
+ULONG CDECL ldap_search_extW( LDAP *ld, WCHAR *base, ULONG scope, WCHAR *filter, WCHAR **attrs, ULONG attrsonly,
+                              LDAPControlW **serverctrls, LDAPControlW **clientctrls, ULONG timelimit,
+                              ULONG sizelimit, ULONG *message )
 {
-    ULONG ret = LDAP_NO_MEMORY;
+    ULONG ret = WLDAP32_LDAP_NO_MEMORY;
     char *baseU = NULL, *filterU = NULL, **attrsU = NULL;
-    LDAPControlU **serverctrlsU = NULL, **clientctrlsU = NULL;
-    struct timevalU timevalU;
+    LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
+    struct timeval timevalU;
 
     TRACE( "(%p, %s, %#lx, %s, %p, %#lx, %p, %p, %#lx, %#lx, %p)\n", ld, debugstr_w(base), scope,
            debugstr_w(filter), attrs, attrsonly, serverctrls, clientctrls, timelimit, sizelimit, message );
@@ -176,11 +128,8 @@ ULONG CDECL ldap_search_extW( LDAP *ld, WCHAR *base, ULONG scope, WCHAR *filter,
     timevalU.tv_sec = timelimit;
     timevalU.tv_usec = 0;
 
-    {
-        struct ldap_search_ext_params params = { CTX(ld), baseU, scope, filterU, attrsU, attrsonly,
-                serverctrlsU, clientctrlsU, timelimit ? &timevalU : NULL, sizelimit, message };
-        ret = map_error( LDAP_CALL( ldap_search_ext, &params ));
-    }
+    ret = map_error( ldap_search_ext( CTX(ld), baseU, scope, filterU, attrsU, attrsonly, serverctrlsU,
+                                      clientctrlsU, timelimit ? &timevalU : NULL, sizelimit, (int *)message ) );
 exit:
     free( baseU );
     free( filterU );
@@ -192,21 +141,19 @@ exit:
 
 /***********************************************************************
  *      ldap_search_ext_sA     (WLDAP32.@)
- *
- * See ldap_search_ext_sW.
  */
-ULONG CDECL ldap_search_ext_sA( LDAP *ld, char *base, ULONG scope, char *filter, char **attrs,
-    ULONG attrsonly, LDAPControlA **serverctrls, LDAPControlA **clientctrls, struct l_timeval *timeout,
-    ULONG sizelimit, LDAPMessage **res )
+ULONG CDECL ldap_search_ext_sA( LDAP *ld, char *base, ULONG scope, char *filter, char **attrs, ULONG attrsonly,
+                                LDAPControlA **serverctrls, LDAPControlA **clientctrls, struct l_timeval *timeout,
+                                ULONG sizelimit, WLDAP32_LDAPMessage **res )
 {
-    ULONG ret = LDAP_NO_MEMORY;
+    ULONG ret = WLDAP32_LDAP_NO_MEMORY;
     WCHAR *baseW = NULL, *filterW = NULL, **attrsW = NULL;
     LDAPControlW **serverctrlsW = NULL, **clientctrlsW = NULL;
 
     TRACE( "(%p, %s, %#lx, %s, %p, %#lx, %p, %p, %p, %#lx, %p)\n", ld, debugstr_a(base), scope,
            debugstr_a(filter), attrs, attrsonly, serverctrls, clientctrls, timeout, sizelimit, res );
 
-    if (!ld || !res) return LDAP_PARAM_ERROR;
+    if (!ld || !res) return WLDAP32_LDAP_PARAM_ERROR;
 
     if (base && !(baseW = strAtoW( base ))) goto exit;
     if (filter && !(filterW = strAtoW( filter ))) goto exit;
@@ -228,44 +175,21 @@ exit:
 
 /***********************************************************************
  *      ldap_search_ext_sW     (WLDAP32.@)
- *
- * Search a directory tree (synchronous operation).
- *
- * PARAMS
- *  ld          [I] Pointer to an LDAP context.
- *  base        [I] Starting point for the search.
- *  scope       [I] Search scope. One of LDAP_SCOPE_BASE,
- *                  LDAP_SCOPE_ONELEVEL and LDAP_SCOPE_SUBTREE.
- *  filter      [I] Search filter.
- *  attrs       [I] Attributes to return.
- *  attrsonly   [I] Return no values, only attributes.
- *  serverctrls [I] Array of LDAP server controls.
- *  clientctrls [I] Array of LDAP client controls.
- *  timeout     [I] Timeout in seconds.
- *  sizelimit   [I] Maximum number of entries to return. Zero means unlimited.
- *  res         [O] Results of the search operation.
- *
- * RETURNS
- *  Success: LDAP_SUCCESS
- *  Failure: An LDAP error code.
- *
- * NOTES
- *  Call ldap_msgfree to free the results.
  */
-ULONG CDECL ldap_search_ext_sW( LDAP *ld, WCHAR *base, ULONG scope, WCHAR *filter, WCHAR **attrs,
-    ULONG attrsonly, LDAPControlW **serverctrls, LDAPControlW **clientctrls, struct l_timeval *timeout,
-    ULONG sizelimit, LDAPMessage **res )
+ULONG CDECL ldap_search_ext_sW( LDAP *ld, WCHAR *base, ULONG scope, WCHAR *filter, WCHAR **attrs, ULONG attrsonly,
+                                LDAPControlW **serverctrls, LDAPControlW **clientctrls, struct l_timeval *timeout,
+                                ULONG sizelimit, LDAPMessage **res )
 {
-    ULONG ret = LDAP_NO_MEMORY;
+    ULONG ret = WLDAP32_LDAP_NO_MEMORY;
     char *baseU = NULL, *filterU = NULL, **attrsU = NULL;
-    LDAPControlU **serverctrlsU = NULL, **clientctrlsU = NULL;
-    struct timevalU timevalU;
-    void *msgU = NULL;
+    LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
+    struct timeval timevalU;
+    LDAPMessage *msgU = NULL;
 
     TRACE( "(%p, %s, %#lx, %s, %p, %#lx, %p, %p, %p, %#lx, %p)\n", ld, debugstr_w(base), scope,
            debugstr_w(filter), attrs, attrsonly, serverctrls, clientctrls, timeout, sizelimit, res );
 
-    if (!ld || !res) return LDAP_PARAM_ERROR;
+    if (!ld || !res) return WLDAP32_LDAP_PARAM_ERROR;
 
     if (base && !(baseU = strWtoU( base ))) goto exit;
     if (filter && !(filterU = strWtoU( filter ))) goto exit;
@@ -279,11 +203,8 @@ ULONG CDECL ldap_search_ext_sW( LDAP *ld, WCHAR *base, ULONG scope, WCHAR *filte
         timevalU.tv_usec = timeout->tv_usec;
     }
 
-    {
-        struct ldap_search_ext_s_params params = { CTX(ld), baseU, scope, filterU, attrsU, attrsonly,
-            serverctrlsU, clientctrlsU, timeout ? &timevalU : NULL, sizelimit, &msgU };
-        ret = map_error( LDAP_CALL( ldap_search_ext_s, &params ));
-    }
+    ret = map_error( ldap_search_ext_s( CTX(ld), baseU, scope, filterU, attrsU, attrsonly, serverctrlsU,
+                                        clientctrlsU, timeout ? &timevalU : NULL, sizelimit, &msgU ) );
 
     if (msgU)
     {
@@ -295,8 +216,8 @@ ULONG CDECL ldap_search_ext_sW( LDAP *ld, WCHAR *base, ULONG scope, WCHAR *filte
         }
         else
         {
-            LDAP_CALL( ldap_msgfree, msgU );
-            ret = LDAP_NO_MEMORY;
+            ldap_msgfree( msgU );
+            ret = WLDAP32_LDAP_NO_MEMORY;
         }
     }
 
@@ -311,19 +232,17 @@ exit:
 
 /***********************************************************************
  *      ldap_search_sA     (WLDAP32.@)
- *
- * See ldap_search_sW.
  */
 ULONG CDECL ldap_search_sA( LDAP *ld, char *base, ULONG scope, char *filter, char **attrs, ULONG attrsonly,
-    LDAPMessage **res )
+                            WLDAP32_LDAPMessage **res )
 {
-    ULONG ret = LDAP_NO_MEMORY;
+    ULONG ret = WLDAP32_LDAP_NO_MEMORY;
     WCHAR *baseW = NULL, *filterW = NULL, **attrsW = NULL;
 
     TRACE( "(%p, %s, %#lx, %s, %p, %#lx, %p)\n", ld, debugstr_a(base), scope, debugstr_a(filter), attrs,
            attrsonly, res );
 
-    if (!ld || !res) return LDAP_PARAM_ERROR;
+    if (!ld || !res) return WLDAP32_LDAP_PARAM_ERROR;
 
     if (base && !(baseW = strAtoW( base ))) goto exit;
     if (filter && !(filterW = strAtoW( filter ))) goto exit;
@@ -340,28 +259,9 @@ exit:
 
 /***********************************************************************
  *      ldap_search_sW     (WLDAP32.@)
- *
- * Search a directory tree (synchronous operation).
- *
- * PARAMS
- *  ld        [I] Pointer to an LDAP context.
- *  base      [I] Starting point for the search.
- *  scope     [I] Search scope. One of LDAP_SCOPE_BASE,
- *                LDAP_SCOPE_ONELEVEL and LDAP_SCOPE_SUBTREE.
- *  filter    [I] Search filter.
- *  attrs     [I] Attributes to return.
- *  attrsonly [I] Return no values, only attributes.
- *  res       [O] Results of the search operation.
- *
- * RETURNS
- *  Success: LDAP_SUCCESS
- *  Failure: An LDAP error code.
- *
- * NOTES
- *  Call ldap_msgfree to free the results.
  */
 ULONG CDECL ldap_search_sW( LDAP *ld, WCHAR *base, ULONG scope, WCHAR *filter, WCHAR **attrs, ULONG attrsonly,
-    LDAPMessage **res )
+                            WLDAP32_LDAPMessage **res )
 {
     TRACE( "(%p, %s, %#lx, %s, %p, %#lx, %p)\n", ld, debugstr_w(base), scope, debugstr_w(filter), attrs,
            attrsonly, res );
@@ -370,19 +270,17 @@ ULONG CDECL ldap_search_sW( LDAP *ld, WCHAR *base, ULONG scope, WCHAR *filter, W
 
 /***********************************************************************
  *      ldap_search_stA     (WLDAP32.@)
- *
- * See ldap_search_stW.
  */
 ULONG CDECL ldap_search_stA( LDAP *ld, const PCHAR base, ULONG scope, const PCHAR filter, char **attrs,
-    ULONG attrsonly, struct l_timeval *timeout, LDAPMessage **res )
+                             ULONG attrsonly, struct l_timeval *timeout, WLDAP32_LDAPMessage **res )
 {
-    ULONG ret = LDAP_NO_MEMORY;
+    ULONG ret = WLDAP32_LDAP_NO_MEMORY;
     WCHAR *baseW = NULL, *filterW = NULL, **attrsW = NULL;
 
     TRACE( "(%p, %s, %#lx, %s, %p, %#lx, %p, %p)\n", ld, debugstr_a(base), scope, debugstr_a(filter), attrs,
            attrsonly, timeout, res );
 
-    if (!ld || !res) return LDAP_PARAM_ERROR;
+    if (!ld || !res) return WLDAP32_LDAP_PARAM_ERROR;
 
     if (base && !(baseW = strAtoW( base ))) goto exit;
     if (filter && !(filterW = strAtoW( filter ))) goto exit;
@@ -399,29 +297,9 @@ exit:
 
 /***********************************************************************
  *      ldap_search_stW     (WLDAP32.@)
- *
- * Search a directory tree (synchronous operation).
- *
- * PARAMS
- *  ld        [I] Pointer to an LDAP context.
- *  base      [I] Starting point for the search.
- *  scope     [I] Search scope. One of LDAP_SCOPE_BASE,
- *                LDAP_SCOPE_ONELEVEL and LDAP_SCOPE_SUBTREE.
- *  filter    [I] Search filter.
- *  attrs     [I] Attributes to return.
- *  attrsonly [I] Return no values, only attributes.
- *  timeout   [I] Timeout in seconds.
- *  res       [O] Results of the search operation.
- *
- * RETURNS
- *  Success: LDAP_SUCCESS
- *  Failure: An LDAP error code.
- *
- * NOTES
- *  Call ldap_msgfree to free the results.
  */
 ULONG CDECL ldap_search_stW( LDAP *ld, const PWCHAR base, ULONG scope, const PWCHAR filter, WCHAR **attrs,
-    ULONG attrsonly, struct l_timeval *timeout, LDAPMessage **res )
+                             ULONG attrsonly, struct l_timeval *timeout, WLDAP32_LDAPMessage **res )
 {
     TRACE( "(%p, %s, %#lx, %s, %p, %#lx, %p, %p)\n", ld, debugstr_w(base), scope, debugstr_w(filter), attrs,
            attrsonly, timeout, res );

@@ -1,15 +1,17 @@
 MODULE    = opengl32.dll
-EXTRADEFS = -DWINE_NO_LONG_TYPES -D_OPENGL32_
+UNIXLIB   = opengl32.so
+EXTRADEFS = -D_OPENGL32_
 IMPORTLIB = opengl32
 IMPORTS   = user32 gdi32 advapi32 win32u
 DELAYIMPORTS = glu32
+UNIX_LIBS    = -lwin32u $(COREFOUNDATION_LIBS)
 
-EXTRADLLFLAGS = -Wl,--image-base,0x7a800000 -mcygwin
+EXTRADLLFLAGS = -Wl,--image-base,0x7a800000
 
 C_SRCS = \
-	32on64hack.c \
-	opengl_ext.c \
-	opengl_norm.c \
+	thunks.c \
+	unix_thunks.c \
+	unix_wgl.c \
 	wgl.c
 
 RC_SRCS = version.rc

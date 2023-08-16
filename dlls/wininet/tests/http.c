@@ -2063,6 +2063,32 @@ static void HttpHeaders_test(void)
        "header still present\n");
     ok(GetLastError() == ERROR_HTTP_HEADER_NOT_FOUND, "got %lu\n", GetLastError());
 
+    /* Header with empty value should cause a failure */
+    todo_wine
+    {
+    SetLastError(0xdeadbeef);
+    ok(!HttpAddRequestHeadersA(hRequest, "EmptyTest1:", -1, HTTP_ADDREQ_FLAG_ADD), "Empty header should not be added.\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "Got unexpected error code %lu.\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ok(!HttpAddRequestHeadersA(hRequest, "EmptyTest2:\r\n", -1, HTTP_ADDREQ_FLAG_ADD), "Empty header should not be added.\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "Got unexpected error code %lu.\n", GetLastError());
+
+    len = sizeof(buffer);
+    strcpy(buffer, "EmptyTest1");
+    SetLastError(0xdeadbeef);
+    ok(!HttpQueryInfoA(hRequest, HTTP_QUERY_CUSTOM | HTTP_QUERY_FLAG_REQUEST_HEADERS, buffer, &len, NULL),
+       "Header with empty value is present.\n");
+    ok(GetLastError() == ERROR_HTTP_HEADER_NOT_FOUND, "Got unexpected error code %lu.\n", GetLastError());
+
+    len = sizeof(buffer);
+    strcpy(buffer, "EmptyTest2");
+    SetLastError(0xdeadbeef);
+    ok(!HttpQueryInfoA(hRequest, HTTP_QUERY_CUSTOM | HTTP_QUERY_FLAG_REQUEST_HEADERS, buffer, &len, NULL),
+       "Header with empty value is present.\n");
+    ok(GetLastError() == ERROR_HTTP_HEADER_NOT_FOUND, "Got unexpected error code %lu.\n", GetLastError());
+    }
+
     ok(InternetCloseHandle(hRequest), "Close request handle failed\n");
 done:
     ok(InternetCloseHandle(hConnect), "Close connect handle failed\n");
@@ -2381,7 +2407,7 @@ static DWORD CALLBACK server_thread(LPVOID param)
                 "Content-Length: 10\r\n\r\n0123456789";
             send(c, nocontentmsg, sizeof(nocontentmsg)-1, 0);
         }
-        if (strstr(buffer, "GET /test_no_content"))
+        else if (strstr(buffer, "GET /test_no_content"))
         {
             static const char nocontentmsg[] = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"
                 "0123456789";
@@ -4501,6 +4527,13 @@ static const http_status_test_t http_status_tests[] = {
         ""
     },
     {
+        "HTTP/1.1 200 \r\n"
+        "Content-Length: 1\r\n"
+        "\r\nx",
+        200,
+        ""
+    },
+    {
         "HTTP/1.1 410 \r\n"
         "Content-Length: 1\r\n"
         "\r\nx",
@@ -6286,12 +6319,9 @@ typedef struct {
 
 static const cert_struct_test_t test_winehq_org_cert = {
     "US\r\n"
-    "55114\r\n"
     "Minnesota\r\n"
     "Saint Paul\r\n"
-    "Ste 120\r\n"
-    "700 Raymond Ave\r\n"
-    "CodeWeavers\r\n"
+    "\"CodeWeavers, Inc.\"\r\n"
     "IT\r\n"
     "*.winehq.org",
 
@@ -6867,7 +6897,7 @@ static void test_secure_connection(void)
     ok(con != NULL, "InternetConnect failed\n");
 
     req = HttpOpenRequestA(con, "GET", "/tests/hello.html", NULL, NULL, NULL,
-                          INTERNET_FLAG_SECURE, 0);
+                           INTERNET_FLAG_SECURE | INTERNET_FLAG_RELOAD, 0);
     ok(req != NULL, "HttpOpenRequest failed\n");
 
     ret = HttpSendRequestA(req, NULL, 0, NULL, 0);
@@ -7370,8 +7400,8 @@ static const struct notification async_send_request_ex_test2[] =
     { http_send_request_ex,  INTERNET_STATUS_COOKIE_SENT, TRUE, FALSE, TRUE },
     { http_send_request_ex,  INTERNET_STATUS_RESOLVING_NAME, TRUE, FALSE, TRUE },
     { http_send_request_ex,  INTERNET_STATUS_NAME_RESOLVED, TRUE, FALSE, TRUE },
-    { http_send_request_ex,  INTERNET_STATUS_CONNECTING_TO_SERVER, TRUE, TRUE },
-    { http_send_request_ex,  INTERNET_STATUS_CONNECTED_TO_SERVER, TRUE, TRUE },
+    { http_send_request_ex,  INTERNET_STATUS_CONNECTING_TO_SERVER, TRUE },
+    { http_send_request_ex,  INTERNET_STATUS_CONNECTED_TO_SERVER, TRUE },
     { http_send_request_ex,  INTERNET_STATUS_SENDING_REQUEST, TRUE },
     { http_send_request_ex,  INTERNET_STATUS_REQUEST_SENT, TRUE },
     { http_send_request_ex,  INTERNET_STATUS_REQUEST_COMPLETE, TRUE },
@@ -7415,8 +7445,8 @@ static const struct notification async_send_request_ex_chunked_test[] =
     { http_end_request,      INTERNET_STATUS_RECEIVING_RESPONSE, TRUE },
     { http_end_request,      INTERNET_STATUS_RESPONSE_RECEIVED, TRUE },
     { http_end_request,      INTERNET_STATUS_REQUEST_COMPLETE, TRUE },
-    { internet_close_handle, INTERNET_STATUS_CLOSING_CONNECTION },
-    { internet_close_handle, INTERNET_STATUS_CONNECTION_CLOSED },
+    { internet_close_handle, INTERNET_STATUS_CLOSING_CONNECTION, FALSE, FALSE, TRUE },
+    { internet_close_handle, INTERNET_STATUS_CONNECTION_CLOSED, FALSE, FALSE, TRUE },
     { internet_close_handle, INTERNET_STATUS_HANDLE_CLOSING },
     { internet_close_handle, INTERNET_STATUS_HANDLE_CLOSING }
 };
@@ -7466,6 +7496,10 @@ static void test_async_HttpSendRequestEx(const struct notification_data *nd)
     char buffer[32];
 
     trace("Async HttpSendRequestEx test (%s %s)\n", nd->method, nd->host);
+
+    /* Collect all existing persistent connections */
+    ret = InternetSetOptionA(NULL, INTERNET_OPTION_SETTINGS_CHANGED, NULL, 0);
+    ok(ret, "InternetSetOption(INTERNET_OPTION_END_BROWSER_SESSION) failed: %lu\n", GetLastError());
 
     InitializeCriticalSection( &notification_cs );
 

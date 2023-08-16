@@ -20,8 +20,6 @@
 #ifndef __INADDR_H__
 #define __INADDR_H__
 
-#include "wine/winheader_enter.h"
-
 #ifdef USE_WS_PREFIX
 #define WS(x)    WS_##x
 #else
@@ -58,7 +56,5 @@ typedef struct WS(in_addr)
 #define WS_s_impno S_un.S_un_b.s_b4
 #define WS_s_imp   S_un.S_un_w.s_w2
 #endif  /* USE_WS_PREFIX */
-
-#include "wine/winheader_exit.h"
 
 #endif /* __INADDR_H__ */

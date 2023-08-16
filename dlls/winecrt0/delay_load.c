@@ -24,78 +24,23 @@
 #include "delayloadhandler.h"
 
 WINBASEAPI void *WINAPI DelayLoadFailureHook( LPCSTR name, LPCSTR function );
-
-#ifdef __WINE_PE_BUILD
-
-extern IMAGE_DOS_HEADER __ImageBase;
-
 WINBASEAPI void *WINAPI ResolveDelayLoadedAPI( void* base, const IMAGE_DELAYLOAD_DESCRIPTOR* desc,
                                                PDELAYLOAD_FAILURE_DLL_CALLBACK dllhook,
                                                PDELAYLOAD_FAILURE_SYSTEM_ROUTINE syshook,
                                                IMAGE_THUNK_DATA* addr, ULONG flags );
 
+static inline void *image_base(void)
+{
+#ifdef __WINE_PE_BUILD
+    extern IMAGE_DOS_HEADER __ImageBase;
+    return (void *)&__ImageBase;
+#else
+    extern IMAGE_NT_HEADERS __wine_spec_nt_header;
+    return (void *)((__wine_spec_nt_header.OptionalHeader.ImageBase + 0xffff) & ~0xffff);
+#endif
+}
+
 FARPROC WINAPI __delayLoadHelper2( const IMAGE_DELAYLOAD_DESCRIPTOR *descr, IMAGE_THUNK_DATA *addr )
 {
-    return ResolveDelayLoadedAPI( &__ImageBase, descr, NULL, DelayLoadFailureHook, addr, 0 );
+    return ResolveDelayLoadedAPI( image_base(), descr, NULL, DelayLoadFailureHook, addr, 0 );
 }
-
-#else /* __WINE_PE_BUILD */
-
-struct ImgDelayDescr
-{
-    DWORD_PTR               grAttrs;
-    LPCSTR                  szName;
-    HMODULE                *phmod;
-    IMAGE_THUNK_DATA       *pIAT;
-    const IMAGE_THUNK_DATA *pINT;
-    const IMAGE_THUNK_DATA *pBoundIAT;
-    const IMAGE_THUNK_DATA *pUnloadIAT;
-    DWORD_PTR               dwTimeStamp;
-};
-
-extern struct ImgDelayDescr __wine_spec_delay_imports[];
-
-#ifdef __i386_on_x86_64__
-extern FARPROC CDECL __wine_get_extra_proc( HMODULE module, LPCSTR name );
-int CDECL __wine_is_module_hybrid( HMODULE module );
-#endif
-
-FARPROC WINAPI DECLSPEC_HIDDEN __wine_spec_delay_load( unsigned int id )
-{
-    struct ImgDelayDescr *descr = __wine_spec_delay_imports + HIWORD(id);
-    WORD func = LOWORD(id);
-    FARPROC proc;
-
-    if (!*descr->phmod) *descr->phmod = LoadLibraryA( descr->szName );
-    if (!*descr->phmod ||
-        !(proc = GetProcAddress( *descr->phmod, (LPCSTR)descr->pINT[func].u1.Function )))
-        proc = DelayLoadFailureHook( descr->szName, (LPCSTR)descr->pINT[func].u1.Function );
-    descr->pIAT[func].u1.Function = (ULONG_PTR)proc;
-#ifdef __i386_on_x86_64__
-    while (descr->pIAT[func].u1.Function != 0) func++;
-    func += LOWORD(id) + 1;
-    if (__wine_is_module_hybrid(*descr->phmod))
-    {
-        if (!(proc = __wine_get_extra_proc( *descr->phmod, (LPCSTR)descr->pINT[func].u1.Function )))
-            proc = DelayLoadFailureHook( descr->szName, (LPCSTR)descr->pINT[func].u1.Function );
-        descr->pIAT[func].u1.Function = (ULONG_PTR)proc;
-    }
-    else
-    {
-        descr->pIAT[func].u1.Function = 0;
-    }
-#endif
-    return proc;
-}
-
-#if defined(__GNUC__) && !defined(__APPLE__)  /* we can't support destructors properly on Mac OS */
-static void free_delay_imports(void) __attribute__((destructor));
-static void free_delay_imports(void)
-{
-    struct ImgDelayDescr *descr;
-    for (descr = __wine_spec_delay_imports; descr->szName; descr++)
-        if (*descr->phmod) FreeLibrary( *descr->phmod );
-}
-#endif
-
-#endif /* __WINE_PE_BUILD */

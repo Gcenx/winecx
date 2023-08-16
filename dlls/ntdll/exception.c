@@ -166,10 +166,10 @@ LONG call_vectored_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
         RtlFreeHeap( GetProcessHeap(), 0, to_free );
         to_free = NULL;
 
-        TRACE( "calling handler at %p code=%x flags=%x\n",
+        TRACE( "calling handler at %p code=%lx flags=%lx\n",
                func, rec->ExceptionCode, rec->ExceptionFlags );
         ret = func( &except_ptrs );
-        TRACE( "handler at %p returned %x\n", func, ret );
+        TRACE( "handler at %p returned %lx\n", func, ret );
 
         RtlEnterCriticalSection( &vectored_handlers_section );
         ptr = list_next( &vectored_exception_handlers, ptr );
@@ -351,7 +351,7 @@ BOOLEAN CDECL RtlAddFunctionTable( RUNTIME_FUNCTION *table, DWORD count, ULONG_P
 {
     struct dynamic_unwind_entry *entry;
 
-    TRACE( "%p %u %lx\n", table, count, addr );
+    TRACE( "%p %lu %Ix\n", table, count, addr );
 
     /* NOTE: Windows doesn't check if table is aligned or a NULL pointer */
 
@@ -383,7 +383,7 @@ BOOLEAN CDECL RtlInstallFunctionTableCallback( ULONG_PTR table, ULONG_PTR base, 
 {
     struct dynamic_unwind_entry *entry;
 
-    TRACE( "%lx %lx %d %p %p %s\n", table, base, length, callback, context, wine_dbgstr_w(dll) );
+    TRACE( "%Ix %Ix %ld %p %p %s\n", table, base, length, callback, context, wine_dbgstr_w(dll) );
 
     /* NOTE: Windows doesn't check if the provided callback is a NULL pointer */
 
@@ -419,7 +419,7 @@ DWORD WINAPI RtlAddGrowableFunctionTable( void **table, RUNTIME_FUNCTION *functi
 {
     struct dynamic_unwind_entry *entry;
 
-    TRACE( "%p, %p, %u, %u, %lx, %lx\n", table, functions, count, max_count, base, end );
+    TRACE( "%p, %p, %lu, %lu, %Ix, %Ix\n", table, functions, count, max_count, base, end );
 
     entry = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*entry) );
     if (!entry)
@@ -450,7 +450,7 @@ void WINAPI RtlGrowFunctionTable( void *table, DWORD count )
 {
     struct dynamic_unwind_entry *entry;
 
-    TRACE( "%p, %u\n", table, count );
+    TRACE( "%p, %lu\n", table, count );
 
     RtlEnterCriticalSection( &dynamic_unwind_section );
     LIST_FOR_EACH_ENTRY( entry, &dynamic_unwind_list, struct dynamic_unwind_entry, entry )
@@ -612,7 +612,7 @@ PRUNTIME_FUNCTION WINAPI RtlLookupFunctionEntry( ULONG_PTR pc, ULONG_PTR *base,
     if (!(func = lookup_function_info( pc, base, &module )))
     {
         *base = 0;
-        WARN( "no exception table found for %lx\n", pc );
+        WARN( "no exception table found for %Ix\n", pc );
     }
     return func;
 }
@@ -782,7 +782,7 @@ NTSTATUS WINAPI RtlGetExtendedContextLength2( ULONG context_flags, ULONG *length
     ULONG64 supported_mask;
     ULONG64 size;
 
-    TRACE( "context_flags %#x, length %p, compaction_mask %s.\n", context_flags, length,
+    TRACE( "context_flags %#lx, length %p, compaction_mask %s.\n", context_flags, length,
             wine_dbgstr_longlong(compaction_mask) );
 
     if (!(p = context_get_parameters( context_flags )))
@@ -828,7 +828,7 @@ NTSTATUS WINAPI RtlInitializeExtendedContext2( void *context, ULONG context_flag
     ULONG64 supported_mask = 0;
     CONTEXT_EX *c_ex;
 
-    TRACE( "context %p, context_flags %#x, context_ex %p, compaction_mask %s.\n",
+    TRACE( "context %p, context_flags %#lx, context_ex %p, compaction_mask %s.\n",
             context, context_flags, context_ex, wine_dbgstr_longlong(compaction_mask));
 
     if (!(p = context_get_parameters( context_flags )))
@@ -891,7 +891,7 @@ NTSTATUS WINAPI RtlInitializeExtendedContext( void *context, ULONG context_flags
 void * WINAPI RtlLocateExtendedFeature2( CONTEXT_EX *context_ex, ULONG feature_id,
         XSTATE_CONFIGURATION *xstate_config, ULONG *length )
 {
-    TRACE( "context_ex %p, feature_id %u, xstate_config %p, length %p.\n",
+    TRACE( "context_ex %p, feature_id %lu, xstate_config %p, length %p.\n",
             context_ex, feature_id, xstate_config, length );
 
     if (!xstate_config)
@@ -961,6 +961,32 @@ ULONG64 WINAPI RtlGetExtendedFeaturesMask( CONTEXT_EX *context_ex )
 }
 
 
+static void context_copy_ranges( BYTE *d, DWORD context_flags, BYTE *s, const struct context_parameters *p )
+{
+    const struct context_copy_range *range;
+    unsigned int start;
+
+    *((ULONG *)(d + p->flags_offset)) |= context_flags;
+
+    start = 0;
+    range = p->copy_ranges;
+    do
+    {
+        if (range->flag & context_flags)
+        {
+            if (!start)
+                start = range->start;
+        }
+        else if (start)
+        {
+            memcpy( d + start, s + start, range->start - start );
+            start = 0;
+        }
+    }
+    while (range++->start != p->context_size);
+}
+
+
 /***********************************************************************
  *              RtlCopyContext  (NTDLL.@)
  */
@@ -968,9 +994,10 @@ NTSTATUS WINAPI RtlCopyContext( CONTEXT *dst, DWORD context_flags, CONTEXT *src 
 {
     DWORD context_size, arch_flag, flags_offset, dst_flags, src_flags;
     static const DWORD arch_mask = CONTEXT_i386 | CONTEXT_AMD64;
+    const struct context_parameters *p;
     BYTE *d, *s;
 
-    TRACE("dst %p, context_flags %#x, src %p.\n", dst, context_flags, src);
+    TRACE("dst %p, context_flags %#lx, src %p.\n", dst, context_flags, src);
 
     if (context_flags & 0x40 && !RtlGetEnabledExtendedFeatures( ~(ULONG64)0 )) return STATUS_NOT_SUPPORTED;
 
@@ -1000,8 +1027,15 @@ NTSTATUS WINAPI RtlCopyContext( CONTEXT *dst, DWORD context_flags, CONTEXT *src 
     context_flags &= src_flags;
     if (context_flags & ~dst_flags & 0x40) return STATUS_BUFFER_OVERFLOW;
 
-    return RtlCopyExtendedContext( (CONTEXT_EX *)(d + context_size), context_flags,
-                                   (CONTEXT_EX *)(s + context_size) );
+    if (context_flags & 0x40)
+        return RtlCopyExtendedContext( (CONTEXT_EX *)(d + context_size), context_flags,
+                                       (CONTEXT_EX *)(s + context_size) );
+
+    if (!(p = context_get_parameters( context_flags )))
+        return STATUS_INVALID_PARAMETER;
+
+    context_copy_ranges( d, context_flags, s, p );
+    return STATUS_SUCCESS;
 }
 
 
@@ -1010,14 +1044,11 @@ NTSTATUS WINAPI RtlCopyContext( CONTEXT *dst, DWORD context_flags, CONTEXT *src 
  */
 NTSTATUS WINAPI RtlCopyExtendedContext( CONTEXT_EX *dst, ULONG context_flags, CONTEXT_EX *src )
 {
-    const struct context_copy_range *range;
     const struct context_parameters *p;
     XSTATE *dst_xs, *src_xs;
     ULONG64 feature_mask;
-    unsigned int start;
-    BYTE *d, *s;
 
-    TRACE( "dst %p, context_flags %#x, src %p.\n", dst, context_flags, src );
+    TRACE( "dst %p, context_flags %#lx, src %p.\n", dst, context_flags, src );
 
     if (!(p = context_get_parameters( context_flags )))
         return STATUS_INVALID_PARAMETER;
@@ -1025,27 +1056,7 @@ NTSTATUS WINAPI RtlCopyExtendedContext( CONTEXT_EX *dst, ULONG context_flags, CO
     if (!(feature_mask = RtlGetEnabledExtendedFeatures( ~(ULONG64)0 )) && context_flags & 0x40)
         return STATUS_NOT_SUPPORTED;
 
-    d = RtlLocateLegacyContext( dst, NULL );
-    s = RtlLocateLegacyContext( src, NULL );
-
-    *((ULONG *)(d + p->flags_offset)) |= context_flags;
-
-    start = 0;
-    range = p->copy_ranges;
-    do
-    {
-        if (range->flag & context_flags)
-        {
-            if (!start)
-                start = range->start;
-        }
-        else if (start)
-        {
-            memcpy( d + start, s + start, range->start - start );
-            start = 0;
-        }
-    }
-    while (range++->start != p->context_size);
+    context_copy_ranges( RtlLocateLegacyContext( dst, NULL ), context_flags, RtlLocateLegacyContext( src, NULL ), p );
 
     if (!(context_flags & 0x40))
         return STATUS_SUCCESS;

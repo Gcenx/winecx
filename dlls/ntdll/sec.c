@@ -37,6 +37,25 @@ WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 
 #define SELF_RELATIVE_FIELD(sd,field) ((BYTE *)(sd) + ((SECURITY_DESCRIPTOR_RELATIVE *)(sd))->field)
 
+static const SID world_sid = { SID_REVISION, 1, { SECURITY_WORLD_SID_AUTHORITY} , { SECURITY_WORLD_RID } };
+static const DWORD world_access_acl_size = sizeof(ACL) + sizeof(ACCESS_ALLOWED_ACE) + sizeof(world_sid) - sizeof(DWORD);
+
+static void get_world_access_acl( PACL acl )
+{
+    PACCESS_ALLOWED_ACE ace = (PACCESS_ALLOWED_ACE)(acl + 1);
+
+    acl->AclRevision = ACL_REVISION;
+    acl->Sbz1 = 0;
+    acl->AclSize = world_access_acl_size;
+    acl->AceCount = 1;
+    acl->Sbz2 = 0;
+    ace->Header.AceType = ACCESS_ALLOWED_ACE_TYPE;
+    ace->Header.AceFlags = CONTAINER_INHERIT_ACE;
+    ace->Header.AceSize = sizeof(ACCESS_ALLOWED_ACE) + sizeof(world_sid) - sizeof(DWORD);
+    ace->Mask = 0xf3ffffff; /* Everything except reserved bits */
+    memcpy( &ace->SidStart, &world_sid, sizeof(world_sid) );
+}
+
 /* helper function to retrieve active length of an ACL */
 static size_t acl_bytesInUse(PACL pAcl)
 {
@@ -136,7 +155,7 @@ NTSTATUS WINAPI RtlAllocateAndInitializeSid (
 {
     SID *tmp_sid;
 
-    TRACE("(%p, 0x%04x,0x%08x,0x%08x,0x%08x,0x%08x,0x%08x,0x%08x,0x%08x,0x%08x,%p)\n",
+    TRACE("(%p, 0x%04x,0x%08lx,0x%08lx,0x%08lx,0x%08lx,0x%08lx,0x%08lx,0x%08lx,0x%08lx,%p)\n",
 		pIdentifierAuthority,nSubAuthorityCount,
 		nSubAuthority0, nSubAuthority1,	nSubAuthority2, nSubAuthority3,
 		nSubAuthority4, nSubAuthority5,	nSubAuthority6, nSubAuthority7, pSid);
@@ -553,7 +572,7 @@ NTSTATUS WINAPI RtlValidSecurityDescriptor(
 BOOLEAN WINAPI RtlValidRelativeSecurityDescriptor(PSECURITY_DESCRIPTOR descriptor,
     ULONG length, SECURITY_INFORMATION info)
 {
-    FIXME("%p,%u,%d: semi-stub\n", descriptor, length, info);
+    FIXME("%p,%lu,%ld: semi-stub\n", descriptor, length, info);
     return RtlValidSecurityDescriptor(descriptor) == STATUS_SUCCESS;
 }
 
@@ -843,7 +862,7 @@ NTSTATUS WINAPI RtlMakeSelfRelativeSD(
     SECURITY_DESCRIPTOR* pAbs = pAbsoluteSecurityDescriptor;
     SECURITY_DESCRIPTOR_RELATIVE *pRel = pSelfRelativeSecurityDescriptor;
 
-    TRACE(" %p %p %p(%d)\n", pAbs, pRel, lpdwBufferLength,
+    TRACE(" %p %p %p(%ld)\n", pAbs, pRel, lpdwBufferLength,
         lpdwBufferLength ? *lpdwBufferLength: -1);
 
     if (!lpdwBufferLength || !pAbs)
@@ -1101,6 +1120,83 @@ NTSTATUS WINAPI RtlAbsoluteToSelfRelativeSD(
         SelfRelativeSecurityDescriptor, BufferLength);
 }
 
+/******************************************************************************
+ *  RtlNewSecurityObject		[NTDLL.@]
+ */
+NTSTATUS WINAPI RtlNewSecurityObject(PSECURITY_DESCRIPTOR parent, PSECURITY_DESCRIPTOR creator,
+    PSECURITY_DESCRIPTOR *descr, BOOLEAN is_container, HANDLE token, PGENERIC_MAPPING mapping)
+{
+    return RtlNewSecurityObjectEx(parent, creator, descr, NULL, is_container, 0, token, mapping);
+}
+
+/******************************************************************************
+ *  RtlNewSecurityObjectEx              [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlNewSecurityObjectEx(PSECURITY_DESCRIPTOR parent, PSECURITY_DESCRIPTOR creator,
+    PSECURITY_DESCRIPTOR *descr, GUID *type, BOOLEAN is_container, ULONG flags, HANDLE token, PGENERIC_MAPPING mapping )
+{
+    SECURITY_DESCRIPTOR_RELATIVE *relative;
+    DWORD needed, offset;
+    NTSTATUS status;
+    BYTE *buffer;
+
+    FIXME("%p, %p, %p, %p, %d, %#lx, %p %p - semi-stub\n", parent, creator, descr, type, is_container, flags, token, mapping);
+
+    needed = sizeof(SECURITY_DESCRIPTOR_RELATIVE);
+    needed += sizeof(world_sid);
+    needed += sizeof(world_sid);
+    needed += world_access_acl_size;
+    needed += world_access_acl_size;
+
+    if (!(buffer = RtlAllocateHeap( GetProcessHeap(), 0, needed ))) return STATUS_NO_MEMORY;
+    relative = (SECURITY_DESCRIPTOR_RELATIVE *)buffer;
+    if ((status = RtlCreateSecurityDescriptor( relative, SECURITY_DESCRIPTOR_REVISION )))
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, buffer );
+        return status;
+    }
+    relative->Control |= SE_SELF_RELATIVE;
+    offset = sizeof(SECURITY_DESCRIPTOR_RELATIVE);
+
+    memcpy( buffer + offset, &world_sid, sizeof(world_sid) );
+    relative->Owner = offset;
+    offset += sizeof(world_sid);
+
+    memcpy( buffer + offset, &world_sid, sizeof(world_sid) );
+    relative->Group = offset;
+    offset += sizeof(world_sid);
+
+    get_world_access_acl( (ACL *)(buffer + offset) );
+    relative->Dacl = offset;
+    offset += world_access_acl_size;
+
+    get_world_access_acl( (ACL *)(buffer + offset) );
+    relative->Sacl = offset;
+
+    *descr = relative;
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ *  RtlNewSecurityObjectWithMultipleInheritance        [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlNewSecurityObjectWithMultipleInheritance(PSECURITY_DESCRIPTOR parent, PSECURITY_DESCRIPTOR creator,
+    PSECURITY_DESCRIPTOR *descr, GUID **types, ULONG count, BOOLEAN is_container, ULONG flags,
+    HANDLE token, PGENERIC_MAPPING mapping )
+{
+    FIXME("semi-stub\n");
+    return RtlNewSecurityObjectEx(parent, creator, descr, NULL, is_container, flags, token, mapping);
+}
+
+/******************************************************************************
+ *  RtlDeleteSecurityObject		[NTDLL.@]
+ */
+NTSTATUS WINAPI RtlDeleteSecurityObject( PSECURITY_DESCRIPTOR *descr )
+{
+    FIXME("%p stub.\n", descr);
+    RtlFreeHeap( GetProcessHeap(), 0, *descr );
+    return STATUS_SUCCESS;
+}
 
 /*
  *	access control list's
@@ -1114,7 +1210,7 @@ NTSTATUS WINAPI RtlAbsoluteToSelfRelativeSD(
  */
 NTSTATUS WINAPI RtlCreateAcl(PACL acl,DWORD size,DWORD rev)
 {
-	TRACE("%p 0x%08x 0x%08x\n", acl, size, rev);
+	TRACE("%p 0x%08lx 0x%08lx\n", acl, size, rev);
 
 	if (rev < MIN_ACL_REVISION || rev > MAX_ACL_REVISION)
 		return STATUS_INVALID_PARAMETER;
@@ -1149,9 +1245,8 @@ BOOLEAN WINAPI RtlFirstFreeAce(
 			return FALSE;
 		ace = (PACE_HEADER)(((BYTE*)ace)+ace->AceSize);
 	}
-	if ((BYTE *)ace >= (BYTE *)acl + acl->AclSize)
-		return FALSE;
-	*x = ace;
+	if ((BYTE *)ace <= (BYTE *)acl + acl->AclSize)
+		*x = ace;
 	return TRUE;
 }
 
@@ -1172,6 +1267,8 @@ NTSTATUS WINAPI RtlAddAce(
 		return STATUS_INVALID_PARAMETER;
 	if (!RtlFirstFreeAce(acl,&targetace))
 		return STATUS_INVALID_PARAMETER;
+	if (!targetace)
+		return STATUS_ALLOTTED_SPACE_EXCEEDED;
 	nrofaces=0;ace=acestart;
 	while (((BYTE *)ace - (BYTE *)acestart) < acelen) {
 		nrofaces++;
@@ -1217,7 +1314,7 @@ NTSTATUS  WINAPI RtlDeleteAce(PACL pAcl, DWORD dwAceIndex)
 		pAcl->AceCount--;
 	}
 
-	TRACE("pAcl=%p dwAceIndex=%d status=0x%08x\n", pAcl, dwAceIndex, status);
+	TRACE("pAcl=%p dwAceIndex=%ld status=0x%08lx\n", pAcl, dwAceIndex, status);
 
 	return status;
 }
@@ -1244,7 +1341,7 @@ NTSTATUS WINAPI RtlAddAccessAllowedAceEx(
 	IN DWORD AccessMask,
 	IN PSID pSid)
 {
-   TRACE("(%p,0x%08x,0x%08x,%p)\n", pAcl, dwAceRevision, AccessMask, pSid);
+   TRACE("(%p,0x%08lx,0x%08lx,%p)\n", pAcl, dwAceRevision, AccessMask, pSid);
 
     return add_access_ace(pAcl, dwAceRevision, AceFlags,
                           AccessMask, pSid, ACCESS_ALLOWED_ACE_TYPE);
@@ -1262,7 +1359,7 @@ NTSTATUS WINAPI RtlAddAccessAllowedObjectAce(
     IN GUID* pInheritedObjectTypeGuid,
     IN PSID pSid)
 {
-    FIXME("%p %x %x %x %p %p %p - stub\n", pAcl, dwAceRevision, dwAceFlags, dwAccessMask,
+    FIXME("%p %lx %lx %lx %p %p %p - stub\n", pAcl, dwAceRevision, dwAceFlags, dwAccessMask,
           pObjectTypeGuid, pInheritedObjectTypeGuid, pSid);
     return STATUS_NOT_IMPLEMENTED;
 }
@@ -1289,7 +1386,7 @@ NTSTATUS WINAPI RtlAddAccessDeniedAceEx(
 	IN DWORD AccessMask,
 	IN PSID pSid)
 {
-   TRACE("(%p,0x%08x,0x%08x,%p)\n", pAcl, dwAceRevision, AccessMask, pSid);
+   TRACE("(%p,0x%08lx,0x%08lx,%p)\n", pAcl, dwAceRevision, AccessMask, pSid);
 
     return add_access_ace(pAcl, dwAceRevision, AceFlags,
                           AccessMask, pSid, ACCESS_DENIED_ACE_TYPE);
@@ -1307,7 +1404,7 @@ NTSTATUS WINAPI RtlAddAccessDeniedObjectAce(
     IN GUID* pInheritedObjectTypeGuid,
     IN PSID pSid)
 {
-    FIXME("%p %x %x %x %p %p %p - stub\n", pAcl, dwAceRevision, dwAceFlags, dwAccessMask,
+    FIXME("%p %lx %lx %lx %p %p %p - stub\n", pAcl, dwAceRevision, dwAceFlags, dwAccessMask,
           pObjectTypeGuid, pInheritedObjectTypeGuid, pSid);
     return STATUS_NOT_IMPLEMENTED;
 }
@@ -1324,7 +1421,7 @@ NTSTATUS WINAPI RtlAddAuditAccessAceEx(
     IN BOOL bAuditSuccess, 
     IN BOOL bAuditFailure) 
 { 
-    TRACE("(%p,%d,0x%08x,0x%08x,%p,%u,%u)\n",pAcl,dwAceRevision,dwAceFlags,dwAccessMask,
+    TRACE("(%p,%ld,0x%08lx,0x%08lx,%p,%u,%u)\n",pAcl,dwAceRevision,dwAceFlags,dwAccessMask,
           pSid,bAuditSuccess,bAuditFailure);
 
     if (bAuditSuccess)
@@ -1365,7 +1462,7 @@ NTSTATUS WINAPI RtlAddAuditAccessObjectAce(
     IN BOOL bAuditSuccess,
     IN BOOL bAuditFailure)
 {
-    FIXME("%p %x %x %x %p %p %p %d %d - stub\n", pAcl, dwAceRevision, dwAceFlags, dwAccessMask,
+    FIXME("%p %lx %lx %lx %p %p %p %d %d - stub\n", pAcl, dwAceRevision, dwAceFlags, dwAccessMask,
           pObjectTypeGuid, pInheritedObjectTypeGuid, pSid, bAuditSuccess, bAuditFailure);
     return STATUS_NOT_IMPLEMENTED;
 }
@@ -1385,8 +1482,8 @@ NTSTATUS WINAPI RtlAddMandatoryAce(
                                      SYSTEM_MANDATORY_LABEL_NO_READ_UP |
                                      SYSTEM_MANDATORY_LABEL_NO_EXECUTE_UP;
 
-    TRACE("(%p, %u, 0x%08x, 0x%08x, %u, %p)\n", pAcl, dwAceRevision, dwAceFlags,
-                                                dwMandatoryFlags, dwAceType, pSid);
+    TRACE("(%p, %lu, 0x%08lx, 0x%08lx, %lu, %p)\n",
+          pAcl, dwAceRevision, dwAceFlags, dwMandatoryFlags, dwAceType, pSid);
 
     if (dwAceType != SYSTEM_MANDATORY_LABEL_ACE_TYPE)
         return STATUS_INVALID_PARAMETER;
@@ -1445,7 +1542,7 @@ NTSTATUS WINAPI RtlGetAce(PACL pAcl,DWORD dwAceIndex,LPVOID *pAce )
 {
 	PACE_HEADER ace;
 
-	TRACE("(%p,%d,%p)\n",pAcl,dwAceIndex,pAce);
+	TRACE("(%p,%ld,%p)\n",pAcl,dwAceIndex,pAce);
 
 	if (dwAceIndex >= pAcl->AceCount)
 		return STATUS_INVALID_PARAMETER;
@@ -1494,7 +1591,7 @@ RtlAdjustPrivilege(ULONG Privilege,
     HANDLE TokenHandle;
     NTSTATUS Status;
 
-    TRACE("(%d, %s, %s, %p)\n", Privilege, Enable ? "TRUE" : "FALSE",
+    TRACE("(%ld, %s, %s, %p)\n", Privilege, Enable ? "TRUE" : "FALSE",
         CurrentThread ? "TRUE" : "FALSE", Enabled);
 
     if (CurrentThread)
@@ -1513,7 +1610,7 @@ RtlAdjustPrivilege(ULONG Privilege,
 
     if (Status)
     {
-        WARN("Retrieving token handle failed (Status %x)\n", Status);
+        WARN("Retrieving token handle failed (Status %lx)\n", Status);
         return Status;
     }
 
@@ -1538,7 +1635,7 @@ RtlAdjustPrivilege(ULONG Privilege,
     }
     if (Status)
     {
-        WARN("NtAdjustPrivilegesToken() failed (Status %x)\n", Status);
+        WARN("NtAdjustPrivilegesToken() failed (Status %lx)\n", Status);
         return Status;
     }
 
@@ -1658,7 +1755,7 @@ NTSTATUS WINAPI RtlQueryInformationAcl(
 {
     NTSTATUS status = STATUS_SUCCESS;
 
-    TRACE("pAcl=%p pAclInfo=%p len=%d, class=%d\n", 
+    TRACE("pAcl=%p pAclInfo=%p len=%ld, class=%d\n",
         pAcl, pAclInformation, nAclInformationLength, dwAclInformationClass);
 
     switch (dwAclInformationClass)
@@ -1687,7 +1784,7 @@ NTSTATUS WINAPI RtlQueryInformationAcl(
                 paclsize->AclBytesInUse = acl_bytesInUse(pAcl);
 		if (pAcl->AclSize < paclsize->AclBytesInUse)
                 {
-                    WARN("Acl uses %d bytes, but only has %d allocated!  Returning smaller of the two values.\n", pAcl->AclSize, paclsize->AclBytesInUse);
+                    WARN("Acl uses %d bytes, but only has %ld allocated!  Returning smaller of the two values.\n", pAcl->AclSize, paclsize->AclBytesInUse);
                     paclsize->AclBytesFree = 0;
                     paclsize->AclBytesInUse = pAcl->AclSize;
                 }

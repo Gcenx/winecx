@@ -433,8 +433,8 @@
 @ stdcall LookupAccountSidLocalA(ptr ptr ptr ptr ptr ptr)
 @ stdcall LookupAccountSidLocalW(ptr ptr ptr ptr ptr ptr)
 @ stdcall LookupAccountSidW(wstr ptr ptr ptr ptr ptr ptr)
-@ stdcall LookupPrivilegeDisplayNameA(str str str ptr ptr)
-@ stdcall LookupPrivilegeDisplayNameW(wstr wstr wstr ptr ptr)
+@ stdcall LookupPrivilegeDisplayNameA(str str ptr ptr ptr)
+@ stdcall LookupPrivilegeDisplayNameW(wstr wstr ptr ptr ptr)
 @ stdcall LookupPrivilegeNameA(str ptr ptr ptr)
 @ stdcall LookupPrivilegeNameW(wstr ptr ptr ptr)
 @ stdcall LookupPrivilegeValueA(str str ptr)
@@ -553,8 +553,8 @@
 @ stdcall -ret64 -import OpenTraceW(ptr)
 # @ stub OperationEnd
 # @ stub OperationStart
-# @ stub PerfAddCounters
-# @ stub PerfCloseQueryHandle
+@ stdcall PerfAddCounters(long ptr long)
+@ stdcall PerfCloseQueryHandle(long)
 @ stdcall -import PerfCreateInstance(long ptr wstr long)
 # @ stub PerfDecrementULongCounterValue
 # @ stub PerfDecrementULongLongCounterValue
@@ -564,8 +564,8 @@
 # @ stub PerfEnumerateCounterSetInstances
 # @ stub PerfIncrementULongCounterValue
 # @ stub PerfIncrementULongLongCounterValue
-# @ stub PerfOpenQueryHandle
-# @ stub PerfQueryCounterData
+@ stdcall PerfOpenQueryHandle(wstr ptr)
+@ stdcall PerfQueryCounterData(long ptr long ptr)
 # @ stub PerfQueryCounterInfo
 # @ stub PerfQueryCounterSetRegistrationInfo
 # @ stub PerfQueryInstance

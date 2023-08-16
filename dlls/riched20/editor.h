@@ -393,6 +393,13 @@ void ME_CommitCoalescingUndo(ME_TextEditor *editor) DECLSPEC_HIDDEN;
 BOOL ME_Undo(ME_TextEditor *editor) DECLSPEC_HIDDEN;
 BOOL ME_Redo(ME_TextEditor *editor) DECLSPEC_HIDDEN;
 void ME_EmptyUndoStack(ME_TextEditor *editor) DECLSPEC_HIDDEN;
+void editor_disable_undo(ME_TextEditor *editor);
+void editor_enable_undo(ME_TextEditor *editor);
+
+static inline BOOL editor_undo_ignored(ME_TextEditor *editor)
+{
+    return editor->undo_ctl_state != undoActive || editor->nUndoMode == umIgnore;
+}
 
 /* txtsrv.c */
 HRESULT create_text_services( IUnknown *outer, ITextHost *text_host, IUnknown **unk, BOOL emulate_10 ) DECLSPEC_HIDDEN;

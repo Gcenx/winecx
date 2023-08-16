@@ -27,6 +27,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <commdlg.h>
+#include <commctrl.h>
 #include <shlwapi.h>
 #include <winternl.h>
 
@@ -1107,6 +1108,8 @@ VOID DIALOG_EditWrap(VOID)
     Globals.bWrapLongLines = !Globals.bWrapLongLines;
     CheckMenuItem(GetMenu(Globals.hMainWnd), CMD_WRAP,
         MF_BYCOMMAND | (Globals.bWrapLongLines ? MF_CHECKED : MF_UNCHECKED));
+    SetWindowSubclass(Globals.hEdit, EDIT_CallBackProc, 0, 0);
+    updateWindowSize(rc.right, rc.bottom);
 }
 
 VOID DIALOG_SelectFont(VOID)
@@ -1274,4 +1277,50 @@ static INT_PTR WINAPI DIALOG_PAGESETUP_DlgProc(HWND hDlg, UINT msg, WPARAM wPara
     }
 
   return FALSE;
+}
+
+static INT_PTR WINAPI DIALOG_GOTO_DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch(msg)
+    {
+        case WM_COMMAND:
+        {
+            switch (wParam)
+            {
+                case IDOK:
+                {
+                    int lineValue = GetDlgItemInt(hDlg, IDC_GOTO_LINEVALUE, NULL, FALSE) - 1;
+                    long lineIndex = SendMessageW(Globals.hEdit, EM_LINEINDEX, lineValue, 0);
+
+                    SendMessageW(Globals.hEdit, EM_SETSEL, lineIndex, lineIndex);
+                    UpdateStatusBar();
+                    EndDialog(hDlg, IDOK);
+                    return TRUE;
+                }
+                case IDCANCEL:
+                {
+                    EndDialog(hDlg, IDCANCEL);
+                    return TRUE;
+                }
+                default:
+                {
+                    break;
+                }
+            }
+            break;
+        }
+        case WM_INITDIALOG:
+        {
+            int currentLine = SendMessageW(Globals.hEdit, EM_LINEFROMCHAR, -1, 0) + 1;
+            SetDlgItemInt(hDlg, IDC_GOTO_LINEVALUE, currentLine, FALSE);
+            break;
+        }
+    }
+    return FALSE;
+}
+
+void DIALOG_EditGoTo(void)
+{
+    DialogBoxW(Globals.hInstance, MAKEINTRESOURCEW(DIALOG_GOTO),
+               Globals.hMainWnd, DIALOG_GOTO_DlgProc);
 }

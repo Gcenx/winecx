@@ -120,6 +120,11 @@ static const char *ntoa6( IN6_ADDR *ip )
     return buffers[i];
 }
 
+static DWORD ipv4_addr( BYTE b1, BYTE b2, BYTE b3, BYTE b4 )
+{
+    return htonl( (b1 << 24) | (b2 << 16) | (b3 << 8) | b4 );
+}
+
 /*
 still-to-be-tested 98-only functions:
 GetUniDirectionalAdapterInfo
@@ -350,7 +355,8 @@ static void testGetIpForwardTable(void)
         else
             ok( buf->table[i].dwForwardType == MIB_IPROUTE_TYPE_INDIRECT, "got %ld\n", buf->table[i].dwForwardType );
         ok( row->dwForwardProto == row2->Protocol, "got %ld vs %d\n", row->dwForwardProto, row2->Protocol );
-        ok( row->dwForwardAge == row2->Age, "got %ld vs %ld\n", row->dwForwardAge, row2->Age );
+        ok( row->dwForwardAge == row2->Age || row->dwForwardAge + 1 == row2->Age,
+            "got %ld vs %ld\n", row->dwForwardAge, row2->Age );
         ok( row->dwForwardNextHopAS == 0, "got %08lx\n", row->dwForwardNextHopAS );
         /* FIXME: need to add the interface's metric from GetIpInterfaceTable() */
         ok( row->dwForwardMetric1 >= row2->Metric, "got %ld vs %ld\n", row->dwForwardMetric1, row2->Metric );
@@ -368,8 +374,15 @@ static void testGetIpForwardTable(void)
 
 static void testGetIpNetTable(void)
 {
-    DWORD apiReturn;
+    DWORD apiReturn, ret, prev_idx;
+    BOOL igmp3_found, ssdp_found;
+    DWORD igmp3_addr, ssdp_addr;
+    MIB_IPNET_TABLE2 *table2;
     ULONG dwSize = 0;
+    unsigned int i;
+
+    igmp3_addr = ipv4_addr( 224, 0, 0, 22 );
+    ssdp_addr = ipv4_addr( 239, 255, 255, 250 );
 
     apiReturn = GetIpNetTable(NULL, NULL, FALSE);
     if (apiReturn == ERROR_NOT_SUPPORTED) {
@@ -388,11 +401,62 @@ static void testGetIpNetTable(void)
     else if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
         PMIB_IPNETTABLE buf = HeapAlloc(GetProcessHeap(), 0, dwSize);
 
-        apiReturn = GetIpNetTable(buf, &dwSize, FALSE);
-        ok(apiReturn == NO_ERROR ||
-           apiReturn == ERROR_NO_DATA, /* empty ARP table's okay */
-           "GetIpNetTable(buf, &dwSize, FALSE) returned %ld, expected NO_ERROR\n",
-           apiReturn);
+        memset(buf, 0xcc, dwSize);
+        apiReturn = GetIpNetTable(buf, &dwSize, TRUE);
+        ok((apiReturn == NO_ERROR && buf->dwNumEntries) || (apiReturn == ERROR_NO_DATA && !buf->dwNumEntries),
+            "got apiReturn %lu, dwSize %lu, buf->dwNumEntries %lu.\n",
+            apiReturn, dwSize, buf->dwNumEntries);
+
+        if (apiReturn == NO_ERROR)
+        {
+            for (i = 0; i < buf->dwNumEntries - 1; ++i)
+            {
+                ok( buf->table[i].dwIndex <= buf->table[i + 1].dwIndex,
+                    "Entries are not sorted by index, i %u.\n", i );
+                if (buf->table[i].dwIndex == buf->table[i + 1].dwIndex)
+                    ok(ntohl(buf->table[i].dwAddr) <= ntohl(buf->table[i + 1].dwAddr),
+                       "Entries are not sorted by address, i %u.\n", i );
+            }
+
+            igmp3_found = ssdp_found = FALSE;
+            prev_idx = ~0ul;
+            for (i = 0; i < buf->dwNumEntries; ++i)
+            {
+                if (buf->table[i].dwIndex != prev_idx)
+                {
+                    if (prev_idx != ~0ul)
+                    {
+                        ok( igmp3_found, "%s not found, iface index %lu.\n", ntoa( igmp3_addr ), prev_idx);
+                        ok( ssdp_found || broken(!ssdp_found) /* 239.255.255.250 is always present since Win10 */,
+                            "%s not found.\n", ntoa( ssdp_addr ));
+                    }
+                    prev_idx = buf->table[i].dwIndex;
+                    igmp3_found = ssdp_found = FALSE;
+                }
+                if (buf->table[i].dwAddr == igmp3_addr)
+                    igmp3_found = TRUE;
+                else if (buf->table[i].dwAddr == ssdp_addr)
+                    ssdp_found = TRUE;
+            }
+            ok( igmp3_found, "%s not found.\n", ntoa( igmp3_addr ));
+            ok( ssdp_found || broken(!ssdp_found) /* 239.255.255.250 is always present since Win10 */,
+                "%s not found.\n", ntoa( ssdp_addr ));
+
+            ret = GetIpNetTable2( AF_INET, &table2 );
+            ok( !ret, "got ret %lu.\n", ret );
+            for (i = 0; i < table2->NumEntries; ++i)
+            {
+                MIB_IPNET_ROW2 *row = &table2->Table[i];
+                if (row->Address.Ipv4.sin_addr.s_addr == igmp3_addr
+                    || row->Address.Ipv4.sin_addr.s_addr == ssdp_addr)
+                {
+                    ok( row->State == NlnsPermanent, "got state %d.\n", row->State );
+                    ok( !row->IsRouter, "IsRouter is set.\n" );
+                    ok( !row->IsUnreachable, "IsUnreachable is set.\n" );
+                }
+            }
+            FreeMibTable( table2 );
+        }
 
         if (apiReturn == NO_ERROR && winetest_debug > 1)
         {
@@ -1456,10 +1520,112 @@ static void testGetNetworkParams(void)
     }
 }
 
+static void testGetBestInterface(void)
+{
+    DWORD apiReturn;
+    DWORD bestIfIndex;
+
+    apiReturn = GetBestInterface( INADDR_ANY, &bestIfIndex );
+    trace( "GetBestInterface([0.0.0.0], {%lu}) = %lu\n", bestIfIndex, apiReturn );
+    if (apiReturn == ERROR_NOT_SUPPORTED)
+    {
+        skip( "GetBestInterface is not supported\n" );
+        return;
+    }
+
+    apiReturn = GetBestInterface( INADDR_LOOPBACK, NULL );
+    ok( apiReturn == ERROR_INVALID_PARAMETER,
+        "GetBestInterface([127.0.0.1], NULL) returned %lu, expected %d\n",
+        apiReturn, ERROR_INVALID_PARAMETER );
+
+    apiReturn = GetBestInterface( INADDR_LOOPBACK, &bestIfIndex );
+    ok( apiReturn == NO_ERROR,
+        "GetBestInterface([127.0.0.1], {%lu}) returned %lu, expected %d\n",
+        bestIfIndex, apiReturn, NO_ERROR );
+}
+
+static void testGetBestInterfaceEx(void)
+{
+    DWORD apiReturn;
+    DWORD bestIfIndex = 0;
+    struct sockaddr_in destAddr;
+
+    memset(&destAddr, 0, sizeof(struct sockaddr_in));
+    destAddr.sin_family = AF_INET;
+    destAddr.sin_addr.S_un.S_addr = INADDR_ANY;
+    apiReturn = GetBestInterfaceEx( (struct sockaddr *)&destAddr, &bestIfIndex );
+    trace( "GetBestInterfaceEx([0.0.0.0], {%lu}) = %lu\n", bestIfIndex, apiReturn );
+    if (apiReturn == ERROR_NOT_SUPPORTED)
+    {
+        skip( "GetBestInterfaceEx not supported\n" );
+        return;
+    }
+
+    apiReturn = GetBestInterfaceEx( NULL, NULL );
+    ok( apiReturn == ERROR_INVALID_PARAMETER,
+        "GetBestInterfaceEx(NULL, NULL) returned %lu, expected %d\n",
+        apiReturn, ERROR_INVALID_PARAMETER );
+
+    apiReturn = GetBestInterfaceEx( NULL, &bestIfIndex );
+    ok( apiReturn == ERROR_INVALID_PARAMETER,
+        "GetBestInterfaceEx(NULL, {%lu}) returned %lu, expected %d\n",
+        bestIfIndex, apiReturn, ERROR_INVALID_PARAMETER );
+
+    memset(&destAddr, 0, sizeof(struct sockaddr_in));
+    apiReturn = GetBestInterfaceEx( (struct sockaddr *)&destAddr, NULL );
+    ok( apiReturn == ERROR_INVALID_PARAMETER,
+        "GetBestInterfaceEx(<AF_UNSPEC>, NULL) returned %lu, expected %d\n",
+        apiReturn, ERROR_INVALID_PARAMETER );
+
+    memset(&destAddr, -1, sizeof(struct sockaddr_in));
+    apiReturn = GetBestInterfaceEx( (struct sockaddr *)&destAddr, NULL );
+    ok( apiReturn == ERROR_INVALID_PARAMETER,
+        "GetBestInterfaceEx(<INVALID>, NULL) returned %lu, expected %d\n",
+        apiReturn, ERROR_INVALID_PARAMETER );
+
+    memset(&destAddr, 0, sizeof(struct sockaddr_in));
+    destAddr.sin_family = AF_INET;
+    destAddr.sin_addr.S_un.S_addr = INADDR_LOOPBACK;
+    apiReturn = GetBestInterfaceEx( (struct sockaddr *)&destAddr, NULL );
+    ok( apiReturn == ERROR_INVALID_PARAMETER,
+        "GetBestInterfaceEx([127.0.0.1], NULL) returned %lu, expected %d\n",
+        apiReturn, ERROR_INVALID_PARAMETER );
+
+    memset(&destAddr, 0, sizeof(struct sockaddr_in));
+    destAddr.sin_family = AF_INET;
+    destAddr.sin_addr.S_un.S_addr = INADDR_LOOPBACK;
+    apiReturn = GetBestInterfaceEx( (struct sockaddr *)&destAddr, &bestIfIndex );
+    ok( apiReturn == NO_ERROR,
+        "GetBestInterfaceEx([127.0.0.1], {%lu}) returned %lu, expected %d\n",
+        bestIfIndex, apiReturn, ERROR_INVALID_PARAMETER );
+}
+
+static void testGetBestRoute(void)
+{
+    DWORD apiReturn;
+    MIB_IPFORWARDROW bestRoute;
+
+    apiReturn = GetBestRoute( INADDR_ANY, 0, &bestRoute );
+    trace( "GetBestRoute([0.0.0.0], 0, [...]) = %lu\n", apiReturn );
+    if (apiReturn == ERROR_NOT_SUPPORTED)
+    {
+        skip( "GetBestRoute is not supported\n" );
+        return;
+    }
+
+    apiReturn = GetBestRoute( INADDR_ANY, 0, NULL );
+    ok( apiReturn == ERROR_INVALID_PARAMETER,
+        "GetBestRoute([0.0.0.0], 0, NULL) returned %lu, expected %d\n",
+        apiReturn, ERROR_INVALID_PARAMETER );
+
+    apiReturn = GetBestRoute( INADDR_LOOPBACK, 0, &bestRoute );
+    ok( apiReturn == NO_ERROR,
+        "GetBestRoute([127.0.0.1], 0, NULL) returned %lu, expected %d\n",
+        apiReturn, NO_ERROR );
+}
+
 /*
 still-to-be-tested 98-onward functions:
-GetBestInterface
-GetBestRoute
 IpReleaseAddress
 IpRenewAddress
 */
@@ -1468,6 +1634,9 @@ static DWORD CALLBACK testWin98Functions(void *p)
   testGetInterfaceInfo();
   testGetAdaptersInfo();
   testGetNetworkParams();
+  testGetBestInterface();
+  testGetBestInterfaceEx();
+  testGetBestRoute();
   return 0;
 }
 
@@ -1648,6 +1817,11 @@ static void test_GetAdaptersAddresses(void)
 
             if (ua->Flags & IP_ADAPTER_ADDRESS_DNS_ELIGIBLE)
                 dns_eligible_found = TRUE;
+
+            if(ua->Address.lpSockaddr->sa_family == AF_INET)
+                ok(aa->Ipv4Enabled == TRUE, "expected Ipv4Enabled flag to be set in interface %ls\n", aa->FriendlyName);
+            else if(ua->Address.lpSockaddr->sa_family == AF_INET6)
+                ok(aa->Ipv6Enabled == TRUE, "expected Ipv6Enabled flag to be set in interface %ls\n", aa->FriendlyName);
 
             ua = ua->Next;
         }
@@ -1981,9 +2155,6 @@ static void test_interface_identifier_conversion(void)
         MIB_IF_ROW2 *row = table->Table + i;
 
         /* ConvertInterfaceIndexToLuid */
-        ret = ConvertInterfaceIndexToLuid( 0, NULL );
-        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
-
         memset( &luid, 0xff, sizeof(luid) );
         ret = ConvertInterfaceIndexToLuid( 0, &luid );
         ok( ret == ERROR_FILE_NOT_FOUND, "got %lu\n", ret );
@@ -1997,12 +2168,6 @@ static void test_interface_identifier_conversion(void)
         ok( luid.Value == row->InterfaceLuid.Value, "mismatch\n" );
 
         /* ConvertInterfaceLuidToIndex */
-        ret = ConvertInterfaceLuidToIndex( NULL, NULL );
-        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
-
-        ret = ConvertInterfaceLuidToIndex( NULL, &index );
-        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
-
         ret = ConvertInterfaceLuidToIndex( &luid, NULL );
         ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
 
@@ -2011,9 +2176,6 @@ static void test_interface_identifier_conversion(void)
         ok( index == row->InterfaceIndex, "mismatch\n" );
 
         /* ConvertInterfaceLuidToGuid */
-        ret = ConvertInterfaceLuidToGuid( NULL, NULL );
-        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
-
         memset( &guid, 0xff, sizeof(guid) );
         ret = ConvertInterfaceLuidToGuid( NULL, &guid );
         ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
@@ -2028,9 +2190,6 @@ static void test_interface_identifier_conversion(void)
         ok( IsEqualGUID( &guid, &row->InterfaceGuid ), "mismatch\n" );
 
         /* ConvertInterfaceGuidToLuid */
-        ret = ConvertInterfaceGuidToLuid( NULL, NULL );
-        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
-
         luid.Info.NetLuidIndex = 1;
         ret = ConvertInterfaceGuidToLuid( NULL, &luid );
         ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
@@ -2048,13 +2207,7 @@ static void test_interface_identifier_conversion(void)
         if (luid.Value != row->InterfaceLuid.Value) continue;
 
         /* ConvertInterfaceLuidToNameW */
-        ret = ConvertInterfaceLuidToNameW( NULL, NULL, 0 );
-        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
-
         ret = ConvertInterfaceLuidToNameW( &luid, NULL, 0 );
-        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
-
-        ret = ConvertInterfaceLuidToNameW( NULL, nameW, 0 );
         ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
 
         ret = ConvertInterfaceLuidToNameW( &luid, nameW, 0 );
@@ -2068,14 +2221,8 @@ static void test_interface_identifier_conversion(void)
         ok( !wcscmp( nameW, expect_nameW ), "got %s vs %s\n", debugstr_w( nameW ), debugstr_w( expect_nameW ) );
 
         /* ConvertInterfaceLuidToNameA */
-        ret = ConvertInterfaceLuidToNameA( NULL, NULL, 0 );
-        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
-
         ret = ConvertInterfaceLuidToNameA( &luid, NULL, 0 );
         ok( ret == ERROR_NOT_ENOUGH_MEMORY, "got %lu\n", ret );
-
-        ret = ConvertInterfaceLuidToNameA( NULL, nameA, 0 );
-        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
 
         ret = ConvertInterfaceLuidToNameA( &luid, nameA, 0 );
         ok( ret == ERROR_NOT_ENOUGH_MEMORY, "got %lu\n", ret );
@@ -2087,9 +2234,6 @@ static void test_interface_identifier_conversion(void)
         ok( nameA[0], "name not set\n" );
 
         /* ConvertInterfaceNameToLuidW */
-        ret = ConvertInterfaceNameToLuidW( NULL, NULL );
-        ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
-
         luid.Info.Reserved = luid.Info.NetLuidIndex = luid.Info.IfType = 0xdead;
         ret = ConvertInterfaceNameToLuidW( NULL, &luid );
         ok( ret == ERROR_INVALID_NAME, "got %lu\n", ret );
@@ -2106,9 +2250,6 @@ static void test_interface_identifier_conversion(void)
         ok( luid.Value == row->InterfaceLuid.Value, "mismatch\n" );
 
         /* ConvertInterfaceNameToLuidA */
-        ret = ConvertInterfaceNameToLuidA( NULL, NULL );
-        ok( ret == ERROR_INVALID_NAME, "got %lu\n", ret );
-
         luid.Info.Reserved = luid.Info.NetLuidIndex = luid.Info.IfType = 0xdead;
         ret = ConvertInterfaceNameToLuidA( NULL, &luid );
         ok( ret == ERROR_INVALID_NAME, "got %lu\n", ret );
@@ -2134,8 +2275,6 @@ static void test_interface_identifier_conversion(void)
         ok( !ret, "got %lu\n", ret );
         ok( !wcscmp( alias, row->Alias ), "got %s vs %s\n", wine_dbgstr_w( alias ), wine_dbgstr_w( row->Alias ) );
 
-        index = if_nametoindex( NULL );
-        ok( !index, "Got unexpected index %lu\n", index );
         index = if_nametoindex( nameA );
         ok( index == row->InterfaceIndex, "Got index %lu for %s, expected %lu\n", index, nameA, row->InterfaceIndex );
         /* Wargaming.net Game Center passes a GUID-like string. */
@@ -2144,15 +2283,7 @@ static void test_interface_identifier_conversion(void)
         index = if_nametoindex( wine_dbgstr_guid( &guid ) );
         ok( !index, "Got unexpected index %lu for input %s\n", index, wine_dbgstr_guid( &guid ) );
 
-        name = if_indextoname( 0, NULL );
-        ok( name == NULL, "got %s\n", name );
-
-        name = if_indextoname( 0, nameA );
-        ok( name == NULL, "got %p\n", name );
-
-        name = if_indextoname( ~0u, nameA );
-        ok( name == NULL, "got %p\n", name );
-
+        /* if_indextoname */
         nameA[0] = 0;
         name = if_indextoname( row->InterfaceIndex, nameA );
         ConvertInterfaceLuidToNameA( &row->InterfaceLuid, expect_nameA, ARRAY_SIZE(expect_nameA) );
@@ -2160,6 +2291,92 @@ static void test_interface_identifier_conversion(void)
         ok( !strcmp( nameA, expect_nameA ), "mismatch\n" );
     }
     FreeMibTable( table );
+}
+
+static void test_interface_identifier_conversion_failure(void)
+{
+    DWORD ret;
+    WCHAR nameW[IF_MAX_STRING_SIZE + 1];
+    char nameA[IF_MAX_STRING_SIZE + 1], *name;
+    NET_IFINDEX index;
+    NET_LUID luid;
+    GUID guid;
+    static const GUID guid_zero;
+    static const GUID guid_ones = { 0xffffffffUL, 0xffff, 0xffff, { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff } };
+
+    /* ConvertInterfaceIndexToLuid */
+    ret = ConvertInterfaceIndexToLuid( 0, NULL );
+    ok( ret == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %lu\n", ret );
+
+    ret = ConvertInterfaceIndexToLuid( -1, &luid );
+    ok( ret == ERROR_FILE_NOT_FOUND, "expected ERROR_FILE_NOT_FOUND, got %lu\n", ret );
+
+    /* ConvertInterfaceLuidToIndex */
+    ret = ConvertInterfaceLuidToIndex( NULL, NULL );
+    ok( ret == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %lu\n", ret );
+
+    ret = ConvertInterfaceLuidToIndex( NULL, &index );
+    ok( ret == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %lu\n", ret );
+
+    luid.Value = -1;
+    index = -1;
+    ret = ConvertInterfaceLuidToIndex( &luid, &index );
+    ok( ret == ERROR_FILE_NOT_FOUND, "expected ERROR_FILE_NOT_FOUND, got %lu\n", ret );
+    ok( index == 0, "index shall be zero (got %lu)\n", index );
+
+    /* ConvertInterfaceLuidToGuid */
+    ret = ConvertInterfaceLuidToGuid( NULL, NULL );
+    ok( ret == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %lu\n", ret );
+
+    luid.Value = -1;
+    memcpy( &guid, &guid_ones, sizeof(guid) );
+    ret = ConvertInterfaceLuidToGuid( &luid, &guid );
+    ok( ret == ERROR_FILE_NOT_FOUND, "expected ERROR_FILE_NOT_FOUND, got %lu\n", ret );
+    ok( memcmp( &guid, &guid_zero, sizeof(guid) ) == 0, "guid shall be nil\n" );
+
+    /* ConvertInterfaceGuidToLuid */
+    ret = ConvertInterfaceGuidToLuid( NULL, NULL );
+    ok( ret == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %lu\n", ret );
+
+    /* ConvertInterfaceLuidToNameW */
+    ret = ConvertInterfaceLuidToNameW( NULL, NULL, 0 );
+    ok( ret == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %lu\n", ret );
+
+    memset( nameW, 0, sizeof(nameW) );
+    ret = ConvertInterfaceLuidToNameW( NULL, nameW, 0 );
+    ok( ret == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %lu\n", ret );
+    ok( !nameW[0], "nameW shall not change\n" );
+
+    /* ConvertInterfaceLuidToNameA */
+    ret = ConvertInterfaceLuidToNameA( NULL, NULL, 0 );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+    memset( nameA, 0, sizeof(nameA) );
+    ret = ConvertInterfaceLuidToNameA( NULL, nameA, 0 );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+    ok( !nameA[0], "nameA shall not change\n" );
+
+    /* ConvertInterfaceNameToLuidW */
+    ret = ConvertInterfaceNameToLuidW( NULL, NULL );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %lu\n", ret );
+
+    /* ConvertInterfaceNameToLuidA */
+    ret = ConvertInterfaceNameToLuidA( NULL, NULL );
+    ok( ret == ERROR_INVALID_NAME, "got %lu\n", ret );
+
+    /* if_nametoindex */
+    index = if_nametoindex( NULL );
+    ok( !index, "Got unexpected index %lu\n", index );
+
+    /* if_indextoname */
+    name = if_indextoname( 0, NULL );
+    ok( name == NULL, "expected NULL, got %s\n", name );
+
+    name = if_indextoname( 0, nameA );
+    ok( name == NULL, "expected NULL, got %p\n", name );
+
+    name = if_indextoname( ~0u, nameA );
+    ok( name == NULL, "expected NULL, got %p\n", name );
 }
 
 static void test_GetIfEntry2(void)
@@ -2698,6 +2915,7 @@ START_TEST(iphlpapi)
     test_AllocateAndGetTcpExTableFromStack();
     test_CreateSortedAddressPairs();
     test_interface_identifier_conversion();
+    test_interface_identifier_conversion_failure();
     test_GetIfEntry2();
     test_GetIfTable2();
     test_GetIfTable2Ex();

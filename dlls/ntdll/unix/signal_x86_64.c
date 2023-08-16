@@ -80,6 +80,8 @@
 WINE_DEFAULT_DEBUG_CHANNEL(unwind);
 WINE_DECLARE_DEBUG_CHANNEL(seh);
 
+#include "dwarf.h"
+
 /***********************************************************************
  * signal context platform-specific definitions
  */
@@ -221,7 +223,9 @@ _STRUCT_X86_THREAD_FULL_STATE64
         __uint64_t                      __ss;
         __uint64_t                      __gsbase;
 };
+#endif
 
+#ifndef _STRUCT_MCONTEXT64_FULL
 #define _STRUCT_MCONTEXT64_FULL      struct __darwin_mcontext64_full
 _STRUCT_MCONTEXT64_FULL
 {
@@ -229,7 +233,9 @@ _STRUCT_MCONTEXT64_FULL
         _STRUCT_X86_THREAD_FULL_STATE64 __ss;
         _STRUCT_X86_FLOAT_STATE64       __fs;
 };
+#endif
 
+#ifndef _STRUCT_MCONTEXT_AVX64_FULL
 #define _STRUCT_MCONTEXT_AVX64_FULL  struct __darwin_mcontext_avx64_full
 _STRUCT_MCONTEXT_AVX64_FULL
 {
@@ -434,6 +440,15 @@ static inline struct amd64_thread_data *amd64_thread_data(void)
     return (struct amd64_thread_data *)ntdll_get_thread_data()->cpu_data;
 }
 
+#ifdef __linux__
+static inline TEB *get_current_teb(void)
+{
+    unsigned long rsp;
+    __asm__( "movq %%rsp,%0" : "=r" (rsp) );
+    return (TEB *)(rsp & ~signal_stack_mask);
+}
+#endif
+
 static BOOL is_inside_syscall( const ucontext_t *sigcontext )
 {
     return ((char *)RSP_sig(sigcontext) >= (char *)ntdll_get_thread_data()->kernel_stack &&
@@ -485,840 +500,10 @@ static inline void context_init_xstate( CONTEXT *context, void *xstate_buffer )
     xctx->All.Offset = -(LONG)sizeof(CONTEXT);
 }
 
-USHORT cs32_sel;  /* selector for %cs in 32-bit mode */
-#ifdef __APPLE__
-USHORT ds32_sel;  /* selector for %ds in 32-bit mode */
-#endif
-USHORT cs64_sel;  /* selector for %cs in 64-bit mode */
+static USHORT cs32_sel;  /* selector for %cs in 32-bit mode */
+static USHORT cs64_sel;  /* selector for %cs in 64-bit mode */
 static USHORT ds64_sel;  /* selector for %ds/%es/%ss in 64-bit mode */
 static USHORT fs32_sel;  /* selector for %fs in 32-bit mode */
-
-/***********************************************************************
- * Definitions for Dwarf unwind tables
- */
-
-enum dwarf_call_frame_info
-{
-    DW_CFA_advance_loc = 0x40,
-    DW_CFA_offset = 0x80,
-    DW_CFA_restore = 0xc0,
-    DW_CFA_nop = 0x00,
-    DW_CFA_set_loc = 0x01,
-    DW_CFA_advance_loc1 = 0x02,
-    DW_CFA_advance_loc2 = 0x03,
-    DW_CFA_advance_loc4 = 0x04,
-    DW_CFA_offset_extended = 0x05,
-    DW_CFA_restore_extended = 0x06,
-    DW_CFA_undefined = 0x07,
-    DW_CFA_same_value = 0x08,
-    DW_CFA_register = 0x09,
-    DW_CFA_remember_state = 0x0a,
-    DW_CFA_restore_state = 0x0b,
-    DW_CFA_def_cfa = 0x0c,
-    DW_CFA_def_cfa_register = 0x0d,
-    DW_CFA_def_cfa_offset = 0x0e,
-    DW_CFA_def_cfa_expression = 0x0f,
-    DW_CFA_expression = 0x10,
-    DW_CFA_offset_extended_sf = 0x11,
-    DW_CFA_def_cfa_sf = 0x12,
-    DW_CFA_def_cfa_offset_sf = 0x13,
-    DW_CFA_val_offset = 0x14,
-    DW_CFA_val_offset_sf = 0x15,
-    DW_CFA_val_expression = 0x16,
-};
-
-enum dwarf_operation
-{
-    DW_OP_addr                 = 0x03,
-    DW_OP_deref                = 0x06,
-    DW_OP_const1u              = 0x08,
-    DW_OP_const1s              = 0x09,
-    DW_OP_const2u              = 0x0a,
-    DW_OP_const2s              = 0x0b,
-    DW_OP_const4u              = 0x0c,
-    DW_OP_const4s              = 0x0d,
-    DW_OP_const8u              = 0x0e,
-    DW_OP_const8s              = 0x0f,
-    DW_OP_constu               = 0x10,
-    DW_OP_consts               = 0x11,
-    DW_OP_dup                  = 0x12,
-    DW_OP_drop                 = 0x13,
-    DW_OP_over                 = 0x14,
-    DW_OP_pick                 = 0x15,
-    DW_OP_swap                 = 0x16,
-    DW_OP_rot                  = 0x17,
-    DW_OP_xderef               = 0x18,
-    DW_OP_abs                  = 0x19,
-    DW_OP_and                  = 0x1a,
-    DW_OP_div                  = 0x1b,
-    DW_OP_minus                = 0x1c,
-    DW_OP_mod                  = 0x1d,
-    DW_OP_mul                  = 0x1e,
-    DW_OP_neg                  = 0x1f,
-    DW_OP_not                  = 0x20,
-    DW_OP_or                   = 0x21,
-    DW_OP_plus                 = 0x22,
-    DW_OP_plus_uconst          = 0x23,
-    DW_OP_shl                  = 0x24,
-    DW_OP_shr                  = 0x25,
-    DW_OP_shra                 = 0x26,
-    DW_OP_xor                  = 0x27,
-    DW_OP_bra                  = 0x28,
-    DW_OP_eq                   = 0x29,
-    DW_OP_ge                   = 0x2a,
-    DW_OP_gt                   = 0x2b,
-    DW_OP_le                   = 0x2c,
-    DW_OP_lt                   = 0x2d,
-    DW_OP_ne                   = 0x2e,
-    DW_OP_skip                 = 0x2f,
-    DW_OP_lit0                 = 0x30,
-    DW_OP_lit1                 = 0x31,
-    DW_OP_lit2                 = 0x32,
-    DW_OP_lit3                 = 0x33,
-    DW_OP_lit4                 = 0x34,
-    DW_OP_lit5                 = 0x35,
-    DW_OP_lit6                 = 0x36,
-    DW_OP_lit7                 = 0x37,
-    DW_OP_lit8                 = 0x38,
-    DW_OP_lit9                 = 0x39,
-    DW_OP_lit10                = 0x3a,
-    DW_OP_lit11                = 0x3b,
-    DW_OP_lit12                = 0x3c,
-    DW_OP_lit13                = 0x3d,
-    DW_OP_lit14                = 0x3e,
-    DW_OP_lit15                = 0x3f,
-    DW_OP_lit16                = 0x40,
-    DW_OP_lit17                = 0x41,
-    DW_OP_lit18                = 0x42,
-    DW_OP_lit19                = 0x43,
-    DW_OP_lit20                = 0x44,
-    DW_OP_lit21                = 0x45,
-    DW_OP_lit22                = 0x46,
-    DW_OP_lit23                = 0x47,
-    DW_OP_lit24                = 0x48,
-    DW_OP_lit25                = 0x49,
-    DW_OP_lit26                = 0x4a,
-    DW_OP_lit27                = 0x4b,
-    DW_OP_lit28                = 0x4c,
-    DW_OP_lit29                = 0x4d,
-    DW_OP_lit30                = 0x4e,
-    DW_OP_lit31                = 0x4f,
-    DW_OP_reg0                 = 0x50,
-    DW_OP_reg1                 = 0x51,
-    DW_OP_reg2                 = 0x52,
-    DW_OP_reg3                 = 0x53,
-    DW_OP_reg4                 = 0x54,
-    DW_OP_reg5                 = 0x55,
-    DW_OP_reg6                 = 0x56,
-    DW_OP_reg7                 = 0x57,
-    DW_OP_reg8                 = 0x58,
-    DW_OP_reg9                 = 0x59,
-    DW_OP_reg10                = 0x5a,
-    DW_OP_reg11                = 0x5b,
-    DW_OP_reg12                = 0x5c,
-    DW_OP_reg13                = 0x5d,
-    DW_OP_reg14                = 0x5e,
-    DW_OP_reg15                = 0x5f,
-    DW_OP_reg16                = 0x60,
-    DW_OP_reg17                = 0x61,
-    DW_OP_reg18                = 0x62,
-    DW_OP_reg19                = 0x63,
-    DW_OP_reg20                = 0x64,
-    DW_OP_reg21                = 0x65,
-    DW_OP_reg22                = 0x66,
-    DW_OP_reg23                = 0x67,
-    DW_OP_reg24                = 0x68,
-    DW_OP_reg25                = 0x69,
-    DW_OP_reg26                = 0x6a,
-    DW_OP_reg27                = 0x6b,
-    DW_OP_reg28                = 0x6c,
-    DW_OP_reg29                = 0x6d,
-    DW_OP_reg30                = 0x6e,
-    DW_OP_reg31                = 0x6f,
-    DW_OP_breg0                = 0x70,
-    DW_OP_breg1                = 0x71,
-    DW_OP_breg2                = 0x72,
-    DW_OP_breg3                = 0x73,
-    DW_OP_breg4                = 0x74,
-    DW_OP_breg5                = 0x75,
-    DW_OP_breg6                = 0x76,
-    DW_OP_breg7                = 0x77,
-    DW_OP_breg8                = 0x78,
-    DW_OP_breg9                = 0x79,
-    DW_OP_breg10               = 0x7a,
-    DW_OP_breg11               = 0x7b,
-    DW_OP_breg12               = 0x7c,
-    DW_OP_breg13               = 0x7d,
-    DW_OP_breg14               = 0x7e,
-    DW_OP_breg15               = 0x7f,
-    DW_OP_breg16               = 0x80,
-    DW_OP_breg17               = 0x81,
-    DW_OP_breg18               = 0x82,
-    DW_OP_breg19               = 0x83,
-    DW_OP_breg20               = 0x84,
-    DW_OP_breg21               = 0x85,
-    DW_OP_breg22               = 0x86,
-    DW_OP_breg23               = 0x87,
-    DW_OP_breg24               = 0x88,
-    DW_OP_breg25               = 0x89,
-    DW_OP_breg26               = 0x8a,
-    DW_OP_breg27               = 0x8b,
-    DW_OP_breg28               = 0x8c,
-    DW_OP_breg29               = 0x8d,
-    DW_OP_breg30               = 0x8e,
-    DW_OP_breg31               = 0x8f,
-    DW_OP_regx                 = 0x90,
-    DW_OP_fbreg                = 0x91,
-    DW_OP_bregx                = 0x92,
-    DW_OP_piece                = 0x93,
-    DW_OP_deref_size           = 0x94,
-    DW_OP_xderef_size          = 0x95,
-    DW_OP_nop                  = 0x96,
-    DW_OP_push_object_address  = 0x97,
-    DW_OP_call2                = 0x98,
-    DW_OP_call4                = 0x99,
-    DW_OP_call_ref             = 0x9a,
-    DW_OP_form_tls_address     = 0x9b,
-    DW_OP_call_frame_cfa       = 0x9c,
-    DW_OP_bit_piece            = 0x9d,
-    DW_OP_lo_user              = 0xe0,
-    DW_OP_hi_user              = 0xff,
-    DW_OP_GNU_push_tls_address = 0xe0,
-    DW_OP_GNU_uninit           = 0xf0,
-    DW_OP_GNU_encoded_addr     = 0xf1,
-};
-
-#define DW_EH_PE_native   0x00
-#define DW_EH_PE_uleb128  0x01
-#define DW_EH_PE_udata2   0x02
-#define DW_EH_PE_udata4   0x03
-#define DW_EH_PE_udata8   0x04
-#define DW_EH_PE_sleb128  0x09
-#define DW_EH_PE_sdata2   0x0a
-#define DW_EH_PE_sdata4   0x0b
-#define DW_EH_PE_sdata8   0x0c
-#define DW_EH_PE_signed   0x08
-#define DW_EH_PE_abs      0x00
-#define DW_EH_PE_pcrel    0x10
-#define DW_EH_PE_textrel  0x20
-#define DW_EH_PE_datarel  0x30
-#define DW_EH_PE_funcrel  0x40
-#define DW_EH_PE_aligned  0x50
-#define DW_EH_PE_indirect 0x80
-#define DW_EH_PE_omit     0xff
-
-struct dwarf_eh_bases
-{
-    void *tbase;
-    void *dbase;
-    void *func;
-};
-
-struct dwarf_cie
-{
-    unsigned int  length;
-    int           id;
-    unsigned char version;
-    unsigned char augmentation[1];
-};
-
-struct dwarf_fde
-{
-    unsigned int length;
-    unsigned int cie_offset;
-};
-
-extern const struct dwarf_fde *_Unwind_Find_FDE (void *, struct dwarf_eh_bases *);
-
-static unsigned char dwarf_get_u1( const unsigned char **p )
-{
-    return *(*p)++;
-}
-
-static unsigned short dwarf_get_u2( const unsigned char **p )
-{
-    unsigned int ret = (*p)[0] | ((*p)[1] << 8);
-    (*p) += 2;
-    return ret;
-}
-
-static unsigned int dwarf_get_u4( const unsigned char **p )
-{
-    unsigned int ret = (*p)[0] | ((*p)[1] << 8) | ((*p)[2] << 16) | ((*p)[3] << 24);
-    (*p) += 4;
-    return ret;
-}
-
-static ULONG64 dwarf_get_u8( const unsigned char **p )
-{
-    ULONG64 low  = dwarf_get_u4( p );
-    ULONG64 high = dwarf_get_u4( p );
-    return low | (high << 32);
-}
-
-static ULONG_PTR dwarf_get_uleb128( const unsigned char **p )
-{
-    ULONG_PTR ret = 0;
-    unsigned int shift = 0;
-    unsigned char byte;
-
-    do
-    {
-        byte = **p;
-        ret |= (ULONG_PTR)(byte & 0x7f) << shift;
-        shift += 7;
-        (*p)++;
-    } while (byte & 0x80);
-    return ret;
-}
-
-static LONG_PTR dwarf_get_sleb128( const unsigned char **p )
-{
-    ULONG_PTR ret = 0;
-    unsigned int shift = 0;
-    unsigned char byte;
-
-    do
-    {
-        byte = **p;
-        ret |= (ULONG_PTR)(byte & 0x7f) << shift;
-        shift += 7;
-        (*p)++;
-    } while (byte & 0x80);
-
-    if ((shift < 8 * sizeof(ret)) && (byte & 0x40)) ret |= -((ULONG_PTR)1 << shift);
-    return ret;
-}
-
-static ULONG_PTR dwarf_get_ptr( const unsigned char **p, unsigned char encoding, const struct dwarf_eh_bases *bases )
-{
-    ULONG_PTR base;
-
-    if (encoding == DW_EH_PE_omit) return 0;
-
-    switch (encoding & 0x70)
-    {
-    case DW_EH_PE_abs:
-        base = 0;
-        break;
-    case DW_EH_PE_pcrel:
-        base = (ULONG_PTR)*p;
-        break;
-    case DW_EH_PE_textrel:
-        base = (ULONG_PTR)bases->tbase;
-        break;
-    case DW_EH_PE_datarel:
-        base = (ULONG_PTR)bases->dbase;
-        break;
-    case DW_EH_PE_funcrel:
-        base = (ULONG_PTR)bases->func;
-        break;
-    case DW_EH_PE_aligned:
-        base = ((ULONG_PTR)*p + 7) & ~7ul;
-        break;
-    default:
-        FIXME( "unsupported encoding %02x\n", encoding );
-        return 0;
-    }
-
-    switch (encoding & 0x0f)
-    {
-    case DW_EH_PE_native:  base += dwarf_get_u8( p ); break;
-    case DW_EH_PE_uleb128: base += dwarf_get_uleb128( p ); break;
-    case DW_EH_PE_udata2:  base += dwarf_get_u2( p ); break;
-    case DW_EH_PE_udata4:  base += dwarf_get_u4( p ); break;
-    case DW_EH_PE_udata8:  base += dwarf_get_u8( p ); break;
-    case DW_EH_PE_sleb128: base += dwarf_get_sleb128( p ); break;
-    case DW_EH_PE_sdata2:  base += (signed short)dwarf_get_u2( p ); break;
-    case DW_EH_PE_sdata4:  base += (signed int)dwarf_get_u4( p ); break;
-    case DW_EH_PE_sdata8:  base += (LONG64)dwarf_get_u8( p ); break;
-    default:
-        FIXME( "unsupported encoding %02x\n", encoding );
-        return 0;
-    }
-    if (encoding & DW_EH_PE_indirect) base = *(ULONG_PTR *)base;
-    return base;
-}
-
-enum reg_rule
-{
-    RULE_UNSET,          /* not set at all */
-    RULE_UNDEFINED,      /* undefined value */
-    RULE_SAME,           /* same value as previous frame */
-    RULE_CFA_OFFSET,     /* stored at cfa offset */
-    RULE_OTHER_REG,      /* stored in other register */
-    RULE_EXPRESSION,     /* address specified by expression */
-    RULE_VAL_EXPRESSION  /* value specified by expression */
-};
-
-#define NB_FRAME_REGS 41
-#define MAX_SAVED_STATES 16
-
-struct frame_state
-{
-    ULONG_PTR     cfa_offset;
-    unsigned char cfa_reg;
-    enum reg_rule cfa_rule;
-    enum reg_rule rules[NB_FRAME_REGS];
-    ULONG64       regs[NB_FRAME_REGS];
-};
-
-struct frame_info
-{
-    ULONG_PTR     ip;
-    ULONG_PTR     code_align;
-    LONG_PTR      data_align;
-    unsigned char retaddr_reg;
-    unsigned char fde_encoding;
-    unsigned char signal_frame;
-    unsigned char state_sp;
-    struct frame_state state;
-    struct frame_state *state_stack;
-};
-
-static const char *dwarf_reg_names[NB_FRAME_REGS] =
-{
-/*  0-7  */ "%rax", "%rdx", "%rcx", "%rbx", "%rsi", "%rdi", "%rbp", "%rsp",
-/*  8-16 */ "%r8", "%r9", "%r10", "%r11", "%r12", "%r13", "%r14", "%r15", "%rip",
-/* 17-24 */ "%xmm0", "%xmm1", "%xmm2", "%xmm3", "%xmm4", "%xmm5", "%xmm6", "%xmm7",
-/* 25-32 */ "%xmm8", "%xmm9", "%xmm10", "%xmm11", "%xmm12", "%xmm13", "%xmm14", "%xmm15",
-/* 33-40 */ "%st0", "%st1", "%st2", "%st3", "%st4", "%st5", "%st6", "%st7"
-};
-
-static BOOL valid_reg( ULONG_PTR reg )
-{
-    if (reg >= NB_FRAME_REGS) FIXME( "unsupported reg %lx\n", reg );
-    return (reg < NB_FRAME_REGS);
-}
-
-static void execute_cfa_instructions( const unsigned char *ptr, const unsigned char *end,
-                                      ULONG_PTR last_ip, struct frame_info *info,
-                                      const struct dwarf_eh_bases *bases )
-{
-    while (ptr < end && info->ip < last_ip + info->signal_frame)
-    {
-        enum dwarf_call_frame_info op = *ptr++;
-
-        if (op & 0xc0)
-        {
-            switch (op & 0xc0)
-            {
-            case DW_CFA_advance_loc:
-            {
-                ULONG_PTR offset = (op & 0x3f) * info->code_align;
-                TRACE( "%lx: DW_CFA_advance_loc %lu\n", info->ip, offset );
-                info->ip += offset;
-                break;
-            }
-            case DW_CFA_offset:
-            {
-                ULONG_PTR reg = op & 0x3f;
-                LONG_PTR offset = dwarf_get_uleb128( &ptr ) * info->data_align;
-                if (!valid_reg( reg )) break;
-                TRACE( "%lx: DW_CFA_offset %s, %ld\n", info->ip, dwarf_reg_names[reg], offset );
-                info->state.regs[reg]  = offset;
-                info->state.rules[reg] = RULE_CFA_OFFSET;
-                break;
-            }
-            case DW_CFA_restore:
-            {
-                ULONG_PTR reg = op & 0x3f;
-                if (!valid_reg( reg )) break;
-                TRACE( "%lx: DW_CFA_restore %s\n", info->ip, dwarf_reg_names[reg] );
-                info->state.rules[reg] = RULE_UNSET;
-                break;
-            }
-            }
-        }
-        else switch (op)
-        {
-        case DW_CFA_nop:
-            break;
-        case DW_CFA_set_loc:
-        {
-            ULONG_PTR loc = dwarf_get_ptr( &ptr, info->fde_encoding, bases );
-            TRACE( "%lx: DW_CFA_set_loc %lx\n", info->ip, loc );
-            info->ip = loc;
-            break;
-        }
-        case DW_CFA_advance_loc1:
-        {
-            ULONG_PTR offset = *ptr++ * info->code_align;
-            TRACE( "%lx: DW_CFA_advance_loc1 %lu\n", info->ip, offset );
-            info->ip += offset;
-            break;
-        }
-        case DW_CFA_advance_loc2:
-        {
-            ULONG_PTR offset = dwarf_get_u2( &ptr ) * info->code_align;
-            TRACE( "%lx: DW_CFA_advance_loc2 %lu\n", info->ip, offset );
-            info->ip += offset;
-            break;
-        }
-        case DW_CFA_advance_loc4:
-        {
-            ULONG_PTR offset = dwarf_get_u4( &ptr ) * info->code_align;
-            TRACE( "%lx: DW_CFA_advance_loc4 %lu\n", info->ip, offset );
-            info->ip += offset;
-            break;
-        }
-        case DW_CFA_offset_extended:
-        case DW_CFA_offset_extended_sf:
-        {
-            ULONG_PTR reg = dwarf_get_uleb128( &ptr );
-            LONG_PTR offset = (op == DW_CFA_offset_extended) ? dwarf_get_uleb128( &ptr ) * info->data_align
-                                                             : dwarf_get_sleb128( &ptr ) * info->data_align;
-            if (!valid_reg( reg )) break;
-            TRACE( "%lx: DW_CFA_offset_extended %s, %ld\n", info->ip, dwarf_reg_names[reg], offset );
-            info->state.regs[reg]  = offset;
-            info->state.rules[reg] = RULE_CFA_OFFSET;
-            break;
-        }
-        case DW_CFA_restore_extended:
-        {
-            ULONG_PTR reg = dwarf_get_uleb128( &ptr );
-            if (!valid_reg( reg )) break;
-            TRACE( "%lx: DW_CFA_restore_extended %s\n", info->ip, dwarf_reg_names[reg] );
-            info->state.rules[reg] = RULE_UNSET;
-            break;
-        }
-        case DW_CFA_undefined:
-        {
-            ULONG_PTR reg = dwarf_get_uleb128( &ptr );
-            if (!valid_reg( reg )) break;
-            TRACE( "%lx: DW_CFA_undefined %s\n", info->ip, dwarf_reg_names[reg] );
-            info->state.rules[reg] = RULE_UNDEFINED;
-            break;
-        }
-        case DW_CFA_same_value:
-        {
-            ULONG_PTR reg = dwarf_get_uleb128( &ptr );
-            if (!valid_reg( reg )) break;
-            TRACE( "%lx: DW_CFA_same_value %s\n", info->ip, dwarf_reg_names[reg] );
-            info->state.regs[reg]  = reg;
-            info->state.rules[reg] = RULE_SAME;
-            break;
-        }
-        case DW_CFA_register:
-        {
-            ULONG_PTR reg = dwarf_get_uleb128( &ptr );
-            ULONG_PTR reg2 = dwarf_get_uleb128( &ptr );
-            if (!valid_reg( reg ) || !valid_reg( reg2 )) break;
-            TRACE( "%lx: DW_CFA_register %s == %s\n", info->ip, dwarf_reg_names[reg], dwarf_reg_names[reg2] );
-            info->state.regs[reg]  = reg2;
-            info->state.rules[reg] = RULE_OTHER_REG;
-            break;
-        }
-        case DW_CFA_remember_state:
-            TRACE( "%lx: DW_CFA_remember_state\n", info->ip );
-            if (info->state_sp >= MAX_SAVED_STATES)
-                FIXME( "%lx: DW_CFA_remember_state too many nested saves\n", info->ip );
-            else
-                info->state_stack[info->state_sp++] = info->state;
-            break;
-        case DW_CFA_restore_state:
-            TRACE( "%lx: DW_CFA_restore_state\n", info->ip );
-            if (!info->state_sp)
-                FIXME( "%lx: DW_CFA_restore_state without corresponding save\n", info->ip );
-            else
-                info->state = info->state_stack[--info->state_sp];
-            break;
-        case DW_CFA_def_cfa:
-        case DW_CFA_def_cfa_sf:
-        {
-            ULONG_PTR reg = dwarf_get_uleb128( &ptr );
-            ULONG_PTR offset = (op == DW_CFA_def_cfa) ? dwarf_get_uleb128( &ptr )
-                                                      : dwarf_get_sleb128( &ptr ) * info->data_align;
-            if (!valid_reg( reg )) break;
-            TRACE( "%lx: DW_CFA_def_cfa %s, %lu\n", info->ip, dwarf_reg_names[reg], offset );
-            info->state.cfa_reg    = reg;
-            info->state.cfa_offset = offset;
-            info->state.cfa_rule   = RULE_CFA_OFFSET;
-            break;
-        }
-        case DW_CFA_def_cfa_register:
-        {
-            ULONG_PTR reg = dwarf_get_uleb128( &ptr );
-            if (!valid_reg( reg )) break;
-            TRACE( "%lx: DW_CFA_def_cfa_register %s\n", info->ip, dwarf_reg_names[reg] );
-            info->state.cfa_reg = reg;
-            info->state.cfa_rule = RULE_CFA_OFFSET;
-            break;
-        }
-        case DW_CFA_def_cfa_offset:
-        case DW_CFA_def_cfa_offset_sf:
-        {
-            ULONG_PTR offset = (op == DW_CFA_def_cfa_offset) ? dwarf_get_uleb128( &ptr )
-                                                             : dwarf_get_sleb128( &ptr ) * info->data_align;
-            TRACE( "%lx: DW_CFA_def_cfa_offset %lu\n", info->ip, offset );
-            info->state.cfa_offset = offset;
-            info->state.cfa_rule = RULE_CFA_OFFSET;
-            break;
-        }
-        case DW_CFA_def_cfa_expression:
-        {
-            ULONG_PTR expr = (ULONG_PTR)ptr;
-            ULONG_PTR len = dwarf_get_uleb128( &ptr );
-            TRACE( "%lx: DW_CFA_def_cfa_expression %lx-%lx\n", info->ip, expr, expr+len );
-            info->state.cfa_offset = expr;
-            info->state.cfa_rule = RULE_VAL_EXPRESSION;
-            ptr += len;
-            break;
-        }
-        case DW_CFA_expression:
-        case DW_CFA_val_expression:
-        {
-            ULONG_PTR reg = dwarf_get_uleb128( &ptr );
-            ULONG_PTR expr = (ULONG_PTR)ptr;
-            ULONG_PTR len = dwarf_get_uleb128( &ptr );
-            if (!valid_reg( reg )) break;
-            TRACE( "%lx: DW_CFA_%sexpression %s %lx-%lx\n",
-                   info->ip, (op == DW_CFA_expression) ? "" : "val_", dwarf_reg_names[reg], expr, expr+len );
-            info->state.regs[reg]  = expr;
-            info->state.rules[reg] = (op == DW_CFA_expression) ? RULE_EXPRESSION : RULE_VAL_EXPRESSION;
-            ptr += len;
-            break;
-        }
-        default:
-            FIXME( "%lx: unknown CFA opcode %02x\n", info->ip, op );
-            break;
-        }
-    }
-}
-
-/* retrieve a context register from its dwarf number */
-static void *get_context_reg( CONTEXT *context, ULONG_PTR dw_reg )
-{
-    switch (dw_reg)
-    {
-    case 0:  return &context->Rax;
-    case 1:  return &context->Rdx;
-    case 2:  return &context->Rcx;
-    case 3:  return &context->Rbx;
-    case 4:  return &context->Rsi;
-    case 5:  return &context->Rdi;
-    case 6:  return &context->Rbp;
-    case 7:  return &context->Rsp;
-    case 8:  return &context->R8;
-    case 9:  return &context->R9;
-    case 10: return &context->R10;
-    case 11: return &context->R11;
-    case 12: return &context->R12;
-    case 13: return &context->R13;
-    case 14: return &context->R14;
-    case 15: return &context->R15;
-    case 16: return &context->Rip;
-    case 17: return &context->u.s.Xmm0;
-    case 18: return &context->u.s.Xmm1;
-    case 19: return &context->u.s.Xmm2;
-    case 20: return &context->u.s.Xmm3;
-    case 21: return &context->u.s.Xmm4;
-    case 22: return &context->u.s.Xmm5;
-    case 23: return &context->u.s.Xmm6;
-    case 24: return &context->u.s.Xmm7;
-    case 25: return &context->u.s.Xmm8;
-    case 26: return &context->u.s.Xmm9;
-    case 27: return &context->u.s.Xmm10;
-    case 28: return &context->u.s.Xmm11;
-    case 29: return &context->u.s.Xmm12;
-    case 30: return &context->u.s.Xmm13;
-    case 31: return &context->u.s.Xmm14;
-    case 32: return &context->u.s.Xmm15;
-    case 33: return &context->u.s.Legacy[0];
-    case 34: return &context->u.s.Legacy[1];
-    case 35: return &context->u.s.Legacy[2];
-    case 36: return &context->u.s.Legacy[3];
-    case 37: return &context->u.s.Legacy[4];
-    case 38: return &context->u.s.Legacy[5];
-    case 39: return &context->u.s.Legacy[6];
-    case 40: return &context->u.s.Legacy[7];
-    default: return NULL;
-    }
-}
-
-/* set a context register from its dwarf number */
-static void set_context_reg( CONTEXT *context, ULONG_PTR dw_reg, void *val )
-{
-    switch (dw_reg)
-    {
-    case 0:  context->Rax = *(ULONG64 *)val; break;
-    case 1:  context->Rdx = *(ULONG64 *)val; break;
-    case 2:  context->Rcx = *(ULONG64 *)val; break;
-    case 3:  context->Rbx = *(ULONG64 *)val; break;
-    case 4:  context->Rsi = *(ULONG64 *)val; break;
-    case 5:  context->Rdi = *(ULONG64 *)val; break;
-    case 6:  context->Rbp = *(ULONG64 *)val; break;
-    case 7:  context->Rsp = *(ULONG64 *)val; break;
-    case 8:  context->R8  = *(ULONG64 *)val; break;
-    case 9:  context->R9  = *(ULONG64 *)val; break;
-    case 10: context->R10 = *(ULONG64 *)val; break;
-    case 11: context->R11 = *(ULONG64 *)val; break;
-    case 12: context->R12 = *(ULONG64 *)val; break;
-    case 13: context->R13 = *(ULONG64 *)val; break;
-    case 14: context->R14 = *(ULONG64 *)val; break;
-    case 15: context->R15 = *(ULONG64 *)val; break;
-    case 16: context->Rip = *(ULONG64 *)val; break;
-    case 17: memcpy( &context->u.s.Xmm0, val, sizeof(M128A) ); break;
-    case 18: memcpy( &context->u.s.Xmm1, val, sizeof(M128A) ); break;
-    case 19: memcpy( &context->u.s.Xmm2, val, sizeof(M128A) ); break;
-    case 20: memcpy( &context->u.s.Xmm3, val, sizeof(M128A) ); break;
-    case 21: memcpy( &context->u.s.Xmm4, val, sizeof(M128A) ); break;
-    case 22: memcpy( &context->u.s.Xmm5, val, sizeof(M128A) ); break;
-    case 23: memcpy( &context->u.s.Xmm6, val, sizeof(M128A) ); break;
-    case 24: memcpy( &context->u.s.Xmm7, val, sizeof(M128A) ); break;
-    case 25: memcpy( &context->u.s.Xmm8, val, sizeof(M128A) ); break;
-    case 26: memcpy( &context->u.s.Xmm9, val, sizeof(M128A) ); break;
-    case 27: memcpy( &context->u.s.Xmm10, val, sizeof(M128A) ); break;
-    case 28: memcpy( &context->u.s.Xmm11, val, sizeof(M128A) ); break;
-    case 29: memcpy( &context->u.s.Xmm12, val, sizeof(M128A) ); break;
-    case 30: memcpy( &context->u.s.Xmm13, val, sizeof(M128A) ); break;
-    case 31: memcpy( &context->u.s.Xmm14, val, sizeof(M128A) ); break;
-    case 32: memcpy( &context->u.s.Xmm15, val, sizeof(M128A) ); break;
-    case 33: memcpy( &context->u.s.Legacy[0], val, sizeof(M128A) ); break;
-    case 34: memcpy( &context->u.s.Legacy[1], val, sizeof(M128A) ); break;
-    case 35: memcpy( &context->u.s.Legacy[2], val, sizeof(M128A) ); break;
-    case 36: memcpy( &context->u.s.Legacy[3], val, sizeof(M128A) ); break;
-    case 37: memcpy( &context->u.s.Legacy[4], val, sizeof(M128A) ); break;
-    case 38: memcpy( &context->u.s.Legacy[5], val, sizeof(M128A) ); break;
-    case 39: memcpy( &context->u.s.Legacy[6], val, sizeof(M128A) ); break;
-    case 40: memcpy( &context->u.s.Legacy[7], val, sizeof(M128A) ); break;
-    }
-}
-
-static ULONG_PTR eval_expression( const unsigned char *p, CONTEXT *context,
-                                  const struct dwarf_eh_bases *bases )
-{
-    ULONG_PTR reg, tmp, stack[64];
-    int sp = -1;
-    ULONG_PTR len = dwarf_get_uleb128(&p);
-    const unsigned char *end = p + len;
-
-    while (p < end)
-    {
-        unsigned char opcode = dwarf_get_u1(&p);
-
-        if (opcode >= DW_OP_lit0 && opcode <= DW_OP_lit31)
-            stack[++sp] = opcode - DW_OP_lit0;
-        else if (opcode >= DW_OP_reg0 && opcode <= DW_OP_reg31)
-            stack[++sp] = *(ULONG_PTR *)get_context_reg( context, opcode - DW_OP_reg0 );
-        else if (opcode >= DW_OP_breg0 && opcode <= DW_OP_breg31)
-            stack[++sp] = *(ULONG_PTR *)get_context_reg( context, opcode - DW_OP_breg0 ) + dwarf_get_sleb128(&p);
-        else switch (opcode)
-        {
-        case DW_OP_nop:         break;
-        case DW_OP_addr:        stack[++sp] = dwarf_get_u8(&p); break;
-        case DW_OP_const1u:     stack[++sp] = dwarf_get_u1(&p); break;
-        case DW_OP_const1s:     stack[++sp] = (signed char)dwarf_get_u1(&p); break;
-        case DW_OP_const2u:     stack[++sp] = dwarf_get_u2(&p); break;
-        case DW_OP_const2s:     stack[++sp] = (short)dwarf_get_u2(&p); break;
-        case DW_OP_const4u:     stack[++sp] = dwarf_get_u4(&p); break;
-        case DW_OP_const4s:     stack[++sp] = (signed int)dwarf_get_u4(&p); break;
-        case DW_OP_const8u:     stack[++sp] = dwarf_get_u8(&p); break;
-        case DW_OP_const8s:     stack[++sp] = (LONG_PTR)dwarf_get_u8(&p); break;
-        case DW_OP_constu:      stack[++sp] = dwarf_get_uleb128(&p); break;
-        case DW_OP_consts:      stack[++sp] = dwarf_get_sleb128(&p); break;
-        case DW_OP_deref:       stack[sp] = *(ULONG_PTR *)stack[sp]; break;
-        case DW_OP_dup:         stack[sp + 1] = stack[sp]; sp++; break;
-        case DW_OP_drop:        sp--; break;
-        case DW_OP_over:        stack[sp + 1] = stack[sp - 1]; sp++; break;
-        case DW_OP_pick:        stack[sp + 1] = stack[sp - dwarf_get_u1(&p)]; sp++; break;
-        case DW_OP_swap:        tmp = stack[sp]; stack[sp] = stack[sp-1]; stack[sp-1] = tmp; break;
-        case DW_OP_rot:         tmp = stack[sp]; stack[sp] = stack[sp-1]; stack[sp-1] = stack[sp-2]; stack[sp-2] = tmp; break;
-        case DW_OP_abs:         stack[sp] = labs(stack[sp]); break;
-        case DW_OP_neg:         stack[sp] = -stack[sp]; break;
-        case DW_OP_not:         stack[sp] = ~stack[sp]; break;
-        case DW_OP_and:         stack[sp-1] &= stack[sp]; sp--; break;
-        case DW_OP_or:          stack[sp-1] |= stack[sp]; sp--; break;
-        case DW_OP_minus:       stack[sp-1] -= stack[sp]; sp--; break;
-        case DW_OP_mul:         stack[sp-1] *= stack[sp]; sp--; break;
-        case DW_OP_plus:        stack[sp-1] += stack[sp]; sp--; break;
-        case DW_OP_xor:         stack[sp-1] ^= stack[sp]; sp--; break;
-        case DW_OP_shl:         stack[sp-1] <<= stack[sp]; sp--; break;
-        case DW_OP_shr:         stack[sp-1] >>= stack[sp]; sp--; break;
-        case DW_OP_plus_uconst: stack[sp] += dwarf_get_uleb128(&p); break;
-        case DW_OP_shra:        stack[sp-1] = (LONG_PTR)stack[sp-1] / (1 << stack[sp]); sp--; break;
-        case DW_OP_div:         stack[sp-1] = (LONG_PTR)stack[sp-1] / (LONG_PTR)stack[sp]; sp--; break;
-        case DW_OP_mod:         stack[sp-1] = (LONG_PTR)stack[sp-1] % (LONG_PTR)stack[sp]; sp--; break;
-        case DW_OP_ge:          stack[sp-1] = ((LONG_PTR)stack[sp-1] >= (LONG_PTR)stack[sp]); sp--; break;
-        case DW_OP_gt:          stack[sp-1] = ((LONG_PTR)stack[sp-1] >  (LONG_PTR)stack[sp]); sp--; break;
-        case DW_OP_le:          stack[sp-1] = ((LONG_PTR)stack[sp-1] <= (LONG_PTR)stack[sp]); sp--; break;
-        case DW_OP_lt:          stack[sp-1] = ((LONG_PTR)stack[sp-1] <  (LONG_PTR)stack[sp]); sp--; break;
-        case DW_OP_eq:          stack[sp-1] = (stack[sp-1] == stack[sp]); sp--; break;
-        case DW_OP_ne:          stack[sp-1] = (stack[sp-1] != stack[sp]); sp--; break;
-        case DW_OP_skip:        tmp = (short)dwarf_get_u2(&p); p += tmp; break;
-        case DW_OP_bra:         tmp = (short)dwarf_get_u2(&p); if (!stack[sp--]) p += tmp; break;
-        case DW_OP_GNU_encoded_addr: tmp = *p++; stack[++sp] = dwarf_get_ptr( &p, tmp, bases ); break;
-        case DW_OP_regx:        stack[++sp] = *(ULONG_PTR *)get_context_reg( context, dwarf_get_uleb128(&p) ); break;
-        case DW_OP_bregx:
-            reg = dwarf_get_uleb128(&p);
-            tmp = dwarf_get_sleb128(&p);
-            stack[++sp] = *(ULONG_PTR *)get_context_reg( context, reg ) + tmp;
-            break;
-        case DW_OP_deref_size:
-            switch (*p++)
-            {
-            case 1: stack[sp] = *(unsigned char *)stack[sp]; break;
-            case 2: stack[sp] = *(unsigned short *)stack[sp]; break;
-            case 4: stack[sp] = *(unsigned int *)stack[sp]; break;
-            case 8: stack[sp] = *(ULONG_PTR *)stack[sp]; break;
-            }
-            break;
-        default:
-            FIXME( "unhandled opcode %02x\n", opcode );
-        }
-    }
-    return stack[sp];
-}
-
-/* apply the computed frame info to the actual context */
-static void apply_frame_state( CONTEXT *context, struct frame_state *state,
-                               const struct dwarf_eh_bases *bases )
-{
-    unsigned int i;
-    ULONG_PTR cfa, value;
-    CONTEXT new_context = *context;
-
-    switch (state->cfa_rule)
-    {
-    case RULE_EXPRESSION:
-        cfa = *(ULONG_PTR *)eval_expression( (const unsigned char *)state->cfa_offset, context, bases );
-        break;
-    case RULE_VAL_EXPRESSION:
-        cfa = eval_expression( (const unsigned char *)state->cfa_offset, context, bases );
-        break;
-    default:
-        cfa = *(ULONG_PTR *)get_context_reg( context, state->cfa_reg ) + state->cfa_offset;
-        break;
-    }
-    if (!cfa) return;
-
-    for (i = 0; i < NB_FRAME_REGS; i++)
-    {
-        switch (state->rules[i])
-        {
-        case RULE_UNSET:
-        case RULE_UNDEFINED:
-        case RULE_SAME:
-            break;
-        case RULE_CFA_OFFSET:
-            set_context_reg( &new_context, i, (char *)cfa + state->regs[i] );
-            break;
-        case RULE_OTHER_REG:
-            set_context_reg( &new_context, i, get_context_reg( context, state->regs[i] ));
-            break;
-        case RULE_EXPRESSION:
-            value = eval_expression( (const unsigned char *)state->regs[i], context, bases );
-            set_context_reg( &new_context, i, (void *)value );
-            break;
-        case RULE_VAL_EXPRESSION:
-            value = eval_expression( (const unsigned char *)state->regs[i], context, bases );
-            set_context_reg( &new_context, i, &value );
-            break;
-        }
-    }
-    new_context.Rsp = cfa;
-    *context = new_context;
-}
 
 
 /***********************************************************************
@@ -1570,8 +755,11 @@ static NTSTATUS libunwind_virtual_unwind( ULONG64 ip, ULONG64 *frame, CONTEXT *c
 /***********************************************************************
  *           unwind_builtin_dll
  */
-NTSTATUS CDECL unwind_builtin_dll( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEXT *context )
+NTSTATUS unwind_builtin_dll( void *args )
 {
+    struct unwind_builtin_dll_params *params = args;
+    DISPATCHER_CONTEXT *dispatch = params->dispatch;
+    CONTEXT *context = params->context;
     struct dwarf_eh_bases bases;
     const struct dwarf_fde *fde = _Unwind_Find_FDE( (void *)(context->Rip - 1), &bases );
 
@@ -1607,7 +795,10 @@ static inline void set_sigcontext( const CONTEXT *context, ucontext_t *sigcontex
     RIP_sig(sigcontext) = context->Rip;
     CS_sig(sigcontext)  = context->SegCs;
     FS_sig(sigcontext)  = context->SegFs;
+    /* CXHACK 22480: Setting GS is not supported on Rosetta */
+#ifndef __APPLE__
     GS_sig(sigcontext)  = context->SegGs;
+#endif
     EFL_sig(sigcontext) = context->EFlags;
 #ifdef DS_sig
     DS_sig(sigcontext) = context->SegDs;
@@ -1627,7 +818,11 @@ static inline void set_sigcontext( const CONTEXT *context, ucontext_t *sigcontex
 static inline void init_handler( const ucontext_t *sigcontext )
 {
 #ifdef __linux__
-    if (fs32_sel) arch_prctl( ARCH_SET_FS, amd64_thread_data()->pthread_teb );
+    if (fs32_sel)
+    {
+        struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)&get_current_teb()->GdiTebBatch;
+        arch_prctl( ARCH_SET_FS, ((struct amd64_thread_data *)thread_data->cpu_data)->pthread_teb );
+    }
 #endif
 }
 
@@ -1809,6 +1004,14 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
     if (!self)
     {
         ret = set_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_AMD64 );
+#ifdef __APPLE__
+        if ((flags & CONTEXT_DEBUG_REGISTERS) && (ret == STATUS_UNSUCCESSFUL))
+        {
+            /* CW HACK 22131 */
+            WARN_(seh)( "Setting debug registers is not supported under Rosetta, faking success\n" );
+            ret = STATUS_SUCCESS;
+        }
+#endif
         if (ret || !self) return ret;
         if (flags & CONTEXT_DEBUG_REGISTERS)
         {
@@ -2026,6 +1229,14 @@ NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size )
     if (!self)
     {
         NTSTATUS ret = set_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_I386 );
+#ifdef __APPLE__
+        if ((flags & CONTEXT_DEBUG_REGISTERS) && (ret == STATUS_UNSUCCESSFUL))
+        {
+            /* CW HACK 22131 */
+            WARN_(seh)( "Setting debug registers is not supported under Rosetta, faking success\n" );
+            ret = STATUS_SUCCESS;
+        }
+#endif
         if (ret || !self) return ret;
         if (flags & CONTEXT_I386_DEBUG_REGISTERS)
         {
@@ -2377,59 +1588,163 @@ NTSTATUS call_user_exception_dispatcher( EXCEPTION_RECORD *rec, CONTEXT *context
 }
 
 
-struct user_callback_frame
-{
-    struct syscall_frame frame;
-    void               **ret_ptr;
-    ULONG               *ret_len;
-    __wine_jmp_buf       jmpbuf;
-    NTSTATUS             status;
-};
+/***********************************************************************
+ *           call_user_mode_callback
+ */
+extern NTSTATUS CDECL call_user_mode_callback( void *func, void *stack, void **ret_ptr,
+                                               ULONG *ret_len, TEB *teb );
+__ASM_GLOBAL_FUNC( call_user_mode_callback,
+                   "subq $0xe8,%rsp\n\t"
+                   __ASM_SEH(".seh_stackalloc 0xf0\n\t")
+                   __ASM_SEH(".seh_endprologue\n\t")
+                   __ASM_CFI(".cfi_adjust_cfa_offset 0xe8\n\t")
+                   "movq %rbp,0xe0(%rsp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %rbp,0xe0\n\t")
+                   "leaq 0xe0(%rsp),%rbp\n\t"
+                   __ASM_CFI(".cfi_def_cfa_register %rbp\n\t")
+                   "movq %rbx,-0x08(%rbp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %rbx,-0x08\n\t")
+                   "movq %rsi,-0x10(%rbp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %rbx,-0x10\n\t")
+                   "movq %rdi,-0x18(%rbp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %rbx,-0x18\n\t")
+                   "movq %r12,-0x20(%rbp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %r12,-0x20\n\t")
+                   "movq %r13,-0x28(%rbp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %r13,-0x28\n\t")
+                   "movq %r14,-0x30(%rbp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %r14,-0x30\n\t")
+                   "movq %r15,-0x38(%rbp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %r15,-0x38\n\t")
+                   "stmxcsr -0x40(%rbp)\n\t"
+                   "fnstcw -0x3c(%rbp)\n\t"
+                   "movdqa %xmm6,-0x50(%rbp)\n\t"
+                   "movdqa %xmm7,-0x60(%rbp)\n\t"
+                   "movdqa %xmm8,-0x70(%rbp)\n\t"
+                   "movdqa %xmm9,-0x80(%rbp)\n\t"
+                   "movdqa %xmm10,-0x90(%rbp)\n\t"
+                   "movdqa %xmm11,-0xa0(%rbp)\n\t"
+                   "movdqa %xmm12,-0xb0(%rbp)\n\t"
+                   "movdqa %xmm13,-0xc0(%rbp)\n\t"
+                   "movdqa %xmm14,-0xd0(%rbp)\n\t"
+                   "movdqa %xmm15,-0xe0(%rbp)\n\t"
+                   "movq %r8,0x10(%rbp)\n\t"   /* ret_ptr */
+                   "movq %r9,0x18(%rbp)\n\t"   /* ret_len */
+                   "movq 0x30(%rbp),%r11\n\t"  /* teb */
+
+                   "subq $0x410,%rsp\n\t"      /* sizeof(struct syscall_frame) + ebp + exception */
+                   "andq $~63,%rsp\n\t"
+                   "movq %rbp,0x400(%rsp)\n\t"
+                   "movq 0x328(%r11),%r10\n\t" /* amd64_thread_data()->syscall_frame */
+                   "movq (%r11),%rax\n\t"      /* NtCurrentTeb()->Tib.ExceptionList */
+                   "movq %rax,0x408(%rsp)\n\t"
+                   "movq 0xa8(%r10),%rax\n\t"  /* prev_frame->syscall_table */
+                   "movq %rax,0xa8(%rsp)\n\t"  /* frame->syscall_table */
+                   "movl 0xb0(%r10),%r14d\n\t" /* prev_frame->syscall_flags */
+                   "movl %r14d,0xb0(%rsp)\n\t" /* frame->syscall_flags */
+                   "movq %r10,0xa0(%rsp)\n\t"  /* frame->prev_frame */
+                   "movq %rsp,0x328(%r11)\n\t" /* amd64_thread_data()->syscall_frame */
+#ifdef __linux__
+                   "testl $12,%r14d\n\t"       /* SYSCALL_HAVE_PTHREAD_TEB | SYSCALL_HAVE_WRFSGSBASE */
+                   "jz 1f\n\t"
+                   "movw 0x338(%r11),%fs\n"    /* amd64_thread_data()->fs */
+                   "1:\n\t"
+#endif
+                   "movq %rcx,%r9\n\t"         /* func */
+                   "movq %rdx,%rax\n\t"        /* stack */
+                   "movq 0x8(%rax),%rcx\n\t"   /* id */
+                   "movq 0x10(%rax),%rdx\n\t"  /* args */
+                   "movq 0x18(%rax),%r8\n\t"   /* len */
+                   "movq %rax,%rsp\n\t"
+                   "jmpq *%r9" )
+
+
+/***********************************************************************
+ *           user_mode_callback_return
+ */
+extern void CDECL DECLSPEC_NORETURN user_mode_callback_return( void *ret_ptr, ULONG ret_len,
+                                                               NTSTATUS status, TEB *teb );
+__ASM_GLOBAL_FUNC( user_mode_callback_return,
+                   "movq 0x328(%r9),%r10\n\t"  /* amd64_thread_data()->syscall_frame */
+                   "movq 0xa0(%r10),%r11\n\t"  /* frame->prev_frame */
+                   "movq %r11,0x328(%r9)\n\t"  /* amd64_thread_data()->syscall_frame = prev_frame */
+                   "movq 0x400(%r10),%rbp\n\t" /* call_user_mode_callback rbp */
+                   __ASM_CFI(".cfi_def_cfa_register %rbp\n\t")
+                   __ASM_CFI(".cfi_rel_offset %rbx,-0x08\n\t")
+                   __ASM_CFI(".cfi_rel_offset %rbx,-0x10\n\t")
+                   __ASM_CFI(".cfi_rel_offset %rbx,-0x18\n\t")
+                   __ASM_CFI(".cfi_rel_offset %r12,-0x20\n\t")
+                   __ASM_CFI(".cfi_rel_offset %r13,-0x28\n\t")
+                   __ASM_CFI(".cfi_rel_offset %r14,-0x30\n\t")
+                   __ASM_CFI(".cfi_rel_offset %r15,-0x38\n\t")
+                   "movq 0x408(%r10),%rsi\n\t" /* exception list */
+                   "movq %rsi,0(%r9)\n\t"      /* teb->Tib.ExceptionList */
+                   "movq 0x10(%rbp),%rsi\n\t"  /* ret_ptr */
+                   "movq 0x18(%rbp),%rdi\n\t"  /* ret_len */
+                   "movq %rcx,(%rsi)\n\t"
+                   "movl %edx,(%rdi)\n\t"
+                   "movdqa -0xe0(%rbp),%xmm15\n\t"
+                   "movdqa -0xd0(%rbp),%xmm14\n\t"
+                   "movdqa -0xc0(%rbp),%xmm13\n\t"
+                   "movdqa -0xb0(%rbp),%xmm12\n\t"
+                   "movdqa -0xa0(%rbp),%xmm11\n\t"
+                   "movdqa -0x90(%rbp),%xmm10\n\t"
+                   "movdqa -0x80(%rbp),%xmm9\n\t"
+                   "movdqa -0x70(%rbp),%xmm8\n\t"
+                   "movdqa -0x60(%rbp),%xmm7\n\t"
+                   "movdqa -0x50(%rbp),%xmm6\n\t"
+                   "ldmxcsr -0x40(%rbp)\n\t"
+                   "fnclex\n\t"
+                   "fldcw -0x3c(%rbp)\n\t"
+                   "movq -0x38(%rbp),%r15\n\t"
+                   __ASM_CFI(".cfi_same_value %r15\n\t")
+                   "movq -0x30(%rbp),%r14\n\t"
+                   __ASM_CFI(".cfi_same_value %r14\n\t")
+                   "movq -0x28(%rbp),%r13\n\t"
+                   __ASM_CFI(".cfi_same_value %r13\n\t")
+                   "movq -0x20(%rbp),%r12\n\t"
+                   __ASM_CFI(".cfi_same_value %r12\n\t")
+                   "movq -0x18(%rbp),%rdi\n\t"
+                   __ASM_CFI(".cfi_same_value %rdi\n\t")
+                   "movq -0x10(%rbp),%rsi\n\t"
+                   __ASM_CFI(".cfi_same_value %rsi\n\t")
+                   "movq -0x08(%rbp),%rbx\n\t"
+                   __ASM_CFI(".cfi_same_value %rbx\n\t")
+                   "leave\n"
+                   __ASM_CFI(".cfi_def_cfa %rsp,8\n\t")
+                   __ASM_CFI(".cfi_same_value %rbp\n\t")
+                   "movq %r8,%rax\n\t"
+                   "retq" )
+
 
 /***********************************************************************
  *           KeUserModeCallback
  */
 NTSTATUS WINAPI KeUserModeCallback( ULONG id, const void *args, ULONG len, void **ret_ptr, ULONG *ret_len )
 {
-    struct user_callback_frame callback_frame = { { 0 }, ret_ptr, ret_len };
+    struct syscall_frame *frame = amd64_thread_data()->syscall_frame;
+    void *args_data = (void *)((frame->rsp - len) & ~15);
+    ULONG_PTR *stack = args_data;
 
     /* if we have no syscall frame, call the callback directly */
-    if ((char *)&callback_frame < (char *)ntdll_get_thread_data()->kernel_stack ||
-        (char *)&callback_frame > (char *)amd64_thread_data()->syscall_frame)
+    if ((char *)&frame < (char *)ntdll_get_thread_data()->kernel_stack ||
+        (char *)&frame > (char *)amd64_thread_data()->syscall_frame)
     {
         NTSTATUS (WINAPI *func)(const void *, ULONG) = ((void **)NtCurrentTeb()->Peb->KernelCallbackTable)[id];
         return func( args, len );
     }
 
-    if ((char *)ntdll_get_thread_data()->kernel_stack + min_kernel_stack > (char *)&callback_frame)
+    if ((char *)ntdll_get_thread_data()->kernel_stack + min_kernel_stack > (char *)&frame)
         return STATUS_STACK_OVERFLOW;
 
-    if (!__wine_setjmpex( &callback_frame.jmpbuf, NULL ))
-    {
-        struct syscall_frame *frame = amd64_thread_data()->syscall_frame;
-        void *args_data = (void *)((frame->rsp - len) & ~15);
+    memcpy( args_data, args, len );
+    *(--stack) = 0;
+    *(--stack) = len;
+    *(--stack) = (ULONG_PTR)args_data;
+    *(--stack) = id;
+    *(--stack) = 0xdeadbabe;
 
-        memcpy( args_data, args, len );
-
-        callback_frame.frame.rcx           = id;
-        callback_frame.frame.rdx           = (ULONG_PTR)args;
-        callback_frame.frame.r8            = len;
-        callback_frame.frame.cs            = cs64_sel;
-        callback_frame.frame.fs            = amd64_thread_data()->fs;
-        callback_frame.frame.gs            = ds64_sel;
-        callback_frame.frame.ss            = ds64_sel;
-        callback_frame.frame.rsp           = (ULONG_PTR)args_data - 0x28;
-        callback_frame.frame.rip           = (ULONG_PTR)pKiUserCallbackDispatcher;
-        callback_frame.frame.eflags        = 0x200;
-        callback_frame.frame.restore_flags = CONTEXT_CONTROL | CONTEXT_INTEGER;
-        callback_frame.frame.prev_frame    = frame;
-        callback_frame.frame.syscall_flags = frame->syscall_flags;
-        callback_frame.frame.syscall_table = frame->syscall_table;
-        amd64_thread_data()->syscall_frame = &callback_frame.frame;
-
-        __wine_syscall_dispatcher_return( &callback_frame.frame, 0 );
-    }
-    return callback_frame.status;
+    return call_user_mode_callback( pKiUserCallbackDispatcher, stack, ret_ptr, ret_len, NtCurrentTeb() );
 }
 
 
@@ -2438,15 +1753,8 @@ NTSTATUS WINAPI KeUserModeCallback( ULONG id, const void *args, ULONG len, void 
  */
 NTSTATUS WINAPI NtCallbackReturn( void *ret_ptr, ULONG ret_len, NTSTATUS status )
 {
-    struct user_callback_frame *frame = (struct user_callback_frame *)amd64_thread_data()->syscall_frame;
-
-    if (!frame->frame.prev_frame) return STATUS_NO_CALLBACK_ACTIVE;
-
-    *frame->ret_ptr = ret_ptr;
-    *frame->ret_len = ret_len;
-    frame->status = status;
-    amd64_thread_data()->syscall_frame = frame->frame.prev_frame;
-    __wine_longjmp( &frame->jmpbuf, 1 );
+    if (!amd64_thread_data()->syscall_frame->prev_frame) return STATUS_NO_CALLBACK_ACTIVE;
+    user_mode_callback_return( ret_ptr, ret_len, status, NtCurrentTeb() );
 }
 
 #ifdef __APPLE__
@@ -2607,6 +1915,14 @@ static inline BOOL handle_interrupt( ucontext_t *sigcontext, EXCEPTION_RECORD *r
 
     switch (ERROR_sig(sigcontext) >> 3)
     {
+    case 0x29:
+        /* __fastfail: process state is corrupted */
+        rec->ExceptionCode = STATUS_STACK_BUFFER_OVERRUN;
+        rec->ExceptionFlags = EH_NONCONTINUABLE;
+        rec->NumberParameters = 1;
+        rec->ExceptionInformation[0] = context->Rcx;
+        NtRaiseException( rec, context, FALSE );
+        return TRUE;
     case 0x2c:
         rec->ExceptionCode = STATUS_ASSERTION_FAILURE;
         break;
@@ -2690,12 +2006,24 @@ static BOOL handle_syscall_fault( ucontext_t *sigcontext, EXCEPTION_RECORD *rec,
  */
 static BOOL handle_syscall_trap( ucontext_t *sigcontext )
 {
-    extern void __wine_syscall_dispatcher_prolog_end(void);
     struct syscall_frame *frame = amd64_thread_data()->syscall_frame;
 
     /* disallow single-stepping through a syscall */
 
-    if ((void *)RIP_sig( sigcontext ) != __wine_syscall_dispatcher) return FALSE;
+    if ((void *)RIP_sig( sigcontext ) == __wine_syscall_dispatcher)
+    {
+        extern void __wine_syscall_dispatcher_prolog_end(void);
+
+        RIP_sig( sigcontext ) = (ULONG64)__wine_syscall_dispatcher_prolog_end;
+    }
+    else if ((void *)RIP_sig( sigcontext ) == __wine_unix_call_dispatcher)
+    {
+        extern void __wine_unix_call_dispatcher_prolog_end(void);
+
+        RIP_sig( sigcontext ) = (ULONG64)__wine_unix_call_dispatcher_prolog_end;
+        R10_sig( sigcontext ) = RCX_sig( sigcontext );
+    }
+    else return FALSE;
 
     TRACE_(seh)( "ignoring trap in syscall rip=%p eflags=%08x\n",
                  (void *)RIP_sig(sigcontext), (ULONG)EFL_sig(sigcontext) );
@@ -2704,7 +2032,6 @@ static BOOL handle_syscall_trap( ucontext_t *sigcontext )
     frame->eflags = EFL_sig(sigcontext);
     frame->restore_flags = CONTEXT_CONTROL;
 
-    RIP_sig( sigcontext ) = (ULONG64)__wine_syscall_dispatcher_prolog_end;
     RCX_sig( sigcontext ) = (ULONG64)frame;
     RSP_sig( sigcontext ) += sizeof(ULONG64);
     EFL_sig( sigcontext ) &= ~0x100;  /* clear single-step flag */
@@ -2931,6 +2258,7 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *ucontext )
 {
     struct xcontext context;
 
+    init_handler( ucontext );
     if (is_inside_syscall( ucontext ))
     {
         DECLSPEC_ALIGN(64) XSTATE xs;
@@ -3160,49 +2488,6 @@ static void *mac_thread_gsbase(void)
 
 
 /**********************************************************************
- *		signal_init_thread
- */
-void signal_init_thread( TEB *teb )
-{
-    const WORD fpu_cw = 0x27f;
-
-#if defined __linux__
-    arch_prctl( ARCH_SET_GS, teb );
-    arch_prctl( ARCH_GET_FS, &amd64_thread_data()->pthread_teb );
-    if (fs32_sel) alloc_fs_sel( fs32_sel >> 3, (char *)teb + teb->WowTebOffset );
-#elif defined (__FreeBSD__) || defined (__FreeBSD_kernel__)
-    amd64_set_gsbase( teb );
-#elif defined(__NetBSD__)
-    sysarch( X86_64_SET_GSBASE, &teb );
-#elif defined (__APPLE__)
-    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1"
-                      :
-                      : "r" (teb->Tib.Self), "n" (FIELD_OFFSET(TEB, Tib.Self)));
-    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1"
-                      :
-                      : "r" (teb->ThreadLocalStoragePointer), "n" (FIELD_OFFSET(TEB, ThreadLocalStoragePointer)));
-    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1"
-                      :
-                      : "r" (teb->Peb), "n" (FIELD_OFFSET(TEB, Peb)));
-    amd64_thread_data()->pthread_teb = mac_thread_gsbase();
-
-    /* alloc_tls_slot() needs to poke a value to an address relative to each
-       thread's gsbase.  Have each thread record its gsbase pointer into its
-       TEB so alloc_tls_slot() can find it. */
-    teb->Reserved5[0] = amd64_thread_data()->pthread_teb;
-#else
-# error Please define setting %gs for your architecture
-#endif
-
-#ifdef __GNUC__
-    __asm__ volatile ("fninit; fldcw %0" : : "m" (fpu_cw));
-#else
-    FIXME_(seh)("FPU setup not implemented for this platform.\n");
-#endif
-}
-
-
-/**********************************************************************
  *		signal_init_process
  */
 void signal_init_process(void)
@@ -3231,7 +2516,9 @@ void signal_init_process(void)
         {
             amd64_thread_data()->fs = fs32_sel = (sel << 3) | 3;
             syscall_flags |= SYSCALL_HAVE_PTHREAD_TEB;
+#ifdef AT_HWCAP2
             if (getauxval( AT_HWCAP2 ) & 2) syscall_flags |= SYSCALL_HAVE_WRFSGSBASE;
+#endif
         }
         else ERR_(seh)( "failed to allocate %%fs selector\n" );
     }
@@ -3239,11 +2526,10 @@ void signal_init_process(void)
     if (NtCurrentTeb()->WowTebOffset)
     {
         void *teb32 = (char *)NtCurrentTeb() + NtCurrentTeb()->WowTebOffset;
-        LDT_ENTRY cs32_entry, ds32_entry, fs32_entry;
+        LDT_ENTRY cs32_entry, fs32_entry;
         int idx;
 
         cs32_entry = ldt_make_entry( NULL, -1, LDT_FLAGS_CODE | LDT_FLAGS_32BIT );
-        ds32_entry = ldt_make_entry( NULL, -1, LDT_FLAGS_DATA | LDT_FLAGS_32BIT );
         fs32_entry = ldt_make_entry( teb32, page_size - 1, LDT_FLAGS_DATA | LDT_FLAGS_32BIT );
 
         for (idx = first_ldt_entry; idx < LDT_SIZE; idx++)
@@ -3257,19 +2543,10 @@ void signal_init_process(void)
         for (idx = first_ldt_entry; idx < LDT_SIZE; idx++)
         {
             if (__wine_ldt_copy.flags[idx]) continue;
-            ds32_sel = (idx << 3) | 7;
-            ldt_set_entry( ds32_sel, ds32_entry );
-            break;
-        }
-
-        for (idx = first_ldt_entry; idx < LDT_SIZE; idx++)
-        {
-            if (__wine_ldt_copy.flags[idx]) continue;
             amd64_thread_data()->fs = (idx << 3) | 7;
             ldt_set_entry( amd64_thread_data()->fs, fs32_entry );
             break;
         }
-        fixup_builtin_so_32on64_sels();
     }
 #endif
 
@@ -3309,6 +2586,27 @@ void DECLSPEC_HIDDEN call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, B
     struct syscall_frame *frame = thread_data->syscall_frame;
     CONTEXT *ctx, context = { 0 };
     I386_CONTEXT *wow_context;
+
+#if defined __linux__
+    arch_prctl( ARCH_SET_GS, teb );
+    arch_prctl( ARCH_GET_FS, &amd64_thread_data()->pthread_teb );
+    if (fs32_sel) alloc_fs_sel( fs32_sel >> 3, (char *)teb + teb->WowTebOffset );
+#elif defined (__FreeBSD__) || defined (__FreeBSD_kernel__)
+    amd64_set_gsbase( teb );
+#elif defined(__NetBSD__)
+    sysarch( X86_64_SET_GSBASE, &teb );
+#elif defined (__APPLE__)
+    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1" :: "r" (teb->Tib.Self), "n" (FIELD_OFFSET(TEB, Tib.Self)));
+    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1" :: "r" (teb->ThreadLocalStoragePointer), "n" (FIELD_OFFSET(TEB, ThreadLocalStoragePointer)));
+    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1" :: "r" (teb->Peb), "n" (FIELD_OFFSET(TEB, Peb)));
+    amd64_thread_data()->pthread_teb = mac_thread_gsbase();
+    /* alloc_tls_slot() needs to poke a value to an address relative to each
+       thread's gsbase.  Have each thread record its gsbase pointer into its
+       TEB so alloc_tls_slot() can find it. */
+    teb->Reserved5[0] = amd64_thread_data()->pthread_teb;
+#else
+# error Please define setting %gs for your architecture
+#endif
 
     context.ContextFlags = CONTEXT_ALL;
     context.Rcx    = (ULONG_PTR)entry;
@@ -3422,31 +2720,49 @@ __ASM_GLOBAL_FUNC( signal_exit_thread,
  *           __wine_syscall_dispatcher
  */
 __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
+#ifdef __APPLE__
                    "movq %gs:0x30,%rcx\n\t"
-                   "movq 0x328(%rcx),%rcx\n\t"     /* amd64_thread_data()->syscall_frame */
+                   "movq 0x328(%rcx),%rcx\n\t"
+#else
+                   "movq %gs:0x328,%rcx\n\t"       /* amd64_thread_data()->syscall_frame */
+#endif
                    "popq 0x70(%rcx)\n\t"           /* frame->rip */
+                   __ASM_CFI(".cfi_adjust_cfa_offset -8\n\t")
+                   __ASM_CFI_REG_IS_AT2(rip, rcx, 0xf0,0x00)
                    "pushfq\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t")
                    "popq 0x80(%rcx)\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset -8\n\t")
                    "movl $0,0x94(%rcx)\n\t"        /* frame->restore_flags */
                    ".globl " __ASM_NAME("__wine_syscall_dispatcher_prolog_end") "\n"
                    __ASM_NAME("__wine_syscall_dispatcher_prolog_end") ":\n\t"
                    "movq %rax,0x00(%rcx)\n\t"
                    "movq %rbx,0x08(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT1(rbx, rcx, 0x08)
                    "movq %rdx,0x18(%rcx)\n\t"
                    "movq %rsi,0x20(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT1(rsi, rcx, 0x20)
                    "movq %rdi,0x28(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT1(rdi, rcx, 0x28)
                    "movq %r12,0x50(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT2(r12, rcx, 0xd0, 0x00)
                    "movq %r13,0x58(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT2(r13, rcx, 0xd8, 0x00)
                    "movq %r14,0x60(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT2(r14, rcx, 0xe0, 0x00)
                    "movq %r15,0x68(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT2(r15, rcx, 0xe8, 0x00)
                    "movw %cs,0x78(%rcx)\n\t"
                    "movw %ds,0x7a(%rcx)\n\t"
                    "movw %es,0x7c(%rcx)\n\t"
                    "movw %fs,0x7e(%rcx)\n\t"
                    "movq %rsp,0x88(%rcx)\n\t"
+                   __ASM_CFI_CFA_IS_AT2(rcx, 0x88, 0x01)
+                   __ASM_CFI_REG_IS_AT2(rsp, rcx, 0x88, 0x01)
                    "movw %ss,0x90(%rcx)\n\t"
                    "movw %gs,0x92(%rcx)\n\t"
                    "movq %rbp,0x98(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT2(rbp, rcx, 0x98, 0x01)
                    /* Legends of Runeterra hooks the first system call return instruction, and
                     * depends on us returning to it. Adjust the return address accordingly. */
                    "subq $0xb,0x70(%rcx)\n\t"
@@ -3465,12 +2781,27 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "movq %rdx,0x2e8(%rcx)\n\t"
                    "movq %rdx,0x2f0(%rcx)\n\t"
                    "movq %rdx,0x2f8(%rcx)\n\t"
-                   "xsavec64 0xc0(%rcx)\n\t"
+                   /* The xsavec instruction is not supported by
+                    * binutils < 2.25. */
+                   ".byte 0x48, 0x0f, 0xc7, 0xa1, 0xc0, 0x00, 0x00, 0x00\n\t" /* xsavec64 0xc0(%rcx) */
                    "jmp 3f\n"
                    "1:\txsave64 0xc0(%rcx)\n\t"
                    "jmp 3f\n"
                    "2:\tfxsave64 0xc0(%rcx)\n"
+                   /* remember state when $rcx is pointing to "frame" */
+                   __ASM_CFI(".cfi_remember_state\n\t")
                    "3:\tleaq 0x98(%rcx),%rbp\n\t"
+                   __ASM_CFI_CFA_IS_AT1(rbp, 0x70)
+                   __ASM_CFI_REG_IS_AT1(rsp, rbp, 0x70)
+                   __ASM_CFI_REG_IS_AT1(rip, rbp, 0x58)
+                   __ASM_CFI_REG_IS_AT2(rbx, rbp, 0xf0, 0x7e)
+                   __ASM_CFI_REG_IS_AT2(rsi, rbp, 0x88, 0x7f)
+                   __ASM_CFI_REG_IS_AT2(rdi, rbp, 0x90, 0x7f)
+                   __ASM_CFI_REG_IS_AT2(r12, rbp, 0xb8, 0x7f)
+                   __ASM_CFI_REG_IS_AT1(r13, rbp, 0x40)
+                   __ASM_CFI_REG_IS_AT1(r14, rbp, 0x48)
+                   __ASM_CFI_REG_IS_AT1(r15, rbp, 0x50)
+                   __ASM_CFI_REG_IS_AT1(rbp, rbp, 0x00)
 #ifdef __linux__
                    "testl $12,%r14d\n\t"           /* SYSCALL_HAVE_PTHREAD_TEB | SYSCALL_HAVE_WRFSGSBASE */
                    "jz 2f\n\t"
@@ -3511,8 +2842,11 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "subq $0x20,%rsp\n\t"
                    "movq (%rbx),%r10\n\t"          /* table->ServiceTable */
                    "callq *(%r10,%rax,8)\n\t"
-                   "leaq -0x98(%rbp),%rcx\n"
-                   "2:\tmovl 0x94(%rcx),%edx\n\t"  /* frame->restore_flags */
+                   "leaq -0x98(%rbp),%rcx\n\t"
+                   /* $rcx is now pointing to "frame" again */
+                   __ASM_CFI(".cfi_restore_state\n")
+                   __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") ":\n\t"
+                   "movl 0x94(%rcx),%edx\n\t"  /* frame->restore_flags */
 #ifdef __linux__
                    "testl $12,%r14d\n\t"           /* SYSCALL_HAVE_PTHREAD_TEB | SYSCALL_HAVE_WRFSGSBASE */
                    "jz 1f\n\t"
@@ -3532,23 +2866,50 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "jmp 4f\n"
                    "3:\tfxrstor64 0xc0(%rcx)\n"
                    "4:\tmovq 0x98(%rcx),%rbp\n\t"
+                   __ASM_CFI(".cfi_same_value rbp\n\t")
                    "movq 0x68(%rcx),%r15\n\t"
+                   __ASM_CFI(".cfi_same_value r15\n\t")
                    "movq 0x60(%rcx),%r14\n\t"
+                   __ASM_CFI(".cfi_same_value r14\n\t")
                    "movq 0x58(%rcx),%r13\n\t"
+                   __ASM_CFI(".cfi_same_value r13\n\t")
                    "movq 0x50(%rcx),%r12\n\t"
+                   __ASM_CFI(".cfi_same_value r12\n\t")
                    "movq 0x28(%rcx),%rdi\n\t"
+                   __ASM_CFI(".cfi_same_value rdi\n\t")
                    "movq 0x20(%rcx),%rsi\n\t"
+                   __ASM_CFI(".cfi_same_value rsi\n\t")
                    "movq 0x08(%rcx),%rbx\n\t"
+                   __ASM_CFI(".cfi_same_value rbx\n\t")
                    "testl $0x3,%edx\n\t"           /* CONTEXT_CONTROL | CONTEXT_INTEGER */
                    "jnz 1f\n\t"
+                   __ASM_CFI(".cfi_remember_state\n\t")
+                   "movq 0x80(%rcx),%r11\n\t"      /* frame->eflags */
+                   "pushq %r11\n\t"
+                   "popfq\n\t"
                    "movq 0x88(%rcx),%rsp\n\t"
+                   __ASM_CFI(".cfi_def_cfa rsp, 0\n\t")
+                   __ASM_CFI(".cfi_same_value rsp\n\t")
                    "movq 0x70(%rcx),%rcx\n\t"      /* frame->rip */
-                   "jmpq *%rcx\n\t"
+                   __ASM_CFI(".cfi_register rip, rcx\n\t")
+                   "pushq %rcx\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t")
+                   "ret\n\t"
+                   /* $rcx is now pointing to "frame" again */
+                   __ASM_CFI(".cfi_restore_state\n\t")
+                   /* remember state when $rcx is pointing to "frame" */
+                   __ASM_CFI(".cfi_remember_state\n\t")
                    "1:\tleaq 0x70(%rcx),%rsp\n\t"
+                   __ASM_CFI_CFA_IS_AT1(rsp, 0x18)
+                   __ASM_CFI_REG_IS_AT1(rsp, rsp, 0x18)
+                   __ASM_CFI_REG_IS_AT1(rip, rsp, 0x00)
                    "testl $0x2,%edx\n\t"           /* CONTEXT_INTEGER */
                    "jnz 1f\n\t"
+                   "movq 0x10(%rsp),%r11\n\t"      /* frame->eflags */
                    "movq (%rsp),%rcx\n\t"          /* frame->rip */
+                   __ASM_CFI(".cfi_register rip, rcx\n\t")
                    "iretq\n"
+                   __ASM_CFI_REG_IS_AT1(rip, rsp, 0x00)
                    "1:\tmovq 0x00(%rcx),%rax\n\t"
                    "movq 0x18(%rcx),%rdx\n\t"
                    "movq 0x30(%rcx),%r8\n\t"
@@ -3557,13 +2918,125 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "movq 0x48(%rcx),%r11\n\t"
                    "movq 0x10(%rcx),%rcx\n"
                    "iretq\n"
+                   __ASM_CFI_CFA_IS_AT1(rbp, 0x70)
+                   __ASM_CFI_REG_IS_AT1(rsp, rbp, 0x70)
+                   __ASM_CFI_REG_IS_AT1(rip, rbp, 0x58)
+                   __ASM_CFI_REG_IS_AT2(rbx, rbp, 0xf0, 0x7e)
+                   __ASM_CFI_REG_IS_AT2(rsi, rbp, 0x88, 0x7f)
+                   __ASM_CFI_REG_IS_AT2(rdi, rbp, 0x90, 0x7f)
+                   __ASM_CFI_REG_IS_AT2(r12, rbp, 0xb8, 0x7f)
+                   __ASM_CFI_REG_IS_AT1(r13, rbp, 0x40)
+                   __ASM_CFI_REG_IS_AT1(r14, rbp, 0x48)
+                   __ASM_CFI_REG_IS_AT1(r15, rbp, 0x50)
+                   __ASM_CFI_REG_IS_AT1(rbp, rbp, 0x00)
                    "5:\tmovl $0xc000000d,%edx\n\t" /* STATUS_INVALID_PARAMETER */
                    "movq %rsp,%rcx\n\t"
+                   /* $rcx is now pointing to "frame" again */
+                   __ASM_CFI(".cfi_restore_state\n\t")
                    ".globl " __ASM_NAME("__wine_syscall_dispatcher_return") "\n"
                    __ASM_NAME("__wine_syscall_dispatcher_return") ":\n\t"
                    "movl 0xb0(%rcx),%r14d\n\t"     /* frame->syscall_flags */
                    "movq %rdx,%rax\n\t"
-                   "jmp 2b" )
+                   "jmp " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") )
+
+
+/***********************************************************************
+ *           __wine_unix_call_dispatcher
+ */
+__ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
+                   "movq %rcx,%r10\n\t"
+#ifdef __APPLE__
+                   "movq %gs:0x30,%rcx\n\t"
+                   "movq 0x328(%rcx),%rcx\n\t"
+#else
+                   "movq %gs:0x328,%rcx\n\t"       /* amd64_thread_data()->syscall_frame */
+#endif
+                   "popq 0x70(%rcx)\n\t"           /* frame->rip */
+                   __ASM_CFI(".cfi_adjust_cfa_offset -8\n\t")
+                   __ASM_CFI_REG_IS_AT2(rip, rcx, 0xf0,0x00)
+                   "movl $0,0x94(%rcx)\n\t"        /* frame->restore_flags */
+                   ".globl " __ASM_NAME("__wine_unix_call_dispatcher_prolog_end") "\n"
+                   __ASM_NAME("__wine_unix_call_dispatcher_prolog_end") ":\n\t"
+                   "movq %rbx,0x08(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT1(rbx, rcx, 0x08)
+                   "movq %rsi,0x20(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT1(rsi, rcx, 0x20)
+                   "movq %rdi,0x28(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT1(rdi, rcx, 0x28)
+                   "movq %r12,0x50(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT2(r12, rcx, 0xd0, 0x00)
+                   "movq %r13,0x58(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT2(r13, rcx, 0xd8, 0x00)
+                   "movq %r14,0x60(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT2(r14, rcx, 0xe0, 0x00)
+                   "movq %r15,0x68(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT2(r15, rcx, 0xe8, 0x00)
+                   "movq %rsp,0x88(%rcx)\n\t"
+                   __ASM_CFI_CFA_IS_AT2(rcx, 0x88, 0x01)
+                   __ASM_CFI_REG_IS_AT2(rsp, rcx, 0x88, 0x01)
+                   "movq %rbp,0x98(%rcx)\n\t"
+                   __ASM_CFI_REG_IS_AT2(rbp, rcx, 0x98, 0x01)
+                   "movdqa %xmm6,0x1c0(%rcx)\n\t"
+                   "movdqa %xmm7,0x1d0(%rcx)\n\t"
+                   "movdqa %xmm8,0x1e0(%rcx)\n\t"
+                   "movdqa %xmm9,0x1f0(%rcx)\n\t"
+                   "movdqa %xmm10,0x200(%rcx)\n\t"
+                   "movdqa %xmm11,0x210(%rcx)\n\t"
+                   "movdqa %xmm12,0x220(%rcx)\n\t"
+                   "movdqa %xmm13,0x230(%rcx)\n\t"
+                   "movdqa %xmm14,0x240(%rcx)\n\t"
+                   "movdqa %xmm15,0x250(%rcx)\n\t"
+                   "movl 0xb0(%rcx),%r14d\n\t"     /* frame->syscall_flags */
+#ifdef __linux__
+                   "testl $12,%r14d\n\t"           /* SYSCALL_HAVE_PTHREAD_TEB | SYSCALL_HAVE_WRFSGSBASE */
+                   "jz 2f\n\t"
+                   "movw %fs,0x7e(%rcx)\n\t"
+                   "movq %gs:0x330,%rsi\n\t"       /* amd64_thread_data()->pthread_teb */
+                   "testl $8,%r14d\n\t"            /* SYSCALL_HAVE_WRFSGSBASE */
+                   "jz 1f\n\t"
+                   "wrfsbase %rsi\n\t"
+                   "jmp 2f\n"
+                   "1:\tmov $0x1002,%edi\n\t"      /* ARCH_SET_FS */
+                   "mov $158,%eax\n\t"             /* SYS_arch_prctl */
+                   "mov %rcx,%r9\n\t"
+                   "syscall\n\t"
+                   "mov %r9,%rcx\n\t"
+                   "2:\n\t"
+#endif
+                   "movq %rcx,%rsp\n"
+                   "movq %r8,%rdi\n\t"             /* args */
+                   "callq *(%r10,%rdx,8)\n\t"
+                   "movq %rsp,%rcx\n"
+                   "movdqa 0x1c0(%rcx),%xmm6\n\t"
+                   "movdqa 0x1d0(%rcx),%xmm7\n\t"
+                   "movdqa 0x1e0(%rcx),%xmm8\n\t"
+                   "movdqa 0x1f0(%rcx),%xmm9\n\t"
+                   "movdqa 0x200(%rcx),%xmm10\n\t"
+                   "movdqa 0x210(%rcx),%xmm11\n\t"
+                   "movdqa 0x220(%rcx),%xmm12\n\t"
+                   "movdqa 0x230(%rcx),%xmm13\n\t"
+                   "movdqa 0x240(%rcx),%xmm14\n\t"
+                   "movdqa 0x250(%rcx),%xmm15\n\t"
+                   "testl $0xffff,0x94(%rcx)\n\t"  /* frame->restore_flags */
+                   "jnz " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") "\n\t"
+#ifdef __linux__
+                   "testl $12,%r14d\n\t"           /* SYSCALL_HAVE_PTHREAD_TEB | SYSCALL_HAVE_WRFSGSBASE */
+                   "jz 1f\n\t"
+                   "movw 0x7e(%rcx),%fs\n"
+                   "1:\n\t"
+#endif
+                   "movq 0x60(%rcx),%r14\n\t"
+                   __ASM_CFI(".cfi_same_value r14\n\t")
+                   "movq 0x28(%rcx),%rdi\n\t"
+                   __ASM_CFI(".cfi_same_value rdi\n\t")
+                   "movq 0x20(%rcx),%rsi\n\t"
+                   __ASM_CFI(".cfi_same_value rsi\n\t")
+                   "movq 0x88(%rcx),%rsp\n\t"
+                   __ASM_CFI(".cfi_def_cfa rsp, 0\n\t")
+                   __ASM_CFI(".cfi_same_value rsp\n\t")
+                   "pushq 0x70(%rcx)\n\t"          /* frame->rip */
+                   __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t")
+                   "ret" )
 
 
 /***********************************************************************

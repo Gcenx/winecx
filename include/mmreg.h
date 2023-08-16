@@ -23,8 +23,6 @@
 #ifndef __WINE_MMREG_H
 #define __WINE_MMREG_H
 
-#include "wine/winheader_enter.h"
-
 #include <pshpack1.h>
 
 /***********************************************************************
@@ -838,9 +836,19 @@ typedef struct {
     GUID SubFormat;
 } WAVEFORMATEXTENSIBLE, *PWAVEFORMATEXTENSIBLE;
 
+typedef struct {
+	WAVEFORMATEX wfx;
+	WORD fwHeadLayer;
+	DWORD dwHeadBitrate;
+	WORD fwHeadMode;
+	WORD fwHeadModeExt;
+	WORD wHeadEmphasis;
+	WORD fwHeadFlags;
+	DWORD dwPTSLow;
+	DWORD dwPTSHigh;
+} MPEG1WAVEFORMAT;
+
 #pragma pack(pop)
 cpp_quote("#endif")
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WIDL__ */

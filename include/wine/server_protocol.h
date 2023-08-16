@@ -7,7 +7,6 @@
 
 #ifndef __WINE_WINE_SERVER_PROTOCOL_H
 #define __WINE_WINE_SERVER_PROTOCOL_H
-#include <wine/winheader_enter.h>
 
 #include <stdarg.h>
 #include <stdlib.h>
@@ -478,6 +477,7 @@ enum apc_type
     APC_USER,
     APC_ASYNC_IO,
     APC_VIRTUAL_ALLOC,
+    APC_VIRTUAL_ALLOC_EX,
     APC_VIRTUAL_FREE,
     APC_VIRTUAL_QUERY,
     APC_VIRTUAL_PROTECT,
@@ -519,6 +519,16 @@ typedef union
         mem_size_t       zero_bits;
         unsigned int     prot;
     } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     op_type;
+        client_ptr_t     addr;
+        mem_size_t       size;
+        mem_size_t       limit;
+        mem_size_t       align;
+        unsigned int     prot;
+    } virtual_alloc_ex;
     struct
     {
         enum apc_type    type;
@@ -614,6 +624,13 @@ typedef union
         client_ptr_t     addr;
         mem_size_t       size;
     } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        client_ptr_t     addr;
+        mem_size_t       size;
+    } virtual_alloc_ex;
     struct
     {
         enum apc_type    type;
@@ -1800,6 +1817,37 @@ struct send_socket_reply
 
 
 
+struct socket_send_icmp_id_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+    unsigned short icmp_id;
+    unsigned short icmp_seq;
+    char __pad_20[4];
+};
+struct socket_send_icmp_id_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct socket_get_icmp_id_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+    unsigned short icmp_seq;
+    char __pad_18[6];
+};
+struct socket_get_icmp_id_reply
+{
+    struct reply_header __header;
+    unsigned short icmp_id;
+    char __pad_10[6];
+};
+
+
+
 struct get_next_console_request_request
 {
     struct request_header __header;
@@ -2194,7 +2242,7 @@ struct create_key_reply
 {
     struct reply_header __header;
     obj_handle_t hkey;
-    int          created;
+    char __pad_12[4];
 };
 
 
@@ -2381,6 +2429,19 @@ struct set_registry_notification_request
     char __pad_28[4];
 };
 struct set_registry_notification_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct rename_key_request
+{
+    struct request_header __header;
+    obj_handle_t hkey;
+    /* VARARG(name,unicode_str); */
+};
+struct rename_key_reply
 {
     struct reply_header __header;
 };
@@ -2864,6 +2925,17 @@ struct set_serial_info_reply
 #define SERIALINFO_PENDING_WRITE 0x04
 #define SERIALINFO_PENDING_WAIT  0x08
 
+
+struct cancel_sync_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    client_ptr_t iosb;
+};
+struct cancel_sync_reply
+{
+    struct reply_header __header;
+};
 
 
 struct register_async_request
@@ -4526,6 +4598,8 @@ struct get_token_groups_request
 {
     struct request_header __header;
     obj_handle_t    handle;
+    unsigned int    attr_mask;
+    char __pad_20[4];
 };
 struct get_token_groups_reply
 {
@@ -5317,20 +5391,6 @@ struct update_rawinput_devices_reply
 };
 
 
-struct get_rawinput_devices_request
-{
-    struct request_header __header;
-    char __pad_12[4];
-};
-struct get_rawinput_devices_reply
-{
-    struct reply_header __header;
-    unsigned int device_count;
-    /* VARARG(devices,rawinput_devices); */
-    char __pad_12[4];
-};
-
-
 struct create_job_request
 {
     struct request_header __header;
@@ -5643,6 +5703,8 @@ enum request
     REQ_unlock_file,
     REQ_recv_socket,
     REQ_send_socket,
+    REQ_socket_send_icmp_id,
+    REQ_socket_get_icmp_id,
     REQ_get_next_console_request,
     REQ_read_directory_changes,
     REQ_read_change,
@@ -5678,6 +5740,7 @@ enum request
     REQ_unload_registry,
     REQ_save_registry,
     REQ_set_registry_notification,
+    REQ_rename_key,
     REQ_create_timer,
     REQ_open_timer,
     REQ_set_timer,
@@ -5707,6 +5770,7 @@ enum request
     REQ_is_window_hung,
     REQ_get_serial_info,
     REQ_set_serial_info,
+    REQ_cancel_sync,
     REQ_register_async,
     REQ_cancel_async,
     REQ_get_async_result,
@@ -5853,7 +5917,6 @@ enum request
     REQ_get_cursor_history,
     REQ_get_rawinput_buffer,
     REQ_update_rawinput_devices,
-    REQ_get_rawinput_devices,
     REQ_create_job,
     REQ_open_job,
     REQ_assign_job,
@@ -5934,6 +5997,8 @@ union generic_request
     struct unlock_file_request unlock_file_request;
     struct recv_socket_request recv_socket_request;
     struct send_socket_request send_socket_request;
+    struct socket_send_icmp_id_request socket_send_icmp_id_request;
+    struct socket_get_icmp_id_request socket_get_icmp_id_request;
     struct get_next_console_request_request get_next_console_request_request;
     struct read_directory_changes_request read_directory_changes_request;
     struct read_change_request read_change_request;
@@ -5969,6 +6034,7 @@ union generic_request
     struct unload_registry_request unload_registry_request;
     struct save_registry_request save_registry_request;
     struct set_registry_notification_request set_registry_notification_request;
+    struct rename_key_request rename_key_request;
     struct create_timer_request create_timer_request;
     struct open_timer_request open_timer_request;
     struct set_timer_request set_timer_request;
@@ -5998,6 +6064,7 @@ union generic_request
     struct is_window_hung_request is_window_hung_request;
     struct get_serial_info_request get_serial_info_request;
     struct set_serial_info_request set_serial_info_request;
+    struct cancel_sync_request cancel_sync_request;
     struct register_async_request register_async_request;
     struct cancel_async_request cancel_async_request;
     struct get_async_result_request get_async_result_request;
@@ -6144,7 +6211,6 @@ union generic_request
     struct get_cursor_history_request get_cursor_history_request;
     struct get_rawinput_buffer_request get_rawinput_buffer_request;
     struct update_rawinput_devices_request update_rawinput_devices_request;
-    struct get_rawinput_devices_request get_rawinput_devices_request;
     struct create_job_request create_job_request;
     struct open_job_request open_job_request;
     struct assign_job_request assign_job_request;
@@ -6223,6 +6289,8 @@ union generic_reply
     struct unlock_file_reply unlock_file_reply;
     struct recv_socket_reply recv_socket_reply;
     struct send_socket_reply send_socket_reply;
+    struct socket_send_icmp_id_reply socket_send_icmp_id_reply;
+    struct socket_get_icmp_id_reply socket_get_icmp_id_reply;
     struct get_next_console_request_reply get_next_console_request_reply;
     struct read_directory_changes_reply read_directory_changes_reply;
     struct read_change_reply read_change_reply;
@@ -6258,6 +6326,7 @@ union generic_reply
     struct unload_registry_reply unload_registry_reply;
     struct save_registry_reply save_registry_reply;
     struct set_registry_notification_reply set_registry_notification_reply;
+    struct rename_key_reply rename_key_reply;
     struct create_timer_reply create_timer_reply;
     struct open_timer_reply open_timer_reply;
     struct set_timer_reply set_timer_reply;
@@ -6287,6 +6356,7 @@ union generic_reply
     struct is_window_hung_reply is_window_hung_reply;
     struct get_serial_info_reply get_serial_info_reply;
     struct set_serial_info_reply set_serial_info_reply;
+    struct cancel_sync_reply cancel_sync_reply;
     struct register_async_reply register_async_reply;
     struct cancel_async_reply cancel_async_reply;
     struct get_async_result_reply get_async_result_reply;
@@ -6433,7 +6503,6 @@ union generic_reply
     struct get_cursor_history_reply get_cursor_history_reply;
     struct get_rawinput_buffer_reply get_rawinput_buffer_reply;
     struct update_rawinput_devices_reply update_rawinput_devices_reply;
-    struct get_rawinput_devices_reply get_rawinput_devices_reply;
     struct create_job_reply create_job_reply;
     struct open_job_reply open_job_reply;
     struct assign_job_reply assign_job_reply;
@@ -6455,10 +6524,8 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 755
+#define SERVER_PROTOCOL_VERSION 766
 
 /* ### protocol_version end ### */
-
-#include <wine/winheader_exit.h>
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

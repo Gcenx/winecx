@@ -21,8 +21,6 @@
 #ifndef __WINE_WINREG_H
 #define __WINE_WINREG_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif /* defined(__cplusplus) */
@@ -180,6 +178,7 @@ WINADVAPI LSTATUS   WINAPI RegQueryValueW(HKEY,LPCWSTR,LPWSTR,LPLONG);
 WINADVAPI LSTATUS   WINAPI RegQueryValueExA(HKEY,LPCSTR,LPDWORD,LPDWORD,LPBYTE,LPDWORD);
 WINADVAPI LSTATUS   WINAPI RegQueryValueExW(HKEY,LPCWSTR,LPDWORD,LPDWORD,LPBYTE,LPDWORD);
 #define                    RegQueryValueEx WINELIB_NAME_AW(RegQueryValueEx)
+WINADVAPI LSTATUS   WINAPI RegRenameKey(HKEY,LPCWSTR,LPCWSTR);
 WINADVAPI LSTATUS   WINAPI RegReplaceKeyA(HKEY,LPCSTR,LPCSTR,LPCSTR);
 WINADVAPI LSTATUS   WINAPI RegReplaceKeyW(HKEY,LPCWSTR,LPCWSTR,LPCWSTR);
 #define                    RegReplaceKey WINELIB_NAME_AW(RegReplaceKey)
@@ -208,7 +207,5 @@ WINADVAPI LSTATUS   WINAPI RegUnLoadKeyW(HKEY,LPCWSTR);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
-
-#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_WINREG_H */

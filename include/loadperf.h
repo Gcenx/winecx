@@ -19,8 +19,6 @@
 #ifndef __WINE_LOADPERF_H
 #define __WINE_LOADPERF_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -40,7 +38,5 @@ DWORD WINAPI UnloadPerfCounterTextStringsW(LPCWSTR, BOOL);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_LOADPERF_H */

@@ -22,8 +22,6 @@
 #ifndef _NTDDSCSI_H_
 #define _NTDDSCSI_H_
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -122,7 +120,5 @@ typedef struct _SCSI_INQUIRY_DATA {
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* _NTDDSCSI_H_ */

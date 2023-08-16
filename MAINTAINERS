@@ -4,8 +4,7 @@
 
 When submitting patches to Wine, the guidelines at
 <https://wiki.winehq.org/SubmittingPatches> should be followed. This file
-contains a list of maintainers for subsections of Wine. When submitting
-patches, you may want to CC relevant people from this list. If you have
+contains a list of maintainers for subsections of Wine. If you have
 questions about your work in an area of Wine, you may find a list of
 knowledgeable people here.
 
@@ -18,10 +17,11 @@ may simply be no one knowledgeable about that subject on the list.
 This file uses a similar format to the Linux kernel MAINTAINERS file.
 Descriptions of section entries used here:
 
-	M: Primary maintainer. CC patches to: FullName <address@domain>
+	M: Primary maintainer. FullName <address@domain>
 	P: Other knowledgeable person. FullName <address@domain>
 	F: Files and directories with wildcard patterns.
 	   One pattern per line.  Multiple F: lines acceptable.
+	   A trailing / implies /*.
 	W: Link to additional information.
 
 Maintainers List
@@ -36,7 +36,7 @@ F:	dlls/ntdll/signal_arm*
 F:	programs/winedbg/be_arm*
 
 Audio I/O
-M:	Andrew Eikum <aeikum@codeweavers.com>
+P:	Andrew Eikum <coldpie@fastmail.com>
 F:	dlls/dsound/
 F:	dlls/mmdevapi/
 F:	dlls/winealsa.drv/
@@ -50,6 +50,7 @@ F:	dlls/xaudio*/
 
 Common Controls Library
 P:	Nikolay Sivov <nsivov@codeweavers.com>
+P:	Zhiyi Zhang <zzhang@codeweavers.com>
 F:	dlls/comctl32/
 
 Common Item Dialog
@@ -58,11 +59,14 @@ F:	dlls/comdlg32/itemdlg.c
 F:	dlls/comdlg32/tests/itemdlg.c
 
 Direct2D
-M:	Henri Verbeet <hverbeet@codeweavers.com>
+M:	Nikolay Sivov <nsivov@codeweavers.com>
+P:	Henri Verbeet <hverbeet@codeweavers.com>
 F:	dlls/d2d*/
 
 Direct3D
-M:	Henri Verbeet <hverbeet@codeweavers.com>
+M:	Zebediah Figura <z.figura12@gmail.com>
+M:	Jan Sikorski <jsikorski@codeweavers.com>
+P:	Henri Verbeet <hverbeet@codeweavers.com>
 P:	Stefan Dösinger <stefan@codeweavers.com>
 P:	Matteo Bruni <mbruni@codeweavers.com>
 F:	dlls/d3d10core/
@@ -100,7 +104,7 @@ F:	dlls/dpwsockx/
 
 DirectShow
 M:	Zebediah Figura <z.figura12@gmail.com>
-P:	Andrew Eikum <aeikum@codeweavers.com>
+P:	Rémi Bernon <rbernon@codeweavers.com>
 F:	dlls/amstream/
 F:	dlls/devenum/
 F:	dlls/mciqtz32/
@@ -109,7 +113,6 @@ F:	dlls/qcap/
 F:	dlls/qdvd/
 F:	dlls/qedit/
 F:	dlls/quartz/
-F:	dlls/winegstreamer/quartz_parser.c
 F:	libs/strmbase/
 
 DirectWrite
@@ -152,9 +155,14 @@ GPhoto Driver
 M:	Marcus Meissner <marcus@jet.franken.de>
 F:	dlls/gphoto2.ds/
 
-HID support
-M:	Aric Stewart <aric@codeweavers.com>
+GStreamer multimedia backend
+M:	Zebediah Figura <z.figura12@gmail.com>
 P:	Rémi Bernon <rbernon@codeweavers.com>
+F:	dlls/winegstreamer/
+
+HID support
+M:	Rémi Bernon <rbernon@codeweavers.com>
+P:	Aric Stewart <aric@codeweavers.com>
 F:	dlls/hid/
 F:	dlls/hidclass.sys/
 F:	dlls/hidparse.sys/
@@ -166,9 +174,10 @@ F:	dlls/httpapi/
 F:	dlls/http.sys/
 
 Input events
-P:	Rémi Bernon <rbernon@codeweavers.com>
+M:	Rémi Bernon <rbernon@codeweavers.com>
 F:	dlls/user32/input.c
-F:	dlls/user32/rawinput.c
+F:	dlls/win32u/input.c
+F:	dlls/win32u/rawinput.c
 F:	server/queue.c
 
 Input methods
@@ -181,21 +190,41 @@ F:	dlls/jscript/
 
 Joystick input
 M:	Rémi Bernon <rbernon@codeweavers.com>
-P:	Andrew Eikum <aeikum@codeweavers.com>
 F:	dlls/dinput*/
+F:	dlls/joy.cpl/
 F:	dlls/windows.gaming.input/
 F:	dlls/winebus.sys/
 F:	dlls/winexinput.sys/
+F:	dlls/winmm/joystick.c
 F:	dlls/xinput*/
 
 Media format conversion
-M:	Andrew Eikum <aeikum@codeweavers.com>
+P:	Andrew Eikum <coldpie@fastmail.com>
 F:	dlls/*.acm/
 F:	dlls/msacm32/
 
+Media Foundation transforms
+M:	Rémi Bernon <rbernon@codeweavers.com>
+P:	Nikolay Sivov <nsivov@codeweavers.com>
+P:	Zebediah Figura <z.figura12@gmail.com>
+F:	dlls/mf/tests/transform.c
+F:	dlls/winegstreamer/aac_decoder.c
+F:	dlls/winegstreamer/color_convert.c
+F:	dlls/winegstreamer/h264_decoder.c
+F:	dlls/winegstreamer/resampler.c
+F:	dlls/winegstreamer/video_processor.c
+F:	dlls/winegstreamer/wg_sample.c
+F:	dlls/winegstreamer/wg_transform.c
+F:	dlls/winegstreamer/wma_decoder.c
+F:	dlls/winegstreamer/wmv_decoder.c
+
 Microsoft C Runtime
 M:	Piotr Caban <piotr@codeweavers.com>
+F:	dlls/concrt140/
 F:	dlls/msvc*/
+F:	dlls/ucrtbase/
+F:	dlls/vcruntime140/
+F:	dlls/vcruntime140_1/
 
 MSI installers
 M:	Hans Leidekker <hans@codeweavers.com>
@@ -245,7 +274,6 @@ F:	dlls/ole32/storage32.h
 F:	dlls/ole32/tests/storage32.c
 
 OLE Typelibs
-P:	Andrew Eikum <aeikum@codeweavers.com>
 P:	Huw Davies <huw@codeweavers.com>
 F:	dlls/oleaut32/typelib.c
 
@@ -268,12 +296,17 @@ F:	dlls/winspool.drv/
 
 Richedit
 M:	Huw Davies <huw@codeweavers.com>
-F:	dlls/riched20
+F:	dlls/riched20/
 
 RPC Runtime
 P:	Huw Davies <huw@codeweavers.com>
 P:	Zebediah Figura <z.figura12@gmail.com>
-F:	dlls/rpcrt4
+F:	dlls/rpcrt4/
+
+Theming
+M:	Zhiyi Zhang <zzhang@codeweavers.com>
+F:	dlls/light.msstyles/
+F:	dlls/uxtheme/
 
 TWAIN
 P:	Esme Povirk <esme@codeweavers.com>
@@ -307,7 +340,7 @@ WIDL
 P:	Huw Davies <huw@codeweavers.com>
 P:	Rémi Bernon <rbernon@codeweavers.com>
 P:	Zebediah Figura <z.figura12@gmail.com>
-F:	tools/widl
+F:	tools/widl/
 
 Windows Imaging Component
 M:	Esme Povirk <esme@codeweavers.com>
@@ -321,8 +354,15 @@ F:	dlls/wbemdisp/
 F:	dlls/wbemprox/
 F:	dlls/wmiutils/
 
+Windows Media Format
+M:	Zebediah Figura <z.figura12@gmail.com>
+P:	Rémi Bernon <rbernon@codeweavers.com>
+F:	dlls/wmp/
+F:	dlls/wmvcore/
+
 Windows Media Foundation
 M:	Nikolay Sivov <nsivov@codeweavers.com>
+P:	Rémi Bernon <rbernon@codeweavers.com>
 F:	dlls/mf/
 F:	dlls/mferror/
 F:	dlls/mfmediaengine/
@@ -360,6 +400,7 @@ F:	dlls/wpcap/
 X11 Driver
 M:	Alexandre Julliard <julliard@winehq.org>
 P:	Rémi Bernon <rbernon@codeweavers.com>
+P:	Zhiyi Zhang <zzhang@codeweavers.com>
 F:	dlls/winex11.drv/
 
 XML parsing
@@ -370,7 +411,6 @@ F:	dlls/xmllite/
 THE REST
 M:	Alexandre Julliard <julliard@winehq.org>
 P:	Alex Henrie <alexhenrie24@gmail.com>
-P:	Andrew Eikum <aeikum@codeweavers.com>
 P:	Huw Davies <huw@codeweavers.com>
 P:	Jacek Caban <jacek@codeweavers.com>
 P:	Esme Povirk <esme@codeweavers.com>

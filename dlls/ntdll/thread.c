@@ -146,10 +146,10 @@ int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_
     if (TRACE_ON(timestamp))
     {
         ULONG ticks = NtGetTickCount();
-        pos += sprintf( pos, "%3u.%03u:", ticks / 1000, ticks % 1000 );
+        pos += sprintf( pos, "%3lu.%03lu:", ticks / 1000, ticks % 1000 );
     }
-    if (TRACE_ON(pid)) pos += sprintf( pos, "%04x:", GetCurrentProcessId() );
-    pos += sprintf( pos, "%04x:", GetCurrentThreadId() );
+    if (TRACE_ON(pid)) pos += sprintf( pos, "%04lx:", GetCurrentProcessId() );
+    pos += sprintf( pos, "%04lx:", GetCurrentThreadId() );
     if (function && cls < ARRAY_SIZE( classes ))
         pos += snprintf( pos, sizeof(info->output) - (pos - info->output), "%s:%s:%s ",
                          classes[cls], channel->name, function );
@@ -175,6 +175,51 @@ int __cdecl __wine_dbg_output( const char *str )
     }
     if (*str) ret += append_output( info, str, strlen( str ));
     return ret;
+}
+
+
+/***********************************************************************
+ *           set_native_thread_name
+ */
+void set_native_thread_name( DWORD tid, const char *name )
+{
+    THREAD_NAME_INFORMATION info;
+    HANDLE h = GetCurrentThread();
+    WCHAR nameW[64];
+
+    if (tid != -1)
+    {
+        OBJECT_ATTRIBUTES attr;
+        CLIENT_ID cid;
+
+        attr.Length = sizeof(attr);
+        attr.RootDirectory = 0;
+        attr.Attributes = 0;
+        attr.ObjectName = NULL;
+        attr.SecurityDescriptor = NULL;
+        attr.SecurityQualityOfService = NULL;
+
+        cid.UniqueProcess = 0;
+        cid.UniqueThread = ULongToHandle( tid );
+
+        if (NtOpenThread( &h, THREAD_QUERY_LIMITED_INFORMATION, &attr, &cid )) return;
+    }
+
+    if (name)
+    {
+        mbstowcs( nameW, name, ARRAY_SIZE(nameW) );
+        nameW[ARRAY_SIZE(nameW) - 1] = '\0';
+    }
+    else
+    {
+        nameW[0] = '\0';
+    }
+
+    RtlInitUnicodeString( &info.ThreadName, nameW );
+    NtSetInformationThread( h, ThreadWineNativeThreadName, &info, sizeof(info) );
+
+    if (h != GetCurrentThread())
+        NtClose(h);
 }
 
 
@@ -312,7 +357,7 @@ NTSTATUS WINAPI RtlCreateUserStack( SIZE_T commit, SIZE_T reserve, ULONG zero_bi
     PROCESS_STACK_ALLOCATION_INFORMATION alloc;
     NTSTATUS status;
 
-    TRACE("commit %#lx, reserve %#lx, zero_bits %u, commit_align %#lx, reserve_align %#lx, stack %p\n",
+    TRACE("commit %#Ix, reserve %#Ix, zero_bits %lu, commit_align %#Ix, reserve_align %#Ix, stack %p\n",
             commit, reserve, zero_bits, commit_align, reserve_align, stack);
 
     if (!commit_align || !reserve_align)
@@ -645,10 +690,10 @@ void WINAPI DECLSPEC_HOTPATCH RtlProcessFlsData( void *teb_fls_data, ULONG flags
     TEB_FLS_DATA *fls = teb_fls_data;
     unsigned int i, index;
 
-    TRACE_(thread)( "teb_fls_data %p, flags %#x.\n", teb_fls_data, flags );
+    TRACE_(thread)( "teb_fls_data %p, flags %#lx.\n", teb_fls_data, flags );
 
     if (flags & ~3)
-        FIXME_(thread)( "Unknown flags %#x.\n", flags );
+        FIXME_(thread)( "Unknown flags %#lx.\n", flags );
 
     if (!fls)
         return;

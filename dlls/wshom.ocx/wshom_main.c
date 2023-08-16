@@ -40,7 +40,8 @@ static REFIID tid_ids[] = {
     &IID_IWshEnvironment,
     &IID_IWshExec,
     &IID_IWshShell3,
-    &IID_IWshShortcut
+    &IID_IWshShortcut,
+    &IID_IWshNetwork2
 };
 
 static HRESULT load_typelib(void)
@@ -209,7 +210,16 @@ static const IClassFactoryVtbl WshShellFactoryVtbl = {
     ClassFactory_LockServer
 };
 
+static const IClassFactoryVtbl WshNetworkFactoryVtbl = {
+    ClassFactory_QueryInterface,
+    ClassFactory_AddRef,
+    ClassFactory_Release,
+    WshNetworkFactory_CreateInstance,
+    ClassFactory_LockServer
+};
+
 static IClassFactory WshShellFactory = { &WshShellFactoryVtbl };
+static IClassFactory WshNetworkFactory = { &WshNetworkFactoryVtbl };
 
 /******************************************************************
  *              DllMain (wshom.ocx.@)
@@ -240,6 +250,10 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
     if(IsEqualGUID(&CLSID_WshShell, rclsid)) {
         TRACE("(CLSID_WshShell %s %p)\n", debugstr_guid(riid), ppv);
         return IClassFactory_QueryInterface(&WshShellFactory, riid, ppv);
+    }
+    else if(IsEqualGUID(&CLSID_WshNetwork, rclsid)) {
+        TRACE("(CLSID_WshNetwork %s %p)\n", debugstr_guid(riid), ppv);
+        return IClassFactory_QueryInterface(&WshNetworkFactory, riid, ppv);
     }
 
     FIXME("%s %s %p\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);

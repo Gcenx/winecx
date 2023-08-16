@@ -309,16 +309,9 @@ static int parse_spec_arguments( ORDDEF *odp, DLLSPEC *spec, int optional )
             error( "A fastcall function must use the stdcall convention\n" );
             return 0;
         }
-        if (!i || (odp->u.func.args[0] != ARG_PTR && odp->u.func.args[0] != ARG_LONG))
-        {
-            error( "First argument of a fastcall function must be a pointer or integer\n" );
-            return 0;
-        }
-        if (i > 1 && odp->u.func.args[1] != ARG_PTR && odp->u.func.args[1] != ARG_LONG)
-        {
-            error( "Second argument of a fastcall function must be a pointer or integer\n" );
-            return 0;
-        }
+        if ((i && odp->u.func.args[0] != ARG_PTR && odp->u.func.args[0] != ARG_LONG) ||
+            (i > 1 && odp->u.func.args[1] != ARG_PTR && odp->u.func.args[1] != ARG_LONG))
+            odp->flags |= FLAG_NORELAY;  /* no relay debug possible for non-standard fastcall args */
     }
     if (odp->flags & FLAG_SYSCALL)
     {
@@ -358,7 +351,7 @@ static int parse_spec_export( ORDDEF *odp, DLLSPEC *spec )
     if (odp->type == TYPE_VARARGS)
         odp->flags |= FLAG_NORELAY;  /* no relay debug possible for varags entry point */
 
-    if (target.cpu != CPU_i386 && target.cpu != CPU_x86_32on64)
+    if (target.cpu != CPU_i386)
         odp->flags &= ~(FLAG_THISCALL | FLAG_FASTCALL);
 
     if (!(token = GetToken(1)))
@@ -501,18 +494,8 @@ static const char *parse_spec_flags( DLLSPEC *spec, ORDDEF *odp, const char *tok
                         error( "Unknown architecture '%s'\n", cpu_name );
                         return NULL;
                     }
-                    if (cpu_name[0] == '!')
-                    {
-                        cpu_mask |= FLAG_CPU( cpu );
-                        if (cpu == CPU_i386)
-                            cpu_mask |= FLAG_CPU( CPU_x86_32on64 );
-                    }
-                    else
-                    {
-                        odp->flags |= FLAG_CPU( cpu );
-                        if (cpu == CPU_i386)
-                            odp->flags |= FLAG_CPU( CPU_x86_32on64 );
-                    }
+                    if (cpu_name[0] == '!') cpu_mask |= FLAG_CPU( cpu );
+                    else odp->flags |= FLAG_CPU( cpu );
                 }
                 cpu_name = strtok( NULL, "," );
             }
@@ -520,7 +503,7 @@ static const char *parse_spec_flags( DLLSPEC *spec, ORDDEF *odp, const char *tok
         }
         else if (!strcmp( token, "i386" ))  /* backwards compatibility */
         {
-            odp->flags |= FLAG_CPU(CPU_i386)| FLAG_CPU(CPU_x86_32on64);
+            odp->flags |= FLAG_CPU(CPU_i386);
         }
         else
         {

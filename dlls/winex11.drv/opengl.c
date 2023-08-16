@@ -23,6 +23,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <assert.h>
@@ -37,7 +41,6 @@
 #include "x11drv.h"
 #include "xcomposite.h"
 #include "winternl.h"
-#include "wine/heap.h"
 #include "wine/debug.h"
 
 #ifdef SONAME_LIBGL
@@ -206,26 +209,6 @@ struct wgl_context
     struct list entry;
 };
 
-struct wgl_pbuffer
-{
-    Drawable   drawable;
-    const struct wgl_pixel_format* fmt;
-    int        width;
-    int        height;
-    int*       attribList;
-    int        use_render_texture; /* This is also the internal texture format */
-    int        texture_bind_target;
-    int        texture_bpp;
-    GLint      texture_format;
-    GLuint     texture_target;
-    GLenum     texture_type;
-    GLuint     texture;
-    int        texture_level;
-    GLXContext tmp_context;
-    GLXContext prev_context;
-    struct list entry;
-};
-
 enum dc_gl_type
 {
     DC_GL_NONE,       /* no GL support (pixel format not set yet) */
@@ -247,6 +230,26 @@ struct gl_drawable
     int                            swap_interval;
     BOOL                           refresh_swap_interval;
     BOOL                           mutable_pf;
+};
+
+struct wgl_pbuffer
+{
+    struct gl_drawable *gl;
+    const struct wgl_pixel_format* fmt;
+    int        width;
+    int        height;
+    int*       attribList;
+    int        use_render_texture; /* This is also the internal texture format */
+    int        texture_bind_target;
+    int        texture_bpp;
+    GLint      texture_format;
+    GLuint     texture_target;
+    GLenum     texture_type;
+    GLuint     texture;
+    int        texture_level;
+    GLXContext tmp_context;
+    GLXContext prev_context;
+    struct list entry;
 };
 
 enum glx_swap_control_method
@@ -291,7 +294,7 @@ static BOOL glxRequireVersion(int requiredVersion);
 static void dump_PIXELFORMATDESCRIPTOR(const PIXELFORMATDESCRIPTOR *ppfd) {
   TRACE( "size %u version %u flags %u type %u color %u %u,%u,%u,%u "
          "accum %u depth %u stencil %u aux %u ",
-         ppfd->nSize, ppfd->nVersion, ppfd->dwFlags, ppfd->iPixelType,
+         ppfd->nSize, ppfd->nVersion, (int)ppfd->dwFlags, ppfd->iPixelType,
          ppfd->cColorBits, ppfd->cRedBits, ppfd->cGreenBits, ppfd->cBlueBits, ppfd->cAlphaBits,
          ppfd->cAccumBits, ppfd->cDepthBits, ppfd->cStencilBits, ppfd->cAuxBuffers );
 #define TEST_AND_DUMP(t,tv) if ((t) & (tv)) TRACE(#tv " ")
@@ -468,7 +471,7 @@ static BOOL X11DRV_WineGL_InitOpenglInfo(void)
     gl_renderer = (const char *)opengl_funcs.gl.p_glGetString(GL_RENDERER);
     gl_version  = (const char *)opengl_funcs.gl.p_glGetString(GL_VERSION);
     str = (const char *) opengl_funcs.gl.p_glGetString(GL_EXTENSIONS);
-    glExtensions = HeapAlloc(GetProcessHeap(), 0, strlen(str)+sizeof(legacy_extensions));
+    glExtensions = malloc( strlen(str) + sizeof(legacy_extensions) );
     strcpy(glExtensions, str);
     strcat(glExtensions, legacy_extensions);
 
@@ -1025,7 +1028,7 @@ static void init_pixel_formats( Display *display )
     }
     TRACE("Found %d bitmap capable fbconfigs\n", bmp_formats);
 
-    list = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (nCfgs + bmp_formats) * sizeof(*list));
+    list = calloc( 1, (nCfgs + bmp_formats) * sizeof(*list) );
 
     /* Fill the pixel format list. Put onscreen formats at the top and offscreen ones at the bottom.
      * Do this as GLX doesn't guarantee that the list is sorted */
@@ -1164,10 +1167,14 @@ static void release_gl_drawable( struct gl_drawable *gl )
         pglXDestroyPixmap( gdi_display, gl->drawable );
         XFreePixmap( gdi_display, gl->pixmap );
         break;
+    case DC_GL_PBUFFER:
+        TRACE( "destroying pbuffer drawable %lx\n", gl->drawable );
+        pglXDestroyPbuffer( gdi_display, gl->drawable );
+        break;
     default:
         break;
     }
-    HeapFree( GetProcessHeap(), 0, gl );
+    free( gl );
 }
 
 /* Mark any allocated context using the glx drawable 'old' to use 'new' */
@@ -1310,7 +1317,7 @@ static struct gl_drawable *create_gl_drawable( HWND hwnd, const struct wgl_pixel
     width  = min( max( 1, rect.right ), 65535 );
     height = min( max( 1, rect.bottom ), 65535 );
 
-    if (!(gl = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*gl) ))) return NULL;
+    if (!(gl = calloc( 1, sizeof(*gl) ))) return NULL;
 
     /* Default GLX and WGL swap interval is 1, but in case of glXSwapIntervalSGI
      * there is no way to query it, so we have to store it here.
@@ -1345,7 +1352,11 @@ static struct gl_drawable *create_gl_drawable( HWND hwnd, const struct wgl_pixel
 #endif
     else
     {
-        WARN("XComposite is not available, using GLXPixmap hack\n");
+        static unsigned int once;
+
+        if (!once++)
+            ERR_(winediag)("XComposite is not available, using GLXPixmap hack.\n");
+        WARN("XComposite is not available, using GLXPixmap hack.\n");
 
         gl->type = DC_GL_PIXMAP_WIN;
         gl->pixmap = XCreatePixmap( gdi_display, root_window, width, height, visual->depth );
@@ -1360,7 +1371,7 @@ static struct gl_drawable *create_gl_drawable( HWND hwnd, const struct wgl_pixel
 
     if (!gl->drawable)
     {
-        HeapFree( GetProcessHeap(), 0, gl );
+        free( gl );
         return NULL;
     }
 
@@ -1654,8 +1665,8 @@ static int describe_pixel_format( int iPixelFormat, PIXELFORMATDESCRIPTOR *ppfd,
  *
  * Get the pixel-format descriptor associated to the given id
  */
-static int WINAPI glxdrv_wglDescribePixelFormat( HDC hdc, int iPixelFormat,
-                                                 UINT nBytes, PIXELFORMATDESCRIPTOR *ppfd)
+static int glxdrv_wglDescribePixelFormat( HDC hdc, int iPixelFormat,
+                                          UINT nBytes, PIXELFORMATDESCRIPTOR *ppfd)
 {
   TRACE("(%p,%d,%d,%p)\n", hdc, iPixelFormat, nBytes, ppfd);
 
@@ -1674,7 +1685,7 @@ static int WINAPI glxdrv_wglDescribePixelFormat( HDC hdc, int iPixelFormat,
 /***********************************************************************
  *		glxdrv_wglGetPixelFormat
  */
-static int WINAPI glxdrv_wglGetPixelFormat( HDC hdc )
+static int glxdrv_wglGetPixelFormat( HDC hdc )
 {
     struct gl_drawable *gl;
     int ret = 0;
@@ -1694,7 +1705,7 @@ static int WINAPI glxdrv_wglGetPixelFormat( HDC hdc )
 /***********************************************************************
  *		glxdrv_wglSetPixelFormat
  */
-static BOOL WINAPI glxdrv_wglSetPixelFormat( HDC hdc, int iPixelFormat, const PIXELFORMATDESCRIPTOR *ppfd )
+static BOOL glxdrv_wglSetPixelFormat( HDC hdc, int iPixelFormat, const PIXELFORMATDESCRIPTOR *ppfd )
 {
     return set_pixel_format(hdc, iPixelFormat, FALSE);
 }
@@ -1702,31 +1713,43 @@ static BOOL WINAPI glxdrv_wglSetPixelFormat( HDC hdc, int iPixelFormat, const PI
 /***********************************************************************
  *		glxdrv_wglCopyContext
  */
-static BOOL WINAPI glxdrv_wglCopyContext(struct wgl_context *src, struct wgl_context *dst, UINT mask)
+static BOOL glxdrv_wglCopyContext(struct wgl_context *src, struct wgl_context *dst, UINT mask)
 {
     TRACE("%p -> %p mask %#x\n", src, dst, mask);
 
-    pglXCopyContext(gdi_display, src->ctx, dst->ctx, mask);
+    X11DRV_expect_error( gdi_display, GLXErrorHandler, NULL );
+    pglXCopyContext( gdi_display, src->ctx, dst->ctx, mask );
+    XSync( gdi_display, False );
+    if (X11DRV_check_error())
+    {
+        static unsigned int once;
 
-    /* As opposed to wglCopyContext, glXCopyContext doesn't return anything, so hopefully we passed */
+        if (!once++)
+        {
+            ERR("glXCopyContext failed. glXCopyContext() for direct rendering contexts not "
+                "implemented in the host graphics driver?\n");
+        }
+        return FALSE;
+    }
+
     return TRUE;
 }
 
 /***********************************************************************
  *		glxdrv_wglCreateContext
  */
-static struct wgl_context * WINAPI glxdrv_wglCreateContext( HDC hdc )
+static struct wgl_context *glxdrv_wglCreateContext( HDC hdc )
 {
     struct wgl_context *ret;
     struct gl_drawable *gl;
 
     if (!(gl = get_gl_drawable( NtUserWindowFromDC( hdc ), hdc )))
     {
-        SetLastError( ERROR_INVALID_PIXEL_FORMAT );
+        RtlSetLastWin32Error( ERROR_INVALID_PIXEL_FORMAT );
         return NULL;
     }
 
-    if ((ret = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ret))))
+    if ((ret = calloc( 1, sizeof(*ret) )))
     {
         ret->hdc = hdc;
         ret->fmt = gl->format;
@@ -1743,7 +1766,7 @@ static struct wgl_context * WINAPI glxdrv_wglCreateContext( HDC hdc )
 /***********************************************************************
  *		glxdrv_wglDeleteContext
  */
-static BOOL WINAPI glxdrv_wglDeleteContext(struct wgl_context *ctx)
+static BOOL glxdrv_wglDeleteContext(struct wgl_context *ctx)
 {
     struct wgl_pbuffer *pb;
 
@@ -1765,13 +1788,14 @@ static BOOL WINAPI glxdrv_wglDeleteContext(struct wgl_context *ctx)
     release_gl_drawable( ctx->drawables[1] );
     release_gl_drawable( ctx->new_drawables[0] );
     release_gl_drawable( ctx->new_drawables[1] );
-    return HeapFree( GetProcessHeap(), 0, ctx );
+    free( ctx );
+    return TRUE;
 }
 
 /***********************************************************************
  *		glxdrv_wglGetProcAddress
  */
-static PROC WINAPI glxdrv_wglGetProcAddress(LPCSTR lpszProc)
+static PROC glxdrv_wglGetProcAddress(LPCSTR lpszProc)
 {
     if (!strncmp(lpszProc, "wgl", 3)) return NULL;
     return pglXGetProcAddressARB((const GLubyte*)lpszProc);
@@ -1796,7 +1820,7 @@ static void set_context_drawables( struct wgl_context *ctx, struct gl_drawable *
 /***********************************************************************
  *		glxdrv_wglMakeCurrent
  */
-static BOOL WINAPI glxdrv_wglMakeCurrent(HDC hdc, struct wgl_context *ctx)
+static BOOL glxdrv_wglMakeCurrent(HDC hdc, struct wgl_context *ctx)
 {
     BOOL ret = FALSE;
     struct gl_drawable *gl;
@@ -1815,7 +1839,7 @@ static BOOL WINAPI glxdrv_wglMakeCurrent(HDC hdc, struct wgl_context *ctx)
         if (ctx->fmt != gl->format)
         {
             WARN( "mismatched pixel format hdc %p %p ctx %p %p\n", hdc, gl->format, ctx, ctx->fmt );
-            SetLastError( ERROR_INVALID_PIXEL_FORMAT );
+            RtlSetLastWin32Error( ERROR_INVALID_PIXEL_FORMAT );
             goto done;
         }
 
@@ -1836,7 +1860,7 @@ static BOOL WINAPI glxdrv_wglMakeCurrent(HDC hdc, struct wgl_context *ctx)
         }
         pthread_mutex_unlock( &context_mutex );
     }
-    SetLastError( ERROR_INVALID_HANDLE );
+    RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
 
 done:
     release_gl_drawable( gl );
@@ -1882,7 +1906,7 @@ static BOOL X11DRV_wglMakeContextCurrentARB( HDC draw_hdc, HDC read_hdc, struct 
         }
         pthread_mutex_unlock( &context_mutex );
     }
-    SetLastError( ERROR_INVALID_HANDLE );
+    RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
 done:
     release_gl_drawable( read_gl );
     release_gl_drawable( draw_gl );
@@ -1893,7 +1917,7 @@ done:
 /***********************************************************************
  *		glxdrv_wglShareLists
  */
-static BOOL WINAPI glxdrv_wglShareLists(struct wgl_context *org, struct wgl_context *dest)
+static BOOL glxdrv_wglShareLists(struct wgl_context *org, struct wgl_context *dest)
 {
     TRACE("(%p, %p)\n", org, dest);
 
@@ -2009,11 +2033,11 @@ static struct wgl_context *X11DRV_wglCreateContextAttribsARB( HDC hdc, struct wg
 
     if (!(gl = get_gl_drawable( NtUserWindowFromDC( hdc ), hdc )))
     {
-        SetLastError( ERROR_INVALID_PIXEL_FORMAT );
+        RtlSetLastWin32Error( ERROR_INVALID_PIXEL_FORMAT );
         return NULL;
     }
 
-    if ((ret = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ret))))
+    if ((ret = calloc( 1, sizeof(*ret) )))
     {
         ret->hdc = hdc;
         ret->fmt = gl->format;
@@ -2079,7 +2103,7 @@ static struct wgl_context *X11DRV_wglCreateContextAttribsARB( HDC hdc, struct wg
         {
             /* In the future we should convert the GLX error to a win32 one here if needed */
             WARN("Context creation failed (error %#x).\n", err);
-            HeapFree( GetProcessHeap(), 0, ret );
+            free( ret );
             ret = NULL;
         }
         else
@@ -2125,13 +2149,13 @@ static struct wgl_pbuffer *X11DRV_wglCreatePbufferARB( HDC hdc, int iPixelFormat
     fmt = get_pixel_format(gdi_display, iPixelFormat, TRUE /* Offscreen */);
     if(!fmt) {
         ERR("(%p): invalid pixel format %d\n", hdc, iPixelFormat);
-        SetLastError(ERROR_INVALID_PIXEL_FORMAT);
+        RtlSetLastWin32Error(ERROR_INVALID_PIXEL_FORMAT);
         return NULL;
     }
 
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    object = calloc( 1, sizeof(*object) );
     if (NULL == object) {
-        SetLastError(ERROR_NO_SYSTEM_RESOURCES);
+        RtlSetLastWin32Error(ERROR_NO_SYSTEM_RESOURCES);
         return NULL;
     }
     object->width = iWidth;
@@ -2159,7 +2183,7 @@ static struct wgl_pbuffer *X11DRV_wglCreatePbufferARB( HDC hdc, int iPixelFormat
                     object->use_render_texture = 0;
                 } else {
                     if (!use_render_texture_emulation) {
-                        SetLastError(ERROR_INVALID_DATA);
+                        RtlSetLastWin32Error(ERROR_INVALID_DATA);
                         goto create_failed;
                     }
                     switch (attr_v) {
@@ -2203,7 +2227,7 @@ static struct wgl_pbuffer *X11DRV_wglCreatePbufferARB( HDC hdc, int iPixelFormat
                             break;
                         default:
                             ERR("Unknown texture format: %x\n", attr_v);
-                            SetLastError(ERROR_INVALID_DATA);
+                            RtlSetLastWin32Error(ERROR_INVALID_DATA);
                             goto create_failed;
                     }
                 }
@@ -2218,13 +2242,13 @@ static struct wgl_pbuffer *X11DRV_wglCreatePbufferARB( HDC hdc, int iPixelFormat
                     object->texture_target = 0;
                 } else {
                     if (!use_render_texture_emulation) {
-                        SetLastError(ERROR_INVALID_DATA);
+                        RtlSetLastWin32Error(ERROR_INVALID_DATA);
                         goto create_failed;
                     }
                     switch (attr_v) {
                         case WGL_TEXTURE_CUBE_MAP_ARB: {
                             if (iWidth != iHeight) {
-                                SetLastError(ERROR_INVALID_DATA);
+                                RtlSetLastWin32Error(ERROR_INVALID_DATA);
                                 goto create_failed;
                             }
                             object->texture_target = GL_TEXTURE_CUBE_MAP;
@@ -2233,7 +2257,7 @@ static struct wgl_pbuffer *X11DRV_wglCreatePbufferARB( HDC hdc, int iPixelFormat
                         }
                         case WGL_TEXTURE_1D_ARB: {
                             if (1 != iHeight) {
-                                SetLastError(ERROR_INVALID_DATA);
+                                RtlSetLastWin32Error(ERROR_INVALID_DATA);
                                 goto create_failed;
                             }
                             object->texture_target = GL_TEXTURE_1D;
@@ -2252,7 +2276,7 @@ static struct wgl_pbuffer *X11DRV_wglCreatePbufferARB( HDC hdc, int iPixelFormat
                         }
                         default:
                             ERR("Unknown texture target: %x\n", attr_v);
-                            SetLastError(ERROR_INVALID_DATA);
+                            RtlSetLastWin32Error(ERROR_INVALID_DATA);
                             goto create_failed;
                     }
                 }
@@ -2264,7 +2288,7 @@ static struct wgl_pbuffer *X11DRV_wglCreatePbufferARB( HDC hdc, int iPixelFormat
                 attr_v = *piAttribList;
                 TRACE("WGL_render_texture Attribute: WGL_MIPMAP_TEXTURE_ARB as %x\n", attr_v);
                 if (!use_render_texture_emulation) {
-                    SetLastError(ERROR_INVALID_DATA);
+                    RtlSetLastWin32Error(ERROR_INVALID_DATA);
                     goto create_failed;
                 }
                 break;
@@ -2274,10 +2298,20 @@ static struct wgl_pbuffer *X11DRV_wglCreatePbufferARB( HDC hdc, int iPixelFormat
     }
 
     PUSH1(attribs, None);
-    object->drawable = pglXCreatePbuffer(gdi_display, fmt->fbconfig, attribs);
-    TRACE("new Pbuffer drawable as %lx\n", object->drawable);
-    if (!object->drawable) {
-        SetLastError(ERROR_NO_SYSTEM_RESOURCES);
+    if (!(object->gl = calloc( 1, sizeof(*object->gl) )))
+    {
+        RtlSetLastWin32Error(ERROR_NO_SYSTEM_RESOURCES);
+        goto create_failed;
+    }
+    object->gl->type = DC_GL_PBUFFER;
+    object->gl->format = object->fmt;
+    object->gl->ref = 1;
+
+    object->gl->drawable = pglXCreatePbuffer(gdi_display, fmt->fbconfig, attribs);
+    TRACE("new Pbuffer drawable as %p (%lx)\n", object->gl, object->gl->drawable);
+    if (!object->gl->drawable) {
+        free( object->gl );
+        RtlSetLastWin32Error(ERROR_NO_SYSTEM_RESOURCES);
         goto create_failed; /* unexpected error */
     }
     pthread_mutex_lock( &context_mutex );
@@ -2287,7 +2321,7 @@ static struct wgl_pbuffer *X11DRV_wglCreatePbufferARB( HDC hdc, int iPixelFormat
     return object;
 
 create_failed:
-    HeapFree(GetProcessHeap(), 0, object);
+    free( object );
     TRACE("->(FAILED)\n");
     return NULL;
 }
@@ -2304,10 +2338,10 @@ static BOOL X11DRV_wglDestroyPbufferARB( struct wgl_pbuffer *object )
     pthread_mutex_lock( &context_mutex );
     list_remove( &object->entry );
     pthread_mutex_unlock( &context_mutex );
-    pglXDestroyPbuffer(gdi_display, object->drawable);
+    release_gl_drawable( object->gl );
     if (object->tmp_context)
         pglXDestroyContext(gdi_display, object->tmp_context);
-    HeapFree(GetProcessHeap(), 0, object);
+    free( object );
     return GL_TRUE;
 }
 
@@ -2319,30 +2353,21 @@ static BOOL X11DRV_wglDestroyPbufferARB( struct wgl_pbuffer *object )
 static HDC X11DRV_wglGetPbufferDCARB( struct wgl_pbuffer *object )
 {
     struct x11drv_escape_set_drawable escape;
-    struct gl_drawable *gl, *prev;
+    struct gl_drawable *prev;
     HDC hdc;
 
     hdc = NtGdiOpenDCW( NULL, NULL, NULL, 0, TRUE, NULL, NULL, NULL );
     if (!hdc) return 0;
 
-    if (!(gl = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*gl) )))
-    {
-        NtGdiDeleteObjectApp( hdc );
-        return 0;
-    }
-    gl->type = DC_GL_PBUFFER;
-    gl->drawable = object->drawable;
-    gl->format = object->fmt;
-    gl->ref = 1;
-
     pthread_mutex_lock( &context_mutex );
     if (!XFindContext( gdi_display, (XID)hdc, gl_pbuffer_context, (char **)&prev ))
         release_gl_drawable( prev );
-    XSaveContext( gdi_display, (XID)hdc, gl_pbuffer_context, (char *)gl );
+    grab_gl_drawable( object->gl );
+    XSaveContext( gdi_display, (XID)hdc, gl_pbuffer_context, (char *)object->gl );
     pthread_mutex_unlock( &context_mutex );
 
     escape.code = X11DRV_SET_DRAWABLE;
-    escape.drawable = object->drawable;
+    escape.drawable = object->gl->drawable;
     escape.mode = IncludeInferiors;
     SetRect( &escape.dc_rect, 0, 0, object->width, object->height );
     NtGdiExtEscape( hdc, NULL, 0, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
@@ -2362,10 +2387,10 @@ static BOOL X11DRV_wglQueryPbufferARB( struct wgl_pbuffer *object, int iAttribut
 
     switch (iAttribute) {
         case WGL_PBUFFER_WIDTH_ARB:
-            pglXQueryDrawable(gdi_display, object->drawable, GLX_WIDTH, (unsigned int*) piValue);
+            pglXQueryDrawable(gdi_display, object->gl->drawable, GLX_WIDTH, (unsigned int*) piValue);
             break;
         case WGL_PBUFFER_HEIGHT_ARB:
-            pglXQueryDrawable(gdi_display, object->drawable, GLX_HEIGHT, (unsigned int*) piValue);
+            pglXQueryDrawable(gdi_display, object->gl->drawable, GLX_HEIGHT, (unsigned int*) piValue);
             break;
 
         case WGL_PBUFFER_LOST_ARB:
@@ -2381,7 +2406,7 @@ static BOOL X11DRV_wglQueryPbufferARB( struct wgl_pbuffer *object, int iAttribut
                 *piValue = WGL_NO_TEXTURE_ARB;
             } else {
                 if (!use_render_texture_emulation) {
-                    SetLastError(ERROR_INVALID_HANDLE);
+                    RtlSetLastWin32Error(ERROR_INVALID_HANDLE);
                     return GL_FALSE;
                 }
                 switch(object->use_render_texture) {
@@ -2415,7 +2440,7 @@ static BOOL X11DRV_wglQueryPbufferARB( struct wgl_pbuffer *object, int iAttribut
                 *piValue = WGL_NO_TEXTURE_ARB;
             } else {
                 if (!use_render_texture_emulation) {
-                    SetLastError(ERROR_INVALID_DATA);
+                    RtlSetLastWin32Error(ERROR_INVALID_DATA);
                     return GL_FALSE;
                 }
                 switch (object->texture_target) {
@@ -2477,7 +2502,7 @@ static BOOL X11DRV_wglSetPbufferAttribARB( struct wgl_pbuffer *object, const int
     WARN("(%p, %p): alpha-testing, report any problem\n", object, piAttribList);
 
     if (!object->use_render_texture) {
-        SetLastError(ERROR_INVALID_HANDLE);
+        RtlSetLastWin32Error(ERROR_INVALID_HANDLE);
         return GL_FALSE;
     }
     if (use_render_texture_emulation) {
@@ -2591,7 +2616,7 @@ static BOOL X11DRV_wglChoosePixelFormatARB( HDC hdc, const int *piAttribIList, c
         return GL_FALSE;
     }
 
-    if (!(formats = heap_alloc(nCfgs * sizeof(*formats))))
+    if (!(formats = malloc( nCfgs * sizeof(*formats) )))
     {
         ERR("No memory.\n");
         XFree(cfgs);
@@ -2614,6 +2639,8 @@ static BOOL X11DRV_wglChoosePixelFormatARB( HDC hdc, const int *piAttribIList, c
                 break;
 
         if (i == nb_pixel_formats)
+            continue;
+        if ((pixel_formats[i].dwFlags & dwFlags) != dwFlags)
             continue;
 
         format = &formats[format_count];
@@ -2641,7 +2668,7 @@ static BOOL X11DRV_wglChoosePixelFormatARB( HDC hdc, const int *piAttribIList, c
     for (i = 0; i < *nNumFormats; ++i)
         piFormats[i] = formats[i].format;
 
-    heap_free(formats);
+    free( formats );
     XFree(cfgs);
     return GL_TRUE;
 }
@@ -2925,7 +2952,7 @@ static BOOL X11DRV_wglGetPixelFormatAttribfvARB( HDC hdc, int iPixelFormat, int 
     TRACE("(%p, %d, %d, %d, %p, %p)\n", hdc, iPixelFormat, iLayerPlane, nAttributes, piAttributes, pfValues);
 
     /* Allocate a temporary array to store integer values */
-    attr = HeapAlloc(GetProcessHeap(), 0, nAttributes * sizeof(int));
+    attr = malloc( nAttributes * sizeof(int) );
     if (!attr) {
         ERR("couldn't allocate %d array\n", nAttributes);
         return GL_FALSE;
@@ -2941,7 +2968,7 @@ static BOOL X11DRV_wglGetPixelFormatAttribfvARB( HDC hdc, int iPixelFormat, int 
         }
     }
 
-    HeapFree(GetProcessHeap(), 0, attr);
+    free( attr );
     return ret;
 }
 
@@ -2957,7 +2984,7 @@ static BOOL X11DRV_wglBindTexImageARB( struct wgl_pbuffer *object, int iBuffer )
     TRACE("(%p, %d)\n", object, iBuffer);
 
     if (!object->use_render_texture) {
-        SetLastError(ERROR_INVALID_HANDLE);
+        RtlSetLastWin32Error(ERROR_INVALID_HANDLE);
         return GL_FALSE;
     }
 
@@ -2979,7 +3006,7 @@ static BOOL X11DRV_wglBindTexImageARB( struct wgl_pbuffer *object, int iBuffer )
             FIXME("partial stub!\n");
         }
 
-        TRACE("drawable=%lx, context=%p\n", object->drawable, prev_context);
+        TRACE("drawable=%p (%lx), context=%p\n", object->gl, object->gl->drawable, prev_context);
         if (!object->tmp_context || object->prev_context != prev_context) {
             if (object->tmp_context)
                 pglXDestroyContext(gdi_display, object->tmp_context);
@@ -2990,7 +3017,7 @@ static BOOL X11DRV_wglBindTexImageARB( struct wgl_pbuffer *object, int iBuffer )
         opengl_funcs.gl.p_glGetIntegerv(object->texture_bind_target, &prev_binded_texture);
 
         /* Switch to our pbuffer */
-        pglXMakeCurrent(gdi_display, object->drawable, object->tmp_context);
+        pglXMakeCurrent(gdi_display, object->gl->drawable, object->tmp_context);
 
         /* Make sure that the prev_binded_texture is set as the current texture state isn't shared between contexts.
          * After that copy the pbuffer texture data. */
@@ -3017,7 +3044,7 @@ static BOOL X11DRV_wglReleaseTexImageARB( struct wgl_pbuffer *object, int iBuffe
     TRACE("(%p, %d)\n", object, iBuffer);
 
     if (!object->use_render_texture) {
-        SetLastError(ERROR_INVALID_HANDLE);
+        RtlSetLastWin32Error(ERROR_INVALID_HANDLE);
         return GL_FALSE;
     }
     if (use_render_texture_emulation) {
@@ -3083,13 +3110,13 @@ static BOOL X11DRV_wglSwapIntervalEXT(int interval)
      */
     if (interval < 0 && !has_swap_control_tear)
     {
-        SetLastError(ERROR_INVALID_DATA);
+        RtlSetLastWin32Error(ERROR_INVALID_DATA);
         return FALSE;
     }
 
     if (!(gl = get_gl_drawable( NtUserWindowFromDC( ctx->hdc ), ctx->hdc )))
     {
-        SetLastError(ERROR_DC_NOT_FOUND);
+        RtlSetLastWin32Error(ERROR_DC_NOT_FOUND);
         return FALSE;
     }
 
@@ -3099,7 +3126,7 @@ static BOOL X11DRV_wglSwapIntervalEXT(int interval)
     if (ret)
         gl->swap_interval = interval;
     else
-        SetLastError(ERROR_DC_NOT_FOUND);
+        RtlSetLastWin32Error(ERROR_DC_NOT_FOUND);
 
     pthread_mutex_unlock( &context_mutex );
     release_gl_drawable(gl);
@@ -3178,11 +3205,6 @@ static void X11DRV_WineGL_LoadExtensions(void)
             register_extension("WGL_ARB_create_context_profile");
     }
 
-    if (has_extension( glxExtensions, "GLX_ARB_fbconfig_float"))
-    {
-        register_extension("WGL_ARB_pixel_format_float");
-        register_extension("WGL_ATI_pixel_format_float");
-    }
 
     register_extension( "WGL_ARB_extensions_string" );
     opengl_funcs.ext.p_wglGetExtensionsStringARB = X11DRV_wglGetExtensionsStringARB;
@@ -3211,6 +3233,12 @@ static void X11DRV_WineGL_LoadExtensions(void)
     opengl_funcs.ext.p_wglChoosePixelFormatARB      = X11DRV_wglChoosePixelFormatARB;
     opengl_funcs.ext.p_wglGetPixelFormatAttribfvARB = X11DRV_wglGetPixelFormatAttribfvARB;
     opengl_funcs.ext.p_wglGetPixelFormatAttribivARB = X11DRV_wglGetPixelFormatAttribivARB;
+
+    if (has_extension( glxExtensions, "GLX_ARB_fbconfig_float"))
+    {
+        register_extension("WGL_ARB_pixel_format_float");
+        register_extension("WGL_ATI_pixel_format_float");
+    }
 
     /* Support WGL_ARB_render_texture when there's support or pbuffer based emulation */
     if (has_extension( glxExtensions, "GLX_ARB_render_texture") ||
@@ -3299,7 +3327,7 @@ static void X11DRV_WineGL_LoadExtensions(void)
  *
  * Swap the buffers of this DC
  */
-static BOOL WINAPI glxdrv_wglSwapBuffers( HDC hdc )
+static BOOL glxdrv_wglSwapBuffers( HDC hdc )
 {
     struct x11drv_escape_flush_gl_drawable escape;
     struct gl_drawable *gl;
@@ -3314,7 +3342,7 @@ static BOOL WINAPI glxdrv_wglSwapBuffers( HDC hdc )
 
     if (!(gl = get_gl_drawable( NtUserWindowFromDC( hdc ), hdc )))
     {
-        SetLastError( ERROR_INVALID_HANDLE );
+        RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
         return FALSE;
     }
 

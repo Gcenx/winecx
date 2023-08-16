@@ -525,8 +525,6 @@ xmlXIncludeAddNode(xmlXIncludeCtxtPtr ctxt, xmlNodePtr cur) {
 	if (href == NULL)
 	    return(-1);
     }
-    if ((href[0] == '#') || (href[0] == 0))
-	local = 1;
     parse = xmlXIncludeGetProp(ctxt, cur, XINCLUDE_PARSE);
     if (parse != NULL) {
 	if (xmlStrEqual(parse, XINCLUDE_PARSE_XML))
@@ -622,6 +620,9 @@ xmlXIncludeAddNode(xmlXIncludeCtxtPtr ctxt, xmlNodePtr cur) {
 	    xmlFree(fragment);
 	return(-1);
     }
+
+    if (xmlStrEqual(URL, ctxt->doc->URL))
+	local = 1;
 
     /*
      * If local and xml then we need a fragment
@@ -880,6 +881,7 @@ xmlXIncludeCopyNodeList(xmlXIncludeCtxtPtr ctxt, xmlDocPtr target,
     return(result);
 }
 
+#ifdef LIBXML_XPTR_LOCS_ENABLED
 /**
  * xmlXIncludeGetNthChild:
  * @cur:  the node
@@ -986,7 +988,7 @@ xmlXIncludeCopyRange(xmlXIncludeCtxtPtr ctxt, xmlDocPtr target,
 		int len;
 
 		if (content == NULL) {
-		    tmp = xmlNewTextLen(NULL, 0);
+		    tmp = xmlNewDocTextLen(target, NULL, 0);
 		} else {
 		    len = index2;
 		    if ((cur == start) && (index1 > 1)) {
@@ -995,7 +997,7 @@ xmlXIncludeCopyRange(xmlXIncludeCtxtPtr ctxt, xmlDocPtr target,
 		    } else {
 			len = index2;
 		    }
-		    tmp = xmlNewTextLen(content, len);
+		    tmp = xmlNewDocTextLen(target, content, len);
 		}
 		/* single sub text node selection */
 		if (list == NULL)
@@ -1046,13 +1048,13 @@ xmlXIncludeCopyRange(xmlXIncludeCtxtPtr ctxt, xmlDocPtr target,
 		const xmlChar *content = cur->content;
 
 		if (content == NULL) {
-		    tmp = xmlNewTextLen(NULL, 0);
+		    tmp = xmlNewDocTextLen(target, NULL, 0);
 		} else {
 		    if (index1 > 1) {
 			content += (index1 - 1);
 			index1 = 0;
 		    }
-		    tmp = xmlNewText(content);
+		    tmp = xmlNewDocText(target, content);
 		}
 		last = list = tmp;
 		listParent = cur->parent;
@@ -1119,6 +1121,7 @@ xmlXIncludeCopyRange(xmlXIncludeCtxtPtr ctxt, xmlDocPtr target,
     }
     return(list);
 }
+#endif /* LIBXML_XPTR_LOCS_ENABLED */
 
 /**
  * xmlXIncludeBuildNodeList:
@@ -1162,9 +1165,6 @@ xmlXIncludeCopyXPointer(xmlXIncludeCtxtPtr ctxt, xmlDocPtr target,
 		    case XML_COMMENT_NODE:
 		    case XML_DOCUMENT_NODE:
 		    case XML_HTML_DOCUMENT_NODE:
-#ifdef LIBXML_DOCB_ENABLED
-		    case XML_DOCB_DOCUMENT_NODE:
-#endif
 		    case XML_XINCLUDE_END:
 			break;
 		    case XML_XINCLUDE_START: {
@@ -1220,7 +1220,7 @@ xmlXIncludeCopyXPointer(xmlXIncludeCtxtPtr ctxt, xmlDocPtr target,
 	    }
 	    break;
 	}
-#ifdef LIBXML_XPTR_ENABLED
+#ifdef LIBXML_XPTR_LOCS_ENABLED
 	case XPATH_LOCATIONSET: {
 	    xmlLocationSetPtr set = (xmlLocationSetPtr) obj->user;
 	    if (set == NULL)
@@ -1242,10 +1242,10 @@ xmlXIncludeCopyXPointer(xmlXIncludeCtxtPtr ctxt, xmlDocPtr target,
 	}
 	case XPATH_RANGE:
 	    return(xmlXIncludeCopyRange(ctxt, target, source, obj));
-#endif
 	case XPATH_POINT:
 	    /* points are ignored in XInclude */
 	    break;
+#endif
 	default:
 	    break;
     }
@@ -1597,7 +1597,9 @@ loaded:
 	    case XPATH_BOOLEAN:
 	    case XPATH_NUMBER:
 	    case XPATH_STRING:
+#ifdef LIBXML_XPTR_LOCS_ENABLED
 	    case XPATH_POINT:
+#endif
 	    case XPATH_USERS:
 	    case XPATH_XSLT_TREE:
 		xmlXIncludeErr(ctxt, ctxt->incTab[nr]->ref,
@@ -1619,9 +1621,11 @@ loaded:
 		    return(-1);
 		}
 
+#ifdef LIBXML_XPTR_LOCS_ENABLED
 	    case XPATH_RANGE:
 	    case XPATH_LOCATIONSET:
 		break;
+#endif
 	}
 	set = xptr->nodesetval;
 	if (set != NULL) {
@@ -1638,9 +1642,6 @@ loaded:
 		    case XML_COMMENT_NODE:
 		    case XML_DOCUMENT_NODE:
 		    case XML_HTML_DOCUMENT_NODE:
-#ifdef LIBXML_DOCB_ENABLED
-		    case XML_DOCB_DOCUMENT_NODE:
-#endif
 			continue;
 
 		    case XML_ATTRIBUTE_NODE:
@@ -1848,7 +1849,7 @@ xmlXIncludeLoadTxt(xmlXIncludeCtxtPtr ctxt, const xmlChar *url, int nr) {
      */
     for (i = 0; i < ctxt->txtNr; i++) {
 	if (xmlStrEqual(URL, ctxt->txturlTab[i])) {
-            node = xmlNewText(ctxt->txtTab[i]);
+            node = xmlNewDocText(ctxt->doc, ctxt->txtTab[i]);
 	    goto loaded;
 	}
     }
@@ -1897,7 +1898,7 @@ xmlXIncludeLoadTxt(xmlXIncludeCtxtPtr ctxt, const xmlChar *url, int nr) {
     if (buf->encoder)
 	xmlCharEncCloseFunc(buf->encoder);
     buf->encoder = xmlGetCharEncodingHandler(enc);
-    node = xmlNewText(NULL);
+    node = xmlNewDocText(ctxt->doc, NULL);
 
     /*
      * Scan all chars from the resource and add the to the node
@@ -2237,6 +2238,9 @@ xmlXIncludeIncludeNode(xmlXIncludeCtxtPtr ctxt, int nr) {
 
 	    xmlAddPrevSibling(cur, end);
 	}
+        /*
+         * FIXME: xmlUnlinkNode doesn't coalesce text nodes.
+         */
 	xmlUnlinkNode(cur);
 	xmlFreeNode(cur);
     } else {
@@ -2651,5 +2655,3 @@ xmlXIncludeProcessNode(xmlXIncludeCtxtPtr ctxt, xmlNodePtr node) {
 
 #else /* !LIBXML_XINCLUDE_ENABLED */
 #endif
-#define bottom_xinclude
-#include "elfgcchack.h"

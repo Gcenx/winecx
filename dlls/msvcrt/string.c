@@ -1268,6 +1268,50 @@ char* __cdecl strncpy(char *dst, const char *src, size_t len)
     return dst;
 }
 
+/******************************************************************
+ *                  strncpy_s (MSVCRT.@)
+ */
+int __cdecl strncpy_s( char *dst, size_t elem, const char *src, size_t count )
+{
+    char *p = dst;
+    BOOL truncate = (count == _TRUNCATE);
+
+    TRACE("(%p %Iu %s %Iu)\n", dst, elem, debugstr_a(src), count);
+
+    if (!count)
+    {
+        if (dst && elem) *dst = 0;
+        return 0;
+    }
+
+    if (!MSVCRT_CHECK_PMT(dst != NULL)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(elem != 0)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(src != NULL))
+    {
+        *dst = 0;
+        return EINVAL;
+    }
+
+    while (elem && count && *src)
+    {
+        *p++ = *src++;
+        elem--;
+        count--;
+    }
+    if (!elem && truncate)
+    {
+        *(p-1) = 0;
+        return STRUNCATE;
+    }
+    else if (!elem)
+    {
+        *dst = 0;
+        return ERANGE;
+    }
+    *p = 0;
+    return 0;
+}
+
 /*********************************************************************
  *      strcpy (MSVCRT.@)
  */
@@ -1284,9 +1328,9 @@ char* CDECL strcpy(char *dst, const char *src)
 int CDECL strcpy_s( char* dst, size_t elem, const char* src )
 {
     size_t i;
-    if(!elem) return EINVAL;
-    if(!dst) return EINVAL;
-    if(!src)
+    if (!MSVCRT_CHECK_PMT(dst != 0)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(elem != 0)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(src != NULL))
     {
         dst[0] = '\0';
         return EINVAL;
@@ -1296,6 +1340,7 @@ int CDECL strcpy_s( char* dst, size_t elem, const char* src )
     {
         if((dst[i] = src[i]) == '\0') return 0;
     }
+    MSVCRT_INVALID_PMT("dst[elem] is too small", ERANGE);
     dst[0] = '\0';
     return ERANGE;
 }
@@ -1306,9 +1351,9 @@ int CDECL strcpy_s( char* dst, size_t elem, const char* src )
 int CDECL strcat_s( char* dst, size_t elem, const char* src )
 {
     size_t i, j;
-    if(!dst) return EINVAL;
-    if(elem == 0) return EINVAL;
-    if(!src)
+    if (!MSVCRT_CHECK_PMT(dst != 0)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(elem != 0)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(src != NULL))
     {
         dst[0] = '\0';
         return EINVAL;
@@ -1325,6 +1370,7 @@ int CDECL strcat_s( char* dst, size_t elem, const char* src )
         }
     }
     /* Set the first element to 0, not the first element after the skipped part */
+    MSVCRT_INVALID_PMT("dst[elem] is too small", ERANGE);
     dst[0] = '\0';
     return ERANGE;
 }
@@ -1349,32 +1395,38 @@ int CDECL strncat_s( char* dst, size_t elem, const char* src, size_t count )
 
     if (!MSVCRT_CHECK_PMT(dst != 0)) return EINVAL;
     if (!MSVCRT_CHECK_PMT(elem != 0)) return EINVAL;
-    if (!MSVCRT_CHECK_PMT(src != 0))
+    if (count == 0) return 0;
+
+    if (!MSVCRT_CHECK_PMT(src != NULL))
     {
-        dst[0] = '\0';
+        *dst = 0;
         return EINVAL;
     }
 
-    for(i = 0; i < elem; i++)
+    for (i = 0; i < elem; i++) if (!dst[i]) break;
+
+    if (i == elem)
     {
-        if(dst[i] == '\0')
+        MSVCRT_INVALID_PMT("dst[elem] is not NULL terminated\n", EINVAL);
+        *dst = 0;
+        return EINVAL;
+    }
+
+    for (j = 0; (j + i) < elem; j++)
+    {
+        if(count == _TRUNCATE && j + i == elem - 1)
         {
-            for(j = 0; (j + i) < elem; j++)
-            {
-                if(count == _TRUNCATE && j + i == elem - 1)
-                {
-                    dst[j + i] = '\0';
-                    return STRUNCATE;
-                }
-                if(j == count || (dst[j + i] = src[j]) == '\0')
-                {
-                    dst[j + i] = '\0';
-                    return 0;
-                }
-            }
+            dst[j + i] = '\0';
+            return STRUNCATE;
+        }
+        if(j == count || (dst[j + i] = src[j]) == '\0')
+        {
+            dst[j + i] = '\0';
+            return 0;
         }
     }
-    /* Set the first element to 0, not the first element after the skipped part */
+
+    MSVCRT_INVALID_PMT("dst[elem] is too small", ERANGE);
     dst[0] = '\0';
     return ERANGE;
 }
@@ -2767,8 +2819,11 @@ int __cdecl memcmp(const void *ptr1, const void *ptr2, size_t n)
 
 #define MEMMOVE_INIT \
     "pushq " SRC_REG "\n\t" \
+    __ASM_SEH(".seh_pushreg " SRC_REG "\n\t") \
     __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t") \
     "pushq " DEST_REG "\n\t" \
+    __ASM_SEH(".seh_pushreg " DEST_REG "\n\t") \
+    __ASM_SEH(".seh_endprologue\n\t") \
     __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t") \
     "movq %rcx, " DEST_REG "\n\t" \
     "movq %rdx, " SRC_REG "\n\t"
@@ -3239,7 +3294,14 @@ int __cdecl strncmp(const char *str1, const char *str2, size_t len)
 {
     if (!len) return 0;
     while (--len && *str1 && *str1 == *str2) { str1++; str2++; }
+
+#if defined(_WIN64) || defined(_UCRT) || _MSVCR_VER == 70 || _MSVCR_VER == 71 || _MSVCR_VER >= 110
+    if ((unsigned char)*str1 > (unsigned char)*str2) return 1;
+    if ((unsigned char)*str1 < (unsigned char)*str2) return -1;
+    return 0;
+#else
     return (unsigned char)*str1 - (unsigned char)*str2;
+#endif
 }
 
 /*********************************************************************

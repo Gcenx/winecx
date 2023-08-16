@@ -18,44 +18,15 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <assert.h>
-#include <stdlib.h>
-#include <string.h>
-#include <limits.h>
-
 #include "user_private.h"
-#include "winnls.h"
+#include "controls.h"
 #include "winver.h"
 #include "wine/server.h"
 #include "wine/asm.h"
-#include "win.h"
-#include "controls.h"
-#include "winerror.h"
 #include "wine/exception.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
-
-static DWORD process_layout = ~0u;
-
-
-/***********************************************************************
- *           get_user_handle_ptr
- */
-void *get_user_handle_ptr( HANDLE handle, unsigned int type )
-{
-    return (void *)NtUserCallTwoParam( HandleToUlong(handle), type, NtUserGetHandlePtr );
-}
-
-
-/***********************************************************************
- *           release_user_handle_ptr
- */
-void release_user_handle_ptr( void *ptr )
-{
-    assert( ptr && ptr != OBJ_OTHER_PROCESS );
-    USER_Unlock();
-}
 
 
 /*******************************************************************
@@ -107,20 +78,6 @@ static HWND *list_window_children( HDESK desktop, HWND hwnd, UNICODE_STRING *cla
 
 
 /*******************************************************************
- *           get_hwnd_message_parent
- *
- * Return the parent for HWND_MESSAGE windows.
- */
-HWND get_hwnd_message_parent(void)
-{
-    struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
-
-    if (!thread_info->msg_window) GetDesktopWindow();  /* trigger creation */
-    return thread_info->msg_window;
-}
-
-
-/*******************************************************************
  *           is_desktop_window
  *
  * Check if window is the desktop or the HWND_MESSAGE top parent.
@@ -130,8 +87,8 @@ BOOL is_desktop_window( HWND hwnd )
     struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
 
     if (!hwnd) return FALSE;
-    if (hwnd == thread_info->top_window) return TRUE;
-    if (hwnd == thread_info->msg_window) return TRUE;
+    if (hwnd == UlongToHandle( thread_info->top_window )) return TRUE;
+    if (hwnd == UlongToHandle( thread_info->msg_window )) return TRUE;
 
     if (!HIWORD(hwnd) || HIWORD(hwnd) == 0xffff)
     {
@@ -142,22 +99,10 @@ BOOL is_desktop_window( HWND hwnd )
 }
 
 
-/***********************************************************************
- *           WIN_GetPtr
- *
- * Return a pointer to the WND structure if local to the process,
- * or WND_OTHER_PROCESS if handle may be valid in other process.
- * If ret value is a valid pointer, it must be released with WIN_ReleasePtr.
- */
-WND *WIN_GetPtr( HWND hwnd )
+/* check if hwnd is a broadcast magic handle */
+static inline BOOL is_broadcast( HWND hwnd )
 {
-    WND *ptr;
-
-    if ((ptr = get_user_handle_ptr( hwnd, NTUSER_OBJ_WINDOW )) == WND_OTHER_PROCESS)
-    {
-        if (is_desktop_window( hwnd )) ptr = WND_DESKTOP;
-    }
-    return ptr;
+    return hwnd == HWND_BROADCAST || hwnd == HWND_TOPMOST;
 }
 
 
@@ -168,13 +113,7 @@ WND *WIN_GetPtr( HWND hwnd )
  */
 HWND WIN_IsCurrentProcess( HWND hwnd )
 {
-    WND *ptr;
-    HWND ret;
-
-    if (!(ptr = WIN_GetPtr( hwnd )) || ptr == WND_OTHER_PROCESS || ptr == WND_DESKTOP) return 0;
-    ret = ptr->obj.handle;
-    WIN_ReleasePtr( ptr );
-    return ret;
+    return UlongToHandle( NtUserCallHwnd( hwnd, NtUserIsCurrehtProcessWindow ));
 }
 
 
@@ -185,31 +124,7 @@ HWND WIN_IsCurrentProcess( HWND hwnd )
  */
 HWND WIN_IsCurrentThread( HWND hwnd )
 {
-    WND *ptr;
-    HWND ret = 0;
-
-    if (!(ptr = WIN_GetPtr( hwnd )) || ptr == WND_OTHER_PROCESS || ptr == WND_DESKTOP) return 0;
-    if (ptr->tid == GetCurrentThreadId()) ret = ptr->obj.handle;
-    WIN_ReleasePtr( ptr );
-    return ret;
-}
-
-
-/***********************************************************************
- *           win_set_flags
- *
- * Set the flags of a window and return the previous value.
- */
-UINT win_set_flags( HWND hwnd, UINT set_mask, UINT clear_mask )
-{
-    UINT ret;
-    WND *ptr = WIN_GetPtr( hwnd );
-
-    if (!ptr || ptr == WND_OTHER_PROCESS || ptr == WND_DESKTOP) return 0;
-    ret = ptr->flags;
-    ptr->flags = (ret & ~clear_mask) | set_mask;
-    WIN_ReleasePtr( ptr );
-    return ret;
+    return UlongToHandle( NtUserCallHwnd( hwnd, NtUserIsCurrehtThreadWindow ));
 }
 
 
@@ -220,36 +135,7 @@ UINT win_set_flags( HWND hwnd, UINT set_mask, UINT clear_mask )
  */
 HWND WIN_GetFullHandle( HWND hwnd )
 {
-    WND *ptr;
-
-    if (!hwnd || (ULONG_PTR)hwnd >> 16) return hwnd;
-    if (LOWORD(hwnd) <= 1 || LOWORD(hwnd) == 0xffff) return hwnd;
-    /* do sign extension for -2 and -3 */
-    if (LOWORD(hwnd) >= (WORD)-3) return (HWND)(LONG_PTR)(INT16)LOWORD(hwnd);
-
-    if (!(ptr = WIN_GetPtr( hwnd ))) return hwnd;
-
-    if (ptr == WND_DESKTOP)
-    {
-        if (LOWORD(hwnd) == LOWORD(GetDesktopWindow())) return GetDesktopWindow();
-        else return get_hwnd_message_parent();
-    }
-
-    if (ptr != WND_OTHER_PROCESS)
-    {
-        hwnd = ptr->obj.handle;
-        WIN_ReleasePtr( ptr );
-    }
-    else  /* may belong to another process */
-    {
-        SERVER_START_REQ( get_window_info )
-        {
-            req->handle = wine_server_user_handle( hwnd );
-            if (!wine_server_call_err( req )) hwnd = wine_server_ptr_handle( reply->full_handle );
-        }
-        SERVER_END_REQ;
-    }
-    return hwnd;
+    return UlongToHandle( NtUserCallHwnd( hwnd, NtUserGetFullWindowHandle ));
 }
 
 
@@ -264,141 +150,6 @@ ULONG WIN_SetStyle( HWND hwnd, ULONG set_bits, ULONG clear_bits )
      * We use STYLESTRUCT to pass params, but meaning of its field does not match our usage. */
     STYLESTRUCT style = { .styleNew = set_bits, .styleOld = clear_bits };
     return NtUserCallHwndParam( hwnd, (UINT_PTR)&style, NtUserSetWindowStyle );
-}
-
-
-/***********************************************************************
- *           WIN_GetRectangles
- *
- * Get the window and client rectangles.
- */
-BOOL WIN_GetRectangles( HWND hwnd, enum coords_relative relative, RECT *rectWindow, RECT *rectClient )
-{
-    WND *win = WIN_GetPtr( hwnd );
-    BOOL ret = TRUE;
-
-    if (!win)
-    {
-        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        return FALSE;
-    }
-    if (win == WND_DESKTOP)
-    {
-        RECT rect;
-        rect.left = rect.top = 0;
-        if (hwnd == get_hwnd_message_parent())
-        {
-            rect.right  = 100;
-            rect.bottom = 100;
-            rect = rect_win_to_thread_dpi( hwnd, rect );
-        }
-        else
-        {
-            rect = get_primary_monitor_rect();
-        }
-        if (rectWindow) *rectWindow = rect;
-        if (rectClient) *rectClient = rect;
-        return TRUE;
-    }
-    if (win != WND_OTHER_PROCESS)
-    {
-        RECT window_rect = win->window_rect, client_rect = win->client_rect;
-
-        switch (relative)
-        {
-        case COORDS_CLIENT:
-            OffsetRect( &window_rect, -win->client_rect.left, -win->client_rect.top );
-            OffsetRect( &client_rect, -win->client_rect.left, -win->client_rect.top );
-            if (win->dwExStyle & WS_EX_LAYOUTRTL)
-                mirror_rect( &win->client_rect, &window_rect );
-            break;
-        case COORDS_WINDOW:
-            OffsetRect( &window_rect, -win->window_rect.left, -win->window_rect.top );
-            OffsetRect( &client_rect, -win->window_rect.left, -win->window_rect.top );
-            if (win->dwExStyle & WS_EX_LAYOUTRTL)
-                mirror_rect( &win->window_rect, &client_rect );
-            break;
-        case COORDS_PARENT:
-            if (win->parent)
-            {
-                WND *parent = WIN_GetPtr( win->parent );
-                if (parent == WND_DESKTOP) break;
-                if (!parent || parent == WND_OTHER_PROCESS)
-                {
-                    WIN_ReleasePtr( win );
-                    goto other_process;
-                }
-                if (parent->flags & WIN_CHILDREN_MOVED)
-                {
-                    WIN_ReleasePtr( parent );
-                    WIN_ReleasePtr( win );
-                    goto other_process;
-                }
-                if (parent->dwExStyle & WS_EX_LAYOUTRTL)
-                {
-                    mirror_rect( &parent->client_rect, &window_rect );
-                    mirror_rect( &parent->client_rect, &client_rect );
-                }
-                WIN_ReleasePtr( parent );
-            }
-            break;
-        case COORDS_SCREEN:
-            while (win->parent)
-            {
-                WND *parent = WIN_GetPtr( win->parent );
-                if (parent == WND_DESKTOP) break;
-                if (!parent || parent == WND_OTHER_PROCESS)
-                {
-                    WIN_ReleasePtr( win );
-                    goto other_process;
-                }
-                WIN_ReleasePtr( win );
-                if (parent->flags & WIN_CHILDREN_MOVED)
-                {
-                    WIN_ReleasePtr( parent );
-                    goto other_process;
-                }
-                win = parent;
-                if (win->parent)
-                {
-                    OffsetRect( &window_rect, win->client_rect.left, win->client_rect.top );
-                    OffsetRect( &client_rect, win->client_rect.left, win->client_rect.top );
-                }
-            }
-            break;
-        }
-        if (rectWindow) *rectWindow = rect_win_to_thread_dpi( hwnd, window_rect );
-        if (rectClient) *rectClient = rect_win_to_thread_dpi( hwnd, client_rect );
-        WIN_ReleasePtr( win );
-        return TRUE;
-    }
-
-other_process:
-    SERVER_START_REQ( get_window_rectangles )
-    {
-        req->handle = wine_server_user_handle( hwnd );
-        req->relative = relative;
-        req->dpi = get_thread_dpi();
-        if ((ret = !wine_server_call_err( req )))
-        {
-            if (rectWindow)
-            {
-                rectWindow->left   = reply->window.left;
-                rectWindow->top    = reply->window.top;
-                rectWindow->right  = reply->window.right;
-                rectWindow->bottom = reply->window.bottom;
-            }
-            if (rectClient)
-            {
-                rectClient->left   = reply->client.left;
-                rectClient->top    = reply->client.top;
-                rectClient->right  = reply->client.right;
-                rectClient->bottom = reply->client.bottom;
-            }
-        }
-    }
-    SERVER_END_REQ;
-    return ret;
 }
 
 
@@ -458,7 +209,7 @@ static void dump_window_styles( DWORD style, DWORD exstyle )
      WS_MINIMIZEBOX | \
      WS_MAXIMIZEBOX))
 
-    if(style & ~DUMPED_STYLES) TRACE(" %08x", style & ~DUMPED_STYLES);
+    if(style & ~DUMPED_STYLES) TRACE(" %08lx", style & ~DUMPED_STYLES);
     TRACE("\n");
 #undef DUMPED_STYLES
 
@@ -510,7 +261,7 @@ static void dump_window_styles( DWORD style, DWORD exstyle )
      WS_EX_COMPOSITED |\
      WS_EX_NOACTIVATE))
 
-    if(exstyle & ~DUMPED_EX_STYLES) TRACE(" %08x", exstyle & ~DUMPED_EX_STYLES);
+    if(exstyle & ~DUMPED_EX_STYLES) TRACE(" %08lx", exstyle & ~DUMPED_EX_STYLES);
     TRACE("\n");
 #undef DUMPED_EX_STYLES
 }
@@ -527,16 +278,16 @@ static BOOL is_default_coord( int x )
  */
 HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module, BOOL unicode )
 {
+    UNICODE_STRING class, window_name = {0};
     HWND hwnd, top_child = 0;
     MDICREATESTRUCTW mdi_cs;
-    UNICODE_STRING class;
-    CBT_CREATEWNDW cbtc;
     WNDCLASSEXW info;
+    WCHAR name_buf[8];
     HMENU menu;
 
     if (!get_class_info( module, className, &info, &class, FALSE )) return FALSE;
 
-    TRACE("%s %s%s%s ex=%08x style=%08x %d,%d %dx%d parent=%p menu=%p inst=%p params=%p\n",
+    TRACE("%s %s%s%s ex=%08lx style=%08lx %d,%d %dx%d parent=%p menu=%p inst=%p params=%p\n",
           unicode ? debugstr_w(cs->lpszName) : debugstr_a((LPCSTR)cs->lpszName),
           debugstr_w(className), class.Buffer != className ? "->" : "",
           class.Buffer != className ? debugstr_wn(class.Buffer, class.Length / sizeof(WCHAR)) : "",
@@ -550,7 +301,7 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
         POINT pos[2];
         UINT id = 0;
 
-        if (!(win_get_flags( cs->hwndParent ) & WIN_ISMDICLIENT))
+        if (!NtUserGetMDIClientInfo( cs->hwndParent ))
         {
             WARN("WS_EX_MDICHILD, but parent %p is not MDIClient\n", cs->hwndParent);
             return 0;
@@ -626,24 +377,31 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
         }
     }
 
-    /* FIXME: move to win32u */
-    if (!cs->hwndParent && className != (const WCHAR *)DESKTOP_CLASS_ATOM &&
-        (IS_INTRESOURCE(className) || wcsicmp( className, L"Message" )))
+    if (!unicode && cs->lpszName)
     {
-        DWORD layout;
-        GetProcessDefaultLayout( &layout );
-        if (layout & LAYOUT_RTL) cs->dwExStyle |= WS_EX_LAYOUTRTL;
+        const char *nameA = (const char *)cs->lpszName;
+        /* resource ID string is a special case */
+        if (nameA[0] == '\xff')
+        {
+            name_buf[0] = 0xffff;
+            name_buf[1] = MAKEWORD( nameA[1], nameA[2] );
+            name_buf[2] = 0;
+            RtlInitUnicodeString( &window_name, name_buf );
+        }
+        else if (!RtlCreateUnicodeStringFromAsciiz( &window_name, (const char *)cs->lpszName ))
+            return 0;
     }
+    else RtlInitUnicodeString( &window_name, cs->lpszName );
 
     menu = cs->hMenu;
     if (!menu && info.lpszMenuName && (cs->style & (WS_CHILD | WS_POPUP)) != WS_CHILD)
         menu = LoadMenuW( cs->hInstance, info.lpszMenuName );
 
-    cbtc.lpcs = cs;
-    hwnd = NtUserCreateWindowEx( cs->dwExStyle, &class, NULL, NULL, cs->style, cs->x, cs->y,
-                                 cs->cx, cs->cy, cs->hwndParent, menu, module,
-                                 cs->lpCreateParams, 0, &cbtc, 0, !unicode );
+    hwnd = NtUserCreateWindowEx( cs->dwExStyle, &class, NULL, &window_name, cs->style,
+                                 cs->x, cs->y, cs->cx, cs->cy, cs->hwndParent, menu, module,
+                                 cs->lpCreateParams, 0, cs->hInstance, 0, !unicode );
     if (!hwnd && menu && menu != cs->hMenu) NtUserDestroyMenu( menu );
+    if (!unicode && window_name.Buffer != name_buf) RtlFreeUnicodeString( &window_name );
     return hwnd;
 }
 
@@ -818,7 +576,7 @@ HWND WINAPI GetDesktopWindow(void)
 {
     struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
 
-    if (thread_info->top_window) return thread_info->top_window;
+    if (thread_info->top_window) return UlongToHandle( thread_info->top_window );
     return NtUserGetDesktopWindow();
 }
 
@@ -858,12 +616,263 @@ DPI_AWARENESS_CONTEXT WINAPI GetWindowDpiAwarenessContext( HWND hwnd )
 }
 
 
+static LONG_PTR get_window_long_ptr( HWND hwnd, int offset, LONG_PTR ret, BOOL ansi )
+{
+    if (offset == DWLP_DLGPROC && NtUserGetDialogInfo( hwnd ))
+    {
+        DLGPROC proc = NtUserGetDialogProc( (DLGPROC)ret, ansi );
+        if (proc && proc != WINPROC_PROC16) return (LONG_PTR)proc;
+    }
+    return ret;
+}
+
+
+static LONG_PTR set_dialog_proc( HWND hwnd, LONG_PTR newval, BOOL ansi )
+{
+    DLGPROC proc;
+    LONG_PTR ret;
+    newval = NtUserCallTwoParam( newval, ansi, NtUserAllocWinProc );
+    ret = NtUserSetWindowLongPtr( hwnd, DWLP_DLGPROC, newval, ansi );
+    proc = NtUserGetDialogProc( (DLGPROC)ret, ansi );
+    if (proc) ret = (UINT_PTR)proc;
+    return ret;
+}
+
+
 /***********************************************************************
  *              GetDpiForWindow   (USER32.@)
  */
 UINT WINAPI GetDpiForWindow( HWND hwnd )
 {
     return NtUserGetDpiForWindow( hwnd );
+}
+
+
+/***********************************************************************
+ *           SwitchToThisWindow (USER32.@)
+ */
+void WINAPI SwitchToThisWindow( HWND hwnd, BOOL alt_tab )
+{
+    if (IsIconic( hwnd )) NtUserShowWindow( hwnd, SW_RESTORE );
+    else BringWindowToTop( hwnd );
+}
+
+
+/***********************************************************************
+ *           GetWindowRect (USER32.@)
+ */
+BOOL WINAPI GetWindowRect( HWND hwnd, RECT *rect )
+{
+    BOOL ret = NtUserGetWindowRect( hwnd, rect );
+    if (ret) TRACE( "hwnd %p %s\n", hwnd, wine_dbgstr_rect(rect) );
+    return ret;
+}
+
+
+/***********************************************************************
+ *           GetWindowRgn (USER32.@)
+ */
+int WINAPI GetWindowRgn( HWND hwnd, HRGN hrgn )
+{
+    return NtUserGetWindowRgnEx( hwnd, hrgn, 0 );
+}
+
+
+/***********************************************************************
+ *           GetWindowRgnBox (USER32.@)
+ */
+int WINAPI GetWindowRgnBox( HWND hwnd, RECT *rect )
+{
+    int ret = ERROR;
+    HRGN hrgn;
+
+    if (!rect)
+        return ERROR;
+
+    if ((hrgn = CreateRectRgn( 0, 0, 0, 0 )))
+    {
+        if ((ret = GetWindowRgn( hwnd, hrgn )) != ERROR )
+            ret = GetRgnBox( hrgn, rect );
+        DeleteObject( hrgn );
+    }
+
+    return ret;
+}
+
+
+/***********************************************************************
+ *           GetClientRect (USER32.@)
+ */
+BOOL WINAPI GetClientRect( HWND hwnd, RECT *rect )
+{
+    return NtUserGetClientRect( hwnd, rect );
+}
+
+
+/*******************************************************************
+ *           WindowFromPoint (USER32.@)
+ */
+HWND WINAPI WindowFromPoint( POINT pt )
+{
+    return NtUserWindowFromPoint( pt.x, pt.y );
+}
+
+
+/*******************************************************************
+ *           ChildWindowFromPoint (USER32.@)
+ */
+HWND WINAPI ChildWindowFromPoint( HWND parent, POINT pt )
+{
+    return NtUserChildWindowFromPointEx( parent, pt.x, pt.y, CWP_ALL );
+}
+
+/*******************************************************************
+ *           RealChildWindowFromPoint (USER32.@)
+ */
+HWND WINAPI RealChildWindowFromPoint( HWND parent, POINT pt )
+{
+    return NtUserRealChildWindowFromPoint( parent, pt.x, pt.y );
+}
+
+/*******************************************************************
+ *           ChildWindowFromPointEx (USER32.@)
+ */
+HWND WINAPI ChildWindowFromPointEx( HWND parent, POINT pt, UINT flags )
+{
+    return NtUserChildWindowFromPointEx( parent, pt.x, pt.y, flags );
+}
+
+
+/*******************************************************************
+ *           MapWindowPoints (USER32.@)
+ */
+INT WINAPI MapWindowPoints( HWND hwnd_from, HWND hwnd_to, POINT *points, UINT count )
+{
+    return NtUserMapWindowPoints( hwnd_from, hwnd_to, points, count );
+}
+
+
+/*******************************************************************
+ *           ClientToScreen (USER32.@)
+ */
+BOOL WINAPI ClientToScreen( HWND hwnd, POINT *pt )
+{
+    return NtUserClientToScreen( hwnd, pt );
+}
+
+
+/*******************************************************************
+ *           ScreenToClient (USER32.@)
+ */
+BOOL WINAPI ScreenToClient( HWND hwnd, POINT *pt )
+{
+    return NtUserScreenToClient( hwnd, pt );
+}
+
+
+/***********************************************************************
+ *           IsIconic (USER32.@)
+ */
+BOOL WINAPI IsIconic( HWND hwnd )
+{
+    return (GetWindowLongW( hwnd, GWL_STYLE ) & WS_MINIMIZE) != 0;
+}
+
+
+/***********************************************************************
+ *           IsZoomed (USER32.@)
+ */
+BOOL WINAPI IsZoomed( HWND hwnd )
+{
+    return (GetWindowLongW( hwnd, GWL_STYLE ) & WS_MAXIMIZE) != 0;
+}
+
+
+/*******************************************************************
+ *           AllowSetForegroundWindow (USER32.@)
+ */
+BOOL WINAPI AllowSetForegroundWindow( DWORD procid )
+{
+    /* FIXME: If Win98/2000 style SetForegroundWindow behavior is
+     * implemented, then fix this function. */
+    return TRUE;
+}
+
+
+/*******************************************************************
+ *           LockSetForegroundWindow (USER32.@)
+ */
+BOOL WINAPI LockSetForegroundWindow( UINT lockcode )
+{
+    /* FIXME: If Win98/2000 style SetForegroundWindow behavior is
+     * implemented, then fix this function. */
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *           BringWindowToTop (USER32.@)
+ */
+BOOL WINAPI BringWindowToTop( HWND hwnd )
+{
+    return NtUserSetWindowPos( hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE );
+}
+
+
+/***********************************************************************
+ *           AnimateWindow (USER32.@)
+ */
+BOOL WINAPI AnimateWindow( HWND hwnd, DWORD time, DWORD flags )
+{
+    FIXME( "partial stub\n" );
+
+    /* If trying to show/hide and it's already shown/hidden or invalid window,
+     * fail with invalid parameter. */
+    if (!IsWindow( hwnd ) || (!(flags & AW_HIDE)) == IsWindowVisible( hwnd ))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    NtUserShowWindow( hwnd, (flags & AW_HIDE) ? SW_HIDE : ((flags & AW_ACTIVATE) ? SW_SHOW : SW_SHOWNA) );
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *           BeginDeferWindowPos (USER32.@)
+ */
+HDWP WINAPI BeginDeferWindowPos( INT count )
+{
+    return NtUserBeginDeferWindowPos( count );
+}
+
+
+/***********************************************************************
+ *           DeferWindowPos (USER32.@)
+ */
+HDWP WINAPI DeferWindowPos( HDWP hdwp, HWND hwnd, HWND after, INT x, INT y,
+                            INT cx, INT cy, UINT flags )
+{
+    return NtUserDeferWindowPosAndBand( hdwp, hwnd, after, x, y, cx, cy, flags, 0, 0 );
+}
+
+
+/***********************************************************************
+ *           EndDeferWindowPos (USER32.@)
+ */
+BOOL WINAPI EndDeferWindowPos( HDWP hdwp )
+{
+    return NtUserEndDeferWindowPosEx( hdwp, FALSE );
+}
+
+
+/***********************************************************************
+ *           ArrangeIconicWindows (USER32.@)
+ */
+UINT WINAPI ArrangeIconicWindows( HWND parent )
+{
+    return NtUserArrangeIconicWindows( parent );
 }
 
 
@@ -892,6 +901,11 @@ LONG WINAPI GetWindowLongA( HWND hwnd, INT offset )
         return 0;
 #endif
     default:
+        if (sizeof(void *) == sizeof(LONG))
+        {
+            LONG_PTR ret = NtUserGetWindowLongA( hwnd, offset );
+            return get_window_long_ptr( hwnd, offset, ret, TRUE );
+        }
         return NtUserGetWindowLongA( hwnd, offset );
     }
 }
@@ -913,6 +927,11 @@ LONG WINAPI GetWindowLongW( HWND hwnd, INT offset )
         return 0;
 #endif
     default:
+        if (sizeof(void *) == sizeof(LONG))
+        {
+            LONG_PTR ret = NtUserGetWindowLongW( hwnd, offset );
+            return get_window_long_ptr( hwnd, offset, ret, FALSE );
+        }
         return NtUserGetWindowLongW( hwnd, offset );
     }
 }
@@ -934,6 +953,10 @@ LONG WINAPI DECLSPEC_HOTPATCH SetWindowLongA( HWND hwnd, INT offset, LONG newval
         WARN( "Invalid offset %d\n", offset );
         SetLastError( ERROR_INVALID_INDEX );
         return 0;
+#else
+    case DWLP_DLGPROC:
+        if (NtUserGetDialogInfo( hwnd )) return set_dialog_proc( hwnd, newval, TRUE );
+        /* fall through */
 #endif
     default:
         return NtUserSetWindowLong( hwnd, offset, newval, TRUE );
@@ -1022,6 +1045,10 @@ LONG WINAPI DECLSPEC_HOTPATCH SetWindowLongW(
         WARN("Invalid offset %d\n", offset );
         SetLastError( ERROR_INVALID_INDEX );
         return 0;
+#else
+    case DWLP_DLGPROC:
+        if (NtUserGetDialogInfo( hwnd )) return set_dialog_proc( hwnd, newval, FALSE );
+        /* fall through */
 #endif
     default:
         return NtUserSetWindowLong( hwnd, offset, newval, FALSE );
@@ -1206,20 +1233,6 @@ BOOL WINAPI IsWindowVisible( HWND hwnd )
 }
 
 
-/***********************************************************************
- *           WIN_IsWindowDrawable
- *
- * hwnd is drawable when it is visible, all parents are not
- * minimized, and it is itself not minimized unless we are
- * trying to draw its default class icon.
- */
-BOOL WIN_IsWindowDrawable( HWND hwnd, BOOL icon )
-{
-    /* FIXME: move callers to win32u */
-    return NtUserCallHwndParam( hwnd, icon, NtUserIsWindowDrawable );
-}
-
-
 /*******************************************************************
  *		GetTopWindow (USER32.@)
  */
@@ -1291,8 +1304,6 @@ BOOL WINAPI EnumWindows( WNDENUMPROC lpEnumFunc, LPARAM lParam )
     BOOL ret = TRUE;
     int i;
 
-    USER_CheckNotLock();
-
     /* We have to build a list of all windows first, to avoid */
     /* unpleasant side-effects, for instance if the callback */
     /* function changes the Z-order of the windows.          */
@@ -1321,8 +1332,6 @@ BOOL WINAPI EnumThreadWindows( DWORD id, WNDENUMPROC func, LPARAM lParam )
     int i;
     BOOL ret = TRUE;
 
-    USER_CheckNotLock();
-
     if (!(list = list_window_children( 0, GetDesktopWindow(), NULL, id ))) return TRUE;
 
     /* Now call the callback function for every window */
@@ -1341,8 +1350,6 @@ BOOL WINAPI EnumDesktopWindows( HDESK desktop, WNDENUMPROC func, LPARAM lparam )
 {
     HWND *list;
     int i;
-
-    USER_CheckNotLock();
 
     if (!(list = list_window_children( desktop, 0, NULL, 0 ))) return TRUE;
 
@@ -1416,8 +1423,6 @@ BOOL WINAPI EnumChildWindows( HWND parent, WNDENUMPROC func, LPARAM lParam )
     HWND *list;
     BOOL ret;
 
-    USER_CheckNotLock();
-
     if (!(list = WIN_ListChildren( parent ))) return FALSE;
     ret = WIN_EnumChildWindows( list, func, lParam );
     HeapFree( GetProcessHeap(), 0, list );
@@ -1475,63 +1480,16 @@ DWORD WINAPI GetWindowContextHelpId( HWND hwnd )
  */
 BOOL WINAPI SetWindowContextHelpId( HWND hwnd, DWORD id )
 {
-    WND *wnd = WIN_GetPtr( hwnd );
-    if (!wnd || wnd == WND_DESKTOP) return FALSE;
-    if (wnd == WND_OTHER_PROCESS)
-    {
-        if (IsWindow( hwnd )) FIXME( "not supported on other process window %p\n", hwnd );
-        return FALSE;
-    }
-    wnd->helpContext = id;
-    WIN_ReleasePtr( wnd );
-    return TRUE;
+    return NtUserSetWindowContextHelpId( hwnd, id );
 }
 
 
 /*******************************************************************
  *		DragDetect (USER32.@)
  */
-BOOL WINAPI DragDetect( HWND hWnd, POINT pt )
+BOOL WINAPI DragDetect( HWND hwnd, POINT pt )
 {
-    MSG msg;
-    RECT rect;
-    WORD wDragWidth, wDragHeight;
-
-    TRACE( "%p,%s\n", hWnd, wine_dbgstr_point( &pt ) );
-
-    if (!(NtUserGetKeyState( VK_LBUTTON ) & 0x8000))
-        return FALSE;
-
-    wDragWidth = GetSystemMetrics(SM_CXDRAG);
-    wDragHeight= GetSystemMetrics(SM_CYDRAG);
-    SetRect(&rect, pt.x - wDragWidth, pt.y - wDragHeight, pt.x + wDragWidth, pt.y + wDragHeight);
-
-    NtUserSetCapture( hWnd );
-
-    while(1)
-    {
-        while (PeekMessageW( &msg, 0, WM_MOUSEFIRST, WM_MOUSELAST, PM_REMOVE ))
-        {
-            if( msg.message == WM_LBUTTONUP )
-            {
-                ReleaseCapture();
-                return FALSE;
-            }
-            if( msg.message == WM_MOUSEMOVE )
-            {
-                POINT tmp;
-                tmp.x = (short)LOWORD(msg.lParam);
-                tmp.y = (short)HIWORD(msg.lParam);
-                if( !PtInRect( &rect, tmp ))
-                {
-                    ReleaseCapture();
-                    return TRUE;
-                }
-            }
-        }
-        WaitMessage();
-    }
-    return FALSE;
+    return NtUserDragDetect( hwnd, pt.x, pt.y );
 }
 
 /******************************************************************************
@@ -1539,20 +1497,17 @@ BOOL WINAPI DragDetect( HWND hWnd, POINT pt )
  */
 UINT WINAPI GetWindowModuleFileNameA( HWND hwnd, LPSTR module, UINT size )
 {
-    WND *win;
     HINSTANCE hinst;
 
     TRACE( "%p, %p, %u\n", hwnd, module, size );
 
-    win = WIN_GetPtr( hwnd );
-    if (!win || win == WND_OTHER_PROCESS || win == WND_DESKTOP)
+    if (!WIN_IsCurrentProcess( hwnd ))
     {
         SetLastError( ERROR_INVALID_WINDOW_HANDLE );
         return 0;
     }
-    hinst = win->hInstance;
-    WIN_ReleasePtr( win );
 
+    hinst = (HINSTANCE)GetWindowLongPtrA( hwnd, GWLP_HINSTANCE );
     return GetModuleFileNameA( hinst, module, size );
 }
 
@@ -1561,20 +1516,17 @@ UINT WINAPI GetWindowModuleFileNameA( HWND hwnd, LPSTR module, UINT size )
  */
 UINT WINAPI GetWindowModuleFileNameW( HWND hwnd, LPWSTR module, UINT size )
 {
-    WND *win;
     HINSTANCE hinst;
 
     TRACE( "%p, %p, %u\n", hwnd, module, size );
 
-    win = WIN_GetPtr( hwnd );
-    if (!win || win == WND_OTHER_PROCESS || win == WND_DESKTOP)
+    if (!WIN_IsCurrentProcess( hwnd ))
     {
         SetLastError( ERROR_INVALID_WINDOW_HANDLE );
         return 0;
     }
-    hinst = win->hInstance;
-    WIN_ReleasePtr( win );
 
+    hinst = (HINSTANCE)GetWindowLongPtrW( hwnd, GWLP_HINSTANCE );
     return GetModuleFileNameW( hinst, module, size );
 }
 
@@ -1657,7 +1609,8 @@ BOOL WINAPI GetProcessDefaultLayout( DWORD *layout )
         SetLastError( ERROR_NOACCESS );
         return FALSE;
     }
-    if (process_layout == ~0u)
+    *layout = NtUserGetProcessDefaultLayout();
+    if (*layout == ~0u)
     {
         WCHAR *str, buffer[MAX_PATH];
         DWORD i, version_layout = 0;
@@ -1687,9 +1640,8 @@ BOOL WINAPI GetProcessDefaultLayout( DWORD *layout )
 
     done:
         HeapFree( GetProcessHeap(), 0, data );
-        process_layout = version_layout;
+        NtUserSetProcessDefaultLayout( *layout = version_layout );
     }
-    *layout = process_layout;
     return TRUE;
 }
 
@@ -1701,8 +1653,47 @@ BOOL WINAPI GetProcessDefaultLayout( DWORD *layout )
  */
 BOOL WINAPI SetProcessDefaultLayout( DWORD layout )
 {
-    process_layout = layout;
-    return TRUE;
+    return NtUserSetProcessDefaultLayout( layout );
+}
+
+
+/***********************************************************************
+ *           UpdateWindow (USER32.@)
+ */
+BOOL WINAPI UpdateWindow( HWND hwnd )
+{
+    if (!hwnd)
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return FALSE;
+    }
+
+    return NtUserRedrawWindow( hwnd, NULL, 0, RDW_UPDATENOW | RDW_ALLCHILDREN );
+}
+
+
+/***********************************************************************
+ *           ValidateRgn (USER32.@)
+ */
+BOOL WINAPI ValidateRgn( HWND hwnd, HRGN hrgn )
+{
+    if (!hwnd)
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return FALSE;
+    }
+
+    return NtUserRedrawWindow( hwnd, NULL, hrgn, RDW_VALIDATE );
+}
+
+
+/*************************************************************************
+ *           ScrollWindow (USER32.@)
+ */
+BOOL WINAPI ScrollWindow( HWND hwnd, INT dx, INT dy, const RECT *rect, const RECT *clip_rect )
+{
+    UINT flags = SW_INVALIDATE | SW_ERASE | (rect ? 0 : SW_SCROLLCHILDREN) | SW_NODCCACHE;
+    return NtUserScrollWindowEx( hwnd, dx, dy, rect, clip_rect, 0, NULL, flags );
 }
 
 #ifdef _WIN64
@@ -1719,7 +1710,8 @@ BOOL WINAPI SetProcessDefaultLayout( DWORD layout )
  */
 LONG_PTR WINAPI GetWindowLongPtrW( HWND hwnd, INT offset )
 {
-    return NtUserGetWindowLongPtrW( hwnd, offset );
+    LONG_PTR ret = NtUserGetWindowLongPtrW( hwnd, offset );
+    return get_window_long_ptr( hwnd, offset, ret, FALSE );
 }
 
 /*****************************************************************************
@@ -1727,7 +1719,8 @@ LONG_PTR WINAPI GetWindowLongPtrW( HWND hwnd, INT offset )
  */
 LONG_PTR WINAPI GetWindowLongPtrA( HWND hwnd, INT offset )
 {
-    return NtUserGetWindowLongPtrA( hwnd, offset );
+    LONG_PTR ret = NtUserGetWindowLongPtrA( hwnd, offset );
+    return get_window_long_ptr( hwnd, offset, ret, TRUE );
 }
 
 /*****************************************************************************
@@ -1735,6 +1728,9 @@ LONG_PTR WINAPI GetWindowLongPtrA( HWND hwnd, INT offset )
  */
 LONG_PTR WINAPI SetWindowLongPtrW( HWND hwnd, INT offset, LONG_PTR newval )
 {
+    if (offset == DWLP_DLGPROC && NtUserGetDialogInfo( hwnd ))
+        return set_dialog_proc( hwnd, newval, FALSE );
+
     return NtUserSetWindowLongPtr( hwnd, offset, newval, FALSE );
 }
 
@@ -1743,60 +1739,13 @@ LONG_PTR WINAPI SetWindowLongPtrW( HWND hwnd, INT offset, LONG_PTR newval )
  */
 LONG_PTR WINAPI SetWindowLongPtrA( HWND hwnd, INT offset, LONG_PTR newval )
 {
+    if (offset == DWLP_DLGPROC && NtUserGetDialogInfo( hwnd ))
+        return set_dialog_proc( hwnd, newval, TRUE );
+
     return NtUserSetWindowLongPtr( hwnd, offset, newval, TRUE );
 }
 
 #endif /* _WIN64 */
-
-/*****************************************************************************
- *              RegisterTouchWindow (USER32.@)
- */
-BOOL WINAPI RegisterTouchWindow(HWND hwnd, ULONG flags)
-{
-    FIXME("(%p %08x): stub\n", hwnd, flags);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-/*****************************************************************************
- *              UnregisterTouchWindow (USER32.@)
- */
-BOOL WINAPI UnregisterTouchWindow(HWND hwnd)
-{
-    FIXME("(%p): stub\n", hwnd);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-/*****************************************************************************
- *              CloseTouchInputHandle (USER32.@)
- */
-BOOL WINAPI CloseTouchInputHandle(HTOUCHINPUT handle)
-{
-    FIXME("(%p): stub\n", handle);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-/*****************************************************************************
- *              GetTouchInputInfo (USER32.@)
- */
-BOOL WINAPI GetTouchInputInfo(HTOUCHINPUT handle, UINT count, TOUCHINPUT *ptr, int size)
-{
-    FIXME("(%p %u %p %u): stub\n", handle, count, ptr, size);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-/*****************************************************************************
- *              GetGestureInfo (USER32.@)
- */
-BOOL WINAPI GetGestureInfo(HGESTUREINFO handle, PGESTUREINFO ptr)
-{
-    FIXME("(%p %p): stub\n", handle, ptr);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
 
 /*****************************************************************************
  *              GetWindowDisplayAffinity (USER32.@)
@@ -1820,7 +1769,7 @@ BOOL WINAPI GetWindowDisplayAffinity(HWND hwnd, DWORD *affinity)
  */
 BOOL WINAPI SetWindowDisplayAffinity(HWND hwnd, DWORD affinity)
 {
-    FIXME("(%p, %u): stub\n", hwnd, affinity);
+    FIXME("(%p, %lu): stub\n", hwnd, affinity);
 
     if (!hwnd)
     {
@@ -1840,51 +1789,4 @@ BOOL WINAPI SetWindowCompositionAttribute(HWND hwnd, void *data)
     FIXME("(%p, %p): stub\n", hwnd, data);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
-}
-
-/***********************************************************************
- *              InternalGetWindowIcon   (USER32.@)
- */
-HICON WINAPI InternalGetWindowIcon( HWND hwnd, UINT type )
-{
-    WND *win = WIN_GetPtr( hwnd );
-    HICON ret;
-
-    TRACE( "hwnd %p, type %#x\n", hwnd, type );
-
-    if (!win)
-    {
-        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        return 0;
-    }
-    if (win == WND_OTHER_PROCESS || win == WND_DESKTOP)
-    {
-        if (IsWindow( hwnd )) FIXME( "not supported on other process window %p\n", hwnd );
-        return 0;
-    }
-
-    switch (type)
-    {
-        case ICON_BIG:
-            ret = win->hIcon;
-            if (!ret) ret = (HICON)GetClassLongPtrW( hwnd, GCLP_HICON );
-            break;
-
-        case ICON_SMALL:
-        case ICON_SMALL2:
-            ret = win->hIconSmall ? win->hIconSmall : win->hIconSmall2;
-            if (!ret) ret = (HICON)GetClassLongPtrW( hwnd, GCLP_HICONSM );
-            if (!ret) ret = (HICON)GetClassLongPtrW( hwnd, GCLP_HICON );
-            break;
-
-        default:
-            SetLastError( ERROR_INVALID_PARAMETER );
-            WIN_ReleasePtr( win );
-            return 0;
-    }
-
-    if (!ret) ret = LoadIconW( 0, (const WCHAR *)IDI_APPLICATION );
-
-    WIN_ReleasePtr( win );
-    return CopyIcon( ret );
 }

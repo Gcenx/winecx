@@ -20,29 +20,17 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
-#include <assert.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <unistd.h>
-
-#include <X11/Xlib.h>
-
 #define NONAMELESSUNION
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winuser.h"
+#include "x11drv_dll.h"
 #include "commctrl.h"
 #include "shellapi.h"
 
-#include "x11drv.h"
 #include "wine/list.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(systray);
+
+BOOL show_systray = TRUE;
 
 /* an individual systray icon */
 struct tray_icon
@@ -74,12 +62,6 @@ static const WCHAR tray_classname[] = {'_','_','w','i','n','e','x','1','1','_','
 static BOOL show_icon( struct tray_icon *icon );
 static BOOL hide_icon( struct tray_icon *icon );
 static BOOL delete_icon( struct tray_icon *icon );
-
-#define SYSTEM_TRAY_REQUEST_DOCK  0
-#define SYSTEM_TRAY_BEGIN_MESSAGE   1
-#define SYSTEM_TRAY_CANCEL_MESSAGE  2
-
-Atom systray_atom = 0;
 
 #define MIN_DISPLAYED 8
 #define ICON_BORDER 2
@@ -148,7 +130,7 @@ static void create_tooltip(struct tray_icon *icon)
     }
 }
 
-void update_systray_balloon_position(void)
+static void update_systray_balloon_position(void)
 {
     RECT rect;
     POINT pos;
@@ -322,14 +304,13 @@ static void add_to_standalone_tray( struct tray_icon *icon )
 
     icon->display = nb_displayed;
     pos = get_icon_pos( icon );
-    icon->window = CreateWindowW( icon_classname, NULL, WS_CHILD | WS_VISIBLE,
-                                  pos.x, pos.y, icon_cx, icon_cy, standalone_tray, NULL, NULL, icon );
+    CreateWindowW( icon_classname, NULL, WS_CHILD | WS_VISIBLE,
+                   pos.x, pos.y, icon_cx, icon_cy, standalone_tray, NULL, NULL, icon );
     if (!icon->window)
     {
         icon->display = -1;
         return;
     }
-    create_tooltip( icon );
 
     nb_displayed++;
     size = get_window_size();
@@ -474,6 +455,11 @@ static LRESULT WINAPI tray_icon_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPAR
 
     switch (msg)
     {
+    case WM_CREATE:
+        icon->window = hwnd;
+        create_tooltip( icon );
+        break;
+
     case WM_SIZE:
         if (icon->window && icon->layered) repaint_tray_icon( icon );
         break;
@@ -546,47 +532,17 @@ static LRESULT WINAPI tray_icon_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPAR
     return DefWindowProcW( hwnd, msg, wparam, lparam );
 }
 
-/* find the X11 window owner the system tray selection */
-static Window get_systray_selection_owner( Display *display )
-{
-    return XGetSelectionOwner( display, systray_atom );
-}
-
-static void get_systray_visual_info( Display *display, Window systray_window, XVisualInfo *info )
-{
-    XVisualInfo *list, template;
-    VisualID *visual_id;
-    Atom type;
-    int format, num;
-    unsigned long count, remaining;
-
-    *info = default_visual;
-    if (XGetWindowProperty( display, systray_window, x11drv_atom(_NET_SYSTEM_TRAY_VISUAL), 0,
-                            65536/sizeof(CARD32), False, XA_VISUALID, &type, &format, &count,
-                            &remaining, (unsigned char **)&visual_id ))
-        return;
-
-    if (type == XA_VISUALID && format == 32)
-    {
-        template.visualid = visual_id[0];
-        if ((list = XGetVisualInfo( display, VisualIDMask, &template, &num )))
-        {
-            *info = list[0];
-            TRACE( "systray window %lx got visual %lx\n", systray_window, info->visualid );
-            XFree( list );
-        }
-    }
-    XFree( visual_id );
-}
-
 static BOOL init_systray(void)
 {
     static BOOL init_done;
     WNDCLASSEXW class;
-    Display *display;
 
-    if (is_virtual_desktop()) return FALSE;
     if (init_done) return TRUE;
+    if (!X11DRV_CALL( systray_init, NULL ))
+    {
+        init_done = TRUE;
+        return FALSE;
+    }
 
     icon_cx = GetSystemMetrics( SM_CXSMICON ) + 2 * ICON_BORDER;
     icon_cy = GetSystemMetrics( SM_CYSMICON ) + 2 * ICON_BORDER;
@@ -616,99 +572,41 @@ static BOOL init_systray(void)
         return FALSE;
     }
 
-    display = thread_init_display();
-    if (DefaultScreen( display ) == 0)
-        systray_atom = x11drv_atom(_NET_SYSTEM_TRAY_S0);
-    else
-    {
-        char systray_buffer[29]; /* strlen(_NET_SYSTEM_TRAY_S4294967295)+1 */
-        sprintf( systray_buffer, "_NET_SYSTEM_TRAY_S%u", DefaultScreen( display ) );
-        systray_atom = XInternAtom( display, systray_buffer, False );
-    }
-    XSelectInput( display, root_window, StructureNotifyMask );
-
     init_done = TRUE;
     return TRUE;
 }
 
-/* dock the given icon with the NETWM system tray */
-static void dock_systray_icon( Display *display, struct tray_icon *icon, Window systray_window )
-{
-    Window window;
-    XEvent ev;
-    XSetWindowAttributes attr;
-    XVisualInfo visual;
-    struct x11drv_win_data *data;
-
-    get_systray_visual_info( display, systray_window, &visual );
-
-    icon->layered = (visual.depth == 32);
-    icon->window = CreateWindowExW( icon->layered ? WS_EX_LAYERED : 0,
-                                    icon_classname, NULL, WS_CLIPSIBLINGS | WS_POPUP,
-                                    CW_USEDEFAULT, CW_USEDEFAULT, icon_cx, icon_cy,
-                                    NULL, NULL, NULL, icon );
-
-    if (!(data = get_win_data( icon->window ))) return;
-    if (icon->layered) set_window_visual( data, &visual, TRUE );
-    make_window_embedded( data );
-    window = data->whole_window;
-    release_win_data( data );
-
-    create_tooltip( icon );
-    ShowWindow( icon->window, SW_SHOWNA );
-
-    TRACE( "icon window %p/%lx\n", icon->window, window );
-
-    /* send the docking request message */
-    ev.xclient.type = ClientMessage;
-    ev.xclient.window = systray_window;
-    ev.xclient.message_type = x11drv_atom( _NET_SYSTEM_TRAY_OPCODE );
-    ev.xclient.format = 32;
-    ev.xclient.data.l[0] = CurrentTime;
-    ev.xclient.data.l[1] = SYSTEM_TRAY_REQUEST_DOCK;
-    ev.xclient.data.l[2] = window;
-    ev.xclient.data.l[3] = 0;
-    ev.xclient.data.l[4] = 0;
-    XSendEvent( display, systray_window, False, NoEventMask, &ev );
-
-    if (!icon->layered)
-    {
-        attr.background_pixmap = ParentRelative;
-        attr.bit_gravity = ForgetGravity;
-        XChangeWindowAttributes( display, window, CWBackPixmap | CWBitGravity, &attr );
-    }
-    else repaint_tray_icon( icon );
-}
-
 /* dock systray windows again with the new owner */
-void change_systray_owner( Display *display, Window systray_window )
+NTSTATUS WINAPI x11drv_systray_change_owner( void *arg, ULONG size )
 {
+    struct systray_change_owner_params *params = arg;
+    struct systray_dock_params dock_params;
     struct tray_icon *icon;
 
-    TRACE( "new owner %lx\n", systray_window );
     LIST_FOR_EACH_ENTRY( icon, &icon_list, struct tray_icon, entry )
     {
         if (icon->display == -1) continue;
         hide_icon( icon );
-        dock_systray_icon( display, icon, systray_window );
+
+        dock_params.event_handle = params->event_handle;
+        dock_params.icon = icon;
+        dock_params.cx = icon_cx;
+        dock_params.cy = icon_cy;
+        dock_params.layered = &icon->layered;
+        X11DRV_CALL( systray_dock, &dock_params );
     }
+
+    return 0;
 }
 
 /* hide a tray icon */
 static BOOL hide_icon( struct tray_icon *icon )
 {
-    struct x11drv_win_data *data;
-
     TRACE( "id=0x%x, hwnd=%p\n", icon->id, icon->owner );
 
     if (!icon->window) return TRUE;  /* already hidden */
 
-    /* make sure we don't try to unmap it, it confuses some systray docks */
-    if ((data = get_win_data( icon->window )))
-    {
-        if (data->embedded) data->mapped = FALSE;
-        release_win_data( data );
-    }
+    X11DRV_CALL( systray_hide, &icon->window );
     DestroyWindow(icon->window);
     DestroyWindow(icon->tooltip);
     icon->window = 0;
@@ -722,16 +620,19 @@ static BOOL hide_icon( struct tray_icon *icon )
 /* make the icon visible */
 static BOOL show_icon( struct tray_icon *icon )
 {
-    Window systray_window;
-    Display *display = thread_init_display();
-
-    TRACE( "id=0x%x, hwnd=%p\n", icon->id, icon->owner );
+    struct systray_dock_params params;
 
     if (icon->window) return TRUE;  /* already shown */
 
-    if ((systray_window = get_systray_selection_owner( display )))
-        dock_systray_icon( display, icon, systray_window );
-    else
+    TRACE( "id=0x%x, hwnd=%p\n", icon->id, icon->owner );
+
+    params.event_handle = 0;
+    params.icon = icon;
+    params.cx = icon_cx;
+    params.cy = icon_cy;
+    params.layered = &icon->layered;
+
+    if (X11DRV_CALL( systray_dock, &params ))
         add_to_standalone_tray( icon );
 
     update_balloon( icon );
@@ -756,11 +657,7 @@ static BOOL modify_icon( struct tray_icon *icon, NOTIFYICONDATAW *nid )
         {
             if (icon->display != -1) InvalidateRect( icon->window, NULL, TRUE );
             else if (icon->layered) repaint_tray_icon( icon );
-            else
-            {
-                Window win = X11DRV_get_whole_window( icon->window );
-                if (win) XClearArea( gdi_display, win, 0, 0, 0, 0, True );
-            }
+            else X11DRV_CALL( systray_clear, &icon->window );
         }
     }
 
@@ -869,8 +766,31 @@ int CDECL wine_notify_icon( DWORD msg, NOTIFYICONDATAW *data )
         cleanup_icons( data->hWnd );
         break;
     default:
-        FIXME( "unhandled tray message: %u\n", msg );
+        FIXME( "unhandled tray message: %lu\n", msg );
         break;
     }
     return ret;
+}
+
+
+/* window procedure for foreign windows */
+LRESULT WINAPI foreign_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    switch(msg)
+    {
+    case WM_WINDOWPOSCHANGED:
+        update_systray_balloon_position();
+        break;
+    case WM_PARENTNOTIFY:
+        if (LOWORD(wparam) == WM_DESTROY)
+        {
+            TRACE( "%p: got parent notify destroy for win %Ix\n", hwnd, lparam );
+            PostMessageW( hwnd, WM_CLOSE, 0, 0 );  /* so that we come back here once the child is gone */
+        }
+        return 0;
+    case WM_CLOSE:
+        if (GetWindow( hwnd, GW_CHILD )) return 0;  /* refuse to die if we still have children */
+        break;
+    }
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
 }

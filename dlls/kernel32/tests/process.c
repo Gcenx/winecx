@@ -547,31 +547,12 @@ static WCHAR* getChildStringW(const char* sect, const char* key)
     return ret;
 }
 
-/* FIXME: this may be moved to the wtmain.c file, because it may be needed by
- * others... (windows uses stricmp while Un*x uses strcasecmp...)
- */
-static int wtstrcasecmp(const char* p1, const char* p2)
-{
-    char c1, c2;
-
-    c1 = c2 = '@';
-    while (c1 == c2 && c1)
-    {
-        c1 = *p1++; c2 = *p2++;
-        if (c1 != c2)
-        {
-            c1 = toupper(c1); c2 = toupper(c2);
-        }
-    }
-    return c1 - c2;
-}
-
 static int strCmp(const char* s1, const char* s2, BOOL sensitive)
 {
     if (!s1 && !s2) return 0;
     if (!s2) return -1;
     if (!s1) return 1;
-    return (sensitive) ? strcmp(s1, s2) : wtstrcasecmp(s1, s2);
+    return (sensitive) ? strcmp(s1, s2) : strcasecmp(s1, s2);
 }
 
 static void ok_child_string( int line, const char *sect, const char *key,
@@ -1374,14 +1355,12 @@ static void test_Environment(void)
     strcpy(ptr, "BAR=FOOBAR");
     ptr += strlen(ptr) + 1;
     /* copy all existing variables except:
-     * - WINELOADER
      * - PATH (already set above)
      * - the directory definitions (=[A-Z]:=)
      */
     for (ptr2 = env; *ptr2; ptr2 += strlen(ptr2) + 1)
     {
         if (strncmp(ptr2, "PATH=", 5) != 0 &&
-            strncmp(ptr2, "WINELOADER=", 11) != 0 &&
             !is_str_env_drive_dir(ptr2))
         {
             strcpy(ptr, ptr2);
@@ -1420,7 +1399,7 @@ static  void    test_SuspendFlag(void)
     ok(CreateProcessA(NULL, buffer, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &startup, &info), "CreateProcess\n");
 
     ok(GetExitCodeThread(info.hThread, &exit_status) && exit_status == STILL_ACTIVE, "thread still running\n");
-    Sleep(1000);
+    Sleep(100);
     ok(GetExitCodeThread(info.hThread, &exit_status) && exit_status == STILL_ACTIVE, "thread still running\n");
     ok(ResumeThread(info.hThread) == 1, "Resuming thread\n");
 
@@ -1572,6 +1551,10 @@ static void test_Console(void)
 
     SetConsoleMode(startup.hStdInput, modeIn);
     SetConsoleMode(startup.hStdOutput, modeOut);
+
+    /* don't test flag that is changed at startup if WINETEST_COLOR is set */
+    modeOut = (modeOut & ~ENABLE_VIRTUAL_TERMINAL_PROCESSING) |
+              (modeOutC & ENABLE_VIRTUAL_TERMINAL_PROCESSING);
 
     cpInC = GetConsoleCP();
     cpOutC = GetConsoleOutputCP();
@@ -3773,7 +3756,7 @@ static void test_process_info(HANDLE hproc)
         return;
     }
 
-    for (i = 0; i < MaxProcessInfoClass; i++)
+    for (i = 0; i < ARRAY_SIZE(info_size); i++)
     {
         ret_len = 0;
         status = pNtQueryInformationProcess(hproc, i, buf, info_size[i], &ret_len);
@@ -4276,16 +4259,26 @@ static void test_handle_list_attribute(BOOL child, HANDLE handle1, HANDLE handle
 
     if (child)
     {
+        char name1[256], name2[256];
         DWORD flags;
 
         flags = 0;
         ret = GetHandleInformation(handle1, &flags);
         ok(ret, "Failed to get handle info, error %ld.\n", GetLastError());
         ok(flags == HANDLE_FLAG_INHERIT, "Unexpected flags %#lx.\n", flags);
+        ret = GetFileInformationByHandleEx(handle1, FileNameInfo, name1, sizeof(name1));
+        ok(ret, "Failed to get pipe name, error %ld\n", GetLastError());
         CloseHandle(handle1);
-
+        flags = 0;
         ret = GetHandleInformation(handle2, &flags);
-        ok(!ret && GetLastError() == ERROR_INVALID_HANDLE, "Unexpected return value, error %ld.\n", GetLastError());
+        if (ret)
+        {
+            ok(!(flags & HANDLE_FLAG_INHERIT), "Parent's handle shouldn't have been inherited\n");
+            ret = GetFileInformationByHandleEx(handle2, FileNameInfo, name2, sizeof(name2));
+            ok(!ret || strcmp(name1, name2), "Parent's handle shouldn't have been inherited\n");
+        }
+        else
+            ok(GetLastError() == ERROR_INVALID_HANDLE, "Unexpected return value, error %ld.\n", GetLastError());
 
         return;
     }
@@ -4956,16 +4949,25 @@ static void test_job_list_attribute(HANDLE parent_job)
 static void test_services_exe(void)
 {
     NTSTATUS status;
-    ULONG size, offset;
+    ULONG size, offset, try;
     char *buf;
     SYSTEM_PROCESS_INFORMATION *spi;
     ULONG services_pid = 0, services_session_id = ~0;
 
-    status = NtQuerySystemInformation(SystemProcessInformation, NULL, 0, &size);
-    ok(status == STATUS_INFO_LENGTH_MISMATCH, "got %#lx\n", status);
+    /* Check that passing a zero size returns a size suitable for the next call,
+     * taking into account that in rare cases processes may start between the
+     * two NtQuerySystemInformation() calls. So this may require a few tries.
+     */
+    for (try = 0; try < 3; try++)
+    {
+        status = NtQuerySystemInformation(SystemProcessInformation, NULL, 0, &size);
+        ok(status == STATUS_INFO_LENGTH_MISMATCH, "got %#lx\n", status);
 
-    buf = malloc(size);
-    status = NtQuerySystemInformation(SystemProcessInformation, buf, size, &size);
+        buf = malloc(size);
+        status = NtQuerySystemInformation(SystemProcessInformation, buf, size, &size);
+        if (status != STATUS_INFO_LENGTH_MISMATCH) break;
+        free(buf);
+    }
     ok(status == STATUS_SUCCESS, "got %#lx\n", status);
 
     spi = (SYSTEM_PROCESS_INFORMATION *)buf;

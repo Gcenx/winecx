@@ -96,7 +96,9 @@ static GpStatus init_custom_linecap(GpCustomLineCap *cap, GpPathData *pathdata, 
     cap->pathdata.Count = pathdata->Count;
 
     cap->inset = base_inset;
-    cap->cap = basecap;
+    cap->basecap = basecap;
+    cap->strokeStartCap = LineCapFlat;
+    cap->strokeEndCap = LineCapFlat;
     cap->join = LineJoinMiter;
     cap->scale = 1.0;
 
@@ -177,32 +179,29 @@ GpStatus WINGDIPAPI GdipGetCustomLineCapWidthScale(GpCustomLineCap* custom,
 }
 
 GpStatus WINGDIPAPI GdipSetCustomLineCapStrokeCaps(GpCustomLineCap* custom,
-    GpLineCap start, GpLineCap end)
+    GpLineCap startcap, GpLineCap endcap)
 {
-    static int calls;
+    TRACE("(%p,%u,%u)\n", custom, startcap, endcap);
 
-    TRACE("(%p,%u,%u)\n", custom, start, end);
-
-    if(!custom)
+    if(!custom || startcap > LineCapTriangle || endcap > LineCapTriangle)
         return InvalidParameter;
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    custom->strokeStartCap = startcap;
+    custom->strokeEndCap = endcap;
 
-    return NotImplemented;
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipSetCustomLineCapBaseCap(GpCustomLineCap* custom,
-    GpLineCap base)
+    GpLineCap basecap)
 {
-    static int calls;
+    TRACE("(%p,%u)\n", custom, basecap);
+    if(!custom || basecap > LineCapTriangle)
+        return InvalidParameter;
 
-    TRACE("(%p,%u)\n", custom, base);
+    custom->basecap = basecap;
 
-    if(!(calls++))
-        FIXME("not implemented\n");
-
-    return NotImplemented;
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipGetCustomLineCapBaseInset(GpCustomLineCap* custom,
@@ -221,14 +220,14 @@ GpStatus WINGDIPAPI GdipGetCustomLineCapBaseInset(GpCustomLineCap* custom,
 GpStatus WINGDIPAPI GdipSetCustomLineCapBaseInset(GpCustomLineCap* custom,
     REAL inset)
 {
-    static int calls;
-
     TRACE("(%p,%0.2f)\n", custom, inset);
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    if(!custom)
+        return InvalidParameter;
 
-    return NotImplemented;
+    custom->inset = inset;
+
+    return Ok;
 }
 
 /*FIXME: LineJoin completely ignored now */
@@ -264,7 +263,7 @@ GpStatus WINGDIPAPI GdipGetCustomLineCapBaseCap(GpCustomLineCap *customCap, GpLi
     if(!customCap || !baseCap)
         return InvalidParameter;
 
-    *baseCap = customCap->cap;
+    *baseCap = customCap->basecap;
 
     return Ok;
 }
@@ -306,18 +305,18 @@ static void arrowcap_update_path(GpAdjustableArrowCap *cap)
         points[2].X = cap->width / 2.0;
         points[2].Y = -cap->height;
         points[3].X = 0.0;
-        points[3].Y = -cap->height - cap->middle_inset;
+        points[3].Y = -cap->height + cap->middle_inset;
     }
     else
     {
         memcpy(cap->cap.pathdata.Types, types_unfilled, sizeof(types_unfilled));
         cap->cap.pathdata.Count = 3;
-        points[0].X = -cap->width / 4.0;
-        points[0].Y = -cap->height / 2.0;
+        points[0].X = -cap->width / 2.0;
+        points[0].Y = -cap->height;
         points[1].X = 0.0;
         points[1].Y = 0.0;
-        points[2].X = cap->width / 4.0;
-        points[2].Y = -cap->height / 2.0;
+        points[2].X = cap->width / 2.0;
+        points[2].Y = -cap->height;
     }
 
     if (cap->width == 0.0)

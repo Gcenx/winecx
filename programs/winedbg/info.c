@@ -199,8 +199,10 @@ static BOOL CALLBACK info_mod_cb(PCSTR mod_name, DWORD64 base, PVOID ctx)
 
     if (im->num_used + 1 > im->num_alloc)
     {
+        struct info_module* new = realloc(im->modules, (im->num_alloc + 16) * sizeof(*im->modules));
+        if (!new) return FALSE; /* stop enumeration in case of OOM */
         im->num_alloc += 16;
-        im->modules = dbg_heap_realloc(im->modules, im->num_alloc * sizeof(*im->modules));
+        im->modules = new;
     }
     im->modules[im->num_used].mi.SizeOfStruct = sizeof(im->modules[im->num_used].mi);
     if (SymGetModuleInfo64(dbg_curr_process->handle, base, &im->modules[im->num_used].mi))
@@ -281,7 +283,7 @@ void info_win32_module(DWORD64 base)
         }
         num_printed++;
     }
-    HeapFree(GetProcessHeap(), 0, im.modules);
+    free(im.modules);
 
     if (base && !num_printed)
         dbg_printf("'0x%0*I64x' is not a valid module address\n", ADDRWIDTH, base);
@@ -315,8 +317,10 @@ static void class_walker(HWND hWnd, struct class_walker* cw)
     {
         if (cw->used >= cw->alloc)
         {
+            ATOM* new = realloc(cw->table, (cw->alloc + 16) * sizeof(ATOM));
+            if (!new) return;
             cw->alloc += 16;
-            cw->table = dbg_heap_realloc(cw->table, cw->alloc * sizeof(ATOM));
+            cw->table = new;
         }
         cw->table[cw->used++] = atom;
         info_win32_class(hWnd, clsName);
@@ -340,7 +344,7 @@ void info_win32_class(HWND hWnd, const char* name)
         cw.table = NULL;
         cw.used = cw.alloc = 0;
         class_walker(GetDesktopWindow(), &cw);
-        HeapFree(GetProcessHeap(), 0, cw.table);
+        free(cw.table);
         return;
     }
 
@@ -498,14 +502,18 @@ static unsigned get_parent(const struct dump_proc* dp, unsigned idx)
 static void dump_proc_info(const struct dump_proc* dp, unsigned idx, unsigned depth)
 {
     struct dump_proc_entry* dpe;
+    char info;
     for ( ; idx != -1; idx = dp->entries[idx].sibling)
     {
         assert(idx < dp->count);
         dpe = &dp->entries[idx];
-        dbg_printf("%c%08lx %-8ld ",
-                   (dpe->proc.th32ProcessID == (dbg_curr_process ?
-                                                dbg_curr_process->pid : 0)) ? '>' : ' ',
-                   dpe->proc.th32ProcessID, dpe->proc.cntThreads);
+        if (dbg_curr_process && dpe->proc.th32ProcessID == dbg_curr_process->pid)
+            info = '>';
+        else if (dpe->proc.th32ProcessID == GetCurrentProcessId())
+            info = '=';
+        else
+            info = ' ';
+        dbg_printf("%c%08lx %-8ld ", info, dpe->proc.th32ProcessID, dpe->proc.cntThreads);
         if (depth)
         {
             unsigned i;
@@ -528,7 +536,7 @@ void info_win32_processes(void)
 
         dp.count   = 0;
         dp.alloc   = 16;
-        dp.entries = HeapAlloc(GetProcessHeap(), 0, sizeof(*dp.entries) * dp.alloc);
+        dp.entries = malloc(sizeof(*dp.entries) * dp.alloc);
         if (!dp.entries)
         {
              CloseHandle(snap);
@@ -537,15 +545,21 @@ void info_win32_processes(void)
         dp.entries[dp.count].proc.dwSize = sizeof(dp.entries[dp.count].proc);
         ok = Process32First(snap, &dp.entries[dp.count].proc);
 
-        /* fetch all process information into dp (skipping this debugger) */
+        /* fetch all process information into dp */
         while (ok)
         {
-            if (dp.entries[dp.count].proc.th32ProcessID != GetCurrentProcessId())
-                dp.entries[dp.count++].children = -1;
+            dp.entries[dp.count++].children = -1;
             if (dp.count >= dp.alloc)
             {
-                dp.entries = HeapReAlloc(GetProcessHeap(), 0, dp.entries, sizeof(*dp.entries) * (dp.alloc *= 2));
-                if (!dp.entries) return;
+                struct dump_proc_entry* new = realloc(dp.entries, sizeof(*dp.entries) * (dp.alloc * 2));
+                if (!new)
+                {
+                    CloseHandle(snap);
+                    free(dp.entries);
+                    return;
+                }
+                dp.alloc *= 2;
+                dp.entries = new;
             }
             dp.entries[dp.count].proc.dwSize = sizeof(dp.entries[dp.count].proc);
             ok = Process32Next(snap, &dp.entries[dp.count].proc);
@@ -561,7 +575,7 @@ void info_win32_processes(void)
         }
         dbg_printf(" %-8.8s %-8.8s %s (all id:s are in hex)\n", "pid", "threads", "executable");
         dump_proc_info(&dp, first, 0);
-        HeapFree(GetProcessHeap(), 0, dp.entries);
+        free(dp.entries);
     }
 }
 
@@ -581,6 +595,39 @@ static BOOL get_process_name(DWORD pid, PROCESSENTRY32W* entry)
     return ret;
 }
 
+WCHAR* fetch_thread_description(DWORD tid)
+{
+    static HRESULT (WINAPI *my_GetThreadDescription)(HANDLE, PWSTR*) = NULL;
+    static BOOL resolved = FALSE;
+    HANDLE h;
+    WCHAR* desc = NULL;
+
+    if (!resolved)
+    {
+        HMODULE kernelbase = GetModuleHandleA("kernelbase.dll");
+        if (kernelbase)
+            my_GetThreadDescription = (void *)GetProcAddress(kernelbase, "GetThreadDescription");
+        resolved = TRUE;
+    }
+
+    if (!my_GetThreadDescription)
+        return NULL;
+
+    h = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, tid);
+    if (!h)
+        return NULL;
+
+    my_GetThreadDescription(h, &desc);
+    CloseHandle(h);
+
+    if (desc && desc[0] == '\0')
+    {
+        LocalFree(desc);
+        return NULL;
+    }
+    return desc;
+}
+
 void info_win32_threads(void)
 {
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
@@ -591,6 +638,7 @@ void info_win32_threads(void)
 	DWORD		lastProcessId = 0;
         struct dbg_process* p = NULL;
         struct dbg_thread* t = NULL;
+        WCHAR *description;
 
 	entry.dwSize = sizeof(entry);
 	ok = Thread32First(snap, &entry);
@@ -622,12 +670,20 @@ void info_win32_threads(void)
                                entry.th32OwnerProcessID, p ? " (D)" : "", exename);
                     lastProcessId = entry.th32OwnerProcessID;
 		}
-                t = dbg_get_thread(p, entry.th32ThreadID);
-                dbg_printf("\t%08lx %4ld%s %s\n",
+                dbg_printf("\t%08lx %4ld%s ",
                            entry.th32ThreadID, entry.tpBasePri,
-                           (entry.th32ThreadID == dbg_curr_tid) ? " <==" : "    ",
-                           t ? t->name : "");
+                           (entry.th32ThreadID == dbg_curr_tid) ? " <==" : "    ");
 
+                if ((description = fetch_thread_description(entry.th32ThreadID)))
+                {
+                    dbg_printf("%ls\n", description);
+                    LocalFree(description);
+                }
+                else
+                {
+                    t = dbg_get_thread(p, entry.th32ThreadID);
+                    dbg_printf("%s\n", t ? t->name : "");
+                }
 	    }
             ok = Thread32Next(snap, &entry);
         }

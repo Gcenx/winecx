@@ -1355,6 +1355,40 @@ static void test_WsReadNode(void)
     WsFreeReader( reader );
 }
 
+static HRESULT set_output( WS_XML_WRITER *writer )
+{
+    WS_XML_WRITER_TEXT_ENCODING text = {{WS_XML_WRITER_ENCODING_TYPE_TEXT}, WS_CHARSET_UTF8};
+    WS_XML_WRITER_BUFFER_OUTPUT buf = {{WS_XML_WRITER_OUTPUT_TYPE_BUFFER}};
+    return WsSetOutput( writer, &text.encoding, &buf.output, NULL, 0, NULL );
+}
+
+static void check_output_buffer( WS_XML_BUFFER *buffer, const char *expected, unsigned int line )
+{
+    WS_XML_WRITER *writer;
+    WS_BYTES bytes;
+    ULONG size = sizeof(bytes);
+    int len = strlen(expected);
+    HRESULT hr;
+
+    hr = WsCreateWriter( NULL, 0, &writer, NULL );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    hr = set_output( writer );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    hr = WsWriteXmlBuffer( writer, buffer, NULL );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    memset( &bytes, 0, sizeof(bytes) );
+    hr = WsGetWriterProperty( writer, WS_XML_WRITER_PROPERTY_BYTES, &bytes, size, NULL );
+    ok( hr == S_OK, "%u: got %#lx\n", line, hr );
+    ok( bytes.length == len, "%u: got %lu expected %d\n", line, bytes.length, len );
+    if (bytes.length != len) return;
+    ok( !memcmp( bytes.bytes, expected, len ), "%u: got %s expected %s\n", line, bytes.bytes, expected );
+
+    WsFreeWriter( writer );
+}
+
 static void prepare_type_test( WS_XML_READER *reader, const char *data, ULONG size )
 {
     HRESULT hr;
@@ -1373,6 +1407,15 @@ static void test_WsReadType(void)
 {
     static const GUID guid = {0,0,0,{0,0,0,0,0,0,0,0xa1}};
     static const char utf8[] = {'<','t','>',0xe2,0x80,0x99,'<','/','t','>'};
+    static const char faultxml[] =
+        "<s:Body xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Fault>"
+        "<faultcode>s:Client</faultcode><faultstring>Example Fault</faultstring>"
+        "<faultactor>http://example.com/fault</faultactor>"
+        "<detail><ErrorCode>1030</ErrorCode></detail></s:Fault></s:Body>";
+    static const char faultcode[] = "Client";
+    static const WCHAR faultstring[] = L"Example Fault";
+    static const WCHAR faultactor[] = L"http://example.com/fault";
+    static const char faultdetail[] = "<detail><ErrorCode>1030</ErrorCode></detail>";
     HRESULT hr;
     WS_XML_READER *reader;
     WS_HEAP *heap;
@@ -1396,6 +1439,8 @@ static void test_WsReadType(void)
     WS_STRING val_string, *ptr_string;
     WS_UNIQUE_ID val_id, *ptr_id;
     WS_XML_QNAME val_qname, *ptr_qname;
+    WS_FAULT_DESCRIPTION fault_desc;
+    WS_FAULT fault;
 
     hr = WsCreateHeap( 1 << 16, 0, NULL, 0, &heap, NULL );
     ok( hr == S_OK, "got %#lx\n", hr );
@@ -1919,6 +1964,33 @@ static void test_WsReadType(void)
     hr = WsReadType( reader, WS_ELEMENT_TYPE_MAPPING, WS_XML_QNAME_TYPE, NULL,
                      WS_READ_REQUIRED_POINTER, heap, &ptr_qname, sizeof(ptr_qname), NULL );
     ok( hr == WS_E_INVALID_FORMAT, "got %#lx\n", hr );
+
+    prepare_type_test( reader, faultxml, sizeof(faultxml) - 1 );
+    hr = WsReadToStartElement( reader, NULL, NULL, NULL, NULL );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    memset( &fault, 0, sizeof(fault) );
+
+    fault_desc.envelopeVersion = WS_ENVELOPE_VERSION_SOAP_1_1;
+    hr = WsReadType( reader, WS_ELEMENT_TYPE_MAPPING, WS_FAULT_TYPE, &fault_desc,
+                     WS_READ_REQUIRED_VALUE, heap, &fault, sizeof(fault), NULL );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( fault.code->value.localName.length == sizeof(faultcode) - 1, "got %lu\n", fault.code->value.localName.length );
+    ok( !memcmp( fault.code->value.localName.bytes, faultcode, sizeof(faultcode) - 1 ), "wrong fault code\n" );
+    ok( !fault.code->subCode, "subcode is not NULL\n" );
+    ok( fault.reasonCount == 1, "got %lu\n", fault.reasonCount );
+    ok( fault.reasons[0].text.length == ARRAY_SIZE(faultstring) - 1, "got %lu\n", fault.reasons[0].text.length );
+    ok( !memcmp( fault.reasons[0].text.chars, faultstring, (ARRAY_SIZE(faultstring) - 1) * sizeof(WCHAR) ),
+        "wrong fault string\n" );
+    ok( fault.actor.length == ARRAY_SIZE(faultactor) - 1, "got %lu\n", fault.actor.length  );
+    ok( !memcmp( fault.actor.chars, faultactor, ARRAY_SIZE(faultactor) - 1 ), "wrong fault actor\n" );
+    ok( !fault.node.length, "fault node not empty\n" );
+    ok( fault.detail != NULL, "fault detail not set\n" );
+    check_output_buffer( fault.detail, faultdetail, __LINE__ );
+
+    fault_desc.envelopeVersion = WS_ENVELOPE_VERSION_NONE;
+    hr = WsReadType( reader, WS_ELEMENT_TYPE_MAPPING, WS_FAULT_TYPE, &fault_desc,
+                     WS_READ_REQUIRED_VALUE, heap, &fault, sizeof(fault), NULL );
+    ok( hr == E_INVALIDARG, "got %#lx\n", hr );
 
     WsFreeReader( reader );
     WsFreeHeap( heap );
@@ -3890,9 +3962,13 @@ static void test_WsReadValue(void)
 static void test_WsResetError(void)
 {
     WS_ERROR_PROPERTY prop;
-    ULONG size, code;
+    ULONG size, code, count;
     WS_ERROR *error;
     LANGID langid;
+    WS_STRING str;
+    WS_FAULT fault;
+    WS_XML_STRING xmlstr;
+    WS_FAULT *faultp;
     HRESULT hr;
 
     hr = WsResetError( NULL );
@@ -3940,6 +4016,62 @@ static void test_WsResetError(void)
     hr = WsGetErrorProperty( error, WS_ERROR_PROPERTY_LANGID, &langid, size );
     ok( hr == S_OK, "got %#lx\n", hr );
     ok( langid == MAKELANGID( LANG_DUTCH, SUBLANG_DEFAULT ), "got %u\n", langid );
+
+    WsFreeError( error );
+
+    str.chars = (WCHAR *) L"str";
+    str.length = 3;
+
+    hr = WsCreateError( NULL, 0, &error );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    hr = WsAddErrorString(error, &str );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    hr = WsAddErrorString(error, &str );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    count = 0xdeadbeef;
+    size = sizeof(count);
+    hr = WsGetErrorProperty( error, WS_ERROR_PROPERTY_STRING_COUNT, &count, size );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( count == 2, "got %lu\n", count );
+
+    hr = WsResetError( error );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    count = 0xdeadbeef;
+    size = sizeof(count);
+    hr = WsGetErrorProperty( error, WS_ERROR_PROPERTY_STRING_COUNT, &count, size );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( count == 0, "got %lu\n", count );
+
+    WsFreeError( error );
+
+    memset( &fault, 0, sizeof(fault) );
+    xmlstr.bytes = (BYTE *)"str";
+    xmlstr.length = 3;
+
+    hr = WsCreateError( NULL, 0, &error );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    hr = WsSetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_FAULT, &fault, sizeof(fault) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    hr = WsSetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_ACTION, &xmlstr, sizeof(WS_XML_STRING) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    hr = WsResetError( error );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    faultp = (WS_FAULT *)0xdeadbeef;
+    hr = WsGetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_FAULT, &faultp, sizeof(faultp) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( faultp == NULL, "faultp != NULL\n" );
+
+    xmlstr.length = 0xdeadbeef;
+    xmlstr.bytes = (BYTE *)0xdeadbeef;
+    hr = WsGetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_ACTION, &xmlstr, sizeof(xmlstr) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( xmlstr.length == 0, "got %lu\n", xmlstr.length );
 
     WsFreeError( error );
 }
@@ -6175,40 +6307,6 @@ static void test_dictionary(void)
     WsFreeReader( reader );
 }
 
-static HRESULT set_output( WS_XML_WRITER *writer )
-{
-    WS_XML_WRITER_TEXT_ENCODING text = {{WS_XML_WRITER_ENCODING_TYPE_TEXT}, WS_CHARSET_UTF8};
-    WS_XML_WRITER_BUFFER_OUTPUT buf = {{WS_XML_WRITER_OUTPUT_TYPE_BUFFER}};
-    return WsSetOutput( writer, &text.encoding, &buf.output, NULL, 0, NULL );
-}
-
-static void check_output_buffer( WS_XML_BUFFER *buffer, const char *expected, unsigned int line )
-{
-    WS_XML_WRITER *writer;
-    WS_BYTES bytes;
-    ULONG size = sizeof(bytes);
-    int len = strlen(expected);
-    HRESULT hr;
-
-    hr = WsCreateWriter( NULL, 0, &writer, NULL );
-    ok( hr == S_OK, "got %#lx\n", hr );
-
-    hr = set_output( writer );
-    ok( hr == S_OK, "got %#lx\n", hr );
-
-    hr = WsWriteXmlBuffer( writer, buffer, NULL );
-    ok( hr == S_OK, "got %#lx\n", hr );
-
-    memset( &bytes, 0, sizeof(bytes) );
-    hr = WsGetWriterProperty( writer, WS_XML_WRITER_PROPERTY_BYTES, &bytes, size, NULL );
-    ok( hr == S_OK, "%u: got %#lx\n", line, hr );
-    ok( bytes.length == len, "%u: got %lu expected %d\n", line, bytes.length, len );
-    if (bytes.length != len) return;
-    ok( !memcmp( bytes.bytes, expected, len ), "%u: got %s expected %s\n", line, bytes.bytes, expected );
-
-    WsFreeWriter( writer );
-}
-
 static HRESULT prepare_xml_buffer_test( WS_XML_READER *reader, WS_HEAP *heap )
 {
     WS_XML_STRING localname = {1, (BYTE *)"t"}, localname2 = {1, (BYTE *)"u"}, ns = {0, NULL};
@@ -7044,6 +7142,332 @@ static void test_description_type(void)
     WsFreeHeap( heap );
 }
 
+static void test_WsAddErrorString(void)
+{
+    ULONG count;
+    WS_ERROR *error;
+    WS_STRING emptystr = { 0 };
+    WS_STRING str1 = { 4, (WCHAR *) L"str1" };
+    WS_STRING str2 = { 4, (WCHAR *) L"str2" };
+    WS_STRING out;
+    HRESULT hr;
+
+    hr = WsCreateError( NULL, 0, &error );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    hr = WsAddErrorString( NULL, NULL );
+    ok( hr == E_INVALIDARG, "got %#lx\n", hr );
+    hr = WsAddErrorString( NULL, &str1 );
+    ok( hr == E_INVALIDARG, "got %#lx\n", hr );
+    hr = WsAddErrorString( error, NULL );
+    ok( hr == E_INVALIDARG, "got %#lx\n", hr );
+
+    hr = WsAddErrorString( error, &emptystr );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    hr = WsAddErrorString(error, &str2 );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    hr = WsAddErrorString(error, &str1 );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    count = 0xdeadbeef;
+    hr = WsGetErrorProperty( error, WS_ERROR_PROPERTY_STRING_COUNT, &count, sizeof(count) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( count == 3, "got %lu\n", count );
+
+    hr = WsGetErrorString( error, 0, &out );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( out.length == str1.length, "got %lu\n", out.length );
+    ok( !memcmp( out.chars, str1.chars, str1.length ), "wrong error string\n" );
+
+    hr = WsGetErrorString( error, 1, &out );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( out.length == str2.length, "got %lu\n", out.length );
+    ok( !memcmp( out.chars, str2.chars, str2.length ), "wrong error string\n" );
+
+    hr = WsGetErrorString( error, 2, &out );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( out.length == 0, "got %lu\n", out.length );
+    ok( out.chars != NULL, "out.chars == NULL\n" );
+
+    WsFreeError( error );
+}
+
+static void test_WsSetFaultErrorProperty(void)
+{
+    static const WCHAR expected_errorstr[] = L"The fault reason was: 'Some reason'.";
+    static const char detailxml[] = "<detail><ErrorCode>1030</ErrorCode></detail>";
+    static const LANGID langid = MAKELANGID( LANG_ENGLISH, SUBLANG_ENGLISH_US );
+    static const WS_XML_STRING action = { 24, (BYTE *)"http://example.com/fault" };
+    WS_ERROR_PROPERTY prop;
+    WS_ERROR *error;
+    WS_FAULT fault;
+    WS_FAULT *faultp;
+    WS_XML_STRING outxmlstr;
+    WS_STRING outstr;
+    ULONG count;
+    WS_HEAP *heap;
+    WS_XML_READER *reader;
+    HRESULT hr;
+
+    prop.id = WS_ERROR_PROPERTY_LANGID;
+    prop.value = (void *)&langid;
+    prop.valueSize = sizeof(langid);
+
+    hr = WsCreateError( &prop, 1, &error );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    hr = WsSetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_FAULT, NULL, sizeof(WS_FAULT) );
+    ok( hr == E_INVALIDARG, "got %#lx\n", hr );
+
+    hr = WsSetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_ACTION, NULL, sizeof(WS_XML_STRING) );
+    ok( hr == E_INVALIDARG, "got %#lx\n", hr );
+
+    memset( &fault, 0, sizeof(fault) );
+
+    fault.code = calloc( 1, sizeof(WS_FAULT_CODE) );
+    fault.code->value.localName.bytes = (BYTE *)"Server";
+    fault.code->value.localName.length = 6;
+    fault.code->subCode = calloc( 1, sizeof(WS_FAULT_CODE) );
+    fault.code->subCode->value.localName.bytes = (BYTE *)"SubCode";
+    fault.code->subCode->value.localName.length = 7;
+
+    fault.reasons = calloc( 1, sizeof(*fault.reasons) );
+    fault.reasonCount = 1;
+    fault.reasons[0].lang.chars = (WCHAR *) L"en-US";
+    fault.reasons[0].lang.length = 5;
+    fault.reasons[0].text.chars = (WCHAR *) L"Some reason";
+    fault.reasons[0].text.length = 11;
+
+    hr = WsSetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_FAULT, &fault, sizeof(WS_FAULT) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    faultp = NULL;
+    hr = WsGetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_FAULT, &faultp, sizeof(faultp) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( faultp != NULL, "faultp not set\n" );
+    ok( faultp != &fault, "fault not copied\n" );
+
+    ok( faultp->code && faultp->code != fault.code, "fault code not copied\n" );
+    ok( faultp->code->value.localName.length == 6, "got %lu\n", faultp->code->value.localName.length );
+    ok( !memcmp( faultp->code->value.localName.bytes, fault.code->value.localName.bytes, 6 ),
+        "wrong code localName\n" );
+    ok( faultp->code->value.localName.bytes != fault.code->value.localName.bytes,
+        "fault code localName not copied\n" );
+    ok( faultp->code->value.ns.length == 0, "got %lu\n", faultp->code->value.ns.length );
+    ok( faultp->code->subCode && faultp->code->subCode != fault.code->subCode,
+        "fault code subCode not copied\n" );
+    ok( faultp->code->subCode->value.localName.length == 7,"got %lu\n", faultp->code->subCode->value.localName.length );
+    ok( !memcmp( faultp->code->subCode->value.localName.bytes, fault.code->subCode->value.localName.bytes, 7 ),
+        "wrong subCode localName\n" );
+    ok( faultp->code->subCode->value.localName.bytes != fault.code->subCode->value.localName.bytes,
+        "fault code subCode localName not copied\n" );
+    ok( faultp->code->subCode->value.ns.length == 0, "got %lu\n", faultp->code->subCode->value.ns.length );
+    ok( faultp->code->subCode->subCode == NULL, "fault->code->subCode->subCode != NULL\n");
+
+    ok( faultp->reasons != fault.reasons, "fault reasons not copied\n" );
+    ok( faultp->reasonCount == 1, "got %lu\n", faultp->reasonCount );
+    ok( faultp->reasons[0].lang.length == 5, "got %lu\n", faultp->reasons[0].text.length );
+    ok( !memcmp( faultp->reasons[0].lang.chars, fault.reasons[0].lang.chars, 5 * sizeof(WCHAR) ),
+        "wrong fault reason lang\n" );
+    ok( faultp->reasons[0].lang.chars != fault.reasons[0].lang.chars,
+        "fault reason lang not copied\n" );
+    ok( faultp->reasons[0].text.length == 11, "got %lu\n", faultp->reasons[0].text.length );
+    ok( !memcmp( faultp->reasons[0].text.chars, fault.reasons[0].text.chars, 11 * sizeof(WCHAR) ),
+        "wrong fault reason text\n" );
+    ok( faultp->reasons[0].text.chars != fault.reasons[0].text.chars,
+        "fault reason text not copied\n" );
+
+    ok( faultp->actor.length == 0, "got %lu\n", faultp->actor.length );
+    ok( faultp->node.length == 0, "got %lu\n", faultp->node.length );
+    ok( faultp->detail == NULL, "faultp->detail != NULL\n" );
+
+    count = 0xdeadbeef;
+    hr = WsGetErrorProperty( error, WS_ERROR_PROPERTY_STRING_COUNT, &count, sizeof(count) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( count == 1, "got %lu\n", count );
+
+    hr = WsGetErrorString( error, 0, &outstr );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( outstr.length == ARRAY_SIZE(expected_errorstr) - 1, "got %lu\n", outstr.length );
+    ok( !memcmp( outstr.chars, expected_errorstr, (ARRAY_SIZE(expected_errorstr) - 1) * sizeof(WCHAR) ),
+        "wrong error string\n" );
+
+    outxmlstr.bytes = (BYTE *)0xdeadbeef;
+    outxmlstr.length = 0xdeadbeef;
+    hr = WsGetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_ACTION, &outxmlstr, sizeof(outxmlstr) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( outxmlstr.length == 0, "got %lu\n", outxmlstr.length );
+
+    hr = WsSetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_ACTION, &action, sizeof(action) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    outxmlstr.bytes = (BYTE *)0xdeadbeef;
+    outxmlstr.length = 0xdeadbeef;
+    hr = WsGetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_ACTION, &outxmlstr, sizeof(outxmlstr) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( outxmlstr.length == 24, "got %lu\n", outxmlstr.length );
+    ok( !memcmp( outxmlstr.bytes, action.bytes, 24 ), "wrong fault action\n" );
+
+    hr = WsCreateHeap( 1 << 16, 0, NULL, 0, &heap, NULL );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    hr = WsCreateReader( NULL, 0, &reader, NULL );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    hr = set_input( reader, detailxml, strlen(detailxml) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    hr = WsReadXmlBuffer( reader, heap, &fault.detail, NULL );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    hr = WsSetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_FAULT, &fault, sizeof(WS_FAULT) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    hr = WsGetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_FAULT, &faultp, sizeof(faultp) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( faultp != NULL, "faultp not set\n" );
+    ok( faultp->detail != NULL, "fault detail not set\n" );
+    ok( faultp->detail != fault.detail, "fault detail not copied\n" );
+    check_output_buffer( faultp->detail, detailxml, __LINE__ );
+
+    free( fault.code->subCode );
+    free( fault.code );
+    free( fault.reasons );
+    WsFreeReader( reader );
+    WsFreeHeap( heap );
+    WsFreeError( error );
+}
+
+static void test_WsGetFaultErrorDetail(void)
+{
+    static const char detailxml[] = "<detail><ErrorCode>1030</ErrorCode></detail>";
+    static const char badxml[] = "<bad><ErrorCode>1030</ErrorCode></bad>";
+
+    WS_ERROR *error;
+    WS_HEAP *heap;
+    WS_XML_READER *reader;
+    WS_FAULT fault;
+    WS_XML_STRING action = { 24, (BYTE *)"http://example.com/fault" };
+    WS_XML_STRING action2 = { 25, (BYTE *)"http://example.com/fault2" };
+    WS_XML_STRING localname = { 9, (BYTE *)"ErrorCode" }, localname2 = { 9, (BYTE *)"OtherCode" };
+    WS_XML_STRING ns = { 0 };
+    WS_ELEMENT_DESCRIPTION desc = { &localname, &ns, WS_UINT32_TYPE, NULL };
+    WS_ELEMENT_DESCRIPTION desc2 = { &localname2, &ns, WS_UINT32_TYPE, NULL };
+    WS_FAULT_DETAIL_DESCRIPTION fault_desc;
+    UINT32 code;
+    UINT32 *codep;
+    HRESULT hr;
+
+    hr = WsCreateError( NULL, 0, &error );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    memset( &fault, 0, sizeof(fault) );
+
+    hr = WsCreateHeap( 1 << 16, 0, NULL, 0, &heap, NULL );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    hr = WsCreateReader( NULL, 0, &reader, NULL );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    hr = set_input( reader, detailxml, strlen(detailxml) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    hr = WsReadXmlBuffer( reader, heap, &fault.detail, NULL );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    hr = WsSetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_FAULT, &fault, sizeof(fault) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    fault_desc.action = NULL;
+    fault_desc.detailElementDescription = &desc;
+
+    code = 0xdeadbeef;
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_REQUIRED_VALUE, heap, &code, sizeof(code) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( code == 1030, "got %u\n", code );
+
+    codep = (UINT32 *)0xdeadbeef;
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_OPTIONAL_POINTER, heap, &codep, sizeof(codep) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( codep != NULL, "codep == NULL\n" );
+    ok( *codep == 1030, "got %u\n", *codep );
+
+    fault_desc.action = &action;
+
+    code = 0xdeadbeef;
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_REQUIRED_VALUE, heap, &code, sizeof(code) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( code == 1030, "got %u\n", code );
+
+    hr = WsSetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_ACTION, &action, sizeof(action) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    fault_desc.action = NULL;
+
+    code = 0xdeadbeef;
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_REQUIRED_VALUE, heap, &code, sizeof(code) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( code == 1030, "got %u\n", code );
+
+    fault_desc.action = &action2;
+
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_REQUIRED_VALUE, heap, &code, sizeof(code) );
+    ok( hr == WS_E_INVALID_FORMAT, "got %#lx\n", hr );
+
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_REQUIRED_POINTER, heap, &codep, sizeof(codep) );
+    ok( hr == WS_E_INVALID_FORMAT, "got %#lx\n", hr );
+
+    codep = (UINT32 *)0xdeadbeef;
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_OPTIONAL_POINTER, heap, &codep, sizeof(codep) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( codep == NULL, "codep != NULL\n" );
+
+    codep = (UINT32 *)0xdeadbeef;
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_NILLABLE_POINTER, heap, &codep, sizeof(codep) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( codep == NULL, "codep != NULL\n" );
+
+    fault_desc.action = NULL;
+    fault_desc.detailElementDescription = &desc2;
+
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_REQUIRED_VALUE, heap, &code, sizeof(code) );
+    ok( hr == WS_E_INVALID_FORMAT, "got %#lx\n", hr );
+
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_REQUIRED_POINTER, heap, &codep, sizeof(codep) );
+    ok( hr == WS_E_INVALID_FORMAT, "got %#lx\n", hr );
+
+    codep = (UINT32 *)0xdeadbeef;
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_OPTIONAL_POINTER, heap, &codep, sizeof(codep) );
+    ok( hr == WS_E_INVALID_FORMAT, "got %#lx\n", hr );
+    ok( codep == NULL, "codep != NULL\n" );
+
+    codep = (UINT32 *)0xdeadbeef;
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_NILLABLE_POINTER, heap, &codep, sizeof(codep) );
+    ok( hr == WS_E_INVALID_FORMAT, "got %#lx\n", hr );
+    ok( codep == NULL, "codep != NULL\n" );
+
+    hr = set_input( reader, badxml, strlen(badxml) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    hr = WsReadXmlBuffer( reader, heap, &fault.detail, NULL );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    hr = WsSetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_FAULT, &fault, sizeof(fault) );
+    ok( hr == S_OK, "got %#lx\n", hr );
+
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_REQUIRED_VALUE, heap, &code, sizeof(code) );
+    ok( hr == WS_E_INVALID_FORMAT, "got %#lx\n", hr );
+
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_REQUIRED_POINTER, heap, &codep, sizeof(codep) );
+    ok( hr == WS_E_INVALID_FORMAT, "got %#lx\n", hr );
+
+    codep = (UINT32 *)0xdeadbeef;
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_OPTIONAL_POINTER, heap, &codep, sizeof(codep) );
+    ok( hr == WS_E_INVALID_FORMAT, "got %#lx\n", hr );
+    ok( codep == NULL, "codep != NULL\n" );
+
+    codep = (UINT32 *)0xdeadbeef;
+    hr = WsGetFaultErrorDetail( error, &fault_desc, WS_READ_NILLABLE_POINTER, heap, &codep, sizeof(codep) );
+    ok( hr == WS_E_INVALID_FORMAT, "got %#lx\n", hr );
+    ok( codep == NULL, "codep != NULL\n" );
+
+    WsFreeReader( reader );
+    WsFreeHeap( heap );
+    WsFreeError( error );
+}
+
 START_TEST(reader)
 {
     test_WsCreateError();
@@ -7095,4 +7519,7 @@ START_TEST(reader)
     test_empty_text_field();
     test_stream_input();
     test_description_type();
+    test_WsAddErrorString();
+    test_WsSetFaultErrorProperty();
+    test_WsGetFaultErrorDetail();
 }

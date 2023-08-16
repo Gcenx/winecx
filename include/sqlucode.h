@@ -21,8 +21,6 @@
 #ifndef __SQLUCODE_H
 #define __SQLUCODE_H
 
-#include "wine/winheader_enter.h"
-
 #include <sqlext.h>
 
 #ifdef __cplusplus
@@ -71,7 +69,5 @@ SQLRETURN WINAPI SQLGetDiagFieldW(SQLSMALLINT type, SQLHANDLE handle,
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

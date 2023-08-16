@@ -84,7 +84,7 @@ static ULONG WINAPI EnumConnections_Release(IEnumConnections *iface)
 
     if(!ref) {
         IConnectionPoint_Release(&This->cp->IConnectionPoint_iface);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -216,6 +216,7 @@ static HRESULT WINAPI ConnectionPoint_Advise(IConnectionPoint *iface, IUnknown *
 {
     ConnectionPoint *This = impl_from_IConnectionPoint(iface);
     IUnknown *sink;
+    void *new_sinks;
     DWORD i;
     HRESULT hres;
 
@@ -227,18 +228,19 @@ static HRESULT WINAPI ConnectionPoint_Advise(IConnectionPoint *iface, IUnknown *
     if(FAILED(hres))
         return CONNECT_E_CANNOTCONNECT;
 
-    if(This->sinks) {
-        for(i=0; i<This->sinks_size; i++) {
-            if(!This->sinks[i].unk)
-                break;
-        }
+    for(i = 0; i < This->sinks_size; i++) {
+        if(!This->sinks[i].unk)
+            break;
+    }
 
-        if(i == This->sinks_size)
-            This->sinks = heap_realloc(This->sinks,(++This->sinks_size)*sizeof(*This->sinks));
-    }else {
-        This->sinks = heap_alloc(sizeof(*This->sinks));
-        This->sinks_size = 1;
-        i = 0;
+    if(i == This->sinks_size) {
+        new_sinks = realloc(This->sinks, (This->sinks_size + 1) * sizeof(*This->sinks));
+        if(!new_sinks) {
+            IUnknown_Release(sink);
+            return E_OUTOFMEMORY;
+        }
+        This->sinks = new_sinks;
+        This->sinks_size++;
     }
 
     This->sinks[i].unk = sink;
@@ -273,7 +275,7 @@ static HRESULT WINAPI ConnectionPoint_EnumConnections(IConnectionPoint *iface,
 
     TRACE("(%p)->(%p)\n", This, ppEnum);
 
-    ret = heap_alloc(sizeof(*ret));
+    ret = malloc(sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -319,7 +321,7 @@ static void ConnectionPoint_Destroy(ConnectionPoint *This)
             IUnknown_Release(This->sinks[i].unk);
     }
 
-    heap_free(This->sinks);
+    free(This->sinks);
 }
 
 static ConnectionPoint *get_cp(ConnectionPointContainer *container, REFIID riid, BOOL do_create)
@@ -341,7 +343,7 @@ static ConnectionPoint *get_cp(ConnectionPointContainer *container, REFIID riid,
 
         while(iter->riid)
             iter++;
-        container->cps = heap_alloc((iter - container->cp_entries) * sizeof(*container->cps));
+        container->cps = malloc((iter - container->cp_entries) * sizeof(*container->cps));
         if(!container->cps)
             return NULL;
 
@@ -449,5 +451,5 @@ void ConnectionPointContainer_Destroy(ConnectionPointContainer *This)
 
     for(i=0; This->cp_entries[i].riid; i++)
         ConnectionPoint_Destroy(This->cps+i);
-    heap_free(This->cps);
+    free(This->cps);
 }

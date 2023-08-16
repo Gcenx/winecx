@@ -205,12 +205,11 @@ static COORD get_console_font_size( HANDLE handle, DWORD index )
 static HANDLE create_console_server( void )
 {
     OBJECT_ATTRIBUTES attr = {sizeof(attr)};
-    UNICODE_STRING string;
+    UNICODE_STRING string = RTL_CONSTANT_STRING( L"\\Device\\ConDrv\\Server" );
     IO_STATUS_BLOCK iosb;
     HANDLE handle;
     NTSTATUS status;
 
-    RtlInitUnicodeString( &string, L"\\Device\\ConDrv\\Server" );
     attr.ObjectName = &string;
     attr.Attributes = OBJ_INHERIT;
     status = NtCreateFile( &handle, FILE_WRITE_PROPERTIES | FILE_READ_PROPERTIES | SYNCHRONIZE,
@@ -222,12 +221,11 @@ static HANDLE create_console_server( void )
 static HANDLE create_console_reference( HANDLE root )
 {
     OBJECT_ATTRIBUTES attr = {sizeof(attr)};
-    UNICODE_STRING string;
+    UNICODE_STRING string = RTL_CONSTANT_STRING( L"Reference" );
     IO_STATUS_BLOCK iosb;
     HANDLE handle;
     NTSTATUS status;
 
-    RtlInitUnicodeString( &string, L"Reference" );
     attr.RootDirectory = root;
     attr.ObjectName = &string;
     status = NtCreateFile( &handle, FILE_READ_DATA | FILE_WRITE_DATA | FILE_WRITE_PROPERTIES |
@@ -466,7 +464,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateConsoleScreenBuffer( DWORD access, DWORD s
 {
     OBJECT_ATTRIBUTES attr = {sizeof(attr)};
     IO_STATUS_BLOCK iosb;
-    UNICODE_STRING name;
+    UNICODE_STRING name = RTL_CONSTANT_STRING( L"\\Device\\ConDrv\\ScreenBuffer" );
     HANDLE handle;
     NTSTATUS status;
 
@@ -478,7 +476,6 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateConsoleScreenBuffer( DWORD access, DWORD s
 	return INVALID_HANDLE_VALUE;
     }
 
-    RtlInitUnicodeString( &name, L"\\Device\\ConDrv\\ScreenBuffer" );
     attr.ObjectName = &name;
     attr.SecurityDescriptor = sa ? sa->lpSecurityDescriptor : NULL;
     if (sa && sa->bInheritHandle) attr.Attributes |= OBJ_INHERIT;
@@ -887,6 +884,28 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetConsoleMode( HANDLE handle, DWORD *mode )
 
 
 /***********************************************************************
+ *	GetConsoleOriginalTitleA   (kernelbase.@)
+ */
+DWORD WINAPI DECLSPEC_HOTPATCH GetConsoleOriginalTitleA( LPSTR title, DWORD size )
+{
+    FIXME( ": (%p, %lu) stub!\n", title, size );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return 0;
+}
+
+
+/***********************************************************************
+ *	GetConsoleOriginalTitleW   (kernelbase.@)
+ */
+DWORD WINAPI DECLSPEC_HOTPATCH GetConsoleOriginalTitleW( LPWSTR title, DWORD size )
+{
+    FIXME( ": (%p, %lu) stub!\n", title, size );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return 0;
+}
+
+
+/***********************************************************************
  *	GetConsoleOutputCP   (kernelbase.@)
  */
 UINT WINAPI DECLSPEC_HOTPATCH GetConsoleOutputCP(void)
@@ -1012,12 +1031,11 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetConsoleTitleA( LPSTR title, DWORD size )
     DWORD ret;
 
     if (!ptr) return 0;
+
     ret = GetConsoleTitleW( ptr, size );
     if (ret)
-    {
-        WideCharToMultiByte( GetConsoleOutputCP(), 0, ptr, ret + 1, title, size, NULL, NULL);
-        ret = strlen(title);
-    }
+        WideCharToMultiByte( GetConsoleOutputCP(), 0, ptr, -1, title, size, NULL, NULL);
+
     HeapFree( GetProcessHeap(), 0, ptr );
     return ret;
 }
@@ -1028,15 +1046,27 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetConsoleTitleA( LPSTR title, DWORD size )
  */
 DWORD WINAPI DECLSPEC_HOTPATCH GetConsoleTitleW( LPWSTR title, DWORD size )
 {
-    if (!size) return 0;
+    struct condrv_title_params *params;
+    size_t max_size = sizeof(*params) + (size - 1) * sizeof(WCHAR);
 
-    if (!console_ioctl( RtlGetCurrentPeb()->ProcessParameters->ConsoleHandle, IOCTL_CONDRV_GET_TITLE,
-                        NULL, 0, title, (size - 1) * sizeof(WCHAR), &size ))
+    if (!title || !size) return 0;
+
+    if (!(params = HeapAlloc( GetProcessHeap(), 0, max_size )))
         return 0;
 
-    size /= sizeof(WCHAR);
-    title[size] = 0;
-    return size + 1;
+    if (console_ioctl( RtlGetCurrentPeb()->ProcessParameters->ConsoleHandle, IOCTL_CONDRV_GET_TITLE,
+                       NULL, 0, params, max_size, &size ) &&
+        size >= sizeof(*params))
+    {
+        size -= sizeof(*params);
+        memcpy( title, params->buffer, size );
+        title[ size / sizeof(WCHAR) ] = 0;
+        size = params->title_len;
+    }
+    else size = 0;
+
+    HeapFree( GetProcessHeap(), 0, params );
+    return size;
 }
 
 

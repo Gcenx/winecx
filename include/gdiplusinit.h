@@ -19,8 +19,6 @@
 #ifndef _GDIPLUSINIT_H
 #define _GDIPLUSINIT_H
 
-#include "wine/winheader_enter.h"
-
 enum DebugEventLevel
 {
     DebugEventLevelFatal,
@@ -67,7 +65,5 @@ void WINAPI GdiplusShutdown(ULONG_PTR);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

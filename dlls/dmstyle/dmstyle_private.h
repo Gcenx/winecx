@@ -44,24 +44,17 @@
 /*****************************************************************************
  * ClassFactory
  */
-extern HRESULT WINAPI create_dmstyle(REFIID lpcGUID, LPVOID* ppobj) DECLSPEC_HIDDEN;
-extern HRESULT WINAPI create_dmauditiontrack(REFIID riid, void **ret_iface) DECLSPEC_HIDDEN;
-extern HRESULT WINAPI create_dmchordtrack(REFIID riid, void **ret_iface) DECLSPEC_HIDDEN;
-extern HRESULT WINAPI create_dmcommandtrack(REFIID riid, void **ret_iface) DECLSPEC_HIDDEN;
-extern HRESULT WINAPI create_dmmotiftrack(REFIID riid, void **ret_iface) DECLSPEC_HIDDEN;
-extern HRESULT WINAPI create_dmmutetrack(REFIID riid, void **ret_iface) DECLSPEC_HIDDEN;
-extern HRESULT WINAPI create_dmstyletrack(REFIID riid, void **ret_iface) DECLSPEC_HIDDEN;
+extern HRESULT create_dmstyle(REFIID riid, void **ret_iface) DECLSPEC_HIDDEN;
+extern HRESULT create_dmauditiontrack(REFIID riid, void **ret_iface) DECLSPEC_HIDDEN;
+extern HRESULT create_dmchordtrack(REFIID riid, void **ret_iface) DECLSPEC_HIDDEN;
+extern HRESULT create_dmcommandtrack(REFIID riid, void **ret_iface) DECLSPEC_HIDDEN;
+extern HRESULT create_dmmotiftrack(REFIID riid, void **ret_iface) DECLSPEC_HIDDEN;
+extern HRESULT create_dmmutetrack(REFIID riid, void **ret_iface) DECLSPEC_HIDDEN;
+extern HRESULT create_dmstyletrack(REFIID riid, void **ret_iface) DECLSPEC_HIDDEN;
 
 /*****************************************************************************
  * Auxiliary definitions
  */
-typedef struct _DMUS_PRIVATE_STYLE_ITEM {
-  struct list entry; /* for listing elements */
-  DWORD dwTimeStamp;
-  IDirectMusicStyle8* pObject;
-} DMUS_PRIVATE_STYLE_ITEM, *LPDMUS_PRIVATE_STYLE_ITEM;
-
-
 typedef struct _DMUS_PRIVATE_COMMAND {
 	struct list entry; /* for listing elements */
 	DMUS_IO_COMMAND pCommand;

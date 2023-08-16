@@ -150,11 +150,10 @@ static BOOL symt_grow_sorttab(struct module* module, unsigned sz)
     return TRUE;
 }
 
-static void symt_add_module_ht(struct module* module, struct symt_ht* ht)
+static void symt_add_module_addr(struct module* module, struct symt_ht* ht)
 {
     ULONG64             addr;
 
-    hash_table_add(&module->ht_symbols, &ht->hash_elt);
     /* Don't store in sorttab a symbol without address, they are of
      * no use here (e.g. constant values)
      */
@@ -164,6 +163,12 @@ static void symt_add_module_ht(struct module* module, struct symt_ht* ht)
         module->addr_sorttab[module->num_symbols++] = ht;
         module->sortlist_valid = FALSE;
     }
+}
+
+static void symt_add_module_ht(struct module* module, struct symt_ht* ht)
+{
+    hash_table_add(&module->ht_symbols, &ht->hash_elt);
+    symt_add_module_addr(module, ht);
 }
 
 static WCHAR* file_regex(const char* srcfile)
@@ -228,8 +233,7 @@ struct symt_module* symt_new_module(struct module* module)
     return sym;
 }
 
-struct symt_compiland* symt_new_compiland(struct module* module, 
-                                          ULONG_PTR address, unsigned src_idx)
+struct symt_compiland* symt_new_compiland(struct module* module, unsigned src_idx)
 {
     struct symt_compiland*    sym;
     struct symt_compiland**   p;
@@ -240,7 +244,7 @@ struct symt_compiland* symt_new_compiland(struct module* module,
     {
         sym->symt.tag  = SymTagCompiland;
         sym->container = module->top;
-        sym->address   = address;
+        sym->address   = 0;
         sym->source    = src_idx;
         vector_init(&sym->vchildren, sizeof(struct symt*), 32);
         sym->user      = NULL;
@@ -299,43 +303,43 @@ struct symt_data* symt_new_global_variable(struct module* module,
         sym->symt.tag      = SymTagData;
         sym->hash_elt.name = pool_strdup(&module->pool, name);
         sym->kind          = is_static ? DataIsFileStatic : DataIsGlobal;
-        sym->container     = compiland ? &compiland->symt : NULL;
+        sym->container     = compiland ? &compiland->symt : &module->top->symt;
         sym->type          = type;
         sym->u.var         = loc;
         if (type && size && symt_get_info(module, type, TI_GET_LENGTH, &tsz))
         {
             if (tsz != size)
-                FIXME("Size mismatch for %s.%s between type (%s) and src (%Iu)\n",
-                      debugstr_w(module->modulename), name,
-                      wine_dbgstr_longlong(tsz), size);
+                FIXME("Size mismatch for %s.%s between type (%I64u) and src (%Iu)\n",
+                      debugstr_w(module->modulename), name, tsz, size);
         }
         symt_add_module_ht(module, (struct symt_ht*)sym);
-        if (compiland)
-        {
-            p = vector_add(&compiland->vchildren, &module->pool);
-            *p = &sym->symt;
-        }
+        p = vector_add(compiland ? &compiland->vchildren : &module->top->vchildren, &module->pool);
+        *p = &sym->symt;
     }
     return sym;
 }
 
-static void init_function_or_inlinesite(struct symt_function* sym,
-                                        struct module* module,
-                                        DWORD tag,
-                                        struct symt* container,
-                                        const char* name,
-                                        ULONG_PTR addr, ULONG_PTR size,
-                                        struct symt* sig_type)
+static struct symt_function* init_function_or_inlinesite(struct module* module,
+                                                         DWORD tag,
+                                                         struct symt* container,
+                                                         const char* name,
+                                                         struct symt* sig_type,
+                                                         unsigned num_ranges)
 {
+    struct symt_function* sym;
+
     assert(!sig_type || sig_type->tag == SymTagFunctionType);
-    sym->symt.tag  = tag;
-    sym->hash_elt.name = pool_strdup(&module->pool, name);
-    sym->container = container;
-    sym->address   = addr;
-    sym->type      = sig_type;
-    sym->size      = size;
-    vector_init(&sym->vlines,  sizeof(struct line_info), 64);
-    vector_init(&sym->vchildren, sizeof(struct symt*), 8);
+    if ((sym = pool_alloc(&module->pool, offsetof(struct symt_function, ranges[num_ranges]))))
+    {
+        sym->symt.tag  = tag;
+        sym->hash_elt.name = pool_strdup(&module->pool, name);
+        sym->container = container;
+        sym->type      = sig_type;
+        vector_init(&sym->vlines,  sizeof(struct line_info), 64);
+        vector_init(&sym->vchildren, sizeof(struct symt*), 8);
+        sym->num_ranges = num_ranges;
+    }
+    return sym;
 }
 
 struct symt_function* symt_new_function(struct module* module,
@@ -348,10 +352,11 @@ struct symt_function* symt_new_function(struct module* module,
 
     TRACE_(dbghelp_symt)("Adding global function %s:%s @%Ix-%Ix\n",
                          debugstr_w(module->modulename), name, addr, addr + size - 1);
-    if ((sym = pool_alloc(&module->pool, sizeof(*sym))))
+    if ((sym = init_function_or_inlinesite(module, SymTagFunction, &compiland->symt, name, sig_type, 1)))
     {
         struct symt** p;
-        init_function_or_inlinesite(sym, module, SymTagFunction, &compiland->symt, name, addr, size, sig_type);
+        sym->ranges[0].low = addr;
+        sym->ranges[0].high = addr + size;
         sym->next_inlinesite = NULL; /* first of list */
         symt_add_module_ht(module, (struct symt_ht*)sym);
         if (compiland)
@@ -363,24 +368,23 @@ struct symt_function* symt_new_function(struct module* module,
     return sym;
 }
 
-struct symt_inlinesite* symt_new_inlinesite(struct module* module,
-                                            struct symt_function* func,
-                                            struct symt* container,
-                                            const char* name,
-                                            ULONG_PTR addr,
-                                            struct symt* sig_type)
+struct symt_function* symt_new_inlinesite(struct module* module,
+                                          struct symt_function* func,
+                                          struct symt* container,
+                                          const char* name,
+                                          struct symt* sig_type,
+                                          unsigned num_ranges)
 {
-    struct symt_inlinesite* sym;
+    struct symt_function* sym;
 
-    TRACE_(dbghelp_symt)("Adding inline site %s @%Ix\n", name, addr);
-    if ((sym = pool_alloc(&module->pool, sizeof(*sym))))
+    TRACE_(dbghelp_symt)("Adding inline site %s\n", name);
+    if ((sym = init_function_or_inlinesite(module, SymTagInlineSite, container, name, sig_type, num_ranges)))
     {
         struct symt** p;
         assert(container);
-        init_function_or_inlinesite(&sym->func, module, SymTagInlineSite, container, name, addr, 0, sig_type);
-        vector_init(&sym->vranges, sizeof(struct addr_range), 2); /* FIXME: number of elts => to be set on input */
+
         /* chain inline sites */
-        sym->func.next_inlinesite = func->next_inlinesite;
+        sym->next_inlinesite = func->next_inlinesite;
         func->next_inlinesite = sym;
         if (container->tag == SymTagFunction || container->tag == SymTagInlineSite)
             p = vector_add(&((struct symt_function*)container)->vchildren, &module->pool);
@@ -389,7 +393,7 @@ struct symt_inlinesite* symt_new_inlinesite(struct module* module,
             assert(container->tag == SymTagBlock);
             p = vector_add(&((struct symt_block*)container)->vchildren, &module->pool);
         }
-        *p = &sym->func.symt;
+        *p = &sym->symt;
     }
     return sym;
 }
@@ -452,6 +456,7 @@ void symt_add_func_line(struct module* module, struct symt_function* func,
  *
  * Adds a new local/parameter to a given function:
  * In any cases, dt tells whether it's a local variable or a parameter
+ * or a static variable inside the function.
  * If regno it's not 0:
  *      - then variable is stored in a register
  *      - otherwise, value is referenced by register + offset
@@ -473,7 +478,7 @@ struct symt_data* symt_add_func_local(struct module* module,
                          name, type);
 
     assert(symt_check_tag(&func->symt, SymTagFunction) || symt_check_tag(&func->symt, SymTagInlineSite));
-    assert(dt == DataIsParam || dt == DataIsLocal);
+    assert(dt == DataIsParam || dt == DataIsLocal || dt == DataIsStaticLocal);
 
     locsym = pool_alloc(&module->pool, sizeof(*locsym));
     locsym->symt.tag      = SymTagData;
@@ -488,6 +493,8 @@ struct symt_data* symt_add_func_local(struct module* module,
     else
         p = vector_add(&func->vchildren, &module->pool);
     *p = &locsym->symt;
+    if (dt == DataIsStaticLocal)
+        symt_add_module_addr(module, (struct symt_ht*)locsym);
     return locsym;
 }
 
@@ -527,21 +534,21 @@ struct symt_data* symt_add_func_constant(struct module* module,
     return locsym;
 }
 
-struct symt_block* symt_open_func_block(struct module* module, 
+struct symt_block* symt_open_func_block(struct module* module,
                                         struct symt_function* func,
-                                        struct symt_block* parent_block, 
-                                        unsigned pc, unsigned len)
+                                        struct symt_block* parent_block,
+                                        unsigned num_ranges)
 {
     struct symt_block*  block;
     struct symt**       p;
 
     assert(symt_check_tag(&func->symt, SymTagFunction) || symt_check_tag(&func->symt, SymTagInlineSite));
-
+    assert(num_ranges > 0);
     assert(!parent_block || parent_block->symt.tag == SymTagBlock);
-    block = pool_alloc(&module->pool, sizeof(*block));
+
+    block = pool_alloc(&module->pool, offsetof(struct symt_block, ranges[num_ranges]));
     block->symt.tag = SymTagBlock;
-    block->address  = func->address + pc;
-    block->size     = len;
+    block->num_ranges = num_ranges;
     block->container = parent_block ? &parent_block->symt : &func->symt;
     vector_init(&block->vchildren, sizeof(struct symt*), 4);
     if (parent_block)
@@ -553,14 +560,13 @@ struct symt_block* symt_open_func_block(struct module* module,
     return block;
 }
 
-struct symt_block* symt_close_func_block(struct module* module, 
+struct symt_block* symt_close_func_block(struct module* module,
                                          const struct symt_function* func,
-                                         struct symt_block* block, unsigned pc)
+                                         struct symt_block* block)
 {
     assert(symt_check_tag(&func->symt, SymTagFunction) || symt_check_tag(&func->symt, SymTagInlineSite));
 
-    if (pc) block->size = func->address + pc - block->address;
-    return (block->container->tag == SymTagBlock) ? 
+    return (block->container->tag == SymTagBlock) ?
         CONTAINING_RECORD(block->container, struct symt_block, symt) : NULL;
 }
 
@@ -583,42 +589,6 @@ struct symt_hierarchy_point* symt_add_function_point(struct module* module,
         *p = &sym->symt;
     }
     return sym;
-}
-
-/* low and high are absolute addresses */
-BOOL symt_add_inlinesite_range(struct module* module,
-                               struct symt_inlinesite* inlined,
-                               ULONG_PTR low, ULONG_PTR high)
-{
-    struct addr_range* p;
-
-    p = vector_add(&inlined->vranges, &module->pool);
-    p->low = low;
-    p->high = high;
-    if (TRUE)
-    {
-        int i;
-
-        /* see dbghelp_private.h for the assumptions */
-        for (i = 0; i < inlined->vranges.num_elts - 1; i++)
-        {
-            if (!addr_range_disjoint((struct addr_range*)vector_at(&inlined->vranges, i), p))
-            {
-                FIXME("Added addr_range isn't disjoint from siblings\n");
-            }
-        }
-        for ( ; inlined->func.symt.tag != SymTagFunction; inlined = (struct symt_inlinesite*)symt_get_upper_inlined(inlined))
-        {
-            for (i = 0; i < inlined->vranges.num_elts; i++)
-            {
-                struct addr_range* ar = (struct addr_range*)vector_at(&inlined->vranges, i);
-                if (!addr_range_disjoint(ar, p) && !addr_range_inside(ar, p))
-                    WARN("Added addr_range not compatible with parent\n");
-            }
-        }
-    }
-
-    return TRUE;
 }
 
 struct symt_thunk* symt_new_thunk(struct module* module, 
@@ -665,7 +635,7 @@ struct symt_data* symt_new_constant(struct module* module,
         sym->symt.tag      = SymTagData;
         sym->hash_elt.name = pool_strdup(&module->pool, name);
         sym->kind          = DataIsConstant;
-        sym->container     = compiland ? &compiland->symt : NULL;
+        sym->container     = compiland ? &compiland->symt : &module->top->symt;
         sym->type          = type;
         sym->u.value       = *v;
         symt_add_module_ht(module, (struct symt_ht*)sym);
@@ -807,6 +777,7 @@ static void symt_fill_sym_info(struct module_pair* pair,
                 break;
             case DataIsGlobal:
             case DataIsFileStatic:
+            case DataIsStaticLocal:
                 switch (data->u.var.kind)
                 {
                 case loc_tlsrel:
@@ -890,9 +861,8 @@ static void symt_fill_sym_info(struct module_pair* pair,
     else
         symbol_setname(sym_info, name);
 
-    TRACE_(dbghelp_symt)("%p => %s %lu %s\n",
-                         sym, sym_info->Name, sym_info->Size,
-                         wine_dbgstr_longlong(sym_info->Address));
+    TRACE_(dbghelp_symt)("%p => %s %lu %I64x\n",
+                         sym, sym_info->Name, sym_info->Size, sym_info->Address);
 }
 
 struct sym_enum
@@ -1027,7 +997,7 @@ static void symt_get_length(struct module* module, const struct symt* symt, ULON
 
     if (symt_get_info(module, symt, TI_GET_TYPE, &type_index) &&
         symt_get_info(module, symt_index2ptr(module, type_index), TI_GET_LENGTH, size)) return;
-    *size = 0x1000; /* arbitrary value */
+    *size = 1; /* no size info */
 }
 
 /* needed by symt_find_nearest */
@@ -1104,6 +1074,20 @@ struct symt_ht* symt_find_nearest(struct module* module, DWORD_PTR addr)
     return module->addr_sorttab[low];
 }
 
+struct symt_ht* symt_find_symbol_at(struct module* module, DWORD_PTR addr)
+{
+    struct symt_ht* nearest = symt_find_nearest(module, addr);
+    if (nearest)
+    {
+        ULONG64     symaddr, symsize;
+        symt_get_address(&nearest->symt, &symaddr);
+        symt_get_length(module, &nearest->symt, &symsize);
+        if (addr < symaddr || addr >= symaddr + symsize)
+            nearest = NULL;
+    }
+    return nearest;
+}
+
 static BOOL symt_enum_locals_helper(struct module_pair* pair,
                                     const WCHAR* match, const struct sym_enum* se,
                                     struct symt_function* func, const struct vector* v)
@@ -1122,10 +1106,15 @@ static BOOL symt_enum_locals_helper(struct module_pair* pair,
         case SymTagBlock:
             {
                 struct symt_block*  block = (struct symt_block*)lsym;
-                if (pc < block->address || block->address + block->size <= pc)
-                    continue;
-                if (!symt_enum_locals_helper(pair, match, se, func, &block->vchildren))
-                    return FALSE;
+                unsigned j;
+                for (j = 0; j < block->num_ranges; j++)
+                {
+                    if (pc >= block->ranges[j].low && pc < block->ranges[j].high)
+                    {
+                        if (!symt_enum_locals_helper(pair, match, se, func, &block->vchildren))
+                            return FALSE;
+                    }
+                }
             }
             break;
         case SymTagData:
@@ -1223,19 +1212,18 @@ void copy_symbolW(SYMBOL_INFOW* siw, const SYMBOL_INFO* si)
 }
 
 /* return the lowest inline site inside a function */
-struct symt_inlinesite* symt_find_lowest_inlined(struct symt_function* func, DWORD64 addr)
+struct symt_function* symt_find_lowest_inlined(struct symt_function* func, DWORD64 addr)
 {
-    struct symt_inlinesite* current;
+    struct symt_function* current;
     int i;
 
     assert(func->symt.tag == SymTagFunction);
-    for (current = func->next_inlinesite; current; current = current->func.next_inlinesite)
+    for (current = func->next_inlinesite; current; current = current->next_inlinesite)
     {
-        for (i = 0; i < current->vranges.num_elts; ++i)
+        for (i = 0; i < current->num_ranges; ++i)
         {
-            struct addr_range* ar = (struct addr_range*)vector_at(&current->vranges, i);
             /* first matching range gives the lowest inline site; see dbghelp_private.h for details */
-            if (ar->low <= addr && addr < ar->high)
+            if (current->ranges[i].low <= addr && addr < current->ranges[i].high)
                 return current;
         }
     }
@@ -1243,9 +1231,9 @@ struct symt_inlinesite* symt_find_lowest_inlined(struct symt_function* func, DWO
 }
 
 /* from an inline function, get either the enclosing inlined function, or the top function when no inlined */
-struct symt* symt_get_upper_inlined(struct symt_inlinesite* inlined)
+struct symt* symt_get_upper_inlined(struct symt_function* inlined)
 {
-    struct symt* symt = &inlined->func.symt;
+    struct symt* symt = &inlined->symt;
 
     do
     {
@@ -1260,42 +1248,21 @@ struct symt* symt_get_upper_inlined(struct symt_inlinesite* inlined)
 }
 
 /* lookup in module for an inline site (from addr and inline_ctx) */
-struct symt_inlinesite* symt_find_inlined_site(struct module* module, DWORD64 addr, DWORD inline_ctx)
+struct symt_function* symt_find_inlined_site(struct module* module, DWORD64 addr, DWORD inline_ctx)
 {
-    struct symt_ht* symt = symt_find_nearest(module, addr);
+    struct symt_ht* symt = symt_find_symbol_at(module, addr);
 
     if (symt_check_tag(&symt->symt, SymTagFunction))
     {
         struct symt_function* func = (struct symt_function*)symt;
-        struct symt_inlinesite* curr = symt_find_lowest_inlined(func, addr);
+        struct symt_function* curr = symt_find_lowest_inlined(func, addr);
         DWORD depth = IFC_DEPTH(inline_ctx);
 
         if (curr)
-            for ( ; &curr->func != func; curr = (struct symt_inlinesite*)symt_get_upper_inlined(curr))
+            for ( ; curr != func; curr = (struct symt_function*)symt_get_upper_inlined(curr))
                 if (depth-- == 0) return curr;
     }
     return NULL;
-}
-
-DWORD symt_get_inlinesite_depth(HANDLE hProcess, DWORD64 addr)
-{
-    struct module_pair pair;
-    DWORD depth = 0;
-
-    if (module_init_pair(&pair, hProcess, addr))
-    {
-        struct symt_ht* symt = symt_find_nearest(pair.effective, addr);
-        if (symt_check_tag(&symt->symt, SymTagFunction))
-        {
-            struct symt_inlinesite* inlined = symt_find_lowest_inlined((struct symt_function*)symt, addr);
-            if (inlined)
-            {
-                for ( ; &inlined->func.symt != &symt->symt; inlined = (struct symt_inlinesite*)symt_get_upper_inlined(inlined))
-                    ++depth;
-            }
-        }
-    }
-    return depth;
 }
 
 /******************************************************************
@@ -1403,9 +1370,8 @@ BOOL WINAPI SymEnumSymbols(HANDLE hProcess, ULONG64 BaseOfDll, PCSTR Mask,
     BOOL                ret;
     PWSTR               maskW = NULL;
 
-    TRACE("(%p %s %s %p %p)\n",
-          hProcess, wine_dbgstr_longlong(BaseOfDll), debugstr_a(Mask),
-          EnumSymbolsCallback, UserContext);
+    TRACE("(%p %I64x %s %p %p)\n",
+          hProcess, BaseOfDll, debugstr_a(Mask), EnumSymbolsCallback, UserContext);
 
     if (Mask)
     {
@@ -1518,7 +1484,7 @@ BOOL WINAPI SymFromAddr(HANDLE hProcess, DWORD64 Address,
     struct symt_ht*     sym;
 
     if (!module_init_pair(&pair, hProcess, Address)) return FALSE;
-    if ((sym = symt_find_nearest(pair.effective, Address)) == NULL) return FALSE;
+    if ((sym = symt_find_symbol_at(pair.effective, Address)) == NULL) return FALSE;
 
     symt_fill_sym_info(&pair, NULL, &sym->symt, Symbol);
     if (Displacement)
@@ -1640,6 +1606,7 @@ static BOOL find_name(struct process* pcs, struct module* module, const char* na
 BOOL WINAPI SymFromName(HANDLE hProcess, PCSTR Name, PSYMBOL_INFO Symbol)
 {
     struct process*             pcs = process_find_by_handle(hProcess);
+    struct module_pair          pair;
     struct module*              module;
     const char*                 name;
 
@@ -1656,6 +1623,45 @@ BOOL WINAPI SymFromName(HANDLE hProcess, PCSTR Name, PSYMBOL_INFO Symbol)
         module = module_find_by_nameA(pcs, tmp);
         return find_name(pcs, module, name + 1, Symbol);
     }
+
+    /* search first in local context */
+    pair.pcs = pcs;
+    pair.requested = module_find_by_addr(pair.pcs, pcs->localscope_pc, DMT_UNKNOWN);
+    if (module_get_debug(&pair) &&
+        (symt_check_tag(pcs->localscope_symt, SymTagFunction) ||
+         symt_check_tag(pcs->localscope_symt, SymTagInlineSite)))
+    {
+        struct symt_function* func = (struct symt_function*)pcs->localscope_symt;
+        struct vector* v = &func->vchildren;
+        unsigned i;
+
+        for (i = 0; i < vector_length(v); i++)
+        {
+            struct symt* lsym = *(struct symt**)vector_at(v, i);
+            switch (lsym->tag)
+            {
+            case SymTagBlock: /* no recursion */
+                break;
+            case SymTagData:
+                name = symt_get_name(lsym);
+                if (name && !strcmp(name, Name))
+                {
+                    symt_fill_sym_info(&pair, func, lsym, Symbol);
+                    return TRUE;
+                }
+                break;
+            case SymTagLabel: /* not returned here */
+            case SymTagFuncDebugStart:
+            case SymTagFuncDebugEnd:
+            case SymTagCustom:
+            case SymTagInlineSite:
+                break;
+            default:
+                WARN("Unsupported tag: %u (%x)\n", lsym->tag, lsym->tag);
+            }
+        }
+    }
+    /* lookup at global scope */
     for (module = pcs->lmodules; module; module = module->next)
     {
         if (module->type == DMT_PE && find_name(pcs, module, Name, Symbol))
@@ -1673,6 +1679,7 @@ BOOL WINAPI SymFromName(HANDLE hProcess, PCSTR Name, PSYMBOL_INFO Symbol)
                 return TRUE;
         }
     }
+    SetLastError(ERROR_MOD_NOT_FOUND);
     return FALSE;
 }
 
@@ -1886,7 +1893,7 @@ static BOOL get_line_from_function(struct module_pair* pair, struct symt_functio
                 ret = internal_line_set_nameW(pair->pcs, intl, dospath, TRUE);
                 HeapFree( GetProcessHeap(), 0, dospath );
             }
-            if (ret) *pdwDisplacement = addr - found_dli->u.address;
+            if (ret && pdwDisplacement) *pdwDisplacement = addr - found_dli->u.address;
             return ret;
         }
     }
@@ -1905,7 +1912,7 @@ static BOOL get_line_from_addr(HANDLE hProcess, DWORD64 addr,
     struct symt_ht*             symt;
 
     if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
-    if ((symt = symt_find_nearest(pair.effective, addr)) == NULL) return FALSE;
+    if ((symt = symt_find_symbol_at(pair.effective, addr)) == NULL) return FALSE;
 
     if (symt->symt.tag != SymTagFunction && symt->symt.tag != SymTagInlineSite) return FALSE;
     return get_line_from_function(&pair, (struct symt_function*)symt, addr, pdwDisplacement, intl);
@@ -2437,10 +2444,9 @@ BOOL WINAPI SymSearch(HANDLE hProcess, ULONG64 BaseOfDll, DWORD Index,
     LPWSTR      maskW = NULL;
     BOOLEAN     ret;
 
-    TRACE("(%p %s %lu %lu %s %s %p %p %lx)\n",
-          hProcess, wine_dbgstr_longlong(BaseOfDll), Index, SymTag, Mask,
-          wine_dbgstr_longlong(Address), EnumSymbolsCallback,
-          UserContext, Options);
+    TRACE("(%p %I64x %lu %lu %s %I64x %p %p %lx)\n",
+          hProcess, BaseOfDll, Index, SymTag, Mask,
+          Address, EnumSymbolsCallback, UserContext, Options);
 
     if (Mask)
     {
@@ -2466,10 +2472,9 @@ BOOL WINAPI SymSearchW(HANDLE hProcess, ULONG64 BaseOfDll, DWORD Index,
 {
     struct sym_enumW    sew;
 
-    TRACE("(%p %s %lu %lu %s %s %p %p %lx)\n",
-          hProcess, wine_dbgstr_longlong(BaseOfDll), Index, SymTag, debugstr_w(Mask),
-          wine_dbgstr_longlong(Address), EnumSymbolsCallback,
-          UserContext, Options);
+    TRACE("(%p %I64x %lu %lu %s %I64x %p %p %lx)\n",
+          hProcess, BaseOfDll, Index, SymTag, debugstr_w(Mask),
+          Address, EnumSymbolsCallback, UserContext, Options);
 
     sew.ctx = UserContext;
     sew.cb = EnumSymbolsCallback;
@@ -2488,7 +2493,7 @@ BOOL WINAPI SymAddSymbol(HANDLE hProcess, ULONG64 BaseOfDll, PCSTR name,
 {
     struct module_pair  pair;
 
-    TRACE("(%p %s %s %lu)\n", hProcess, wine_dbgstr_a(name), wine_dbgstr_longlong(addr), size);
+    TRACE("(%p %s %I64x %lu)\n", hProcess, wine_dbgstr_a(name), addr, size);
 
     if (!module_init_pair(&pair, hProcess, BaseOfDll)) return FALSE;
 
@@ -2504,7 +2509,7 @@ BOOL WINAPI SymAddSymbolW(HANDLE hProcess, ULONG64 BaseOfDll, PCWSTR nameW,
 {
     char       name[MAX_SYM_NAME];
 
-    TRACE("(%p %s %s %lu)\n", hProcess, wine_dbgstr_w(nameW), wine_dbgstr_longlong(addr), size);
+    TRACE("(%p %s %I64x %lu)\n", hProcess, wine_dbgstr_w(nameW), addr, size);
 
     WideCharToMultiByte(CP_ACP, 0, nameW, -1, name, ARRAY_SIZE(name), NULL, NULL);
 
@@ -2611,8 +2616,8 @@ BOOL WINAPI SymGetLineFromNameW64(HANDLE hProcess, PCWSTR ModuleName, PCWSTR Fil
  */
 BOOL WINAPI SymFromIndex(HANDLE hProcess, ULONG64 BaseOfDll, DWORD index, PSYMBOL_INFO symbol)
 {
-    FIXME("hProcess = %p, BaseOfDll = %s, index = %ld, symbol = %p\n",
-          hProcess, wine_dbgstr_longlong(BaseOfDll), index, symbol);
+    FIXME("hProcess = %p, BaseOfDll = %I64x, index = %ld, symbol = %p\n",
+          hProcess, BaseOfDll, index, symbol);
 
     return FALSE;
 }
@@ -2623,8 +2628,8 @@ BOOL WINAPI SymFromIndex(HANDLE hProcess, ULONG64 BaseOfDll, DWORD index, PSYMBO
  */
 BOOL WINAPI SymFromIndexW(HANDLE hProcess, ULONG64 BaseOfDll, DWORD index, PSYMBOL_INFOW symbol)
 {
-    FIXME("hProcess = %p, BaseOfDll = %s, index = %ld, symbol = %p\n",
-          hProcess, wine_dbgstr_longlong(BaseOfDll), index, symbol);
+    FIXME("hProcess = %p, BaseOfDll = %I64x, index = %ld, symbol = %p\n",
+          hProcess, BaseOfDll, index, symbol);
 
     return FALSE;
 }
@@ -2658,25 +2663,25 @@ PWSTR WINAPI SymSetHomeDirectoryW(HANDLE hProcess, PCWSTR dir)
 BOOL WINAPI SymFromInlineContext(HANDLE hProcess, DWORD64 addr, ULONG inline_ctx, PDWORD64 disp, PSYMBOL_INFO si)
 {
     struct module_pair pair;
-    struct symt_inlinesite* inlined;
+    struct symt_function* inlined;
 
     TRACE("(%p, %#I64x, 0x%lx, %p, %p)\n", hProcess, addr, inline_ctx, disp, si);
 
     switch (IFC_MODE(inline_ctx))
     {
-    case IFC_MODE_IGNORE:
-    case IFC_MODE_REGULAR:
-        return SymFromAddr(hProcess, addr, disp, si);
     case IFC_MODE_INLINE:
         if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
         inlined = symt_find_inlined_site(pair.effective, addr, inline_ctx);
         if (inlined)
         {
-            symt_fill_sym_info(&pair, NULL, &inlined->func.symt, si);
-            *disp = addr - inlined->func.address;
+            symt_fill_sym_info(&pair, NULL, &inlined->symt, si);
+            if (disp) *disp = addr - inlined->ranges[0].low;
             return TRUE;
         }
         /* fall through */
+    case IFC_MODE_IGNORE:
+    case IFC_MODE_REGULAR:
+        return SymFromAddr(hProcess, addr, disp, si);
     default:
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
@@ -2713,14 +2718,14 @@ static BOOL get_line_from_inline_context(HANDLE hProcess, DWORD64 addr, ULONG in
                                          struct internal_line_t* intl)
 {
     struct module_pair pair;
-    struct symt_inlinesite* inlined;
+    struct symt_function* inlined;
 
     if (!module_init_pair(&pair, hProcess, mod_addr ? mod_addr : addr)) return FALSE;
     switch (IFC_MODE(inline_ctx))
     {
     case IFC_MODE_INLINE:
         inlined = symt_find_inlined_site(pair.effective, addr, inline_ctx);
-        if (inlined && get_line_from_function(&pair, &inlined->func, addr, disp, intl))
+        if (inlined && get_line_from_function(&pair, inlined, addr, disp, intl))
             return TRUE;
         /* fall through: check if we can find line info at top function level */
     case IFC_MODE_IGNORE:
@@ -2766,4 +2771,94 @@ BOOL WINAPI SymGetLineFromInlineContextW(HANDLE hProcess, DWORD64 addr, ULONG in
 
     if (!get_line_from_inline_context(hProcess, addr, inline_ctx, mod_addr, disp, &intl)) return FALSE;
     return internal_line_copy_toW64(&intl, line);
+}
+
+/******************************************************************
+ *		SymAddrIncludeInlineTrace (DBGHELP.@)
+ *
+ * MSDN doesn't state that the maximum depth (of embedded inline sites) at <addr>
+ * is actually returned. (It just says non zero means that there are some inline site(s)).
+ * But this is what native actually returns.
+ */
+DWORD WINAPI SymAddrIncludeInlineTrace(HANDLE hProcess, DWORD64 addr)
+{
+    struct module_pair pair;
+    DWORD depth = 0;
+
+    TRACE("(%p, %#I64x)\n", hProcess, addr);
+
+    if (module_init_pair(&pair, hProcess, addr))
+    {
+        struct symt_ht* symt = symt_find_symbol_at(pair.effective, addr);
+        if (symt_check_tag(&symt->symt, SymTagFunction))
+        {
+            struct symt_function* inlined = symt_find_lowest_inlined((struct symt_function*)symt, addr);
+            if (inlined)
+            {
+                for ( ; &inlined->symt != &symt->symt; inlined = (struct symt_function*)symt_get_upper_inlined(inlined))
+                    ++depth;
+            }
+        }
+    }
+    return depth;
+}
+
+/******************************************************************
+ *		SymQueryInlineTrace (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymQueryInlineTrace(HANDLE hProcess, DWORD64 StartAddress, DWORD StartContext,
+                                DWORD64 StartRetAddress, DWORD64 CurAddress,
+                                LPDWORD CurContext, LPDWORD CurFrameIndex)
+{
+    struct module_pair  pair;
+    struct symt_ht*     sym_curr;
+    struct symt_ht*     sym_start;
+    struct symt_ht*     sym_startret;
+    DWORD               depth;
+
+    TRACE("(%p, %#I64x, 0x%lx, %#I64x, %I64x, %p, %p)\n",
+          hProcess, StartAddress, StartContext, StartRetAddress, CurAddress, CurContext, CurFrameIndex);
+
+    if (!module_init_pair(&pair, hProcess, CurAddress)) return FALSE;
+    if (!(sym_curr = symt_find_symbol_at(pair.effective, CurAddress))) return FALSE;
+    if (!symt_check_tag(&sym_curr->symt, SymTagFunction)) return FALSE;
+
+    sym_start = symt_find_symbol_at(pair.effective, StartAddress);
+    sym_startret = symt_find_symbol_at(pair.effective, StartRetAddress);
+    if (sym_start != sym_curr && sym_startret != sym_curr)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    if (sym_start != sym_curr || StartContext)
+    {
+        FIXME("(%p, %#I64x, 0x%lx, %#I64x, %I64x, %p, %p): semi-stub\n",
+              hProcess, StartAddress, StartContext, StartRetAddress, CurAddress, CurContext, CurFrameIndex);
+        return ERROR_CALL_NOT_IMPLEMENTED;
+    }
+
+    depth = SymAddrIncludeInlineTrace(hProcess, CurAddress);
+    if (depth)
+    {
+        *CurContext = IFC_MODE_INLINE; /* deepest inline site */
+        *CurFrameIndex = depth;
+    }
+    else
+    {
+        *CurContext = IFC_MODE_REGULAR;
+        *CurFrameIndex = 0;
+    }
+    return TRUE;
+}
+
+/******************************************************************
+ *      SymSrvGetFileIndexInfo (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymSrvGetFileIndexInfo(const char *file, SYMSRV_INDEX_INFO* info, DWORD flags)
+{
+    FIXME("(%s, %p, 0x%08lx): stub!\n", debugstr_a(file), info, flags);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
 }

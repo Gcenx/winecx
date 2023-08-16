@@ -164,12 +164,16 @@ void message_do_send_callback( WS_MESSAGE * ) DECLSPEC_HIDDEN;
 void message_do_receive_callback( WS_MESSAGE * ) DECLSPEC_HIDDEN;
 HRESULT message_insert_http_headers( WS_MESSAGE *, HINTERNET ) DECLSPEC_HIDDEN;
 HRESULT message_map_http_response_headers( WS_MESSAGE *, HINTERNET, const WS_HTTP_MESSAGE_MAPPING * ) DECLSPEC_HIDDEN;
+HRESULT message_read_fault( WS_MESSAGE *, WS_HEAP *, WS_ERROR * ) DECLSPEC_HIDDEN;
 
 HRESULT channel_send_message( WS_CHANNEL *, WS_MESSAGE * ) DECLSPEC_HIDDEN;
 HRESULT channel_receive_message( WS_CHANNEL *, WS_MESSAGE * ) DECLSPEC_HIDDEN;
 HRESULT channel_get_reader( WS_CHANNEL *, WS_XML_READER ** ) DECLSPEC_HIDDEN;
+HRESULT channel_address_message( WS_CHANNEL *, WS_MESSAGE * ) DECLSPEC_HIDDEN;
 
 HRESULT parse_url( const WS_STRING *, WS_URL_SCHEME_TYPE *, WCHAR **, USHORT * ) DECLSPEC_HIDDEN;
+
+void free_fault_fields( WS_HEAP *, WS_FAULT * ) DECLSPEC_HIDDEN;
 
 enum record_type
 {
@@ -401,9 +405,4 @@ static inline BOOL is_valid_parent( const struct node *node )
 {
     if (!node) return FALSE;
     return (node_type( node ) == WS_XML_NODE_TYPE_ELEMENT || node_type( node ) == WS_XML_NODE_TYPE_BOF);
-}
-
-static inline void* __WINE_ALLOC_SIZE(2) heap_realloc_zero(void *mem, size_t size)
-{
-    return HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, mem, size);
 }

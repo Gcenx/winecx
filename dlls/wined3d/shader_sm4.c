@@ -578,7 +578,7 @@ static void shader_sm4_read_dcl_resource(struct wined3d_shader_instruction *ins,
     enum wined3d_sm4_resource_type resource_type;
     enum wined3d_sm4_data_type data_type;
     enum wined3d_data_type reg_data_type;
-    DWORD components;
+    uint32_t components;
 
     resource_type = (opcode_token & WINED3D_SM4_RESOURCE_TYPE_MASK) >> WINED3D_SM4_RESOURCE_TYPE_SHIFT;
     if (!resource_type || (resource_type >= ARRAY_SIZE(resource_type_table)))
@@ -758,7 +758,7 @@ static void shader_sm5_read_dcl_function_table(struct wined3d_shader_instruction
         struct wined3d_sm4_data *priv)
 {
     ins->declaration.index = *tokens++;
-    FIXME("Ignoring set of function bodies (count %u).\n", *tokens);
+    FIXME("Ignoring set of function bodies (count %lu).\n", *tokens);
 }
 
 static void shader_sm5_read_dcl_interface(struct wined3d_shader_instruction *ins,
@@ -1237,7 +1237,7 @@ static enum wined3d_data_type map_data_type(char t)
 
 static enum wined3d_shader_type wined3d_get_sm4_shader_type(const DWORD *byte_code, size_t byte_code_size)
 {
-    DWORD shader_type;
+    unsigned int shader_type;
 
     if (byte_code_size / sizeof(*byte_code) < 1)
     {
@@ -1275,7 +1275,7 @@ static enum wined3d_shader_type wined3d_get_sm4_shader_type(const DWORD *byte_co
 static void *shader_sm4_init(const DWORD *byte_code, size_t byte_code_size,
         const struct wined3d_shader_signature *output_signature)
 {
-    DWORD version_token, token_count;
+    unsigned int version_token, token_count;
     struct wined3d_sm4_data *priv;
     unsigned int i;
 
@@ -1414,7 +1414,7 @@ static BOOL shader_sm4_read_param(struct wined3d_sm4_data *priv, const DWORD **p
         enum wined3d_shader_src_modifier *modifier)
 {
     enum wined3d_sm4_register_type register_type;
-    DWORD token, order;
+    uint32_t token, order;
 
     if (*ptr >= end)
     {
@@ -1438,7 +1438,7 @@ static BOOL shader_sm4_read_param(struct wined3d_sm4_data *priv, const DWORD **p
 
     if (token & WINED3D_SM4_REGISTER_MODIFIER)
     {
-        DWORD m;
+        unsigned int m;
 
         if (*ptr >= end)
         {
@@ -1624,7 +1624,7 @@ static BOOL shader_sm4_read_dst_param(struct wined3d_sm4_data *priv, const DWORD
     return TRUE;
 }
 
-static void shader_sm4_read_instruction_modifier(DWORD modifier, struct wined3d_shader_instruction *ins)
+static void shader_sm4_read_instruction_modifier(uint32_t modifier, struct wined3d_shader_instruction *ins)
 {
     enum wined3d_sm4_instruction_modifier modifier_type = modifier & WINED3D_SM4_MODIFIER_MASK;
 
@@ -1660,7 +1660,7 @@ static void shader_sm4_read_instruction_modifier(DWORD modifier, struct wined3d_
 
         case WINED3D_SM5_MODIFIER_DATA_TYPE:
         {
-            DWORD components = (modifier & WINED3D_SM5_MODIFIER_DATA_TYPE_MASK) >> WINED3D_SM5_MODIFIER_DATA_TYPE_SHIFT;
+            uint32_t components = (modifier & WINED3D_SM5_MODIFIER_DATA_TYPE_MASK) >> WINED3D_SM5_MODIFIER_DATA_TYPE_SHIFT;
             enum wined3d_sm4_data_type data_type = components & 0xf;
 
             if ((components & 0xfff0) != (components & 0xf) * 0x1110)
@@ -1686,8 +1686,9 @@ static void shader_sm4_read_instruction_modifier(DWORD modifier, struct wined3d_
 static void shader_sm4_read_instruction(void *data, const DWORD **ptr, struct wined3d_shader_instruction *ins)
 {
     const struct wined3d_sm4_opcode_info *opcode_info;
-    DWORD opcode_token, opcode, previous_token;
+    uint32_t opcode_token, previous_token;
     struct wined3d_sm4_data *priv = data;
+    unsigned int opcode;
     unsigned int i, len;
     SIZE_T remaining;
     const DWORD *p;
@@ -1727,7 +1728,7 @@ static void shader_sm4_read_instruction(void *data, const DWORD **ptr, struct wi
         TRACE_(d3d_bytecode)("[ %08x ", opcode_token);
         for (i = 0; i < len; ++i)
         {
-            TRACE_(d3d_bytecode)("%08x ", (*ptr)[i]);
+            TRACE_(d3d_bytecode)("%08lx ", (*ptr)[i]);
         }
         TRACE_(d3d_bytecode)("]\n");
     }
@@ -1836,9 +1837,9 @@ const struct wined3d_shader_frontend sm4_shader_frontend =
 struct aon9_header
 {
     DWORD chunk_size;
-    DWORD shader_version;
+    unsigned int shader_version;
     DWORD unknown;
-    DWORD byte_code_offset;
+    unsigned int byte_code_offset;
 };
 
 struct shader_handler_context
@@ -1848,7 +1849,7 @@ struct shader_handler_context
     unsigned int max_version;
 };
 
-static void read_dword(const char **ptr, DWORD *d)
+static void read_dword(const char **ptr, unsigned int *d)
 {
     memcpy(d, *ptr, sizeof(*d));
     *ptr += sizeof(*d);
@@ -1862,7 +1863,7 @@ static BOOL require_space(size_t offset, size_t count, size_t size, size_t data_
 static void skip_dword_unknown(const char **ptr, unsigned int count)
 {
     unsigned int i;
-    DWORD d;
+    unsigned int d;
 
     WARN("Skipping %u unknown DWORDs:\n", count);
     for (i = 0; i < count; ++i)
@@ -1873,15 +1874,15 @@ static void skip_dword_unknown(const char **ptr, unsigned int count)
 }
 
 static HRESULT parse_dxbc(const char *data, SIZE_T data_size,
-        HRESULT (*chunk_handler)(const char *data, DWORD data_size, DWORD tag, void *ctx), void *ctx)
+        HRESULT (*chunk_handler)(const char *data, unsigned int data_size, unsigned int tag, void *ctx), void *ctx)
 {
     const char *ptr = data;
     HRESULT hr = S_OK;
-    DWORD chunk_count;
-    DWORD total_size;
+    unsigned int chunk_count;
+    unsigned int total_size;
     unsigned int i;
-    DWORD version;
-    DWORD tag;
+    unsigned int version;
+    unsigned int tag;
 
     read_dword(&ptr, &tag);
     TRACE("tag: %s.\n", debugstr_an((const char *)&tag, 4));
@@ -1911,9 +1912,9 @@ static HRESULT parse_dxbc(const char *data, SIZE_T data_size,
 
     for (i = 0; i < chunk_count; ++i)
     {
-        DWORD chunk_tag, chunk_size;
+        unsigned int chunk_tag, chunk_size;
         const char *chunk_ptr;
-        DWORD chunk_offset;
+        unsigned int chunk_offset;
 
         read_dword(&ptr, &chunk_offset);
         TRACE("chunk %u at offset %#x\n", i, chunk_offset);
@@ -1943,7 +1944,7 @@ static HRESULT parse_dxbc(const char *data, SIZE_T data_size,
     return hr;
 }
 
-static const char *shader_get_string(const char *data, size_t data_size, DWORD offset)
+static const char *shader_get_string(const char *data, size_t data_size, unsigned int offset)
 {
     if (offset >= data_size)
     {
@@ -1957,14 +1958,14 @@ static const char *shader_get_string(const char *data, size_t data_size, DWORD o
     return data + offset;
 }
 
-static HRESULT shader_parse_signature(DWORD tag, const char *data, DWORD data_size,
+static HRESULT shader_parse_signature(DWORD tag, const char *data, unsigned int data_size,
         struct wined3d_shader_signature *s)
 {
     struct wined3d_shader_signature_element *e;
     bool has_stream_index, has_min_precision;
     const char *ptr = data;
     unsigned int i;
-    DWORD count;
+    unsigned int count;
 
     if (!require_space(0, 2, sizeof(DWORD), data_size))
     {
@@ -1994,7 +1995,7 @@ static HRESULT shader_parse_signature(DWORD tag, const char *data, DWORD data_si
 
     for (i = 0; i < count; ++i)
     {
-        DWORD name_offset;
+        unsigned int name_offset;
 
         if (has_stream_index)
             read_dword(&ptr, &e[i].stream_idx);
@@ -2030,7 +2031,7 @@ static HRESULT shader_parse_signature(DWORD tag, const char *data, DWORD data_si
     return S_OK;
 }
 
-static HRESULT shader_dxbc_chunk_handler(const char *data, DWORD data_size, DWORD tag, void *context)
+static HRESULT shader_dxbc_chunk_handler(const char *data, unsigned int data_size, unsigned int tag, void *context)
 {
     struct shader_handler_context *ctx = context;
     struct wined3d_shader *shader = ctx->shader;
@@ -2123,7 +2124,7 @@ static HRESULT shader_dxbc_chunk_handler(const char *data, DWORD data_size, DWOR
                 shader->function = (const DWORD *)byte_code;
                 shader->functionLength = data_size - header->byte_code_offset;
                 *ctx->format = WINED3D_SHADER_BYTE_CODE_FORMAT_SM1;
-                TRACE("Feature level 9 shader version 0%08x, 0%08x.\n",
+                TRACE("Feature level 9 shader version 0%08x, 0%08lx.\n",
                         header->shader_version, *shader->function);
             }
             else
@@ -2155,7 +2156,7 @@ HRESULT shader_extract_from_dxbc(struct wined3d_shader *shader,
         hr = E_INVALIDARG;
 
     if (FAILED(hr))
-        WARN("Failed to parse DXBC, hr %#x.\n", hr);
+        WARN("Failed to parse DXBC, hr %#lx.\n", hr);
 
     return hr;
 }

@@ -21,8 +21,6 @@
 #ifndef __NDRTYPES_H__
 #define __NDRTYPES_H__
 
-#include "wine/winheader_enter.h"
-
 #include <limits.h>
 
 typedef struct
@@ -307,7 +305,5 @@ typedef enum
 #define USER_MARSHAL_REF        0x40
 #define USER_MARSHAL_POINTER    0xc0
 #define USER_MARSHAL_IID        0x20
-
-#include "wine/winheader_exit.h"
 
 #endif

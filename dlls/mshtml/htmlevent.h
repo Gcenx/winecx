@@ -17,10 +17,14 @@
  */
 
 typedef enum {
+    EVENTID_INVALID_ID = -1,
+    EVENTID_DOMCONTENTLOADED,
     EVENTID_ABORT,
+    EVENTID_AFTERPRINT,
     EVENTID_ANIMATIONEND,
     EVENTID_ANIMATIONSTART,
     EVENTID_BEFOREACTIVATE,
+    EVENTID_BEFOREPRINT,
     EVENTID_BEFOREUNLOAD,
     EVENTID_BLUR,
     EVENTID_CHANGE,
@@ -28,7 +32,6 @@ typedef enum {
     EVENTID_CONTEXTMENU,
     EVENTID_DATAAVAILABLE,
     EVENTID_DBLCLICK,
-    EVENTID_DOMCONTENTLOADED,
     EVENTID_DRAG,
     EVENTID_DRAGSTART,
     EVENTID_ERROR,
@@ -41,6 +44,8 @@ typedef enum {
     EVENTID_KEYPRESS,
     EVENTID_KEYUP,
     EVENTID_LOAD,
+    EVENTID_LOADEND,
+    EVENTID_LOADSTART,
     EVENTID_MESSAGE,
     EVENTID_MOUSEDOWN,
     EVENTID_MOUSEMOVE,
@@ -49,32 +54,33 @@ typedef enum {
     EVENTID_MOUSEUP,
     EVENTID_MOUSEWHEEL,
     EVENTID_MSTHUMBNAILCLICK,
+    EVENTID_PAGEHIDE,
+    EVENTID_PAGESHOW,
     EVENTID_PASTE,
+    EVENTID_PROGRESS,
     EVENTID_READYSTATECHANGE,
     EVENTID_RESIZE,
     EVENTID_SCROLL,
     EVENTID_SELECTIONCHANGE,
     EVENTID_SELECTSTART,
+    EVENTID_STORAGE,
+    EVENTID_STORAGECOMMIT,
     EVENTID_SUBMIT,
+    EVENTID_TIMEOUT,
     EVENTID_UNLOAD,
+    EVENTID_VISIBILITYCHANGE,
     EVENTID_LAST
 } eventid_t;
 
 typedef struct DOMEvent {
     DispatchEx dispex;
     IDOMEvent IDOMEvent_iface;
-    IDOMUIEvent IDOMUIEvent_iface;
-    IDOMMouseEvent IDOMMouseEvent_iface;
-    IDOMKeyboardEvent IDOMKeyboardEvent_iface;
 
     LONG ref;
     void *(*query_interface)(struct DOMEvent*,REFIID);
     void (*destroy)(struct DOMEvent*);
 
     nsIDOMEvent *nsevent;
-    nsIDOMUIEvent *ui_event;
-    nsIDOMMouseEvent *mouse_event;
-    nsIDOMKeyEvent *keyboard_event;
 
     eventid_t event_id;
     WCHAR *type;
@@ -93,6 +99,7 @@ typedef struct DOMEvent {
     BOOL no_event_obj;
 } DOMEvent;
 
+const WCHAR *get_event_name(eventid_t) DECLSPEC_HIDDEN;
 void check_event_attr(HTMLDocumentNode*,nsIDOMElement*) DECLSPEC_HIDDEN;
 void release_event_target(EventTarget*) DECLSPEC_HIDDEN;
 HRESULT set_event_handler(EventTarget*,eventid_t,VARIANT*) DECLSPEC_HIDDEN;
@@ -112,7 +119,8 @@ void dispatch_event(EventTarget*,DOMEvent*) DECLSPEC_HIDDEN;
 HRESULT create_document_event(HTMLDocumentNode*,eventid_t,DOMEvent**) DECLSPEC_HIDDEN;
 HRESULT create_document_event_str(HTMLDocumentNode*,const WCHAR*,IDOMEvent**) DECLSPEC_HIDDEN;
 HRESULT create_event_from_nsevent(nsIDOMEvent*,compat_mode_t,DOMEvent**) DECLSPEC_HIDDEN;
-HRESULT create_message_event(HTMLDocumentNode*,BSTR,DOMEvent**) DECLSPEC_HIDDEN;
+HRESULT create_message_event(HTMLDocumentNode*,VARIANT*,DOMEvent**) DECLSPEC_HIDDEN;
+HRESULT create_storage_event(HTMLDocumentNode*,BSTR,BSTR,BSTR,const WCHAR*,BOOL,DOMEvent**) DECLSPEC_HIDDEN;
 
 void init_nsevents(HTMLDocumentNode*) DECLSPEC_HIDDEN;
 void release_nsevents(HTMLDocumentNode*) DECLSPEC_HIDDEN;
@@ -124,6 +132,7 @@ typedef struct {
     dispex_static_data_vtbl_t dispex_vtbl;
     nsISupports *(*get_gecko_target)(DispatchEx*);
     void (*bind_event)(DispatchEx*,eventid_t);
+    HRESULT (*dispatch_nsevent_hook)(DispatchEx*,DOMEvent*);
     EventTarget *(*get_parent_event_target)(DispatchEx*);
     HRESULT (*handle_event_default)(DispatchEx*,eventid_t,nsIDOMEvent*,BOOL*);
     ConnectionPointContainer *(*get_cp_container)(DispatchEx*);
@@ -147,12 +156,12 @@ static inline HRESULT get_node_event(HTMLDOMNode *node, eventid_t eid, VARIANT *
     return get_event_handler(get_node_event_prop_target(node, eid), eid, var);
 }
 
-static inline HRESULT set_doc_event(HTMLDocument *doc, eventid_t eid, VARIANT *var)
+static inline HRESULT set_doc_event(HTMLDocumentNode *doc, eventid_t eid, VARIANT *var)
 {
-    return set_event_handler(&doc->doc_node->node.event_target, eid, var);
+    return set_event_handler(&doc->node.event_target, eid, var);
 }
 
-static inline HRESULT get_doc_event(HTMLDocument *doc, eventid_t eid, VARIANT *var)
+static inline HRESULT get_doc_event(HTMLDocumentNode *doc, eventid_t eid, VARIANT *var)
 {
-    return get_event_handler(&doc->doc_node->node.event_target, eid, var);
+    return get_event_handler(&doc->node.event_target, eid, var);
 }

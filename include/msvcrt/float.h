@@ -9,8 +9,6 @@
 #ifndef __WINE_FLOAT_H
 #define __WINE_FLOAT_H
 
-#include "wine/winheader_enter.h"
-
 #include <corecrt.h>
 
 #ifdef __cplusplus
@@ -163,7 +161,5 @@ _ACRTIMP float __cdecl _scalbf(float, __msvcrt_long);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_FLOAT_H */

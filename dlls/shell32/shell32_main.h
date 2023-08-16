@@ -102,6 +102,8 @@ HRESULT WINAPI QueryAssociations_Constructor(IUnknown *pUnkOuter, REFIID riid, L
 HRESULT WINAPI ExplorerBrowser_Constructor(IUnknown *pUnkOuter, REFIID riid, LPVOID *ppv) DECLSPEC_HIDDEN;
 HRESULT WINAPI KnownFolderManager_Constructor(IUnknown *pUnkOuter, REFIID riid, LPVOID *ppv) DECLSPEC_HIDDEN;
 HRESULT WINAPI IFileOperation_Constructor(IUnknown *outer, REFIID riid, void **out) DECLSPEC_HIDDEN;
+HRESULT WINAPI ActiveDesktop_Constructor(IUnknown *outer, REFIID riid, void **out) DECLSPEC_HIDDEN;
+
 extern HRESULT CPanel_GetIconLocationW(LPCITEMIDLIST, LPWSTR, UINT, int*) DECLSPEC_HIDDEN;
 HRESULT WINAPI CPanel_ExtractIconA(LPITEMIDLIST pidl, LPCSTR pszFile, UINT nIconIndex, HICON *phiconLarge, HICON *phiconSmall, UINT nIconSize) DECLSPEC_HIDDEN;
 HRESULT WINAPI CPanel_ExtractIconW(LPITEMIDLIST pidl, LPCWSTR pszFile, UINT nIconIndex, HICON *phiconLarge, HICON *phiconSmall, UINT nIconSize) DECLSPEC_HIDDEN;
@@ -228,29 +230,6 @@ enum tid_t {
 HRESULT get_typeinfo(enum tid_t, ITypeInfo**) DECLSPEC_HIDDEN;
 void release_typelib(void) DECLSPEC_HIDDEN;
 void release_desktop_folder(void) DECLSPEC_HIDDEN;
-
-static inline WCHAR *strdupW(const WCHAR *src)
-{
-    WCHAR *dest;
-    if (!src) return NULL;
-    dest = heap_alloc((lstrlenW(src) + 1) * sizeof(*dest));
-    if (dest)
-        lstrcpyW(dest, src);
-    return dest;
-}
-
-static inline WCHAR *strndupW(const WCHAR *src, DWORD len)
-{
-    WCHAR *dest;
-    if (!src) return NULL;
-    dest = heap_alloc((len + 1) * sizeof(*dest));
-    if (dest)
-    {
-        memcpy(dest, src, len * sizeof(WCHAR));
-        dest[len] = '\0';
-    }
-    return dest;
-}
 
 static inline WCHAR *strdupAtoW(const char *str)
 {

@@ -19,8 +19,6 @@
 #ifndef __NTIFS_H__
 #define __NTIFS_H__
 
-#include "wine/winheader_enter.h"
-
 #include "ntddk.h"
 
 #define PHCM_ERROR_INVALID_PARAMETER    ((char)-1)
@@ -152,7 +150,5 @@ NTSTATUS WINAPI PsLookupProcessByProcessId(HANDLE,PEPROCESS*);
 NTSTATUS WINAPI PsLookupThreadByThreadId(HANDLE,PETHREAD*);
 void WINAPI PsRevertToSelf(void);
 char WINAPI RtlQueryProcessPlaceholderCompatibilityMode(void);
-
-#include "wine/winheader_exit.h"
 
 #endif

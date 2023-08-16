@@ -13,9 +13,6 @@
 #define __XML_XSLTUTILS_H__
 
 #include <libxslt/xsltconfig.h>
-#ifdef HAVE_STDARG_H
-#include <stdarg.h>
-#endif
 #include <libxml/xpath.h>
 #include <libxml/dict.h>
 #include <libxml/xmlerror.h>
@@ -160,7 +157,7 @@ XSLTPUBFUN void XSLTCALL
 		xsltSetTransformErrorFunc	(xsltTransformContextPtr ctxt,
 						 void *ctx,
 						 xmlGenericErrorFunc handler);
-XSLTPUBFUN void XSLTCALL
+XSLTPUBFUN void WINAPIV
 		xsltTransformError		(xsltTransformContextPtr ctxt,
 						 xsltStylesheetPtr style,
 						 xmlNodePtr node,

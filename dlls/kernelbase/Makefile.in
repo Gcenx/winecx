@@ -1,4 +1,4 @@
-EXTRADEFS = -DWINBASEAPI=
+EXTRADEFS = -DWINBASEAPI= -DWINADVAPI= -DWINUSERAPI= -DWINSHLWAPI=
 MODULE    = kernelbase.dll
 IMPORTLIB = kernelbase
 IMPORTS   = uuid ntdll winecrt0
@@ -6,10 +6,8 @@ IMPORTS   = uuid ntdll winecrt0
 EXTRADLLFLAGS = -nodefaultlibs -nostartfiles -Wl,--image-base,0x7b000000
 
 C_SRCS = \
-	collation.c \
 	console.c \
 	debug.c \
-	digitmap.c \
 	file.c \
 	loader.c \
 	locale.c \

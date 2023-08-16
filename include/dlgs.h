@@ -21,8 +21,6 @@
 #ifndef __WINE_DLGS_H
 #define __WINE_DLGS_H
 
-#include "wine/winheader_enter.h"
-
 #define ctlFirst    0x0400
 #define ctlLast     0x04ff
     /* Push buttons */
@@ -222,7 +220,5 @@ typedef struct tagCRGB
     BYTE bBlue;
     BYTE bExtra;
 } CRGB;
-
-#include "wine/winheader_exit.h"
 
 #endif  /* #ifdef __WINE_DLGS_H */

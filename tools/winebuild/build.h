@@ -172,14 +172,6 @@ static inline unsigned int get_ptr_size(void)
     return get_target_ptr_size( target );
 }
 
-/* return the size of a pointer on the target CPU */
-static inline unsigned int get_host_ptr_size(void)
-{
-    if (target.cpu == CPU_x86_32on64)
-        return 8;
-    return get_ptr_size();
-}
-
 static inline int is_pe(void)
 {
     return target.platform == PLATFORM_MINGW || target.platform == PLATFORM_WINDOWS;
@@ -260,6 +252,8 @@ extern void output_cfi( const char *format, ... )
    __attribute__ ((__format__ (__printf__, 1, 2)));
 extern void output_rva( const char *format, ... )
    __attribute__ ((__format__ (__printf__, 1, 2)));
+extern void output_thunk_rva( int ordinal, const char *format, ... )
+   __attribute__ ((__format__ (__printf__, 2, 3)));
 extern void spawn( struct strarray array );
 extern struct strarray find_tool( const char *name, const char * const *names );
 extern struct strarray find_link_tool(void);
@@ -281,17 +275,16 @@ extern DLLSPEC *alloc_dll_spec(void);
 extern void free_dll_spec( DLLSPEC *spec );
 extern char *make_c_identifier( const char *str );
 extern const char *get_stub_name( const ORDDEF *odp, const DLLSPEC *spec );
+extern const char *get_abi_name( const ORDDEF *odp, const char *name );
 extern const char *get_link_name( const ORDDEF *odp );
 extern int sort_func_list( ORDDEF **list, int count, int (*compare)(const void *, const void *) );
 extern unsigned int get_alignment(unsigned int align);
 extern unsigned int get_page_size(void);
 extern unsigned int get_args_size( const ORDDEF *odp );
 extern const char *asm_name( const char *func );
-extern const char *thunk32_name( const char *func );
 extern const char *func_declaration( const char *func );
 extern const char *asm_globl( const char *func );
 extern const char *get_asm_ptr_keyword(void);
-extern const char *get_asm_host_ptr_keyword(void);
 extern const char *get_asm_string_keyword(void);
 extern const char *get_asm_export_section(void);
 extern const char *get_asm_rodata_section(void);
@@ -310,12 +303,14 @@ extern void read_undef_symbols( DLLSPEC *spec, struct strarray files );
 extern void resolve_imports( DLLSPEC *spec );
 extern int is_undefined( const char *name );
 extern int has_imports(void);
+extern int has_delay_imports(void);
 extern void output_get_pc_thunk(void);
 extern void output_module( DLLSPEC *spec );
 extern void output_stubs( DLLSPEC *spec );
 extern void output_syscalls( DLLSPEC *spec );
 extern void output_imports( DLLSPEC *spec );
-extern void output_static_lib( DLLSPEC *spec, struct strarray files );
+extern void output_import_lib( DLLSPEC *spec, struct strarray files );
+extern void output_static_lib( const char *output_name, struct strarray files, int create );
 extern void output_exports( DLLSPEC *spec );
 extern int load_res32_file( const char *name, DLLSPEC *spec );
 extern void output_resources( DLLSPEC *spec );
@@ -366,8 +361,8 @@ extern int verbose;
 extern int link_ext_symbols;
 extern int force_pointer_size;
 extern int unwind_tables;
+extern int use_dlltool;
 extern int use_msvcrt;
-extern int unix_lib;
 extern int safe_seh;
 extern int prefer_native;
 extern int data_only;
@@ -389,6 +384,5 @@ extern char *arch_option;
 extern const char *float_abi_option;
 extern int thumb_mode;
 extern int needs_get_pc_thunk;
-extern int needs_invoke32;
 
 #endif  /* __WINE_BUILD_H */

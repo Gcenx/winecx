@@ -34,6 +34,8 @@ import "dispex.idl";
 cpp_quote("#include <olectl.h>")
 
 cpp_quote("DEFINE_GUID(CLSID_MHTMLDocument,     0x3050f3d9,0x98b5,0x11cf,0xbb,0x82,0x00,0xaa,0x00,0xbd,0xce,0x0b);")
+cpp_quote("DEFINE_GUID(CLSID_XHTMLDocument,     0x30590067,0x98b5,0x11cf,0xbb,0x82,0x00,0xaa,0x00,0xbd,0xce,0x0b);")
+cpp_quote("DEFINE_GUID(CLSID_SVGDocument,       0x30590066,0x98b5,0x11cf,0xbb,0x82,0x00,0xaa,0x00,0xbd,0xce,0x0b);")
 
 cpp_quote("DEFINE_GUID(SID_SEditCommandTarget,  0x3050f4b5,0x98b5,0x11cf,0xbb,0x82,0x00,0xaa,0x00,0xbd,0xce,0x0b);")
 cpp_quote("DEFINE_GUID(SID_SHTMLEditHost,       0x3050f6a0,0x98b5,0x11cf,0xbb,0x82,0x00,0xaa,0x00,0xbd,0xce,0x0b);")
@@ -395,9 +397,7 @@ interface IHTMLDOMConstructor : IDispatch
     [propget, id(DISPID_IHTMLDOMCONSTRUCTOR_CONSTRUCTOR), hidden]       \
     IDispatch *constructor()
 
-interface IHTMLCaret;
 interface IHTMLComputedStyle;
-interface IHTMLDocument2;
 interface IHTMLDocument7;
 interface IHTMLElement;
 interface IHTMLElement2;
@@ -414,14 +414,6 @@ interface IHTMLWindow5;
 interface IHTMLWindow6;
 interface IHTMLWindow7;
 interface IDOMEvent;
-interface IDisplayPointer;
-interface IDisplayServices;
-interface ILineInfo;
-interface IMarkupPointer;
-interface IMarkupContainer;
-interface ISegmentList;
-interface IHTMLChangeLog;
-interface IHTMLChangeSink;
 interface ISVGSVGElement;
 interface IHTMLDOMRange;
 interface IHTMLStyleSheet;
@@ -8142,10 +8134,6 @@ interface IHTMLDOMNode2 : IDispatch
     [propget, id(DISPID_IHTMLDOMNODE2_OWNERDOCUMENT)]   \
     IDispatch *ownerDocument()
 
-#define WINE_HTMLDOMNODE_DISPINTERFACE_DECL     \
-    WINE_IHTMLDOMNODE_DISPINTERFACE_DECL;       \
-    WINE_IHTMLDOMNODE2_DISPINTERFACE_DECL
-
 /*****************************************************************************
  *    IHTMLDOMNode3 interface
  */
@@ -8233,6 +8221,69 @@ interface IHTMLDOMNode3 : IDispatch
         [in] VARIANT version,
         [out, retval] VARIANT_BOOL *pfisSupported);
 }
+
+#define WINE_IHTMLDOMNODE3_DISPINTERFACE_DECL                           \
+    [propput, id(DISPID_IHTMLDOMNODE3_PREFIX)]                          \
+    void prefix(VARIANT v);                                             \
+                                                                        \
+    [propget, id(DISPID_IHTMLDOMNODE3_PREFIX)]                          \
+    VARIANT prefix();                                                   \
+                                                                        \
+    [propget, id(DISPID_IHTMLDOMNODE3_LOCALNAME)]                       \
+    VARIANT localName();                                                \
+                                                                        \
+    [propget, id(DISPID_IHTMLDOMNODE3_NAMESPACEURI)]                    \
+    VARIANT namespaceURI();                                             \
+                                                                        \
+    [propput, id(DISPID_IHTMLDOMNODE3_TEXTCONTENT)]                     \
+    void textContent(VARIANT v);                                        \
+                                                                        \
+    [propget, id(DISPID_IHTMLDOMNODE3_TEXTCONTENT)]                     \
+    VARIANT textContent();                                              \
+                                                                        \
+    [id(DISPID_IHTMLDOMNODE3_ISEQUALNODE)]                              \
+    VARIANT_BOOL isEqualNode([in] IHTMLDOMNode3 *otherNode);            \
+                                                                        \
+    [id(DISPID_IHTMLDOMNODE3_LOOKUPNAMESPACEURI)]                       \
+    VARIANT lookupNamespaceURI([in] VARIANT *pvarPrefix);               \
+                                                                        \
+    [id(DISPID_IHTMLDOMNODE3_LOOKUPPREFIX)]                             \
+    VARIANT lookupPrefix([in] VARIANT *pvarNamespaceURI);               \
+                                                                        \
+    [id(DISPID_IHTMLDOMNODE3_ISDEFAULTNAMESPACE)]                       \
+    VARIANT_BOOL isDefaultNamespace([in] VARIANT *pvarNamespace);       \
+                                                                        \
+    [id(DISPID_IHTMLDOMNODE3_IE9_APPENDCHILD)]                          \
+    IHTMLDOMNode *ie9_appendChild([in] IHTMLDOMNode *newChild);         \
+                                                                        \
+    [id(DISPID_IHTMLDOMNODE3_IE9_INSERTBEFORE)]                         \
+    IHTMLDOMNode *ie9_insertBefore(                                     \
+        [in] IHTMLDOMNode *newChild,                                    \
+        [in, optional] VARIANT refChild);                               \
+                                                                        \
+    [id(DISPID_IHTMLDOMNODE3_IE9_REMOVECHILD)]                          \
+    IHTMLDOMNode *ie9_removeChild([in] IHTMLDOMNode *oldChild);         \
+                                                                        \
+    [id(DISPID_IHTMLDOMNODE3_IE9_REPLACECHILD)]                         \
+    IHTMLDOMNode *ie9_replaceChild(                                     \
+        [in] IHTMLDOMNode *newChild,                                    \
+        [in] IHTMLDOMNode *oldChild);                                   \
+                                                                        \
+    [id(DISPID_IHTMLDOMNODE3_ISSAMENODE)]                               \
+    VARIANT_BOOL isSameNode([in] IHTMLDOMNode3 *otherNode);             \
+                                                                        \
+    [id(DISPID_IHTMLDOMNODE3_COMPAREDOCUMENTPOSITION)]                  \
+    USHORT compareDocumentPosition([in] IHTMLDOMNode *otherNode);       \
+                                                                        \
+    [id(DISPID_IHTMLDOMNODE3_ISSUPPORTED)]                              \
+    VARIANT_BOOL isSupported(                                           \
+        [in] BSTR feature,                                              \
+        [in] VARIANT version)                                           \
+
+#define WINE_HTMLDOMNODE_DISPINTERFACE_DECL     \
+    WINE_IHTMLDOMNODE_DISPINTERFACE_DECL;       \
+    WINE_IHTMLDOMNODE2_DISPINTERFACE_DECL;      \
+    WINE_IHTMLDOMNODE3_DISPINTERFACE_DECL
 
 /*****************************************************************************
  *    IHTMLDOMAttribute interface
@@ -8437,6 +8488,51 @@ interface IDOMDocumentType : IDispatch
     [propget, id(DISPID_IDOMDOCUMENTTYPE_INTERNALSUBSET)]
     HRESULT internalSubset([out, retval] VARIANT *p);
 }
+
+/*****************************************************************************
+ *    DispDOMDocumentType dispinterface
+ */
+[
+    hidden,
+    uuid(30590098-98b5-11cf-bb82-00aa00bdce0b)
+]
+dispinterface DispDOMDocumentType
+{
+properties:
+methods:
+    WINE_HTMLDOMNODE_DISPINTERFACE_DECL;
+
+    [propget, id(DISPID_IDOMDOCUMENTTYPE_NAME)]
+    BSTR name();
+
+    [propget, id(DISPID_IDOMDOCUMENTTYPE_ENTITIES)]
+    IDispatch *entities();
+
+    [propget, id(DISPID_IDOMDOCUMENTTYPE_NOTATIONS)]
+    IDispatch *notations();
+
+    [propget, id(DISPID_IDOMDOCUMENTTYPE_PUBLICID)]
+    VARIANT publicId();
+
+    [propget, id(DISPID_IDOMDOCUMENTTYPE_SYSTEMID)]
+    VARIANT systemId();
+
+    [propget, id(DISPID_IDOMDOCUMENTTYPE_INTERNALSUBSET)]
+    VARIANT internalSubset();
+};
+
+[
+    noncreatable,
+    uuid(30510739-98b5-11cf-bb82-00aa00bdce0b)
+]
+coclass DOMDocumentType
+{
+    [default] dispinterface DispDOMDocumentType;
+    interface IHTMLDOMNode;
+    interface IHTMLDOMNode2;
+    interface IHTMLDOMNode3;
+    interface IDOMDocumentType;
+};
 
 /*****************************************************************************
  *    IHTMLDOMImplementation interface
@@ -13997,6 +14093,117 @@ coclass HTMLXMLHttpRequest
 }
 
 /*****************************************************************************
+ *    IHTMLXDomainRequest interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(30510454-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IHTMLXDomainRequest : IDispatch
+{
+    [propget, id(DISPID_IHTMLXDOMAINREQUEST_RESPONSETEXT)]
+    HRESULT responseText([out, retval] BSTR *p);
+
+    [propput, id(DISPID_IHTMLXDOMAINREQUEST_TIMEOUT)]
+    HRESULT timeout([in] LONG v);
+
+    [propget, id(DISPID_IHTMLXDOMAINREQUEST_TIMEOUT)]
+    HRESULT timeout([out, retval] LONG *p);
+
+    [propget, id(DISPID_IHTMLXDOMAINREQUEST_CONTENTTYPE)]
+    HRESULT contentType([out, retval] BSTR *p);
+
+    [propput, id(DISPID_IHTMLXDOMAINREQUEST_ONPROGRESS)]
+    HRESULT onprogress([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLXDOMAINREQUEST_ONPROGRESS)]
+    HRESULT onprogress([out, retval] VARIANT *p);
+
+    [propput, id(DISPID_IHTMLXDOMAINREQUEST_ONERROR)]
+    HRESULT onerror([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLXDOMAINREQUEST_ONERROR)]
+    HRESULT onerror([out, retval] VARIANT *p);
+
+    [propput, id(DISPID_IHTMLXDOMAINREQUEST_ONTIMEOUT)]
+    HRESULT ontimeout([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLXDOMAINREQUEST_ONTIMEOUT)]
+    HRESULT ontimeout([out, retval] VARIANT *p);
+
+    [propput, id(DISPID_IHTMLXDOMAINREQUEST_ONLOAD)]
+    HRESULT onload([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLXDOMAINREQUEST_ONLOAD)]
+    HRESULT onload([out, retval] VARIANT *p);
+
+    [id(DISPID_IHTMLXDOMAINREQUEST_ABORT)]
+    HRESULT abort();
+
+    [id(DISPID_IHTMLXDOMAINREQUEST_OPEN)]
+    HRESULT open([in] BSTR bstrMethod, [in] BSTR bstrUrl);
+
+    [id(DISPID_IHTMLXDOMAINREQUEST_SEND)]
+    HRESULT send([in, optional] VARIANT varBody);
+};
+
+/*****************************************************************************
+ *    IHTMLXDomainRequestFactory interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(30510456-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IHTMLXDomainRequestFactory : IDispatch
+{
+    [id(DISPID_IHTMLXDOMAINREQUESTFACTORY_CREATE)]
+    HRESULT create([out, retval] IHTMLXDomainRequest **p);
+};
+
+/*****************************************************************************
+ *    DispXDomainRequest dispinterface
+ */
+[
+    hidden,
+    uuid(3050f599-98b5-11cf-bb82-00aa00bdce0b)
+]
+dispinterface DispXDomainRequest
+{
+properties:
+methods:
+    WINE_IHTMLDOMCONSTRUCTOR_DISPINTERFACE_DECL;
+};
+
+/*****************************************************************************
+ *    XDomainRequest
+ */
+[
+    noncreatable,
+    uuid(30510455-98b5-11cf-bb82-00aa00bdce0b)
+]
+coclass XDomainRequest
+{
+    [default]         dispinterface DispXDomainRequest;
+    interface IHTMLDOMConstructor;
+};
+
+/*****************************************************************************
+ *    XDomainRequestFactory
+ */
+[
+    noncreatable,
+    uuid(30510457-98b5-11cf-bb82-00aa00bdce0b)
+]
+coclass XDomainRequestFactory
+{
+    [default]         interface IHTMLXDomainRequestFactory;
+};
+
+/*****************************************************************************
  *    IHTMLControlElement interface
  */
 [
@@ -19469,6 +19676,8 @@ interface IHTMLFramesCollection2 : IDispatch
     [propget, id(DISPID_IHTMLFRAMESCOLLECTION2_LENGTH)]
     HRESULT length([retval, out] LONG *p);
 }
+
+interface IHTMLDocument2;
 
 /*****************************************************************************
  *    IHTMLScreen interface
@@ -28496,6 +28705,146 @@ methods:
 }
 
 /*****************************************************************************
+ *    IDOMProgressEvent interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(3051071e-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IDOMProgressEvent : IDispatch
+{
+    [propget, id(DISPID_IDOMPROGRESSEVENT_LENGTHCOMPUTABLE)]
+    HRESULT lengthComputable([out, retval] VARIANT_BOOL *p);
+
+    [propget, id(DISPID_IDOMPROGRESSEVENT_LOADED)]
+    HRESULT loaded([out, retval] ULONGLONG *p);
+
+    [propget, id(DISPID_IDOMPROGRESSEVENT_TOTAL)]
+    HRESULT total([out, retval] ULONGLONG *p);
+
+    [id(DISPID_IDOMPROGRESSEVENT_INITPROGRESSEVENT)]
+    HRESULT initProgressEvent(
+            [in] BSTR eventType,
+            [in] VARIANT_BOOL canBubble,
+            [in] VARIANT_BOOL cancelable,
+            [in] VARIANT_BOOL lengthComputableArg,
+            [in] ULONGLONG loadedArg,
+            [in] ULONGLONG totalArg);
+};
+
+/*****************************************************************************
+ *    DispDOMProgressEvent dispinterface
+ */
+[
+    hidden,
+    uuid(30590091-98b5-11cf-bb82-00aa00bdce0b)
+]
+dispinterface DispDOMProgressEvent
+{
+properties:
+methods:
+    WINE_IDOMEVENT_DISPINTERFACE_DECL;
+
+    [propget, id(DISPID_IDOMPROGRESSEVENT_LENGTHCOMPUTABLE)]
+    VARIANT_BOOL lengthComputable();
+
+    [propget, id(DISPID_IDOMPROGRESSEVENT_LOADED)]
+    ULONGLONG loaded();
+
+    [propget, id(DISPID_IDOMPROGRESSEVENT_TOTAL)]
+    ULONGLONG total();
+
+    [id(DISPID_IDOMPROGRESSEVENT_INITPROGRESSEVENT)]
+    void initProgressEvent(
+            [in] BSTR eventType,
+            [in] VARIANT_BOOL canBubble,
+            [in] VARIANT_BOOL cancelable,
+            [in] VARIANT_BOOL lengthComputableArg,
+            [in] ULONGLONG loadedArg,
+            [in] ULONGLONG totalArg);
+};
+
+/*****************************************************************************
+ *    IDOMStorageEvent interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(30510722-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IDOMStorageEvent : IDispatch
+{
+    [propget, id(DISPID_IDOMSTORAGEEVENT_KEY)]
+    HRESULT key([out, retval] BSTR *p);
+
+    [propget, id(DISPID_IDOMSTORAGEEVENT_OLDVALUE)]
+    HRESULT oldValue([out, retval] BSTR *p);
+
+    [propget, id(DISPID_IDOMSTORAGEEVENT_NEWVALUE)]
+    HRESULT newValue([out, retval] BSTR *p);
+
+    [propget, id(DISPID_IDOMSTORAGEEVENT_URL)]
+    HRESULT url([out, retval] BSTR *p);
+
+    [propget, id(DISPID_IDOMSTORAGEEVENT_STORAGEAREA)]
+    HRESULT storageArea([out, retval] IHTMLStorage **p);
+
+    [id(DISPID_IDOMSTORAGEEVENT_INITSTORAGEEVENT)]
+    HRESULT initStorageEvent(
+            [in] BSTR eventType,
+            [in] VARIANT_BOOL canBubble,
+            [in] VARIANT_BOOL cancelable,
+            [in] BSTR keyArg,
+            [in] BSTR oldValueArg,
+            [in] BSTR newValueArg,
+            [in] BSTR urlArg,
+            [in] IHTMLStorage *storageAreaArg);
+};
+
+/*****************************************************************************
+ *    DispDOMStorageEvent dispinterface
+ */
+[
+    hidden,
+    uuid(30590093-98b5-11cf-bb82-00aa00bdce0b)
+]
+dispinterface DispDOMStorageEvent
+{
+properties:
+methods:
+    WINE_IDOMEVENT_DISPINTERFACE_DECL;
+
+    [propget, id(DISPID_IDOMSTORAGEEVENT_KEY)]
+    BSTR key();
+
+    [propget, id(DISPID_IDOMSTORAGEEVENT_OLDVALUE)]
+    BSTR oldValue();
+
+    [propget, id(DISPID_IDOMSTORAGEEVENT_NEWVALUE)]
+    BSTR newValue();
+
+    [propget, id(DISPID_IDOMSTORAGEEVENT_URL)]
+    BSTR url();
+
+    [propget, id(DISPID_IDOMSTORAGEEVENT_STORAGEAREA)]
+    IHTMLStorage *storageArea();
+
+    [id(DISPID_IDOMSTORAGEEVENT_INITSTORAGEEVENT)]
+    void initStorageEvent(
+            [in] BSTR eventType,
+            [in] VARIANT_BOOL canBubble,
+            [in] VARIANT_BOOL cancelable,
+            [in] BSTR keyArg,
+            [in] BSTR oldValueArg,
+            [in] BSTR newValueArg,
+            [in] BSTR urlArg,
+            [in] IHTMLStorage *storageAreaArg);
+};
+
+/*****************************************************************************
  *    IHTMLNamespaceCollection interface
  */
 [
@@ -28596,6 +28945,16 @@ interface IHTMLComputedStyle : IUnknown
     [propget, id(DISPID_IHTMLCOMPUTEDSTYLE_OL)] HRESULT OL([retval, out] VARIANT_BOOL *p);
     HRESULT IsEqual([in] IHTMLComputedStyle *pComputedStyle,[out] VARIANT_BOOL *pfEqual);
 };
+
+interface IHTMLCaret;
+interface IDisplayPointer;
+interface IDisplayServices;
+interface ILineInfo;
+interface IMarkupPointer;
+interface IMarkupContainer;
+interface ISegmentList;
+interface IHTMLChangeLog;
+interface IHTMLChangeSink;
 
 /*****************************************************************************
  *    IDisplayPointer interface
@@ -29340,6 +29699,46 @@ interface IHTMLDOMConstructorCollection : IDispatch
 
     [propget, id(DISPID_IHTMLDOMCONSTRUCTORCOLLECTION_XMLHTTPREQUEST)]
     HRESULT XMLHttpRequest([out, retval] IDispatch **p);
+}
+
+/*****************************************************************************
+ *    IDOMParser interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(30510781-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IDOMParser : IDispatch
+{
+    [id(DISPID_IDOMPARSER_PARSEFROMSTRING)]
+    HRESULT parseFromString([in] BSTR string, [in] BSTR mimeType, [retval, out] IHTMLDocument2 **ppNode);
+}
+
+/*****************************************************************************
+ *    DispDOMParser dispinterface
+ */
+[
+    hidden,
+    uuid(305900ae-98b5-11cf-bb82-00aa00bdce0b)
+]
+dispinterface DispDOMParser
+{
+properties:
+methods:
+    [id(DISPID_IDOMPARSER_PARSEFROMSTRING)]
+    IHTMLDocument2 *parseFromString([in] BSTR string, [in] BSTR mimeType);
+}
+
+[
+    noncreatable,
+    uuid(30510782-98b5-11cf-bb82-00aa00bdce0b)
+]
+coclass DOMParser
+{
+    [default] dispinterface DispDOMParser;
+    interface IDOMParser;
 }
 
 /*****************************************************************************

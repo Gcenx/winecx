@@ -387,8 +387,8 @@ static void fill_caps(__u32 pixelformat, __u32 width, __u32 height,
     caps->media_type.cbFormat = sizeof(VIDEOINFOHEADER);
     /* We reallocate the caps array, so pbFormat has to be set after all caps
      * have been enumerated. */
-    caps->config.MaxFrameInterval = 10000000 * max_fps;
-    caps->config.MinFrameInterval = 10000000 * min_fps;
+    caps->config.MaxFrameInterval = 10000000 / max_fps;
+    caps->config.MinFrameInterval = 10000000 / min_fps;
     caps->config.MaxOutputSize.cx = width;
     caps->config.MaxOutputSize.cy = height;
     caps->config.MinOutputSize.cx = width;
@@ -528,8 +528,8 @@ static NTSTATUS v4l_device_create( void *args )
             else if (frmival.type == V4L2_FRMIVAL_TYPE_STEPWISE
                     || frmival.type == V4L2_FRMIVAL_TYPE_CONTINUOUS)
             {
-                max_fps = frmival.stepwise.max.denominator / frmival.stepwise.max.numerator;
-                min_fps = frmival.stepwise.min.denominator / frmival.stepwise.min.numerator;
+                min_fps = frmival.stepwise.max.denominator / frmival.stepwise.max.numerator;
+                max_fps = frmival.stepwise.min.denominator / frmival.stepwise.min.numerator;
             }
         }
         else

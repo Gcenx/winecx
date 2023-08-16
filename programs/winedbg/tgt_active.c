@@ -70,9 +70,14 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de);
  */
 BOOL dbg_attach_debuggee(DWORD pid)
 {
+    if (pid == GetCurrentProcessId())
+    {
+        dbg_printf("WineDbg can't debug its own process. Please use another process ID.\n");
+        return FALSE;
+    }
     if (!(dbg_curr_process = dbg_add_process(&be_process_active_io, pid, 0))) return FALSE;
 
-    if (!DebugActiveProcess(pid)) 
+    if (!DebugActiveProcess(pid))
     {
         dbg_printf("Can't attach process %04lx: error %lu\n", pid, GetLastError());
         dbg_del_process(dbg_curr_process);
@@ -148,7 +153,7 @@ static BOOL dbg_exception_prolog(BOOL is_debug, const EXCEPTION_RECORD* rec)
 
     if (addr.Mode != dbg_curr_thread->addr_mode)
     {
-        const char* name = NULL;
+        const char* name;
 
         switch (addr.Mode)
         {
@@ -157,6 +162,7 @@ static BOOL dbg_exception_prolog(BOOL is_debug, const EXCEPTION_RECORD* rec)
         case AddrModeReal: name = "vm86";       break;
         case AddrModeFlat: name = dbg_curr_process->be_cpu->pointer_size == 4
                                   ? "32 bit" : "64 bit"; break;
+        default: return FALSE;
         }
         dbg_printf("In %s mode.\n", name);
         dbg_curr_thread->addr_mode = addr.Mode;
@@ -192,10 +198,10 @@ static BOOL dbg_exception_prolog(BOOL is_debug, const EXCEPTION_RECORD* rec)
             if ((!last_name || strcmp(last_name, si->Name)) ||
                 (!last_file || strcmp(last_file, il.FileName)))
             {
-                HeapFree(GetProcessHeap(), 0, last_name);
-                HeapFree(GetProcessHeap(), 0, last_file);
-                last_name = strcpy(HeapAlloc(GetProcessHeap(), 0, strlen(si->Name) + 1), si->Name);
-                last_file = strcpy(HeapAlloc(GetProcessHeap(), 0, strlen(il.FileName) + 1), il.FileName);
+                free(last_name);
+                free(last_file);
+                last_name = strdup(si->Name);
+                last_file = strdup(il.FileName);
                 dbg_printf("%s () at %s:%lu\n", last_name, last_file, il.LineNumber);
             }
         }
@@ -495,6 +501,7 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
                    de->dwProcessId, de->dwThreadId,
                    de->u.UnloadDll.lpBaseOfDll);
         break_delete_xpoints_from_module((DWORD_PTR)de->u.UnloadDll.lpBaseOfDll);
+        types_unload_module((DWORD_PTR)de->u.UnloadDll.lpBaseOfDll);
         SymUnloadModule64(dbg_curr_process->handle, (DWORD_PTR)de->u.UnloadDll.lpBaseOfDll);
         break;
 

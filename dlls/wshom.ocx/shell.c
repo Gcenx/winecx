@@ -264,7 +264,7 @@ static HRESULT WINAPI WshExec_get_StdErr(IWshExec *iface, ITextStream **stream)
     return S_OK;
 }
 
-static HRESULT WINAPI WshExec_get_ProcessID(IWshExec *iface, DWORD *pid)
+static HRESULT WINAPI WshExec_get_ProcessID(IWshExec *iface, int *pid)
 {
     WshExecImpl *This = impl_from_IWshExec(iface);
 
@@ -277,7 +277,7 @@ static HRESULT WINAPI WshExec_get_ProcessID(IWshExec *iface, DWORD *pid)
     return S_OK;
 }
 
-static HRESULT WINAPI WshExec_get_ExitCode(IWshExec *iface, DWORD *code)
+static HRESULT WINAPI WshExec_get_ExitCode(IWshExec *iface, int *code)
 {
     WshExecImpl *This = impl_from_IWshExec(iface);
 
@@ -1329,12 +1329,12 @@ static WCHAR *split_command( BSTR cmd, WCHAR **params )
     return ret;
 }
 
-static HRESULT WINAPI WshShell3_Run(IWshShell3 *iface, BSTR cmd, VARIANT *style, VARIANT *wait, DWORD *exit_code)
+static HRESULT WINAPI WshShell3_Run(IWshShell3 *iface, BSTR cmd, VARIANT *style, VARIANT *wait, int *exit_code)
 {
     SHELLEXECUTEINFOW info;
-    int waitforprocess;
+    int waitforprocess, show;
     WCHAR *file, *params;
-    VARIANT s;
+    VARIANT v;
     HRESULT hr;
     BOOL ret;
 
@@ -1343,25 +1343,26 @@ static HRESULT WINAPI WshShell3_Run(IWshShell3 *iface, BSTR cmd, VARIANT *style,
     if (!style || !wait || !exit_code)
         return E_POINTER;
 
-    VariantInit(&s);
-    hr = VariantChangeType(&s, style, 0, VT_I4);
-    if (FAILED(hr))
-    {
-        ERR("failed to convert style argument, %#lx\n", hr);
-        return hr;
+    if (is_optional_argument(style))
+        show = SW_SHOWNORMAL;
+    else {
+        VariantInit(&v);
+        hr = VariantChangeType(&v, style, 0, VT_I4);
+        if (FAILED(hr))
+            return hr;
+
+        show = V_I4(&v);
     }
 
     if (is_optional_argument(wait))
         waitforprocess = 0;
     else {
-        VARIANT w;
-
-        VariantInit(&w);
-        hr = VariantChangeType(&w, wait, 0, VT_I4);
+        VariantInit(&v);
+        hr = VariantChangeType(&v, wait, 0, VT_I4);
         if (FAILED(hr))
             return hr;
 
-        waitforprocess = V_I4(&w);
+        waitforprocess = V_I4(&v);
     }
 
     if (!(file = split_command(cmd, &params))) return E_OUTOFMEMORY;
@@ -1371,7 +1372,7 @@ static HRESULT WINAPI WshShell3_Run(IWshShell3 *iface, BSTR cmd, VARIANT *style,
     info.fMask = waitforprocess ? SEE_MASK_NOASYNC | SEE_MASK_NOCLOSEPROCESS : SEE_MASK_DEFAULT;
     info.lpFile = file;
     info.lpParameters = params;
-    info.nShow = V_I4(&s);
+    info.nShow = show;
 
     ret = ShellExecuteExW(&info);
     free(file);
@@ -1384,9 +1385,11 @@ static HRESULT WINAPI WshShell3_Run(IWshShell3 *iface, BSTR cmd, VARIANT *style,
     {
         if (waitforprocess)
         {
+            DWORD code;
             WaitForSingleObject(info.hProcess, INFINITE);
-            GetExitCodeProcess(info.hProcess, exit_code);
+            GetExitCodeProcess(info.hProcess, &code);
             CloseHandle(info.hProcess);
+            *exit_code = code;
         }
         else
             *exit_code = 0;

@@ -19,16 +19,16 @@
 #ifndef __WINE_WINSVC_H
 #define __WINE_WINSVC_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif /* defined(__cplusplus) */
 
+#ifndef WINADVAPI
 #ifdef _ADVAPI32_
 #define WINADVAPI
 #else
-#define WINADVAPI DECLSPEC_HIDDEN
+#define WINADVAPI DECLSPEC_IMPORT
+#endif
 #endif
 
 /* Service database names */
@@ -198,8 +198,6 @@ typedef struct _SERVICE_NOTIFY_2W {
     DWORD dwNotificationTriggered;
     WCHAR *pszServiceNames;
 } SERVICE_NOTIFY_2W, SERVICE_NOTIFYW;
-
-DWORD WINAPI NotifyServiceStatusChangeW(SC_HANDLE,DWORD,SERVICE_NOTIFYW*);
 
 typedef enum _SC_STATUS_TYPE {
   SC_STATUS_PROCESS_INFO      = 0
@@ -417,6 +415,7 @@ WINADVAPI BOOL        WINAPI GetServiceKeyNameW(SC_HANDLE,LPCWSTR,LPWSTR,LPDWORD
 #define                      GetServiceKeyName WINELIB_NAME_AW(GetServiceKeyName)
 WINADVAPI SC_LOCK     WINAPI LockServiceDatabase(SC_HANDLE);
 WINADVAPI BOOL        WINAPI NotifyBootConfigStatus(BOOL);
+WINADVAPI DWORD       WINAPI NotifyServiceStatusChangeW(SC_HANDLE,DWORD,SERVICE_NOTIFYW*);
 WINADVAPI SC_HANDLE   WINAPI OpenSCManagerA(LPCSTR,LPCSTR,DWORD);
 WINADVAPI SC_HANDLE   WINAPI OpenSCManagerW(LPCWSTR,LPCWSTR,DWORD);
 #define                      OpenSCManager WINELIB_NAME_AW(OpenSCManager)
@@ -454,7 +453,5 @@ WINADVAPI BOOL        WINAPI UnlockServiceDatabase(SC_LOCK);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
-
-#include "wine/winheader_exit.h"
 
 #endif /* !defined(__WINE_WINSVC_H) */

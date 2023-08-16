@@ -22,18 +22,16 @@
 #pragma makedep unix
 #endif
 
+/* this is actually part of a static lib linked into a .exe.so module, not a real Unix library */
+#undef WINE_UNIX_LIB
+
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
 
-/* 32on64 FIXME: Is this right? If I see it right this non-cdecl
- * main symbol is used when linking against host libc, so it'd be
- * a host addr space symbol. See commit 2e115ab4420e. */
-
 extern int main( int argc, char *argv[] );
-
-#include <wine/hostaddrspace_enter.h>
+extern void __wine_init_so_dll(void) DECLSPEC_HIDDEN;
 
 static char **build_argv( const char *src, int *ret_argc )
 {
@@ -103,8 +101,6 @@ DWORD WINAPI DECLSPEC_HIDDEN __wine_spec_exe_entry( PEB *peb )
     int argc;
     char **argv = build_argv( GetCommandLineA(), &argc );
 
-    /* 32on64 FIXME: argv -> __wine_main_argv ?? */
+    __wine_init_so_dll();
     ExitProcess( main( argc, argv ));
 }
-
-#include <wine/hostaddrspace_exit.h>

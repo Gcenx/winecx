@@ -6,7 +6,7 @@
 @ stdcall WsAbortServiceProxy(ptr ptr)
 @ stdcall WsAcceptChannel(ptr ptr ptr ptr)
 @ stdcall WsAddCustomHeader(ptr ptr long ptr long long ptr)
-@ stub WsAddErrorString
+@ stdcall WsAddErrorString(ptr ptr)
 @ stdcall WsAddMappedHeader(ptr ptr long long ptr long ptr)
 @ stdcall WsAddressMessage(ptr ptr ptr)
 @ stdcall WsAlloc(ptr long ptr ptr)
@@ -64,8 +64,8 @@
 @ stdcall WsGetDictionary(long ptr ptr)
 @ stdcall WsGetErrorProperty(ptr long ptr long)
 @ stdcall WsGetErrorString(ptr long ptr)
-@ stub WsGetFaultErrorDetail
-@ stub WsGetFaultErrorProperty
+@ stdcall WsGetFaultErrorDetail(ptr ptr ptr ptr ptr long)
+@ stdcall WsGetFaultErrorProperty(ptr long ptr long)
 @ stdcall WsGetHeader(ptr long long long ptr ptr long ptr)
 @ stub WsGetHeaderAttributes
 @ stdcall WsGetHeapProperty(ptr long ptr long ptr)
@@ -148,7 +148,7 @@
 @ stdcall WsSetChannelProperty(ptr long ptr long ptr)
 @ stdcall WsSetErrorProperty(ptr long ptr long)
 @ stub WsSetFaultErrorDetail
-@ stub WsSetFaultErrorProperty
+@ stdcall WsSetFaultErrorProperty(ptr long ptr long)
 @ stdcall WsSetHeader(ptr long long long ptr long ptr)
 @ stdcall WsSetInput(ptr ptr ptr ptr long ptr)
 @ stdcall WsSetInputToBuffer(ptr ptr ptr long ptr)

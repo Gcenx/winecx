@@ -111,8 +111,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(nsi);
 
-static NTSTATUS tcp_stats_get_all_parameters( const void *key, DWORD key_size, void *rw_data, DWORD rw_size,
-                                              void *dynamic_data, DWORD dynamic_size, void *static_data, DWORD static_size )
+static NTSTATUS tcp_stats_get_all_parameters( const void *key, UINT key_size, void *rw_data, UINT rw_size,
+                                              void *dynamic_data, UINT dynamic_size, void *static_data, UINT static_size )
 {
     struct nsi_tcp_stats_dynamic dyn;
     struct nsi_tcp_stats_static stat;
@@ -143,7 +143,7 @@ static NTSTATUS tcp_stats_get_all_parameters( const void *key, DWORD key_size, v
             if (!(ptr = fgets( buf, sizeof(buf), fp ))) break;
             if (!ascii_strncasecmp( buf, hdr, sizeof(hdr) - 1 ))
             {
-                DWORD in_segs, out_segs;
+                UINT in_segs, out_segs;
                 ptr += sizeof(hdr);
                 sscanf( ptr, "%u %u %u %u %u %u %u %u %u %u %u %u %u %u",
                         &stat.rto_algo,
@@ -248,7 +248,7 @@ struct ipv6_addr_scope *get_ipv6_addr_scope_table( unsigned int *size )
         while ((ptr = fgets( buf, sizeof(buf), fp )))
         {
             WORD a[8];
-            DWORD scope;
+            UINT scope;
             struct ipv6_addr_scope *entry;
             unsigned int i;
 
@@ -322,7 +322,7 @@ failed:
     return NULL;
 }
 
-DWORD find_ipv6_addr_scope( const IN6_ADDR *addr, const struct ipv6_addr_scope *table, unsigned int size )
+UINT find_ipv6_addr_scope( const IN6_ADDR *addr, const struct ipv6_addr_scope *table, unsigned int size )
 {
     const BYTE multicast_scope_mask = 0x0F;
     const BYTE multicast_scope_shift = 0;
@@ -404,7 +404,7 @@ unsigned int find_owning_pid( struct pid_map *map, unsigned int num_entries, UIN
     unsigned int i, len_socket;
     char socket[32];
 
-    sprintf( socket, "socket:[%lu]", inode );
+    sprintf( socket, "socket:[%zu]", inode );
     len_socket = strlen( socket );
     for (i = 0; i < num_entries; i++)
     {
@@ -514,12 +514,12 @@ unsigned int find_owning_pid( struct pid_map *map, unsigned int num_entries, UIN
 #endif
 }
 
-static NTSTATUS tcp_conns_enumerate_all( DWORD filter, struct nsi_tcp_conn_key *key_data, DWORD key_size,
-                                         void *rw, DWORD rw_size,
-                                         struct nsi_tcp_conn_dynamic *dynamic_data, DWORD dynamic_size,
-                                         struct nsi_tcp_conn_static *static_data, DWORD static_size, DWORD_PTR *count )
+static NTSTATUS tcp_conns_enumerate_all( UINT filter, struct nsi_tcp_conn_key *key_data, UINT key_size,
+                                         void *rw, UINT rw_size,
+                                         struct nsi_tcp_conn_dynamic *dynamic_data, UINT dynamic_size,
+                                         struct nsi_tcp_conn_static *static_data, UINT static_size, UINT_PTR *count )
 {
-    DWORD num = 0;
+    UINT num = 0;
     NTSTATUS status = STATUS_SUCCESS;
     BOOL want_data = key_size || rw_size || dynamic_size || static_size;
     struct nsi_tcp_conn_key key;
@@ -534,6 +534,7 @@ static NTSTATUS tcp_conns_enumerate_all( DWORD filter, struct nsi_tcp_conn_key *
         FILE *fp;
         char buf[512], *ptr;
         int inode;
+        UINT laddr, raddr;
 
         if (!(fp = fopen( "/proc/net/tcp", "r" ))) return ERROR_NOT_SUPPORTED;
 
@@ -547,15 +548,17 @@ static NTSTATUS tcp_conns_enumerate_all( DWORD filter, struct nsi_tcp_conn_key *
         while ((ptr = fgets( buf, sizeof(buf), fp )))
         {
             if (sscanf( ptr, "%*x: %x:%hx %x:%hx %x %*s %*s %*s %*s %*s %d",
-                        &key.local.Ipv4.sin_addr.WS_s_addr, &key.local.Ipv4.sin_port,
-                        &key.remote.Ipv4.sin_addr.WS_s_addr, &key.remote.Ipv4.sin_port,
+                        &laddr, &key.local.Ipv4.sin_port,
+                        &raddr, &key.remote.Ipv4.sin_port,
                         &dyn.state, &inode ) != 6)
                 continue;
             dyn.state = tcp_state_to_mib_state( dyn.state );
             if (filter && filter != dyn.state ) continue;
 
             key.local.Ipv4.sin_family = key.remote.Ipv4.sin_family = WS_AF_INET;
+            key.local.Ipv4.sin_addr.WS_s_addr = laddr;
             key.local.Ipv4.sin_port = htons( key.local.Ipv4.sin_port );
+            key.remote.Ipv4.sin_addr.WS_s_addr = raddr;
             key.remote.Ipv4.sin_port = htons( key.remote.Ipv4.sin_port );
 
             if (num < *count)
@@ -586,8 +589,8 @@ static NTSTATUS tcp_conns_enumerate_all( DWORD filter, struct nsi_tcp_conn_key *
             ptr = fgets( buf, sizeof(buf), fp );
             while ((ptr = fgets( buf, sizeof(buf), fp )))
             {
-                DWORD *local_addr = (DWORD *)&key.local.Ipv6.sin6_addr;
-                DWORD *remote_addr = (DWORD *)&key.remote.Ipv6.sin6_addr;
+                UINT *local_addr = (UINT *)&key.local.Ipv6.sin6_addr;
+                UINT *remote_addr = (UINT *)&key.remote.Ipv6.sin6_addr;
 
                 if (sscanf( ptr, "%*u: %8x%8x%8x%8x:%hx %8x%8x%8x%8x:%hx %x %*s %*s %*s %*s %*s %*s %*s %d",
                             local_addr, local_addr + 1, local_addr + 2, local_addr + 3, &key.local.Ipv6.sin6_port,
@@ -741,9 +744,9 @@ static NTSTATUS tcp_conns_enumerate_all( DWORD filter, struct nsi_tcp_conn_key *
     return status;
 }
 
-static NTSTATUS tcp_all_enumerate_all( void *key_data, DWORD key_size, void *rw_data, DWORD rw_size,
-                                       void *dynamic_data, DWORD dynamic_size,
-                                       void *static_data, DWORD static_size, DWORD_PTR *count )
+static NTSTATUS tcp_all_enumerate_all( void *key_data, UINT key_size, void *rw_data, UINT rw_size,
+                                       void *dynamic_data, UINT dynamic_size,
+                                       void *static_data, UINT static_size, UINT_PTR *count )
 {
     TRACE( "%p %d %p %d %p %d %p %d %p\n", key_data, key_size, rw_data, rw_size,
            dynamic_data, dynamic_size, static_data, static_size, count );
@@ -752,9 +755,9 @@ static NTSTATUS tcp_all_enumerate_all( void *key_data, DWORD key_size, void *rw_
                                     dynamic_data, dynamic_size, static_data, static_size, count );
 }
 
-static NTSTATUS tcp_estab_enumerate_all( void *key_data, DWORD key_size, void *rw_data, DWORD rw_size,
-                                         void *dynamic_data, DWORD dynamic_size,
-                                         void *static_data, DWORD static_size, DWORD_PTR *count )
+static NTSTATUS tcp_estab_enumerate_all( void *key_data, UINT key_size, void *rw_data, UINT rw_size,
+                                         void *dynamic_data, UINT dynamic_size,
+                                         void *static_data, UINT static_size, UINT_PTR *count )
 {
     TRACE( "%p %d %p %d %p %d %p %d %p\n", key_data, key_size, rw_data, rw_size,
            dynamic_data, dynamic_size, static_data, static_size, count );
@@ -763,9 +766,9 @@ static NTSTATUS tcp_estab_enumerate_all( void *key_data, DWORD key_size, void *r
                                     dynamic_data, dynamic_size, static_data, static_size, count );
 }
 
-static NTSTATUS tcp_listen_enumerate_all( void *key_data, DWORD key_size, void *rw_data, DWORD rw_size,
-                                          void *dynamic_data, DWORD dynamic_size,
-                                          void *static_data, DWORD static_size, DWORD_PTR *count )
+static NTSTATUS tcp_listen_enumerate_all( void *key_data, UINT key_size, void *rw_data, UINT rw_size,
+                                          void *dynamic_data, UINT dynamic_size,
+                                          void *static_data, UINT static_size, UINT_PTR *count )
 {
     TRACE( "%p %d %p %d %p %d %p %d %p\n", key_data, key_size, rw_data, rw_size,
            dynamic_data, dynamic_size, static_data, static_size, count );

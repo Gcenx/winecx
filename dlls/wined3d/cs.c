@@ -158,13 +158,13 @@ struct wined3d_cs_present
     RECT src_rect;
     RECT dst_rect;
     unsigned int swap_interval;
-    DWORD flags;
+    uint32_t flags;
 };
 
 struct wined3d_cs_clear
 {
     enum wined3d_cs_op opcode;
-    DWORD flags;
+    uint32_t flags;
     unsigned int rt_count;
     struct wined3d_fb_state fb;
     RECT draw_rect;
@@ -429,7 +429,7 @@ struct wined3d_cs_query_issue
 {
     enum wined3d_cs_op opcode;
     struct wined3d_query *query;
-    DWORD flags;
+    uint32_t flags;
 };
 
 struct wined3d_cs_preload_resource
@@ -451,7 +451,7 @@ struct wined3d_cs_map
     unsigned int sub_resource_idx;
     void **map_ptr;
     const struct wined3d_box *box;
-    DWORD flags;
+    uint32_t flags;
     HRESULT *hr;
 };
 
@@ -480,7 +480,7 @@ struct wined3d_cs_blt_sub_resource
     struct wined3d_resource *src_resource;
     unsigned int src_sub_resource_idx;
     struct wined3d_box src_box;
-    DWORD flags;
+    uint32_t flags;
     struct wined3d_blt_fx fx;
     enum wined3d_texture_filter_type filter;
 };
@@ -720,7 +720,7 @@ static void wined3d_cs_exec_present(struct wined3d_cs *cs, const void *data)
 
 void wined3d_cs_emit_present(struct wined3d_cs *cs, struct wined3d_swapchain *swapchain,
         const RECT *src_rect, const RECT *dst_rect, HWND dst_window_override,
-        unsigned int swap_interval, DWORD flags)
+        unsigned int swap_interval, uint32_t flags)
 {
     struct wined3d_cs_present *op;
     unsigned int i;
@@ -764,7 +764,7 @@ static void wined3d_cs_exec_clear(struct wined3d_cs *cs, const void *data)
 }
 
 void wined3d_cs_emit_clear(struct wined3d_cs *cs, DWORD rect_count, const RECT *rects,
-        DWORD flags, const struct wined3d_color *color, float depth, DWORD stencil)
+        uint32_t flags, const struct wined3d_color *color, float depth, DWORD stencil)
 {
     const struct wined3d_state *state = cs->c.state;
     const struct wined3d_viewport *vp = &state->viewports[0];
@@ -1207,8 +1207,8 @@ static void wined3d_cs_exec_set_rendertarget_views(struct wined3d_cs *cs, const 
         if (!(device->adapter->d3d_info.wined3d_creation_flags & WINED3D_SRGB_READ_WRITE_CONTROL)
                 || cs->state.render_states[WINED3D_RS_SRGBWRITEENABLE])
         {
-            prev_srgb_write = prev && prev->format_flags & WINED3DFMT_FLAG_SRGB_WRITE;
-            curr_srgb_write = view && view->format_flags & WINED3DFMT_FLAG_SRGB_WRITE;
+            prev_srgb_write = prev && prev->format_caps & WINED3D_FORMAT_CAP_SRGB_WRITE;
+            curr_srgb_write = view && view->format_caps & WINED3D_FORMAT_CAP_SRGB_WRITE;
             if (prev_srgb_write != curr_srgb_write)
                 device_invalidate_state(device, STATE_RENDER(WINED3D_RS_SRGBWRITEENABLE));
         }
@@ -1451,8 +1451,8 @@ static void wined3d_cs_exec_set_texture(struct wined3d_cs *cs, const void *data)
     {
         const struct wined3d_format *new_format = op->texture->resource.format;
         const struct wined3d_format *old_format = prev ? prev->resource.format : NULL;
-        unsigned int old_fmt_flags = prev ? prev->resource.format_flags : 0;
-        unsigned int new_fmt_flags = op->texture->resource.format_flags;
+        unsigned int old_fmt_caps = prev ? prev->resource.format_caps : 0;
+        unsigned int new_fmt_caps = op->texture->resource.format_caps;
 
         if (InterlockedIncrement(&op->texture->resource.bind_count) == 1)
             op->texture->sampler = op->stage;
@@ -1460,7 +1460,7 @@ static void wined3d_cs_exec_set_texture(struct wined3d_cs *cs, const void *data)
         if (!prev || wined3d_texture_gl(op->texture)->target != wined3d_texture_gl(prev)->target
                 || (!is_same_fixup(new_format->color_fixup, old_format->color_fixup)
                 && !(can_use_texture_swizzle(d3d_info, new_format) && can_use_texture_swizzle(d3d_info, old_format)))
-                || (new_fmt_flags & WINED3DFMT_FLAG_SHADOW) != (old_fmt_flags & WINED3DFMT_FLAG_SHADOW))
+                || (new_fmt_caps & WINED3D_FORMAT_CAP_SHADOW) != (old_fmt_caps & WINED3D_FORMAT_CAP_SHADOW))
             device_invalidate_state(cs->c.device, STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL));
 
         if (!prev && op->stage < d3d_info->limits.ffp_blend_stages)
@@ -3153,8 +3153,7 @@ static void *wined3d_cs_queue_require_space(struct wined3d_cs_queue *queue, size
     size = packet_size - header_size;
     if (packet_size >= WINED3D_CS_QUEUE_SIZE)
     {
-        ERR("Packet size %lu >= queue size %u.\n",
-                (unsigned long)packet_size, WINED3D_CS_QUEUE_SIZE);
+        ERR("Packet size %Iu >= queue size %u.\n", packet_size, WINED3D_CS_QUEUE_SIZE);
         return NULL;
     }
 
@@ -3164,8 +3163,7 @@ static void *wined3d_cs_queue_require_space(struct wined3d_cs_queue *queue, size
         size_t nop_size = remaining - header_size;
         struct wined3d_cs_nop *nop;
 
-        TRACE("Inserting a nop for %lu + %lu bytes.\n",
-                (unsigned long)header_size, (unsigned long)nop_size);
+        TRACE("Inserting a nop for %Iu + %Iu bytes.\n", header_size, nop_size);
 
         nop = wined3d_cs_queue_require_space(queue, nop_size, cs);
         if (nop_size)
@@ -3194,8 +3192,8 @@ static void *wined3d_cs_queue_require_space(struct wined3d_cs_queue *queue, size
         if (new_pos < tail && new_pos)
             break;
 
-        TRACE("Waiting for free space. Head %u, tail %u, packet size %lu.\n",
-                head, tail, (unsigned long)packet_size);
+        TRACE("Waiting for free space. Head %lu, tail %lu, packet size %Iu.\n",
+                head, tail, packet_size);
     }
 
     packet = (struct wined3d_cs_packet *)&queue->data[head];
@@ -3466,6 +3464,7 @@ struct wined3d_cs *wined3d_cs_create(struct wined3d_device *device,
         }
     }
 
+    TRACE("Created command stream %p.\n", cs);
     return cs;
 
 fail:
@@ -4410,7 +4409,7 @@ static void wined3d_command_list_destroy_object(void *object)
 
 ULONG CDECL wined3d_command_list_incref(struct wined3d_command_list *list)
 {
-    ULONG refcount = InterlockedIncrement(&list->refcount);
+    unsigned int refcount = InterlockedIncrement(&list->refcount);
 
     TRACE("%p increasing refcount to %u.\n", list, refcount);
 
@@ -4419,7 +4418,7 @@ ULONG CDECL wined3d_command_list_incref(struct wined3d_command_list *list)
 
 ULONG CDECL wined3d_command_list_decref(struct wined3d_command_list *list)
 {
-    ULONG refcount = InterlockedDecrement(&list->refcount);
+    unsigned int refcount = InterlockedDecrement(&list->refcount);
     struct wined3d_device *device = list->device;
     const struct wined3d_cs_packet *packet;
     SIZE_T i, offset;

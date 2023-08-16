@@ -24,24 +24,8 @@
  */
 
 #include <assert.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <fcntl.h>
-#include <string.h>
-
-#include "ntstatus.h"
-#define WIN32_NO_STATUS
-#include "windef.h"
-#include "winbase.h"
-#include "winnls.h"
-#include "wingdi.h"
-#include "winuser.h"
-#include "winerror.h"
 #include "user_private.h"
-#include "win.h"
-
-#include "wine/list.h"
+#include "winnls.h"
 #include "wine/server.h"
 #include "wine/debug.h"
 
@@ -108,7 +92,7 @@ static const char *debugstr_format( UINT id )
 }
 
 /* build the data to send to the server in SetClipboardData */
-static HANDLE marshal_data( UINT format, HANDLE handle, ULONG64 *ret_size )
+static HANDLE marshal_data( UINT format, HANDLE handle, size_t *ret_size )
 {
     SIZE_T size;
 
@@ -205,7 +189,7 @@ static HANDLE marshal_data( UINT format, HANDLE handle, ULONG64 *ret_size )
 /* rebuild the target handle from the data received in GetClipboardData */
 static HANDLE unmarshal_data( UINT format, void *data, data_size_t size )
 {
-    HANDLE handle = GlobalReAlloc( data, size, 0 );  /* release unused space */
+    HANDLE handle = GlobalReAlloc( data, size, GMEM_MOVEABLE );  /* release unused space */
 
     switch (format)
     {
@@ -365,7 +349,7 @@ static HANDLE render_synthesized_bitmap( HANDLE data, UINT from )
 {
     BITMAPINFO *bmi;
     HANDLE ret = 0;
-    HDC hdc = GetDC( 0 );
+    HDC hdc = NtUserGetDC( 0 );
 
     if ((bmi = GlobalLock( data )))
     {
@@ -385,7 +369,7 @@ static HANDLE render_synthesized_dib( HANDLE data, UINT format, UINT from )
     BITMAPINFO *bmi, *src;
     DWORD src_size, header_size, bits_size;
     HANDLE ret = 0;
-    HDC hdc = GetDC( 0 );
+    HDC hdc = NtUserGetDC( 0 );
 
     if (from == CF_BITMAP)
     {
@@ -444,7 +428,7 @@ static HANDLE render_synthesized_metafile( HANDLE data )
     void *bits;
     METAFILEPICT *pict;
     ENHMETAHEADER header;
-    HDC hdc = GetDC( 0 );
+    HDC hdc = NtUserGetDC( 0 );
 
     size = GetWinMetaFileBits( data, 0, NULL, MM_ISOTROPIC, hdc );
     if ((bits = HeapAlloc( GetProcessHeap(), 0, size )))
@@ -582,7 +566,7 @@ HANDLE WINAPI SetClipboardData( UINT format, HANDLE data )
     if (data)
     {
         if (!(handle = marshal_data( format, data, &params.size ))) return 0;
-        if (!(params.data = PtrToUlong(GlobalLock( handle )))) return 0;
+        if (!(params.data = GlobalLock( handle ))) return 0;
     }
 
     status = NtUserSetClipboardData( format, data, &params );
@@ -621,14 +605,14 @@ HANDLE WINAPI GetClipboardData( UINT format )
     {
         params.size = params.data_size;
         params.data_size = 0;
-        if (!(params.data = PtrToUlong(GlobalAlloc( GMEM_FIXED, params.size )))) break;
+        if (!(params.data = GlobalAlloc( GMEM_FIXED, params.size ))) break;
         ret = NtUserGetClipboardData( format, &params );
         if (ret) break;
         if (params.data_size == ~0) /* needs unmarshaling */
         {
             struct set_clipboard_params set_params = { .cache_only = TRUE, .seqno = params.seqno };
 
-            ret = unmarshal_data( format, ULongToPtr(params.data), params.size );
+            ret = unmarshal_data( format, params.data, params.size );
             if (!NtUserSetClipboardData( format, ret, &set_params )) break;
 
             /* data changed, retry */
@@ -637,7 +621,7 @@ HANDLE WINAPI GetClipboardData( UINT format )
             params.data_size = 1024;
             continue;
         }
-        GlobalFree( ULongToPtr(params.data) );
+        GlobalFree( params.data );
     }
 
     LeaveCriticalSection( &clipboard_cs );

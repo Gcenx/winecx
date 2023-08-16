@@ -30,6 +30,7 @@
 #include "winternl.h"
 
 #include "psdrv.h"
+#include "unixlib.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
@@ -37,123 +38,49 @@ WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
 /***********************************************************************
  *           SelectFont   (WINEPS.@)
  */
-HFONT CDECL PSDRV_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
+HFONT CDECL PSDRV_SelectFont( print_ctx *ctx, HFONT hfont, UINT *aa_flags )
 {
-    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
-    PHYSDEV next = GET_NEXT_PHYSDEV( dev, pSelectFont );
-    HFONT ret;
-    LOGFONTW lf;
-    BOOL subst = FALSE;
-    char FaceName[LF_FACESIZE];
+    struct font_info font_info;
 
-    if (!GetObjectW( hfont, sizeof(lf), &lf )) return 0;
+    ctx->font.set = UNSET;
 
-    *aa_flags = GGO_BITMAP; /* no anti-aliasing on printer devices */
-
-    TRACE("FaceName = %s Height = %ld Italic = %d Weight = %ld\n",
-	  debugstr_w(lf.lfFaceName), lf.lfHeight, lf.lfItalic,
-	  lf.lfWeight);
-
-    WideCharToMultiByte(CP_ACP, 0, lf.lfFaceName, -1,
-			FaceName, sizeof(FaceName), NULL, NULL);
-
-    if(FaceName[0] == '\0') {
-        switch(lf.lfPitchAndFamily & 0xf0) {
-	case FF_DONTCARE:
-	    break;
-	case FF_ROMAN:
-	case FF_SCRIPT:
-	    strcpy(FaceName, "Times");
-	    break;
-	case FF_SWISS:
-	    strcpy(FaceName, "Helvetica");
-	    break;
-	case FF_MODERN:
-	    strcpy(FaceName, "Courier");
-	    break;
-	case FF_DECORATIVE:
-	    strcpy(FaceName, "Symbol");
-	    break;
-	}
-    }
-
-    if(FaceName[0] == '\0') {
-        switch(lf.lfPitchAndFamily & 0x0f) {
-	case VARIABLE_PITCH:
-	    strcpy(FaceName, "Times");
-	    break;
-	default:
-	    strcpy(FaceName, "Courier");
-	    break;
-	}
-    }
-
-    if (physDev->pi->FontSubTableSize != 0)
+    if (ExtEscape(ctx->hdc, PSDRV_GET_BUILTIN_FONT_INFO, 0, NULL,
+                sizeof(font_info), (char *)&font_info))
     {
-	DWORD i;
-
-	for (i = 0; i < physDev->pi->FontSubTableSize; ++i)
-	{
-	    if (!stricmp (FaceName,
-		    physDev->pi->FontSubTable[i].pValueName))
-	    {
-		TRACE ("substituting facename '%s' for '%s'\n",
-			(LPSTR) physDev->pi->FontSubTable[i].pData, FaceName);
-		if (strlen ((LPSTR) physDev->pi->FontSubTable[i].pData) <
-			LF_FACESIZE)
-		{
-		    strcpy (FaceName,
-			    (LPSTR) physDev->pi->FontSubTable[i].pData);
-		    subst = TRUE;
-		}
-		else
-		    WARN ("Facename '%s' is too long; ignoring substitution\n",
-			    (LPSTR) physDev->pi->FontSubTable[i].pData);
-		break;
-	    }
-	}
+        ctx->font.fontloc = Builtin;
     }
-
-    physDev->font.escapement = lf.lfEscapement;
-    physDev->font.set = UNSET;
-
-    if (!subst && ((ret = next->funcs->pSelectFont( next, hfont, aa_flags ))))
+    else
     {
-        PSDRV_SelectDownloadFont(dev);
-        return ret;
+        ctx->font.fontloc = Download;
+        ctx->font.fontinfo.Download = NULL;
     }
-
-    PSDRV_SelectBuiltinFont(dev, hfont, &lf, FaceName);
-    next->funcs->pSelectFont( next, 0, aa_flags );  /* tell next driver that we selected a device font */
     return hfont;
 }
 
 /***********************************************************************
  *           PSDRV_SetFont
  */
-BOOL PSDRV_SetFont( PHYSDEV dev, BOOL vertical )
+BOOL PSDRV_SetFont( print_ctx *ctx, BOOL vertical )
 {
-    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
+    PSDRV_WriteSetColor(ctx, &ctx->font.color);
+    if (vertical && (ctx->font.set == VERTICAL_SET)) return TRUE;
+    if (!vertical && (ctx->font.set == HORIZONTAL_SET)) return TRUE;
 
-    PSDRV_WriteSetColor(dev, &physDev->font.color);
-    if (vertical && (physDev->font.set == VERTICAL_SET)) return TRUE;
-    if (!vertical && (physDev->font.set == HORIZONTAL_SET)) return TRUE;
-
-    switch(physDev->font.fontloc) {
+    switch(ctx->font.fontloc) {
     case Builtin:
-        PSDRV_WriteSetBuiltinFont(dev);
+        PSDRV_WriteSetBuiltinFont(ctx);
 	break;
     case Download:
-        PSDRV_WriteSetDownloadFont(dev, vertical);
+        PSDRV_WriteSetDownloadFont(ctx, vertical);
 	break;
     default:
-        ERR("fontloc = %d\n", physDev->font.fontloc);
+        ERR("fontloc = %d\n", ctx->font.fontloc);
         assert(1);
 	break;
     }
     if (vertical)
-        physDev->font.set = VERTICAL_SET;
+        ctx->font.set = VERTICAL_SET;
     else
-        physDev->font.set = HORIZONTAL_SET;
+        ctx->font.set = HORIZONTAL_SET;
     return TRUE;
 }

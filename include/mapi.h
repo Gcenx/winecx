@@ -19,8 +19,6 @@
 #ifndef MAPI_H
 #define MAPI_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -243,7 +241,5 @@ MAPISENDMAILW MAPISendMailW;
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* MAPI_H */

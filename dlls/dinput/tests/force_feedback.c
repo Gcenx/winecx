@@ -20,6 +20,7 @@
 
 #include <stdarg.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -39,6 +40,7 @@
 
 #define WIDL_using_Windows_Foundation
 #define WIDL_using_Windows_Foundation_Collections
+#define WIDL_using_Windows_Foundation_Numerics
 #include "windows.foundation.h"
 #define WIDL_using_Windows_Devices_Haptics
 #define WIDL_using_Windows_Gaming_Input
@@ -47,13 +49,11 @@
 #include "windows.gaming.input.forcefeedback.h"
 #undef Size
 
-#define MAKE_FUNC(f) static typeof(f) *p ## f
-MAKE_FUNC( RoGetActivationFactory );
-MAKE_FUNC( RoInitialize );
-MAKE_FUNC( WindowsCreateString );
-MAKE_FUNC( WindowsDeleteString );
-MAKE_FUNC( WindowsGetStringRawBuffer );
-#undef MAKE_FUNC
+static HRESULT (WINAPI *pRoGetActivationFactory)( HSTRING, REFIID, void** );
+static HRESULT (WINAPI *pRoInitialize)( RO_INIT_TYPE );
+static HRESULT (WINAPI *pWindowsCreateString)( const WCHAR*, UINT32, HSTRING* );
+static HRESULT (WINAPI *pWindowsDeleteString)( HSTRING str );
+static const WCHAR* (WINAPI *pWindowsGetStringRawBuffer)( HSTRING, UINT32* );
 
 static BOOL load_combase_functions(void)
 {
@@ -360,6 +360,47 @@ static void test_periodic_effect( IDirectInputDevice8W *device, HANDLE file, DWO
             .report_buf = {0x02,0x01,0x01,0x01},
         },
     };
+    struct hid_expect expect_download_0[] =
+    {
+        /* set periodic */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 5,
+            .report_len = 2,
+            .report_buf = {0x05,0x00},
+        },
+        /* set envelope */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 6,
+            .report_len = 7,
+            .report_buf = {0x06,0x00,0x00,0x00,0x00,0x00,0x00},
+        },
+        /* update effect */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 11,
+            .report_buf = {0x03,0x01,0x02,0x08,0x01,0x00,0x00,0x00,0x01,0x3f,0x00},
+        },
+    };
+    struct hid_expect expect_download_1[] =
+    {
+        /* set periodic */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 5,
+            .report_len = 2,
+            .report_buf = {0x05,0x00},
+        },
+        /* update effect */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 11,
+            .report_buf = {0x03,0x01,0x02,0x08,0x01,0x00,0x00,0x00,0x01,0x3f,0x00},
+        },
+    };
     struct hid_expect expect_download_2[] =
     {
         /* set periodic */
@@ -382,6 +423,55 @@ static void test_periodic_effect( IDirectInputDevice8W *device, HANDLE file, DWO
             .report_id = 3,
             .report_len = 11,
             .report_buf = {0x03,0x01,0x02,0x08,0x01,0x00,version >= 0x700 ? 0x06 : 0x00,0x00,0x01,0x55,0xd5},
+        },
+    };
+    struct hid_expect expect_download_3[] =
+    {
+        /* set periodic */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 5,
+            .report_len = 2,
+            .report_buf = {0x05,0x19},
+        },
+        /* set envelope */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 6,
+            .report_len = 7,
+            .report_buf = {0x06,0x19,0x4c,0x01,0x00,0x04,0x00},
+        },
+        /* update effect */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 11,
+            .report_buf = {0x03,0x01,0x02,0x08,0xff,0xff,version >= 0x700 ? 0x06 : 0x00,0x00,0x01,0x55,0xd5},
+        },
+    };
+    struct hid_expect expect_download_4[] =
+    {
+        /* set periodic */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 5,
+            .report_len = 2,
+            .report_buf = {0x05,0x19},
+        },
+        /* set envelope (wine) */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 6,
+            .report_len = 7,
+            .report_buf = {0x06,0x19,0x4c,0x01,0x00,0x04,0x00},
+            .todo = TRUE, .wine_only = TRUE,
+        },
+        /* update effect */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 11,
+            .report_buf = {0x03,0x01,0x02,0x08,0xff,0xff,version >= 0x700 ? 0x06 : 0x00,0x00,0x01,0x55,0xd5},
         },
     };
     struct hid_expect expect_update[] =
@@ -529,6 +619,22 @@ static void test_periodic_effect( IDirectInputDevice8W *device, HANDLE file, DWO
         .cbTypeSpecificParams = sizeof(DIPERIODIC),
         .lpvTypeSpecificParams = (void *)&expect_periodic,
         .dwStartDelay = 6000,
+    };
+    static const LONG expect_directions_0[3] = {0};
+    static const DIENVELOPE expect_envelope_0 = {.dwSize = sizeof(DIENVELOPE)};
+    static const DIPERIODIC expect_periodic_0 = {0};
+    const DIEFFECT expect_desc_0 =
+    {
+        .dwSize = version >= 0x700 ? sizeof(DIEFFECT_DX6) : sizeof(DIEFFECT_DX5),
+        .dwFlags = DIEFF_SPHERICAL | DIEFF_OBJECTIDS,
+        .dwDuration = 1000,
+        .dwTriggerButton = DIDFT_PSHBUTTON | DIDFT_MAKEINSTANCE( 0 ) | DIDFT_FFEFFECTTRIGGER,
+        .cAxes = 3,
+        .rgdwAxes = (void *)expect_axes,
+        .rglDirection = (void *)expect_directions_0,
+        .lpEnvelope = (void *)&expect_envelope_0,
+        .cbTypeSpecificParams = sizeof(DIPERIODIC),
+        .lpvTypeSpecificParams = (void *)&expect_periodic_0,
     };
     struct check_created_effect_params check_params = {0};
     IDirectInputEffect *effect;
@@ -1316,8 +1422,39 @@ static void test_periodic_effect( IDirectInputDevice8W *device, HANDLE file, DWO
         winetest_pop_context();
     }
 
+    /* zero-ed effect parameters are sent */
+
     hr = IDirectInputDevice8_CreateEffect( device, &GUID_Sine, NULL, &effect, NULL );
     ok( hr == DI_OK, "CreateEffect returned %#lx\n", hr );
+
+    set_hid_expect( file, expect_download_0, sizeof(expect_download_0) );
+    flags = version >= 0x700 ? DIEP_ALLPARAMS : DIEP_ALLPARAMS_DX5;
+    hr = IDirectInputEffect_SetParameters( effect, &expect_desc_0, flags );
+    ok( hr == DI_OK, "SetParameters returned %#lx\n", hr );
+    set_hid_expect( file, NULL, 0 );
+
+    set_hid_expect( file, &expect_stop, sizeof(expect_stop) );
+    ref = IDirectInputEffect_Release( effect );
+    ok( ref == 0, "Release returned %ld\n", ref );
+    set_hid_expect( file, NULL, 0 );
+
+    hr = IDirectInputDevice8_CreateEffect( device, &GUID_Sine, NULL, &effect, NULL );
+    ok( hr == DI_OK, "CreateEffect returned %#lx\n", hr );
+
+    set_hid_expect( file, expect_download_1, sizeof(expect_download_1) );
+    flags = version >= 0x700 ? DIEP_ALLPARAMS : DIEP_ALLPARAMS_DX5;
+    hr = IDirectInputEffect_SetParameters( effect, &expect_desc_0, (flags & ~DIEP_ENVELOPE) );
+    ok( hr == DI_OK, "SetParameters returned %#lx\n", hr );
+    set_hid_expect( file, NULL, 0 );
+
+    set_hid_expect( file, &expect_stop, sizeof(expect_stop) );
+    ref = IDirectInputEffect_Release( effect );
+    ok( ref == 0, "Release returned %ld\n", ref );
+    set_hid_expect( file, NULL, 0 );
+
+    hr = IDirectInputDevice8_CreateEffect( device, &GUID_Sine, NULL, &effect, NULL );
+    ok( hr == DI_OK, "CreateEffect returned %#lx\n", hr );
+
 
     set_hid_expect( file, expect_download_2, sizeof(expect_download_2) );
     flags = version >= 0x700 ? DIEP_ALLPARAMS : DIEP_ALLPARAMS_DX5;
@@ -1349,6 +1486,32 @@ static void test_periodic_effect( IDirectInputDevice8W *device, HANDLE file, DWO
     hr = IDirectInputEffect_SetParameters( effect, &desc, DIEP_NODOWNLOAD | DIEP_ENVELOPE );
     ok( hr == DI_DOWNLOADSKIPPED, "SetParameters returned %#lx\n", hr );
     set_hid_expect( file, expect_set_envelope, sizeof(expect_set_envelope) );
+    hr = IDirectInputEffect_SetParameters( effect, &expect_desc, 0 );
+    ok( hr == DI_OK, "SetParameters returned %#lx\n", hr );
+    wait_hid_expect( file, 100 ); /* these updates are sent asynchronously */
+
+    set_hid_expect( file, &expect_stop, sizeof(expect_stop) );
+    hr = IDirectInputEffect_Unload( effect );
+    ok( hr == DI_OK, "Unload returned %#lx\n", hr );
+    set_hid_expect( file, NULL, 0 );
+
+    hr = IDirectInputEffect_SetParameters( effect, &expect_desc, DIEP_NODOWNLOAD );
+    ok( hr == DI_DOWNLOADSKIPPED, "SetParameters returned %#lx\n", hr );
+    set_hid_expect( file, expect_download_3, sizeof(expect_download_3) );
+    hr = IDirectInputEffect_SetParameters( effect, &expect_desc, 0 );
+    ok( hr == DI_OK, "SetParameters returned %#lx\n", hr );
+    wait_hid_expect( file, 100 ); /* these updates are sent asynchronously */
+
+    set_hid_expect( file, &expect_stop, sizeof(expect_stop) );
+    hr = IDirectInputEffect_Unload( effect );
+    ok( hr == DI_OK, "Unload returned %#lx\n", hr );
+    set_hid_expect( file, NULL, 0 );
+
+    desc = expect_desc;
+    desc.lpEnvelope = NULL;
+    hr = IDirectInputEffect_SetParameters( effect, &desc, DIEP_NODOWNLOAD | DIEP_ENVELOPE );
+    ok( hr == DI_DOWNLOADSKIPPED, "SetParameters returned %#lx\n", hr );
+    set_hid_expect( file, expect_download_4, sizeof(expect_download_4) );
     hr = IDirectInputEffect_SetParameters( effect, &expect_desc, 0 );
     ok( hr == DI_OK, "SetParameters returned %#lx\n", hr );
     wait_hid_expect( file, 100 ); /* these updates are sent asynchronously */
@@ -1672,7 +1835,8 @@ static void test_condition_effect( IDirectInputDevice8W *device, HANDLE file, DW
 static BOOL test_force_feedback_joystick( DWORD version )
 {
 #include "psh_hid_macros.h"
-    const unsigned char report_descriptor[] = {
+    const unsigned char report_descriptor[] =
+    {
         USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
         USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
         COLLECTION(1, Application),
@@ -2005,13 +2169,17 @@ static BOOL test_force_feedback_joystick( DWORD version )
             END_COLLECTION,
         END_COLLECTION,
     };
-#undef REPORT_ID_OR_USAGE_PAGE
+    C_ASSERT(sizeof(report_descriptor) < MAX_HID_DESCRIPTOR_LEN);
 #include "pop_hid_macros.h"
 
     struct hid_device_desc desc =
     {
         .use_report_id = TRUE,
-        .caps = { .InputReportByteLength = 5 },
+        .caps =
+        {
+            .InputReportByteLength = 5,
+            .OutputReportByteLength = 11,
+        },
         .attributes = default_attributes,
     };
     const DIDEVCAPS expect_caps =
@@ -2832,9 +3000,9 @@ static BOOL test_force_feedback_joystick( DWORD version )
 
     desc.report_descriptor_len = sizeof(report_descriptor);
     memcpy( desc.report_descriptor_buf, report_descriptor, sizeof(report_descriptor) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
-    if (!hid_device_start( &desc )) goto done;
+    if (!hid_device_start( &desc, 1 )) goto done;
     if (FAILED(hr = dinput_test_create_device( version, &devinst, &device ))) goto done;
 
     check_dinput_devices( version, &devinst );
@@ -3038,7 +3206,7 @@ static BOOL test_force_feedback_joystick( DWORD version )
     CloseHandle( file );
 
 done:
-    hid_device_stop( &desc );
+    hid_device_stop( &desc, 1 );
     cleanup_registry_keys();
     winetest_pop_context();
 
@@ -3460,12 +3628,18 @@ static void test_device_managed_effect(void)
             END_COLLECTION,
         END_COLLECTION,
     };
+    C_ASSERT(sizeof(report_descriptor) < MAX_HID_DESCRIPTOR_LEN);
 #include "pop_hid_macros.h"
 
     struct hid_device_desc desc =
     {
         .use_report_id = TRUE,
-        .caps = { .InputReportByteLength = 5 },
+        .caps =
+        {
+            .InputReportByteLength = 5,
+            .OutputReportByteLength = 11,
+            .FeatureReportByteLength = 5,
+        },
         .attributes = default_attributes,
     };
     struct hid_expect expect_acquire[] =
@@ -3947,9 +4121,9 @@ static void test_device_managed_effect(void)
     memcpy( desc.report_descriptor_buf, report_descriptor, sizeof(report_descriptor) );
     desc.expect_size = sizeof(expect_pool);
     memcpy( desc.expect, expect_pool, sizeof(expect_pool) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
-    if (!hid_device_start( &desc )) goto done;
+    if (!hid_device_start( &desc, 1 )) goto done;
     if (FAILED(hr = dinput_test_create_device( DIRECTINPUT_VERSION, &devinst, &device ))) goto done;
 
     hr = IDirectInputDevice8_GetProperty( device, DIPROP_GUIDANDPATH, &prop_guid_path.diph );
@@ -4358,7 +4532,7 @@ static void test_device_managed_effect(void)
     CloseHandle( file );
 
 done:
-    hid_device_stop( &desc );
+    hid_device_stop( &desc, 1 );
     cleanup_registry_keys();
     winetest_pop_context();
 }
@@ -4414,7 +4588,7 @@ static HRESULT WINAPI controller_handler_QueryInterface( IEventHandler_RawGameCo
         return S_OK;
     }
 
-    trace( "%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid( iid ) );
+    if (winetest_debug > 1) trace( "%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid( iid ) );
     *out = NULL;
     return E_NOINTERFACE;
 }
@@ -4434,11 +4608,11 @@ static HRESULT WINAPI controller_handler_Invoke( IEventHandler_RawGameController
 {
     struct controller_handler *impl = impl_from_IEventHandler_RawGameController( iface );
 
-    trace( "iface %p, sender %p, controller %p\n", iface, sender, controller );
+    if (winetest_debug > 1) trace( "iface %p, sender %p, controller %p\n", iface, sender, controller );
 
     ok( sender == NULL, "got sender %p\n", sender );
-    SetEvent( impl->event );
     impl->invoked = TRUE;
+    SetEvent( impl->event );
 
     return S_OK;
 }
@@ -4482,7 +4656,7 @@ static void check_bool_async_( int line, IAsyncOperation_boolean *async, UINT32 
     hr = IAsyncInfo_get_ErrorCode( async_info, &async_hr );
     if (expect_status < 4) ok_(__FILE__, line)( hr == S_OK, "get_ErrorCode returned %#lx\n", hr );
     else ok_(__FILE__, line)( hr == E_ILLEGAL_METHOD_CALL, "get_ErrorCode returned %#lx\n", hr );
-    if (expect_status < 4) ok_(__FILE__, line)( async_hr == expect_hr, "got error %#lx\n", async_hr );
+    if (expect_status < 4) todo_wine_if(FAILED(expect_hr)) ok_(__FILE__, line)( async_hr == expect_hr, "got error %#lx\n", async_hr );
     else ok_(__FILE__, line)( async_hr == E_ILLEGAL_METHOD_CALL, "got error %#lx\n", async_hr );
 
     IAsyncInfo_Release( async_info );
@@ -4493,6 +4667,59 @@ static void check_bool_async_( int line, IAsyncOperation_boolean *async, UINT32 
     {
     case Completed:
     case Error:
+        todo_wine_if(FAILED(expect_hr))
+        ok_(__FILE__, line)( hr == expect_hr, "GetResults returned %#lx\n", hr );
+        ok_(__FILE__, line)( result == expect_result, "got result %u\n", result );
+        break;
+    case Canceled:
+    case Started:
+    default:
+        ok_(__FILE__, line)( hr == E_ILLEGAL_METHOD_CALL, "GetResults returned %#lx\n", hr );
+        break;
+    }
+}
+
+#define check_result_async( a, b, c, d, e ) check_result_async_( __LINE__, a, b, c, d, e )
+static void check_result_async_( int line, IAsyncOperation_ForceFeedbackLoadEffectResult *async, UINT32 expect_id,
+                                 AsyncStatus expect_status, HRESULT expect_hr, ForceFeedbackLoadEffectResult expect_result )
+{
+    ForceFeedbackLoadEffectResult result;
+    AsyncStatus async_status;
+    IAsyncInfo *async_info;
+    HRESULT hr, async_hr;
+    UINT32 async_id;
+
+    hr = IAsyncOperation_ForceFeedbackLoadEffectResult_QueryInterface( async, &IID_IAsyncInfo, (void **)&async_info );
+    ok_(__FILE__, line)( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+
+    async_id = 0xdeadbeef;
+    hr = IAsyncInfo_get_Id( async_info, &async_id );
+    if (expect_status < 4) ok_(__FILE__, line)( hr == S_OK, "get_Id returned %#lx\n", hr );
+    else ok_(__FILE__, line)( hr == E_ILLEGAL_METHOD_CALL, "get_Id returned %#lx\n", hr );
+    ok_(__FILE__, line)( async_id == expect_id, "got id %u\n", async_id );
+
+    async_status = 0xdeadbeef;
+    hr = IAsyncInfo_get_Status( async_info, &async_status );
+    if (expect_status < 4) ok_(__FILE__, line)( hr == S_OK, "get_Status returned %#lx\n", hr );
+    else ok_(__FILE__, line)( hr == E_ILLEGAL_METHOD_CALL, "get_Status returned %#lx\n", hr );
+    ok_(__FILE__, line)( async_status == expect_status, "got status %u\n", async_status );
+
+    async_hr = 0xdeadbeef;
+    hr = IAsyncInfo_get_ErrorCode( async_info, &async_hr );
+    if (expect_status < 4) ok_(__FILE__, line)( hr == S_OK, "get_ErrorCode returned %#lx\n", hr );
+    else ok_(__FILE__, line)( hr == E_ILLEGAL_METHOD_CALL, "get_ErrorCode returned %#lx\n", hr );
+    if (expect_status < 4) todo_wine_if(FAILED(expect_hr)) ok_(__FILE__, line)( async_hr == expect_hr, "got error %#lx\n", async_hr );
+    else ok_(__FILE__, line)( async_hr == E_ILLEGAL_METHOD_CALL, "got error %#lx\n", async_hr );
+
+    IAsyncInfo_Release( async_info );
+
+    result = !expect_result;
+    hr = IAsyncOperation_ForceFeedbackLoadEffectResult_GetResults( async, &result );
+    switch (expect_status)
+    {
+    case Completed:
+    case Error:
+        todo_wine_if(FAILED(expect_hr))
         ok_(__FILE__, line)( hr == expect_hr, "GetResults returned %#lx\n", hr );
         ok_(__FILE__, line)( result == expect_result, "got result %u\n", result );
         break;
@@ -4529,7 +4756,7 @@ static HRESULT WINAPI bool_async_handler_QueryInterface( IAsyncOperationComplete
         return S_OK;
     }
 
-    trace( "%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid( iid ) );
+    if (winetest_debug > 1) trace( "%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid( iid ) );
     *out = NULL;
     return E_NOINTERFACE;
 }
@@ -4549,7 +4776,7 @@ static HRESULT WINAPI bool_async_handler_Invoke( IAsyncOperationCompletedHandler
 {
     struct bool_async_handler *impl = impl_from_IAsyncOperationCompletedHandler_boolean( iface );
 
-    trace( "iface %p, async %p, status %u\n", iface, async, status );
+    if (winetest_debug > 1) trace( "iface %p, async %p, status %u\n", iface, async, status );
 
     ok( !impl->invoked, "invoked twice\n" );
     impl->invoked = TRUE;
@@ -4570,12 +4797,115 @@ static IAsyncOperationCompletedHandler_booleanVtbl bool_async_handler_vtbl =
     bool_async_handler_Invoke,
 };
 
-struct bool_async_handler default_bool_async_handler = {{&bool_async_handler_vtbl}};
+static struct bool_async_handler default_bool_async_handler = {{&bool_async_handler_vtbl}};
+
+#define await_bool( a ) await_bool_( __LINE__, a )
+static void await_bool_( int line, IAsyncOperation_boolean *async )
+{
+    struct bool_async_handler handler = default_bool_async_handler;
+    HRESULT hr;
+    DWORD ret;
+
+    handler.event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok_(__FILE__, line)( !!handler.event, "CreateEventW failed, error %lu\n", GetLastError() );
+    hr = IAsyncOperation_boolean_put_Completed( async, &handler.IAsyncOperationCompletedHandler_boolean_iface );
+    ok_(__FILE__, line)( hr == S_OK, "put_Completed returned %#lx\n", hr );
+    ret = WaitForSingleObject( handler.event, 5000 );
+    ok_(__FILE__, line)( !ret, "WaitForSingleObject returned %#lx\n", ret );
+    ret = CloseHandle( handler.event );
+    ok_(__FILE__, line)( ret, "CloseHandle failed, error %lu\n", GetLastError() );
+}
+
+struct result_async_handler
+{
+    IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult_iface;
+    IAsyncOperation_ForceFeedbackLoadEffectResult *async;
+    AsyncStatus status;
+    BOOL invoked;
+    HANDLE event;
+};
+
+static inline struct result_async_handler *impl_from_IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult( IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult *iface )
+{
+    return CONTAINING_RECORD( iface, struct result_async_handler, IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult_iface );
+}
+
+static HRESULT WINAPI result_async_handler_QueryInterface( IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult *iface, REFIID iid, void **out )
+{
+    if (IsEqualGUID( iid, &IID_IUnknown ) ||
+        IsEqualGUID( iid, &IID_IAgileObject ) ||
+        IsEqualGUID( iid, &IID_IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult ))
+    {
+        IUnknown_AddRef( iface );
+        *out = iface;
+        return S_OK;
+    }
+
+    if (winetest_debug > 1) trace( "%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid( iid ) );
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI result_async_handler_AddRef( IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult *iface )
+{
+    return 2;
+}
+
+static ULONG WINAPI result_async_handler_Release( IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult *iface )
+{
+    return 1;
+}
+
+static HRESULT WINAPI result_async_handler_Invoke( IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult *iface,
+                                                   IAsyncOperation_ForceFeedbackLoadEffectResult *async, AsyncStatus status )
+{
+    struct result_async_handler *impl = impl_from_IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult( iface );
+
+    if (winetest_debug > 1) trace( "iface %p, async %p, status %u\n", iface, async, status );
+
+    ok( !impl->invoked, "invoked twice\n" );
+    impl->invoked = TRUE;
+    impl->async = async;
+    impl->status = status;
+    if (impl->event) SetEvent( impl->event );
+
+    return S_OK;
+}
+
+static IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResultVtbl result_async_handler_vtbl =
+{
+    /*** IUnknown methods ***/
+    result_async_handler_QueryInterface,
+    result_async_handler_AddRef,
+    result_async_handler_Release,
+    /*** IAsyncOperationCompletedHandler<ForceFeedbackLoadEffectResult> methods ***/
+    result_async_handler_Invoke,
+};
+
+static struct result_async_handler default_result_async_handler = {{&result_async_handler_vtbl}};
+
+#define await_result( a ) await_result_( __LINE__, a )
+static void await_result_( int line, IAsyncOperation_ForceFeedbackLoadEffectResult *async )
+{
+    struct result_async_handler handler = default_result_async_handler;
+    HRESULT hr;
+    DWORD ret;
+
+    handler.event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok_(__FILE__, line)( !!handler.event, "CreateEventW failed, error %lu\n", GetLastError() );
+    hr = IAsyncOperation_ForceFeedbackLoadEffectResult_put_Completed( async, &handler.IAsyncOperationCompletedHandler_ForceFeedbackLoadEffectResult_iface );
+    ok_(__FILE__, line)( hr == S_OK, "put_Completed returned %#lx\n", hr );
+    ret = WaitForSingleObject( handler.event, 5000 );
+    ok_(__FILE__, line)( !ret, "WaitForSingleObject returned %#lx\n", ret );
+    ret = CloseHandle( handler.event );
+    ok_(__FILE__, line)( ret, "CloseHandle failed, error %lu\n", GetLastError() );
+}
 
 static void test_windows_gaming_input(void)
 {
 #include "psh_hid_macros.h"
-    const unsigned char report_desc[] = {
+    const unsigned char report_desc[] =
+    {
         USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
         USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
         COLLECTION(1, Application),
@@ -4583,17 +4913,15 @@ static void test_windows_gaming_input(void)
             COLLECTION(1, Physical),
                 REPORT_ID(1, 1),
 
-                USAGE(4, (HID_USAGE_PAGE_SIMULATION<<16)|HID_USAGE_SIMULATION_STEERING),
-                USAGE(4, (HID_USAGE_PAGE_SIMULATION<<16)|HID_USAGE_SIMULATION_ACCELERATOR),
-                USAGE(4, (HID_USAGE_PAGE_SIMULATION<<16)|HID_USAGE_SIMULATION_BRAKE),
-                USAGE(4, (HID_USAGE_PAGE_SIMULATION<<16)|HID_USAGE_SIMULATION_CLUTCH),
                 USAGE(1, HID_USAGE_GENERIC_X),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                USAGE(1, HID_USAGE_GENERIC_Z),
                 LOGICAL_MINIMUM(1, 0),
                 LOGICAL_MAXIMUM(1, 127),
                 PHYSICAL_MINIMUM(1, 0),
                 PHYSICAL_MAXIMUM(1, 127),
                 REPORT_SIZE(1, 8),
-                REPORT_COUNT(1, 5),
+                REPORT_COUNT(1, 3),
                 INPUT(1, Data|Var|Abs),
 
                 USAGE(1, HID_USAGE_GENERIC_HATSWITCH),
@@ -4734,10 +5062,12 @@ static void test_windows_gaming_input(void)
                     USAGE(1, PID_USAGE_ET_SQUARE),
                     USAGE(1, PID_USAGE_ET_SINE),
                     USAGE(1, PID_USAGE_ET_SPRING),
+                    USAGE(1, PID_USAGE_ET_CONSTANT_FORCE),
+                    USAGE(1, PID_USAGE_ET_RAMP),
                     LOGICAL_MINIMUM(1, 1),
-                    LOGICAL_MAXIMUM(1, 3),
+                    LOGICAL_MAXIMUM(1, 5),
                     PHYSICAL_MINIMUM(1, 1),
-                    PHYSICAL_MAXIMUM(1, 3),
+                    PHYSICAL_MAXIMUM(1, 5),
                     REPORT_SIZE(1, 8),
                     REPORT_COUNT(1, 1),
                     OUTPUT(1, Data|Ary|Abs),
@@ -4747,31 +5077,32 @@ static void test_windows_gaming_input(void)
                 COLLECTION(1, Logical),
                     USAGE(4, (HID_USAGE_PAGE_GENERIC << 16)|HID_USAGE_GENERIC_X),
                     USAGE(4, (HID_USAGE_PAGE_GENERIC << 16)|HID_USAGE_GENERIC_Y),
-                    USAGE(4, (HID_USAGE_PAGE_GENERIC << 16)|HID_USAGE_GENERIC_Z),
                     LOGICAL_MINIMUM(1, 0),
                     LOGICAL_MAXIMUM(1, 1),
                     PHYSICAL_MINIMUM(1, 0),
                     PHYSICAL_MAXIMUM(1, 1),
                     REPORT_SIZE(1, 1),
-                    REPORT_COUNT(1, 3),
+                    REPORT_COUNT(1, 2),
                     OUTPUT(1, Data|Var|Abs),
                 END_COLLECTION,
                 USAGE(1, PID_USAGE_DIRECTION_ENABLE),
                 REPORT_COUNT(1, 1),
                 OUTPUT(1, Data|Var|Abs),
-                REPORT_COUNT(1, 4),
+                REPORT_COUNT(1, 5),
                 OUTPUT(1, Cnst|Var|Abs),
 
                 USAGE(1, PID_USAGE_DURATION),
+                USAGE(1, PID_USAGE_TRIGGER_REPEAT_INTERVAL),
+                USAGE(1, PID_USAGE_SAMPLE_PERIOD),
                 USAGE(1, PID_USAGE_START_DELAY),
                 UNIT(2, 0x1003),      /* Eng Lin:Time */
                 UNIT_EXPONENT(1, -3), /* 10^-3 */
                 LOGICAL_MINIMUM(1, 0),
                 LOGICAL_MAXIMUM(2, 0x7fff),
                 PHYSICAL_MINIMUM(1, 0),
-                PHYSICAL_MAXIMUM(2, 0x7fff),
+                PHYSICAL_MAXIMUM(1, 0),
                 REPORT_SIZE(1, 16),
-                REPORT_COUNT(1, 2),
+                REPORT_COUNT(1, 4),
                 OUTPUT(1, Data|Var|Abs),
                 UNIT(1, 0),
                 UNIT_EXPONENT(1, 0),
@@ -4785,6 +5116,15 @@ static void test_windows_gaming_input(void)
                 REPORT_COUNT(1, 1),
                 OUTPUT(1, Data|Var|Abs),
 
+                USAGE(1, PID_USAGE_GAIN),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(2, 0x00ff),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(2, 0x2710),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+
                 USAGE(1, PID_USAGE_DIRECTION),
                 COLLECTION(1, Logical),
                     USAGE(4, (HID_USAGE_PAGE_ORDINAL << 16)|1),
@@ -4792,11 +5132,11 @@ static void test_windows_gaming_input(void)
                     UNIT(1, 0x14),        /* Eng Rot:Angular Pos */
                     UNIT_EXPONENT(1, -2), /* 10^-2 */
                     LOGICAL_MINIMUM(1, 0),
-                    LOGICAL_MAXIMUM(2, 0x00ff),
+                    LOGICAL_MAXIMUM(4, 360),
                     PHYSICAL_MINIMUM(1, 0),
-                    PHYSICAL_MAXIMUM(4, 0x00008ca0),
+                    PHYSICAL_MAXIMUM(4, 36000),
                     UNIT(1, 0),
-                    REPORT_SIZE(1, 8),
+                    REPORT_SIZE(1, 16),
                     REPORT_COUNT(1, 2),
                     OUTPUT(1, Data|Var|Abs),
                     UNIT_EXPONENT(1, 0),
@@ -4840,21 +5180,21 @@ static void test_windows_gaming_input(void)
                 END_COLLECTION,
 
                 USAGE(1, PID_USAGE_CP_OFFSET),
-                LOGICAL_MINIMUM(1, 0x80),
-                LOGICAL_MAXIMUM(1, 0x7f),
-                PHYSICAL_MINIMUM(2, 0xd8f0),
-                PHYSICAL_MAXIMUM(2, 0x2710),
-                REPORT_SIZE(1, 8),
+                LOGICAL_MINIMUM(2, -10000),
+                LOGICAL_MAXIMUM(2, +10000),
+                PHYSICAL_MINIMUM(2, -10000),
+                PHYSICAL_MAXIMUM(2, +10000),
+                REPORT_SIZE(1, 16),
                 REPORT_COUNT(1, 1),
                 OUTPUT(1, Data|Var|Abs),
 
                 USAGE(1, PID_USAGE_POSITIVE_COEFFICIENT),
                 USAGE(1, PID_USAGE_NEGATIVE_COEFFICIENT),
-                LOGICAL_MINIMUM(1, 0x80),
-                LOGICAL_MAXIMUM(1, 0x7f),
-                PHYSICAL_MINIMUM(2, 0xd8f0),
-                PHYSICAL_MAXIMUM(2, 0x2710),
-                REPORT_SIZE(1, 8),
+                LOGICAL_MINIMUM(2, -10000),
+                LOGICAL_MAXIMUM(2, +10000),
+                PHYSICAL_MINIMUM(2, -10000),
+                PHYSICAL_MAXIMUM(2, +10000),
+                REPORT_SIZE(1, 16),
                 REPORT_COUNT(1, 2),
                 OUTPUT(1, Data|Var|Abs),
 
@@ -4863,7 +5203,7 @@ static void test_windows_gaming_input(void)
                 LOGICAL_MINIMUM(1, 0),
                 LOGICAL_MAXIMUM(2, 0x00ff),
                 PHYSICAL_MINIMUM(1, 0),
-                PHYSICAL_MAXIMUM(2, 0x2710),
+                PHYSICAL_MAXIMUM(2, 10000),
                 REPORT_SIZE(1, 8),
                 REPORT_COUNT(1, 2),
                 OUTPUT(1, Data|Var|Abs),
@@ -4872,7 +5212,7 @@ static void test_windows_gaming_input(void)
                 LOGICAL_MINIMUM(1, 0),
                 LOGICAL_MAXIMUM(2, 0x00ff),
                 PHYSICAL_MINIMUM(1, 0),
-                PHYSICAL_MAXIMUM(2, 0x2710),
+                PHYSICAL_MAXIMUM(2, 10000),
                 REPORT_SIZE(1, 8),
                 REPORT_COUNT(1, 1),
                 OUTPUT(1, Data|Var|Abs),
@@ -4903,6 +5243,148 @@ static void test_windows_gaming_input(void)
                 PHYSICAL_MAXIMUM(2, 0x2710),
                 REPORT_SIZE(1, 8),
                 REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+
+            USAGE(1, PID_USAGE_SET_PERIODIC_REPORT),
+            COLLECTION(1, Logical),
+                REPORT_ID(1, 7),
+
+                USAGE(1, PID_USAGE_EFFECT_BLOCK_INDEX),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 1),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_MAGNITUDE),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(2, 10000),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(2, 10000),
+                REPORT_SIZE(1, 16),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_OFFSET),
+                LOGICAL_MINIMUM(2, -10000),
+                LOGICAL_MAXIMUM(2, +10000),
+                PHYSICAL_MINIMUM(2, -10000),
+                PHYSICAL_MAXIMUM(2, +10000),
+                REPORT_SIZE(1, 16),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_PHASE),
+                UNIT(1, 0x14), /* Eng Rot:Angular Pos */
+                UNIT_EXPONENT(1, -2),
+                LOGICAL_MINIMUM(2, -180),
+                LOGICAL_MAXIMUM(2, +180),
+                PHYSICAL_MINIMUM(2, -18000),
+                PHYSICAL_MAXIMUM(2, +18000),
+                REPORT_SIZE(1, 16),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_PERIOD),
+                UNIT(2, 0x1003), /* Eng Lin:Time */
+                UNIT_EXPONENT(1, -3), /* 10^-3 */
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(2, 0x7fff),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(2, 0x7fff),
+                REPORT_SIZE(1, 16),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+
+                UNIT_EXPONENT(1, 0),
+                UNIT(1, 0), /* None */
+            END_COLLECTION,
+
+            USAGE(1, PID_USAGE_SET_ENVELOPE_REPORT),
+            COLLECTION(1, Logical),
+                REPORT_ID(1, 8),
+
+                USAGE(1, PID_USAGE_EFFECT_BLOCK_INDEX),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 1),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_ATTACK_LEVEL),
+                USAGE(1, PID_USAGE_FADE_LEVEL),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(2, 0x00ff),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(2, 0x2710),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 2),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_ATTACK_TIME),
+                USAGE(1, PID_USAGE_FADE_TIME),
+                UNIT(2, 0x1003),      /* Eng Lin:Time */
+                UNIT_EXPONENT(1, -3), /* 10^-3 */
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(2, 0x7fff),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(2, 0x7fff),
+                REPORT_SIZE(1, 16),
+                REPORT_COUNT(1, 2),
+                OUTPUT(1, Data|Var|Abs),
+                UNIT_EXPONENT(1, 0),
+                UNIT(1, 0),
+            END_COLLECTION,
+
+            USAGE(1, PID_USAGE_SET_CONSTANT_FORCE_REPORT),
+            COLLECTION(1, Logical),
+                REPORT_ID(1, 9),
+
+                USAGE(1, PID_USAGE_EFFECT_BLOCK_INDEX),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 1),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_MAGNITUDE),
+                LOGICAL_MINIMUM(2, -10000),
+                LOGICAL_MAXIMUM(2, +10000),
+                PHYSICAL_MINIMUM(2, -10000),
+                PHYSICAL_MAXIMUM(2, +10000),
+                REPORT_SIZE(1, 16),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+
+            USAGE(1, PID_USAGE_SET_RAMP_FORCE_REPORT),
+            COLLECTION(1, Logical),
+                REPORT_ID(1, 10),
+
+                USAGE(1, PID_USAGE_EFFECT_BLOCK_INDEX),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 1),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                OUTPUT(1, Data|Var|Abs),
+
+                USAGE(1, PID_USAGE_RAMP_START),
+                USAGE(1, PID_USAGE_RAMP_END),
+                LOGICAL_MINIMUM(2, -10000),
+                LOGICAL_MAXIMUM(2, +10000),
+                PHYSICAL_MINIMUM(2, -10000),
+                PHYSICAL_MAXIMUM(2, +10000),
+                REPORT_SIZE(1, 16),
+                REPORT_COUNT(1, 2),
                 OUTPUT(1, Data|Var|Abs),
             END_COLLECTION,
 
@@ -4948,14 +5430,25 @@ static void test_windows_gaming_input(void)
                     USAGE(1, PID_USAGE_ET_SQUARE),
                     USAGE(1, PID_USAGE_ET_SINE),
                     USAGE(1, PID_USAGE_ET_SPRING),
+                    USAGE(1, PID_USAGE_ET_CONSTANT_FORCE),
+                    USAGE(1, PID_USAGE_ET_RAMP),
                     LOGICAL_MINIMUM(1, 1),
-                    LOGICAL_MAXIMUM(1, 3),
+                    LOGICAL_MAXIMUM(1, 5),
                     PHYSICAL_MINIMUM(1, 1),
-                    PHYSICAL_MAXIMUM(1, 3),
+                    PHYSICAL_MAXIMUM(1, 5),
                     REPORT_SIZE(1, 8),
                     REPORT_COUNT(1, 1),
                     FEATURE(1, Data|Ary|Abs),
                 END_COLLECTION,
+
+                USAGE(4, (HID_USAGE_PAGE_GENERIC<<16)|HID_USAGE_GENERIC_BYTE_COUNT),
+                LOGICAL_MINIMUM(1, 0x7f),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 0x7f),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                FEATURE(1, Data|Ary|Abs),
             END_COLLECTION,
 
             USAGE(1, PID_USAGE_BLOCK_LOAD_REPORT),
@@ -4996,13 +5489,18 @@ static void test_windows_gaming_input(void)
             END_COLLECTION,
         END_COLLECTION,
     };
-#undef REPORT_ID_OR_USAGE_PAGE
+    C_ASSERT(sizeof(report_desc) < MAX_HID_DESCRIPTOR_LEN);
 #include "pop_hid_macros.h"
 
     struct hid_device_desc desc =
     {
         .use_report_id = TRUE,
-        .caps = { .InputReportByteLength = 8 },
+        .caps =
+        {
+            .InputReportByteLength = 6,
+            .OutputReportByteLength = 18,
+            .FeatureReportByteLength = 5,
+        },
         .attributes = default_attributes,
     };
     struct hid_expect expect_init[] =
@@ -5012,7 +5510,7 @@ static void test_windows_gaming_input(void)
             .code = IOCTL_HID_GET_FEATURE,
             .report_id = 1,
             .report_len = 5,
-            .report_buf = {1,0x10,0x00,0x04,0x03},
+            .report_buf = {1,0xff,0x7f,0x7f,0x03},
             .todo = TRUE,
         },
     };
@@ -5023,7 +5521,7 @@ static void test_windows_gaming_input(void)
             .code = IOCTL_HID_GET_FEATURE,
             .report_id = 1,
             .report_len = 5,
-            .report_buf = {1,0x10,0x00,0x04,0x03},
+            .report_buf = {1,0xff,0x7f,0x7f,0x03},
             .todo = TRUE,
         },
         /* device control */
@@ -5048,7 +5546,6 @@ static void test_windows_gaming_input(void)
             .report_id = 1,
             .report_len = 2,
             .report_buf = {1, 0x01},
-            .todo = TRUE,
         },
         /* device gain */
         {
@@ -5056,7 +5553,6 @@ static void test_windows_gaming_input(void)
             .report_id = 6,
             .report_len = 2,
             .report_buf = {6, 0xff},
-            .todo = TRUE,
         },
     };
     static struct hid_expect expect_set_gain =
@@ -5065,7 +5561,6 @@ static void test_windows_gaming_input(void)
         .report_id = 6,
         .report_len = 2,
         .report_buf = {6, 0x7f},
-        .todo = TRUE,
     };
     static struct hid_expect expect_pause =
     {
@@ -5073,7 +5568,6 @@ static void test_windows_gaming_input(void)
         .report_id = 1,
         .report_len = 2,
         .report_buf = {1, 0x02},
-        .todo = TRUE,
     };
     static struct hid_expect expect_resume =
     {
@@ -5081,7 +5575,6 @@ static void test_windows_gaming_input(void)
         .report_id = 1,
         .report_len = 2,
         .report_buf = {1, 0x03},
-        .todo = TRUE,
     };
     static struct hid_expect expect_stop =
     {
@@ -5089,7 +5582,6 @@ static void test_windows_gaming_input(void)
         .report_id = 1,
         .report_len = 2,
         .report_buf = {1, 0x06},
-        .todo = TRUE,
     };
     static struct hid_expect expect_disable =
     {
@@ -5097,7 +5589,6 @@ static void test_windows_gaming_input(void)
         .report_id = 1,
         .report_len = 2,
         .report_buf = {1, 0x05},
-        .todo = TRUE,
     };
     static struct hid_expect expect_enable =
     {
@@ -5105,7 +5596,6 @@ static void test_windows_gaming_input(void)
         .report_id = 1,
         .report_len = 2,
         .report_buf = {1, 0x04},
-        .todo = TRUE,
     };
     static struct hid_expect expect_enable_fail =
     {
@@ -5114,27 +5604,6 @@ static void test_windows_gaming_input(void)
         .report_id = 1,
         .report_len = 2,
         .report_buf = {1, 0x04},
-        .todo = TRUE,
-    };
-    static struct hid_expect expect_reset_delay[] =
-    {
-        /* device control */
-        {
-            .code = IOCTL_HID_WRITE_REPORT,
-            .ret_status = STATUS_PENDING,
-            .report_id = 1,
-            .report_len = 2,
-            .report_buf = {1, 0x01},
-            .todo = TRUE,
-        },
-        /* device gain */
-        {
-            .code = IOCTL_HID_WRITE_REPORT,
-            .report_id = 6,
-            .report_len = 2,
-            .report_buf = {6, 0x7f},
-            .todo = TRUE,
-        },
     };
     struct hid_expect expect_reset[] =
     {
@@ -5144,7 +5613,6 @@ static void test_windows_gaming_input(void)
             .report_id = 1,
             .report_len = 2,
             .report_buf = {1, 0x01},
-            .todo = TRUE,
         },
         /* device gain */
         {
@@ -5152,12 +5620,404 @@ static void test_windows_gaming_input(void)
             .report_id = 6,
             .report_len = 2,
             .report_buf = {6, 0x7f},
+        },
+    };
+    struct hid_expect expect_create_periodic[] =
+    {
+        /* create new effect */
+        {
+            .code = IOCTL_HID_SET_FEATURE,
+            .report_id = 2,
+            .report_len = 3,
+            .report_buf = {2,0x02,0x00},
+        },
+        /* block load */
+        {
+            .code = IOCTL_HID_GET_FEATURE,
+            .report_id = 3,
+            .report_len = 5,
+            .report_buf = {3,0x01,0x01,0x00,0x00},
+        },
+        /* set periodic */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 7,
+            .report_len = 10,
+            .report_buf = {7,0x01,0xa0,0x0f,0xd0,0x07,0x70,0xff,0x0a,0x00},
+        },
+        /* set envelope */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 8,
+            .report_len = 8,
+            .report_buf = {8,0x01,0x4c,0x7f,0x28,0x00,0x50,0x00},
+        },
+        /* update effect */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 18,
+            .report_buf = {3,0x01,0x02,0x04,0x78,0x00,0x00,0x00,0x00,0x00,0x0a,0x00,0xff,0xff,0x4e,0x01,0x00,0x00},
+        },
+    };
+    struct hid_expect expect_create_periodic_neg[] =
+    {
+        /* create new effect */
+        {
+            .code = IOCTL_HID_SET_FEATURE,
+            .report_id = 2,
+            .report_len = 3,
+            .report_buf = {2,0x02,0x00},
+        },
+        /* block load */
+        {
+            .code = IOCTL_HID_GET_FEATURE,
+            .report_id = 3,
+            .report_len = 5,
+            .report_buf = {3,0x01,0x01,0x00,0x00},
+        },
+        /* set periodic */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 7,
+            .report_len = 10,
+            .report_buf = {7,0x01,0x10,0x27,0x00,0x00,0x70,0xff,0xe8,0x03},
+        },
+        /* set envelope (wine) */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 8,
+            .report_len = 8,
+            .report_buf = {8,0x01,0x00,0x00,0x00,0x00,0x00,0x00},
+            .todo = TRUE, .wine_only = TRUE,
+        },
+        /* update effect */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 18,
+            .report_buf = {3,0x01,0x02,0x04,0x28,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0x1a,0x00,0x00,0x00},
+        },
+    };
+    struct hid_expect expect_create_condition[] =
+    {
+        /* create new effect */
+        {
+            .code = IOCTL_HID_SET_FEATURE,
+            .report_id = 2,
+            .report_len = 3,
+            .report_buf = {2,0x03,0x00},
+        },
+        /* block load */
+        {
+            .code = IOCTL_HID_GET_FEATURE,
+            .report_id = 3,
+            .report_len = 5,
+            .report_buf = {3,0x01,0x01,0x00,0x00},
+        },
+        /* set condition */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 4,
+            .report_len = 12,
+            .report_buf = {4,0x01,0x00,0x70,0x17,0x7b,0x02,0xe9,0x04,0x4c,0x66,0x7f},
+        },
+        /* update effect */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 18,
+            .report_buf = {3,0x01,0x03,0x04,0xff,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0x99,0x00,0x00,0x00},
+        },
+    };
+    struct hid_expect expect_create_condition_neg[] =
+    {
+        /* create new effect */
+        {
+            .code = IOCTL_HID_SET_FEATURE,
+            .report_id = 2,
+            .report_len = 3,
+            .report_buf = {2,0x03,0x00},
+        },
+        /* block load */
+        {
+            .code = IOCTL_HID_GET_FEATURE,
+            .report_id = 3,
+            .report_len = 5,
+            .report_buf = {3,0x01,0x01,0x00,0x00},
+        },
+        /* set condition */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 4,
+            .report_len = 12,
+            .report_buf = {4,0x01,0x00,0x70,0x17,0x7b,0x02,0xe9,0x04,0x4c,0x66,0x7f},
+        },
+        /* update effect */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 18,
+            .report_buf = {3,0x01,0x03,0x04,0xff,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0xcf,0x00,0x00,0x00},
+        },
+    };
+    struct hid_expect expect_create_constant[] =
+    {
+        /* create new effect */
+        {
+            .code = IOCTL_HID_SET_FEATURE,
+            .report_id = 2,
+            .report_len = 3,
+            .report_buf = {2,0x04,0x00},
+        },
+        /* block load */
+        {
+            .code = IOCTL_HID_GET_FEATURE,
+            .report_id = 3,
+            .report_len = 5,
+            .report_buf = {3,0x01,0x01,0x00,0x00},
+        },
+        /* set constant */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 9,
+            .report_len = 4,
+            .report_buf = {9,0x01,0xc8,0x00},
+        },
+        /* set envelope */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 8,
+            .report_len = 8,
+            .report_buf = {8,0x01,0x19,0x4c,0x14,0x00,0x3c,0x00},
+        },
+        /* update effect */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 18,
+            .report_buf = {3,0x01,0x04,0x04,0x5a,0x00,0x00,0x00,0x00,0x00,0x0a,0x00,0xff,0x7f,0x4e,0x01,0x00,0x00},
+        },
+    };
+    struct hid_expect expect_create_constant_neg[] =
+    {
+        /* create new effect */
+        {
+            .code = IOCTL_HID_SET_FEATURE,
+            .report_id = 2,
+            .report_len = 3,
+            .report_buf = {2,0x04,0x00},
+        },
+        /* block load */
+        {
+            .code = IOCTL_HID_GET_FEATURE,
+            .report_id = 3,
+            .report_len = 5,
+            .report_buf = {3,0x01,0x01,0x00,0x00},
+        },
+        /* set constant */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 9,
+            .report_len = 4,
+            .report_buf = {9,0x01,0x18,0xfc},
+        },
+        /* set envelope (wine) */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 8,
+            .report_len = 8,
+            .report_buf = {8,0x01,0x00,0x00,0x00,0x00,0x00,0x00},
+            .todo = TRUE, .wine_only = TRUE,
+        },
+        /* update effect (wine) */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 18,
+            .report_buf = {3,0x01,0x04,0x04,0x28,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0x7f,0x99,0x00,0x00,0x00},
+            .wine_only = TRUE, .todo = TRUE,
+        },
+        /* update effect */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 18,
+            .report_buf = {3,0x01,0x04,0x04,0x28,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0x7f,0x4e,0x01,0x00,0x00},
             .todo = TRUE,
         },
     };
+    struct hid_expect expect_create_ramp[] =
+    {
+        /* create new effect */
+        {
+            .code = IOCTL_HID_SET_FEATURE,
+            .report_id = 2,
+            .report_len = 3,
+            .report_buf = {2,0x05,0x00},
+        },
+        /* block load */
+        {
+            .code = IOCTL_HID_GET_FEATURE,
+            .report_id = 3,
+            .report_len = 5,
+            .report_buf = {3,0x01,0x01,0x00,0x00},
+        },
+        /* set ramp */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 10,
+            .report_len = 6,
+            .report_buf = {10,0x01,0xc8,0x00,0x20,0x03},
+        },
+        /* set envelope */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 8,
+            .report_len = 8,
+            .report_buf = {8,0x01,0x19,0x4c,0x14,0x00,0x3c,0x00},
+        },
+        /* update effect */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 18,
+            .report_buf = {3,0x01,0x05,0x04,0x5a,0x00,0x00,0x00,0x00,0x00,0x0a,0x00,0xff,0xff,0x4e,0x01,0x00,0x00},
+        },
+    };
+    struct hid_expect expect_create_ramp_inf[] =
+    {
+        /* create new effect */
+        {
+            .code = IOCTL_HID_SET_FEATURE,
+            .report_id = 2,
+            .report_len = 3,
+            .report_buf = {2,0x05,0x00},
+        },
+        /* block load */
+        {
+            .code = IOCTL_HID_GET_FEATURE,
+            .report_id = 3,
+            .report_len = 5,
+            .report_buf = {3,0x01,0x01,0x00,0x00},
+        },
+        /* set ramp */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 10,
+            .report_len = 6,
+            .report_buf = {10,0x01,0xe8,0x03,0xa0,0x0f},
+        },
+        /* set envelope (wine) */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 8,
+            .report_len = 8,
+            .report_buf = {8,0x01,0x00,0x00,0x00,0x00,0x00,0x00},
+            .todo = TRUE, .wine_only = TRUE,
+        },
+        /* update effect (wine) */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 18,
+            .report_buf = {3,0x01,0x05,0x04,0x8f,0xe4,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0x4e,0x01,0x00,0x00},
+            .todo = TRUE, .wine_only = TRUE,
+        },
+        /* update effect */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 18,
+            .report_buf = {3,0x01,0x05,0x04,0xff,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0x4e,0x01,0x00,0x00},
+            .todo = TRUE,
+        },
+    };
+    struct hid_expect expect_create_ramp_neg[] =
+    {
+        /* create new effect */
+        {
+            .code = IOCTL_HID_SET_FEATURE,
+            .report_id = 2,
+            .report_len = 3,
+            .report_buf = {2,0x05,0x00},
+        },
+        /* block load */
+        {
+            .code = IOCTL_HID_GET_FEATURE,
+            .report_id = 3,
+            .report_len = 5,
+            .report_buf = {3,0x01,0x01,0x00,0x00},
+        },
+        /* set ramp */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 10,
+            .report_len = 6,
+            .report_buf = {10,0x01,0x18,0xfc,0x60,0xf0},
+        },
+        /* set envelope (wine) */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 8,
+            .report_len = 8,
+            .report_buf = {8,0x01,0x00,0x00,0x00,0x00,0x00,0x00},
+            .todo = TRUE, .wine_only = TRUE,
+        },
+        /* update effect (wine) */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 18,
+            .report_buf = {3,0x01,0x05,0x04,0x8f,0xe4,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0x99,0x00,0x00,0x00},
+            .wine_only = TRUE, .todo = TRUE,
+        },
+        /* update effect */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 3,
+            .report_len = 18,
+            .report_buf = {3,0x01,0x05,0x04,0xff,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0x4e,0x01,0x00,0x00},
+            .todo = TRUE,
+        },
+    };
+    struct hid_expect expect_effect_start =
+    {
+        .code = IOCTL_HID_WRITE_REPORT,
+        .report_id = 2,
+        .report_len = 4,
+        .report_buf = {2,0x01,0x01,0x01},
+    };
+    struct hid_expect expect_effect_stop =
+    {
+        .code = IOCTL_HID_WRITE_REPORT,
+        .report_id = 2,
+        .report_len = 4,
+        .report_buf = {2,0x01,0x03,0x00},
+    };
+    struct hid_expect expect_unload[] =
+    {
+        /* effect stop */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 2,
+            .report_len = 4,
+            .report_buf = {2,0x01,0x03,0x00},
+        },
+        /* effect free */
+        {
+            .code = IOCTL_HID_WRITE_REPORT,
+            .report_id = 5,
+            .report_len = 2,
+            .report_buf = {5,0x01},
+        },
+    };
+    static const WCHAR *condition_effect_class_name = RuntimeClass_Windows_Gaming_Input_ForceFeedback_ConditionForceEffect;
+    static const WCHAR *periodic_effect_class_name = RuntimeClass_Windows_Gaming_Input_ForceFeedback_PeriodicForceEffect;
+    static const WCHAR *constant_effect_class_name = RuntimeClass_Windows_Gaming_Input_ForceFeedback_ConstantForceEffect;
     static const WCHAR *force_feedback_motor = RuntimeClass_Windows_Gaming_Input_ForceFeedback_ForceFeedbackMotor;
+    static const WCHAR *ramp_effect_class_name = RuntimeClass_Windows_Gaming_Input_ForceFeedback_RampForceEffect;
     static const WCHAR *controller_class_name = RuntimeClass_Windows_Gaming_Input_RawGameController;
-    static const WCHAR *racing_wheel_class_name = RuntimeClass_Windows_Gaming_Input_RacingWheel;
 
     DIPROPGUIDANDPATH guid_path =
     {
@@ -5168,23 +6028,33 @@ static void test_windows_gaming_input(void)
             .dwHow = DIPH_DEVICE,
         },
     };
+    TimeSpan delay = {100000}, attack_duration = {200000}, release_duration = {300000}, duration = {400000}, infinite_duration = {INT64_MAX};
+    Vector3 direction = {0.1, 0.2, 0.3}, end_direction = {0.4, 0.5, 0.6};
     DIDEVICEINSTANCEW devinst = {.dwSize = sizeof(DIDEVICEINSTANCEW)};
+    IAsyncOperation_ForceFeedbackLoadEffectResult *result_async;
     IAsyncOperationCompletedHandler_boolean *tmp_handler;
     IVectorView_RawGameController *controllers_view;
+    IConditionForceEffectFactory *condition_factory;
     IRawGameControllerStatics *controller_statics;
     EventRegistrationToken controller_added_token;
+    IPeriodicForceEffectFactory *periodic_factory;
     struct bool_async_handler bool_async_handler;
+    ForceFeedbackEffectAxes supported_axes, axes;
     IVectorView_ForceFeedbackMotor *motors_view;
-    IVectorView_RacingWheel *racing_wheels_view;
-    IRacingWheelStatics2 *racing_wheel_statics2;
-    IRacingWheelStatics *racing_wheel_statics;
-    ForceFeedbackEffectAxes supported_axes;
+    IConditionForceEffect *condition_effect;
+    ConditionForceEffectKind condition_kind;
+    IActivationFactory *activation_factory;
+    IPeriodicForceEffect *periodic_effect;
+    IConstantForceEffect *constant_effect;
+    PeriodicForceEffectKind periodic_kind;
     IAsyncOperation_boolean *bool_async;
     IRawGameController *raw_controller;
-    IGameController *game_controller;
+    ForceFeedbackEffectState state;
+    IRampForceEffect *ramp_effect;
+    IInspectable *tmp_inspectable;
+    IForceFeedbackEffect *effect;
     IDirectInputDevice8W *device;
     IForceFeedbackMotor *motor;
-    IRacingWheel *racing_wheel;
     BOOLEAN paused, enabled;
     IAsyncInfo *async_info;
     DOUBLE gain;
@@ -5193,7 +6063,6 @@ static void test_windows_gaming_input(void)
     UINT32 size;
     HRESULT hr;
     DWORD ret;
-    ULONG ref;
 
     if (!load_combase_functions()) return;
 
@@ -5226,10 +6095,11 @@ static void test_windows_gaming_input(void)
     memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
     desc.expect_size = sizeof(expect_init);
     memcpy( desc.expect, expect_init, sizeof(expect_init) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
-    if (!hid_device_start( &desc )) goto done;
-    WaitForSingleObject( controller_added.event, INFINITE );
+    if (!hid_device_start( &desc, 1 )) goto done;
+    ret = WaitForSingleObject( controller_added.event, 5000 );
+    ok( !ret, "WaitForSingleObject returned %#lx\n", ret );
     CloseHandle( controller_added.event );
 
     if (FAILED(hr = dinput_test_create_device( 0x800, &devinst, &device ))) goto done;
@@ -5254,47 +6124,15 @@ static void test_windows_gaming_input(void)
     ok( hr == S_OK, "GetAt returned %#lx\n", hr );
     IVectorView_RawGameController_Release( controllers_view );
 
-    hr = pWindowsCreateString( racing_wheel_class_name, wcslen( racing_wheel_class_name ), &str );
-    ok( hr == S_OK, "WindowsCreateString returned %#lx\n", hr );
-    hr = pRoGetActivationFactory( str, &IID_IRacingWheelStatics, (void **)&racing_wheel_statics );
-    ok( hr == S_OK, "RoGetActivationFactory returned %#lx\n", hr );
-    hr = pRoGetActivationFactory( str, &IID_IRacingWheelStatics2, (void **)&racing_wheel_statics2 );
-    ok( hr == S_OK, "RoGetActivationFactory returned %#lx\n", hr );
-    pWindowsDeleteString( str );
-
-    /* HID driving wheels aren't exposed as WGI gamepads on Windows */
-
-    hr = IRacingWheelStatics_get_RacingWheels( racing_wheel_statics, &racing_wheels_view );
-    ok( hr == S_OK, "get_RacingWheels returned %#lx\n", hr );
-    hr = IVectorView_RacingWheel_get_Size( racing_wheels_view, &size );
-    ok( hr == S_OK, "get_Size returned %#lx\n", hr );
-    todo_wine /* but Wine currently intentionally does */
-    ok( size == 0, "got size %u\n", size );
-    IVectorView_RacingWheel_Release( racing_wheels_view );
-    IRacingWheelStatics_Release( racing_wheel_statics );
-
-    hr = IRawGameController_QueryInterface( raw_controller, &IID_IGameController, (void **)&game_controller );
-    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
-    hr = IRacingWheelStatics2_FromGameController( racing_wheel_statics2, game_controller, &racing_wheel );
-    ok( hr == S_OK, "FromGameController returned %#lx\n", hr );
-    todo_wine
-    ok( racing_wheel == NULL, "got racing_wheel %p\n", racing_wheel );
-    IGameController_Release( game_controller );
-    IRacingWheelStatics2_Release( racing_wheel_statics2 );
-
     set_hid_expect( file, expect_acquire, sizeof(expect_acquire) );
     hr = IRawGameController_get_ForceFeedbackMotors( raw_controller, &motors_view );
-    todo_wine
     ok( hr == S_OK, "get_ForceFeedbackMotors returned %#lx\n", hr );
-    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE ); /* device gain reports are written asynchronously */
-    if (!motors_view) goto skip_tests;
+    wait_hid_expect( file, 100 ); /* device gain reports are written asynchronously */
 
     hr = IVectorView_ForceFeedbackMotor_get_Size( motors_view, &size );
     ok( hr == S_OK, "get_Size returned %#lx\n", hr );
-    todo_wine
     ok( size == 1, "got size %u\n", size );
     hr = IVectorView_ForceFeedbackMotor_GetAt( motors_view, 0, &motor );
-    todo_wine
     ok( hr == S_OK, "GetAt returned %#lx\n", hr );
     IVectorView_ForceFeedbackMotor_Release( motors_view );
 
@@ -5306,57 +6144,51 @@ static void test_windows_gaming_input(void)
 
     paused = TRUE;
     hr = IForceFeedbackMotor_get_AreEffectsPaused( motor, &paused );
-    todo_wine
     ok( hr == S_OK, "get_AreEffectsPaused returned %#lx\n", hr );
-    todo_wine
     ok( paused == FALSE, "got paused %u\n", paused );
 
     gain = 12345.6;
     hr = IForceFeedbackMotor_get_MasterGain( motor, &gain );
-    todo_wine
     ok( hr == S_OK, "get_MasterGain returned %#lx\n", hr );
-    todo_wine
     ok( gain == 1.0, "got gain %f\n", gain );
     set_hid_expect( file, &expect_set_gain, sizeof(expect_set_gain) );
     hr = IForceFeedbackMotor_put_MasterGain( motor, 0.5 );
-    todo_wine
     ok( hr == S_OK, "put_MasterGain returned %#lx\n", hr );
-    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE ); /* device gain reports are written asynchronously */
+    wait_hid_expect( file, 100 ); /* device gain reports are written asynchronously */
 
     enabled = FALSE;
     hr = IForceFeedbackMotor_get_IsEnabled( motor, &enabled );
-    todo_wine
     ok( hr == S_OK, "get_IsEnabled returned %#lx\n", hr );
-    todo_wine
     ok( enabled == TRUE, "got enabled %u\n", enabled );
+
+    /* SupportedAxes always returns ForceFeedbackEffectAxes_X on Windows,
+     * no matter which axis is available for FFB in the Set Effects report,
+     * or whether a X axis is declared at all.
+     */
 
     supported_axes = 0xdeadbeef;
     hr = IForceFeedbackMotor_get_SupportedAxes( motor, &supported_axes );
-    todo_wine
     ok( hr == S_OK, "get_SupportedAxes returned %#lx\n", hr );
-    todo_wine
-    ok( supported_axes == ForceFeedbackEffectAxes_X, "got axes %#x\n", supported_axes );
+    axes = ForceFeedbackEffectAxes_X | ForceFeedbackEffectAxes_Y;
+    ok( supported_axes == axes || broken( supported_axes == ForceFeedbackEffectAxes_X ),
+        "got axes %#x\n", supported_axes );
 
     set_hid_expect( file, &expect_pause, sizeof(expect_pause) );
     hr = IForceFeedbackMotor_PauseAllEffects( motor );
-    todo_wine
     ok( hr == S_OK, "PauseAllEffects returned %#lx\n", hr );
     set_hid_expect( file, &expect_resume, sizeof(expect_resume) );
     hr = IForceFeedbackMotor_ResumeAllEffects( motor );
-    todo_wine
     ok( hr == S_OK, "ResumeAllEffects returned %#lx\n", hr );
     set_hid_expect( file, &expect_stop, sizeof(expect_stop) );
     hr = IForceFeedbackMotor_StopAllEffects( motor );
-    todo_wine
     ok( hr == S_OK, "StopAllEffects returned %#lx\n", hr );
     set_hid_expect( file, NULL, 0 );
 
 
     set_hid_expect( file, &expect_disable, sizeof(expect_disable) );
     hr = IForceFeedbackMotor_TryDisableAsync( motor, &bool_async );
-    todo_wine
     ok( hr == S_OK, "TryDisableAsync returned %#lx\n", hr );
-    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE );
+    wait_hid_expect( file, 100 );
     check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
 
     check_interface( bool_async, &IID_IUnknown, TRUE );
@@ -5395,15 +6227,13 @@ static void test_windows_gaming_input(void)
     check_bool_async( bool_async, 1, 4, S_OK, FALSE );
     IAsyncInfo_Release( async_info );
 
-    ref = IAsyncOperation_boolean_Release( bool_async );
-    ok( ref == 0, "Release returned %lu\n", ref );
+    IAsyncOperation_boolean_Release( bool_async );
 
 
     set_hid_expect( file, &expect_enable_fail, sizeof(expect_enable_fail) );
     hr = IForceFeedbackMotor_TryEnableAsync( motor, &bool_async );
-    todo_wine
     ok( hr == S_OK, "TryEnableAsync returned %#lx\n", hr );
-    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE );
+    wait_hid_expect( file, 100 );
     check_bool_async( bool_async, 1, Error, 0x8685400d, FALSE );
 
     bool_async_handler = default_bool_async_handler;
@@ -5423,140 +6253,535 @@ static void test_windows_gaming_input(void)
     check_bool_async( bool_async, 1, 4, 0x8685400d, FALSE );
     IAsyncInfo_Release( async_info );
 
-    ref = IAsyncOperation_boolean_Release( bool_async );
-    ok( ref == 0, "Release returned %lu\n", ref );
-
-
-    /* canceling the async op is just ignored */
-
-    set_hid_expect( file, expect_reset_delay, sizeof(expect_reset_delay) );
-    hr = IForceFeedbackMotor_TryResetAsync( motor, &bool_async );
-    todo_wine
-    ok( hr == S_OK, "TryResetAsync returned %#lx\n", hr );
-    check_bool_async( bool_async, 1, Started, S_OK, FALSE );
-
-    bool_async_handler = default_bool_async_handler;
-    bool_async_handler.event = CreateEventW( NULL, FALSE, FALSE, NULL );
-    ok( !!bool_async_handler.event, "CreateEventW failed, error %lu\n", GetLastError() );
-
-    hr = IAsyncOperation_boolean_put_Completed( bool_async, &bool_async_handler.IAsyncOperationCompletedHandler_boolean_iface );
-    ok( hr == S_OK, "put_Completed returned %#lx\n", hr );
-    ok( !bool_async_handler.invoked, "handler invoked\n" );
-    hr = IAsyncOperation_boolean_get_Completed( bool_async, &tmp_handler );
-    ok( hr == S_OK, "get_Completed returned %#lx\n", hr );
-    ok( tmp_handler == &bool_async_handler.IAsyncOperationCompletedHandler_boolean_iface,
-        "got handler %p\n", tmp_handler );
-
-    hr = IAsyncOperation_boolean_QueryInterface( bool_async, &IID_IAsyncInfo, (void **)&async_info );
-    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
-    hr = IAsyncInfo_Cancel( async_info );
-    ok( hr == S_OK, "Cancel returned %#lx\n", hr );
-    check_bool_async( bool_async, 1, Canceled, S_OK, FALSE );
-    ok( !bool_async_handler.invoked, "handler invoked\n" );
-    IAsyncInfo_Release( async_info );
-
-    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE );
-    ret = WaitForSingleObject( bool_async_handler.event, 100 );
-    ok( ret == 0, "WaitForSingleObject returned %#lx\n", ret );
-    CloseHandle( bool_async_handler.event );
-    check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
-
-    ok( bool_async_handler.invoked, "handler not invoked\n" );
-    ok( bool_async_handler.async == bool_async, "got async %p\n", bool_async_handler.async );
-    ok( bool_async_handler.status == Completed, "got status %u\n", bool_async_handler.status );
-    hr = IAsyncOperation_boolean_get_Completed( bool_async, &tmp_handler );
-    ok( hr == S_OK, "get_Completed returned %#lx\n", hr );
-    ok( tmp_handler == NULL, "got handler %p\n", tmp_handler );
-
-    ref = IAsyncOperation_boolean_Release( bool_async );
-    ok( ref == 0, "Release returned %lu\n", ref );
-
-
-    /* canceling then closing it calls the handler with closed state */
-
-    set_hid_expect( file, expect_reset_delay, sizeof(expect_reset_delay) );
-    hr = IForceFeedbackMotor_TryResetAsync( motor, &bool_async );
-    todo_wine
-    ok( hr == S_OK, "TryResetAsync returned %#lx\n", hr );
-    check_bool_async( bool_async, 1, Started, S_OK, FALSE );
-
-    bool_async_handler = default_bool_async_handler;
-    bool_async_handler.event = CreateEventW( NULL, FALSE, FALSE, NULL );
-    ok( !!bool_async_handler.event, "CreateEventW failed, error %lu\n", GetLastError() );
-
-    hr = IAsyncOperation_boolean_put_Completed( bool_async, &bool_async_handler.IAsyncOperationCompletedHandler_boolean_iface );
-    ok( hr == S_OK, "put_Completed returned %#lx\n", hr );
-    ok( !bool_async_handler.invoked, "handler invoked\n" );
-
-    hr = IAsyncOperation_boolean_QueryInterface( bool_async, &IID_IAsyncInfo, (void **)&async_info );
-    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
-    hr = IAsyncInfo_Close( async_info );
-    ok( hr == E_ILLEGAL_STATE_CHANGE, "Close returned %#lx\n", hr );
-    hr = IAsyncInfo_Cancel( async_info );
-    ok( hr == S_OK, "Cancel returned %#lx\n", hr );
-    check_bool_async( bool_async, 1, Canceled, S_OK, FALSE );
-    ok( !bool_async_handler.invoked, "handler invoked\n" );
-    hr = IAsyncInfo_Close( async_info );
-    ok( hr == S_OK, "Close returned %#lx\n", hr );
-    check_bool_async( bool_async, 1, 4, S_OK, FALSE );
-    ok( !bool_async_handler.invoked, "handler invoked\n" );
-    IAsyncInfo_Release( async_info );
-
-    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE );
-    ret = WaitForSingleObject( bool_async_handler.event, 100 );
-    ok( ret == 0, "WaitForSingleObject returned %#lx\n", ret );
-    CloseHandle( bool_async_handler.event );
-    check_bool_async( bool_async, 1, 4, S_OK, FALSE );
-
-    ok( bool_async_handler.invoked, "handler not invoked\n" );
-    ok( bool_async_handler.async == bool_async, "got async %p\n", bool_async_handler.async );
-    ok( bool_async_handler.status == 4, "got status %u\n", bool_async_handler.status );
-    hr = IAsyncOperation_boolean_get_Completed( bool_async, &tmp_handler );
-    ok( hr == E_ILLEGAL_METHOD_CALL, "get_Completed returned %#lx\n", hr );
-
-    ref = IAsyncOperation_boolean_Release( bool_async );
-    ok( ref == 0, "Release returned %lu\n", ref );
+    IAsyncOperation_boolean_Release( bool_async );
 
 
     set_hid_expect( file, &expect_enable, sizeof(expect_enable) );
     hr = IForceFeedbackMotor_TryEnableAsync( motor, &bool_async );
-    todo_wine
     ok( hr == S_OK, "TryEnableAsync returned %#lx\n", hr );
-    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE );
-    check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
-    ref = IAsyncOperation_boolean_Release( bool_async );
-    ok( ref == 0, "Release returned %lu\n", ref );
+    wait_hid_expect( file, 100 );
+    IAsyncOperation_boolean_Release( bool_async );
 
 
     set_hid_expect( file, expect_reset, sizeof(expect_reset) );
     hr = IForceFeedbackMotor_TryResetAsync( motor, &bool_async );
-    todo_wine
     ok( hr == S_OK, "TryResetAsync returned %#lx\n", hr );
-    wait_hid_expect_( __FILE__, __LINE__, file, 100, TRUE );
+    wait_hid_expect( file, 100 );
+    IAsyncOperation_boolean_Release( bool_async );
+
+
+    hr = pWindowsCreateString( force_feedback_motor, wcslen( force_feedback_motor ), &str );
+    ok( hr == S_OK, "WindowsCreateString returned %#lx\n", hr );
+    hr = pRoGetActivationFactory( str, &IID_IInspectable, (void **)&tmp_inspectable );
+    ok( hr == REGDB_E_CLASSNOTREG, "RoGetActivationFactory returned %#lx\n", hr );
+    pWindowsDeleteString( str );
+
+
+    hr = pWindowsCreateString( periodic_effect_class_name, wcslen( periodic_effect_class_name ), &str );
+    ok( hr == S_OK, "WindowsCreateString returned %#lx\n", hr );
+    hr = pRoGetActivationFactory( str, &IID_IPeriodicForceEffectFactory, (void **)&periodic_factory );
+    ok( hr == S_OK, "RoGetActivationFactory returned %#lx\n", hr );
+    pWindowsDeleteString( str );
+
+    check_interface( periodic_factory, &IID_IUnknown, TRUE );
+    check_interface( periodic_factory, &IID_IInspectable, TRUE );
+    check_interface( periodic_factory, &IID_IAgileObject, TRUE );
+    check_interface( periodic_factory, &IID_IActivationFactory, TRUE );
+    check_interface( periodic_factory, &IID_IPeriodicForceEffectFactory, TRUE );
+    check_interface( periodic_factory, &IID_IConditionForceEffectFactory, FALSE );
+
+    hr = IPeriodicForceEffectFactory_QueryInterface( periodic_factory, &IID_IActivationFactory, (void **)&activation_factory );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    hr = IActivationFactory_ActivateInstance( activation_factory, &tmp_inspectable );
+    ok( hr == E_NOTIMPL, "ActivateInstance returned %#lx\n", hr );
+    IActivationFactory_Release( activation_factory );
+
+    hr = IPeriodicForceEffectFactory_CreateInstance( periodic_factory, PeriodicForceEffectKind_SawtoothWaveUp, &effect );
+    ok( hr == S_OK, "CreateInstance returned %#lx\n", hr );
+
+    check_interface( effect, &IID_IUnknown, TRUE );
+    check_interface( effect, &IID_IInspectable, TRUE );
+    check_interface( effect, &IID_IAgileObject, TRUE );
+    check_interface( effect, &IID_IForceFeedbackEffect, TRUE );
+    check_interface( effect, &IID_IPeriodicForceEffect, TRUE );
+    check_interface( effect, &IID_IConditionForceEffect, FALSE );
+    check_runtimeclass( effect, periodic_effect_class_name );
+
+    hr = IForceFeedbackEffect_QueryInterface( effect, &IID_IPeriodicForceEffect, (void **)&periodic_effect );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+
+    hr = IPeriodicForceEffect_get_Kind( periodic_effect, &periodic_kind );
+    ok( hr == S_OK, "get_Kind returned %#lx\n", hr );
+    ok( periodic_kind == PeriodicForceEffectKind_SawtoothWaveUp, "got kind %u\n", periodic_kind );
+    hr = IPeriodicForceEffect_SetParameters( periodic_effect, direction, 1.0, 0.1, 0.0, duration );
+    ok( hr == S_OK, "SetParameters returned %#lx\n", hr );
+    hr = IPeriodicForceEffect_SetParametersWithEnvelope( periodic_effect, direction, 100.0, 0.1, 0.2, 0.3, 0.4, 0.5,
+                                                         delay, attack_duration, duration, release_duration, 1 );
+    ok( hr == S_OK, "SetParametersWithEnvelope returned %#lx\n", hr );
+    IPeriodicForceEffect_Release( periodic_effect );
+
+    gain = 12345.6;
+    hr = IForceFeedbackEffect_get_Gain( effect, &gain );
+    ok( hr == S_OK, "get_Gain returned %#lx\n", hr );
+    ok( gain == 1.0, "got gain %f\n", gain );
+    hr = IForceFeedbackEffect_put_Gain( effect, 0.5 );
+    ok( hr == S_FALSE, "put_Gain returned %#lx\n", hr );
+    state = 0xdeadbeef;
+    hr = IForceFeedbackEffect_get_State( effect, &state );
+    ok( hr == S_OK, "get_State returned %#lx\n", hr );
+    ok( state == ForceFeedbackEffectState_Stopped, "got state %#x\n", state );
+    hr = IForceFeedbackEffect_Start( effect );
+    todo_wine
+    ok( hr == 0x86854003, "Start returned %#lx\n", hr );
+    hr = IForceFeedbackEffect_Stop( effect );
+    todo_wine
+    ok( hr == 0x86854003, "Stop returned %#lx\n", hr );
+
+    hr = IForceFeedbackMotor_LoadEffectAsync( motor, effect, &result_async );
+    ok( hr == S_OK, "LoadEffectAsync returned %#lx\n", hr );
+    await_result( result_async );
+    check_result_async( result_async, 1, Error, 0x86854008, ForceFeedbackLoadEffectResult_EffectNotSupported );
+    IAsyncOperation_ForceFeedbackLoadEffectResult_Release( result_async );
+
+    hr = IForceFeedbackEffect_Start( effect );
+    todo_wine
+    ok( hr == 0x86854003, "Start returned %#lx\n", hr );
+    hr = IForceFeedbackEffect_Stop( effect );
+    todo_wine
+    ok( hr == 0x86854003, "Stop returned %#lx\n", hr );
+    hr = IForceFeedbackMotor_TryUnloadEffectAsync( motor, effect, &bool_async );
+    todo_wine
+    ok( hr == 0x86854003, "TryUnloadEffectAsync returned %#lx\n", hr );
+
+    IForceFeedbackEffect_Release( effect );
+
+
+    hr = IPeriodicForceEffectFactory_CreateInstance( periodic_factory, PeriodicForceEffectKind_SineWave, &effect );
+    ok( hr == S_OK, "CreateInstance returned %#lx\n", hr );
+
+    check_interface( effect, &IID_IUnknown, TRUE );
+    check_interface( effect, &IID_IInspectable, TRUE );
+    check_interface( effect, &IID_IAgileObject, TRUE );
+    check_interface( effect, &IID_IForceFeedbackEffect, TRUE );
+    check_interface( effect, &IID_IPeriodicForceEffect, TRUE );
+    check_interface( effect, &IID_IConditionForceEffect, FALSE );
+    check_runtimeclass( effect, periodic_effect_class_name );
+
+    hr = IForceFeedbackEffect_QueryInterface( effect, &IID_IPeriodicForceEffect, (void **)&periodic_effect );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+
+    hr = IPeriodicForceEffect_get_Kind( periodic_effect, &periodic_kind );
+    ok( hr == S_OK, "get_Kind returned %#lx\n", hr );
+    ok( periodic_kind == PeriodicForceEffectKind_SineWave, "got kind %u\n", periodic_kind );
+    hr = IPeriodicForceEffect_SetParameters( periodic_effect, direction, 1.0, 0.1, 0.0, duration );
+    ok( hr == S_OK, "SetParameters returned %#lx\n", hr );
+    hr = IPeriodicForceEffect_SetParametersWithEnvelope( periodic_effect, direction, 100.0, 0.1, 0.2, 0.3, 0.4, 0.5,
+                                                         delay, duration, duration, duration, 1 );
+    ok( hr == S_OK, "SetParametersWithEnvelope returned %#lx\n", hr );
+    IPeriodicForceEffect_Release( periodic_effect );
+
+    /* Windows.Gaming.Input always uses the X and Y directions on Windows,
+     * ignoring what is declared in the Axes Enable collection at the
+     * Set Effects report, or even the existence of the axes in the HID
+     * report. It ignores the Z direction, at least on HID PID devices.
+     * DirectInput works properly in such cases on Windows.
+     */
+
+    set_hid_expect( file, expect_create_periodic, sizeof(expect_create_periodic) );
+    hr = IForceFeedbackMotor_LoadEffectAsync( motor, effect, &result_async );
+    ok( hr == S_OK, "LoadEffectAsync returned %#lx\n", hr );
+    await_result( result_async );
+    check_result_async( result_async, 1, Completed, S_OK, ForceFeedbackLoadEffectResult_Succeeded );
+    IAsyncOperation_ForceFeedbackLoadEffectResult_Release( result_async );
+    set_hid_expect( file, NULL, 0 );
+
+    set_hid_expect( file, &expect_effect_start, sizeof(expect_effect_start) );
+    hr = IForceFeedbackEffect_Start( effect );
+    ok( hr == S_OK, "Start returned %#lx\n", hr );
+    set_hid_expect( file, &expect_effect_start, sizeof(expect_effect_start) );
+    hr = IForceFeedbackEffect_Start( effect );
+    ok( hr == S_OK, "Start returned %#lx\n", hr );
+
+    set_hid_expect( file, &expect_effect_stop, sizeof(expect_effect_stop) );
+    hr = IForceFeedbackEffect_Stop( effect );
+    ok( hr == S_OK, "Stop returned %#lx\n", hr );
+    set_hid_expect( file, &expect_effect_stop, sizeof(expect_effect_stop) );
+    hr = IForceFeedbackEffect_Stop( effect );
+    ok( hr == S_OK, "Stop returned %#lx\n", hr );
+
+    set_hid_expect( file, expect_unload, sizeof(expect_unload) );
+    hr = IForceFeedbackMotor_TryUnloadEffectAsync( motor, effect, &bool_async );
+    ok( hr == S_OK, "TryUnloadEffectAsync returned %#lx\n", hr );
+    await_bool( bool_async );
     check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
-    ref = IAsyncOperation_boolean_Release( bool_async );
-    ok( ref == 0, "Release returned %lu\n", ref );
+    IAsyncOperation_boolean_Release( bool_async );
+    set_hid_expect( file, NULL, 0 );
+
+
+    hr = IForceFeedbackEffect_QueryInterface( effect, &IID_IPeriodicForceEffect, (void **)&periodic_effect );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    direction.X = -direction.X;
+    hr = IPeriodicForceEffect_SetParameters( periodic_effect, direction, 1.0, 0.1, 0.0, duration );
+    ok( hr == S_OK, "SetParameters returned %#lx\n", hr );
+    direction.X = -direction.X;
+    IPeriodicForceEffect_Release( periodic_effect );
+
+    set_hid_expect( file, expect_create_periodic_neg, sizeof(expect_create_periodic_neg) );
+    hr = IForceFeedbackMotor_LoadEffectAsync( motor, effect, &result_async );
+    ok( hr == S_OK, "LoadEffectAsync returned %#lx\n", hr );
+    await_result( result_async );
+    check_result_async( result_async, 1, Completed, S_OK, ForceFeedbackLoadEffectResult_Succeeded );
+    IAsyncOperation_ForceFeedbackLoadEffectResult_Release( result_async );
+    set_hid_expect( file, NULL, 0 );
+
+    set_hid_expect( file, expect_unload, sizeof(expect_unload) );
+    hr = IForceFeedbackMotor_TryUnloadEffectAsync( motor, effect, &bool_async );
+    ok( hr == S_OK, "TryUnloadEffectAsync returned %#lx\n", hr );
+    await_bool( bool_async );
+    check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
+    IAsyncOperation_boolean_Release( bool_async );
+    set_hid_expect( file, NULL, 0 );
+
+
+    IForceFeedbackEffect_Release( effect );
+
+    IPeriodicForceEffectFactory_Release( periodic_factory );
+
+
+    hr = pWindowsCreateString( condition_effect_class_name, wcslen( condition_effect_class_name ), &str );
+    ok( hr == S_OK, "WindowsCreateString returned %#lx\n", hr );
+    hr = pRoGetActivationFactory( str, &IID_IConditionForceEffectFactory, (void **)&condition_factory );
+    ok( hr == S_OK, "RoGetActivationFactory returned %#lx\n", hr );
+    pWindowsDeleteString( str );
+
+    check_interface( condition_factory, &IID_IUnknown, TRUE );
+    check_interface( condition_factory, &IID_IInspectable, TRUE );
+    check_interface( condition_factory, &IID_IAgileObject, TRUE );
+    check_interface( condition_factory, &IID_IActivationFactory, TRUE );
+    check_interface( condition_factory, &IID_IConditionForceEffectFactory, TRUE );
+    check_interface( condition_factory, &IID_IPeriodicForceEffectFactory, FALSE );
+
+    hr = IConditionForceEffectFactory_QueryInterface( condition_factory, &IID_IActivationFactory, (void **)&activation_factory );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    hr = IActivationFactory_ActivateInstance( activation_factory, &tmp_inspectable );
+    ok( hr == E_NOTIMPL, "ActivateInstance returned %#lx\n", hr );
+    IActivationFactory_Release( activation_factory );
+
+
+    hr = IConditionForceEffectFactory_CreateInstance( condition_factory, ConditionForceEffectKind_Spring, &effect );
+    ok( hr == S_OK, "CreateInstance returned %#lx\n", hr );
+
+    check_interface( effect, &IID_IUnknown, TRUE );
+    check_interface( effect, &IID_IInspectable, TRUE );
+    check_interface( effect, &IID_IAgileObject, TRUE );
+    check_interface( effect, &IID_IForceFeedbackEffect, TRUE );
+    check_interface( effect, &IID_IConditionForceEffect, TRUE );
+    check_interface( effect, &IID_IPeriodicForceEffect, FALSE );
+    check_runtimeclass( effect, condition_effect_class_name );
+
+    hr = IForceFeedbackEffect_QueryInterface( effect, &IID_IConditionForceEffect, (void **)&condition_effect );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+
+    hr = IConditionForceEffect_get_Kind( condition_effect, &condition_kind );
+    ok( hr == S_OK, "get_Kind returned %#lx\n", hr );
+    ok( condition_kind == ConditionForceEffectKind_Spring, "got kind %u\n", condition_kind );
+    hr = IConditionForceEffect_SetParameters( condition_effect, direction, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6 );
+    ok( hr == S_OK, "SetParameters returned %#lx\n", hr );
+    IConditionForceEffect_Release( condition_effect );
+
+    set_hid_expect( file, expect_create_condition, sizeof(expect_create_condition) );
+    hr = IForceFeedbackMotor_LoadEffectAsync( motor, effect, &result_async );
+    ok( hr == S_OK, "LoadEffectAsync returned %#lx\n", hr );
+    await_result( result_async );
+    check_result_async( result_async, 1, Completed, S_OK, ForceFeedbackLoadEffectResult_Succeeded );
+    IAsyncOperation_ForceFeedbackLoadEffectResult_Release( result_async );
+    set_hid_expect( file, NULL, 0 );
+
+    set_hid_expect( file, &expect_effect_start, sizeof(expect_effect_start) );
+    hr = IForceFeedbackEffect_Start( effect );
+    ok( hr == S_OK, "Start returned %#lx\n", hr );
+    set_hid_expect( file, &expect_effect_start, sizeof(expect_effect_start) );
+    hr = IForceFeedbackEffect_Start( effect );
+    ok( hr == S_OK, "Start returned %#lx\n", hr );
+
+    set_hid_expect( file, &expect_effect_stop, sizeof(expect_effect_stop) );
+    hr = IForceFeedbackEffect_Stop( effect );
+    ok( hr == S_OK, "Stop returned %#lx\n", hr );
+    set_hid_expect( file, &expect_effect_stop, sizeof(expect_effect_stop) );
+    hr = IForceFeedbackEffect_Stop( effect );
+    ok( hr == S_OK, "Stop returned %#lx\n", hr );
+
+    set_hid_expect( file, expect_unload, sizeof(expect_unload) );
+    hr = IForceFeedbackMotor_TryUnloadEffectAsync( motor, effect, &bool_async );
+    ok( hr == S_OK, "TryUnloadEffectAsync returned %#lx\n", hr );
+    await_bool( bool_async );
+    check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
+    IAsyncOperation_boolean_Release( bool_async );
+    set_hid_expect( file, NULL, 0 );
+
+
+    hr = IForceFeedbackEffect_QueryInterface( effect, &IID_IConditionForceEffect, (void **)&condition_effect );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    direction.X = -direction.X;
+    hr = IConditionForceEffect_SetParameters( condition_effect, direction, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6 );
+    ok( hr == S_OK, "SetParameters returned %#lx\n", hr );
+    direction.X = -direction.X;
+    IConditionForceEffect_Release( condition_effect );
+
+    set_hid_expect( file, expect_create_condition_neg, sizeof(expect_create_condition_neg) );
+    hr = IForceFeedbackMotor_LoadEffectAsync( motor, effect, &result_async );
+    ok( hr == S_OK, "LoadEffectAsync returned %#lx\n", hr );
+    await_result( result_async );
+    check_result_async( result_async, 1, Completed, S_OK, ForceFeedbackLoadEffectResult_Succeeded );
+    IAsyncOperation_ForceFeedbackLoadEffectResult_Release( result_async );
+    set_hid_expect( file, NULL, 0 );
+
+    set_hid_expect( file, expect_unload, sizeof(expect_unload) );
+    hr = IForceFeedbackMotor_TryUnloadEffectAsync( motor, effect, &bool_async );
+    ok( hr == S_OK, "TryUnloadEffectAsync returned %#lx\n", hr );
+    await_bool( bool_async );
+    check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
+    IAsyncOperation_boolean_Release( bool_async );
+    set_hid_expect( file, NULL, 0 );
+
+
+    IForceFeedbackEffect_Release( effect );
+
+    IConditionForceEffectFactory_Release( condition_factory );
+
+
+    hr = pWindowsCreateString( constant_effect_class_name, wcslen( constant_effect_class_name ), &str );
+    ok( hr == S_OK, "WindowsCreateString returned %#lx\n", hr );
+    hr = pRoGetActivationFactory( str, &IID_IActivationFactory, (void **)&activation_factory );
+    ok( hr == S_OK, "RoGetActivationFactory returned %#lx\n", hr );
+    pWindowsDeleteString( str );
+
+    hr = IActivationFactory_ActivateInstance( activation_factory, &tmp_inspectable );
+    ok( hr == S_OK, "ActivateInstance returned %#lx\n", hr );
+    IActivationFactory_Release( activation_factory );
+
+    hr = IInspectable_QueryInterface( tmp_inspectable, &IID_IForceFeedbackEffect, (void **)&effect );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    IInspectable_Release( tmp_inspectable );
+
+    hr = IForceFeedbackEffect_QueryInterface( effect, &IID_IConstantForceEffect, (void **)&constant_effect );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+
+    hr = IConstantForceEffect_SetParameters( constant_effect, direction, duration );
+    ok( hr == S_OK, "SetParameters returned %#lx\n", hr );
+    hr = IConstantForceEffect_SetParametersWithEnvelope( constant_effect, direction, 0.1, 0.2, 0.3,
+                                                         delay, attack_duration, duration, release_duration, 1 );
+    ok( hr == S_OK, "SetParametersWithEnvelope returned %#lx\n", hr );
+    IConstantForceEffect_Release( constant_effect );
+
+    gain = 12345.6;
+    hr = IForceFeedbackEffect_get_Gain( effect, &gain );
+    ok( hr == S_OK, "get_Gain returned %#lx\n", hr );
+    ok( gain == 1.0, "get_MasterGain returned %f\n", gain );
+    hr = IForceFeedbackEffect_put_Gain( effect, 0.5 );
+    ok( hr == S_FALSE, "put_Gain returned %#lx\n", hr );
+    state = 0xdeadbeef;
+    hr = IForceFeedbackEffect_get_State( effect, &state );
+    ok( hr == S_OK, "get_State returned %#lx\n", hr );
+    ok( state == ForceFeedbackEffectState_Stopped, "get_State returned %#lx\n", hr );
+    hr = IForceFeedbackEffect_Start( effect );
+    todo_wine
+    ok( hr == 0x86854003, "Start returned %#lx\n", hr );
+    hr = IForceFeedbackEffect_Stop( effect );
+    todo_wine
+    ok( hr == 0x86854003, "Stop returned %#lx\n", hr );
+
+    set_hid_expect( file, expect_create_constant, sizeof(expect_create_constant) );
+    hr = IForceFeedbackMotor_LoadEffectAsync( motor, effect, &result_async );
+    ok( hr == S_OK, "LoadEffectAsync returned %#lx\n", hr );
+    await_result( result_async );
+    check_result_async( result_async, 1, Completed, S_OK, ForceFeedbackLoadEffectResult_Succeeded );
+    IAsyncOperation_ForceFeedbackLoadEffectResult_Release( result_async );
+    set_hid_expect( file, NULL, 0 );
+
+    set_hid_expect( file, &expect_effect_start, sizeof(expect_effect_start) );
+    hr = IForceFeedbackEffect_Start( effect );
+    ok( hr == S_OK, "Start returned %#lx\n", hr );
+    set_hid_expect( file, &expect_effect_start, sizeof(expect_effect_start) );
+    hr = IForceFeedbackEffect_Start( effect );
+    ok( hr == S_OK, "Start returned %#lx\n", hr );
+
+    set_hid_expect( file, &expect_effect_stop, sizeof(expect_effect_stop) );
+    hr = IForceFeedbackEffect_Stop( effect );
+    ok( hr == S_OK, "Stop returned %#lx\n", hr );
+    set_hid_expect( file, &expect_effect_stop, sizeof(expect_effect_stop) );
+    hr = IForceFeedbackEffect_Stop( effect );
+    ok( hr == S_OK, "Stop returned %#lx\n", hr );
+
+    set_hid_expect( file, expect_unload, sizeof(expect_unload) );
+    hr = IForceFeedbackMotor_TryUnloadEffectAsync( motor, effect, &bool_async );
+    ok( hr == S_OK, "TryUnloadEffectAsync returned %#lx\n", hr );
+    await_bool( bool_async );
+    check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
+    IAsyncOperation_boolean_Release( bool_async );
+    set_hid_expect( file, NULL, 0 );
+
+
+    hr = IForceFeedbackEffect_QueryInterface( effect, &IID_IConstantForceEffect, (void **)&constant_effect );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    direction.X = -direction.X;
+    direction.Y = -direction.Y;
+    direction.Z = -direction.Z;
+    hr = IConstantForceEffect_SetParameters( constant_effect, direction, duration );
+    ok( hr == S_OK, "SetParameters returned %#lx\n", hr );
+    direction.X = -direction.X;
+    direction.Y = -direction.Y;
+    direction.Z = -direction.Z;
+    IConstantForceEffect_Release( constant_effect );
+
+    set_hid_expect( file, expect_create_constant_neg, sizeof(expect_create_constant_neg) );
+    hr = IForceFeedbackMotor_LoadEffectAsync( motor, effect, &result_async );
+    ok( hr == S_OK, "LoadEffectAsync returned %#lx\n", hr );
+    await_result( result_async );
+    check_result_async( result_async, 1, Completed, S_OK, ForceFeedbackLoadEffectResult_Succeeded );
+    IAsyncOperation_ForceFeedbackLoadEffectResult_Release( result_async );
+    set_hid_expect( file, NULL, 0 );
+
+    set_hid_expect( file, expect_unload, sizeof(expect_unload) );
+    hr = IForceFeedbackMotor_TryUnloadEffectAsync( motor, effect, &bool_async );
+    ok( hr == S_OK, "TryUnloadEffectAsync returned %#lx\n", hr );
+    await_bool( bool_async );
+    check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
+    IAsyncOperation_boolean_Release( bool_async );
+    set_hid_expect( file, NULL, 0 );
+
+    IForceFeedbackEffect_Release( effect );
+
+
+    hr = pWindowsCreateString( ramp_effect_class_name, wcslen( ramp_effect_class_name ), &str );
+    ok( hr == S_OK, "WindowsCreateString returned %#lx\n", hr );
+    hr = pRoGetActivationFactory( str, &IID_IActivationFactory, (void **)&activation_factory );
+    ok( hr == S_OK, "RoGetActivationFactory returned %#lx\n", hr );
+    pWindowsDeleteString( str );
+
+    hr = IActivationFactory_ActivateInstance( activation_factory, &tmp_inspectable );
+    ok( hr == S_OK, "ActivateInstance returned %#lx\n", hr );
+    IActivationFactory_Release( activation_factory );
+
+    hr = IInspectable_QueryInterface( tmp_inspectable, &IID_IForceFeedbackEffect, (void **)&effect );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    IInspectable_Release( tmp_inspectable );
+
+    hr = IForceFeedbackEffect_QueryInterface( effect, &IID_IRampForceEffect, (void **)&ramp_effect );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+
+    hr = IRampForceEffect_SetParameters( ramp_effect, direction, end_direction, duration );
+    ok( hr == S_OK, "SetParameters returned %#lx\n", hr );
+    hr = IRampForceEffect_SetParametersWithEnvelope( ramp_effect, direction, end_direction, 0.1, 0.2, 0.3,
+                                                     delay, attack_duration, duration, release_duration, 1 );
+    ok( hr == S_OK, "SetParametersWithEnvelope returned %#lx\n", hr );
+    IRampForceEffect_Release( ramp_effect );
+
+    set_hid_expect( file, expect_create_ramp, sizeof(expect_create_ramp) );
+    hr = IForceFeedbackMotor_LoadEffectAsync( motor, effect, &result_async );
+    ok( hr == S_OK, "LoadEffectAsync returned %#lx\n", hr );
+    await_result( result_async );
+    check_result_async( result_async, 1, Completed, S_OK, ForceFeedbackLoadEffectResult_Succeeded );
+    IAsyncOperation_ForceFeedbackLoadEffectResult_Release( result_async );
+    set_hid_expect( file, NULL, 0 );
+
+    set_hid_expect( file, &expect_effect_start, sizeof(expect_effect_start) );
+    hr = IForceFeedbackEffect_Start( effect );
+    ok( hr == S_OK, "Start returned %#lx\n", hr );
+    set_hid_expect( file, &expect_effect_start, sizeof(expect_effect_start) );
+    hr = IForceFeedbackEffect_Start( effect );
+    ok( hr == S_OK, "Start returned %#lx\n", hr );
+
+    set_hid_expect( file, &expect_effect_stop, sizeof(expect_effect_stop) );
+    hr = IForceFeedbackEffect_Stop( effect );
+    ok( hr == S_OK, "Stop returned %#lx\n", hr );
+    set_hid_expect( file, &expect_effect_stop, sizeof(expect_effect_stop) );
+    hr = IForceFeedbackEffect_Stop( effect );
+    ok( hr == S_OK, "Stop returned %#lx\n", hr );
+
+    set_hid_expect( file, expect_unload, sizeof(expect_unload) );
+    hr = IForceFeedbackMotor_TryUnloadEffectAsync( motor, effect, &bool_async );
+    ok( hr == S_OK, "TryUnloadEffectAsync returned %#lx\n", hr );
+    await_bool( bool_async );
+    check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
+    IAsyncOperation_boolean_Release( bool_async );
+    set_hid_expect( file, NULL, 0 );
+
+
+    hr = IForceFeedbackEffect_QueryInterface( effect, &IID_IRampForceEffect, (void **)&ramp_effect );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    hr = IRampForceEffect_SetParameters( ramp_effect, direction, end_direction, infinite_duration );
+    ok( hr == S_OK, "SetParameters returned %#lx\n", hr );
+    IRampForceEffect_Release( ramp_effect );
+
+    set_hid_expect( file, expect_create_ramp_inf, sizeof(expect_create_ramp_inf) );
+    hr = IForceFeedbackMotor_LoadEffectAsync( motor, effect, &result_async );
+    ok( hr == S_OK, "LoadEffectAsync returned %#lx\n", hr );
+    await_result( result_async );
+    check_result_async( result_async, 1, Completed, S_OK, ForceFeedbackLoadEffectResult_Succeeded );
+    IAsyncOperation_ForceFeedbackLoadEffectResult_Release( result_async );
+    set_hid_expect( file, NULL, 0 );
+
+    set_hid_expect( file, expect_unload, sizeof(expect_unload) );
+    hr = IForceFeedbackMotor_TryUnloadEffectAsync( motor, effect, &bool_async );
+    ok( hr == S_OK, "TryUnloadEffectAsync returned %#lx\n", hr );
+    await_bool( bool_async );
+    check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
+    IAsyncOperation_boolean_Release( bool_async );
+    set_hid_expect( file, NULL, 0 );
+
+
+    hr = IForceFeedbackEffect_QueryInterface( effect, &IID_IRampForceEffect, (void **)&ramp_effect );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    direction.X = -direction.X;
+    direction.Y = -direction.Y;
+    end_direction.X = -end_direction.X;
+    end_direction.Z = -end_direction.Z;
+    hr = IRampForceEffect_SetParameters( ramp_effect, direction, end_direction, infinite_duration );
+    ok( hr == S_OK, "SetParameters returned %#lx\n", hr );
+    direction.X = -direction.X;
+    direction.Y = -direction.Y;
+    end_direction.X = -end_direction.X;
+    end_direction.Z = -end_direction.Z;
+    IRampForceEffect_Release( ramp_effect );
+
+    set_hid_expect( file, expect_create_ramp_neg, sizeof(expect_create_ramp_neg) );
+    hr = IForceFeedbackMotor_LoadEffectAsync( motor, effect, &result_async );
+    ok( hr == S_OK, "LoadEffectAsync returned %#lx\n", hr );
+    await_result( result_async );
+    check_result_async( result_async, 1, Completed, S_OK, ForceFeedbackLoadEffectResult_Succeeded );
+    IAsyncOperation_ForceFeedbackLoadEffectResult_Release( result_async );
+    set_hid_expect( file, NULL, 0 );
+
+    set_hid_expect( file, expect_unload, sizeof(expect_unload) );
+    hr = IForceFeedbackMotor_TryUnloadEffectAsync( motor, effect, &bool_async );
+    ok( hr == S_OK, "TryUnloadEffectAsync returned %#lx\n", hr );
+    await_bool( bool_async );
+    check_bool_async( bool_async, 1, Completed, S_OK, TRUE );
+    IAsyncOperation_boolean_Release( bool_async );
+    set_hid_expect( file, NULL, 0 );
+
+
+    IForceFeedbackEffect_Release( effect );
 
 
     IForceFeedbackMotor_Release( motor );
 
-skip_tests:
     IRawGameController_Release( raw_controller );
 
     CloseHandle( file );
     IRawGameControllerStatics_Release( controller_statics );
 
 done:
-    hid_device_stop( &desc );
+    hid_device_stop( &desc, 1 );
     cleanup_registry_keys();
 }
 
 START_TEST( force_feedback )
 {
-    if (!dinput_test_init()) return;
+    dinput_test_init();
     if (!bus_device_start()) goto done;
 
-    CoInitialize( NULL );
     if (test_force_feedback_joystick( 0x800 ))
     {
         test_force_feedback_joystick( 0x500 );
@@ -5564,7 +6789,6 @@ START_TEST( force_feedback )
         test_device_managed_effect();
         test_windows_gaming_input();
     }
-    CoUninitialize();
 
 done:
     bus_device_stop();

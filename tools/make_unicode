@@ -21,33 +21,52 @@
 
 use strict;
 use XML::LibXML;
+use Digest::SHA;
 use Encode;
+use Time::Local qw(timegm_modern);
 
-# base URLs for www.unicode.org files
-my $UNIVERSION = "14.0.0";
-my $UNIDATA  = "https://www.unicode.org/Public/$UNIVERSION/ucd/UCD.zip";
-my $IDNADATA = "https://www.unicode.org/Public/idna/$UNIVERSION";
-my $JISDATA  = "https://www.unicode.org/Public/MAPPINGS/OBSOLETE/EASTASIA/JIS";
-my $KSCDATA  = "https://www.unicode.org/Public/MAPPINGS/OBSOLETE/EASTASIA/KSC";
-my $REPORTS = "http://www.unicode.org/reports";
-my $MSDATA = "https://download.microsoft.com/download/C/F/7/CF713A5E-9FBC-4FD6-9246-275F65C0E498";
-my $MSCODEPAGES = "$MSDATA/Windows Supported Code Page Data Files.zip";
-
-my $CLDRVERSION = "41";
-my $CLDRDATA = "https://github.com/unicode-org/cldr/archive/refs/tags/release-$CLDRVERSION.zip";
-my $CLDR33DATA = "https://www.unicode.org/Public/cldr/33/cldr-common-33.0.zip";
-
+my $UNIVERSION = "15.0.0";
+my $CLDRVERSION = "42";
 my $ISO639VERSION = "20220120";
-my $ISO639 =  "https://iso639-3.sil.org/sites/iso639-3/files/downloads/iso-639-3_Code_Tables_$ISO639VERSION.zip";
+my $TZVERSION = "2022g";
 
-# Sort keys file
-my $SORTKEYS = "tr10/allkeys.txt";
+my %data_files =
+(
+ ucd       => { url  => "https://www.unicode.org/Public/$UNIVERSION/ucd/UCD.zip", name => "UCD-$UNIVERSION.zip",
+                sha  => "5fbde400f3e687d25cc9b0a8d30d7619e76cb2f4c3e85ba9df8ec1312cb6718c" },
+ unihan    => { url  => "https://www.unicode.org/Public/$UNIVERSION/ucd/Unihan.zip", name => "Unihan-$UNIVERSION.zip",
+                sha  => "24b154691fc97cb44267b925d62064297086b3f896b57a8181c7b6d42702a026" },
+ idna      => { url  => "https://www.unicode.org/Public/idna/$UNIVERSION/IdnaMappingTable.txt", name => "IdnaMappingTable-$UNIVERSION.txt",
+                sha  => "cc8522199541d60326a42a8f91f8748fd15630a42502dd2cf4878e81e2066ead" },
+ cldr      => { url  => "https://github.com/unicode-org/cldr/archive/refs/tags/release-$CLDRVERSION.zip",
+                sha  => "275c37b1373a1c8461c14d2fe9e3b7b47ba24ea89e3fdd2dedfe0547ab2f07dc" },
+ cldr33    => { url  => "https://www.unicode.org/Public/cldr/33/cldr-common-33.0.zip",
+                sha  => "fa3490082c086d21257153609642f54fcf788fcfda4966fe67f3f6daca0d58b9" },
+ sorting   => { url  => "https://download.microsoft.com/download/C/F/7/CF713A5E-9FBC-4FD6-9246-275F65C0E498/Windows 10 Sorting Weight Table.txt",
+                sha  => "81fcfa1e5ed3e3a94d329959ff7d97d522ddf9d653d2c4d6ddcccc5cd4df663f" },
+ codepages => { url  => "https://download.microsoft.com/download/C/F/7/CF713A5E-9FBC-4FD6-9246-275F65C0E498/Windows Supported Code Page Data Files.zip",
+                sha  => "5074e6dd253056ba61fc6c870c9a955467855129c6ad3a51761c386b301b125a" },
+ iso639    => { url  => "https://iso639-3.sil.org/sites/iso639-3/files/downloads/iso-639-3_Code_Tables_$ISO639VERSION.zip",
+                sha  => "d912749d10c344835f052a9f31d13f13d5ffc99bc589e1eb88f2b4663e990881" },
+ ksx1001   => { url  => "https://www.unicode.org/Public/MAPPINGS/OBSOLETE/EASTASIA/KSC/KSX1001.TXT",
+                sha  => "d8d2a35206ac0ea2865f5d801c9d6717f735bf46f263a658a64a960abe59e371" },
+ jis0208   => { url  => "https://www.unicode.org/Public/MAPPINGS/OBSOLETE/EASTASIA/JIS/JIS0208.TXT",
+                sha  => "1c571870457f19c97720631fa83ee491549a96ba1436da1296786a67d8632e87" },
+ jis0212   => { url  => "https://www.unicode.org/Public/MAPPINGS/OBSOLETE/EASTASIA/JIS/JIS0212.TXT",
+                sha  => "477820bb3055bbcc90880d788cd95607d221dc94457bae249231adecf13c12e6" },
+ tzdata    => { url  => "https://data.iana.org/time-zones/releases/tzdata$TZVERSION.tar.gz",
+                sha  => "4491db8281ae94a84d939e427bdd83dc389f26764d27d9a5c52d782c16764478" },
+);
+
 
 # Default char for undefined mappings
 my $DEF_CHAR = ord '?';
 
 # Last valid Unicode character
 my $MAX_CHAR = 0x10ffff;
+
+my $nlskey = "-SYSTEM\\-CurrentControlSet\\-Control\\-Nls";
+my $zonekey = "-Software\\-Microsoft\\-Windows NT\\-CurrentVersion\\Time Zones";
 
 my @allfiles =
 (
@@ -119,6 +138,7 @@ my @allfiles =
     "CodpageFiles/28605.txt",
 );
 
+my @timezone_files = qw(africa antarctica asia australasia europe northamerica southamerica etcetera backward);
 
 my %ctype =
 (
@@ -459,7 +479,7 @@ my @locales =
  { name => "ar-AE", lcid => 0x00003801, sabbrevlangname => "ARU" },
  { name => "ar-BH", lcid => 0x00003c01, sabbrevlangname => "ARH" },
  { name => "ar-DJ" },
- { name => "ar-DZ", lcid => 0x00001401, sabbrevlangname => "ARG" },
+ { name => "ar-DZ", lcid => 0x00001401, sabbrevlangname => "ARG", nativedigits => "0123456789" },
  { name => "ar-EG", lcid => 0x00000c01, sabbrevlangname => "ARE" },
  { name => "ar-EH" },
  { name => "ar-ER" },
@@ -469,8 +489,8 @@ my @locales =
  { name => "ar-KM" },
  { name => "ar-KW", lcid => 0x00003401, sabbrevlangname => "ARK" },
  { name => "ar-LB", lcid => 0x00003001, sabbrevlangname => "ARB" },
- { name => "ar-LY", lcid => 0x00001001, sabbrevlangname => "ARL" },
- { name => "ar-MA", lcid => 0x00001801, sabbrevlangname => "ARM" },
+ { name => "ar-LY", lcid => 0x00001001, sabbrevlangname => "ARL", nativedigits => "0123456789" },
+ { name => "ar-MA", lcid => 0x00001801, sabbrevlangname => "ARM", nativedigits => "0123456789" },
  { name => "ar-MR" },
  { name => "ar-OM", lcid => 0x00002001, sabbrevlangname => "ARO" },
  { name => "ar-PS" },
@@ -481,7 +501,7 @@ my @locales =
  { name => "ar-SS" },
  { name => "ar-SY", lcid => 0x00002801, sabbrevlangname => "ARS" },
  { name => "ar-TD" },
- { name => "ar-TN", lcid => 0x00001c01, sabbrevlangname => "ART" },
+ { name => "ar-TN", lcid => 0x00001c01, sabbrevlangname => "ART", nativedigits => "0123456789" },
  { name => "ar-YE", lcid => 0x00002401, sabbrevlangname => "ARY" },
  { name => "arn", lcid => 0x0000007a, oemcp => 850, ebcdiccp => 20284, slist => ",", dir => "seed", sabbrevlangname => "MPD", sopentypelang => "MAP" },
  { name => "arn-CL", lcid => 0x0000047a, dir => "seed" },
@@ -594,13 +614,15 @@ my @locales =
  { name => "de-LU", lcid => 0x00001007, sabbrevlangname => "DEL" },
  { name => "dje", sopentypelang => "DJR" },
  { name => "dje-NE" },
- { name => "doi" },
- { name => "doi-IN" },
+ { name => "doi", sopentypelang => "DGR" },
+ { name => "doi-IN", alias => "doi-Deva-IN" },
+ { name => "doi-Deva", file => "doi" },
+ { name => "doi-Deva-IN", file => "doi_IN" },
  { name => "dsb", lcid => 0x00007c2e, sparent => "hsb", oemcp => 850, ebcdiccp => 870, sabbrevlangname => "DSB", sopentypelang => "LSB" },
  { name => "dsb-DE", lcid => 0x0000082e },
  { name => "dua" },
  { name => "dua-CM" },
- { name => "dv", lcid => 0x00000065, slist => "\x{060c}", group => 13, dir => "seed" },
+ { name => "dv", lcid => 0x00000065, slist => "\x{060c}", group => 13, dir => "seed", nativedigits => "0123456789" },
  { name => "dv-MV", lcid => 0x00000465, dir => "seed" },
  { name => "dyo" },
  { name => "dyo-SN" },
@@ -770,7 +792,7 @@ my @locales =
  { name => "ff-MR", alias => "ff-Latn-MR" },
  { name => "ff-NG", alias => "ff-Latn-NG" },
  { name => "ff-SN", alias => "ff-Latn-SN" },
- { name => "ff-Adlm" },
+ { name => "ff-Adlm", oemcp => 65001 },
  { name => "ff-Adlm-BF" },
  { name => "ff-Adlm-CM" },
  { name => "ff-Adlm-GH" },
@@ -855,10 +877,11 @@ my @locales =
  { name => "fr-YT" },
  { name => "fur", sopentypelang => "FRL" },
  { name => "fur-IT" },
+ { name => "fuv-NG", alias => "ff-Latn-NG" },
  { name => "fy", lcid => 0x00000062, oemcp => 850, sabbrevlangname => "FYN", sopentypelang => "FRI" },
  { name => "fy-NL", lcid => 0x00000462 },
  { name => "ga", lcid => 0x0000003c, oemcp => 850, sabbrevlangname => "IRE", sopentypelang => "IRI" },
- { name => "ga-GB" },
+ { name => "ga-GB", oemcp => 65001 },
  { name => "ga-IE", lcid => 0x0000083c },
  { name => "gd", lcid => 0x00000091, oemcp => 850, ebcdiccp => 20285, sopentypelang => "GAE" },
  { name => "gd-GB", lcid => 0x00000491 },
@@ -876,6 +899,7 @@ my @locales =
  { name => "guz" },
  { name => "guz-KE" },
  { name => "gv", sopentypelang => "MNX" },
+ { name => "gv-GB", file => "gv" },
  { name => "gv-IM" },
  { name => "ha", lcid => 0x00000068, oemcp => 437 },
  { name => "ha-GH", alias => "ha-Latn-GH" },
@@ -937,7 +961,7 @@ my @locales =
  { name => "jgo-CM" },
  { name => "jmc" },
  { name => "jmc-TZ" },
- { name => "jv", oemcp => 850 },
+ { name => "jv", oemcp => 850, nativedigits => "0123456789" },
  { name => "jv-ID", alias => "jv-Latn-ID" },
 ## name => "jv-Java" },
 ## name => "jv-Java-ID" },
@@ -1006,7 +1030,8 @@ my @locales =
  { name => "ky-Cyrl-KG", alias => "ky-KG" },
  { name => "ky-KG", lcid => 0x00000440 },
  { name => "la", lcid => 0x00000076, oemcp => 437, slist => ",", dir => "seed", sabbrevlangname => "ZZZ" },
- { name => "la-001", lcid => 0x00000476, file => "la", dir => "seed" },
+ { name => "la-VA", lcid => 0x00000476, dir => "seed" },
+ { name => "la-001", alias => "la-VA" },
  { name => "lag" },
  { name => "lag-TZ" },
  { name => "lb", lcid => 0x0000006e, oemcp => 850, ebcdiccp => 20297, sabbrevlangname => "LBX" },
@@ -1062,11 +1087,13 @@ my @locales =
  { name => "mn-Cyrl", lcid => 0x00007850, file => "mn", sabbrevlangname => "MNN" },
  { name => "mn-Cyrl-MN", alias => "mn-MN" },
  { name => "mn-MN", lcid => 0x00000450, sparent => "mn-Cyrl", group => 5 },
- { name => "mn-Mong", lcid => 0x00007c50, oemcp => 65001, slist => ",", group => 15, dir => "seed", sabbrevlangname => "MNG" },
+ { name => "mn-Mong", lcid => 0x00007c50, oemcp => 65001, slist => ",", group => 15, dir => "seed", sabbrevlangname => "MNG", nativedigits => "0123456789" },
  { name => "mn-Mong-CN", lcid => 0x00000850, dir => "seed" },
  { name => "mn-Mong-MN", lcid => 0x00000c50, dir => "seed", sabbrevlangname => "MNM" },
  { name => "mni", lcid => 0x00000058, slist => ",", sabbrevlangname => "ZZZ" },
  { name => "mni-IN", lcid => 0x00000458, file => "mni_Beng_IN" },
+ { name => "mni-Beng" },
+ { name => "mni-Beng-IN", alias => "mni-IN" },
  { name => "moh", lcid => 0x0000007c, oemcp => 850, ebcdiccp => 37, slist => ",", dir => "seed", sabbrevlangname => "MWK" },
  { name => "moh-CA", lcid => 0x0000047c, dir => "seed" },
  { name => "moh-Latn", alias => "moh" },
@@ -1129,8 +1156,8 @@ my @locales =
  { name => "nus-SS" },
  { name => "nyn", sopentypelang => "NKL" },
  { name => "nyn-UG" },
- { name => "oc", lcid => 0x00000082, oemcp => 850, ebcdiccp => 20297, dir => "seed" },
- { name => "oc-FR", lcid => 0x00000482, dir => "seed" },
+ { name => "oc", lcid => 0x00000082, oemcp => 850, ebcdiccp => 20297 },
+ { name => "oc-FR", lcid => 0x00000482 },
  { name => "oc-Latn", alias => "oc" },
  { name => "oc-Latn-FR", alias => "oc-FR" },
  { name => "om", lcid => 0x00000072, sopentypelang => "ORO" },
@@ -1150,7 +1177,9 @@ my @locales =
 ## name => "pap", lcid => 0x00000079 },
 ## name => "pap-029", lcid => 0x00000479 },
  { name => "pcm" },
- { name => "pcm-NG" },
+ { name => "pcm-NG", alias => "pcm-Latn-NG" },
+ { name => "pcm-Latn", file => "pcm" },
+ { name => "pcm-Latn-NG", file => "pcm_NG" },
  { name => "pl", lcid => 0x00000015, oemcp => 852, ebcdiccp => 20880, group => 2, sabbrevlangname => "PLK", sopentypelang => "PLK" },
  { name => "pl-PL", lcid => 0x00000415 },
 ## name => "prg" },
@@ -1280,8 +1309,8 @@ my @locales =
  { name => "smn-FI", lcid => 0x0000243b },
  { name => "smn-Latn", alias => "smn" },
  { name => "smn-Latn-FI", alias => "smn-FI" },
- { name => "sms", lcid => 0x0000743b, sparent => "se", ebcdiccp => 20278, dir => "seed", sopentypelang => "SKS" },
- { name => "sms-FI", lcid => 0x0000203b, dir => "seed" },
+ { name => "sms", lcid => 0x0000743b, sparent => "se", ebcdiccp => 20278, sopentypelang => "SKS" },
+ { name => "sms-FI", lcid => 0x0000203b },
  { name => "sms-Latn", alias => "sms" },
  { name => "sms-Latn-FI", alias => "sms-FI" },
  { name => "sn", sopentypelang => "SNA0" },
@@ -1356,6 +1385,7 @@ my @locales =
  { name => "ti-ET", lcid => 0x00000473, sabbrevlangname => "TIE" },
  { name => "tig", dir => "seed", sopentypelang => "TGR" },
  { name => "tig-ER", dir => "seed" },
+ { name => "tig-Ethi-ER", alias => "tig-ER" },
  { name => "tk", lcid => 0x00000042, oemcp => 852, ebcdiccp => 20880, group => 2, sopentypelang => "TKM" },
  { name => "tk-Latn", alias => "tk" },
  { name => "tk-Latn-TM", alias => "tk-TM" },
@@ -1381,11 +1411,12 @@ my @locales =
  { name => "tzm-Latn-MA", file => "tzm_MA", oemcp => 65001 },
  { name => "tzm-Latn-DZ", lcid => 0x0000085f, file => "tzm" },
  { name => "tzm-MA", alias => "tzm-Latn-MA" },
+ { name => "tzm-DZ", alias => "tzm-Latn-DZ" },
 ## name => "tzm-Arab", group => 13 },
 ## name => "tzm-Arab-MA", lcid => 0x0000045f },
 ## name => "tzm-Tfng", lcid => 0x0000785f },
 ## name => "tzm-Tfng-MA", lcid => 0x0000105f },
- { name => "ug", lcid => 0x00000080, oemcp => 720, slist => ",", group => 13, sopentypelang => "UYG" },
+ { name => "ug", lcid => 0x00000080, oemcp => 720, slist => ",", group => 13, sopentypelang => "UYG", nativedigits => "0123456789" },
  { name => "ug-Arab", alias => "ug" },
  { name => "ug-Arab-CN", alias => "ug-CN" },
  { name => "ug-CN", lcid => 0x00000480 },
@@ -1414,6 +1445,8 @@ my @locales =
  { name => "vo-001", dir => "seed" },
  { name => "vun" },
  { name => "vun-TZ" },
+ { name => "wa", dir => "seed", oemcp => 850 },
+ { name => "wa-BE", dir => "seed" },
  { name => "wae" },
  { name => "wae-CH" },
  { name => "wal", dir => "seed" },
@@ -1449,7 +1482,7 @@ my @locales =
  { name => "zgh-MA", alias => "zgh-Tfng-MA" },
  { name => "zgh-Tfng", file => "zgh" },
  { name => "zgh-Tfng-MA", file => "zgh_MA" },
- { name => "zh", lcid => 0x00007804, ireadinglayout => 2, oemcp => 936, slist => ",", sscripts => "Hani Hans", sabbrevlangname => "CHS", sopentypelang => "ZHS" },
+ { name => "zh", lcid => 0x00007804, ireadinglayout => 2, oemcp => 936, slist => ",", sscripts => "Hani Hans", sabbrevlangname => "CHS", sopentypelang => "ZHS", nativedigits => "0123456789" },
  { name => "zh-CN", lcid => 0x00000804, file => "zh_Hans_CN", sparent => "zh-Hans" },
  { name => "zh-CN_phoneb", lcid => 0x00050804, alias => "zh-CN" },
  { name => "zh-CN_stroke", lcid => 0x00020804, alias => "zh-CN" },
@@ -1457,8 +1490,8 @@ my @locales =
  { name => "zh-Hans-CN", alias => "zh-CN" },
  { name => "zh-Hans-CN-u-co-phonebk", alias => "zh-CN_phoneb" },
  { name => "zh-Hans-CN-u-co-stroke", alias => "zh-CN_stroke" },
- { name => "zh-Hans-HK", slist => ";" },
- { name => "zh-Hans-MO", slist => ";" },
+ { name => "zh-Hans-HK", slist => ";", nativedigits => "" },
+ { name => "zh-Hans-MO", slist => ";", nativedigits => "" },
  { name => "zh-Hans-SG", alias => "zh-SG" },
  { name => "zh-Hans-SG-u-co-phonebk", alias => "zh-SG_phoneb" },
  { name => "zh-Hans-SG-u-co-stroke", alias => "zh-SG_stroke" },
@@ -1825,6 +1858,11 @@ my @uni2cp = ();
 my @tolower_table = ();
 my @toupper_table = ();
 my @digitmap_table = ();
+my @halfwidth_table = ();
+my @fullwidth_table = ();
+my @cjk_compat_table = ();
+my @chinese_traditional_table = ();
+my @chinese_simplified_table = ();
 my @category_table = ();
 my @initial_joining_table = ();
 my @direction_table = ();
@@ -1846,6 +1884,8 @@ my %joining_forms =
    "medial" => []
 );
 
+my $current_data_file;
+
 sub to_utf16(@)
 {
     my @ret;
@@ -1866,45 +1906,47 @@ sub to_utf16(@)
 
 ################################################################
 # fetch a unicode.org file and open it
-sub open_data_file($$)
+sub open_data_file($@)
 {
-    my ($base, $name) = @_;
+    my ($id, $name) = @_;
+    my $data = $data_files{$id};
     my $cache = ($ENV{XDG_CACHE_HOME} || "$ENV{HOME}/.cache") . "/wine";
-    (my $dir = "$cache/$name") =~ s/\/[^\/]+$//;
-    my $suffix = ($base =~ /\/\Q$UNIVERSION\E/) ? "-$UNIVERSION" : "";
     local *FILE;
 
-    if ($base =~ /.*\/([^\/]+)\.zip$/)
+    my $url = $data->{url};
+    my $filename = "$cache/" . ($data->{name} || ($url =~ s/.*\/([^\/]+)$/$1/r));
+    unless (-f $filename)
     {
-        my $zip = "$1$suffix.zip";
-        unless (-f "$cache/$zip")
-        {
-            system "mkdir", "-p", $cache;
-            print "Fetching $base...\n";
-            !system "wget", "-q", "-O", "$cache/$zip", $base or die "cannot fetch $base";
-        }
-        open FILE, "-|", "unzip", "-p", "$cache/$zip", $name or die "cannot extract $name from $zip";
+        print "Fetching $url...\n";
+        system "mkdir", "-p", $cache;
+        !system "wget", "-q", "-O", $filename, $url or die "cannot fetch $url";
+    }
+
+    my $sha = Digest::SHA->new( "sha256" )->addfile( $filename )->hexdigest;
+    die "invalid checksum $sha for $filename" unless $sha eq $data->{sha};
+
+    if ($filename =~ /\.zip$/)
+    {
+        open FILE, "-|", "unzip", "-p", $filename, $name or die "cannot extract $name from $filename";
+    }
+    elsif ($filename =~ /\.tar\.gz$/)
+    {
+        open FILE, "-|", "tar", "-x", "-f", $filename, "-O", $name or die "cannot extract $name from $filename";
     }
     else
     {
-        (my $dest = "$cache/$name") =~ s/(.*)(\.[^\/.]+)$/$1$suffix$2/;
-        unless (-f $dest)
-        {
-            system "mkdir", "-p", $dir;
-            print "Fetching $base/$name...\n";
-            !system "wget", "-q", "-O", $dest, "$base/$name" or die "cannot fetch $base/$name";
-        }
-        open FILE, "<$dest" or die "cannot open $dest";
+        open FILE, "<$filename" or die "cannot open $filename";
     }
+    $current_data_file = $name ? "$url:$name" : $url;
     return *FILE;
 }
 
 ################################################################
 # load a unicode.org file as XML data
-sub load_xml_data_file($$)
+sub load_xml_data_file($@)
 {
-    my ($base, $name) = @_;
-    my $FILE = open_data_file( $base, $name );
+    my ($id, $name) = @_;
+    my $FILE = open_data_file( $id, $name );
     my $xml = XML::LibXML->load_xml( IO => $FILE );
     close FILE;
     return $xml;
@@ -2031,7 +2073,7 @@ sub load_data()
 
     # now build mappings from the decomposition field of the Unicode database
 
-    my $UNICODE_DATA = open_data_file( $UNIDATA, "UnicodeData.txt" );
+    my $UNICODE_DATA = open_data_file( "ucd", "UnicodeData.txt" );
     while (<$UNICODE_DATA>)
     {
 	# Decode the fields ...
@@ -2109,9 +2151,25 @@ sub load_data()
         if ($decomp =~ /^<([a-zA-Z]+)>\s+([0-9a-fA-F]+)$/)
         {
             # decomposition of the form "<foo> 1234" -> use char if type is known
-            if ($1 eq "isolated" || $1 eq "final" || $1 eq "initial" || $1 eq "medial")
+            my $dst = hex $2;
+            if ($1 eq "narrow")
             {
-                ${joining_forms{$1}}[hex $2] = $src;
+                $halfwidth_table[$dst] = $src;
+                $fullwidth_table[$src] = $dst;
+            }
+            elsif ($1 eq "wide")
+            {
+                next if $dst == 0x5c; # don't remap backslash
+                $fullwidth_table[$dst] = $src;
+                $halfwidth_table[$src] = $dst;
+            }
+            elsif ($1 eq "font" || $1 eq "square" || $1 eq "circle")
+            {
+                $fullwidth_table[$src] = $dst if $src >= 0x10000;
+            }
+            elsif ($1 eq "isolated" || $1 eq "final" || $1 eq "initial" || $1 eq "medial")
+            {
+                ${joining_forms{$1}}[$dst] = $src;
             }
         }
         elsif ($decomp =~ /^<compat>\s+0020\s+([0-9a-fA-F]+)/)
@@ -2127,8 +2185,14 @@ sub load_data()
             }
             elsif ($decomp =~ /^([0-9a-fA-F]+)$/)
             {
+                my $dst = hex $1;
                 # Single char decomposition
-                $decomp_table[$src] = $decomp_compat_table[$src] = [ hex $1 ];
+                $decomp_table[$src] = $decomp_compat_table[$src] = [ $dst ];
+                if ($name =~ /^CJK COMPATIBILITY IDEOGRAPH/)
+                {
+                    $cjk_compat_table[$src] = $dst;
+                    $fullwidth_table[$src] = $dst if $src >= 0x10000;
+                }
             }
         }
     }
@@ -2155,7 +2219,7 @@ sub load_data()
 
     # load the composition exclusions
 
-    my $EXCL = open_data_file( $UNIDATA, "CompositionExclusions.txt" );
+    my $EXCL = open_data_file( "ucd", "CompositionExclusions.txt" );
     while (<$EXCL>)
     {
         s/\#.*//;  # remove comments
@@ -2173,7 +2237,7 @@ sub load_data()
     # load the IDNA mappings
 
     @idna_decomp_table = @decomp_compat_table;
-    my $IDNA = open_data_file( $IDNADATA, "IdnaMappingTable.txt" );
+    my $IDNA = open_data_file( "idna", "IdnaMappingTable.txt" );
     while (<$IDNA>)
     {
         s/\#.*//;  # remove comments
@@ -2213,24 +2277,75 @@ sub load_data()
         }
     }
     close $IDNA;
+
+    # load the Unihan mappings
+
+    my $UNIHAN = open_data_file( "unihan", "Unihan_Variants.txt" );
+    while (<$UNIHAN>)
+    {
+        s/\#.*//;  # remove comments
+        next if /^\s*$/;
+        if (/^U\+([0-9a-fA-F]{4})\s+kTraditionalVariant\s+U\+([0-9a-fA-F]{4})$/)
+        {
+            next if hex $1 < 0x4dc0;  # skip extension A
+            $chinese_traditional_table[hex $1] = hex $2;
+        }
+        elsif (/^U\+([0-9a-fA-F]{4})\s+kSimplifiedVariant\s+U\+([0-9a-fA-F]{4})$/)
+        {
+            next if hex $1 < 0x4dc0;  # skip extension A
+            $chinese_simplified_table[hex $1] = hex $2;
+        }
+    }
+    close $UNIHAN;
+    foreach my $i (0xf900..0xfaff)
+    {
+        next unless defined $cjk_compat_table[$i];
+        next if defined $chinese_simplified_table[$cjk_compat_table[$i]];
+        $chinese_simplified_table[$i] = $cjk_compat_table[$i];
+    }
 }
 
 
 ################################################################
 # add a new registry key
-sub add_registry_key($$)
+sub add_registry_key($$$)
 {
-    my ($key, $defval) = @_;
-    $registry_keys{$key} = [ $defval ] unless defined $registry_keys{$key};
+    my ($base, $key, $defval) = @_;
+    $registry_keys{"$base\\$key"} = [ $defval ] unless defined $registry_keys{"$base\\$key"};
 }
 
 ################################################################
-# add a new registry value
-sub add_registry_value($$$)
+# add a new registry value with explicit type
+sub add_registry_value($$$$)
 {
-    my ($key, $name, $value) = @_;
-    add_registry_key( $key, undef );
-    push @{$registry_keys{$key}}, "'$name' = s '$value'";
+    my ($base, $key, $name, $value) = @_;
+    add_registry_key( $base, $key, undef );
+    push @{$registry_keys{"$base\\$key"}}, "'$name' = $value";
+}
+
+################################################################
+# add a new registry string value
+sub add_registry_string_value($$$$)
+{
+    my ($base, $key, $name, $value) = @_;
+    $value =~ s/\'/\'\'/g;
+    add_registry_value( $base, $key, $name, "s '$value'" );
+}
+
+################################################################
+# add a new registry dword value
+sub add_registry_dword_value($$$$)
+{
+    my ($base, $key, $name, $value) = @_;
+    add_registry_value( $base, $key, $name, "d $value" );
+}
+
+################################################################
+# add a new registry binary value
+sub add_registry_binary_value($$$$)
+{
+    my ($base, $key, $name, $value) = @_;
+    add_registry_value( $base, $key, $name, "b " . join "", map { sprintf "%02x", $_; } unpack( "C*", $value ));
 }
 
 ################################################################
@@ -2311,7 +2426,7 @@ sub dump_eucjp_codepage()
         }
     }
 
-    my $INPUT = open_data_file( $JISDATA, "JIS0208.TXT" );
+    my $INPUT = open_data_file( "jis0208" );
     while (<$INPUT>)
     {
         next if /^\#/;  # skip comments
@@ -2326,7 +2441,7 @@ sub dump_eucjp_codepage()
     }
     close $INPUT;
 
-    $INPUT = open_data_file( $JISDATA, "JIS0212.TXT" );
+    $INPUT = open_data_file( "jis0212" );
     while (<$INPUT>)
     {
         next if /^\#/;  # skip comments
@@ -2365,7 +2480,7 @@ sub dump_krwansung_codepage(@)
     add_mapping( 0xfe, 0xf8ea );
     add_mapping( 0xff, 0xf8eb );
 
-    my $INPUT = open_data_file( $KSCDATA, "KSX1001.TXT" );
+    my $INPUT = open_data_file( "ksx1001" );
     while (<$INPUT>)
     {
         next if /^\#/;  # skip comments
@@ -2399,106 +2514,6 @@ sub dump_krwansung_codepage(@)
     }
 
     output_codepage_file( 20949 );
-}
-
-################################################################
-# build the sort keys table
-sub dump_sortkeys($)
-{
-    my $filename = shift;
-    my @sortkeys = ();
-
-    my $INPUT = open_data_file( $REPORTS, $SORTKEYS );
-    while (<$INPUT>)
-    {
-        next if /^\#/;  # skip comments
-        next if /^$/;  # skip empty lines
-        next if /\x1a/;  # skip ^Z
-        next if /^\@version/;  # skip @version header
-        if (/^([0-9a-fA-F]+)\s+;\s+\[([*.])([0-9a-fA-F]{4})\.([0-9a-fA-F]{4})\.([0-9a-fA-F]{4})\.([0-9a-fA-F]+)\]/)
-        {
-            my ($uni,$variable) = (hex $1, $2);
-            next if $uni > 65535;
-            $sortkeys[$uni] = [ $uni, hex $3, hex $4, hex $5, hex $6 ];
-            next;
-        }
-        if (/^([0-9a-fA-F]+\s+)+;\s+\[[*.]([0-9a-fA-F]{4})\.([0-9a-fA-F]{4})\.([0-9a-fA-F]{4})\.([0-9a-fA-F]+)\]/)
-        {
-            # multiple character sequence, ignored for now
-            next;
-        }
-        die "$SORTKEYS: Unrecognized line $_\n";
-    }
-    close $INPUT;
-
-    # compress the keys to 32 bit:
-    # key 1 to 16 bits, key 2 to 8 bits, key 3 to 4 bits, key 4 to 1 bit
-
-    @sortkeys = sort { ${$a}[1] <=> ${$b}[1] or 
-                       ${$a}[2] <=> ${$b}[2] or
-                       ${$a}[3] <=> ${$b}[3] or
-                       ${$a}[4] <=> ${$b}[4] or
-                       $a cmp $b; } @sortkeys;
-
-    my ($n2, $n3) = (1, 1);
-    my @keys = (-1, -1, -1, -1, -1 );
-    my @flatkeys = ();
-
-    for (my $i = 0; $i < @sortkeys; $i++)
-    {
-        next unless defined $sortkeys[$i];
-        my @current = @{$sortkeys[$i]};
-        if ($current[1] == $keys[1])
-        {
-            if ($current[2] == $keys[2])
-            {
-                if ($current[3] == $keys[3])
-                {
-                    # nothing
-                }
-                else
-                {
-                    $keys[3] = $current[3];
-                    $n3++;
-                    die if ($n3 >= 16);
-                }
-            }
-            else
-            {
-                $keys[2] = $current[2];
-                $keys[3] = $current[3];
-                $n2++;
-                $n3 = 1;
-                die if ($n2 >= 256);
-            }
-        }
-        else
-        {
-            $keys[1] = $current[1];
-            $keys[2] = $current[2];
-            $keys[3] = $current[3];
-            $n2 = 1;
-            $n3 = 1;
-        }
-
-        if ($current[2]) { $current[2] = $n2; }
-        if ($current[3]) { $current[3] = $n3; }
-        if ($current[4]) { $current[4] = 1; }
-
-        $flatkeys[$current[0]] = ($current[1] << 16) | ($current[2] << 8) | ($current[3] << 4) | $current[4];
-    }
-
-    open OUTPUT,">$filename.new" or die "Cannot create $filename";
-    printf "Building $filename\n";
-    printf OUTPUT "/* Unicode collation element table */\n";
-    printf OUTPUT "/* generated from %s */\n", "$REPORTS/$SORTKEYS";
-    printf OUTPUT "/* DO NOT EDIT!! */\n\n";
-    print OUTPUT "#include \"windef.h\"\n\n";
-
-    dump_two_level_mapping( "collation_table", 0xffffffff, 32, @flatkeys );
-
-    close OUTPUT;
-    save_file($filename);
 }
 
 
@@ -2613,7 +2628,7 @@ sub dump_indic($)
     my $filename = shift;
     my @indic_table;
 
-    my $INPUT = open_data_file( $UNIDATA, "IndicSyllabicCategory.txt" );
+    my $INPUT = open_data_file( "ucd", "IndicSyllabicCategory.txt" );
     while (<$INPUT>)
     {
         next if /^\#/;  # skip comments
@@ -2646,7 +2661,8 @@ sub dump_indic($)
     }
     close $INPUT;
 
-    $INPUT = open_data_file( $UNIDATA, "IndicPositionalCategory.txt" );
+    my $prev_data_file = $current_data_file;
+    $INPUT = open_data_file( "ucd", "IndicPositionalCategory.txt" );
     while (<$INPUT>)
     {
         next if /^\#/;  # skip comments
@@ -2676,8 +2692,8 @@ sub dump_indic($)
     open OUTPUT,">$filename.new" or die "Cannot create $filename";
     print "Building $filename\n";
     print OUTPUT "/* Unicode Indic Syllabic Category */\n";
-    print OUTPUT "/* generated from $UNIDATA:IndicSyllabicCategory.txt */\n";
-    print OUTPUT "/*       and from $UNIDATA:IndicPositionalCategory.txt */\n";
+    print OUTPUT "/* generated from $prev_data_file */\n";
+    print OUTPUT "/*       and from $current_data_file */\n";
     print OUTPUT "/* DO NOT EDIT!! */\n\n";
     print OUTPUT "#include \"windef.h\"\n\n";
 
@@ -2694,7 +2710,7 @@ sub dump_linebreak($)
     my $filename = shift;
     my @break_table;
 
-    my $INPUT = open_data_file( $UNIDATA, "LineBreak.txt" );
+    my $INPUT = open_data_file( "ucd", "LineBreak.txt" );
     while (<$INPUT>)
     {
         next if /^\#/;  # skip comments
@@ -2741,11 +2757,11 @@ sub dump_linebreak($)
     open OUTPUT,">$filename.new" or die "Cannot create $filename";
     print "Building $filename\n";
     print OUTPUT "/* Unicode Line Break Properties */\n";
-    print OUTPUT "/* generated from $UNIDATA:LineBreak.txt */\n";
+    print OUTPUT "/* generated from $current_data_file */\n";
     print OUTPUT "/* DO NOT EDIT!! */\n\n";
     print OUTPUT "#include \"windef.h\"\n\n";
 
-    dump_two_level_mapping( "wine_linebreak_table", $break_types{'XX'}, 16, @break_table );
+    dump_three_level_mapping( "wine_linebreak_table", $break_types{'XX'}, 16, @break_table );
 
     close OUTPUT;
     save_file($filename);
@@ -2929,7 +2945,7 @@ sub dump_scripts($)
     my $script_index;
     my $i;
 
-    my $INPUT = open_data_file( $UNIDATA, "Scripts.txt" );
+    my $INPUT = open_data_file( "ucd", "Scripts.txt" );
     # Fill the table
     # Unknown script id is always 0, so undefined scripts are automatically treated as such
     while (<$INPUT>)
@@ -2968,7 +2984,7 @@ sub dump_scripts($)
     open OUTPUT,">$header.new" or die "Cannot create $header";
     print "Building $header\n";
     print OUTPUT "/* Unicode Script IDs */\n";
-    print OUTPUT "/* generated from $UNIDATA:Scripts.txt */\n";
+    print OUTPUT "/* generated from $current_data_file */\n";
     print OUTPUT "/* DO NOT EDIT!! */\n\n";
 
     print OUTPUT "enum unicode_script_id {\n";
@@ -2986,11 +3002,11 @@ sub dump_scripts($)
     open OUTPUT,">$filename.new" or die "Cannot create $header";
     print "Building $filename\n";
     print OUTPUT "/* Unicode Script IDs */\n";
-    print OUTPUT "/* generated from $UNIDATA:Scripts.txt */\n";
+    print OUTPUT "/* generated from $current_data_file */\n";
     print OUTPUT "/* DO NOT EDIT!! */\n\n";
     print OUTPUT "#include \"windef.h\"\n\n";
 
-    dump_two_level_mapping( "wine_scripts_table", 0, 16, @scripts_table );
+    dump_three_level_mapping( "wine_scripts_table", 0, 16, @scripts_table );
     close OUTPUT;
     save_file($filename);
 }
@@ -3002,7 +3018,7 @@ sub dump_mirroring($)
     my $filename = shift;
     my @mirror_table = ();
 
-    my $INPUT = open_data_file( $UNIDATA, "BidiMirroring.txt" );
+    my $INPUT = open_data_file( "ucd", "BidiMirroring.txt" );
     while (<$INPUT>)
     {
         next if /^\#/;  # skip comments
@@ -3020,7 +3036,7 @@ sub dump_mirroring($)
     open OUTPUT,">$filename.new" or die "Cannot create $filename";
     print "Building $filename\n";
     print OUTPUT "/* Unicode BiDi mirroring */\n";
-    print OUTPUT "/* generated from $UNIDATA:BidiMirroring.txt */\n";
+    print OUTPUT "/* generated from $current_data_file */\n";
     print OUTPUT "/* DO NOT EDIT!! */\n\n";
     print OUTPUT "#include \"windef.h\"\n\n";
     dump_two_level_mapping( "wine_mirror_map", 0, 16, @mirror_table );
@@ -3035,7 +3051,7 @@ sub dump_bracket($)
     my $filename = shift;
     my @bracket_table;
 
-    my $INPUT = open_data_file( $UNIDATA, "BidiBrackets.txt" );
+    my $INPUT = open_data_file( "ucd", "BidiBrackets.txt" );
     while (<$INPUT>)
     {
         next if /^\#/;  # skip comments
@@ -3057,7 +3073,7 @@ sub dump_bracket($)
     open OUTPUT,">$filename.new" or die "Cannot create $filename";
     print "Building $filename\n";
     print OUTPUT "/* Unicode Bidirectional Bracket table */\n";
-    print OUTPUT "/* generated from $UNIDATA:BidiBrackets.txt */\n";
+    print OUTPUT "/* generated from $current_data_file */\n";
     print OUTPUT "/* DO NOT EDIT!! */\n\n";
     print OUTPUT "#include \"windef.h\"\n\n";
 
@@ -3074,7 +3090,7 @@ sub dump_shaping($)
     my $filename = shift;
     my @joining_table = @initial_joining_table;
 
-    my $INPUT = open_data_file( $UNIDATA, "ArabicShaping.txt" );
+    my $INPUT = open_data_file( "ucd", "ArabicShaping.txt" );
     while (<$INPUT>)
     {
         next if /^\#/;  # skip comments
@@ -3093,7 +3109,7 @@ sub dump_shaping($)
     open OUTPUT,">$filename.new" or die "Cannot create $filename";
     print "Building $filename\n";
     print OUTPUT "/* Unicode Arabic shaping */\n";
-    print OUTPUT "/* generated from $UNIDATA:ArabicShaping.txt */\n";
+    print OUTPUT "/* generated from $current_data_file */\n";
     print OUTPUT "/* DO NOT EDIT!! */\n\n";
     print OUTPUT "#include \"windef.h\"\n\n";
 
@@ -3121,7 +3137,7 @@ sub dump_arabic_shaping($)
     my $filename = shift;
     my @joining_table = @initial_joining_table;
 
-    my $INPUT = open_data_file( $UNIDATA, "ArabicShaping.txt" );
+    my $INPUT = open_data_file( "ucd", "ArabicShaping.txt" );
     while (<$INPUT>)
     {
         next if /^\#/;  # skip comments
@@ -3150,11 +3166,11 @@ sub dump_arabic_shaping($)
     open OUTPUT,">$filename.new" or die "Cannot create $filename";
     print "Building $filename\n";
     print OUTPUT "/* Unicode Arabic shaping */\n";
-    print OUTPUT "/* generated from $UNIDATA:ArabicShaping.txt */\n";
+    print OUTPUT "/* generated from $current_data_file */\n";
     print OUTPUT "/* DO NOT EDIT!! */\n\n";
     print OUTPUT "#include \"windef.h\"\n\n";
 
-    dump_two_level_mapping( "arabic_shaping_table", 0, 16, @joining_table );
+    dump_three_level_mapping( "arabic_shaping_table", 0, 16, @joining_table );
 
     close OUTPUT;
     save_file($filename);
@@ -3167,7 +3183,7 @@ sub dump_vertical($$)
     my ($filename, $unix) = @_;
     my @vertical_table;
 
-    my $INPUT = open_data_file( $UNIDATA, "VerticalOrientation.txt" );
+    my $INPUT = open_data_file( "ucd", "VerticalOrientation.txt" );
     while (<$INPUT>)
     {
         next if /^\#/;  # skip comments
@@ -3200,7 +3216,7 @@ sub dump_vertical($$)
     open OUTPUT,">$filename.new" or die "Cannot create $filename";
     print "Building $filename\n";
     print OUTPUT "/* Unicode Vertical Orientation */\n";
-    print OUTPUT "/* generated from $UNIDATA:VerticalOrientation.txt */\n";
+    print OUTPUT "/* generated from $current_data_file */\n";
     print OUTPUT "/* DO NOT EDIT!! */\n\n";
     if ($unix)
     {
@@ -3215,24 +3231,6 @@ sub dump_vertical($$)
     close OUTPUT;
     save_file($filename);
 }
-
-################################################################
-# dump the digit folding tables
-sub dump_digit_folding($)
-{
-    my ($filename) = shift;
-    open OUTPUT,">$filename.new" or die "Cannot create $filename";
-    print "Building $filename\n";
-    print OUTPUT "/* Unicode digit folding mappings */\n";
-    print OUTPUT "/* generated from $UNIDATA:UnicodeData.txt */\n";
-    print OUTPUT "/* DO NOT EDIT!! */\n\n";
-    print OUTPUT "#include \"windef.h\"\n\n";
-
-    dump_two_level_mapping( "wine_digitmap", 0, 16, @digitmap_table );
-    close OUTPUT;
-    save_file($filename);
-}
-
 
 ################################################################
 # compress a mapping table by removing identical rows
@@ -3272,22 +3270,23 @@ sub compress_array($$@)
 }
 
 ################################################################
-# dump a char -> 16-bit value mapping table using two-level tables
-sub dump_two_level_mapping($$@)
+# dump a char -> value mapping table using two-level tables
+sub dump_two_level_mapping($$$@)
 {
     my $name = shift;
     my $def = shift;
     my $size = shift;
     my $type = $size == 16 ? "unsigned short" : "unsigned int";
-    my @row_array = compress_array( 4096, $def, @_[0..65535] );
-    my @array = compress_array( 256, 0, @row_array[0..4095] );
+    my (@array, @row_array, @data, @row_data);
+    (@row_array[0..4095], @data) = compress_array( 4096, $def, @_[0..65535] );
+    (@array[0..255], @row_data) = compress_array( 256, 0, @row_array );
 
-    for (my $i = 256; $i < @array; $i++) { $array[$i] += @array - 4096; }
+    for (my $i = 0; $i < @row_data; $i++) { $row_data[$i] += @row_data + 256 - 4096; }
 
-    printf OUTPUT "const %s DECLSPEC_HIDDEN %s[%d] =\n{\n", $type, $name, @array + @row_array - 4096;
-    printf OUTPUT "    /* level 1 offsets */\n%s,\n", dump_array( $size, 0, @array[0..255] );
-    printf OUTPUT "    /* level 2 offsets */\n%s,\n", dump_array( $size, 0, @array[256..$#array] );
-    printf OUTPUT "    /* values */\n%s\n};\n", dump_array( $size, 0, @row_array[4096..$#row_array] );
+    printf OUTPUT "const %s DECLSPEC_HIDDEN %s[%d] =\n{\n", $type, $name, @array + @row_data + @data;
+    printf OUTPUT "    /* level 1 offsets */\n%s,\n", dump_array( $size, 0, @array );
+    printf OUTPUT "    /* level 2 offsets */\n%s,\n", dump_array( $size, 0, @row_data );
+    printf OUTPUT "    /* values */\n%s\n};\n", dump_array( $size, 0, @data );
 }
 
 ################################################################
@@ -3320,22 +3319,39 @@ sub dump_three_level_mapping($$@)
 sub dump_binary_case_table(@)
 {
     my (@table) = @_;
-    my $max_char = 0x10000;
-    my $level1 = $max_char / 16;
-    my $level2 = $level1 / 16;
-
     my @difftable;
+    my @res;
+
     for (my $i = 0; $i < @table; $i++)
     {
         next unless defined $table[$i];
-        $difftable[$i] = ($table[$i] - $i) & 0xffff;
+        $difftable[$i] = ($table[$i] - $i) & 0xffffffff;
     }
 
-    my @row_array = compress_array( $level1, 0, @difftable[0..$max_char-1] );
-    my @array = compress_array( $level2, 0, @row_array[0..$level1-1] );
-    my $offset = @array - $level1;
-    for (my $i = $level2; $i < @array; $i++) { $array[$i] += $offset; }
-    return pack "S<*", 1 + $offset + @row_array, @array, @row_array[$level1..$#row_array];
+    my (@low_array1, @low_array2, @low_data, @low_row_data);
+    (@low_array2[0..4095], @low_data) = compress_array( 4096, 0, @difftable[0..65535] );
+    (@low_array1[0..255], @low_row_data) = compress_array( 256, 0, @low_array2 );
+
+    if (scalar @table > 0x10000)
+    {
+        my (@high_array1, @high_array2, @high_data, @high_row_data);
+        (@high_array2[0..32767], @high_data) = compress_array( 32768, 0, @difftable[65536..$MAX_CHAR] );
+        (@high_array1[0..1023], @high_row_data) = compress_array( 1024, 0, @high_array2 );
+
+        push @res, map { $_ + 1024; } @low_array1;
+        push @res, map { $_ + @res + @low_row_data + @low_data; } @high_array1;
+        push @res, map { $_ + @res + @low_row_data - 4096; } @low_row_data;
+        push @res, @low_data;
+        push @res, map { 2 * ($_ - 32768) + @res + @high_row_data; } @high_row_data;
+        return pack( "S<*", 1 + scalar @res  + 2 * scalar @high_data, @res ) . pack( "L<*", @high_data );
+    }
+    else
+    {
+        push @res, @low_array1;
+        push @res, map { $_ + @res + @low_row_data - 4096; } @low_row_data;
+        push @res, @low_data;
+        return pack "S<*", 1 + scalar @res, @res;
+    }
 }
 
 ################################################################
@@ -3346,8 +3362,8 @@ sub dump_intl_nls($)
     my @lower_table = @tolower_table;
     remove_linguistic_mappings( \@upper_table, \@lower_table );
 
-    my $upper = dump_binary_case_table( @upper_table );
-    my $lower = dump_binary_case_table( @lower_table );
+    my $upper = dump_binary_case_table( @upper_table[0..65535] );
+    my $lower = dump_binary_case_table( @lower_table[0..65535] );
 
     my $filename = shift;
     open OUTPUT,">$filename.new" or die "Cannot create $filename";
@@ -3375,12 +3391,12 @@ sub dump_bidi_dir_table($)
 
     my @table;
 
-    for (my $i = 0; $i < 65536; $i++)
+    for (my $i = 0; $i < @direction_table; $i++)
     {
         $table[$i] = $bidi_types{$direction_table[$i]} if defined $direction_table[$i];
     }
 
-    dump_two_level_mapping( "bidi_direction_table", $bidi_types{"L"}, 16, @table );
+    dump_three_level_mapping( "bidi_direction_table", $bidi_types{"L"}, 16, @table );
 
     close OUTPUT;
     save_file($filename);
@@ -3653,7 +3669,7 @@ sub dump_norm_table($)
     close OUTPUT;
     save_file($filename);
 
-    add_registry_value( "Normalization", sprintf( "%x", $forms{$type} ), "norm$type.nls" );
+    add_registry_string_value( $nlskey, "Normalization", sprintf( "%x", $forms{$type} ), "norm$type.nls" );
 }
 
 
@@ -3673,7 +3689,7 @@ sub output_codepage_file($)
     close OUTPUT;
     save_file($output);
 
-    add_registry_value( "Codepage", sprintf( "%d", $codepage ), sprintf( "c_%03d.nls", $codepage ));
+    add_registry_string_value( $nlskey, "Codepage", sprintf( "%d", $codepage ), sprintf( "c_%03d.nls", $codepage ));
 }
 
 ################################################################
@@ -3693,7 +3709,7 @@ sub dump_msdata_codepage($)
     $default_char = $DEF_CHAR;
     $default_wchar = $DEF_CHAR;
 
-    my $INPUT = open_data_file( $MSCODEPAGES, $filename ) or die "Cannot open $filename";
+    my $INPUT = open_data_file( "codepages", $filename );
 
     while (<$INPUT>)
     {
@@ -3819,10 +3835,9 @@ sub cmp_compression
 
 ################################################################
 # build a binary sort keys table
-sub dump_sortkey_table($$)
+sub dump_sortkey_table($)
 {
-    my ($filename, $download) = @_;
-
+    my $filename = shift;
     my @keys;
     my ($part, $section, $subsection, $guid, $version, $ling_flag);
     my @multiple_weights;
@@ -3841,7 +3856,7 @@ sub dump_sortkey_table($$)
 
     my %flags = ( "HAS_3_BYTE_WEIGHTS" => 0x01, "REVERSEDIACRITICS" => 0x10, "DOUBLECOMPRESSION" => 0x20, "INVERSECASING" => 0x40 );
 
-    my $KEYS = open_data_file( $MSDATA, $download );
+    my $KEYS = open_data_file( "sorting" );
 
     printf "Building $filename\n";
 
@@ -4002,7 +4017,7 @@ sub dump_sortkey_table($$)
                 next;
             }
         }
-        die "$download: $part.$section: unrecognized line $_\n";
+        die "$current_data_file: $part.$section: unrecognized line $_\n";
     }
     close $KEYS;
 
@@ -4085,12 +4100,13 @@ sub dump_sortkey_table($$)
         $table[$i] = $typestr{$str};
     }
 
-    my @rows = compress_array( 4096, 0, @table[0..65535] );
-    my @array = compress_array( 256, 0, @rows[0..4095] );
+    my (@rows, @array, @data, @row_data);
+    (@rows[0..4095], @data) = compress_array( 4096, 0, @table[0..65535] );
+    (@array[0..255], @row_data) = compress_array( 256, 0, @rows );
     for (my $i = 0; $i < 256; $i++) { $array[$i] *= 2; }  # we need byte offsets
-    for (my $i = 256; $i < @array; $i++) { $array[$i] += 2 * @array - 4096; }
+    for (my $i = 0; $i < @row_data; $i++) { $row_data[$i] += 2 * @row_data + 512 - 4096; }
 
-    my $arraystr = pack("S<*", @array) . pack("C*", @rows[4096..$#rows]);
+    my $arraystr = pack("S<*", @array, @row_data) . pack("C*", @data);
     my $chartypes = pack "S<2", 4 + length($types) + length($arraystr), 2 + length($types);
     $chartypes = align_string( 8, $chartypes . $types . $arraystr );
 
@@ -4147,14 +4163,14 @@ sub dump_sortkey_table($$)
 
     # Locales
 
-    add_registry_key( "Sorting\\Ids", "{$default_guid}" );
+    add_registry_key( $nlskey, "Sorting\\Ids", "{$default_guid}" );
     foreach my $loc (sort keys %locales)
     {
         # skip specific locales that match more general ones
         my @parts = split /[-_]/, $loc;
         next if @parts > 1 && defined($locales{$parts[0]}) && $locales{$parts[0]} eq $locales{$loc};
         next if @parts > 2 && defined($locales{"$parts[0]-$parts[1]"}) && $locales{"$parts[0]-$parts[1]"} eq $locales{$loc};
-        add_registry_value( "Sorting\\Ids", $loc, "\{$locales{$loc}\}" );
+        add_registry_string_value( $nlskey, "Sorting\\Ids", $loc, "\{$locales{$loc}\}" );
     }
 
     # File header
@@ -4388,13 +4404,14 @@ sub convert_time_format($)
     my $fmt = shift;
     $fmt =~ s/a+/tt/;
     $fmt =~ s/B+/tt/;
+    $fmt =~ s/\x{202f}/ /;
     return $fmt;
 }
 
 sub load_iso639()
 {
     my %iso639;
-    my $DATA = open_data_file( $ISO639, "iso-639-3_Code_Tables_$ISO639VERSION/iso-639-3.tab" );
+    my $DATA = open_data_file( "iso639", "iso-639-3_Code_Tables_$ISO639VERSION/iso-639-3.tab" );
     while (<$DATA>)
     {
         if (/^\s*[a-z]{3}\s+[a-z]{3}\s+([a-z]{3})\s+([a-z]{2})\s/) { $iso639{$2} = $1; }
@@ -4409,11 +4426,11 @@ sub load_iso639()
 sub build_locale_data()
 {
     my $base = "cldr-release-$CLDRVERSION";
-    my $suppl = load_xml_data_file( $CLDRDATA, "$base/common/supplemental/supplementalData.xml" );
-    my $subtags = load_xml_data_file( $CLDRDATA, "$base/common/supplemental/likelySubtags.xml" );
-    my $numbers = load_xml_data_file( $CLDRDATA, "$base/common/supplemental/numberingSystems.xml" );
+    my $suppl = load_xml_data_file( "cldr", "$base/common/supplemental/supplementalData.xml" );
+    my $subtags = load_xml_data_file( "cldr", "$base/common/supplemental/likelySubtags.xml" );
+    my $numbers = load_xml_data_file( "cldr", "$base/common/supplemental/numberingSystems.xml" );
     # obsolete phone data from CLDR version 33
-    my $phone = load_xml_data_file( $CLDR33DATA, "common/supplemental/telephoneCodeData.xml" );
+    my $phone = load_xml_data_file( "cldr33", "common/supplemental/telephoneCodeData.xml" );
     my %iso639 = load_iso639();
     $string_data = pack "S2", 0, 0;  # offset 0 == empty string
 
@@ -4448,7 +4465,7 @@ sub build_locale_data()
         next if defined $loc->{alias};
         (my $file = $loc->{file} || $loc->{name}) =~ s/-/_/g;
         $file = "$base/" . ($loc->{dir} || "common") . "/main/$file.xml";
-        my $xml = load_xml_data_file( $CLDRDATA, $file );
+        my $xml = load_xml_data_file( "cldr", $file );
         $loc->{xml} = $xml;
         $loc->{language} ||= xml_query( $xml, "/ldml/identity/language/\@type" );
         $loc->{territory} ||= xml_query( $xml, "/ldml/identity/territory/\@type" );
@@ -4477,7 +4494,7 @@ sub build_locale_data()
         else
         {
             my $name = $loc->{file} || $loc->{name};
-            $name =~ s/-(Arab|Cyrl|Deva|Guru|Hans|Hant|Latn|Tfng|Vaii)$//;
+            $name =~ s/-(Arab|Beng|Cyrl|Deva|Guru|Hans|Hant|Latn|Tfng|Vaii)$//;
             $name =~ s/-/_/g;
             $id = xml_query( $subtags, "/supplementalData/likelySubtags/likelySubtag[\@from='$name']/\@to" );
             $id =~ s/_/-/g if $id;
@@ -4704,13 +4721,13 @@ sub build_locale_data()
         my $sneginfinity = $sposinfinity ? "-$sposinfinity" : "";
         my $sgrouping = format_to_grouping( loc_query( $loc, "/ldml/numbers/decimalFormats[\@numberSystem='latn']/decimalFormatLength[not(\@type)]/decimalFormat/pattern" ));
         my $percentformat = loc_query( $loc, "/ldml/numbers/percentFormats[\@numberSystem='latn']/percentFormatLength[not(\@type)]/percentFormat/pattern" );
-        my $currencyformat = loc_query( $loc, "/ldml/numbers/currencyFormats[\@numberSystem='latn']/currencyFormatLength[not(\@type)]/currencyFormat[\@type='accounting']/pattern" ) ||
-                             loc_query( $loc, "/ldml/numbers/currencyFormats[\@numberSystem='latn']/currencyFormatLength[not(\@type)]/currencyFormat[\@type='standard']/pattern" );
+        my $currencyformat = loc_query( $loc, "/ldml/numbers/currencyFormats[\@numberSystem='latn']/currencyFormatLength[not(\@type)]/currencyFormat[\@type='accounting']/pattern[not(\@alt)]" ) ||
+                             loc_query( $loc, "/ldml/numbers/currencyFormats[\@numberSystem='latn']/currencyFormatLength[not(\@type)]/currencyFormat[\@type='standard']/pattern[not(\@alt)]" );
         my $smongrouping = format_to_grouping( $currencyformat );
         my ($icurrency, $inegcurr) = parse_currency_format( $sname, $currencyformat );
         my ($ipospercent, $inegpercent) = parse_percent_format( $percentformat );
         my $native_numbering = loc_query( $loc, "/ldml/numbers/otherNumberingSystems/native" );
-        my @snativedigits = split //, xml_query( $numbers, "/supplementalData/numberingSystems/numberingSystem[\@id='$native_numbering']/\@digits" );
+        my @snativedigits = split //, (locale_entry( $loc, "nativedigits", "" ) || xml_query( $numbers, "/supplementalData/numberingSystems/numberingSystem[\@id='$native_numbering']/\@digits" ));
         my $digitsubstitution = !(ord($snativedigits[0]) >= 0x600 && ord($snativedigits[0]) <= 0x6ff);
         my $measure = defined xml_query( $suppl, "/supplementalData/measurementData/measurementSystem[\@type='US' and $territory_match]" );
         my $papersize = defined xml_query( $suppl, "/supplementalData/measurementData/paperSize[\@type='US-Letter' and $territory_match]" );
@@ -5005,7 +5022,7 @@ sub build_locale_data()
     # output language groups
 
     my %groups;
-    add_registry_key( "Locale", "00000409" );
+    add_registry_key( $nlskey, "Locale", "00000409" );
     foreach my $loc (@locales)
     {
         next unless defined $loc->{lcid};
@@ -5014,11 +5031,11 @@ sub build_locale_data()
         my $group = locale_entry( $loc, "group", 1 );
         my $name = sprintf( "%08x", $loc->{lcid} );
         my $val = sprintf( "%x", $group );
-        add_registry_value( "Locale", $name, $val ) unless ($loc->{lcid} & 0x000f0000);
-        add_registry_value( "Locale\\Alternate Sorts", $name, $val ) if $loc->{name} =~ /_/;
+        add_registry_string_value( $nlskey, "Locale", $name, $val ) unless ($loc->{lcid} & 0x000f0000);
+        add_registry_string_value( $nlskey, "Locale\\Alternate Sorts", $name, $val ) if $loc->{name} =~ /_/;
         $groups{$val} = 1;
     }
-    foreach my $group (keys %groups) { add_registry_value( "Language Groups", $group, "1" ); }
+    foreach my $group (keys %groups) { add_registry_string_value( $nlskey, "Language Groups", $group, "1" ); }
 
     # output calendar data
 
@@ -5180,6 +5197,56 @@ sub build_locale_data()
 
 
 ################################################################
+# build the charmaps table for locale.nls
+sub build_charmaps_data()
+{
+    my $data = "";
+
+    # MAP_FOLDDIGITS
+    my @digits = (ord('0') .. ord('9'));
+    $digitmap_table[0x3007] = $digits[0];               # Ideographic Zero
+    @digitmap_table[0x0c78..0x0c7b] = @digits[0..3];    # Telugu Fraction Digits
+    @digitmap_table[0x0c7c..0x0c7e] = @digits[1..3];    # Telugu Fraction Digits
+    @digitmap_table[0x3021..0x3029] = @digits[1..9];    # Hangzhou Numerals
+    @digitmap_table[0xa8e0..0xa8e9] = @digits;          # Combining Devanagari Digits
+    @digitmap_table[0x10107..0x1010f] = @digits[1..9];  # Aegean Numbers
+    $digitmap_table[0x10320] = $digits[1];              # Old Italic Numerals
+    $digitmap_table[0x10321] = $digits[5];              # Old Italic Numerals
+    $data .= dump_binary_case_table( @digitmap_table );
+
+    # CJK compatibility map
+    $data .= dump_binary_case_table( @cjk_compat_table );
+
+    # LCMAP_HIRAGANA/KATAKANA
+    my (@hiragana_table, @katakana_table);
+    foreach my $ch (0x3041..0x3096, 0x309d..0x309e)
+    {
+        $hiragana_table[$ch + 0x60] = $ch;
+        $katakana_table[$ch] = $ch + 0x60;
+    }
+    $data .= dump_binary_case_table( @hiragana_table ) . dump_binary_case_table( @katakana_table );
+
+    # LCMAP_HALFWIDTH/FULLWIDTH
+    $halfwidth_table[0x2018] = 0x0027;
+    $halfwidth_table[0x2019] = 0x0027;
+    $halfwidth_table[0x201c] = 0x0022;
+    $halfwidth_table[0x201d] = 0x0022;
+    $halfwidth_table[0x309b] = 0xff9e;
+    $halfwidth_table[0x309c] = 0xff9f;
+    $fullwidth_table[0x309b] = 0x3099;
+    $fullwidth_table[0x309c] = 0x309a;
+    $data .= dump_binary_case_table( @halfwidth_table ) . dump_binary_case_table( @fullwidth_table );
+
+    # LCMAP_TRADITIONAL/SIMPLIFIED_CHINESE
+    $data .= dump_binary_case_table( @chinese_traditional_table ) . dump_binary_case_table( @chinese_simplified_table );
+
+    # FIXME: some more unknown tables here
+
+    return $data;
+}
+
+
+################################################################
 # build the geoids table for locale.nls
 sub build_geoids_data()
 {
@@ -5237,7 +5304,7 @@ sub dump_locales($$)
     printf "Building $filename\n";
 
     my $locale_data = build_locale_data();
-    my $charmaps_data = "";  # FIXME
+    my $charmaps_data = build_charmaps_data();
     my $geoids_data = build_geoids_data();
     my $scripts_data = "";  # FIXME
 
@@ -5257,35 +5324,461 @@ sub dump_locales($$)
 
 
 ################################################################
+# return the day of week of the first of the month
+sub month_first_dow($$)
+{
+    my ($year, $month) = @_;
+    my @time = gmtime( timegm_modern( 0, 0, 0, 1, $month - 1, $year ));
+    return $time[6];
+}
+
+
+################################################################
+# compare system time values
+sub compare_systime($$)
+{
+    my ($a, $b) = @_;
+    return $a->[0] <=> $b->[0] ||
+           $a->[1] <=> $b->[1] ||
+           $a->[2] <=> $b->[2] ||
+           $a->[3] <=> $b->[3] ||
+           $a->[4] <=> $b->[4] ||
+           $a->[5] <=> $b->[5] ||
+           $a->[6] <=> $b->[6];
+}
+
+
+################################################################
+# compare the zone transition date with the rule date
+sub compare_transition_date($$$$)
+{
+    my ($stdoff, $isdst, $zone, $rule) = @_;
+
+    if (scalar @{$zone} <= 1)
+    {
+        return (!defined($zone->[0]) || $zone->[0] > $rule->[0]) ? 1 : -1;
+    }
+
+    my @date = parse_transition_date( $stdoff, $isdst, $zone->[0], $zone->[1], $zone->[2], $zone->[3] || 0 );
+    return compare_systime( \@date, $rule );
+}
+
+
+################################################################
+# get the Windows zone names from the CLDR data
+sub load_windows_zones()
+{
+    my $current_name;
+    my %names;
+    my $base = "cldr-release-$CLDRVERSION";
+    my $INPUT = open_data_file( "cldr", "$base/common/supplemental/windowsZones.xml" );
+    while (<$INPUT>)
+    {
+        if (/<!-- +(\(UTC.*) -->.*/)
+        {
+            $current_name = $1;
+        }
+        if (/<mapZone other="(.*)" territory="001" type="(.*)"\/>/)
+        {
+            $names{$1} = [ $current_name, $2 ];
+        }
+    }
+    close $INPUT;
+    return %names;
+}
+
+
+################################################################
+# parse a transition date specification from the tzdata files
+sub parse_transition_date($$@)
+{
+    use integer;
+    my ($stdoff, $isdst, $year, $in, $on, $at) = @_;
+
+    $on = "1" unless defined $on;
+    $at = "0" unless defined $at;
+
+    my %months = ( Jan => 1, Feb => 2, Mar => 3, Apr => 4, May => 5, Jun => 6,
+                   Jul => 7, Aug => 8, Sep => 9, Oct => 10, Nov => 11, Dec => 12 );
+    my %days = ( Sun => 0, Mon => 1, Tue => 2, Wed => 3, Thu => 4, Fri => 5, Sat => 6 );
+
+    my $mon = $in ? $months{$in} : 1;
+    my ($week, $dow, $flag, $time, $sec);
+    my $first = month_first_dow( $year, $mon );
+
+    if ($on =~ /^last(.*)$/)
+    {
+        $week = 5;
+        $dow = $days{$1};
+    }
+    elsif ($on =~ /^(.*)>=(\d+)$/)
+    {
+        $dow = $days{$1};
+        my $diff = ($first + 6 - $dow) % 7;
+        $week = $2 >= 25 ? 5 : ($2 + 6 + $diff) / 7;
+    }
+    elsif ($on =~ /^(.*)<=(\d+)$/)
+    {
+        $dow = $days{$1};
+        my $diff = ($first + $2 + 6 - $dow) % 7;
+        $week = ($2 + 6 - $diff) / 7;
+        if (!$week)
+        {
+            $week = 5;
+            if (!--$mon) { $mon = 12; $year--; }
+        }
+    }
+    elsif ($on =~ /^\d+$/)
+    {
+        $dow = ($first + $on - 1) % 7;
+        $week = $on >= 25 ? 5 : ($on + 6) / 7;
+    }
+    else
+    {
+        die "unsupported date specification $year $in $on $at";
+    }
+
+    if ($at =~ /^(\d+):(\d+):(\d+)([uws]?)$/)
+    {
+        $time = $1 * 60 + $2;
+        $sec = $3;
+        $flag = $4;
+    }
+    elsif ($at =~ /^(\d+):(\d+)([uws]?)$/)
+    {
+        $time = $1 * 60 + $2;
+        $flag = $3;
+    }
+    elsif ($at =~ /^(\d+)([uws]?)$/)
+    {
+        $time = $1 * 60;
+        $flag = $2;
+    }
+    else
+    {
+        die "unsupported time specification $year $in $on $at";
+    }
+
+    $flag ||= "w";
+    $time -= $stdoff if $flag eq "u";
+    $time += 60 if !$isdst && $flag ne "w";
+
+    if ($time < 0)  # previous day
+    {
+        $week-- if $week < 5 && $dow == month_first_dow( $year, $mon );
+        $week-- if $week == 5 && $dow == month_first_dow( $year + ($mon == 12), $mon % 12 + 1 );
+        if (!$week)
+        {
+            $week = 5;
+            if (!--$mon) { $mon = 12; $year--; }
+        }
+        $dow = ($dow + 6) % 7;
+        $time += 24 * 60;
+    }
+
+    return ($year, $mon, $week, $dow, $time / 60, $time % 60, $sec || 0);
+}
+
+
+################################################################
+# parse a system time value as a SYSTEMTIME structure
+sub pack_systime(@)
+{
+    my ($year, $mon, $week, $dow, $hour, $min, $sec) = @_;
+    return pack "S<8", 0, $mon, $dow, $week, $hour < 24 ? ($hour, $min, $sec, 0) : (23, 59, 59, 999);
+}
+
+
+################################################################
+# parse a timezone offset from the tzdata files
+sub parse_tz_offset($)
+{
+    my ($hour, $min) = split /:/, shift;
+    $min ||= 0;
+    return $hour < 0 ? -$hour * 60 + $min : -$hour * 60 - $min;  # invert sign
+}
+
+
+################################################################
+# build the timezone data
+sub dump_timezones($@)
+{
+    my $filename = shift;
+    my $FIRST_YEAR = 2000;
+    my $LAST_YEAR = 2030;
+
+    my %names = load_windows_zones();
+    my %zones;
+    my %rules;
+    my %links;
+    my %res_indices;
+
+    printf "Building $filename\n";
+
+    open OUTPUT, ">$filename.new" or die "Cannot create $filename";
+    print OUTPUT "/* Automatically generated; DO NOT EDIT!! */\n\n";
+    print OUTPUT "#include \"winresrc.h\"\n\n";
+    print OUTPUT "#pragma makedep po\n\n";
+    print OUTPUT "LANGUAGE LANG_ENGLISH, SUBLANG_DEFAULT\n\n";
+    print OUTPUT "STRINGTABLE\n{\n";
+
+    # load tzdata files
+
+    foreach my $filename (@_)
+    {
+        my $FILE = open_data_file( "tzdata", $filename );
+        my $zonename;
+        while (<$FILE>)
+        {
+            chomp;
+            s/\#.*$//;
+            next if /^\s*$/;
+            my @fields = split /\s+/;
+            if ($fields[0] eq "Zone" || ($zonename && $fields[0] eq ""))
+            {
+                shift @fields;
+                $zonename = shift @fields unless $zonename;
+                my ($stdoff, $rules, $dummy, @date) = @fields;
+                $zones{$zonename} ||= [ ];
+                push @{$zones{$zonename}}, [ parse_tz_offset( $stdoff ), $rules, @date ];
+                $zonename = undef unless @date;  # last entry doesn't have an until date
+                next;
+            }
+            if ($fields[0] eq "Rule")
+            {
+                shift @fields;
+                my ($rulename, $from, $to, $dummy, $in, $on, $at, $save) = @fields;
+                $to = $from if $to eq "only";
+                $to = $LAST_YEAR if $to eq "max";
+                push @{$rules{$rulename}}, [ parse_tz_offset( $save ), $from, $to, $in, $on, $at ];
+                next;
+            }
+            if ($fields[0] eq "Link")
+            {
+                $links{$fields[2]} = $fields[1];
+                next;
+            }
+            die "unrecognized line $_";
+        }
+        close $FILE;
+    }
+
+    foreach my $name (sort { uc($a) cmp uc($b) } keys %names)
+    {
+        my ($display, $zone) = @{$names{$name}};
+        $zone = $links{$zone} if defined $links{$zone};
+
+        # build list of transitions
+
+        my @transitions;
+        my @from_date = ( 1 );
+        my $last_stdoff = 0;
+        for (my $i = 0; $i < scalar @{$zones{$zone}}; $i++)
+        {
+            my ($stdoff, $rule, @until_date) = @{$zones{$zone}->[$i]};
+            my $isdst = ($last_stdoff != $stdoff);
+            $from_date[0] ||= $LAST_YEAR;
+            my @systime = parse_transition_date( $stdoff, $isdst, @from_date );
+            push @transitions, [ $stdoff, -1, \@systime ];
+
+            if (defined $rules{$rule})
+            {
+                foreach my $r (@{$rules{$rule}})
+                {
+                    my ($offset, $from, $to, $in, $on, $at) = @{$r};
+                    foreach my $year ($from..$to)
+                    {
+                        next if $year < $from_date[0];
+                        next if $until_date[0] && $year > $until_date[0];
+                        my @systime = parse_transition_date( $stdoff, !!$offset, $year, $in, $on, $at );
+                        next if compare_transition_date( $stdoff, $isdst, \@until_date, \@systime ) <= 0;
+                        my $ret = compare_transition_date( $stdoff, $isdst, \@from_date, \@systime );
+                        next if $ret > 0;
+                        pop @transitions if !$ret;  # remove transition if there's a dst change at the same time
+                        push @transitions, [ $stdoff, $offset, \@systime ];
+                    }
+                }
+            }
+            @from_date = @until_date;
+            $last_stdoff = $stdoff;
+        }
+        @transitions = sort { compare_systime( $a->[2], $b->[2] ) }  @transitions;
+
+        # build per-year dynamic info
+
+        my @info;
+        my $last_dstoff = 0;
+        my $last_dst = 0;
+        my $year = $FIRST_YEAR;
+        while ($year <= $LAST_YEAR)
+        {
+            if (@transitions && $transitions[0]->[2]->[0] < $year)
+            {
+                $last_stdoff = $transitions[0]->[0];
+                shift @transitions;
+                next;
+            }
+            my ($std, $dst, @trans);
+            my $cur_stdoff = $last_stdoff;
+            my $cur_dstoff = ($name =~ /^UTC/) ? 0 : -60;
+            while (@transitions && $transitions[0]->[2]->[0] == $year)
+            {
+                my $t = shift @transitions;
+                my ($stdoff, $dstoff, $systime) = @{$t};
+                $systime = pack_systime( @{$systime} );
+                if (!$dstoff)  # std
+                {
+                    $cur_stdoff = $stdoff unless $std;
+                    $std = $systime;
+                }
+                elsif ($dstoff != -1)  # dst
+                {
+                    $cur_dstoff = $dstoff unless $dst;
+                    $dst ||= $systime;
+                }
+                elsif ($stdoff != $last_stdoff)  # rule transition
+                {
+                    # Handle a special case: Samoa moved to the other side of
+                    # the date line between 2011-12-03 and 2012-01-01,
+                    # entirely skipping the day 2011-12-31. We ignore this
+                    # change because it happens on a year boundary and more
+                    # importantly it would generate on offset of -25 hours,
+                    # which some programs (e.g., Mono) do not like. See
+                    # https://bugs.winehq.org/show_bug.cgi?id=51758
+
+                    if ($last_stdoff - $stdoff < 24 * 60)
+                    {
+                        @trans = ($last_stdoff, $stdoff, $systime);
+                        $cur_stdoff = $stdoff;
+                    }
+                }
+                elsif ($dst)  # rule transition with no stdoff change
+                {
+                    $std = $systime;
+                }
+                $last_dstoff = ($dstoff == -1) ? 0 : $dstoff;
+            }
+            $last_stdoff = $cur_stdoff;
+
+            if ($cur_dstoff > 0)  # swap std and dst to ensure that offset is negative
+            {
+                ($std, $dst) = ($dst, $std);
+                $cur_stdoff += $cur_dstoff;
+                $cur_dstoff = -$cur_dstoff;
+            }
+
+            if (@trans)
+            {
+                # heuristic to prefer switching dst
+                if ($last_dst == $year - 1 || (!$last_dst && $trans[0] > $trans[1]))
+                {
+                    $dst ||= $trans[2];
+                    $cur_stdoff = $trans[0];
+                    $cur_dstoff = $trans[1] - $trans[0];
+                }
+                else
+                {
+                    $std ||= $trans[2];
+                    $cur_stdoff = $trans[1];
+                    $cur_dstoff = $trans[0] - $trans[1];
+                }
+            }
+
+            if ($std || $dst)
+            {
+                $std ||= pack_systime( parse_transition_date( 0, 0, $year, "Jan", 1 ));
+                $dst ||= pack_systime( parse_transition_date( 0, 0, $year, "Jan", 1 ));
+                $last_dst = $year;
+            }
+            else
+            {
+                $std = pack "S<8", 0;
+                $dst = pack "S<8", 0;
+                $cur_stdoff += $last_dstoff;
+            }
+            $info[$year++] = pack( "l<3", $cur_stdoff, 0, $cur_dstoff ) . $std . $dst;
+        }
+
+        # output registry keys
+
+        my $std_name = $name eq "UTC" ? "Coordinated Universal Time" : $name;
+        my $dlt_name = $std_name =~ s/Standard Time/Daylight Time/r;
+        my $res_idx = hex( substr( Digest::SHA::sha1_hex($name), -3, 3 )) << 4;
+        $res_idx += 16 while exists $res_indices{$res_idx};
+        $res_indices{$res_idx} = 1;
+
+        add_registry_string_value( $zonekey, $name, "Display", $display );
+        add_registry_string_value( $zonekey, $name, "Std", $std_name );
+        add_registry_string_value( $zonekey, $name, "Dlt", $dlt_name );
+        add_registry_string_value( $zonekey, $name, "MUI_Std", sprintf( "\@tzres.dll,-%u", $res_idx ));
+        add_registry_string_value( $zonekey, $name, "MUI_Dlt", sprintf( "\@tzres.dll,-%u", $res_idx + 1 ));
+        add_registry_string_value( $zonekey, $name, "MUI_Display", sprintf( "\@tzres.dll,-%u", $res_idx + 2 ));
+        add_registry_binary_value( $zonekey, $name, "TZI", $info[$LAST_YEAR] );
+
+        printf OUTPUT "%7d \"#msgctxt#maximum 31 characters#%s\"\n", $res_idx, $std_name;
+        printf OUTPUT "%7d \"#msgctxt#maximum 31 characters#%s\"\n", $res_idx + 1, $dlt_name;
+        printf OUTPUT "%7d \"%s\"\n", $res_idx + 2, $display;
+
+        my $first_year = $FIRST_YEAR;
+        my $last_year = $LAST_YEAR;
+        $last_year-- while $last_year > $FIRST_YEAR && $info[$last_year] eq $info[$last_year - 1];
+        $first_year++ while $first_year < $last_year && $info[$first_year] eq $info[$last_year];
+
+        next if $last_year <= $first_year;
+
+        foreach my $i ($first_year..$last_year)
+        {
+            add_registry_binary_value( $zonekey, "$name\\Dynamic DST", $i, $info[$i] );
+        }
+        add_registry_dword_value( $zonekey, "$name\\Dynamic DST", "FirstEntry", $first_year );
+        add_registry_dword_value( $zonekey, "$name\\Dynamic DST", "LastEntry", $last_year );
+    }
+
+    print OUTPUT "}\n";
+    close OUTPUT;
+    save_file($filename);
+}
+
+
+################################################################
 # build the script to create registry keys
 sub dump_registry_script($%)
 {
     my ($filename, %keys) = @_;
     my $indent = 1;
+    my @prev;
 
     printf "Building %s\n", $filename;
     open OUTPUT, ">$filename.new" or die "Cannot create $filename";
     print OUTPUT "HKLM\n{\n";
-    foreach my $k (split /\\/, "SYSTEM\\CurrentControlSet\\Control\\Nls")
-    {
-        printf OUTPUT "%*sNoRemove %s\n%*s{\n", 4 * $indent, "", $k, 4 * $indent, "";
-        $indent++;
-    }
-    foreach my $k (sort keys %keys)
+    foreach my $k (sort { ($a =~ tr/a-z\\/A-Z\001/r) cmp ($b =~ tr/a-z\\/A-Z\001/r) } keys %keys)
     {
         my @subkeys = split /\\/, $k;
+        while (@prev && @subkeys && $prev[0] eq $subkeys[0]) { shift @prev; shift @subkeys; }
+        while (@prev) { printf OUTPUT "%*s}\n", 4 * --$indent, ""; shift @prev; }
         my ($def, @vals) = @{$keys{$k}};
         for (my $i = 0; $i < @subkeys; $i++)
         {
-            printf OUTPUT "%*s%s%s\n%*s{\n", 4 * $indent, "",
-                $subkeys[$i] =~ /\s/ ? "'$subkeys[$i]'" :  $subkeys[$i],
+            my $name = $subkeys[$i];
+            my $prefix = "";
+            if ($name =~ /^-/)
+            {
+                $name =~ s/^-//;
+                $prefix = "NoRemove ";
+            }
+            if ($name =~ /\s/)
+            {
+                $name = "'$name'";
+            }
+            printf OUTPUT "%*s%s%s%s\n%*s{\n", 4 * $indent, "", $prefix, $name,
                 $i == $#subkeys && $def ? " = s '$def'" : "", 4 * $indent, "";
             $indent++;
         }
         foreach my $v (sort @vals) { printf OUTPUT "%*sval $v\n", 4 * $indent, ""; }
-        for (my $i = 0; $i < @subkeys; $i++) { printf OUTPUT "%*s}\n", 4 * --$indent, ""; }
+        @prev = split /\\/, $k;
     }
-    while ($indent) { printf OUTPUT "%*s}\n", 4 * --$indent, ""; }
+    while (@prev) { printf OUTPUT "%*s}\n", 4 * --$indent, ""; shift @prev; }
+    printf OUTPUT "}\n";
     close OUTPUT;
     save_file($filename);
 }
@@ -5312,10 +5805,9 @@ sub save_file($)
 
 chdir ".." if -f "./make_unicode";
 load_data();
-dump_sortkeys( "dlls/kernelbase/collation.c" );
 dump_bidi_dir_table( "dlls/gdi32/uniscribe/direction.c" );
 dump_bidi_dir_table( "dlls/dwrite/direction.c" );
-dump_digit_folding( "dlls/kernelbase/digitmap.c" );
+dump_bidi_dir_table( "dlls/wineps.drv/direction.c" );
 dump_mirroring( "dlls/gdi32/uniscribe/mirror.c" );
 dump_mirroring( "dlls/dwrite/mirror.c" );
 dump_bracket( "dlls/gdi32/uniscribe/bracket.c" );
@@ -5334,10 +5826,11 @@ dump_norm_table( "nls/normnfd.nls" );
 dump_norm_table( "nls/normnfkc.nls" );
 dump_norm_table( "nls/normnfkd.nls" );
 dump_norm_table( "nls/normidna.nls" );
-my $chartypes = dump_sortkey_table( "nls/sortdefault.nls", "Windows 10 Sorting Weight Table.txt" );
+my $chartypes = dump_sortkey_table( "nls/sortdefault.nls" );
 dump_locales( "nls/locale.nls", $chartypes );
 foreach my $file (@allfiles) { dump_msdata_codepage( $file ); }
 dump_eucjp_codepage();
+dump_timezones( "dlls/tzres/tzres.rc", @timezone_files );
 dump_registry_script( "dlls/kernelbase/kernelbase.rgs", %registry_keys );
 
 exit 0;

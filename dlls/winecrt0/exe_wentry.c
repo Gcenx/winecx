@@ -22,12 +22,16 @@
 #pragma makedep unix
 #endif
 
+/* this is actually part of a static lib linked into a .exe.so module, not a real Unix library */
+#undef WINE_UNIX_LIB
+
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
 
 extern int wmain( int argc, WCHAR *argv[] );
+extern void __wine_init_so_dll(void) DECLSPEC_HIDDEN;
 
 static WCHAR **build_argv( const WCHAR *src, int *ret_argc )
 {
@@ -97,5 +101,6 @@ DWORD WINAPI DECLSPEC_HIDDEN __wine_spec_exe_wentry( PEB *peb )
     int argc;
     WCHAR **argv = build_argv( GetCommandLineW(), &argc );
 
+    __wine_init_so_dll();
     ExitProcess( wmain( argc, argv ));
 }

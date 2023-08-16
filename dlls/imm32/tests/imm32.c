@@ -30,6 +30,7 @@
 BOOL WINAPI ImmSetActiveContext(HWND, HIMC, BOOL);
 
 static BOOL (WINAPI *pImmAssociateContextEx)(HWND,HIMC,DWORD);
+static UINT (WINAPI *pNtUserAssociateInputContext)(HWND,HIMC,ULONG);
 static BOOL (WINAPI *pImmIsUIMessageA)(HWND,UINT,WPARAM,LPARAM);
 static UINT (WINAPI *pSendInput) (UINT, INPUT*, size_t);
 
@@ -303,6 +304,8 @@ static BOOL init(void) {
     pImmAssociateContextEx = (void*)GetProcAddress(hmod, "ImmAssociateContextEx");
     pImmIsUIMessageA = (void*)GetProcAddress(hmod, "ImmIsUIMessageA");
     pSendInput = (void*)GetProcAddress(huser, "SendInput");
+    pNtUserAssociateInputContext = (void*)GetProcAddress(GetModuleHandleW(L"win32u.dll"),
+                                                         "NtUserAssociateInputContext");
 
     wc.cbSize        = sizeof(WNDCLASSEXA);
     wc.style         = 0;
@@ -746,6 +749,81 @@ static void test_ImmAssociateContextEx(void)
         CHECK_CALLED(WM_IME_SETCONTEXT_DEACTIVATE);
         CHECK_CALLED(WM_IME_SETCONTEXT_ACTIVATE);
         ok(rc, "ImmAssociateContextEx failed\n");
+
+        SET_ENABLE(WM_IME_SETCONTEXT_ACTIVATE, FALSE);
+        SET_ENABLE(WM_IME_SETCONTEXT_DEACTIVATE, FALSE);
+    }
+    ImmReleaseContext(hwnd,imc);
+}
+
+/* similar to above, but using NtUserAssociateInputContext */
+static void test_NtUserAssociateInputContext(void)
+{
+    HIMC imc;
+    UINT rc;
+
+    if (!pNtUserAssociateInputContext)
+    {
+        win_skip("NtUserAssociateInputContext not available\n");
+        return;
+    }
+
+    imc = ImmGetContext(hwnd);
+    if (imc)
+    {
+        HIMC retimc, newimc;
+        HWND focus;
+
+        SET_ENABLE(WM_IME_SETCONTEXT_ACTIVATE, TRUE);
+        SET_ENABLE(WM_IME_SETCONTEXT_DEACTIVATE, TRUE);
+
+        ok(GetActiveWindow() == hwnd, "hwnd is not active\n");
+        newimc = ImmCreateContext();
+        ok(newimc != imc, "handles should not be the same\n");
+        rc = pNtUserAssociateInputContext(NULL, NULL, 0);
+        ok(rc == 2, "NtUserAssociateInputContext returned %x\n", rc);
+        rc = pNtUserAssociateInputContext(hwnd, NULL, 0);
+        ok(rc == 1, "NtUserAssociateInputContext returned %x\n", rc);
+        rc = pNtUserAssociateInputContext(NULL, imc, 0);
+        ok(rc == 2, "NtUserAssociateInputContext returned %x\n", rc);
+
+        rc = pNtUserAssociateInputContext(hwnd, imc, 0);
+        ok(rc == 1, "NtUserAssociateInputContext returned %x\n", rc);
+        retimc = ImmGetContext(hwnd);
+        ok(retimc == imc, "handles should be the same\n");
+        ImmReleaseContext(hwnd,retimc);
+
+        rc = pNtUserAssociateInputContext(hwnd, imc, 0);
+        ok(rc == 0, "NtUserAssociateInputContext returned %x\n", rc);
+
+        rc = pNtUserAssociateInputContext(hwnd, newimc, 0);
+        ok(rc == 1, "NtUserAssociateInputContext returned %x\n", rc);
+        retimc = ImmGetContext(hwnd);
+        ok(retimc == newimc, "handles should be the same\n");
+        ImmReleaseContext(hwnd,retimc);
+
+        focus = CreateWindowA("button", "button", 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        ok(focus != NULL, "CreateWindow failed\n");
+        SET_EXPECT(WM_IME_SETCONTEXT_DEACTIVATE);
+        SetFocus(focus);
+        CHECK_CALLED(WM_IME_SETCONTEXT_DEACTIVATE);
+        rc = pNtUserAssociateInputContext(hwnd, imc, 0);
+        ok(rc == 0, "NtUserAssociateInputContext returned %x\n", rc);
+        SET_EXPECT(WM_IME_SETCONTEXT_ACTIVATE);
+        DestroyWindow(focus);
+        CHECK_CALLED(WM_IME_SETCONTEXT_ACTIVATE);
+
+        SET_EXPECT(WM_IME_SETCONTEXT_DEACTIVATE);
+        SetFocus(child);
+        CHECK_CALLED(WM_IME_SETCONTEXT_DEACTIVATE);
+        rc = pNtUserAssociateInputContext(hwnd, newimc, 0);
+        ok(rc == 0, "NtUserAssociateInputContext returned %x\n", rc);
+        SET_EXPECT(WM_IME_SETCONTEXT_ACTIVATE);
+        SetFocus(hwnd);
+        CHECK_CALLED(WM_IME_SETCONTEXT_ACTIVATE);
+
+        rc = pNtUserAssociateInputContext(hwnd, NULL, IACE_DEFAULT);
+        ok(rc == 1, "NtUserAssociateInputContext returned %x\n", rc);
 
         SET_ENABLE(WM_IME_SETCONTEXT_ACTIVATE, FALSE);
         SET_ENABLE(WM_IME_SETCONTEXT_DEACTIVATE, FALSE);
@@ -1270,6 +1348,7 @@ static DWORD WINAPI test_default_ime_window_cb(void *arg)
        broken(!testcase->top_level_window /* Vista */) ,
        "Expected IME window existence\n");
     DestroyWindow(hwnd1);
+    flaky
     ok(!IsWindow(ime_wnd), "Expected no IME windows\n");
     return 1;
 }
@@ -1333,24 +1412,29 @@ static DWORD WINAPI test_default_ime_with_message_only_window_cb(void *arg)
 {
     HWND hwnd1, hwnd2, default_ime_wnd;
 
+    /* Message-only window doesn't create associated IME window. */
     test_phase = PHASE_UNKNOWN;
     hwnd1 = CreateWindowA(wndcls, "Wine imm32.dll test",
                           WS_OVERLAPPEDWINDOW,
                           CW_USEDEFAULT, CW_USEDEFAULT,
                           240, 120, HWND_MESSAGE, NULL, GetModuleHandleW(NULL), NULL);
     default_ime_wnd = ImmGetDefaultIMEWnd(hwnd1);
-    ok(!IsWindow(default_ime_wnd), "Expected no IME windows, got %p\n", default_ime_wnd);
+    ok(!default_ime_wnd, "Expected no IME windows, got %p\n", default_ime_wnd);
 
+    /* Setting message-only window as owner at creation,
+       doesn't create associated IME window. */
     hwnd2 = CreateWindowA(wndcls, "Wine imm32.dll test",
                           WS_OVERLAPPEDWINDOW,
                           CW_USEDEFAULT, CW_USEDEFAULT,
                           240, 120, hwnd1, NULL, GetModuleHandleW(NULL), NULL);
     default_ime_wnd = ImmGetDefaultIMEWnd(hwnd2);
-    ok(IsWindow(default_ime_wnd), "Expected IME window existence\n");
+    todo_wine ok(!default_ime_wnd || broken(IsWindow(default_ime_wnd)), "Expected no IME windows, got %p\n", default_ime_wnd);
 
     DestroyWindow(hwnd2);
     DestroyWindow(hwnd1);
 
+    /* Making window message-only after creation,
+       doesn't disassociate IME window. */
     hwnd1 = CreateWindowA(wndcls, "Wine imm32.dll test",
                           WS_OVERLAPPEDWINDOW,
                           CW_USEDEFAULT, CW_USEDEFAULT,
@@ -2258,6 +2342,7 @@ static void test_com_initialization(void)
 
     wnd = CreateWindowA("static", "static", WS_POPUP, 0, 0, 100, 100, 0, 0, 0, 0);
     ok(wnd != NULL, "CreateWindow failed\n");
+    test_apttype(-1);
     ShowWindow(wnd, SW_SHOW);
     test_apttype(APTTYPE_MAINSTA);
     DestroyWindow(wnd);
@@ -2290,14 +2375,44 @@ static DWORD WINAPI disable_ime_thread(void *arg)
     return 0;
 }
 
+static DWORD WINAPI check_not_disabled_ime_thread(void *arg)
+{
+    HWND def, hwnd;
+
+    WaitForSingleObject(arg, INFINITE);
+    hwnd = CreateWindowA("static", "static", 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    ok(hwnd != NULL, "CreateWindow failed\n");
+    def = ImmGetDefaultIMEWnd(hwnd);
+    ok(def != NULL, "ImmGetDefaultIMEWnd returned %p\n", def);
+    return 0;
+}
+
+static DWORD WINAPI disable_ime_process(void *arg)
+{
+    BOOL r = ImmDisableIME(-1);
+    ok(r, "ImmDisableIME failed\n");
+    return 0;
+}
+
 static void test_ImmDisableIME(void)
 {
-    HANDLE thread;
-    HWND def;
+    HANDLE thread, event;
+    DWORD tid;
+    HWND def, def2;
     BOOL r;
 
     def = ImmGetDefaultIMEWnd(hwnd);
     ok(def != NULL, "ImmGetDefaultIMEWnd(hwnd) returned NULL\n");
+
+    event = CreateEventW(NULL, TRUE, FALSE, FALSE);
+    thread = CreateThread(NULL, 0, check_not_disabled_ime_thread, event, 0, &tid);
+    ok(thread != NULL, "CreateThread failed\n");
+    r = ImmDisableIME(tid);
+    ok(!r, "ImmDisableIME(tid) succeeded\n");
+    SetEvent(event);
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+    CloseHandle(event);
 
     thread = CreateThread(NULL, 0, disable_ime_thread, 0, 0, NULL);
     ok(thread != NULL, "CreateThread failed\n");
@@ -2308,6 +2423,21 @@ static void test_ImmDisableIME(void)
     ok(thread != NULL, "CreateThread failed\n");
     WaitForSingleObject(thread, INFINITE);
     CloseHandle(thread);
+
+    msg_spy_pump_msg_queue();
+    thread = CreateThread(NULL, 0, disable_ime_process, 0, 0, NULL);
+    ok(thread != NULL, "CreateThread failed\n");
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+
+    ok(IsWindow(def), "not a window\n");
+    def2 = ImmGetDefaultIMEWnd(hwnd);
+    ok(def2 == def, "ImmGetDefaultIMEWnd(hwnd) returned %p\n", def2);
+    ok(IsWindow(def), "not a window\n");
+    msg_spy_pump_msg_queue();
+    ok(!IsWindow(def), "window is still valid\n");
+    def = ImmGetDefaultIMEWnd(hwnd);
+    ok(!def, "ImmGetDefaultIMEWnd(hwnd) returned %p\n", def);
 
     r = ImmDisableIME(-1);
     ok(r, "ImmDisableIME(-1) failed\n");
@@ -2331,6 +2461,7 @@ START_TEST(imm32) {
         test_ImmSetCompositionString();
         test_ImmIME();
         test_ImmAssociateContextEx();
+        test_NtUserAssociateInputContext();
         test_ImmThreads();
         test_ImmIsUIMessage();
         test_ImmGetContext();

@@ -285,6 +285,12 @@ typedef enum {
   umAddBackToUndo
 } ME_UndoMode;
 
+typedef enum {
+  undoActive,
+  undoSuspended,
+  undoDisabled
+} ME_UndoControlState;
+
 enum undo_type
 {
     undo_insert_run,
@@ -402,6 +408,7 @@ typedef struct tagME_TextEditor
   int nUndoStackSize;
   int nUndoLimit;
   ME_UndoMode nUndoMode;
+  ME_UndoControlState undo_ctl_state;
   int nParagraphs;
   LONG nLastSelStart, nLastSelEnd;
   ME_Paragraph *last_sel_start_para, *last_sel_end_para;
@@ -422,6 +429,7 @@ typedef struct tagME_TextEditor
   BOOL AutoURLDetect_bEnable;
   WCHAR password_char;
   BOOL bHaveFocus;
+  DWORD freeze_count;
   /*for IME */
   int imeStartIndex;
   DWORD selofs; /* The size of the selection bar on the left side of control */

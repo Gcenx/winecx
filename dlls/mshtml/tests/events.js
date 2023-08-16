@@ -198,6 +198,21 @@ sync_test("add_remove_listener", function() {
     calls = "";
     div.click();
     ok(calls === "", "calls = " + calls);
+
+    /* test undefined function argument */
+    div.addEventListener("click", undefined, false);
+
+    calls = "";
+    div.click();
+    ok(calls === "", "calls = " + calls);
+
+    div.addEventListener("click", listener, false);
+    div.removeEventListener("click", undefined);
+
+    calls = "";
+    div.click();
+    ok(calls === "listener,", "calls = " + calls);
+    div.removeEventListener("click", listener);
 });
 
 sync_test("event_phase", function() {
@@ -745,6 +760,7 @@ sync_test("keyboard_event", function() {
     ok(e.location === 0, "location = " + e.location);
     ok(e.detail === 0, "detail = " + e.detail);
     ok(e.which === 0, "which = " + e.which);
+    ok(e.locale === "", "locale = " + e.locale);
 });
 
 sync_test("custom_event", function() {
@@ -797,6 +813,16 @@ async_test("detached_img_error_event", function() {
     img.src = "about:blank";
 });
 
+async_test("img_wrong_content_type", function() {
+    var img = new Image();
+    img.onload = function() {
+        ok(img.width === 2, "width = " + img.width);
+        ok(img.height === 2, "height = " + img.height);
+        next_test();
+    }
+    img.src = "img.png?content-type=image/jpeg";
+});
+
 async_test("message event", function() {
     var listener_called = false;
 
@@ -808,6 +834,6 @@ async_test("message event", function() {
         next_test();
     });
 
-    window.postMessage("test", "http://winetest.example.org");
+    window.postMessage("test", "httP://wineTest.example.org");
     ok(listener_called == false, "listener already called");
 });

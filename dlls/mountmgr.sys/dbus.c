@@ -573,7 +573,7 @@ found:
     while (p_dbus_connection_read_write_dispatch( connection, -1 )) /* nothing */ ;
 }
 
-#if !defined(HAVE_SYSTEMCONFIGURATION_SCDYNAMICSTORECOPYDHCPINFO_H) || !defined(HAVE_SYSTEMCONFIGURATION_SCNETWORKCONFIGURATION_H)
+#if !defined(__APPLE__)
 
 /* The udisks dispatch loop will block all threads using the same connection, so we'll
    use a private connection. Multiple threads can make methods calls at the same time
@@ -600,6 +600,9 @@ static DBusMessage *device_by_iface_request( const char *iface )
     DBusMessage *request, *reply;
     DBusMessageIter iter;
     DBusError error;
+    DBusConnection *connection = get_dhcp_connection();
+
+    if (!connection) return NULL;
 
     request = p_dbus_message_new_method_call( "org.freedesktop.NetworkManager", "/org/freedesktop/NetworkManager",
                                               "org.freedesktop.NetworkManager", "GetDeviceByIpIface" );
@@ -609,7 +612,7 @@ static DBusMessage *device_by_iface_request( const char *iface )
     p_dbus_message_iter_append_basic( &iter, DBUS_TYPE_STRING, &iface );
 
     p_dbus_error_init( &error );
-    reply = p_dbus_connection_send_with_reply_and_block( get_dhcp_connection(), request, -1, &error );
+    reply = p_dbus_connection_send_with_reply_and_block( connection, request, -1, &error );
     p_dbus_message_unref( request );
     if (!reply)
     {

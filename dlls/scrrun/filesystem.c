@@ -897,7 +897,7 @@ static HRESULT create_textstream(const WCHAR *filename, DWORD disposition, IOMod
     {
         stream->unicode = format == TristateTrue;
         /* Write Unicode BOM */
-        if (stream->unicode && (disposition == CREATE_ALWAYS || disposition == CREATE_NEW)) {
+        if (stream->unicode && (disposition == CREATE_ALWAYS || disposition == CREATE_NEW || disposition == TRUNCATE_EXISTING)) {
             DWORD written = 0;
             BOOL ret = WriteFile(stream->file, &utf16bom, sizeof(utf16bom), &written, NULL);
             if (!ret || written != sizeof(utf16bom)) {
@@ -939,7 +939,20 @@ static HRESULT create_textstream(const WCHAR *filename, DWORD disposition, IOMod
 
             stream->eof = read != sizeof(buf);
         }
-        else SetFilePointer(stream->file, 0, 0, FILE_END);
+        else
+        {
+            LONG filePosHigh = 0;
+            DWORD filePosLow = SetFilePointer(stream->file, 0, &filePosHigh, FILE_END);
+            if(stream->unicode && filePosHigh == 0 && filePosLow == 0) {
+                /* unicode ForAppending to an empty file, write BOM */
+                DWORD written = 0;
+                BOOL ret = WriteFile(stream->file, &utf16bom, sizeof(utf16bom), &written, NULL);
+                if (!ret || written != sizeof(utf16bom)) {
+                    ITextStream_Release(&stream->ITextStream_iface);
+                    return create_error(GetLastError());
+                }
+            }
+        }
     }
 
     init_classinfo(&CLSID_TextStream, (IUnknown *)&stream->ITextStream_iface, &stream->classinfo);
@@ -2699,6 +2712,7 @@ static const IFolderVtbl foldervtbl = {
 HRESULT create_folder(const WCHAR *path, IFolder **folder)
 {
     struct folder *object;
+    DWORD len;
 
     *folder = NULL;
 
@@ -2709,11 +2723,26 @@ HRESULT create_folder(const WCHAR *path, IFolder **folder)
 
     object->IFolder_iface.lpVtbl = &foldervtbl;
     object->ref = 1;
-    object->path = SysAllocString(path);
-    if (!object->path)
+
+    len = GetFullPathNameW(path, 0, NULL, NULL);
+    if (!len)
+    {
+        free(object);
+        return E_FAIL;
+    }
+
+    object->path = SysAllocStringLen(NULL, len);
+    if(!object->path)
     {
         free(object);
         return E_OUTOFMEMORY;
+    }
+
+    if (!GetFullPathNameW(path, len, object->path, NULL))
+    {
+        SysFreeString(object->path);
+        free(object);
+        return E_FAIL;
     }
 
     init_classinfo(&CLSID_Folder, (IUnknown *)&object->IFolder_iface, &object->classinfo);
@@ -2947,11 +2976,17 @@ static HRESULT get_date_from_filetime(const FILETIME *ft, DATE *date)
     return S_OK;
 }
 
-static HRESULT WINAPI file_get_DateCreated(IFile *iface, DATE *pdate)
+static HRESULT WINAPI file_get_DateCreated(IFile *iface, DATE *date)
 {
     struct file *This = impl_from_IFile(iface);
-    FIXME("(%p)->(%p)\n", This, pdate);
-    return E_NOTIMPL;
+    WIN32_FILE_ATTRIBUTE_DATA attrs;
+
+    TRACE("(%p)->(%p)\n", This, date);
+
+    if (GetFileAttributesExW(This->path, GetFileExInfoStandard, &attrs))
+        return get_date_from_filetime(&attrs.ftCreationTime, date);
+
+    return E_FAIL;
 }
 
 static HRESULT WINAPI file_get_DateLastModified(IFile *iface, DATE *date)
@@ -3449,11 +3484,15 @@ static HRESULT WINAPI filesys_GetTempName(IFileSystem3 *iface, BSTR *result)
     if (!result)
         return E_POINTER;
 
-    if (!(*result = SysAllocStringLen(NULL, 13)))
+    if (!(*result = SysAllocStringLen(NULL, 12)))
         return E_OUTOFMEMORY;
 
     if(!RtlGenRandom(&random, sizeof(random)))
+    {
+        SysFreeString(*result);
         return E_FAIL;
+    }
+
     swprintf(*result, 13, L"rad%05X.tmp", random & 0xfffff);
     return S_OK;
 }
@@ -3758,6 +3797,9 @@ static HRESULT WINAPI filesys_MoveFile(IFileSystem3 *iface, BSTR source, BSTR de
 {
     TRACE("%p %s %s\n", iface, debugstr_w(source), debugstr_w(destination));
 
+    if(!source || !destination)
+        return E_INVALIDARG;
+
     return MoveFileW(source, destination) ? S_OK : create_error(GetLastError());
 }
 
@@ -4020,7 +4062,11 @@ static HRESULT WINAPI filesys_OpenTextFile(IFileSystem3 *iface, BSTR filename,
 
     TRACE("(%p)->(%s %d %d %d %p)\n", iface, debugstr_w(filename), mode, create, format, stream);
 
-    disposition = create == VARIANT_TRUE ? OPEN_ALWAYS : OPEN_EXISTING;
+    if(mode == ForWriting) {
+        disposition = create == VARIANT_TRUE ? CREATE_ALWAYS : TRUNCATE_EXISTING;
+    } else {
+        disposition = create == VARIANT_TRUE ? OPEN_ALWAYS : OPEN_EXISTING;
+    }
     return create_textstream(filename, disposition, mode, format, stream);
 }
 

@@ -19,8 +19,6 @@
 #ifndef __D3DX11ASYNC_H__
 #define __D3DX11ASYNC_H__
 
-#include "wine/winheader_enter.h"
-
 #include "d3dx11.h"
 
 #ifdef __cplusplus
@@ -49,7 +47,5 @@ HRESULT WINAPI D3DX11CompileFromFileW(const WCHAR *filename, const D3D10_SHADER_
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

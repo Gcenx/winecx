@@ -21,8 +21,6 @@
 #ifndef __WINE_MSACMDRV_H
 #define __WINE_MSACMDRV_H
 
-#include "wine/winheader_enter.h"
-
 #include <stdarg.h>
 
 #include <windef.h>
@@ -158,7 +156,5 @@ typedef struct _ACMDRVFORMATSUGGEST
   PWAVEFORMATEX   pwfxDst;
   DWORD           cbwfxDst;
 } ACMDRVFORMATSUGGEST, *PACMDRVFORMATSUGGEST;
-
-#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_MSACMDRV_H */

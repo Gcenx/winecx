@@ -49,11 +49,11 @@ static HRESULT navigate_href_new_window(HTMLElement *element, nsAString *href_st
     HRESULT hres;
 
     nsAString_GetData(href_str, &href);
-    hres = create_relative_uri(element->node.doc->basedoc.window, href, &uri);
+    hres = create_relative_uri(element->node.doc->outer_window, href, &uri);
     if(FAILED(hres))
         return hres;
 
-    hres = navigate_new_window(element->node.doc->basedoc.window, uri, target, NULL, NULL);
+    hres = navigate_new_window(element->node.doc->outer_window, uri, target, NULL, NULL);
     IUri_Release(uri);
     return hres;
 }
@@ -110,7 +110,7 @@ static HRESULT navigate_href(HTMLElement *element, nsAString *href_str, nsAStrin
     const PRUnichar *href;
     HRESULT hres;
 
-    window = get_target_window(element->node.doc->basedoc.window, target_str, &use_new_window);
+    window = get_target_window(element->node.doc->outer_window, target_str, &use_new_window);
     if(!window) {
         if(use_new_window) {
             const PRUnichar *target;
@@ -517,6 +517,10 @@ static HRESULT WINAPI HTMLAnchorElement_get_port(IHTMLAnchorElement *iface, BSTR
     IUri_Release(uri);
     if(FAILED(hres))
         return hres;
+    if(hres != S_OK) {
+        *p = NULL;
+        return S_OK;
+    }
 
     len = swprintf(buf, ARRAY_SIZE(buf), L"%u", port);
     str = SysAllocStringLen(buf, len);
@@ -556,6 +560,11 @@ static HRESULT WINAPI HTMLAnchorElement_get_protocol(IHTMLAnchorElement *iface, 
     IUri_Release(uri);
     if(FAILED(hres))
         return hres;
+    if(hres != S_OK) {
+        SysFreeString(scheme);
+        *p = NULL;
+        return S_OK;
+    }
 
     len = SysStringLen(scheme);
     if(len) {
@@ -870,8 +879,10 @@ static const NodeImplVtbl HTMLAnchorElementImplVtbl = {
     HTMLElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLAnchorElement_handle_event,
     HTMLElement_get_attr_col,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -903,7 +914,7 @@ HRESULT HTMLAnchorElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, H
     HTMLAnchorElement *ret;
     nsresult nsres;
 
-    ret = heap_alloc_zero(sizeof(HTMLAnchorElement));
+    ret = calloc(1, sizeof(HTMLAnchorElement));
     if(!ret)
         return E_OUTOFMEMORY;
 

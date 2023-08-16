@@ -19,8 +19,6 @@
 #ifndef _GDIPLUSCOLORMATRIX_H
 #define _GDIPLUSCOLORMATRIX_H
 
-#include "wine/winheader_enter.h"
-
 struct ColorMatrix
 {
     REAL m[5][5];
@@ -71,7 +69,5 @@ typedef struct ColorMatrix ColorMatrix;
 typedef struct ColorMap ColorMap;
 
 #endif  /* end of c typedefs */
-
-#include "wine/winheader_exit.h"
 
 #endif  /* _GDIPLUSCOLORMATRIX_H */

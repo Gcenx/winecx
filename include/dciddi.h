@@ -21,8 +21,6 @@
 #ifndef __WINE_DCIDDI_H
 #define __WINE_DCIDDI_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -81,7 +79,5 @@ typedef struct _DCISURFACEINFO {
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_DCIDDI_H */

@@ -598,7 +598,6 @@ DWORD WINAPI GetAdaptersInfo( IP_ADAPTER_INFO *info, ULONG *size )
     DWORD len, i, uni, fwd;
     NET_LUID *if_keys = NULL;
     struct nsi_ndis_ifinfo_rw *if_rw = NULL;
-    struct nsi_ndis_ifinfo_dynamic *if_dyn = NULL;
     struct nsi_ndis_ifinfo_static *if_stat = NULL;
     struct nsi_ipv4_unicast_key *uni_keys = NULL;
     struct nsi_ip_unicast_rw *uni_rw = NULL;
@@ -612,7 +611,8 @@ DWORD WINAPI GetAdaptersInfo( IP_ADAPTER_INFO *info, ULONG *size )
 
     err = NsiAllocateAndGetTable( 1, &NPI_MS_NDIS_MODULEID, NSI_NDIS_IFINFO_TABLE,
                                   (void **)&if_keys, sizeof(*if_keys), (void **)&if_rw, sizeof(*if_rw),
-                                  (void **)&if_dyn, sizeof(*if_dyn), (void **)&if_stat, sizeof(*if_stat), &if_count, 0 );
+                                  NULL, 0, (void **)&if_stat, sizeof(*if_stat), &if_count, 0 );
+
     if (err) return err;
     for (i = 0; i < if_count; i++)
     {
@@ -726,7 +726,7 @@ err:
     heap_free( wins_servers );
     NsiFreeTable( fwd_keys, NULL, NULL, NULL );
     NsiFreeTable( uni_keys, uni_rw, NULL, NULL );
-    NsiFreeTable( if_keys, if_rw, if_dyn, if_stat );
+    NsiFreeTable( if_keys, if_rw, NULL, if_stat );
     return err;
 }
 
@@ -959,12 +959,14 @@ static DWORD unicast_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG family, UL
             {
                 SOCKADDR_IN *in = (SOCKADDR_IN *)addr->Address.lpSockaddr;
                 in->sin_addr = key4->addr;
+                aa->Ipv4Enabled = TRUE;
             }
             else
             {
                 SOCKADDR_IN6 *in6 = (SOCKADDR_IN6 *)addr->Address.lpSockaddr;
                 in6->sin6_addr = key6->addr;
                 in6->sin6_scope_id = dyn[i].scope_id;
+                aa->Ipv6Enabled = TRUE;
             }
             addr->PrefixOrigin = rw[i].prefix_origin;
             addr->SuffixOrigin = rw[i].suffix_origin;
@@ -2282,6 +2284,9 @@ err:
 static int ipnetrow_cmp( const void *a, const void *b )
 {
     const MIB_IPNETROW *rowA = a, *rowB = b;
+
+    if (rowA->dwIndex != rowB->dwIndex) return DWORD_cmp( rowA->dwIndex, rowB->dwIndex );
+
     return DWORD_cmp(RtlUlongByteSwap( rowA->dwAddr ), RtlUlongByteSwap( rowB->dwAddr ));
 }
 
@@ -2326,6 +2331,13 @@ DWORD WINAPI GetIpNetTable( MIB_IPNETTABLE *table, ULONG *size, BOOL sort )
     }
 
     table->dwNumEntries = count;
+
+    if (!count)
+    {
+        err = ERROR_NO_DATA;
+        goto err;
+    }
+
     for (i = 0; i < count; i++)
     {
         MIB_IPNETROW *row = table->table + i;
@@ -2337,7 +2349,8 @@ DWORD WINAPI GetIpNetTable( MIB_IPNETTABLE *table, ULONG *size, BOOL sort )
         memset( row->bPhysAddr + row->dwPhysAddrLen, 0,
                 sizeof(row->bPhysAddr) - row->dwPhysAddrLen );
         row->dwAddr = keys[i].addr.s_addr;
-        switch (dyn->state)
+
+        switch (dyn[i].state)
         {
         case NlnsUnreachable:
         case NlnsIncomplete:
@@ -2588,6 +2601,7 @@ static DWORD get_dns_server_list( const NET_LUID *luid, IP_ADDR_STRING *list, IP
     for (;;)
     {
         err = DnsQueryConfig( DnsConfigDnsServerList, 0, NULL, NULL, servers, &array_len );
+        if (err != ERROR_SUCCESS && err != ERROR_MORE_DATA) goto err;
         num = (array_len - FIELD_OFFSET(IP4_ARRAY, AddrArray[0])) / sizeof(IP4_ADDRESS);
         needed = num * sizeof(IP_ADDR_STRING);
         if (!list || *len < needed)
@@ -4617,6 +4631,21 @@ DWORD WINAPI IcmpSendEcho2( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_rou
                             opts, reply, reply_size, timeout );
 }
 
+struct icmp_apc_ctxt
+{
+    void *apc_ctxt;
+    PIO_APC_ROUTINE apc_routine;
+    IO_STATUS_BLOCK iosb;
+};
+
+void WINAPI icmp_apc_routine( void *context, IO_STATUS_BLOCK *iosb, ULONG reserved )
+{
+    struct icmp_apc_ctxt *ctxt = context;
+
+    ctxt->apc_routine( ctxt->apc_ctxt, iosb, reserved );
+    heap_free( ctxt );
+}
+
 /***********************************************************************
  *    IcmpSendEcho2Ex (IPHLPAPI.@)
  */
@@ -4625,17 +4654,22 @@ DWORD WINAPI IcmpSendEcho2Ex( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_r
                               void *reply, DWORD reply_size, DWORD timeout )
 {
     struct icmp_handle_data *data = (struct icmp_handle_data *)handle;
+    struct icmp_apc_ctxt *ctxt = heap_alloc( sizeof(*ctxt) );
+    IO_STATUS_BLOCK *iosb = &ctxt->iosb;
     DWORD opt_size, in_size, ret = 0;
     struct nsiproxy_icmp_echo *in;
     HANDLE request_event;
-    IO_STATUS_BLOCK iosb;
     NTSTATUS status;
 
     if (handle == INVALID_HANDLE_VALUE || !reply)
     {
+        heap_free( ctxt );
         SetLastError( ERROR_INVALID_PARAMETER );
         return 0;
     }
+
+    ctxt->apc_routine = apc_routine;
+    ctxt->apc_ctxt = apc_ctxt;
 
     opt_size = opts ? (opts->OptionsSize + 3) & ~3 : 0;
     in_size = FIELD_OFFSET(struct nsiproxy_icmp_echo, data[opt_size + request_size]);
@@ -4643,6 +4677,7 @@ DWORD WINAPI IcmpSendEcho2Ex( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_r
 
     if (!in)
     {
+        heap_free( ctxt );
         SetLastError( IP_NO_RESOURCES );
         return 0;
     }
@@ -4667,20 +4702,21 @@ DWORD WINAPI IcmpSendEcho2Ex( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_r
 
     request_event = event ? event : (apc_routine ? NULL : CreateEventW( NULL, 0, 0, NULL ));
 
-    status = NtDeviceIoControlFile( data->nsi_device, request_event, apc_routine, apc_ctxt,
-                                    &iosb, IOCTL_NSIPROXY_WINE_ICMP_ECHO, in, in_size,
-                                    reply, reply_size );
+    status = NtDeviceIoControlFile( data->nsi_device, request_event, apc_routine ? icmp_apc_routine : NULL,
+                                    apc_routine ? ctxt : apc_ctxt, iosb, IOCTL_NSIPROXY_WINE_ICMP_ECHO,
+                                    in, in_size, reply, reply_size );
 
     if (status == STATUS_PENDING)
     {
         if (!event && !apc_routine && !WaitForSingleObject( request_event, INFINITE ))
-            status = iosb.Status;
+            status = iosb->Status;
     }
 
     if (!status)
         ret = IcmpParseReplies( reply, reply_size );
 
     if (!event && request_event) CloseHandle( request_event );
+    if (!apc_routine || status != STATUS_PENDING) heap_free( ctxt );
     heap_free( in );
 
     if (status) SetLastError( RtlNtStatusToDosError( status ) );

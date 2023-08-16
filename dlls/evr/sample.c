@@ -920,19 +920,21 @@ static ULONG WINAPI video_sample_AddRef(IMFSample *iface)
 static ULONG WINAPI video_sample_Release(IMFSample *iface)
 {
     struct video_sample *sample = impl_from_IMFSample(iface);
-    ULONG refcount;
+    ULONG refcount = InterlockedDecrement(&sample->refcount);
+    IMFAsyncResult *tracked_result = NULL;
 
-    IMFSample_LockStore(sample->sample);
-    if (sample->tracked_result && sample->tracked_refcount == (sample->refcount - 1))
+    EnterCriticalSection(&sample->cs);
+    if (sample->tracked_result && sample->tracked_refcount == refcount)
     {
-        video_sample_tracking_thread_invoke(sample->tracked_result);
-        IMFAsyncResult_Release(sample->tracked_result);
+        tracked_result = sample->tracked_result;
+        video_sample_tracking_thread_invoke(tracked_result);
         sample->tracked_result = NULL;
         sample->tracked_refcount = 0;
     }
-    IMFSample_UnlockStore(sample->sample);
+    LeaveCriticalSection(&sample->cs);
 
-    refcount = InterlockedDecrement(&sample->refcount);
+    if (tracked_result)
+        IMFAsyncResult_Release(tracked_result);
 
     TRACE("%p, refcount %lu.\n", iface, refcount);
 
@@ -1444,8 +1446,7 @@ static HRESULT WINAPI tracked_video_sample_SetAllocator(IMFTrackedSample *iface,
 
     TRACE("%p, %p, %p.\n", iface, sample_allocator, state);
 
-    IMFSample_LockStore(sample->sample);
-
+    EnterCriticalSection(&sample->cs);
     if (sample->tracked_result)
         hr = MF_E_NOTACCEPTING;
     else
@@ -1462,8 +1463,7 @@ static HRESULT WINAPI tracked_video_sample_SetAllocator(IMFTrackedSample *iface,
             }
         }
     }
-
-    IMFSample_UnlockStore(sample->sample);
+    LeaveCriticalSection(&sample->cs);
 
     return hr;
 }
@@ -1747,7 +1747,10 @@ HRESULT WINAPI MFCreateVideoSampleFromSurface(IUnknown *surface, IMFSample **sam
     }
 
     if (buffer)
+    {
         IMFSample_AddBuffer(object->sample, buffer);
+        IMFMediaBuffer_Release(buffer);
+    }
 
     video_sample_create_tracking_thread();
 

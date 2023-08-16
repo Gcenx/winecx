@@ -19,8 +19,6 @@
 #ifndef __WINE_WINSTRING_H
 #define __WINE_WINSTRING_H
 
-#include "wine/winheader_enter.h"
-
 #include <hstring.h>
 
 #ifdef __cplusplus
@@ -52,7 +50,5 @@ HRESULT WINAPI WindowsTrimStringStart(HSTRING str, HSTRING charstr, HSTRING *out
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_WINSTRING_H */

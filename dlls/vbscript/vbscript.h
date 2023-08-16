@@ -31,7 +31,6 @@
 #include "vbscript_classes.h"
 #include "vbscript_defs.h"
 
-#include "wine/heap.h"
 #include "wine/list.h"
 
 typedef struct {
@@ -136,6 +135,8 @@ typedef struct {
 
     script_ctx_t *ctx;
     heap_pool_t heap;
+
+    unsigned int rnd;
 } ScriptDisp;
 
 typedef struct _builtin_prop_t builtin_prop_t;
@@ -182,6 +183,7 @@ static inline VARIANT *get_arg(DISPPARAMS *dp, DWORD i)
 struct _script_ctx_t {
     IActiveScriptSite *site;
     LCID lcid;
+    UINT codepage;
 
     IInternetHostSecurityManager *secmgr;
     DWORD safeopt;
@@ -382,6 +384,7 @@ void clear_ei(EXCEPINFO*) DECLSPEC_HIDDEN;
 HRESULT report_script_error(script_ctx_t*,const vbscode_t*,unsigned) DECLSPEC_HIDDEN;
 void detach_global_objects(script_ctx_t*) DECLSPEC_HIDDEN;
 HRESULT get_builtin_id(BuiltinDisp*,const WCHAR*,DISPID*) DECLSPEC_HIDDEN;
+HRESULT array_access(SAFEARRAY *array, DISPPARAMS *dp, VARIANT **ret) DECLSPEC_HIDDEN;
 
 void release_regexp_typelib(void) DECLSPEC_HIDDEN;
 HRESULT get_dispatch_typeinfo(ITypeInfo**) DECLSPEC_HIDDEN;
@@ -399,9 +402,9 @@ static inline BOOL is_digit(WCHAR c)
 HRESULT create_regexp(IDispatch**) DECLSPEC_HIDDEN;
 BSTR string_replace(BSTR,BSTR,BSTR,int,int,int) DECLSPEC_HIDDEN;
 
-HRESULT map_hres(HRESULT) DECLSPEC_HIDDEN;
+void map_vbs_exception(EXCEPINFO *) DECLSPEC_HIDDEN;
 
-HRESULT create_safearray_iter(SAFEARRAY *sa, IEnumVARIANT **ev) DECLSPEC_HIDDEN;
+HRESULT create_safearray_iter(SAFEARRAY *sa, BOOL owned, IEnumVARIANT **ev) DECLSPEC_HIDDEN;
 
 #define FACILITY_VBS 0xa
 #define MAKE_VBSERROR(code) MAKE_HRESULT(SEVERITY_ERROR, FACILITY_VBS, code)
@@ -410,23 +413,6 @@ HRESULT WINAPI VBScriptFactory_CreateInstance(IClassFactory*,IUnknown*,REFIID,vo
 HRESULT WINAPI VBScriptRegExpFactory_CreateInstance(IClassFactory*,IUnknown*,REFIID,void**) DECLSPEC_HIDDEN;
 
 BSTR get_vbscript_string(int) DECLSPEC_HIDDEN;
-BSTR get_vbscript_error_string(HRESULT) DECLSPEC_HIDDEN;
-
-static inline LPWSTR heap_strdupW(LPCWSTR str)
-{
-    LPWSTR ret = NULL;
-
-    if(str) {
-        DWORD size;
-
-        size = (lstrlenW(str)+1)*sizeof(WCHAR);
-        ret = heap_alloc(size);
-        if(ret)
-            memcpy(ret, str, size);
-    }
-
-    return ret;
-}
 
 #define VBSCRIPT_BUILD_VERSION 16978
 #define VBSCRIPT_MAJOR_VERSION 5

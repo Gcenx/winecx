@@ -19,8 +19,6 @@
 #ifndef __WINE_FILEAPI_H
 #define __WINE_FILEAPI_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -39,7 +37,5 @@ WINBASEAPI HANDLE WINAPI CreateFile2(LPCWSTR,DWORD,DWORD,DWORD,LPCREATEFILE2_EXT
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_FILEAPI_H */

@@ -33,6 +33,21 @@
 WINE_DEFAULT_DEBUG_CHANNEL(wow);
 
 
+static MEMORY_RANGE_ENTRY *memory_range_entry_array_32to64( const MEMORY_RANGE_ENTRY32 *addresses32,
+                                                            ULONG count )
+{
+    MEMORY_RANGE_ENTRY *addresses = Wow64AllocateTemp( sizeof(MEMORY_RANGE_ENTRY) * count );
+    ULONG i;
+
+    for (i = 0; i < count; i++)
+    {
+        addresses[i].VirtualAddress = ULongToPtr( addresses32[i].VirtualAddress );
+        addresses[i].NumberOfBytes = addresses32[i].NumberOfBytes;
+    }
+
+    return addresses;
+}
+
 /**********************************************************************
  *           wow64_NtAllocateVirtualMemory
  */
@@ -76,10 +91,69 @@ NTSTATUS WINAPI wow64_NtAllocateVirtualMemoryEx( UINT *args )
     void *addr;
     SIZE_T size;
     NTSTATUS status;
+    SIZE_T alloc_size = count * sizeof(*params);
+    MEM_EXTENDED_PARAMETER *params64;
+    BOOL set_highest_address = (!*addr32 && process == GetCurrentProcess());
+    BOOL add_address_requirements = set_highest_address;
+    MEM_ADDRESS_REQUIREMENTS *buf;
+    unsigned int i;
 
-    if (count) FIXME( "%ld extended parameters %p\n", count, params );
+    if (count && !params) return STATUS_INVALID_PARAMETER;
+
+    for (i = 0; i < count; ++i)
+    {
+        if (params[i].Type == MemExtendedParameterAddressRequirements)
+        {
+            alloc_size += sizeof(MEM_ADDRESS_REQUIREMENTS);
+            add_address_requirements = FALSE;
+        }
+        else if (params[i].Type && params[i].Type < MemExtendedParameterMax)
+        {
+            FIXME( "Unsupported parameter type %d.\n", params[i].Type);
+        }
+    }
+
+    if (add_address_requirements)
+        alloc_size += sizeof(*params) + sizeof(MEM_ADDRESS_REQUIREMENTS);
+    params64 = Wow64AllocateTemp( alloc_size );
+    memcpy( params64, params, count * sizeof(*params64) );
+    if (add_address_requirements)
+    {
+        buf = (MEM_ADDRESS_REQUIREMENTS *)((char *)params64 + (count + 1) * sizeof(*params64));
+        params64[count].Type = MemExtendedParameterAddressRequirements;
+        params64[count].Pointer = buf;
+        memset(buf, 0, sizeof(*buf));
+        buf->HighestEndingAddress = (void *)highest_user_address;
+        ++buf;
+    }
+    else
+    {
+        buf = (MEM_ADDRESS_REQUIREMENTS *)((char *)params64 + count * sizeof(*params64));
+    }
+    for (i = 0; i < count; ++i)
+    {
+        if (params64[i].Type == MemExtendedParameterAddressRequirements)
+        {
+            MEM_ADDRESS_REQUIREMENTS32 *p = (MEM_ADDRESS_REQUIREMENTS32 *)params[i].Pointer;
+
+            buf->LowestStartingAddress = ULongToPtr(p->LowestStartingAddress);
+            if (p->HighestEndingAddress)
+            {
+                if (p->HighestEndingAddress > highest_user_address) return STATUS_INVALID_PARAMETER;
+                buf->HighestEndingAddress = ULongToPtr(p->HighestEndingAddress);
+            }
+            else
+            {
+                buf->HighestEndingAddress = set_highest_address ? (void *)highest_user_address : NULL;
+            }
+            buf->Alignment = p->Alignment;
+            params64[i].Pointer = buf;
+            ++buf;
+        }
+    }
+
     status = NtAllocateVirtualMemoryEx( process, addr_32to64( &addr, addr32 ), size_32to64( &size, size32 ),
-                                        type, protect, params, count );
+                                        type, protect, params64, count + add_address_requirements );
     if (!status)
     {
         put_addr( addr32, addr );
@@ -297,6 +371,40 @@ NTSTATUS WINAPI wow64_NtMapViewOfSection( UINT *args )
     return status;
 }
 
+/**********************************************************************
+ *           wow64_NtMapViewOfSectionEx
+ */
+NTSTATUS WINAPI wow64_NtMapViewOfSectionEx( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    HANDLE process = get_handle( &args );
+    ULONG *addr32 = get_ptr( &args );
+    const LARGE_INTEGER *offset = get_ptr( &args );
+    ULONG *size32 = get_ptr( &args );
+    ULONG alloc = get_ulong( &args );
+    ULONG protect = get_ulong( &args );
+    MEM_EXTENDED_PARAMETER *params = get_ptr( &args );
+    ULONG params_count = get_ulong( &args );
+
+    void *addr;
+    SIZE_T size;
+    NTSTATUS status;
+
+    status = NtMapViewOfSectionEx( handle, process, addr_32to64( &addr, addr32 ), offset, size_32to64( &size, size32 ), alloc,
+            protect, params, params_count );
+    if (NT_SUCCESS(status))
+    {
+        SECTION_IMAGE_INFORMATION info;
+
+        if (!NtQuerySection( handle, SectionImageInformation, &info, sizeof(info), NULL ))
+        {
+            if (info.Machine == current_machine) init_image_mapping( addr );
+        }
+        put_addr( addr32, addr );
+        put_size( size32, size );
+    }
+    return status;
+}
 
 /**********************************************************************
  *           wow64_NtProtectVirtualMemory
@@ -385,6 +493,34 @@ NTSTATUS WINAPI wow64_NtQueryVirtualMemory( UINT *args )
         break;
     }
 
+    case MemoryRegionInformation: /* MEMORY_REGION_INFORMATION */
+    {
+        if (len < sizeof(MEMORY_REGION_INFORMATION32))
+            status = STATUS_INFO_LENGTH_MISMATCH;
+        if ((ULONG_PTR)addr > highest_user_address)
+            status = STATUS_INVALID_PARAMETER;
+        else
+        {
+            MEMORY_REGION_INFORMATION info;
+            MEMORY_REGION_INFORMATION32 *info32 = ptr;
+
+            if (!(status = NtQueryVirtualMemory( handle, addr, class, &info, sizeof(info), &res_len )))
+            {
+                info32->AllocationBase = PtrToUlong( info.AllocationBase );
+                info32->AllocationProtect = info.AllocationProtect;
+                info32->RegionType = info.RegionType;
+                info32->RegionSize = info.RegionSize;
+                info32->CommitSize = info.CommitSize;
+                info32->PartitionId = info.PartitionId;
+                info32->NodePreference = info.NodePreference;
+                if ((ULONG_PTR)info.AllocationBase + info.RegionSize > highest_user_address)
+                    info32->RegionSize = highest_user_address - (ULONG_PTR)info.AllocationBase + 1;
+            }
+        }
+        res_len = sizeof(MEMORY_REGION_INFORMATION32);
+        break;
+    }
+
     case MemoryWorkingSetExInformation:  /* MEMORY_WORKING_SET_EX_INFORMATION */
     {
         MEMORY_WORKING_SET_EX_INFORMATION32 *info32 = ptr;
@@ -452,6 +588,37 @@ NTSTATUS WINAPI wow64_NtResetWriteWatch( UINT *args )
 
 
 /**********************************************************************
+ *           wow64_NtSetInformationVirtualMemory
+ */
+NTSTATUS WINAPI wow64_NtSetInformationVirtualMemory( UINT *args )
+{
+    HANDLE process = get_handle( &args );
+    VIRTUAL_MEMORY_INFORMATION_CLASS info_class = get_ulong( &args );
+    ULONG count = get_ulong( &args );
+    MEMORY_RANGE_ENTRY32 *addresses32 = get_ptr( &args );
+    PVOID ptr = get_ptr( &args );
+    ULONG len = get_ulong( &args );
+
+    MEMORY_RANGE_ENTRY *addresses;
+
+    if (!count) return STATUS_INVALID_PARAMETER_3;
+    addresses = memory_range_entry_array_32to64( addresses32, count );
+
+    switch (info_class)
+    {
+    case VmPrefetchInformation:
+        break;
+    default:
+        FIXME( "(%p,info_class=%u,%lu,%p,%p,%lu): not implemented\n",
+               process, info_class, count, addresses32, ptr, len );
+        return STATUS_INVALID_PARAMETER_2;
+    }
+
+    return NtSetInformationVirtualMemory( process, info_class, count, addresses, ptr, len );
+}
+
+
+/**********************************************************************
  *           wow64_NtSetLdtEntries
  */
 NTSTATUS WINAPI wow64_NtSetLdtEntries( UINT *args )
@@ -503,6 +670,19 @@ NTSTATUS WINAPI wow64_NtUnmapViewOfSection( UINT *args )
     void *addr = get_ptr( &args );
 
     return NtUnmapViewOfSection( process, addr );
+}
+
+
+/**********************************************************************
+ *           wow64_NtUnmapViewOfSectionEx
+ */
+NTSTATUS WINAPI wow64_NtUnmapViewOfSectionEx( UINT *args )
+{
+    HANDLE process = get_handle( &args );
+    void *addr = get_ptr( &args );
+    ULONG flags = get_ulong( &args );
+
+    return NtUnmapViewOfSectionEx( process, addr, flags );
 }
 
 

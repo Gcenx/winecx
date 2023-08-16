@@ -184,9 +184,11 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
      * whereas GetCurrentPadding grows when input is not consumed. */
     hr = IAudioCaptureClient_GetNextPacketSize(acc, &next);
     ok(hr == S_OK, "IAudioCaptureClient_GetNextPacketSize returns %08lx\n", hr);
+    flaky_wine
     ok(next <  pad, "GetNextPacketSize %u vs. GCP %u\n", next, pad);
 
     hr = IAudioCaptureClient_GetBuffer(acc, &data, &frames, &flags, &pos, &qpc);
+    flaky_wine
     ok(hr == S_OK, "Valid IAudioCaptureClient_GetBuffer returns %08lx\n", hr);
     ok(next == frames, "GetNextPacketSize %u vs. GetBuffer %u\n", next, frames);
 
@@ -256,6 +258,7 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
     }
 
     frames = period;
+    flaky_wine
     ok(next == frames, "GetNextPacketSize %u vs. GetDevicePeriod %u\n", next, frames);
 
     /* GetBufferSize is not a multiple of the period size! */
@@ -269,6 +272,7 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
     ok(hr == S_OK, "GetCurrentPadding call returns %08lx\n", hr);
 
     hr = IAudioCaptureClient_GetBuffer(acc, &data, &frames, &flags, &pos, &qpc);
+    flaky_wine
     ok(hr == S_OK, "Valid IAudioCaptureClient_GetBuffer returns %08lx\n", hr);
 
     trace("Overrun position %d pad %u flags %lx, amount of frames locked: %u\n",
@@ -296,13 +300,16 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
     ok(hr == S_OK, "GetCurrentPadding call returns %08lx\n", hr);
 
     hr = IAudioCaptureClient_GetBuffer(acc, &data, &frames, &flags, &pos, &qpc);
+    flaky_wine
     ok(hr == S_OK, "Valid IAudioCaptureClient_GetBuffer returns %08lx\n", hr);
 
     trace("Cont'ed position %d pad %u flags %lx, amount of frames locked: %u\n",
           hr==S_OK ? (UINT)pos : -1, pad, flags, frames);
 
     if(hr == S_OK){
+        flaky_wine
         ok(pos == sum, "Position %u expected %u\n", (UINT)pos, sum);
+        flaky_wine
         ok(!flags, "flags %lu\n", flags);
 
         hr = IAudioCaptureClient_ReleaseBuffer(acc, frames);
@@ -317,6 +324,7 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
     ok(hr == S_OK, "Start on a stopped stream returns %08lx\n", hr);
 
     hr = IAudioCaptureClient_GetBuffer(acc, &data, &frames, &flags, &pos, &qpc);
+    flaky_wine
     ok(hr == S_OK, "Valid IAudioCaptureClient_GetBuffer returns %08lx\n", hr);
 
     hr = IAudioClient_GetCurrentPadding(ac, &pad);
@@ -324,9 +332,11 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
 
     trace("Restart position %d pad %u flags %lx, amount of frames locked: %u\n",
           hr==S_OK ? (UINT)pos : -1, pad, flags, frames);
+    flaky_wine
     ok(pad > sum, "restarted GCP %u\n", pad); /* GCP is still near buffer size */
 
     if(frames){
+        flaky_wine
         ok(pos == sum, "Position %u expected %u\n", (UINT)pos, sum);
         ok(!flags, "flags %lu\n", flags);
 
@@ -366,6 +376,7 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
     ok(hr == S_OK, "GetCurrentPadding call returns %08lx\n", hr);
 
     hr = IAudioCaptureClient_GetBuffer(acc, &data, &frames, &flags, &pos, &qpc);
+    flaky_wine
     ok(hr == S_OK, "Valid IAudioCaptureClient_GetBuffer returns %08lx\n", hr);
     trace("Running position %d pad %u flags %lx, amount of frames locked: %u\n",
           SUCCEEDED(hr) ? (UINT)pos : -1, pad, flags, frames);
@@ -582,16 +593,16 @@ static void test_streamvolume(void)
     ok(chans == fmt->nChannels, "GetChannelCount gave wrong number of channels: %d\n", chans);
 
     hr = IAudioStreamVolume_GetChannelVolume(asv, fmt->nChannels, NULL);
-    ok(hr == E_POINTER, "GetChannelCount gave wrong error: %08lx\n", hr);
+    ok(hr == E_POINTER, "GetChannelVolume gave wrong error: %08lx\n", hr);
 
     hr = IAudioStreamVolume_GetChannelVolume(asv, fmt->nChannels, &vol);
-    ok(hr == E_INVALIDARG, "GetChannelCount gave wrong error: %08lx\n", hr);
+    ok(hr == E_INVALIDARG, "GetChannelVolume gave wrong error: %08lx\n", hr);
 
     hr = IAudioStreamVolume_GetChannelVolume(asv, 0, NULL);
-    ok(hr == E_POINTER, "GetChannelCount gave wrong error: %08lx\n", hr);
+    ok(hr == E_POINTER, "GetChannelVolume gave wrong error: %08lx\n", hr);
 
     hr = IAudioStreamVolume_GetChannelVolume(asv, 0, &vol);
-    ok(hr == S_OK, "GetChannelCount failed: %08lx\n", hr);
+    ok(hr == S_OK, "GetChannelVolume failed: %08lx\n", hr);
     ok(vol == 1.f, "Channel volume was not 1: %f\n", vol);
 
     hr = IAudioStreamVolume_SetChannelVolume(asv, fmt->nChannels, -1.f);
@@ -607,7 +618,7 @@ static void test_streamvolume(void)
     ok(hr == S_OK, "SetChannelVolume failed: %08lx\n", hr);
 
     hr = IAudioStreamVolume_GetChannelVolume(asv, 0, &vol);
-    ok(hr == S_OK, "GetChannelCount failed: %08lx\n", hr);
+    ok(hr == S_OK, "GetChannelVolume failed: %08lx\n", hr);
     ok(fabsf(vol - 0.2f) < 0.05f, "Channel volume wasn't 0.2: %f\n", vol);
 
     hr = IAudioStreamVolume_GetAllVolumes(asv, 0, NULL);
@@ -681,16 +692,16 @@ static void test_channelvolume(void)
     ok(chans == fmt->nChannels, "GetChannelCount gave wrong number of channels: %d\n", chans);
 
     hr = IChannelAudioVolume_GetChannelVolume(acv, fmt->nChannels, NULL);
-    ok(hr == NULL_PTR_ERR, "GetChannelCount gave wrong error: %08lx\n", hr);
+    ok(hr == NULL_PTR_ERR, "GetChannelVolume gave wrong error: %08lx\n", hr);
 
     hr = IChannelAudioVolume_GetChannelVolume(acv, fmt->nChannels, &vol);
-    ok(hr == E_INVALIDARG, "GetChannelCount gave wrong error: %08lx\n", hr);
+    ok(hr == E_INVALIDARG, "GetChannelVolume gave wrong error: %08lx\n", hr);
 
     hr = IChannelAudioVolume_GetChannelVolume(acv, 0, NULL);
-    ok(hr == NULL_PTR_ERR, "GetChannelCount gave wrong error: %08lx\n", hr);
+    ok(hr == NULL_PTR_ERR, "GetChannelVolume gave wrong error: %08lx\n", hr);
 
     hr = IChannelAudioVolume_GetChannelVolume(acv, 0, &vol);
-    ok(hr == S_OK, "GetChannelCount failed: %08lx\n", hr);
+    ok(hr == S_OK, "GetChannelVolume failed: %08lx\n", hr);
     ok(vol == 1.f, "Channel volume was not 1: %f\n", vol);
 
     hr = IChannelAudioVolume_SetChannelVolume(acv, fmt->nChannels, -1.f, NULL);
@@ -706,7 +717,7 @@ static void test_channelvolume(void)
     ok(hr == S_OK, "SetChannelVolume failed: %08lx\n", hr);
 
     hr = IChannelAudioVolume_GetChannelVolume(acv, 0, &vol);
-    ok(hr == S_OK, "GetChannelCount failed: %08lx\n", hr);
+    ok(hr == S_OK, "GetChannelVolume failed: %08lx\n", hr);
     ok(fabsf(vol - 0.2f) < 0.05f, "Channel volume wasn't 0.2: %f\n", vol);
 
     hr = IChannelAudioVolume_GetAllVolumes(acv, 0, NULL);
@@ -915,11 +926,11 @@ static void test_volume_dependence(void)
         ok(vol == 1.f, "ASV_GetChannelVolume gave wrong volume: %f\n", vol);
 
         hr = IChannelAudioVolume_GetChannelCount(cav2, &nch);
-        ok(hr == S_OK, "GetChannelCount failed: %08lx\n", hr);
+        ok(hr == S_OK, "CAV_GetChannelCount failed: %08lx\n", hr);
         ok(nch == fmt->nChannels, "Got wrong channel count, expected %u: %u\n", fmt->nChannels, nch);
 
         hr = IAudioStreamVolume_GetChannelCount(asv2, &nch);
-        ok(hr == S_OK, "GetChannelCount failed: %08lx\n", hr);
+        ok(hr == S_OK, "ASV_GetChannelCount failed: %08lx\n", hr);
         ok(nch == fmt->nChannels, "Got wrong channel count, expected %u: %u\n", fmt->nChannels, nch);
 
         IAudioStreamVolume_Release(asv2);

@@ -1,6 +1,10 @@
 /* Unicode Vertical Orientation */
-/* generated from https://www.unicode.org/Public/14.0.0/ucd/UCD.zip:VerticalOrientation.txt */
+/* generated from https://www.unicode.org/Public/15.0.0/ucd/UCD.zip:VerticalOrientation.txt */
 /* DO NOT EDIT!! */
+
+#if 0
+#pragma makedep unix
+#endif
 
 #include "windef.h"
 

@@ -48,7 +48,6 @@ static CRITICAL_SECTION backend_cs = { &backend_cs_debug, -1, 0, 0, 0, 0 };
 /* ############################### */
 
 HINSTANCE WINSPOOL_hInstance = NULL;
-unixlib_handle_t winspool_handle = 0;
 
 static HMODULE hlocalspl;
 static BOOL (WINAPI *pInitializePrintProvidor)(LPPRINTPROVIDOR, DWORD, LPWSTR);
@@ -97,7 +96,7 @@ BOOL load_backend(void)
 
     LeaveCriticalSection(&backend_cs);
 
-    WARN("failed to load the backend: %u\n", GetLastError());
+    WARN("failed to load the backend: %lu\n", GetLastError());
     SetLastError(RPC_S_SERVER_UNAVAILABLE);
     return FALSE;
 }
@@ -119,8 +118,7 @@ BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, void *reserved )
         hWineps = LoadLibraryA("WINEPS.DRV");
         WINSPOOL_hInstance = instance;
         DisableThreadLibraryCalls( instance );
-        if (!NtQueryVirtualMemory( GetCurrentProcess(), instance, MemoryWineUnixFuncs,
-                                   &winspool_handle, sizeof(winspool_handle), NULL ))
+        if (!__wine_init_unix_call())
             UNIX_CALL( process_attach, NULL );
         WINSPOOL_LoadSystemPrinters();
         break;

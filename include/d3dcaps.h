@@ -19,8 +19,6 @@
 #ifndef __WINE_D3DCAPS_H
 #define __WINE_D3DCAPS_H
 
-#include "wine/winheader_enter.h"
-
 #include <ddraw.h>
 
 #ifdef __i386__
@@ -437,7 +435,5 @@ typedef struct _D3DDEVINFO_TEXTURING {
 #ifdef __i386__
 #include <poppack.h>
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

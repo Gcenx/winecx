@@ -38,6 +38,12 @@ DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
 
 WINE_DEFAULT_DEBUG_CHANNEL(plugplay);
 
+DECLARE_CRITICAL_SECTION(invalidated_devices_cs);
+static CONDITION_VARIABLE invalidated_devices_cv = CONDITION_VARIABLE_INIT;
+
+static DEVICE_OBJECT **invalidated_devices;
+static size_t invalidated_devices_count;
+
 static inline const char *debugstr_propkey( const DEVPROPKEY *id )
 {
     if (!id) return "(null)";
@@ -250,6 +256,7 @@ static BOOL install_device_driver( DEVICE_OBJECT *device, HDEVINFO set, SP_DEVIN
         DIF_INSTALLDEVICE,
         DIF_NEWDEVICEWIZARD_FINISHINSTALL,
     };
+    static const DWORD config_flags = 0;
 
     NTSTATUS status;
     unsigned int i;
@@ -274,6 +281,14 @@ static BOOL install_device_driver( DEVICE_OBJECT *device, HDEVINFO set, SP_DEVIN
     SetupDiSetDeviceRegistryPropertyW( set, sp_device, SPDRP_COMPATIBLEIDS, (BYTE *)ids,
             sizeof_multiszW( ids ) * sizeof(WCHAR) );
     ExFreePool( ids );
+
+    /* Set the config flags. setupapi won't do this for us if we couldn't find
+     * a driver to install, but raw devices should still have this key
+     * populated. */
+
+    if (!SetupDiSetDeviceRegistryPropertyW( set, sp_device, SPDRP_CONFIGFLAGS,
+            (BYTE *)&config_flags, sizeof(config_flags) ))
+        ERR("Failed to set config flags, error %#lx.\n", GetLastError());
 
     if (!SetupDiBuildDriverInfoList( set, sp_device, SPDIT_COMPATDRIVER ))
     {
@@ -312,6 +327,7 @@ static void enumerate_new_device( DEVICE_OBJECT *device, HDEVINFO set )
     BOOL need_driver = TRUE;
     NTSTATUS status;
     HKEY key;
+    WCHAR *id;
 
     if (get_device_instance_id( device, device_instance_id ))
         return;
@@ -339,6 +355,13 @@ static void enumerate_new_device( DEVICE_OBJECT *device, HDEVINFO set )
     {
         ERR("Failed to get caps for device %s, status %#lx.\n", debugstr_w(device_instance_id), status);
         return;
+    }
+
+    if (!get_device_id(device, BusQueryContainerID, &id) && id)
+    {
+        SetupDiSetDeviceRegistryPropertyW( set, &sp_device, SPDRP_BASE_CONTAINERID, (BYTE *)id,
+            (lstrlenW( id ) + 1) * sizeof(WCHAR) );
+        ExFreePool( id );
     }
 
     if (need_driver && !install_device_driver( device, set, &sp_device ) && !caps.RawDeviceOK)
@@ -468,8 +491,14 @@ void WINAPI IoInvalidateDeviceRelations( DEVICE_OBJECT *device_object, DEVICE_RE
     switch (type)
     {
         case BusRelations:
-            handle_bus_relations( device_object );
+            EnterCriticalSection( &invalidated_devices_cs );
+            invalidated_devices = realloc( invalidated_devices,
+                    (invalidated_devices_count + 1) * sizeof(*invalidated_devices) );
+            invalidated_devices[invalidated_devices_count++] = device_object;
+            LeaveCriticalSection( &invalidated_devices_cs );
+            WakeConditionVariable( &invalidated_devices_cv );
             break;
+
         default:
             FIXME("Unhandled relation %#x.\n", type);
             break;
@@ -1086,6 +1115,30 @@ static NTSTATUS WINAPI pnp_manager_driver_entry( DRIVER_OBJECT *driver, UNICODE_
     return STATUS_SUCCESS;
 }
 
+static DWORD CALLBACK device_enum_thread_proc(void *arg)
+{
+    for (;;)
+    {
+        DEVICE_OBJECT *device;
+
+        EnterCriticalSection( &invalidated_devices_cs );
+
+        while (!invalidated_devices_count)
+            SleepConditionVariableCS( &invalidated_devices_cv, &invalidated_devices_cs, INFINITE );
+
+        device = invalidated_devices[--invalidated_devices_count];
+
+        /* Don't hold the CS while enumerating the device. Tests show that
+         * calling IoInvalidateDeviceRelations() from another thread shouldn't
+         * block, even if this thread is blocked in an IRP handler. */
+        LeaveCriticalSection( &invalidated_devices_cs );
+
+        handle_bus_relations( device );
+    }
+
+    return 0;
+}
+
 void pnp_manager_start(void)
 {
     static const WCHAR driver_nameW[] = {'\\','D','r','i','v','e','r','\\','P','n','p','M','a','n','a','g','e','r',0};
@@ -1109,6 +1162,8 @@ void pnp_manager_start(void)
     RpcStringFreeW( &binding_str );
     if (err)
         ERR("RpcBindingFromStringBinding() failed, error %#lx\n", err);
+
+    CreateThread( NULL, 0, device_enum_thread_proc, NULL, 0, NULL );
 }
 
 void pnp_manager_stop_driver( struct wine_driver *driver )

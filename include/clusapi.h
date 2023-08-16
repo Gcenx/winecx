@@ -19,8 +19,6 @@
 #ifndef __WINE_CLUSAPI_H
 #define __WINE_CLUSAPI_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -55,7 +53,5 @@ DWORD WINAPI ClusterCloseEnum(HCLUSENUM hEnum);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_CLUSAPI_H */

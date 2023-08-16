@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <stdarg.h>
@@ -29,7 +33,6 @@
 #include <dlfcn.h>
 #include "x11drv.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 
@@ -42,6 +45,7 @@ static MONITORINFOEXW default_monitor =
     { '\\','\\','.','\\','D','I','S','P','L','A','Y','1',0 }   /* szDevice */
 };
 
+static pthread_mutex_t xinerama_mutex = PTHREAD_MUTEX_INITIALIZER;
 static MONITORINFOEXW *monitors;
 static int nb_monitors;
 
@@ -87,8 +91,8 @@ static int query_screens(void)
         !pXineramaQueryExtension( gdi_display, &event_base, &error_base ) ||
         !(screens = pXineramaQueryScreens( gdi_display, &count ))) return 0;
 
-    if (monitors != &default_monitor) HeapFree( GetProcessHeap(), 0, monitors );
-    if ((monitors = HeapAlloc( GetProcessHeap(), 0, count * sizeof(*monitors) )))
+    if (monitors != &default_monitor) free( monitors );
+    if ((monitors = malloc( count * sizeof(*monitors) )))
     {
         nb_monitors = count;
         for (i = 0; i < nb_monitors; i++)
@@ -119,13 +123,80 @@ static inline int query_screens(void)
 
 #endif  /* SONAME_LIBXINERAMA */
 
+/* Get xinerama monitor indices required for _NET_WM_FULLSCREEN_MONITORS */
+BOOL xinerama_get_fullscreen_monitors( const RECT *rect, long *indices )
+{
+    RECT window_rect, intersected_rect, monitor_rect;
+    BOOL ret = FALSE;
+    POINT offset;
+    INT i;
+
+    pthread_mutex_lock( &xinerama_mutex );
+    if (nb_monitors == 1)
+    {
+        memset( indices, 0, sizeof(*indices) * 4 );
+        ret = TRUE;
+        goto done;
+    }
+
+    /* Convert window rectangle to root coordinates */
+    offset = virtual_screen_to_root( rect->left, rect->top );
+    window_rect.left = offset.x;
+    window_rect.top = offset.y;
+    window_rect.right = window_rect.left + rect->right - rect->left;
+    window_rect.bottom = window_rect.top + rect->bottom - rect->top;
+
+    /* Compare to xinerama monitor rectangles in root coordinates */
+    offset.x = INT_MAX;
+    offset.y = INT_MAX;
+    for (i = 0; i < nb_monitors; ++i)
+    {
+        offset.x = min( offset.x, monitors[i].rcMonitor.left );
+        offset.y = min( offset.y, monitors[i].rcMonitor.top );
+    }
+
+    indices[0] = -1;
+    indices[1] = -1;
+    indices[2] = -1;
+    indices[3] = -1;
+    for (i = 0; i < nb_monitors; ++i)
+    {
+        SetRect( &monitor_rect, monitors[i].rcMonitor.left - offset.x,
+                 monitors[i].rcMonitor.top - offset.y, monitors[i].rcMonitor.right - offset.x,
+                 monitors[i].rcMonitor.bottom - offset.y );
+        intersect_rect( &intersected_rect, &window_rect, &monitor_rect );
+        if (EqualRect( &intersected_rect, &monitor_rect ))
+        {
+            if (indices[0] == -1 || monitors[i].rcMonitor.top < monitors[indices[0]].rcMonitor.top)
+                indices[0] = i;
+            if (indices[1] == -1 || monitors[i].rcMonitor.bottom > monitors[indices[1]].rcMonitor.bottom)
+                indices[1] = i;
+            if (indices[2] == -1 || monitors[i].rcMonitor.left < monitors[indices[2]].rcMonitor.left)
+                indices[2] = i;
+            if (indices[3] == -1 || monitors[i].rcMonitor.right > monitors[indices[3]].rcMonitor.right)
+                indices[3] = i;
+        }
+    }
+
+    if (indices[0] == -1 || indices[1] == -1 || indices[2] == -1 || indices[3] == -1)
+        ERR("Failed to get xinerama fullscreen monitor indices.\n");
+    else
+        ret = TRUE;
+
+done:
+    pthread_mutex_unlock( &xinerama_mutex );
+    if (ret)
+        TRACE( "fullsceen monitors: %ld,%ld,%ld,%ld.\n", indices[0], indices[1], indices[2], indices[3] );
+    return ret;
+}
+
 static BOOL xinerama_get_gpus( struct gdi_gpu **new_gpus, int *count )
 {
     static const WCHAR wine_adapterW[] = {'W','i','n','e',' ','A','d','a','p','t','e','r',0};
     struct gdi_gpu *gpus;
 
     /* Xinerama has no support for GPU, faking one */
-    gpus = heap_calloc( 1, sizeof(*gpus) );
+    gpus = calloc( 1, sizeof(*gpus) );
     if (!gpus)
         return FALSE;
 
@@ -139,7 +210,7 @@ static BOOL xinerama_get_gpus( struct gdi_gpu **new_gpus, int *count )
 
 static void xinerama_free_gpus( struct gdi_gpu *gpus )
 {
-    heap_free( gpus );
+    free( gpus );
 }
 
 static BOOL xinerama_get_adapters( ULONG_PTR gpu_id, struct gdi_adapter **new_adapters, int *count )
@@ -154,9 +225,13 @@ static BOOL xinerama_get_adapters( ULONG_PTR gpu_id, struct gdi_adapter **new_ad
         return FALSE;
 
     /* Being lazy, actual adapter count may be less */
-    adapters = heap_calloc( nb_monitors, sizeof(*adapters) );
+    pthread_mutex_lock( &xinerama_mutex );
+    adapters = calloc( nb_monitors, sizeof(*adapters) );
     if (!adapters)
+    {
+        pthread_mutex_unlock( &xinerama_mutex );
         return FALSE;
+    }
 
     primary_index = primary_monitor;
     if (primary_index >= nb_monitors)
@@ -201,12 +276,13 @@ static BOOL xinerama_get_adapters( ULONG_PTR gpu_id, struct gdi_adapter **new_ad
 
     *new_adapters = adapters;
     *count = index;
+    pthread_mutex_unlock( &xinerama_mutex );
     return TRUE;
 }
 
 static void xinerama_free_adapters( struct gdi_adapter *adapters )
 {
-    heap_free( adapters );
+    free( adapters );
 }
 
 static BOOL xinerama_get_monitors( ULONG_PTR adapter_id, struct gdi_monitor **new_monitors, int *count )
@@ -220,6 +296,8 @@ static BOOL xinerama_get_monitors( ULONG_PTR adapter_id, struct gdi_monitor **ne
     INT index = 0;
     INT i;
 
+    pthread_mutex_lock( &xinerama_mutex );
+
     for (i = first; i < nb_monitors; i++)
     {
         if (i == first
@@ -228,9 +306,12 @@ static BOOL xinerama_get_monitors( ULONG_PTR adapter_id, struct gdi_monitor **ne
             monitor_count++;
     }
 
-    monitor = heap_calloc( monitor_count, sizeof(*monitor) );
+    monitor = calloc( monitor_count, sizeof(*monitor) );
     if (!monitor)
+    {
+        pthread_mutex_unlock( &xinerama_mutex );
         return FALSE;
+    }
 
     for (i = first; i < nb_monitors; i++)
     {
@@ -254,12 +335,13 @@ static BOOL xinerama_get_monitors( ULONG_PTR adapter_id, struct gdi_monitor **ne
 
     *new_monitors = monitor;
     *count = monitor_count;
+    pthread_mutex_unlock( &xinerama_mutex );
     return TRUE;
 }
 
 static void xinerama_free_monitors( struct gdi_monitor *monitors, int count )
 {
-    heap_free( monitors );
+    free( monitors );
 }
 
 void xinerama_init( unsigned int width, unsigned int height )
@@ -271,6 +353,8 @@ void xinerama_init( unsigned int width, unsigned int height )
 
     if (is_virtual_desktop())
         return;
+
+    pthread_mutex_lock( &xinerama_mutex );
 
     SetRect( &rect, 0, 0, width, height );
     if (!query_screens())
@@ -294,6 +378,8 @@ void xinerama_init( unsigned int width, unsigned int height )
                wine_dbgstr_rect(&monitors[i].rcWork),
                (monitors[i].dwFlags & MONITORINFOF_PRIMARY) ? " (primary)" : "" );
     }
+
+    pthread_mutex_unlock( &xinerama_mutex );
 
     handler.name = "Xinerama";
     handler.priority = 100;

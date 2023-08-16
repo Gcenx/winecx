@@ -87,6 +87,14 @@ static inline WCHAR *strdupAtoW( const char *str )
     return ret;
 }
 
+/* exported functions not in public headers */
+
+void    WINAPI MyFree( void *mem );
+void *  WINAPI MyMalloc( DWORD size ) __WINE_ALLOC_SIZE(1) __WINE_DEALLOC(MyFree) __WINE_MALLOC;
+void *  WINAPI MyRealloc( void *src, DWORD size ) __WINE_ALLOC_SIZE(2) __WINE_DEALLOC(MyFree);
+WCHAR * WINAPI MultiByteToUnicode( const char *str, UINT code_page ) __WINE_DEALLOC(MyFree) __WINE_MALLOC;
+char *  WINAPI UnicodeToMultiByte( const WCHAR *str, UINT code_page ) __WINE_DEALLOC(MyFree) __WINE_MALLOC;
+
 /* string substitutions */
 
 struct inf_file;
@@ -103,10 +111,6 @@ struct callback_WtoA_context
 };
 
 UINT CALLBACK QUEUE_callback_WtoA( void *context, UINT notification, UINT_PTR, UINT_PTR ) DECLSPEC_HIDDEN;
-
-/* from msvcrt/sys/stat.h */
-#define _S_IWRITE 0x0080
-#define _S_IREAD  0x0100
 
 extern OSVERSIONINFOW OsVersionInfo DECLSPEC_HIDDEN;
 

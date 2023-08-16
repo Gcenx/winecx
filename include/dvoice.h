@@ -20,8 +20,6 @@
 #ifndef __DVOICE_INCLUDED__
 #define __DVOICE_INCLUDED__
 
-#include "wine/winheader_enter.h"
-
 #include <ole2.h>
 #include <mmsystem.h>
 #include <mmreg.h>
@@ -499,7 +497,5 @@ DECLARE_INTERFACE_(IDirectPlayVoiceTest, IUnknown)
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __DVOICE_INCLUDED__ */

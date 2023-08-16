@@ -60,7 +60,7 @@ static void IPStore_guid2wstr( const GUID *guid, LPWSTR wstr )
 {
     char str[40];
 
-    sprintf(str, "{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+    sprintf(str, "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
            guid->Data1, guid->Data2, guid->Data3,
            guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
            guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7] );
@@ -184,6 +184,7 @@ static HRESULT WINAPI PStore_fnCreateType( IPStore* This,
     if( r )
         return hres;
 
+    /* CX HACK 10006: Actually store the information... unencrypted */
     IPStore_guid2wstr( pType, szGuid );
     r = RegCreateKeyExW( hkey, szGuid, 0, NULL, REG_OPTION_NON_VOLATILE,
                          KEY_ALL_ACCESS, NULL, &hkeytype, &dwCreated );
@@ -226,7 +227,7 @@ static HRESULT WINAPI PStore_fnDeleteType( IPStore* This,
     WCHAR szGuid[40];
     HRESULT hres = E_FAIL;
 
-    TRACE("%p %d %s %08lx\n", This, Key, debugstr_guid(pType), dwFlags);
+    TRACE("%p %ld %s %08lx\n", This, Key, debugstr_guid(pType), dwFlags);
 
     r = IPStore_OpenRoot( Key, &hkey );
     if( r )

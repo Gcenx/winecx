@@ -160,7 +160,7 @@ static DECLSPEC_NORETURN void server_protocol_error( const char *err, ... )
     va_list args;
 
     va_start( args, err );
-    fprintf( stderr, "wine client error:%x: ", GetCurrentThreadId() );
+    fprintf( stderr, "wine client error:%x: ", (int)GetCurrentThreadId() );
     vfprintf( stderr, err, args );
     va_end( args );
     abort_thread(1);
@@ -172,7 +172,7 @@ static DECLSPEC_NORETURN void server_protocol_error( const char *err, ... )
  */
 static DECLSPEC_NORETURN void server_protocol_perror( const char *err )
 {
-    fprintf( stderr, "wine client error:%x: ", GetCurrentThreadId() );
+    fprintf( stderr, "wine client error:%x: ", (int)GetCurrentThreadId() );
     perror( err );
     abort_thread(1);
 }
@@ -359,7 +359,7 @@ static NTSTATUS invoke_user_apc( CONTEXT *context, const user_apc_t *apc, NTSTAT
  */
 static void invoke_system_apc( const apc_call_t *call, apc_result_t *result, BOOL self )
 {
-    SIZE_T size, bits;
+    SIZE_T size, bits, limit, align;
     void *addr;
 
     memset( result, 0, sizeof(*result) );
@@ -372,7 +372,7 @@ static void invoke_system_apc( const apc_call_t *call, apc_result_t *result, BOO
     {
         struct async_fileio *user = wine_server_get_ptr( call->async_io.user );
         ULONG_PTR info = call->async_io.result;
-        NTSTATUS status;
+        unsigned int status;
 
         result->type = call->type;
         status = call->async_io.status;
@@ -402,6 +402,36 @@ static void invoke_system_apc( const apc_call_t *call, apc_result_t *result, BOO
         }
         else result->virtual_alloc.status = STATUS_WORKING_SET_LIMIT_RANGE;
         break;
+    case APC_VIRTUAL_ALLOC_EX:
+    {
+        MEM_ADDRESS_REQUIREMENTS r = { NULL };
+        MEM_EXTENDED_PARAMETER ext =
+        {
+            .Type = MemExtendedParameterAddressRequirements,
+            .Pointer = &r
+        };
+        SYSTEM_BASIC_INFORMATION sbi;
+
+        virtual_get_system_info( &sbi, !!NtCurrentTeb()->WowTebOffset );
+        result->type = call->type;
+        addr = wine_server_get_ptr( call->virtual_alloc_ex.addr );
+        size = call->virtual_alloc_ex.size;
+        limit = min( (ULONG_PTR)sbi.HighestUserAddress, call->virtual_alloc_ex.limit );
+        align = call->virtual_alloc_ex.align;
+        if ((ULONG_PTR)addr == call->virtual_alloc_ex.addr && size == call->virtual_alloc_ex.size
+            && align == call->virtual_alloc_ex.align)
+        {
+            r.HighestEndingAddress = (void *)limit;
+            r.Alignment = align;
+            result->virtual_alloc_ex.status = NtAllocateVirtualMemoryEx( NtCurrentProcess(), &addr, &size,
+                                                                         call->virtual_alloc_ex.op_type,
+                                                                         call->virtual_alloc_ex.prot, &ext, 1 );
+            result->virtual_alloc_ex.addr = wine_server_client_ptr( addr );
+            result->virtual_alloc_ex.size = size;
+        }
+        else result->virtual_alloc_ex.status = STATUS_WORKING_SET_LIMIT_RANGE;
+        break;
+    }
     case APC_VIRTUAL_FREE:
         result->type = call->type;
         addr = wine_server_get_ptr( call->virtual_free.addr );
@@ -445,11 +475,12 @@ static void invoke_system_apc( const apc_call_t *call, apc_result_t *result, BOO
         size = call->virtual_protect.size;
         if ((ULONG_PTR)addr == call->virtual_protect.addr && size == call->virtual_protect.size)
         {
+            ULONG prot;
             result->virtual_protect.status = NtProtectVirtualMemory( NtCurrentProcess(), &addr, &size,
-                                                                     call->virtual_protect.prot,
-                                                                     &result->virtual_protect.prot );
+                                                                     call->virtual_protect.prot, &prot );
             result->virtual_protect.addr = wine_server_client_ptr( addr );
             result->virtual_protect.size = size;
+            result->virtual_protect.prot = prot;
         }
         else result->virtual_protect.status = STATUS_INVALID_PARAMETER;
         break;
@@ -1044,7 +1075,7 @@ done:
  */
 NTSTATUS CDECL wine_server_fd_to_handle( int fd, unsigned int access, unsigned int attributes, HANDLE *handle )
 {
-    NTSTATUS ret;
+    unsigned int ret;
 
     *handle = 0;
     wine_server_send_fd( fd );
@@ -1524,7 +1555,7 @@ size_t server_init_process(void)
 #endif
         /* CW HACK 20810: Allow using a 32-bit prefix in Wow64 mode. */
         if (wow64_using_32bit_prefix)
-            fprintf( stderr, "Using a 32-bit prefix in Wow64 mode (%s) pid %x. tid %x\n", config_dir, pid, tid );
+            fprintf( stderr, "Using a 32-bit prefix in Wow64 mode (%s) pid %lx. tid %lx\n", config_dir, pid, tid );
     }
     else
     {
@@ -1596,7 +1627,7 @@ static BOOL force_laa(const WCHAR *app_name)
 void server_init_process_done(void)
 {
     void *entry, *teb;
-    NTSTATUS status;
+    unsigned int status;
     const WCHAR *exename;
     int suspend;
     FILE_FS_DEVICE_INFORMATION info;
@@ -1703,7 +1734,7 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE 
                                    ACCESS_MASK access, ULONG attributes, ULONG options )
 {
     sigset_t sigset;
-    NTSTATUS ret;
+    unsigned int ret;
     int fd = -1;
 
     if (dest) *dest = 0;
@@ -1763,7 +1794,7 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE 
  */
 NTSTATUS WINAPI NtCompareObjects( HANDLE first, HANDLE second )
 {
-    NTSTATUS status;
+    unsigned int status;
 
     SERVER_START_REQ( compare_objects )
     {
@@ -1784,7 +1815,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
 {
     sigset_t sigset;
     HANDLE port;
-    NTSTATUS ret;
+    unsigned int ret;
     int fd;
 
     if (HandleToLong( handle ) >= ~5 && HandleToLong( handle ) <= ~0)

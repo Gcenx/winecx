@@ -1,6 +1,6 @@
 /* FAudio - XAudio Reimplementation for FNA
  *
- * Copyright (c) 2011-2021 Ethan Lee, Luigi Auriemma, and the MonoGame Team
+ * Copyright (c) 2011-2022 Ethan Lee, Luigi Auriemma, and the MonoGame Team
  *
  * This software is provided 'as-is', without any express or implied warranty.
  * In no event will the authors be held liable for any damages arising from
@@ -352,6 +352,16 @@ uint32_t FACTAudioEngine_ShutDown(FACTAudioEngine *pEngine)
 		FAudio_StopEngine(pEngine->audio);
 	}
 
+	/* Purge All pending notifactions */
+	while (pEngine->wb_notifications_list)
+	{
+		FACTNotification *note = (FACTNotification*) pEngine->wb_notifications_list->entry;
+		pEngine->notificationCallback(note);
+		LinkedList_RemoveEntry(&pEngine->wb_notifications_list, note, pEngine->apiLock, pEngine->pFree);
+	}
+
+	pEngine->notifications = 0;
+
 	/* This method destroys all existing cues, sound banks, and wave banks.
 	 * It blocks until all cues are destroyed.
 	 */
@@ -433,8 +443,16 @@ uint32_t FACTAudioEngine_DoWork(FACTAudioEngine *pEngine)
 	uint8_t i;
 	FACTCue *cue;
 	LinkedList *list;
+	FACTNotification *note;
 
 	FAudio_PlatformLockMutex(pEngine->apiLock);
+
+	while (pEngine->wb_notifications_list)
+	{
+		note = (FACTNotification*) pEngine->wb_notifications_list->entry;
+		pEngine->notificationCallback(note);
+		LinkedList_RemoveEntry(&pEngine->wb_notifications_list, note, pEngine->apiLock, pEngine->pFree);
+	}
 
 	list = pEngine->sbList;
 	while (list != NULL)
@@ -495,6 +513,7 @@ uint32_t FACTAudioEngine_CreateInMemoryWaveBank(
 	uint32_t dwAllocAttributes,
 	FACTWaveBank **ppWaveBank
 ) {
+	FACTNotification *note;
 	uint32_t retval;
 	FAudio_PlatformLockMutex(pEngine->apiLock);
 	retval = FACT_INTERNAL_ParseWaveBank(
@@ -507,6 +526,14 @@ uint32_t FACTAudioEngine_CreateInMemoryWaveBank(
 		0,
 		ppWaveBank
 	);
+	if (pEngine->notifications & NOTIFY_WAVEBANKPREPARED)
+	{
+		note = (FACTNotification*) pEngine->pMalloc(sizeof(FACTNotification));
+		note->type = FACTNOTIFICATIONTYPE_WAVEBANKPREPARED;
+		note->waveBank.pWaveBank = *ppWaveBank;
+		note->pvContext = pEngine->wb_context;
+		LinkedList_AddEntry(&pEngine->wb_notifications_list, note, pEngine->apiLock, pEngine->pMalloc);
+	}
 	FAudio_PlatformUnlockMutex(pEngine->apiLock);
 	return retval;
 }
@@ -516,6 +543,7 @@ uint32_t FACTAudioEngine_CreateStreamingWaveBank(
 	const FACTStreamingParameters *pParms,
 	FACTWaveBank **ppWaveBank
 ) {
+	FACTNotification *note;
 	uint32_t retval, packetSize;
 	FAudio_PlatformLockMutex(pEngine->apiLock);
 	if (	pEngine->pReadFile == FACT_INTERNAL_DefaultReadFile &&
@@ -538,6 +566,14 @@ uint32_t FACTAudioEngine_CreateStreamingWaveBank(
 		1,
 		ppWaveBank
 	);
+	if (pEngine->notifications & NOTIFY_WAVEBANKPREPARED)
+	{
+		note = (FACTNotification*) pEngine->pMalloc(sizeof(FACTNotification));
+		note->type = FACTNOTIFICATIONTYPE_WAVEBANKPREPARED;
+		note->waveBank.pWaveBank = *ppWaveBank;
+		note->pvContext = pEngine->wb_context;
+		LinkedList_AddEntry(&pEngine->wb_notifications_list, note, pEngine->apiLock, pEngine->pMalloc);
+	}
 	FAudio_PlatformUnlockMutex(pEngine->apiLock);
 	return retval;
 }
@@ -2175,11 +2211,13 @@ uint32_t FACTWave_Stop(FACTWave *pWave, uint32_t dwFlags)
 	{
 		FACTNotification note;
 		note.type = FACTNOTIFICATIONTYPE_WAVESTOP;
+		note.wave.cueIndex = pWave->parentCue->index;
+		note.wave.pCue = pWave->parentCue;
+		note.wave.pSoundBank = pWave->parentCue->parentBank;
 		note.wave.pWave = pWave;
-		if (pWave->parentBank->parentEngine->notifications & NOTIFY_WAVESTOP)
-		{
-			note.pvContext = pWave->parentBank->parentEngine->wave_context;
-		}
+		note.wave.pWaveBank = pWave->parentBank;
+		note.pvContext = pWave->parentBank->parentEngine->wave_context;
+
 		pWave->parentBank->parentEngine->notificationCallback(&note);
 	}
 
@@ -2381,7 +2419,6 @@ uint32_t FACTCue_Destroy(FACTCue *pCue)
 {
 	FACTCue *cue, *prev;
 	FAudioMutex mutex;
-	FACTNotification note;
 	if (pCue == NULL)
 	{
 		return 1;
@@ -2734,6 +2771,8 @@ uint32_t FACTCue_SetMatrixCoefficients(
 			}
 		}
 	}
+
+	FACT_INTERNAL_SendCueNotification(pCue, NOTIFY_CUESTOP, FACTNOTIFICATIONTYPE_CUESTOP);
 
 	FAudio_PlatformUnlockMutex(pCue->parentBank->parentEngine->apiLock);
 	return 0;

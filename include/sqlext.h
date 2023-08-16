@@ -21,8 +21,6 @@
 #ifndef __SQLEXT_H
 #define __SQLEXT_H
 
-#include "wine/winheader_enter.h"
-
 #include <sql.h>
 
 #ifdef __cplusplus
@@ -1672,7 +1670,5 @@ VOID	FireVSDebugEvent(PODBC_VS_ARGS);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

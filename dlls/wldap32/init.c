@@ -24,7 +24,6 @@
 #include "winbase.h"
 #include "winnls.h"
 #include "winternl.h"
-#include "winldap.h"
 
 #include "wine/debug.h"
 #include "winldap_private.h"
@@ -37,7 +36,7 @@ static char **split_hostnames( const char *hostnames )
     char **res, *str, *p, *q;
     unsigned int i = 0;
 
-    str = strdupU( hostnames );
+    str = strdup( hostnames );
     if (!str) return NULL;
 
     p = str;
@@ -73,7 +72,7 @@ static char **split_hostnames( const char *hostnames )
             if (isspace( *p ))
             {
                 *p = '\0'; p++;
-                res[i] = strdupU( q );
+                res[i] = strdup( q );
                 if (!res[i]) goto oom;
                 i++;
 
@@ -83,7 +82,7 @@ static char **split_hostnames( const char *hostnames )
         }
         else
         {
-            res[i] = strdupU( q );
+            res[i] = strdup( q );
             if (!res[i]) goto oom;
             i++;
         }
@@ -190,20 +189,15 @@ static char *urlify_hostnames( const char *scheme, char *hostnames, ULONG port )
     return url;
 }
 
-
 static LDAP *create_context( const char *url )
 {
     LDAP *ld;
-    int version = LDAP_VERSION3;
-    struct ldap_initialize_params params;
+    int version = WLDAP32_LDAP_VERSION3;
 
     if (!(ld = calloc( 1, sizeof( *ld )))) return NULL;
-    params.ld = &CTX(ld);
-    params.url = url;
-    if (map_error( LDAP_CALL( ldap_initialize, &params )) == LDAP_SUCCESS)
+    if (map_error( ldap_initialize( &CTX(ld), url ) ) == WLDAP32_LDAP_SUCCESS)
     {
-        struct ldap_set_option_params opt_params = { CTX(ld), LDAP_OPT_PROTOCOL_VERSION, &version };
-        LDAP_CALL( ldap_set_option, &opt_params );
+        ldap_set_option( CTX(ld), WLDAP32_LDAP_OPT_PROTOCOL_VERSION, &version );
         return ld;
     }
     free( ld );
@@ -212,8 +206,6 @@ static LDAP *create_context( const char *url )
 
 /***********************************************************************
  *      cldap_openA     (WLDAP32.@)
- *
- * See cldap_openW.
  */
 LDAP * CDECL cldap_openA( char *hostname, ULONG portnumber )
 {
@@ -232,24 +224,6 @@ LDAP * CDECL cldap_openA( char *hostname, ULONG portnumber )
 
 /***********************************************************************
  *      cldap_openW     (WLDAP32.@)
- *
- * Initialize an LDAP context and create a UDP connection.
- *
- * PARAMS
- *  hostname   [I] Name of the host to connect to.
- *  portnumber [I] Port number to use.
- *
- * RETURNS
- *  Success: Pointer to an LDAP context.
- *  Failure: NULL
- *
- * NOTES
- *  The hostname string can be a space separated string of hostnames,
- *  in which case the LDAP runtime will try to connect to the hosts
- *  in order, until a connection can be made. A hostname may have a
- *  trailing port number (separated from the hostname by a ':'), which
- *  will take precedence over the port number supplied as a parameter
- *  to this function.
  */
 LDAP * CDECL cldap_openW( WCHAR *hostname, ULONG portnumber )
 {
@@ -271,34 +245,17 @@ exit:
 
 /***********************************************************************
  *      ldap_connect     (WLDAP32.@)
- *
- * Connect to an LDAP server.
- *
- * PARAMS
- *  ld      [I] Pointer to an LDAP context.
- *  timeout [I] Pointer to an l_timeval structure specifying the
- *              timeout in seconds.
- *
- * RETURNS
- *  Success: LDAP_SUCCESS
- *  Failure: An LDAP error code.
- *
- * NOTES
- *  The timeout parameter may be NULL in which case a default timeout
- *  value will be used.
  */
-ULONG CDECL ldap_connect( LDAP *ld, struct l_timeval *timeout )
+ULONG CDECL WLDAP32_ldap_connect( LDAP *ld, struct l_timeval *timeout )
 {
     TRACE( "(%p, %p)\n", ld, timeout );
 
-    if (!ld) return LDAP_PARAM_ERROR;
-    return LDAP_SUCCESS; /* FIXME: do something, e.g. ping the host */
+    if (!ld) return WLDAP32_LDAP_PARAM_ERROR;
+    return WLDAP32_LDAP_SUCCESS; /* FIXME: do something, e.g. ping the host */
 }
 
 /***********************************************************************
  *      ldap_initA     (WLDAP32.@)
- *
- * See ldap_initW.
  */
 LDAP *  CDECL ldap_initA( const PCHAR hostname, ULONG portnumber )
 {
@@ -317,25 +274,6 @@ LDAP *  CDECL ldap_initA( const PCHAR hostname, ULONG portnumber )
 
 /***********************************************************************
  *      ldap_initW     (WLDAP32.@)
- *
- * Initialize an LDAP context and create a TCP connection.
- *
- * PARAMS
- *  hostname   [I] Name of the host to connect to.
- *  portnumber [I] Port number to use.
- *
- * RETURNS
- *  Success: Pointer to an LDAP context.
- *  Failure: NULL
- *
- * NOTES
- *  The hostname string can be a space separated string of hostnames,
- *  in which case the LDAP runtime will try to connect to the hosts
- *  in order, until a connection can be made. A hostname may have a
- *  trailing port number (separated from the hostname by a ':'), which
- *  will take precedence over the port number supplied as a parameter
- *  to this function. The connection will not be made until the first
- *  LDAP function that needs it is called.
  */
 LDAP * CDECL ldap_initW( const PWCHAR hostname, ULONG portnumber )
 {
@@ -357,8 +295,6 @@ exit:
 
 /***********************************************************************
  *      ldap_openA     (WLDAP32.@)
- *
- * See ldap_openW.
  */
 LDAP * CDECL ldap_openA( char *hostname, ULONG portnumber )
 {
@@ -377,24 +313,6 @@ LDAP * CDECL ldap_openA( char *hostname, ULONG portnumber )
 
 /***********************************************************************
  *      ldap_openW     (WLDAP32.@)
- *
- * Initialize an LDAP context and create a TCP connection.
- *
- * PARAMS
- *  hostname   [I] Name of the host to connect to.
- *  portnumber [I] Port number to use.
- *
- * RETURNS
- *  Success: Pointer to an LDAP context.
- *  Failure: NULL
- *
- * NOTES
- *  The hostname string can be a space separated string of hostnames,
- *  in which case the LDAP runtime will try to connect to the hosts
- *  in order, until a connection can be made. A hostname may have a
- *  trailing port number (separated from the hostname by a ':'), which
- *  will take precedence over the port number supplied as a parameter
- *  to this function.
  */
 LDAP * CDECL ldap_openW( WCHAR *hostname, ULONG portnumber )
 {
@@ -416,8 +334,6 @@ exit:
 
 /***********************************************************************
  *      ldap_sslinitA     (WLDAP32.@)
- *
- * See ldap_sslinitW.
  */
 LDAP * CDECL ldap_sslinitA( char *hostname, ULONG portnumber, int secure )
 {
@@ -436,26 +352,6 @@ LDAP * CDECL ldap_sslinitA( char *hostname, ULONG portnumber, int secure )
 
 /***********************************************************************
  *      ldap_sslinitW     (WLDAP32.@)
- *
- * Initialize an LDAP context and create a secure TCP connection.
- *
- * PARAMS
- *  hostname   [I] Name of the host to connect to.
- *  portnumber [I] Port number to use.
- *  secure     [I] Ask the server to create an SSL connection.
- *
- * RETURNS
- *  Success: Pointer to an LDAP context.
- *  Failure: NULL
- *
- * NOTES
- *  The hostname string can be a space separated string of hostnames,
- *  in which case the LDAP runtime will try to connect to the hosts
- *  in order, until a connection can be made. A hostname may have a
- *  trailing port number (separated from the hostname by a ':'), which
- *  will take precedence over the port number supplied as a parameter
- *  to this function. The connection will not be made until the first
- *  LDAP function that needs it is called.
  */
 LDAP * CDECL ldap_sslinitW( WCHAR *hostname, ULONG portnumber, int secure )
 {
@@ -482,13 +378,11 @@ exit:
 
 /***********************************************************************
  *      ldap_start_tls_sA     (WLDAP32.@)
- *
- * See ldap_start_tls_sW.
  */
 ULONG CDECL ldap_start_tls_sA( LDAP *ld, ULONG *retval, LDAPMessage **result, LDAPControlA **serverctrls,
-    LDAPControlA **clientctrls )
+                               LDAPControlA **clientctrls )
 {
-    ULONG ret = LDAP_NO_MEMORY;
+    ULONG ret = WLDAP32_LDAP_NO_MEMORY;
     LDAPControlW **serverctrlsW = NULL, **clientctrlsW = NULL;
 
     TRACE( "(%p, %p, %p, %p, %p)\n", ld, retval, result, serverctrls, clientctrls );
@@ -508,28 +402,12 @@ exit:
 
 /***********************************************************************
  *      ldap_start_tls_s     (WLDAP32.@)
- *
- * Start TLS encryption on an LDAP connection.
- *
- * PARAMS
- *  ld          [I] Pointer to an LDAP context.
- *  retval      [I] Return value from the server.
- *  result      [I] Response message from the server.
- *  serverctrls [I] Array of LDAP server controls.
- *  clientctrls [I] Array of LDAP client controls.
- *
- * RETURNS
- *  Success: LDAP_SUCCESS
- *  Failure: An LDAP error code.
- *
- * NOTES
- *  LDAP function that needs it is called.
  */
 ULONG CDECL ldap_start_tls_sW( LDAP *ld, ULONG *retval, LDAPMessage **result, LDAPControlW **serverctrls,
-    LDAPControlW **clientctrls )
+                               LDAPControlW **clientctrls )
 {
-    ULONG ret = LDAP_NO_MEMORY;
-    LDAPControlU **serverctrlsU = NULL, **clientctrlsU = NULL;
+    ULONG ret = WLDAP32_LDAP_NO_MEMORY;
+    LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
 
     TRACE( "(%p, %p, %p, %p, %p)\n", ld, retval, result, serverctrls, clientctrls );
     if (result)
@@ -544,8 +422,7 @@ ULONG CDECL ldap_start_tls_sW( LDAP *ld, ULONG *retval, LDAPMessage **result, LD
     if (clientctrls && !(clientctrlsU = controlarrayWtoU( clientctrls ))) goto exit;
     else
     {
-        struct ldap_start_tls_s_params params = { CTX(ld), serverctrlsU, clientctrlsU };
-        ret = map_error( LDAP_CALL( ldap_start_tls_s, &params ));
+        ret = map_error( ldap_start_tls_s( CTX(ld), serverctrlsU, clientctrlsU ) );
     }
 
 exit:
@@ -560,20 +437,11 @@ exit:
 ULONG CDECL ldap_startup( LDAP_VERSION_INFO *version, HANDLE *instance )
 {
     TRACE( "(%p, %p)\n", version, instance );
-    return LDAP_SUCCESS;
+    return WLDAP32_LDAP_SUCCESS;
 }
 
 /***********************************************************************
  *      ldap_stop_tls_s     (WLDAP32.@)
- *
- * Stop TLS encryption on an LDAP connection.
- *
- * PARAMS
- *  ld [I] Pointer to an LDAP context.
- *
- * RETURNS
- *  Success: TRUE
- *  Failure: FALSE
  */
 BOOLEAN CDECL ldap_stop_tls_s( LDAP *ld )
 {

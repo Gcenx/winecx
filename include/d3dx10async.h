@@ -19,8 +19,6 @@
 #ifndef __D3DX10ASYNC_H__
 #define __D3DX10ASYNC_H__
 
-#include "wine/winheader_enter.h"
-
 #include "d3dx10.h"
 
 HRESULT WINAPI D3DX10CompileFromMemory(const char *data, SIZE_T data_size, const char *filename,
@@ -81,7 +79,5 @@ HRESULT WINAPI D3DX10CreateAsyncResourceLoaderW(HMODULE module, const WCHAR *res
 HRESULT WINAPI D3DX10CreateAsyncTextureProcessor(ID3D10Device *device,
         D3DX10_IMAGE_LOAD_INFO *info, ID3DX10DataProcessor **processor);
 HRESULT WINAPI D3DX10CreateAsyncTextureInfoProcessor(D3DX10_IMAGE_INFO *info, ID3DX10DataProcessor **processor);
-
-#include "wine/winheader_exit.h"
 
 #endif

@@ -3288,14 +3288,17 @@ static void test_coop_level_mode_set(void)
     hr = IDirectDrawSurface_IsLost(primary);
     ok(hr == DDERR_SURFACELOST, "Got unexpected hr %#lx.\n", hr);
 
+    flaky /* win8 */
     ok(!expect_messages->message, "Expected message %#x, but didn't receive it.\n", expect_messages->message);
     expect_messages = NULL;
+    flaky /* win8 */
     ok(screen_size.cx == registry_mode.dmPelsWidth
             && screen_size.cy == registry_mode.dmPelsHeight,
             "Expected screen size %lux%lu, got %lux%lu.\n",
             registry_mode.dmPelsWidth, registry_mode.dmPelsHeight, screen_size.cx, screen_size.cy);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3326,6 +3329,7 @@ static void test_coop_level_mode_set(void)
             registry_mode.dmPelsHeight, ddsd.dwHeight);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3333,6 +3337,7 @@ static void test_coop_level_mode_set(void)
     ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#lx.\n", hr);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3359,6 +3364,7 @@ static void test_coop_level_mode_set(void)
             registry_mode.dmPelsHeight, ddsd.dwHeight);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3382,6 +3388,7 @@ static void test_coop_level_mode_set(void)
     ok(!screen_size.cx && !screen_size.cy, "Got unexpected screen size %lux%lu.\n", screen_size.cx, screen_size.cy);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3411,6 +3418,7 @@ static void test_coop_level_mode_set(void)
     ok(!screen_size.cx && !screen_size.cy, "Got unexpected screen size %lux%lu.\n", screen_size.cx, screen_size.cy);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3437,6 +3445,7 @@ static void test_coop_level_mode_set(void)
             param.ddraw_height, ddsd.dwHeight);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3457,6 +3466,7 @@ static void test_coop_level_mode_set(void)
     ok(!screen_size.cx && !screen_size.cy, "Got unexpected screen size %lux%lu.\n", screen_size.cx, screen_size.cy);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3493,6 +3503,7 @@ static void test_coop_level_mode_set(void)
             registry_mode.dmPelsHeight, ddsd.dwHeight);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3503,6 +3514,7 @@ static void test_coop_level_mode_set(void)
     ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#lx.\n", hr);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3529,6 +3541,7 @@ static void test_coop_level_mode_set(void)
             registry_mode.dmPelsHeight, ddsd.dwHeight);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3552,6 +3565,7 @@ static void test_coop_level_mode_set(void)
     ok(!screen_size.cx && !screen_size.cy, "Got unexpected screen size %lux%lu.\n", screen_size.cx, screen_size.cy);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3574,6 +3588,7 @@ static void test_coop_level_mode_set(void)
     ok(!screen_size.cx && !screen_size.cy, "Got unexpected screen size %lux%lu.\n", screen_size.cx, screen_size.cy);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3600,6 +3615,7 @@ static void test_coop_level_mode_set(void)
             param.ddraw_height, ddsd.dwHeight);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3620,6 +3636,7 @@ static void test_coop_level_mode_set(void)
     ok(!screen_size.cx && !screen_size.cy, "Got unexpected screen size %lux%lu.\n", screen_size.cx, screen_size.cy);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3657,6 +3674,7 @@ static void test_coop_level_mode_set(void)
     IDirectDrawSurface_Release(primary);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -15353,8 +15371,7 @@ static BOOL CALLBACK test_window_position_cb(HMONITOR monitor, HDC hdc, RECT *mo
     ddraw = create_ddraw();
     ok(!!ddraw, "Failed to create a ddraw object.\n");
     window = CreateWindowA("static", "ddraw_test", WS_POPUP | WS_VISIBLE, monitor_rect->left,
-            monitor_rect->top, monitor_rect->right - monitor_rect->left,
-            monitor_rect->bottom - monitor_rect->top, NULL, NULL, NULL, NULL);
+            monitor_rect->top, 100, 100, NULL, NULL, NULL, NULL);
     ok(!!window, "Failed to create a window.\n");
     flush_events();
 
@@ -15639,9 +15656,9 @@ static void test_texture_wrong_caps(const GUID *device_guid)
     IDirectDrawSurface_Release(rt);
     destroy_viewport(device, viewport);
     destroy_material(background);
-    IDirectDraw2_Release(ddraw);
     refcount = IDirect3DDevice2_Release(device);
     ok(!refcount, "Device has %lu references left.\n", refcount);
+    IDirectDraw2_Release(ddraw);
     DestroyWindow(window);
 }
 

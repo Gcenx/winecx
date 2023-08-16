@@ -21,6 +21,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include <assert.h>
 #include <math.h>
 #include <stdarg.h>
@@ -112,7 +116,7 @@ static struct gdi_path *alloc_gdi_path( int count )
 
     if (!path)
     {
-        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        RtlSetLastWin32Error( ERROR_NOT_ENOUGH_MEMORY );
         return NULL;
     }
     count = max( NUM_ENTRIES_INITIAL, count );
@@ -122,7 +126,7 @@ static struct gdi_path *alloc_gdi_path( int count )
         if (!path->points)
         {
             free( path );
-            SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+            RtlSetLastWin32Error( ERROR_NOT_ENOUGH_MEMORY );
             return NULL;
         }
         path->flags = (BYTE *)(path->points + count);
@@ -230,7 +234,7 @@ static BOOL PATH_AddEntry(struct gdi_path *pPath, const POINT *pPoint, BYTE flag
     /* FIXME: If newStroke is true, perhaps we want to check that we're
      * getting a PT_MOVETO
      */
-    TRACE("(%d,%d) - %d\n", pPoint->x, pPoint->y, flags);
+    TRACE("(%d,%d) - %d\n", (int)pPoint->x, (int)pPoint->y, flags);
 
     /* Reserve enough memory for an extra path entry */
     if(!PATH_ReserveEntries(pPath, pPath->count+1))
@@ -538,7 +542,7 @@ struct gdi_path *get_gdi_flat_path( DC *dc, HRGN *rgn )
         dc->path = NULL;
         if (ret && rgn) *rgn = path_to_region( ret, dc->attr->poly_fill_mode );
     }
-    else SetLastError( ERROR_CAN_NOT_COMPLETE );
+    else RtlSetLastWin32Error( ERROR_CAN_NOT_COMPLETE );
 
     return ret;
 }
@@ -634,7 +638,7 @@ INT WINAPI NtGdiGetPath( HDC hdc, POINT *points, BYTE *types, INT size )
 
     if (!dc->path)
     {
-        SetLastError( ERROR_CAN_NOT_COMPLETE );
+        RtlSetLastWin32Error( ERROR_CAN_NOT_COMPLETE );
     }
     else if (size == 0)
     {
@@ -642,7 +646,7 @@ INT WINAPI NtGdiGetPath( HDC hdc, POINT *points, BYTE *types, INT size )
     }
     else if (size < dc->path->count)
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
     }
     else
     {
@@ -654,7 +658,7 @@ INT WINAPI NtGdiGetPath( HDC hdc, POINT *points, BYTE *types, INT size )
             ret = dc->path->count;
         else
             /* FIXME: Is this the correct value? */
-            SetLastError( ERROR_CAN_NOT_COMPLETE );
+            RtlSetLastWin32Error( ERROR_CAN_NOT_COMPLETE );
     }
 
     release_dc_ptr( dc );
@@ -684,7 +688,7 @@ HRGN WINAPI NtGdiPathToRegion( HDC hdc )
             free_gdi_path( path );
         }
     }
-    else SetLastError( ERROR_CAN_NOT_COMPLETE );
+    else RtlSetLastWin32Error( ERROR_CAN_NOT_COMPLETE );
 
     release_dc_ptr( dc );
     return ret;
@@ -1444,7 +1448,7 @@ static BOOL PATH_add_outline(struct path_physdev *physdev, INT x, INT y,
 
         if (header->dwType != TT_POLYGON_TYPE)
         {
-            FIXME("Unknown header type %d\n", header->dwType);
+            FIXME("Unknown header type %d\n", (int)header->dwType);
             return FALSE;
         }
 
@@ -1594,7 +1598,7 @@ BOOL WINAPI NtGdiFlattenPath( HDC hdc )
 
     if (!(dc = get_dc_ptr( hdc ))) return FALSE;
 
-    if (!dc->path) SetLastError( ERROR_CAN_NOT_COMPLETE );
+    if (!dc->path) RtlSetLastWin32Error( ERROR_CAN_NOT_COMPLETE );
     else if ((path = PATH_FlattenPath( dc->path )))
     {
         free_gdi_path( dc->path );
@@ -1619,7 +1623,7 @@ static struct gdi_path *PATH_WidenPath(DC *dc)
 
     size = NtGdiExtGetObjectW( dc->hPen, 0, NULL );
     if (!size) {
-        SetLastError(ERROR_CAN_NOT_COMPLETE);
+        RtlSetLastWin32Error(ERROR_CAN_NOT_COMPLETE);
         return NULL;
     }
 
@@ -1636,7 +1640,7 @@ static struct gdi_path *PATH_WidenPath(DC *dc)
         penStyle = elp->elpPenStyle;
         break;
     default:
-        SetLastError(ERROR_CAN_NOT_COMPLETE);
+        RtlSetLastWin32Error(ERROR_CAN_NOT_COMPLETE);
         free( elp );
         return NULL;
     }
@@ -1650,7 +1654,7 @@ static struct gdi_path *PATH_WidenPath(DC *dc)
 
     /* The function cannot apply to cosmetic pens */
     if(obj_type == OBJ_EXTPEN && penType == PS_COSMETIC) {
-        SetLastError(ERROR_CAN_NOT_COMPLETE);
+        RtlSetLastWin32Error(ERROR_CAN_NOT_COMPLETE);
         return NULL;
     }
 
@@ -1944,7 +1948,7 @@ BOOL WINAPI NtGdiWidenPath( HDC hdc )
 
     if (!(dc = get_dc_ptr( hdc ))) return FALSE;
 
-    if (!dc->path) SetLastError( ERROR_CAN_NOT_COMPLETE );
+    if (!dc->path) RtlSetLastWin32Error( ERROR_CAN_NOT_COMPLETE );
     else if ((path = PATH_WidenPath( dc )))
     {
         free_gdi_path( dc->path );
@@ -1984,7 +1988,7 @@ BOOL CDECL nulldrv_BeginPath( PHYSDEV dev )
 
 BOOL CDECL nulldrv_EndPath( PHYSDEV dev )
 {
-    SetLastError( ERROR_CAN_NOT_COMPLETE );
+    RtlSetLastWin32Error( ERROR_CAN_NOT_COMPLETE );
     return FALSE;
 }
 
@@ -1999,7 +2003,7 @@ BOOL CDECL nulldrv_AbortPath( PHYSDEV dev )
 
 BOOL CDECL nulldrv_CloseFigure( PHYSDEV dev )
 {
-    SetLastError( ERROR_CAN_NOT_COMPLETE );
+    RtlSetLastWin32Error( ERROR_CAN_NOT_COMPLETE );
     return FALSE;
 }
 
@@ -2116,6 +2120,9 @@ const struct gdi_dc_funcs path_driver =
     NULL,                               /* pStrokePath */
     NULL,                               /* pUnrealizePalette */
     NULL,                               /* pD3DKMTCheckVidPnExclusiveOwnership */
+    NULL,                               /* pD3DKMTCloseAdapter */
+    NULL,                               /* pD3DKMTOpenAdapterFromLuid */
+    NULL,                               /* pD3DKMTQueryVideoMemoryInfo */
     NULL,                               /* pD3DKMTSetVidPnSourceOwner */
     GDI_PRIORITY_PATH_DRV               /* priority */
 };

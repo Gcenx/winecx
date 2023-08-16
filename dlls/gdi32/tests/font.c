@@ -3687,8 +3687,8 @@ static const LANGID mac_langid_table[] =
     0,                                                       /* TT_MAC_LANGID_RUANDA */
     0,                                                       /* TT_MAC_LANGID_RUNDI */
     0,                                                       /* TT_MAC_LANGID_CHEWA */
-    MAKELANGID(LANG_MALAGASY,SUBLANG_DEFAULT),               /* TT_MAC_LANGID_MALAGASY */
-    MAKELANGID(LANG_ESPERANTO,SUBLANG_DEFAULT),              /* TT_MAC_LANGID_ESPERANTO */
+    0,                                                       /* TT_MAC_LANGID_MALAGASY */
+    0,                                                       /* TT_MAC_LANGID_ESPERANTO */
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,       /* 95-111 */
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,          /* 112-127 */
     MAKELANGID(LANG_WELSH,SUBLANG_DEFAULT),                  /* TT_MAC_LANGID_WELSH */
@@ -3708,7 +3708,7 @@ static const LANGID mac_langid_table[] =
     MAKELANGID(LANG_BRETON,SUBLANG_DEFAULT),                 /* TT_MAC_LANGID_BRETON */
     MAKELANGID(LANG_INUKTITUT,SUBLANG_DEFAULT),              /* TT_MAC_LANGID_INUKTITUT */
     MAKELANGID(LANG_SCOTTISH_GAELIC,SUBLANG_DEFAULT),        /* TT_MAC_LANGID_SCOTTISH_GAELIC */
-    MAKELANGID(LANG_MANX_GAELIC,SUBLANG_DEFAULT),            /* TT_MAC_LANGID_MANX_GAELIC */
+    0,                                                       /* TT_MAC_LANGID_MANX_GAELIC */
     MAKELANGID(LANG_IRISH,SUBLANG_IRISH_IRELAND),            /* TT_MAC_LANGID_IRISH_GAELIC */
     0,                                                       /* TT_MAC_LANGID_TONGAN */
     0,                                                       /* TT_MAC_LANGID_GREEK_POLYTONIC */
@@ -4102,7 +4102,10 @@ static INT CALLBACK enum_truetype_font_proc(const LOGFONTA *lf, const TEXTMETRIC
 
 static void test_GetTextMetrics(void)
 {
+    HFONT old_hf, hf;
+    TEXTMETRICA tm;
     LOGFONTA lf;
+    BOOL ret;
     HDC hdc;
     INT enumed;
 
@@ -4112,6 +4115,18 @@ static void test_GetTextMetrics(void)
     lf.lfCharSet = DEFAULT_CHARSET;
     enumed = 0;
     EnumFontFamiliesExA(hdc, &lf, enum_truetype_font_proc, (LPARAM)&enumed, 0);
+
+    /* Test a bug triggered by rounding up FreeType ppem */
+    hf = CreateFontA(20, 0, 0, 0, FW_REGULAR, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                     OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH,
+                     "Tahoma");
+    ok(hf != NULL, "CreateFontA failed, error %lu\n", GetLastError());
+    old_hf = SelectObject(hdc, hf);
+    ret = GetTextMetricsA(hdc, &tm);
+    ok(ret, "GetTextMetricsA failed, error %lu\n", GetLastError());
+    ok(tm.tmHeight <= 20, "Got unexpected tmHeight %ld\n", tm.tmHeight);
+    SelectObject(hdc, old_hf);
+    DeleteObject(hf);
 
     ReleaseDC(0, hdc);
 }
@@ -6505,7 +6520,7 @@ static void test_max_height(void)
     r = GetTextMetricsA(hdc, &tm1);
     ok(r, "GetTextMetrics failed\n");
     ok(tm1.tmHeight > 0, "expected a positive value, got %ld\n", tm1.tmHeight);
-    ok(tm1.tmAveCharWidth > 0, "expected a positive value, got %ld\n", tm1.tmHeight);
+    ok(tm1.tmAveCharWidth > 0, "expected a positive value, got %ld\n", tm1.tmAveCharWidth);
     DeleteObject(SelectObject(hdc, hfont_old));
 
     /* test the largest value */
@@ -6523,6 +6538,7 @@ static void test_max_height(void)
 
     /* test an invalid value */
     for (i = 0; i < ARRAY_SIZE(invalid_height); i++) {
+        winetest_push_context("height=%ld", invalid_height[i]);
         lf.lfHeight = invalid_height[i];
         hfont = CreateFontIndirectA(&lf);
         hfont_old = SelectObject(hdc, hfont);
@@ -6534,6 +6550,7 @@ static void test_max_height(void)
         ok(tm.tmAveCharWidth == tm1.tmAveCharWidth,
            "expected 1 ppem value (%ld), got %ld\n", tm1.tmAveCharWidth, tm.tmAveCharWidth);
         DeleteObject(SelectObject(hdc, hfont_old));
+        winetest_pop_context();
     }
 
     ReleaseDC(NULL, hdc);

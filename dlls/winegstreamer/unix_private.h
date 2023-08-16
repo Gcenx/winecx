@@ -34,7 +34,16 @@ extern GstCaps *wg_format_to_caps(const struct wg_format *format) DECLSPEC_HIDDE
 
 extern NTSTATUS wg_transform_create(void *args) DECLSPEC_HIDDEN;
 extern NTSTATUS wg_transform_destroy(void *args) DECLSPEC_HIDDEN;
+extern NTSTATUS wg_transform_set_output_format(void *args) DECLSPEC_HIDDEN;
 extern NTSTATUS wg_transform_push_data(void *args) DECLSPEC_HIDDEN;
 extern NTSTATUS wg_transform_read_data(void *args) DECLSPEC_HIDDEN;
+
+/* wg_allocator_release_sample can be used to release any sample that was requested. */
+typedef struct wg_sample *(*wg_allocator_request_sample_cb)(gsize size, void *context);
+extern GstAllocator *wg_allocator_create(wg_allocator_request_sample_cb request_sample,
+        void *request_sample_context) DECLSPEC_HIDDEN;
+extern void wg_allocator_destroy(GstAllocator *allocator) DECLSPEC_HIDDEN;
+extern void wg_allocator_release_sample(GstAllocator *allocator, struct wg_sample *sample,
+        bool discard_data) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_WINEGSTREAMER_UNIX_PRIVATE_H */

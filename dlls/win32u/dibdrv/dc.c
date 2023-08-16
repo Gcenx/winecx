@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include <assert.h>
 
 #include "ntgdi_private.h"
@@ -28,18 +32,7 @@
 #include "wine/wgl_driver.h"
 #include "wine/debug.h"
 
-#ifdef __WINESRC__
-#include "wine/exception.h"
-#endif
-
 WINE_DEFAULT_DEBUG_CHANNEL(dib);
-
-#ifdef __i386_on_x86_64__
-#undef free
-#define heapfree(x) HeapFree(GetProcessHeap(), 0, x)
-#else
-#define heapfree(x) free(x)
-#endif
 
 static const struct osmesa_funcs *osmesa_funcs;
 
@@ -234,35 +227,17 @@ DWORD convert_bitmapinfo( const BITMAPINFO *src_info, void *src_bits, struct bit
     init_dib_info_from_bitmapinfo( &src_dib, src_info, src_bits );
     init_dib_info_from_bitmapinfo( &dst_dib, dst_info, dst_bits );
 
-#ifdef __i386_on_x86_64__
-/* BKS HACK */
-    if (IsBadReadPtr(src_bits, 1))
-    {
-        WARN( "invalid bits pointer %p\n", src_bits );
-        ret = FALSE;
-    }
-    else
-    {
-        dst_dib.funcs->convert_to( &dst_dib, &src_dib, &src->visrect, FALSE );
-        ret = TRUE;
-    }
-#else
     __TRY
     {
         dst_dib.funcs->convert_to( &dst_dib, &src_dib, &src->visrect, FALSE );
         ret = TRUE;
     }
-#ifdef __WINESRC__
-    __EXCEPT_PAGE_FAULT
-#else
     __EXCEPT
-#endif
     {
         WARN( "invalid bits pointer %p\n", src_bits );
         ret = FALSE;
     }
     __ENDTRY
-#endif
 
     if(!ret) return ERROR_BAD_FORMAT;
 
@@ -373,7 +348,7 @@ static BOOL CDECL dibdrv_DeleteDC( PHYSDEV dev )
     free_pattern_brush( &pdev->brush );
     free_pattern_brush( &pdev->pen_brush );
     release_cached_font( pdev->font );
-    heapfree( pdev );
+    free( pdev );
     return TRUE;
 }
 
@@ -455,7 +430,7 @@ static const struct
 /**********************************************************************
  *	     dibdrv_wglDescribePixelFormat
  */
-static int WINAPI dibdrv_wglDescribePixelFormat( HDC hdc, int fmt, UINT size, PIXELFORMATDESCRIPTOR *descr )
+static int dibdrv_wglDescribePixelFormat( HDC hdc, int fmt, UINT size, PIXELFORMATDESCRIPTOR *descr )
 {
     int ret = ARRAY_SIZE( pixel_formats );
 
@@ -492,7 +467,7 @@ static int WINAPI dibdrv_wglDescribePixelFormat( HDC hdc, int fmt, UINT size, PI
 /***********************************************************************
  *		dibdrv_wglCopyContext
  */
-static BOOL WINAPI dibdrv_wglCopyContext( struct wgl_context *src, struct wgl_context *dst, UINT mask )
+static BOOL dibdrv_wglCopyContext( struct wgl_context *src, struct wgl_context *dst, UINT mask )
 {
     FIXME( "not supported yet\n" );
     return FALSE;
@@ -501,7 +476,7 @@ static BOOL WINAPI dibdrv_wglCopyContext( struct wgl_context *src, struct wgl_co
 /***********************************************************************
  *		dibdrv_wglDeleteContext
  */
-static BOOL WINAPI dibdrv_wglDeleteContext( struct wgl_context *context )
+static BOOL dibdrv_wglDeleteContext( struct wgl_context *context )
 {
     if (!osmesa_funcs) return FALSE;
     return osmesa_funcs->delete_context( context );
@@ -510,7 +485,7 @@ static BOOL WINAPI dibdrv_wglDeleteContext( struct wgl_context *context )
 /***********************************************************************
  *		dibdrv_wglGetPixelFormat
  */
-static int WINAPI dibdrv_wglGetPixelFormat( HDC hdc )
+static int dibdrv_wglGetPixelFormat( HDC hdc )
 {
     DC *dc = get_dc_ptr( hdc );
     int ret = 0;
@@ -526,7 +501,7 @@ static int WINAPI dibdrv_wglGetPixelFormat( HDC hdc )
 /***********************************************************************
  *		dibdrv_wglCreateContext
  */
-static struct wgl_context * WINAPI dibdrv_wglCreateContext( HDC hdc )
+static struct wgl_context *dibdrv_wglCreateContext( HDC hdc )
 {
     PIXELFORMATDESCRIPTOR descr;
     int format = dibdrv_wglGetPixelFormat( hdc );
@@ -541,22 +516,17 @@ static struct wgl_context * WINAPI dibdrv_wglCreateContext( HDC hdc )
 /***********************************************************************
  *		dibdrv_wglGetProcAddress
  */
-static WINEGLDEF(PROC) WINAPI dibdrv_wglGetProcAddress( const char *proc )
+static PROC dibdrv_wglGetProcAddress( const char *proc )
 {
     if (!strncmp( proc, "wgl", 3 )) return NULL;
     if (!osmesa_funcs) return NULL;
-#ifdef SONAME_LIBOSMESA
-/* BKS HACK */
     return osmesa_funcs->get_proc_address( proc );
-#else
-    return NULL;
-#endif
 }
 
 /***********************************************************************
  *		dibdrv_wglMakeCurrent
  */
-static BOOL WINAPI dibdrv_wglMakeCurrent( HDC hdc, struct wgl_context *context )
+static BOOL dibdrv_wglMakeCurrent( HDC hdc, struct wgl_context *context )
 {
     HBITMAP bitmap;
     BITMAPOBJ *bmp;
@@ -593,7 +563,7 @@ static BOOL WINAPI dibdrv_wglMakeCurrent( HDC hdc, struct wgl_context *context )
 /**********************************************************************
  *	     dibdrv_wglSetPixelFormat
  */
-static BOOL WINAPI dibdrv_wglSetPixelFormat( HDC hdc, int fmt, const PIXELFORMATDESCRIPTOR *descr )
+static BOOL dibdrv_wglSetPixelFormat( HDC hdc, int fmt, const PIXELFORMATDESCRIPTOR *descr )
 {
     if (fmt <= 0 || fmt > ARRAY_SIZE( pixel_formats )) return FALSE;
     return NtGdiSetPixelFormat( hdc, fmt );
@@ -602,7 +572,7 @@ static BOOL WINAPI dibdrv_wglSetPixelFormat( HDC hdc, int fmt, const PIXELFORMAT
 /***********************************************************************
  *		dibdrv_wglShareLists
  */
-static BOOL WINAPI dibdrv_wglShareLists( struct wgl_context *org, struct wgl_context *dest )
+static BOOL dibdrv_wglShareLists( struct wgl_context *org, struct wgl_context *dest )
 {
     FIXME( "not supported yet\n" );
     return FALSE;
@@ -611,7 +581,7 @@ static BOOL WINAPI dibdrv_wglShareLists( struct wgl_context *org, struct wgl_con
 /***********************************************************************
  *		dibdrv_wglSwapBuffers
  */
-static BOOL WINAPI dibdrv_wglSwapBuffers( HDC hdc )
+static BOOL dibdrv_wglSwapBuffers( HDC hdc )
 {
     return TRUE;
 }
@@ -739,6 +709,9 @@ const struct gdi_dc_funcs dib_driver =
     dibdrv_StrokePath,                  /* pStrokePath */
     NULL,                               /* pUnrealizePalette */
     NULL,                               /* pD3DKMTCheckVidPnExclusiveOwnership */
+    NULL,                               /* pD3DKMTCloseAdapter */
+    NULL,                               /* pD3DKMTOpenAdapterFromLuid */
+    NULL,                               /* pD3DKMTQueryVideoMemoryInfo */
     NULL,                               /* pD3DKMTSetVidPnSourceOwner */
     GDI_PRIORITY_DIB_DRV                /* priority */
 };
@@ -904,7 +877,7 @@ static BOOL CDECL windrv_CreateDC( PHYSDEV *dev, LPCWSTR device, LPCWSTR output,
 
     if (!dib_driver.pCreateDC( dev, NULL, NULL, NULL ))
     {
-        heapfree( physdev );
+        free( physdev );
         return FALSE;
     }
     physdev->dibdrv = get_dibdrv_pdev( *dev );
@@ -917,7 +890,7 @@ static BOOL CDECL windrv_DeleteDC( PHYSDEV dev )
     struct windrv_physdev *physdev = get_windrv_physdev( dev );
 
     window_surface_release( physdev->surface );
-    heapfree( physdev );
+    free( physdev );
     return TRUE;
 }
 
@@ -1293,6 +1266,9 @@ static const struct gdi_dc_funcs window_driver =
     NULL,                               /* pStrokePath */
     NULL,                               /* pUnrealizePalette */
     NULL,                               /* pD3DKMTCheckVidPnExclusiveOwnership */
+    NULL,                               /* pD3DKMTCloseAdapter */
+    NULL,                               /* pD3DKMTOpenAdapterFromLuid */
+    NULL,                               /* pD3DKMTQueryVideoMemoryInfo */
     NULL,                               /* pD3DKMTSetVidPnSourceOwner */
     GDI_PRIORITY_DIB_DRV + 10           /* priority */
 };

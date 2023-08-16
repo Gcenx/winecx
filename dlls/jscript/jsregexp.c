@@ -149,7 +149,7 @@ HRESULT regexp_match_next(script_ctx_t *ctx, jsdisp_t *dispex,
     heap_pool_clear(mark);
 
     if(hres != S_OK && (rem_flags & REM_ALLOC_RESULT)) {
-        heap_free(match);
+        free(match);
         *ret = NULL;
     }
 
@@ -193,11 +193,11 @@ static HRESULT regexp_match(script_ctx_t *ctx, jsdisp_t *dispex, jsstr_t *jsstr,
             if(ret) {
                 match_result_t *old_ret = ret;
 
-                ret = heap_realloc(old_ret, (ret_size <<= 1) * sizeof(match_result_t));
+                ret = realloc(old_ret, (ret_size <<= 1) * sizeof(match_result_t));
                 if(!ret)
-                    heap_free(old_ret);
+                    free(old_ret);
             }else {
-                ret = heap_alloc((ret_size=4) * sizeof(match_result_t));
+                ret = malloc((ret_size=4) * sizeof(match_result_t));
             }
             if(!ret) {
                 hres = E_OUTOFMEMORY;
@@ -216,7 +216,7 @@ static HRESULT regexp_match(script_ctx_t *ctx, jsdisp_t *dispex, jsstr_t *jsstr,
 
     heap_pool_clear(mark);
     if(FAILED(hres)) {
-        heap_free(ret);
+        free(ret);
         return hres;
     }
 
@@ -545,7 +545,12 @@ static void RegExp_destructor(jsdisp_t *dispex)
         regexp_destroy(This->jsregexp);
     jsval_release(This->last_index_val);
     jsstr_release(This->str);
-    heap_free(This);
+    free(This);
+}
+
+static HRESULT RegExp_gc_traverse(struct gc_ctx *gc_ctx, enum gc_traverse_op op, jsdisp_t *dispex)
+{
+    return gc_process_linked_val(gc_ctx, op, dispex, &regexp_from_jsdisp(dispex)->last_index_val);
 }
 
 static const builtin_prop_t RegExp_props[] = {
@@ -565,7 +570,11 @@ static const builtin_info_t RegExp_info = {
     ARRAY_SIZE(RegExp_props),
     RegExp_props,
     RegExp_destructor,
-    NULL
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    RegExp_gc_traverse
 };
 
 static const builtin_prop_t RegExpInst_props[] = {
@@ -582,15 +591,19 @@ static const builtin_info_t RegExpInst_info = {
     ARRAY_SIZE(RegExpInst_props),
     RegExpInst_props,
     RegExp_destructor,
-    NULL
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    RegExp_gc_traverse
 };
 
-static HRESULT alloc_regexp(script_ctx_t *ctx, jsdisp_t *object_prototype, RegExpInstance **ret)
+static HRESULT alloc_regexp(script_ctx_t *ctx, jsstr_t *str, jsdisp_t *object_prototype, RegExpInstance **ret)
 {
     RegExpInstance *regexp;
     HRESULT hres;
 
-    regexp = heap_alloc_zero(sizeof(RegExpInstance));
+    regexp = calloc(1, sizeof(RegExpInstance));
     if(!regexp)
         return E_OUTOFMEMORY;
 
@@ -600,9 +613,12 @@ static HRESULT alloc_regexp(script_ctx_t *ctx, jsdisp_t *object_prototype, RegEx
         hres = init_dispex_from_constr(&regexp->dispex, ctx, &RegExpInst_info, ctx->regexp_constr);
 
     if(FAILED(hres)) {
-        heap_free(regexp);
+        free(regexp);
         return hres;
     }
+
+    regexp->str = jsstr_addref(str);
+    regexp->last_index_val = jsval_number(0);
 
     *ret = regexp;
     return S_OK;
@@ -620,12 +636,9 @@ HRESULT create_regexp(script_ctx_t *ctx, jsstr_t *src, DWORD flags, jsdisp_t **r
 
     TRACE("%s %lx\n", debugstr_wn(str, jsstr_length(src)), flags);
 
-    hres = alloc_regexp(ctx, NULL, &regexp);
+    hres = alloc_regexp(ctx, src, NULL, &regexp);
     if(FAILED(hres))
         return hres;
-
-    regexp->str = jsstr_addref(src);
-    regexp->last_index_val = jsval_number(0);
 
     regexp->jsregexp = regexp_new(ctx, &ctx->tmp_heap, str, jsstr_length(regexp->str), flags, FALSE);
     if(!regexp->jsregexp) {
@@ -780,7 +793,7 @@ HRESULT regexp_string_match(script_ctx_t *ctx, jsdisp_t *re, jsstr_t *jsstr, jsv
         break;
     }
 
-    heap_free(match_result);
+    free(match_result);
 
     if(SUCCEEDED(hres) && r)
         *r = jsval_obj(array);
@@ -959,10 +972,12 @@ static const builtin_info_t RegExpConstr_info = {
 
 HRESULT create_regexp_constr(script_ctx_t *ctx, jsdisp_t *object_prototype, jsdisp_t **ret)
 {
+    jsstr_t *str = jsstr_empty();
     RegExpInstance *regexp;
     HRESULT hres;
 
-    hres = alloc_regexp(ctx, object_prototype, &regexp);
+    hres = alloc_regexp(ctx, str, object_prototype, &regexp);
+    jsstr_release(str);
     if(FAILED(hres))
         return hres;
 

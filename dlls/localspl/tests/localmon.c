@@ -48,8 +48,6 @@ static BOOL  (WINAPI *pEnumPorts)(LPWSTR, DWORD, LPBYTE, DWORD, LPDWORD, LPDWORD
 static BOOL  (WINAPI *pEnumPorts2)(HANDLE, LPWSTR, DWORD, LPBYTE, DWORD, LPDWORD, LPDWORD);
 static BOOL  (WINAPI *pOpenPort)(LPWSTR, PHANDLE);
 static BOOL  (WINAPI *pOpenPort2)(HANDLE, LPWSTR, PHANDLE);
-static BOOL  (WINAPI *pOpenPortEx)(LPWSTR, LPWSTR, PHANDLE, struct _MONITOR *);
-static BOOL  (WINAPI *pOpenPortEx2)(HANDLE, HANDLE, LPWSTR, LPWSTR, PHANDLE, struct _MONITOR2 *);
 static BOOL  (WINAPI *pStartDocPort)(HANDLE, LPWSTR, DWORD, DWORD, LPBYTE);
 static BOOL  (WINAPI *pWritePort)(HANDLE hPort, LPBYTE, DWORD, LPDWORD);
 static BOOL  (WINAPI *pReadPort)(HANDLE hPort, LPBYTE, DWORD, LPDWORD);
@@ -224,18 +222,43 @@ static MONITORREG monreg =
     QueryValue
 };
 
-static DWORD delete_port(LPWSTR portname)
+static BOOL delete_port(LPWSTR portname)
 {
-    DWORD   res;
+    if (pDeletePort)
+        return pDeletePort(NULL, 0, portname);
+    if (pDeletePort2)
+        return pDeletePort2(hmon, NULL, 0, portname);
+    return pXcvDataPort(hXcv, cmd_DeletePortW, (PBYTE) portname,
+            (lstrlenW(portname) + 1) * sizeof(WCHAR), NULL, 0, NULL) == ERROR_SUCCESS;
+}
 
-    if (pDeletePort) {
-        res = pDeletePort(NULL, 0, portname);
-    }
-    else
-    {
-        res = pXcvDataPort(hXcv, cmd_DeletePortW, (PBYTE) portname, (lstrlenW(portname) + 1) * sizeof(WCHAR), NULL, 0, NULL);
-    }
-    return res;
+static BOOL call_EnumPorts(WCHAR *name, DWORD level, BYTE *buf, DWORD size,
+        DWORD *needed, DWORD *count)
+{
+    if (pEnumPorts)
+        return pEnumPorts(name, level, buf, size, needed, count);
+    return pEnumPorts2(hmon, name, level, buf, size, needed, count);
+}
+
+static BOOL call_OpenPort(WCHAR *name, HANDLE *h)
+{
+    if (pOpenPort)
+        return pOpenPort(name, h);
+    return pOpenPort2(hmon, name, h);
+}
+
+static BOOL call_AddPortEx(WCHAR *name, DWORD level, BYTE *buf, WCHAR *mon)
+{
+    if (pAddPortEx)
+        return pAddPortEx(name, level, buf, mon);
+    return pAddPortEx2(hmon, name, level, buf, mon);
+}
+
+static BOOL call_XcvOpenPort(const WCHAR *name, ACCESS_MASK access, HANDLE *h)
+{
+    if (pXcvOpenPort)
+        return pXcvOpenPort(name, access, h);
+    return pXcvOpenPort2(hmon, name, access, h);
 }
 
 /* ########################### */
@@ -253,13 +276,13 @@ static void find_installed_ports(void)
     have_lpt[0] = '\0';
     have_file[0] = '\0';
 
-    if (!pEnumPorts) return;
+    if (!pEnumPorts && !pEnumPorts2) return;
 
-    res = pEnumPorts(NULL, 1, NULL, 0, &needed, &returned);
+    res = call_EnumPorts(NULL, 1, NULL, 0, &needed, &returned);
     if (!res && (GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
         pi = HeapAlloc(GetProcessHeap(), 0, needed);
     }
-    res = pEnumPorts(NULL, 1, (LPBYTE) pi, needed, &needed, &returned);
+    res = call_EnumPorts(NULL, 1, (LPBYTE) pi, needed, &needed, &returned);
 
     if (!res) {
         skip("no ports found\n");
@@ -331,11 +354,11 @@ static void test_AddPortEx(void)
     PORT_INFO_2W pi;
     DWORD   res;
 
-    if (!pAddPortEx) {
+    if (!pAddPortEx && !pAddPortEx2) {
         skip("AddPortEx\n");
         return;
     }
-    if ((!pDeletePort) &&  (!hXcv)) {
+    if (!pDeletePort && !pDeletePort2 && !pXcvDataPort) {
         skip("No API to delete a Port\n");
         return;
     }
@@ -348,13 +371,13 @@ static void test_AddPortEx(void)
         /* tests crash with native localspl.dll in w2k,
            but works with native localspl.dll in wine */
         SetLastError(0xdeadbeef);
-        res = pAddPortEx(NULL, 1, (LPBYTE) &pi, LocalPortW);
+        res = call_AddPortEx(NULL, 1, (LPBYTE) &pi, LocalPortW);
         trace("returned %lu with %lu\n", res, GetLastError() );
         ok( res, "got %lu with %lu (expected '!= 0')\n", res, GetLastError());
 
         /* port already exists: */
         SetLastError(0xdeadbeef);
-        res = pAddPortEx(NULL, 1, (LPBYTE) &pi, LocalPortW);
+        res = call_AddPortEx(NULL, 1, (LPBYTE) &pi, LocalPortW);
         trace("returned %lu with %lu\n", res, GetLastError() );
         ok( !res && (GetLastError() == ERROR_INVALID_PARAMETER),
             "got %lu with %lu (expected '0' with ERROR_INVALID_PARAMETER)\n",
@@ -365,7 +388,7 @@ static void test_AddPortEx(void)
         /*  NULL for pMonitorName is documented for Printmonitors, but
             localspl.dll fails always with ERROR_INVALID_PARAMETER  */
         SetLastError(0xdeadbeef);
-        res = pAddPortEx(NULL, 1, (LPBYTE) &pi, NULL);
+        res = call_AddPortEx(NULL, 1, (LPBYTE) &pi, NULL);
         trace("returned %lu with %lu\n", res, GetLastError() );
         ok( !res && (GetLastError() == ERROR_INVALID_PARAMETER),
             "got %lu with %lu (expected '0' with ERROR_INVALID_PARAMETER)\n",
@@ -374,7 +397,7 @@ static void test_AddPortEx(void)
 
 
         SetLastError(0xdeadbeef);
-        res = pAddPortEx(NULL, 1, (LPBYTE) &pi, emptyW);
+        res = call_AddPortEx(NULL, 1, (LPBYTE) &pi, emptyW);
         trace("returned %lu with %lu\n", res, GetLastError() );
         ok( !res && (GetLastError() == ERROR_INVALID_PARAMETER),
             "got %lu with %lu (expected '0' with ERROR_INVALID_PARAMETER)\n",
@@ -383,7 +406,7 @@ static void test_AddPortEx(void)
 
 
         SetLastError(0xdeadbeef);
-        res = pAddPortEx(NULL, 1, (LPBYTE) &pi, does_not_existW);
+        res = call_AddPortEx(NULL, 1, (LPBYTE) &pi, does_not_existW);
         trace("returned %lu with %lu\n", res, GetLastError() );
         ok( !res && (GetLastError() == ERROR_INVALID_PARAMETER),
             "got %lu with %lu (expected '0' with ERROR_INVALID_PARAMETER)\n",
@@ -393,7 +416,7 @@ static void test_AddPortEx(void)
 
     pi.pPortName = NULL;
     SetLastError(0xdeadbeef);
-    res = pAddPortEx(NULL, 1, (LPBYTE) &pi, LocalPortW);
+    res = call_AddPortEx(NULL, 1, (LPBYTE) &pi, LocalPortW);
     ok( !res && (GetLastError() == ERROR_INVALID_PARAMETER),
         "got %lu with %lu (expected '0' with ERROR_INVALID_PARAMETER)\n",
         res, GetLastError());
@@ -407,7 +430,7 @@ static void test_AddPortEx(void)
     pi.fPortType = PORT_TYPE_WRITE;
 
     SetLastError(0xdeadbeef);
-    res = pAddPortEx(NULL, 2, (LPBYTE) &pi, LocalPortW);
+    res = call_AddPortEx(NULL, 2, (LPBYTE) &pi, LocalPortW);
     ok( !res && (GetLastError() == ERROR_INVALID_LEVEL),
         "got %lu with %lu (expected '0' with ERROR_INVALID_LEVEL)\n",
         res, GetLastError());
@@ -416,7 +439,7 @@ static void test_AddPortEx(void)
 
     /* invalid levels */
     SetLastError(0xdeadbeef);
-    res = pAddPortEx(NULL, 0, (LPBYTE) &pi, LocalPortW);
+    res = call_AddPortEx(NULL, 0, (LPBYTE) &pi, LocalPortW);
     ok( !res && (GetLastError() == ERROR_INVALID_LEVEL),
         "got %lu with %lu (expected '0' with ERROR_INVALID_LEVEL)\n",
         res, GetLastError());
@@ -424,7 +447,7 @@ static void test_AddPortEx(void)
 
 
     SetLastError(0xdeadbeef);
-    res = pAddPortEx(NULL, 3, (LPBYTE) &pi, LocalPortW);
+    res = call_AddPortEx(NULL, 3, (LPBYTE) &pi, LocalPortW);
     ok( !res && (GetLastError() == ERROR_INVALID_LEVEL),
         "got %lu with %lu (expected '0' with ERROR_INVALID_LEVEL)\n",
         res, GetLastError());
@@ -445,15 +468,15 @@ static void test_ClosePort(void)
     DWORD   res2;
 
 
-    if (!pOpenPort || !pClosePort) return;
+    if ((!pOpenPort && !pOpenPort2) || !pClosePort) return;
 
     if (have_com[0]) {
         nameW = have_com;
 
         hPort = (HANDLE) 0xdeadbeef;
-        res = pOpenPort(nameW, &hPort);
+        res = call_OpenPort(nameW, &hPort);
         hPort2 = (HANDLE) 0xdeadbeef;
-        res2 = pOpenPort(nameW, &hPort2);
+        res2 = call_OpenPort(nameW, &hPort2);
 
         if (res2 && (hPort2 != hPort)) {
             SetLastError(0xdeadbeef);
@@ -473,9 +496,9 @@ static void test_ClosePort(void)
         nameW = have_lpt;
 
         hPort = (HANDLE) 0xdeadbeef;
-        res = pOpenPort(nameW, &hPort);
+        res = call_OpenPort(nameW, &hPort);
         hPort2 = (HANDLE) 0xdeadbeef;
-        res2 = pOpenPort(nameW, &hPort2);
+        res2 = call_OpenPort(nameW, &hPort2);
 
         if (res2 && (hPort2 != hPort)) {
             SetLastError(0xdeadbeef);
@@ -495,9 +518,9 @@ static void test_ClosePort(void)
         nameW = have_file;
 
         hPort = (HANDLE) 0xdeadbeef;
-        res = pOpenPort(nameW, &hPort);
+        res = call_OpenPort(nameW, &hPort);
         hPort2 = (HANDLE) 0xdeadbeef;
-        res2 = pOpenPort(nameW, &hPort2);
+        res2 = call_OpenPort(nameW, &hPort2);
 
         if (res2 && (hPort2 != hPort)) {
             SetLastError(0xdeadbeef);
@@ -616,7 +639,7 @@ static void test_EnumPorts(void)
     DWORD   pcbNeeded;
     DWORD   pcReturned;
 
-    if (!pEnumPorts) return;
+    if (!pEnumPorts && !pEnumPorts2) return;
 
     /* valid levels are 1 and 2 */
     for(level = 0; level < 4; level++) {
@@ -624,15 +647,14 @@ static void test_EnumPorts(void)
         cbBuf = 0xdeadbeef;
         pcReturned = 0xdeadbeef;
         SetLastError(0xdeadbeef);
-        res = pEnumPorts(NULL, level, NULL, 0, &cbBuf, &pcReturned);
+        res = call_EnumPorts(NULL, level, NULL, 0, &cbBuf, &pcReturned);
 
         /* use only a short test, when we test with an invalid level */
         if(!level || (level > 2)) {
-            /* NT4 fails with ERROR_INVALID_LEVEL (as expected)
-               XP succeeds with ERROR_SUCCESS () */
-            ok( (cbBuf == 0) && (pcReturned == 0),
-                "(%ld) returned %ld with %lu and %ld, %ld (expected 0, 0)\n",
-                level, res, GetLastError(), cbBuf, pcReturned);
+            todo_wine ok(!res || broken(res && !GetLastError()),
+                    "EnumPorts succeeded with level %ld\n", level);
+            todo_wine ok(GetLastError() == ERROR_INVALID_LEVEL || broken(res && !GetLastError()),
+                    "GetLastError() = %ld\n", GetLastError());
             continue;
         }        
 
@@ -647,7 +669,7 @@ static void test_EnumPorts(void)
         pcbNeeded = 0xdeadbeef;
         pcReturned = 0xdeadbeef;
         SetLastError(0xdeadbeef);
-        res = pEnumPorts(NULL, level, buffer, cbBuf, &pcbNeeded, &pcReturned);
+        res = call_EnumPorts(NULL, level, buffer, cbBuf, &pcbNeeded, &pcReturned);
         ok( res, "(%ld) returned %ld with %lu and %ld, %ld (expected '!= 0')\n",
             level, res, GetLastError(), pcbNeeded, pcReturned);
         /* We can compare the returned Data with the Registry / "win.ini",[Ports] here */
@@ -655,14 +677,14 @@ static void test_EnumPorts(void)
         pcbNeeded = 0xdeadbeef;
         pcReturned = 0xdeadbeef;
         SetLastError(0xdeadbeef);
-        res = pEnumPorts(NULL, level, buffer, cbBuf+1, &pcbNeeded, &pcReturned);
+        res = call_EnumPorts(NULL, level, buffer, cbBuf+1, &pcbNeeded, &pcReturned);
         ok( res, "(%ld) returned %ld with %lu and %ld, %ld (expected '!= 0')\n",
             level, res, GetLastError(), pcbNeeded, pcReturned);
 
         pcbNeeded = 0xdeadbeef;
         pcReturned = 0xdeadbeef;
         SetLastError(0xdeadbeef);
-        res = pEnumPorts(NULL, level, buffer, cbBuf-1, &pcbNeeded, &pcReturned);
+        res = call_EnumPorts(NULL, level, buffer, cbBuf-1, &pcbNeeded, &pcReturned);
         ok( !res && (GetLastError() == ERROR_INSUFFICIENT_BUFFER),
             "(%ld) returned %ld with %lu and %ld, %ld (expected '0' with "
             "ERROR_INSUFFICIENT_BUFFER)\n",
@@ -671,23 +693,23 @@ static void test_EnumPorts(void)
         if (0)
         {
             /* The following tests crash this app with native localmon/localspl */
-            pEnumPorts(NULL, level, NULL, cbBuf, &pcbNeeded, &pcReturned);
-            pEnumPorts(NULL, level, buffer, cbBuf, NULL, &pcReturned);
-            pEnumPorts(NULL, level, buffer, cbBuf, &pcbNeeded, NULL);
+            call_EnumPorts(NULL, level, NULL, cbBuf, &pcbNeeded, &pcReturned);
+            call_EnumPorts(NULL, level, buffer, cbBuf, NULL, &pcReturned);
+            call_EnumPorts(NULL, level, buffer, cbBuf, &pcbNeeded, NULL);
         }
 
         /* The Servername is ignored */
         pcbNeeded = 0xdeadbeef;
         pcReturned = 0xdeadbeef;
         SetLastError(0xdeadbeef);
-        res = pEnumPorts(emptyW, level, buffer, cbBuf+1, &pcbNeeded, &pcReturned);
+        res = call_EnumPorts(emptyW, level, buffer, cbBuf+1, &pcbNeeded, &pcReturned);
         ok( res, "(%ld) returned %ld with %lu and %ld, %ld (expected '!= 0')\n",
             level, res, GetLastError(), pcbNeeded, pcReturned);
 
         pcbNeeded = 0xdeadbeef;
         pcReturned = 0xdeadbeef;
         SetLastError(0xdeadbeef);
-        res = pEnumPorts(server_does_not_existW, level, buffer, cbBuf+1, &pcbNeeded, &pcReturned);
+        res = call_EnumPorts(server_does_not_existW, level, buffer, cbBuf+1, &pcbNeeded, &pcReturned);
         ok( res, "(%ld) returned %ld with %lu and %ld, %ld (expected '!= 0')\n",
             level, res, GetLastError(), pcbNeeded, pcReturned);
 
@@ -754,21 +776,21 @@ static void test_OpenPort(void)
     DWORD   res;
     DWORD   res2;
 
-    if (!pOpenPort || !pClosePort) return;
+    if ((!pOpenPort && !pOpenPort2) || !pClosePort) return;
 
     if (have_com[0]) {
         nameW = have_com;
 
         hPort = (HANDLE) 0xdeadbeef;
         SetLastError(0xdeadbeef);
-        res = pOpenPort(nameW, &hPort);
+        res = call_OpenPort(nameW, &hPort);
         ok( res, "got %lu with %lu and %p (expected '!= 0')\n",
             res, GetLastError(), hPort);
 
         /* the same HANDLE is returned for a second OpenPort in native localspl */
         hPort2 = (HANDLE) 0xdeadbeef;
         SetLastError(0xdeadbeef);
-        res2 = pOpenPort(nameW, &hPort2);
+        res2 = call_OpenPort(nameW, &hPort2);
         ok( res2, "got %lu with %lu and %p (expected '!= 0')\n",
             res2, GetLastError(), hPort2);
 
@@ -781,7 +803,7 @@ static void test_OpenPort(void)
 
         hPort = (HANDLE) 0xdeadbeef;
         SetLastError(0xdeadbeef);
-        res = pOpenPort(nameW, &hPort);
+        res = call_OpenPort(nameW, &hPort);
         ok( res || (GetLastError() == ERROR_ACCESS_DENIED),
             "got %lu with %lu and %p (expected '!= 0' or '0' with ERROR_ACCESS_DENIED)\n",
             res, GetLastError(), hPort);
@@ -789,7 +811,7 @@ static void test_OpenPort(void)
         /* the same HANDLE is returned for a second OpenPort in native localspl */
         hPort2 = (HANDLE) 0xdeadbeef;
         SetLastError(0xdeadbeef);
-        res2 = pOpenPort(nameW, &hPort2);
+        res2 = call_OpenPort(nameW, &hPort2);
         ok( res2 || (GetLastError() == ERROR_ACCESS_DENIED),
             "got %lu with %lu and %p (expected '!= 0' or '0' with ERROR_ACCESS_DENIED)\n",
             res2, GetLastError(), hPort2);
@@ -803,14 +825,14 @@ static void test_OpenPort(void)
 
         hPort = (HANDLE) 0xdeadbeef;
         SetLastError(0xdeadbeef);
-        res = pOpenPort(nameW, &hPort);
+        res = call_OpenPort(nameW, &hPort);
         ok( res, "got %lu with %lu and %p (expected '!= 0')\n",
             res, GetLastError(), hPort);
 
         /* a different HANDLE is returned for a second OpenPort */
         hPort2 = (HANDLE) 0xdeadbeef;
         SetLastError(0xdeadbeef);
-        res2 = pOpenPort(nameW, &hPort2);
+        res2 = call_OpenPort(nameW, &hPort2);
         ok( res2 && (hPort2 != hPort),
             "got %lu with %lu and %p (expected '!= 0' and '!= %p')\n",
             res2, GetLastError(), hPort2, hPort);
@@ -824,23 +846,21 @@ static void test_OpenPort(void)
         if (nameW) {
             hPort = (HANDLE) 0xdeadbeef;
             SetLastError(0xdeadbeef);
-            res = pOpenPort(nameW, NULL);
+            res = call_OpenPort(nameW, NULL);
             trace("got %lu with %lu and %p\n", res, GetLastError(), hPort);
         }
     }
 
-    hPort = (HANDLE) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pOpenPort(does_not_existW, &hPort);
-    ok (!res && (hPort == (HANDLE) 0xdeadbeef),
-        "got %lu with 0x%lx and %p (expected '0' and 0xdeadbeef)\n", res, GetLastError(), hPort);
+    res = call_OpenPort(does_not_existW, &hPort);
+    ok (!res, "got %lu with 0x%lx and %p (expected '0' and 0xdeadbeef)\n",
+            res, GetLastError(), hPort);
     if (res) pClosePort(hPort);
 
-    hPort = (HANDLE) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pOpenPort(emptyW, &hPort);
-    ok (!res && (hPort == (HANDLE) 0xdeadbeef),
-        "got %lu with 0x%lx and %p (expected '0' and 0xdeadbeef)\n", res, GetLastError(), hPort);
+    res = call_OpenPort(emptyW, &hPort);
+    ok (!res, "got %lu with 0x%lx and %p (expected '0' and 0xdeadbeef)\n",
+            res, GetLastError(), hPort);
     if (res) pClosePort(hPort);
 
 
@@ -848,10 +868,88 @@ static void test_OpenPort(void)
     if (0) {
         hPort = (HANDLE) 0xdeadbeef;
         SetLastError(0xdeadbeef);
-        res = pOpenPort(NULL, &hPort);
+        res = call_OpenPort(NULL, &hPort);
         trace("got %lu with %lu and %p\n", res, GetLastError(), hPort);
     }
 
+}
+
+static void test_file_port(void)
+{
+    WCHAR printer_name[256];
+    DOC_INFO_1W doc_info;
+    HANDLE hport, hf;
+    BYTE buf[16];
+    DWORD no;
+    BOOL res;
+
+    if ((!pOpenPort && !pOpenPort2) || !pClosePort || !pStartDocPort ||
+            !pWritePort || !pEndDocPort)
+    {
+        win_skip("FILE: port\n");
+        return;
+    }
+
+    no = ARRAY_SIZE(printer_name);
+    if (!GetDefaultPrinterW(printer_name, &no))
+    {
+        skip("no default printer\n");
+        return;
+    }
+
+    SetLastError(0xdeadbeef);
+    res = call_OpenPort(tempfileW, &hport);
+    ok(!res, "OpenPort succeeded\n");
+    ok(GetLastError() == 0xdeadbeef, "GetLastError() = %lu\n", GetLastError());
+
+    res = call_OpenPort((WCHAR *)L"FILE", &hport);
+    ok(!res, "OpenPort succeeded\n");
+    ok(GetLastError() == 0xdeadbeef, "GetLastError() = %lu\n", GetLastError());
+
+    res = call_OpenPort((WCHAR *)L"FILE:", &hport);
+    ok(res, "OpenPort failed (%lu)\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    res = pWritePort(hport, (BYTE *)"test", 4, &no);
+    ok(!res, "WritePort succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "GetLastError() = %lu\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    res = pStartDocPort(hport, printer_name, 1, 1, NULL);
+    ok(!res, "StartDocPort succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "GetLastError() = %lu\n", GetLastError());
+
+    memset(&doc_info, 0, sizeof(doc_info));
+    SetLastError(0xdeadbeef);
+    res = pStartDocPort(hport, printer_name, 1, 1, (BYTE *)&doc_info);
+    ok(!res, "StartDocPort succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "GetLastError() = %lu\n", GetLastError());
+
+    doc_info.pOutputFile = tempfileW;
+    res = pStartDocPort(hport, printer_name, 1, 1, (BYTE *)&doc_info);
+    ok(res, "StartDocPort failed (%lu)\n", GetLastError());
+
+    res = pStartDocPort(hport, printer_name, 1, 1, (BYTE *)&doc_info);
+    ok(res, "StartDocPort failed (%lu)\n", GetLastError());
+
+    res = pWritePort(hport, (BYTE *)"test", 4, &no);
+    ok(res, "WritePort failed (%lu)\n", GetLastError());
+    ok(no == 4, "no = %ld\n", no);
+
+    res = pEndDocPort(hport);
+    ok(res, "EndDocPort failed (%lu)\n", GetLastError());
+    res = pEndDocPort(hport);
+    ok(res, "EndDocPort failed (%lu)\n", GetLastError());
+
+    hf = CreateFileW(tempfileW, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+    ok(hf != INVALID_HANDLE_VALUE, "CreateFile failed (%lu)\n", GetLastError());
+    res = ReadFile(hf, buf, sizeof(buf), &no, NULL);
+    ok(res, "ReadFile failed (%lu)\n", GetLastError());
+    ok(no == 4, "no = %ld\n", no);
+    CloseHandle(hf);
+
+    res = pClosePort(hport);
+    ok(res, "ClosePort failed (%lu)\n", GetLastError());
 }
 
 /* ########################### */
@@ -872,7 +970,7 @@ static void test_XcvClosePort(void)
 
     SetLastError(0xdeadbeef);
     hXcv2 = (HANDLE) 0xdeadbeef;
-    res = pXcvOpenPort(emptyW, SERVER_ACCESS_ADMINISTER, &hXcv2);
+    res = call_XcvOpenPort(emptyW, SERVER_ACCESS_ADMINISTER, &hXcv2);
     ok(res, "returned %ld with %lu and %p (expected '!= 0')\n", res, GetLastError(), hXcv2);
 
     if (res) {
@@ -970,6 +1068,10 @@ static void test_XcvDataPort_ConfigureLPTPortCommandOK(void)
     res = pXcvDataPort(hXcv, cmd_ConfigureLPTPortCommandOKW, (PBYTE) num_0W, sizeof(num_0W), NULL, 0, &needed);
     if (res == ERROR_INVALID_PARAMETER) {
         skip("'ConfigureLPTPortCommandOK' not supported\n");
+        return;
+    }
+    if (res == ERROR_ACCESS_DENIED) {
+        skip("'ConfigureLPTPortCommandOK' failed with ERROR_ACCESS_DENIED\n");
         return;
     }
     ok( res == ERROR_SUCCESS, "returned %ld with %lu (expected ERROR_SUCCESS)\n", res, GetLastError());
@@ -1107,7 +1209,13 @@ static void test_XcvDataPort_GetTransmissionRetryTimeout(void)
         "ERROR_FILE_NOT_FOUND)\n", res, needed, org_value);
 
     /* Get default value (documented as 90 in the w2k reskit, but that is wrong) */
-    RegDeleteValueA(hroot, TransmissionRetryTimeoutA);
+    res = RegDeleteValueA(hroot, TransmissionRetryTimeoutA);
+    if (res == ERROR_ACCESS_DENIED) {
+        RegCloseKey(hroot);
+        skip("ACCESS_DENIED\n");
+        return;
+    }
+    ok( res == ERROR_SUCCESS, "RegDeleteValue(TransmissionRetryTimeout) returned %lu\n", res);
     needed = (DWORD) 0xdeadbeef;
     buffer[0] = 0xdeadbeef;
     SetLastError(0xdeadbeef);
@@ -1118,7 +1226,7 @@ static void test_XcvDataPort_GetTransmissionRetryTimeout(void)
 
     /* the default timeout is returned, when the value is empty */
     res = RegSetValueExA(hroot, TransmissionRetryTimeoutA, 0, REG_SZ, (PBYTE)emptyA, 1);
-    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", GetLastError());
+    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu (%lu)\n", res, GetLastError());
     needed = (DWORD) 0xdeadbeef;
     buffer[0] = 0xdeadbeef;
     SetLastError(0xdeadbeef);
@@ -1300,17 +1408,17 @@ static void test_XcvDataPort_PortIsValid(void)
     }
 
 
-    /* hXcv is ignored for the command "PortIsValid" */
     needed = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataPort(NULL, cmd_PortIsValidW, (PBYTE) portname_lpt1W, sizeof(portname_lpt1W), NULL, 0, NULL);
-    ok( res == ERROR_SUCCESS, "returned %ld with %lu (expected ERROR_SUCCESS)\n", res, GetLastError());
+    res = pXcvDataPort(NULL, cmd_PortIsValidW, (PBYTE) portname_lpt1W, sizeof(portname_lpt1W), NULL, 0, &needed);
+    todo_wine ok( res == ERROR_INVALID_PARAMETER || broken(res == ERROR_SUCCESS),
+            "returned %ld with %lu\n", res, GetLastError());
 
-    /* needed is ignored */
     needed = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
     res = pXcvDataPort(hXcv, cmd_PortIsValidW, (PBYTE) portname_lpt1W, sizeof(portname_lpt1W), NULL, 0, NULL);
-    ok( res == ERROR_SUCCESS, "returned %ld with %lu (expected ERROR_SUCCESS)\n", res, GetLastError());
+    todo_wine ok( res == ERROR_INVALID_PARAMETER || broken(res == ERROR_SUCCESS),
+            "returned %ld with %lu\n", res, GetLastError());
 
 
     /* cbInputData is ignored */
@@ -1347,9 +1455,8 @@ static void test_XcvDataPort_PortIsValid(void)
     needed = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
     res = pXcvDataPort(hXcv, cmd_PortIsValidW, (PBYTE) emptyW, sizeof(emptyW), NULL, 0, &needed);
-    ok( res == ERROR_PATH_NOT_FOUND,
-        "returned %ld with %lu and 0x%lx (expected ERROR_PATH_NOT_FOUND)\n",
-        res, GetLastError(), needed);
+    todo_wine ok( res == ERROR_FILE_NOT_FOUND || broken(res == ERROR_PATH_NOT_FOUND),
+        "returned %ld with %lu and 0x%lx\n", res, GetLastError(), needed);
 
 
     /* a directory is not allowed */
@@ -1427,15 +1534,15 @@ static void test_XcvOpenPort(void)
     if (0)
     {
         /* crash with native localspl.dll (w2k+xp) */
-        pXcvOpenPort(NULL, SERVER_ACCESS_ADMINISTER, &hXcv2);
-        pXcvOpenPort(emptyW, SERVER_ACCESS_ADMINISTER, NULL);
+        call_XcvOpenPort(NULL, SERVER_ACCESS_ADMINISTER, &hXcv2);
+        call_XcvOpenPort(emptyW, SERVER_ACCESS_ADMINISTER, NULL);
     }
 
 
     /* The returned handle is the result from a previous "spoolss.dll,DllAllocSplMem" */
     SetLastError(0xdeadbeef);
     hXcv2 = (HANDLE) 0xdeadbeef;
-    res = pXcvOpenPort(emptyW, SERVER_ACCESS_ADMINISTER, &hXcv2);
+    res = call_XcvOpenPort(emptyW, SERVER_ACCESS_ADMINISTER, &hXcv2);
     ok(res, "returned %ld with %lu and %p (expected '!= 0')\n", res, GetLastError(), hXcv2);
     if (res) pXcvClosePort(hXcv2);
 
@@ -1443,7 +1550,7 @@ static void test_XcvOpenPort(void)
     /* The ACCESS_MASK is not checked in XcvOpenPort */
     SetLastError(0xdeadbeef);
     hXcv2 = (HANDLE) 0xdeadbeef;
-    res = pXcvOpenPort(emptyW, 0, &hXcv2);
+    res = call_XcvOpenPort(emptyW, 0, &hXcv2);
     ok(res, "returned %ld with %lu and %p (expected '!= 0')\n", res, GetLastError(), hXcv2);
     if (res) pXcvClosePort(hXcv2);
 
@@ -1451,13 +1558,13 @@ static void test_XcvOpenPort(void)
     /* A copy of pszObject is saved in the Memory-Block */
     SetLastError(0xdeadbeef);
     hXcv2 = (HANDLE) 0xdeadbeef;
-    res = pXcvOpenPort(portname_lpt1W, SERVER_ALL_ACCESS, &hXcv2);
+    res = call_XcvOpenPort(portname_lpt1W, SERVER_ALL_ACCESS, &hXcv2);
     ok(res, "returned %ld with %lu and %p (expected '!= 0')\n", res, GetLastError(), hXcv2);
     if (res) pXcvClosePort(hXcv2);
 
     SetLastError(0xdeadbeef);
     hXcv2 = (HANDLE) 0xdeadbeef;
-    res = pXcvOpenPort(portname_fileW, SERVER_ALL_ACCESS, &hXcv2);
+    res = call_XcvOpenPort(portname_fileW, SERVER_ALL_ACCESS, &hXcv2);
     ok(res, "returned %ld with %lu and %p (expected '!= 0')\n", res, GetLastError(), hXcv2);
     if (res) pXcvClosePort(hXcv2);
 
@@ -1544,7 +1651,6 @@ START_TEST(localmon)
 
         GET_MONITOR_FUNC2(EnumPorts);
         GET_MONITOR_FUNC2(OpenPort);
-        GET_MONITOR_FUNC2(OpenPortEx);
         GET_MONITOR_FUNC(StartDocPort);
         GET_MONITOR_FUNC(WritePort);
         GET_MONITOR_FUNC(ReadPort);
@@ -1560,13 +1666,13 @@ START_TEST(localmon)
         GET_MONITOR_FUNC(XcvDataPort);
         GET_MONITOR_FUNC(XcvClosePort);
 
-        if ((pXcvOpenPort) && (pXcvDataPort) && (pXcvClosePort)) {
+        if ((pXcvOpenPort || pXcvOpenPort2) && pXcvDataPort && pXcvClosePort) {
             SetLastError(0xdeadbeef);
-            res = pXcvOpenPort(emptyW, SERVER_ACCESS_ADMINISTER, &hXcv);
+            res = call_XcvOpenPort(emptyW, SERVER_ACCESS_ADMINISTER, &hXcv);
             ok(res, "hXcv: %ld with %lu and %p (expected '!= 0')\n", res, GetLastError(), hXcv);
 
             SetLastError(0xdeadbeef);
-            res = pXcvOpenPort(emptyW, 0, &hXcv_noaccess);
+            res = call_XcvOpenPort(emptyW, 0, &hXcv_noaccess);
             ok(res, "hXcv_noaccess: %ld with %lu and %p (expected '!= 0')\n", res, GetLastError(), hXcv_noaccess);
         }
     }
@@ -1583,6 +1689,7 @@ START_TEST(localmon)
     test_DeletePort();
     test_EnumPorts();
     test_OpenPort();
+    test_file_port();
 
     if ( !hXcv ) {
         skip("Xcv not supported\n");

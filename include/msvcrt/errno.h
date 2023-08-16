@@ -19,8 +19,6 @@
 #ifndef __WINE_ERRNO_H
 #define __WINE_ERRNO_H
 
-#include "wine/winheader_enter.h"
-
 #include <corecrt.h>
 
 #  define EPERM   1
@@ -120,7 +118,5 @@ _ACRTIMP int* __cdecl _errno(void);
 #endif
 
 #define errno        (*_errno())
-
-#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_ERRNO_H */

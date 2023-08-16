@@ -18,8 +18,6 @@
 #ifndef _INC_WINDOWSX
 #define _INC_WINDOWSX
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -1437,7 +1435,5 @@ extern "C" {
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

@@ -19,28 +19,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <assert.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include "winerror.h"
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winnls.h"
-#include "win.h"
 #include "user_private.h"
 #include "controls.h"
-#include "wine/server.h"
-#include "wine/list.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(class);
 
 #define MAX_ATOM_LEN 255 /* from dlls/kernel32/atom.c */
-
-static INIT_ONCE init_once = INIT_ONCE_STATIC_INIT;
 
 static inline const char *debugstr_us( const UNICODE_STRING *us )
 {
@@ -266,32 +251,6 @@ static void get_versioned_name( const WCHAR *name, UNICODE_STRING *ret, UNICODE_
 }
 
 
-/***********************************************************************
- *           register_builtin
- *
- * Register a builtin control class.
- * This allows having both ANSI and Unicode winprocs for the same class.
- */
-static void register_builtin( const struct builtin_class_descr *descr )
-{
-    UNICODE_STRING name, version = { .Length = 0 };
-    struct client_menu_name menu_name = { 0 };
-    WNDCLASSEXW class = {
-        .cbSize = sizeof(class),
-        .hInstance = user32_module,
-        .style = descr->style,
-        .cbWndExtra = descr->extra,
-        .hbrBackground = descr->brush,
-        .lpfnWndProc = BUILTIN_WINPROC( descr->proc ),
-    };
-
-    if (descr->cursor) class.hCursor = LoadCursorA( 0, (LPSTR)descr->cursor );
-
-    init_class_name( &name, descr->name );
-    if (!NtUserRegisterClassExWOW( &class, &name, &version, &menu_name, 1, 0, NULL ) && class.hCursor)
-        DestroyCursor( class.hCursor );
-}
-
 static void load_uxtheme(void)
 {
     BOOL (WINAPI * pIsThemeActive)(void);
@@ -307,45 +266,17 @@ static void load_uxtheme(void)
 }
 
 /***********************************************************************
- *           register_builtins
+ *           User32InitBuiltinClasses
  */
-static BOOL WINAPI register_builtins( INIT_ONCE *once, void *param, void **context )
+BOOL WINAPI User32InitBuiltinClasses( const struct win_hook_params *params, ULONG size )
 {
-    register_builtin( &BUTTON_builtin_class );
-    register_builtin( &COMBO_builtin_class );
-    register_builtin( &COMBOLBOX_builtin_class );
-    register_builtin( &DIALOG_builtin_class );
-    register_builtin( &EDIT_builtin_class );
-    register_builtin( &ICONTITLE_builtin_class );
-    register_builtin( &LISTBOX_builtin_class );
-    register_builtin( &MDICLIENT_builtin_class );
-    register_builtin( &MENU_builtin_class );
-    register_builtin( &SCROLL_builtin_class );
-    register_builtin( &STATIC_builtin_class );
-    register_builtin( &IME_builtin_class );
+    DWORD layout;
+
+    GetProcessDefaultLayout( &layout ); /* make sure that process layout is initialized */
 
     /* Load uxtheme.dll so that standard scrollbars and dialogs are hooked for theming support */
     load_uxtheme();
     return TRUE;
-}
-
-
-/***********************************************************************
- *           register_builtin_classes
- */
-void register_builtin_classes(void)
-{
-    InitOnceExecuteOnce( &init_once, register_builtins, NULL, NULL );
-}
-
-
-/***********************************************************************
- *           register_desktop_class
- */
-void register_desktop_class(void)
-{
-    register_builtin( &DESKTOP_builtin_class );
-    register_builtin( &MESSAGE_builtin_class );
 }
 
 
@@ -724,44 +655,6 @@ BOOL WINAPI GetClassInfoExW( HINSTANCE hInstance, LPCWSTR name, WNDCLASSEXW *wc 
     return atom;
 }
 
-
-#if 0  /* toolhelp is in kernel, so this cannot work */
-
-/***********************************************************************
- *		ClassFirst (TOOLHELP.69)
- */
-BOOL16 WINAPI ClassFirst16( CLASSENTRY *pClassEntry )
-{
-    TRACE("%p\n",pClassEntry);
-    pClassEntry->wNext = 1;
-    return ClassNext16( pClassEntry );
-}
-
-
-/***********************************************************************
- *		ClassNext (TOOLHELP.70)
- */
-BOOL16 WINAPI ClassNext16( CLASSENTRY *pClassEntry )
-{
-    int i;
-    CLASS *class = firstClass;
-
-    TRACE("%p\n",pClassEntry);
-
-    if (!pClassEntry->wNext) return FALSE;
-    for (i = 1; (i < pClassEntry->wNext) && class; i++) class = class->next;
-    if (!class)
-    {
-        pClassEntry->wNext = 0;
-        return FALSE;
-    }
-    pClassEntry->hInst = class->hInstance;
-    pClassEntry->wNext++;
-    GlobalGetAtomNameA( class->atomName, pClassEntry->szClassName,
-                          sizeof(pClassEntry->szClassName) );
-    return TRUE;
-}
-#endif
 
 #ifdef _WIN64
 

@@ -1,9 +1,8 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE    = winecoreaudio.drv
 UNIXLIB   = winecoreaudio.so
 IMPORTS   = uuid ole32 user32 advapi32
 DELAYIMPORTS = winmm
-EXTRALIBS = $(COREAUDIO_LIBS) -framework AppKit $(AVFOUNDATION_LIBS)
+UNIX_LIBS    = $(COREAUDIO_LIBS) -framework AppKit $(AVFOUNDATION_LIBS)
 
 C_SRCS = \
 	coreaudio.c \

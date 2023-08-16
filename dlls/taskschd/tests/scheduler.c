@@ -744,6 +744,7 @@ static void test_GetTask(void)
     ITaskService *service;
     ITaskFolder *root, *folder;
     IRegisteredTask *task1, *task2;
+    DATE date;
     IID iid;
     int i;
 
@@ -774,11 +775,25 @@ static void test_GetTask(void)
     hr = ITaskFolder_CreateFolder(root, Wine, v_null, &folder);
     ok(hr == S_OK, "CreateFolder error %#lx\n", hr);
 
+    MultiByteToWideChar(CP_ACP, 0, xml1, -1, xmlW, ARRAY_SIZE(xmlW));
+
+    hr = ITaskFolder_RegisterTask(root, Wine, xmlW, TASK_CREATE, v_null, v_null, TASK_LOGON_NONE, v_null, NULL);
+    todo_wine
+    ok(hr == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED) || broken(hr == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)) /* Vista */, "expected ERROR_ACCESS_DENIED, got %#lx\n", hr);
+
+    /* Delete the folder and recreate it to prevent a crash on w1064v1507 */
+    hr = ITaskFolder_DeleteFolder(root, Wine, 0);
+    todo_wine
+    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) || broken(hr == S_OK) /* w1064v1507 */,
+       "expected ERROR_FILE_NOT_FOUND, got %#lx\n", hr);
+    ITaskFolder_Release(folder);
+
+    hr = ITaskFolder_CreateFolder(root, Wine, v_null, &folder);
+    ok(hr == S_OK, "CreateFolder error %#lx\n", hr);
+
     hr = ITaskFolder_GetTask(root, Wine, &task1);
     ok(hr == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND) || hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) /* win7 */,
        "expected ERROR_PATH_NOT_FOUND, got %#lx\n", hr);
-
-    MultiByteToWideChar(CP_ACP, 0, xml1, -1, xmlW, ARRAY_SIZE(xmlW));
 
     for (i = 0; i < ARRAY_SIZE(create_new_task); i++)
     {
@@ -797,10 +812,6 @@ static void test_GetTask(void)
 
     hr = ITaskFolder_RegisterTask(root, Wine, xmlW, TASK_VALIDATE_ONLY, v_null, v_null, TASK_LOGON_NONE, v_null, NULL);
     ok(hr == S_OK, "RegisterTask error %#lx\n", hr);
-
-    hr = ITaskFolder_RegisterTask(root, Wine, xmlW, TASK_CREATE, v_null, v_null, TASK_LOGON_NONE, v_null, NULL);
-    todo_wine
-    ok(hr == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED) || broken(hr == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)) /* Vista */, "expected ERROR_ACCESS_DENIED, got %#lx\n", hr);
 
     hr = ITaskFolder_RegisterTask(root, Wine_Task1, xmlW, TASK_CREATE, v_null, v_null, TASK_LOGON_NONE, v_null, NULL);
     ok(hr == S_OK, "RegisterTask error %#lx\n", hr);
@@ -840,6 +851,9 @@ static void test_GetTask(void)
     ok(hr == S_OK, "get_Enabled error %#lx\n", hr);
     ok(vbool == VARIANT_FALSE, "expected VARIANT_FALSE, got %d\n", vbool);
 
+    hr = IRegisteredTask_get_LastRunTime(task1, &date);
+    ok(hr == SCHED_S_TASK_HAS_NOT_RUN, "got %#lx\n", hr);
+
     IRegisteredTask_Release(task1);
 
     hr = ITaskFolder_RegisterTask(folder, Task1, xmlW, TASK_CREATE, v_null, v_null, TASK_LOGON_NONE, v_null, &task2);
@@ -860,12 +874,13 @@ static void test_GetTask(void)
     SysFreeString(bstr);
     hr = IRegisteredTask_get_State(task2, &state);
     ok(hr == S_OK, "get_State error %#lx\n", hr);
-    todo_wine
     ok(state == TASK_STATE_READY, "expected TASK_STATE_READY, got %d\n", state);
     hr = IRegisteredTask_get_Enabled(task2, &vbool);
     ok(hr == S_OK, "get_Enabled error %#lx\n", hr);
-    todo_wine
     ok(vbool == VARIANT_TRUE, "expected VARIANT_TRUE, got %d\n", vbool);
+
+    hr = IRegisteredTask_get_LastRunTime(task2, &date);
+    ok(hr == SCHED_S_TASK_HAS_NOT_RUN, "got %#lx\n", hr);
 
     IRegisteredTask_Release(task2);
 
@@ -893,6 +908,9 @@ static void test_GetTask(void)
     ok(hr == S_OK, "get_Enabled error %#lx\n", hr);
     ok(vbool == VARIANT_FALSE, "expected VARIANT_FALSE, got %d\n", vbool);
 
+    hr = IRegisteredTask_get_LastRunTime(task1, &date);
+    ok(hr == SCHED_S_TASK_HAS_NOT_RUN, "got %#lx\n", hr);
+
     hr = IRegisteredTask_put_Enabled(task1, VARIANT_TRUE);
     ok(hr == S_OK, "put_Enabled error %#lx\n", hr);
     hr = IRegisteredTask_get_State(task1, &state);
@@ -903,6 +921,9 @@ static void test_GetTask(void)
     ok(hr == S_OK, "get_Enabled error %#lx\n", hr);
     todo_wine
     ok(vbool == VARIANT_TRUE, "expected VARIANT_TRUE, got %d\n", vbool);
+
+    hr = IRegisteredTask_get_LastRunTime(task1, &date);
+    ok(hr == SCHED_S_TASK_HAS_NOT_RUN, "got %#lx\n", hr);
 
     IRegisteredTask_Release(task1);
 
@@ -919,12 +940,13 @@ static void test_GetTask(void)
     SysFreeString(bstr);
     hr = IRegisteredTask_get_State(task2, &state);
     ok(hr == S_OK, "get_State error %#lx\n", hr);
-    todo_wine
     ok(state == TASK_STATE_READY, "expected TASK_STATE_READY, got %d\n", state);
     hr = IRegisteredTask_get_Enabled(task2, &vbool);
     ok(hr == S_OK, "get_Enabled error %#lx\n", hr);
-    todo_wine
     ok(vbool == VARIANT_TRUE, "expected VARIANT_TRUE, got %d\n", vbool);
+
+    hr = IRegisteredTask_get_LastRunTime(task2, &date);
+    ok(hr == SCHED_S_TASK_HAS_NOT_RUN, "got %#lx\n", hr);
 
     hr = IRegisteredTask_get_State(task2, NULL);
     ok(hr == E_POINTER, "expected E_POINTER, got %#lx\n", hr);

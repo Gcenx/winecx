@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,7 +34,6 @@
 #include "x11drv.h"
 #include "imm.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xim);
 
@@ -58,27 +61,20 @@ static XIMStyle ximStyle = 0;
 static XIMStyle ximStyleRoot = 0;
 static XIMStyle ximStyleRequest = STYLE_CALLBACK;
 
-static void X11DRV_ImmSetInternalString(DWORD dwOffset,
-                                        DWORD selLength, LPWSTR lpComp, DWORD dwCompLen)
+static void X11DRV_ImmSetInternalString(UINT offset, UINT selLength, LPWSTR lpComp, UINT len)
 {
     /* Composition strings are edited in chunks */
-    unsigned int byte_length = dwCompLen * sizeof(WCHAR);
-    unsigned int byte_offset = dwOffset * sizeof(WCHAR);
+    unsigned int byte_length = len * sizeof(WCHAR);
+    unsigned int byte_offset = offset * sizeof(WCHAR);
     unsigned int byte_selection = selLength * sizeof(WCHAR);
     int byte_expansion = byte_length - byte_selection;
     LPBYTE ptr_new;
 
-    TRACE("( %i, %i, %p, %d):\n", dwOffset, selLength, lpComp, dwCompLen );
+    TRACE("( %i, %i, %p, %d):\n", offset, selLength, lpComp, len );
 
     if (byte_expansion + dwCompStringLength >= dwCompStringSize)
     {
-        if (CompositionString)
-            ptr_new = HeapReAlloc(GetProcessHeap(), 0, CompositionString,
-                                  dwCompStringSize + byte_expansion);
-        else
-            ptr_new = HeapAlloc(GetProcessHeap(), 0,
-                                dwCompStringSize + byte_expansion);
-
+        ptr_new = realloc( CompositionString, dwCompStringSize + byte_expansion );
         if (ptr_new == NULL)
         {
             ERR("Couldn't expand composition string buffer\n");
@@ -95,29 +91,22 @@ static void X11DRV_ImmSetInternalString(DWORD dwOffset,
     if (lpComp) memcpy(ptr_new, lpComp, byte_length);
     dwCompStringLength += byte_expansion;
 
-    IME_SetCompositionString(SCS_SETSTR, CompositionString,
-                             dwCompStringLength, NULL, 0);
+    x11drv_client_func( client_func_ime_set_composition_string,
+                        CompositionString, dwCompStringLength );
 }
 
-void X11DRV_XIMLookupChars( const char *str, DWORD count )
+void X11DRV_XIMLookupChars( const char *str, UINT count )
 {
-    DWORD dwOutput;
-    WCHAR *wcOutput;
-    HWND focus;
+    WCHAR *output;
+    DWORD len;
 
     TRACE("%p %u\n", str, count);
 
-    dwOutput = MultiByteToWideChar(CP_UNIXCP, 0, str, count, NULL, 0);
-    wcOutput = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR) * dwOutput);
-    if (wcOutput == NULL)
-        return;
-    MultiByteToWideChar(CP_UNIXCP, 0, str, count, wcOutput, dwOutput);
+    if (!(output = malloc( count * sizeof(WCHAR) ))) return;
+    len = ntdll_umbstowcs( str, count, output, count );
 
-    if ((focus = GetFocus()))
-        IME_UpdateAssociation(focus);
-
-    IME_SetResultString(wcOutput, dwOutput);
-    HeapFree(GetProcessHeap(), 0, wcOutput);
+    x11drv_client_func( client_func_ime_set_result, output, len * sizeof(WCHAR) );
+    free( output );
 }
 
 static BOOL XIMPreEditStateNotifyCallback(XIC xic, XPointer p, XPointer data)
@@ -129,21 +118,22 @@ static BOOL XIMPreEditStateNotifyCallback(XIC xic, XPointer p, XPointer data)
     switch (state)
     {
     case XIMPreeditEnable:
-        IME_SetOpenStatus(TRUE);
+        x11drv_client_call( client_ime_set_open_status, TRUE );
         break;
     case XIMPreeditDisable:
-        IME_SetOpenStatus(FALSE);
+        x11drv_client_call( client_ime_set_open_status, FALSE );
         break;
     default:
         break;
     }
+
     return TRUE;
 }
 
 static int XIMPreEditStartCallback(XIC ic, XPointer client_data, XPointer call_data)
 {
     TRACE("PreEditStartCallback %p\n",ic);
-    IME_SetCompositionStatus(TRUE);
+    x11drv_client_call( client_ime_set_composition_status, TRUE );
     ximInComposeMode = TRUE;
     return -1;
 }
@@ -153,11 +143,11 @@ static void XIMPreEditDoneCallback(XIC ic, XPointer client_data, XPointer call_d
     TRACE("PreeditDoneCallback %p\n",ic);
     ximInComposeMode = FALSE;
     if (dwCompStringSize)
-        HeapFree(GetProcessHeap(), 0, CompositionString);
+        free( CompositionString );
     dwCompStringSize = 0;
     dwCompStringLength = 0;
     CompositionString = NULL;
-    IME_SetCompositionStatus(FALSE);
+    x11drv_client_call( client_ime_set_composition_status, FALSE );
 }
 
 static void XIMPreEditDrawCallback(XIM ic, XPointer client_data,
@@ -173,24 +163,18 @@ static void XIMPreEditDrawCallback(XIM ic, XPointer client_data,
         {
             if (! P_DR->text->encoding_is_wchar)
             {
-                DWORD dwOutput;
-                WCHAR *wcOutput;
+                size_t text_len;
+                WCHAR *output;
 
                 TRACE("multibyte\n");
-                dwOutput = MultiByteToWideChar(CP_UNIXCP, 0,
-                           P_DR->text->string.multi_byte, -1,
-                           NULL, 0);
-                wcOutput = HeapAlloc(GetProcessHeap(), 0, sizeof (WCHAR) * dwOutput);
-                if (wcOutput)
+                text_len = strlen( P_DR->text->string.multi_byte );
+                if ((output = malloc( text_len * sizeof(WCHAR) )))
                 {
-                    dwOutput = MultiByteToWideChar(CP_UNIXCP, 0,
-                               P_DR->text->string.multi_byte, -1,
-                               wcOutput, dwOutput);
+                    text_len = ntdll_umbstowcs( P_DR->text->string.multi_byte, text_len,
+                                                output, text_len );
 
-                    /* ignore null */
-                    dwOutput --;
-                    X11DRV_ImmSetInternalString (sel, len, wcOutput, dwOutput);
-                    HeapFree(GetProcessHeap(), 0, wcOutput);
+                    X11DRV_ImmSetInternalString( sel, len, output, text_len );
+                    free( output );
                 }
             }
             else
@@ -203,7 +187,7 @@ static void XIMPreEditDrawCallback(XIM ic, XPointer client_data,
         }
         else
             X11DRV_ImmSetInternalString (sel, len, NULL, 0);
-        IME_SetCursorPos(P_DR->caret);
+        x11drv_client_call( client_ime_set_cursor_pos, P_DR->caret );
     }
     TRACE("Finished\n");
 }
@@ -215,7 +199,7 @@ static void XIMPreEditCaretCallback(XIC ic, XPointer client_data,
 
     if (P_C)
     {
-        int pos = IME_GetCursorPos();
+        int pos = x11drv_client_call( client_ime_get_cursor_pos, 0 );
         TRACE("pos: %d\n", pos);
         switch(P_C->direction)
         {
@@ -244,13 +228,13 @@ static void XIMPreEditCaretCallback(XIC ic, XPointer client_data,
                 FIXME("Not implemented\n");
                 break;
         }
-        IME_SetCursorPos(pos);
+        x11drv_client_call( client_ime_set_cursor_pos, pos );
         P_C->position = pos;
     }
     TRACE("Finished\n");
 }
 
-void X11DRV_ForceXIMReset(HWND hwnd)
+NTSTATUS x11drv_xim_reset( void *hwnd )
 {
     XIC ic = X11DRV_get_ic(hwnd);
     if (ic)
@@ -260,19 +244,21 @@ void X11DRV_ForceXIMReset(HWND hwnd)
         leftover = XmbResetIC(ic);
         XFree(leftover);
     }
+    return 0;
 }
 
-void X11DRV_SetPreeditState(HWND hwnd, BOOL fOpen)
+NTSTATUS x11drv_xim_preedit_state( void *arg )
 {
+    struct xim_preedit_state_params *params = arg;
     XIC ic;
     XIMPreeditState state;
     XVaNestedList attr;
 
-    ic = X11DRV_get_ic(hwnd);
+    ic = X11DRV_get_ic( params->hwnd );
     if (!ic)
-        return;
+        return 0;
 
-    if (fOpen)
+    if (params->open)
         state = XIMPreeditEnable;
     else
         state = XIMPreeditDisable;
@@ -283,6 +269,7 @@ void X11DRV_SetPreeditState(HWND hwnd, BOOL fOpen)
         XSetICValues(ic, XNPreeditAttributes, attr, NULL);
         XFree(attr);
     }
+    return 0;
 }
 
 
@@ -297,11 +284,11 @@ BOOL X11DRV_InitXIM( const WCHAR *input_style )
     static const WCHAR overthespotW[] = {'o','v','e','r','t','h','e','s','p','o','t',0};
     static const WCHAR rootW[] = {'r','o','o','t',0};
 
-    if (!strcmpiW(input_style, offthespotW))
+    if (!wcsicmp( input_style, offthespotW ))
         ximStyleRequest = STYLE_OFFTHESPOT;
-    else if (!strcmpiW(input_style, overthespotW))
+    else if (!wcsicmp( input_style, overthespotW ))
         ximStyleRequest = STYLE_OVERTHESPOT;
-    else if (!strcmpiW(input_style, rootW))
+    else if (!wcsicmp( input_style, rootW ))
         ximStyleRequest = STYLE_ROOT;
 
     if (!XSupportsLocale())
@@ -435,7 +422,7 @@ static BOOL open_xim( Display *display )
     else
         thread_data->font_set = NULL;
 
-    IME_UpdateAssociation(NULL);
+    x11drv_client_call( client_ime_update_association, 0 );
     return TRUE;
 }
 
@@ -470,17 +457,24 @@ XIC X11DRV_CreateIC(XIM xim, struct x11drv_win_data *data)
     XIC xic;
     XICCallback destroy = {(XPointer)data, X11DRV_DestroyIC};
     XICCallback P_StateNotifyCB, P_StartCB, P_DoneCB, P_DrawCB, P_CaretCB;
-    LANGID langid = PRIMARYLANGID(LANGIDFROMLCID(GetThreadLocale()));
+    LCID lcid;
     Window win = data->whole_window;
     XFontSet fontSet = x11drv_thread_data()->font_set;
 
     TRACE("xim = %p\n", xim);
 
+    lcid = NtCurrentTeb()->CurrentLocale;
+    if (!lcid) NtQueryDefaultLocale( TRUE, &lcid );
+
     /* use complex and slow XIC initialization method only for CJK */
-    if (langid != LANG_CHINESE &&
-        langid != LANG_JAPANESE &&
-        langid != LANG_KOREAN)
+    switch (PRIMARYLANGID(LANGIDFROMLCID(lcid)))
     {
+    case LANG_CHINESE:
+    case LANG_JAPANESE:
+    case LANG_KOREAN:
+        break;
+
+    default:
         xic = XCreateIC(xim,
                         XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
                         XNClientWindow, win,

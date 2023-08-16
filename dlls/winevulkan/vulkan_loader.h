@@ -30,7 +30,6 @@
 #include "winternl.h"
 #include "wine/debug.h"
 #include "wine/vulkan.h"
-#include "wine/vulkan_driver.h"
 #include "wine/unixlib.h"
 #include "wine/list.h"
 
@@ -146,12 +145,6 @@ struct is_available_device_function_params
     const char *name;
 };
 
-extern NTSTATUS WINAPI __wine_direct_unix_call(unixlib_handle_t handle, unsigned int code, void *params);
-extern unixlib_handle_t unix_handle DECLSPEC_HIDDEN;
-
-static inline NTSTATUS vk_unix_call(enum unix_call code, void *params)
-{
-    return __wine_unix_call(unix_handle, code, params);
-}
+#define UNIX_CALL(code, params) WINE_UNIX_CALL(unix_ ## code, params)
 
 #endif /* __WINE_VULKAN_LOADER_H */

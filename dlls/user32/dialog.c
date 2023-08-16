@@ -18,26 +18,17 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <ctype.h>
-#include <errno.h>
-#include <limits.h>
 #include <stdlib.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
-
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winuser.h"
-#include "winnls.h"
-#include "controls.h"
-#include "win.h"
+#include <limits.h>
+#include <errno.h>
 #include "user_private.h"
+#include "controls.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dialog);
 
+
+#define DIALOG_CLASS_ATOM    MAKEINTATOM(32770)  /* Dialog */
 
   /* Dialog control information */
 typedef struct
@@ -83,20 +74,6 @@ typedef struct
     UINT lastID;
     UINT checkID;
 } RADIOGROUP;
-
-
-/*********************************************************************
- * dialog class descriptor
- */
-const struct builtin_class_descr DIALOG_builtin_class =
-{
-    (LPCWSTR)DIALOG_CLASS_ATOM, /* name */
-    CS_SAVEBITS | CS_DBLCLKS, /* style  */
-    WINPROC_DIALOG,     /* proc */
-    DLGWINDOWEXTRA,     /* extra */
-    IDC_ARROW,          /* cursor */
-    0                   /* brush */
-};
 
 
 /***********************************************************************
@@ -177,7 +154,7 @@ static const WORD *DIALOG_GetControl32( const WORD *p, DLG_CONTROL_INFO *info,
         p += lstrlenW( info->windowName ) + 1;
     }
 
-    TRACE("    %s %s %ld, %d, %d, %d, %d, %08x, %08x, %08x\n",
+    TRACE("    %s %s %Id, %d, %d, %d, %d, %08lx, %08lx, %08lx\n",
           debugstr_w( info->className ), debugstr_w( info->windowName ),
           info->id, info->x, info->y, info->cx, info->cy,
           info->style, info->exStyle, info->helpId );
@@ -232,8 +209,19 @@ static BOOL DIALOG_CreateControls32( HWND hwnd, LPCSTR template, const DLG_TEMPL
         }
         if (unicode)
         {
+            const WCHAR *caption = info.windowName;
+            WCHAR caption_buf[3];
+
+            if (IS_INTRESOURCE(caption) && caption)
+            {
+                caption_buf[0] = 0xffff;
+                caption_buf[1] = PtrToUlong( caption );
+                caption_buf[2] = 0;
+                caption = caption_buf;
+            }
+
             hwndCtrl = CreateWindowExW( info.exStyle | WS_EX_NOPARENTNOTIFY,
-                                        info.className, info.windowName,
+                                        info.className, caption,
                                         info.style | WS_CHILD,
                                         MulDiv(info.x, dlgInfo->xBaseUnit, 4),
                                         MulDiv(info.y, dlgInfo->yBaseUnit, 8),
@@ -248,6 +236,7 @@ static BOOL DIALOG_CreateControls32( HWND hwnd, LPCSTR template, const DLG_TEMPL
             LPCSTR caption = (LPCSTR)info.windowName;
             LPSTR class_tmp = NULL;
             LPSTR caption_tmp = NULL;
+            char caption_buf[4];
 
             if (!IS_INTRESOURCE(class))
             {
@@ -263,6 +252,15 @@ static BOOL DIALOG_CreateControls32( HWND hwnd, LPCSTR template, const DLG_TEMPL
                 WideCharToMultiByte( CP_ACP, 0, info.windowName, -1, caption_tmp, len, NULL, NULL );
                 caption = caption_tmp;
             }
+            else if (caption)
+            {
+                caption_buf[0] = 0xff;
+                caption_buf[1] = PtrToUlong( caption );
+                caption_buf[2] = PtrToUlong( caption ) >> 8;
+                caption_buf[3] = 0;
+                caption = caption_buf;
+            }
+
             hwndCtrl = CreateWindowExA( info.exStyle | WS_EX_NOPARENTNOTIFY,
                                         class, caption, info.style | WS_CHILD,
                                         MulDiv(info.x, dlgInfo->xBaseUnit, 4),
@@ -335,11 +333,11 @@ static LPCSTR DIALOG_ParseTemplate32( LPCSTR template, DLG_TEMPLATE * result )
     result->y       = GET_WORD(p); p++;
     result->cx      = GET_WORD(p); p++;
     result->cy      = GET_WORD(p); p++;
-    TRACE("DIALOG%s %d, %d, %d, %d, %d\n",
+    TRACE("DIALOG%s %d, %d, %d, %d, %ld\n",
            result->dialogEx ? "EX" : "", result->x, result->y,
            result->cx, result->cy, result->helpId );
-    TRACE(" STYLE 0x%08x\n", result->style );
-    TRACE(" EXSTYLE 0x%08x\n", result->exStyle );
+    TRACE(" STYLE 0x%08lx\n", result->style );
+    TRACE(" EXSTYLE 0x%08lx\n", result->exStyle );
 
     /* Get the menu name */
 
@@ -471,7 +469,7 @@ static HWND DIALOG_CreateIndirect( HINSTANCE hInst, LPCVOID dlgTemplate,
 
     if (template.style & DS_SETFONT)
     {
-        HDC dc = GetDC(0);
+        HDC dc = NtUserGetDC(0);
 
         if (template.pointSize == 0x7fff)
         {
@@ -909,7 +907,7 @@ BOOL WINAPI EndDialog( HWND hwnd, INT_PTR retval )
     DIALOGINFO * dlgInfo;
     HWND owner;
 
-    TRACE("%p %ld\n", hwnd, retval );
+    TRACE("%p %Id\n", hwnd, retval );
 
     if (!(dlgInfo = DIALOG_get_info( hwnd, FALSE )))
     {
@@ -940,7 +938,7 @@ BOOL WINAPI EndDialog( HWND hwnd, INT_PTR retval )
         if (owner)
             SetForegroundWindow( owner );
         else
-            WINPOS_ActivateOtherWindow( hwnd );
+            NtUserActivateOtherWindow( hwnd );
     }
 
     /* unblock dialog loop */
@@ -1038,19 +1036,10 @@ static HWND DIALOG_FindMsgDestination( HWND hwndDlg )
 {
     while (GetWindowLongA(hwndDlg, GWL_STYLE) & DS_CONTROL)
     {
-        WND *pParent;
         HWND hParent = GetParent(hwndDlg);
-        if (!hParent) break;
 
-        pParent = WIN_GetPtr(hParent);
-        if (!pParent || pParent == WND_OTHER_PROCESS || pParent == WND_DESKTOP) break;
-
-        if (!pParent->dlgInfo)
-        {
-            WIN_ReleasePtr(pParent);
-            break;
-        }
-        WIN_ReleasePtr(pParent);
+        if (!hParent || !WIN_IsCurrentProcess( hParent )) break;
+        if (!NtUserGetDialogInfo( hParent )) break;
 
         hwndDlg = hParent;
     }
@@ -1164,7 +1153,7 @@ BOOL WINAPI IsDialogMessageW( HWND hwndDlg, LPMSG msg )
     if (!IsWindow( hwndDlg ))
         return FALSE;
 
-    if (CallMsgFilterW( msg, MSGF_DIALOGBOX )) return TRUE;
+    if (NtUserCallMsgFilter( msg, MSGF_DIALOGBOX )) return TRUE;
 
     hwndDlg = WIN_GetFullHandle( hwndDlg );
     if (is_desktop_window(hwndDlg)) return FALSE;
@@ -1183,14 +1172,8 @@ BOOL WINAPI IsDialogMessageW( HWND hwndDlg, LPMSG msg )
         case VK_TAB:
             if (!(dlgCode & DLGC_WANTTAB))
             {
-                BOOL fIsDialog = TRUE;
-                WND *pWnd = WIN_GetPtr( hwndDlg );
-
-                if (pWnd && pWnd != WND_OTHER_PROCESS)
-                {
-                    fIsDialog = (pWnd->dlgInfo != NULL);
-                    WIN_ReleasePtr(pWnd);
-                }
+                BOOL fIsDialog = !WIN_IsCurrentProcess( hwndDlg ) ||
+                    NtUserGetDialogInfo( hwndDlg ) != NULL;
 
                 /* I am not sure under which circumstances the TAB is handled
                  * each way.  All I do know is that it does not always simply
@@ -1519,22 +1502,7 @@ BOOL WINAPI CheckRadioButton( HWND hwndDlg, int firstID,
  */
 DWORD WINAPI GetDialogBaseUnits(void)
 {
-    static LONG cx, cy;
-
-    if (!cx)
-    {
-        HDC hdc;
-
-        if ((hdc = GetDC(0)))
-        {
-            cx = GdiGetCharDimensions( hdc, NULL, &cy );
-            NtUserReleaseDC( 0, hdc );
-        }
-        TRACE( "base units = %d,%d\n", cx, cy );
-    }
-
-    return MAKELONG( MulDiv( cx, GetDpiForSystem(), USER_DEFAULT_SCREEN_DPI ),
-                     MulDiv( cy, GetDpiForSystem(), USER_DEFAULT_SCREEN_DPI ));
+    return NtUserGetDialogBaseUnits();
 }
 
 

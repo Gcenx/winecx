@@ -314,26 +314,44 @@ static HRESULT exprval_propget(script_ctx_t *ctx, exprval_t *ref, jsval_t *r)
 
 static HRESULT exprval_call(script_ctx_t *ctx, exprval_t *ref, WORD flags, unsigned argc, jsval_t *argv, jsval_t *r)
 {
+    jsdisp_t *jsdisp;
+    HRESULT hres;
+    jsval_t v;
+
     switch(ref->type) {
     case EXPRVAL_STACK_REF: {
-        jsval_t v = ctx->stack[ref->u.off];
+        v = ctx->stack[ref->u.off];
 
         if(!is_object_instance(v)) {
             FIXME("invoke %s\n", debugstr_jsval(v));
             return E_FAIL;
         }
 
-        return disp_call_value(ctx, get_object(v), NULL, flags, argc, argv, r);
+        return disp_call_value(ctx, get_object(v), jsval_undefined(), flags, argc, argv, r);
     }
     case EXPRVAL_IDREF:
+        /* ECMA-262 3rd Edition 11.2.3.7 / ECMA-262 5.1 Edition 11.2.3.6 *
+         * Don't treat scope object props as PropertyReferences.         */
+        if((jsdisp = to_jsdisp(ref->u.idref.disp)) && jsdisp->builtin_info->class == JSCLASS_NONE) {
+            hres = disp_propget(ctx, ref->u.idref.disp, ref->u.idref.id, &v);
+            if(FAILED(hres))
+                return hres;
+            if(!is_object_instance(v)) {
+                FIXME("invoke %s\n", debugstr_jsval(v));
+                hres = E_FAIL;
+            }else {
+                hres = disp_call_value(ctx, get_object(v), jsval_undefined(), flags, argc, argv, r);
+            }
+            jsval_release(v);
+            return hres;
+        }
         return disp_call(ctx, ref->u.idref.disp, ref->u.idref.id, flags, argc, argv, r);
     case EXPRVAL_JSVAL: {
         IDispatch *obj;
-        HRESULT hres;
 
         hres = to_object(ctx, ref->u.val, &obj);
         if(SUCCEEDED(hres)) {
-            hres = disp_call_value(ctx, obj, NULL, flags, argc, argv, r);
+            hres = disp_call_value(ctx, obj, jsval_undefined(), flags, argc, argv, r);
             IDispatch_Release(obj);
         }
         return hres;
@@ -404,15 +422,68 @@ static inline void clear_acc(script_ctx_t *ctx)
     ctx->acc = jsval_undefined();
 }
 
-static HRESULT scope_push(scope_chain_t *scope, jsdisp_t *jsobj, IDispatch *obj, scope_chain_t **ret)
+static void scope_destructor(jsdisp_t *dispex)
+{
+    scope_chain_t *scope = CONTAINING_RECORD(dispex, scope_chain_t, dispex);
+
+    if(scope->next)
+        scope_release(scope->next);
+
+    if(scope->obj)
+        IDispatch_Release(scope->obj);
+    free(scope);
+}
+
+static HRESULT scope_gc_traverse(struct gc_ctx *gc_ctx, enum gc_traverse_op op, jsdisp_t *dispex)
+{
+    scope_chain_t *scope = CONTAINING_RECORD(dispex, scope_chain_t, dispex);
+    HRESULT hres;
+
+    if(scope->next) {
+        hres = gc_process_linked_obj(gc_ctx, op, dispex, &scope->next->dispex, (void**)&scope->next);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    if(op == GC_TRAVERSE_UNLINK) {
+        IDispatch *obj = scope->obj;
+        if(obj) {
+            scope->obj = NULL;
+            IDispatch_Release(obj);
+        }
+        return S_OK;
+    }
+
+    return scope->jsobj ? gc_process_linked_obj(gc_ctx, op, dispex, scope->jsobj, (void**)&scope->obj) : S_OK;
+}
+
+static const builtin_info_t scope_info = {
+    JSCLASS_NONE,
+    NULL,
+    0,
+    NULL,
+    scope_destructor,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    scope_gc_traverse
+};
+
+static HRESULT scope_push(script_ctx_t *ctx, scope_chain_t *scope, jsdisp_t *jsobj, IDispatch *obj, scope_chain_t **ret)
 {
     scope_chain_t *new_scope;
+    HRESULT hres;
 
-    new_scope = heap_alloc(sizeof(scope_chain_t));
+    new_scope = calloc(1, sizeof(scope_chain_t));
     if(!new_scope)
         return E_OUTOFMEMORY;
 
-    new_scope->ref = 1;
+    hres = init_dispex(&new_scope->dispex, ctx, &scope_info, NULL);
+    if(FAILED(hres)) {
+        free(new_scope);
+        return hres;
+    }
 
     if (obj)
         IDispatch_AddRef(obj);
@@ -433,19 +504,6 @@ static void scope_pop(scope_chain_t **scope)
     tmp = *scope;
     *scope = tmp->next;
     scope_release(tmp);
-}
-
-void scope_release(scope_chain_t *scope)
-{
-    if(--scope->ref)
-        return;
-
-    if(scope->next)
-        scope_release(scope->next);
-
-    if (scope->obj)
-        IDispatch_Release(scope->obj);
-    heap_free(scope);
 }
 
 static HRESULT disp_get_id(script_ctx_t *ctx, IDispatch *disp, const WCHAR *name, BSTR name_bstr, DWORD flags, DISPID *id)
@@ -957,7 +1015,7 @@ static HRESULT interp_push_with_scope(script_ctx_t *ctx)
     if(FAILED(hres))
         return hres;
 
-    hres = scope_push(ctx->call_ctx->scope, to_jsdisp(disp), disp, &ctx->call_ctx->scope);
+    hres = scope_push(ctx, ctx->call_ctx->scope, to_jsdisp(disp), disp, &ctx->call_ctx->scope);
     IDispatch_Release(disp);
     return hres;
 }
@@ -971,7 +1029,7 @@ static HRESULT interp_push_block_scope(script_ctx_t *ctx)
 
     TRACE("scope_index %u.\n", scope_index);
 
-    hres = scope_push(ctx->call_ctx->scope, NULL, NULL, &frame->scope);
+    hres = scope_push(ctx, ctx->call_ctx->scope, NULL, NULL, &frame->scope);
 
     if (FAILED(hres) || !scope_index)
         return hres;
@@ -986,7 +1044,7 @@ static HRESULT interp_pop_scope(script_ctx_t *ctx)
 {
     TRACE("\n");
 
-    if(ctx->call_ctx->scope->ref > 1) {
+    if(ctx->call_ctx->scope->dispex.ref > 1) {
         HRESULT hres = detach_variable_object(ctx, ctx->call_ctx, FALSE);
         if(FAILED(hres))
             ERR("Failed to detach variable object: %08lx\n", hres);
@@ -1097,7 +1155,7 @@ static HRESULT interp_push_except(script_ctx_t *ctx)
 
     TRACE("\n");
 
-    except = heap_alloc(sizeof(*except));
+    except = malloc(sizeof(*except));
     if(!except)
         return E_OUTOFMEMORY;
 
@@ -1125,7 +1183,7 @@ static HRESULT interp_pop_except(script_ctx_t *ctx)
 
     finally_off = except->finally_off;
     frame->except_frame = except->next;
-    heap_free(except);
+    free(except);
 
     if(finally_off) {
         HRESULT hres;
@@ -1183,7 +1241,7 @@ static HRESULT interp_enter_catch(script_ctx_t *ctx)
     hres = jsdisp_propput_name(scope_obj, ident, v);
     jsval_release(v);
     if(SUCCEEDED(hres))
-        hres = scope_push(ctx->call_ctx->scope, scope_obj, to_disp(scope_obj), &ctx->call_ctx->scope);
+        hres = scope_push(ctx, ctx->call_ctx->scope, scope_obj, to_disp(scope_obj), &ctx->call_ctx->scope);
     jsdisp_release(scope_obj);
     return hres;
 }
@@ -1362,7 +1420,7 @@ static HRESULT interp_new(script_ctx_t *ctx)
         return JS_E_INVALID_ACTION;
 
     clear_acc(ctx);
-    return disp_call_value(ctx, get_object(constr), NULL, DISPATCH_CONSTRUCT | DISPATCH_JSCRIPT_CALLEREXECSSOURCE,
+    return disp_call_value(ctx, get_object(constr), jsval_undefined(), DISPATCH_CONSTRUCT | DISPATCH_JSCRIPT_CALLEREXECSSOURCE,
                            argc, stack_args(ctx, argc), &ctx->acc);
 }
 
@@ -1380,7 +1438,7 @@ static HRESULT interp_call(script_ctx_t *ctx)
         return JS_E_INVALID_PROPERTY;
 
     clear_acc(ctx);
-    return disp_call_value(ctx, get_object(obj), NULL, DISPATCH_METHOD | DISPATCH_JSCRIPT_CALLEREXECSSOURCE,
+    return disp_call_value(ctx, get_object(obj), jsval_undefined(), DISPATCH_METHOD | DISPATCH_JSCRIPT_CALLEREXECSSOURCE,
                            argn, stack_args(ctx, argn), do_ret ? &ctx->acc : NULL);
 }
 
@@ -1626,7 +1684,7 @@ static HRESULT interp_carray_set(script_ctx_t *ctx)
     array = stack_top(ctx);
     assert(is_object_instance(array));
 
-    hres = jsdisp_propput_idx(iface_to_jsdisp(get_object(array)), index, value);
+    hres = jsdisp_propput_idx(to_jsdisp(get_object(array)), index, value);
     jsval_release(value);
     return hres;
 }
@@ -2901,7 +2959,7 @@ static void pop_call_frame(script_ctx_t *ctx)
     assert(frame->scope == frame->base_scope);
 
     /* If current scope will be kept alive, we need to transfer local variables to its variable object. */
-    if(frame->scope && frame->scope->ref > 1) {
+    if(frame->scope && frame->scope->dispex.ref > 1) {
         HRESULT hres = detach_variable_object(ctx, frame, TRUE);
         if(FAILED(hres))
             ERR("Failed to detach variable object: %08lx\n", hres);
@@ -2926,7 +2984,7 @@ static void pop_call_frame(script_ctx_t *ctx)
         IDispatch_Release(frame->this_obj);
     jsval_release(frame->ret);
     release_bytecode(frame->bytecode);
-    heap_free(frame);
+    free(frame);
 }
 
 static void print_backtrace(script_ctx_t *ctx)
@@ -3038,7 +3096,7 @@ static HRESULT unwind_exception(script_ctx_t *ctx, HRESULT exception_hres)
         except_frame->catch_off = 0;
     }else {
         frame->except_frame = except_frame->next;
-        heap_free(except_frame);
+        free(except_frame);
     }
 
     hres = stack_push(ctx, except_val);
@@ -3173,7 +3231,7 @@ static HRESULT setup_scope(script_ctx_t *ctx, call_frame_t *frame, scope_chain_t
 
     frame->pop_variables = i;
 
-    hres = scope_push(scope_chain, variable_object, to_disp(variable_object), &scope);
+    hres = scope_push(ctx, scope_chain, variable_object, to_disp(variable_object), &scope);
     if(FAILED(hres)) {
         stack_popn(ctx, ctx->stack_top - orig_stack);
         return hres;
@@ -3213,7 +3271,7 @@ HRESULT exec_source(script_ctx_t *ctx, DWORD flags, bytecode_t *bytecode, functi
     HRESULT hres;
 
     if(!ctx->stack) {
-        ctx->stack = heap_alloc(stack_size * sizeof(*ctx->stack));
+        ctx->stack = malloc(stack_size * sizeof(*ctx->stack));
         if(!ctx->stack)
             return E_OUTOFMEMORY;
     }
@@ -3300,16 +3358,11 @@ HRESULT exec_source(script_ctx_t *ctx, DWORD flags, bytecode_t *bytecode, functi
         }
     }
 
-    /* ECMA-262 3rd Edition    11.2.3.7 */
     if(this_obj) {
-        jsdisp_t *jsthis;
+        jsdisp_t *jsthis = to_jsdisp(this_obj);
 
-        jsthis = iface_to_jsdisp(this_obj);
-        if(jsthis) {
-            if(jsthis->builtin_info->class == JSCLASS_GLOBAL || jsthis->builtin_info->class == JSCLASS_NONE)
-                this_obj = NULL;
-            jsdisp_release(jsthis);
-        }
+        if(jsthis && jsthis->builtin_info->class == JSCLASS_GLOBAL)
+            this_obj = NULL;
     }
 
     if(ctx->call_ctx && (flags & EXEC_EVAL)) {
@@ -3318,7 +3371,7 @@ HRESULT exec_source(script_ctx_t *ctx, DWORD flags, bytecode_t *bytecode, functi
             goto fail;
     }
 
-    frame = heap_alloc_zero(sizeof(*frame));
+    frame = calloc(1, sizeof(*frame));
     if(!frame) {
         hres = E_OUTOFMEMORY;
         goto fail;
@@ -3333,7 +3386,7 @@ HRESULT exec_source(script_ctx_t *ctx, DWORD flags, bytecode_t *bytecode, functi
         hres = setup_scope(ctx, frame, scope, variable_obj, argc, argv);
         if(FAILED(hres)) {
             release_bytecode(frame->bytecode);
-            heap_free(frame);
+            free(frame);
             goto fail;
         }
     }else if(scope) {

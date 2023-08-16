@@ -42,7 +42,7 @@
 DEFINE_GUID(control_class,0xdeadbeef,0x29ef,0x4538,0xa5,0xfd,0xb6,0x95,0x73,0xa3,0x62,0xc0);
 
 #define IOCTL_WINETEST_HID_SET_EXPECT    CTL_CODE(FILE_DEVICE_KEYBOARD, 0x800, METHOD_IN_DIRECT, FILE_ANY_ACCESS)
-#define IOCTL_WINETEST_HID_WAIT_EXPECT   CTL_CODE(FILE_DEVICE_KEYBOARD, 0x801, METHOD_NEITHER, FILE_ANY_ACCESS)
+#define IOCTL_WINETEST_HID_WAIT_EXPECT   CTL_CODE(FILE_DEVICE_KEYBOARD, 0x801, METHOD_IN_DIRECT, FILE_ANY_ACCESS)
 #define IOCTL_WINETEST_HID_SEND_INPUT    CTL_CODE(FILE_DEVICE_KEYBOARD, 0x802, METHOD_IN_DIRECT, FILE_ANY_ACCESS)
 #define IOCTL_WINETEST_HID_SET_CONTEXT   CTL_CODE(FILE_DEVICE_KEYBOARD, 0x803, METHOD_IN_DIRECT, FILE_ANY_ACCESS)
 #define IOCTL_WINETEST_CREATE_DEVICE     CTL_CODE(FILE_DEVICE_KEYBOARD, 0x804, METHOD_IN_DIRECT, FILE_ANY_ACCESS)
@@ -61,14 +61,23 @@ struct hid_expect
     BYTE report_buf[128];
 };
 
+#define EXPECT_QUEUE_BUFFER_SIZE (64 * sizeof(struct hid_expect))
+
+struct wait_expect_params
+{
+    BOOL wait_pending;
+};
+
 /* create/remove device */
+#define MAX_HID_DESCRIPTOR_LEN 2048
+
 struct hid_device_desc
 {
     BOOL is_polled;
     BOOL use_report_id;
 
     DWORD report_descriptor_len;
-    char report_descriptor_buf[1024];
+    char report_descriptor_buf[MAX_HID_DESCRIPTOR_LEN];
 
     HIDP_CAPS caps;
     HID_DEVICE_ATTRIBUTES attributes;
@@ -339,7 +348,7 @@ static inline void winetest_cleanup_( const char *file )
 
     if (winetest_debug)
     {
-        kprintf( "%04lx:%s: %ld tests executed (%ld marked as todo, %ld %s), %ld skipped.\n",
+        kprintf( "%04lx:%s: %ld tests executed (%ld marked as todo, 0 as flaky, %ld %s), %ld skipped.\n",
                  (DWORD)(DWORD_PTR)PsGetCurrentProcessId(), test_name,
                  successes + failures + todo_successes + todo_failures, todo_successes, failures + todo_failures,
                  (failures + todo_failures != 1) ? "failures" : "failure", skipped );

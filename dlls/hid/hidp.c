@@ -224,6 +224,8 @@ NTSTATUS WINAPI HidP_GetCaps( PHIDP_PREPARSED_DATA preparsed_data, HIDP_CAPS *ca
 
 struct usage_value_params
 {
+    BOOL array;
+    USAGE usage;
     void *value_buf;
     USHORT value_len;
     void *report_buf;
@@ -236,18 +238,36 @@ static LONG sign_extend( ULONG value, const struct hid_value_caps *caps )
     return value - ((value & sign) << 1);
 }
 
+static NTSTATUS get_usage_value( const struct hid_value_caps *caps, void *user )
+{
+    unsigned char *report_buf, start_bit = caps->start_bit;
+    ULONG bit_count = caps->bit_size, bit_offset = 0;
+    struct usage_value_params *params = user;
+
+    if (params->array) bit_count *= caps->report_count;
+    else bit_offset = (params->usage - caps->usage_min) * caps->bit_size;
+
+    if ((bit_count + 7) / 8 > params->value_len) return HIDP_STATUS_BUFFER_TOO_SMALL;
+    memset( params->value_buf, 0, params->value_len );
+
+    report_buf = (unsigned char *)params->report_buf + caps->start_byte + bit_offset / 8;
+    copy_bits( params->value_buf, report_buf, bit_count, -(start_bit + bit_offset % 8) );
+
+    return HIDP_STATUS_NULL;
+}
+
 static NTSTATUS get_scaled_usage_value( const struct hid_value_caps *caps, void *user )
 {
     struct usage_value_params *params = user;
-    ULONG unsigned_value = 0, bit_count = caps->bit_size * caps->report_count;
     LONG signed_value, *value = params->value_buf;
-    unsigned char *report_buf;
+    ULONG unsigned_value = 0;
+    NTSTATUS status;
 
-    if ((bit_count + 7) / 8 > sizeof(unsigned_value)) return HIDP_STATUS_BUFFER_TOO_SMALL;
+    params->value_buf = &unsigned_value;
+    params->value_len = sizeof(unsigned_value);
+    if ((status = get_usage_value( caps, params )) != HIDP_STATUS_NULL) return status;
+
     if (sizeof(LONG) > params->value_len) return HIDP_STATUS_BUFFER_TOO_SMALL;
-
-    report_buf = (unsigned char *)params->report_buf + caps->start_byte;
-    copy_bits( (unsigned char *)&unsigned_value, report_buf, bit_count, -caps->start_bit );
     signed_value = sign_extend( unsigned_value, caps );
 
     if (caps->logical_min > caps->logical_max || caps->physical_min > caps->physical_max)
@@ -265,7 +285,7 @@ NTSTATUS WINAPI HidP_GetScaledUsageValue( HIDP_REPORT_TYPE report_type, USAGE us
                                           USAGE usage, LONG *value, PHIDP_PREPARSED_DATA preparsed_data,
                                           char *report_buf, ULONG report_len )
 {
-    struct usage_value_params params = {.value_buf = value, .value_len = sizeof(*value), .report_buf = report_buf};
+    struct usage_value_params params = {.usage = usage, .value_buf = value, .value_len = sizeof(*value), .report_buf = report_buf};
     struct hid_preparsed_data *preparsed = (struct hid_preparsed_data *)preparsed_data;
     struct caps_filter filter = {.values = TRUE, .usage_page = usage_page, .collection = collection, .usage = usage };
     USHORT count = 1;
@@ -280,25 +300,10 @@ NTSTATUS WINAPI HidP_GetScaledUsageValue( HIDP_REPORT_TYPE report_type, USAGE us
     return enum_value_caps( preparsed, report_type, report_len, &filter, get_scaled_usage_value, &params, &count );
 }
 
-static NTSTATUS get_usage_value( const struct hid_value_caps *caps, void *user )
-{
-    struct usage_value_params *params = user;
-    ULONG bit_count = caps->bit_size * caps->report_count;
-    unsigned char *report_buf;
-
-    if ((bit_count + 7) / 8 > params->value_len) return HIDP_STATUS_BUFFER_TOO_SMALL;
-    memset( params->value_buf, 0, params->value_len );
-
-    report_buf = (unsigned char *)params->report_buf + caps->start_byte;
-    copy_bits( params->value_buf, report_buf, bit_count, -caps->start_bit );
-
-    return HIDP_STATUS_NULL;
-}
-
 NTSTATUS WINAPI HidP_GetUsageValue( HIDP_REPORT_TYPE report_type, USAGE usage_page, USHORT collection, USAGE usage,
                                     ULONG *value, PHIDP_PREPARSED_DATA preparsed_data, char *report_buf, ULONG report_len )
 {
-    struct usage_value_params params = {.value_buf = value, .value_len = sizeof(*value), .report_buf = report_buf};
+    struct usage_value_params params = {.usage = usage, .value_buf = value, .value_len = sizeof(*value), .report_buf = report_buf};
     struct hid_preparsed_data *preparsed = (struct hid_preparsed_data *)preparsed_data;
     struct caps_filter filter = {.values = TRUE, .usage_page = usage_page, .collection = collection, .usage = usage};
     USHORT count = 1;
@@ -316,7 +321,7 @@ NTSTATUS WINAPI HidP_GetUsageValueArray( HIDP_REPORT_TYPE report_type, USAGE usa
                                          USAGE usage, char *value_buf, USHORT value_len,
                                          PHIDP_PREPARSED_DATA preparsed_data, char *report_buf, ULONG report_len )
 {
-    struct usage_value_params params = {.value_buf = value_buf, .value_len = value_len, .report_buf = report_buf};
+    struct usage_value_params params = {.array = TRUE, .usage = usage, .value_buf = value_buf, .value_len = value_len, .report_buf = report_buf};
     struct hid_preparsed_data *preparsed = (struct hid_preparsed_data *)preparsed_data;
     struct caps_filter filter = {.values = TRUE, .array = TRUE, .usage_page = usage_page, .collection = collection, .usage = usage};
     USHORT count = 1;
@@ -446,17 +451,31 @@ ULONG WINAPI HidP_MaxUsageListLength( HIDP_REPORT_TYPE report_type, USAGE usage_
     return count;
 }
 
+static NTSTATUS set_usage_value( const struct hid_value_caps *caps, void *user )
+{
+    unsigned char *report_buf, start_bit = caps->start_bit;
+    ULONG bit_count = caps->bit_size, bit_offset = 0;
+    struct usage_value_params *params = user;
+
+    if (params->array) bit_count *= caps->report_count;
+    else bit_offset = (params->usage - caps->usage_min) * caps->bit_size;
+
+    if ((bit_count + 7) / 8 > params->value_len) return HIDP_STATUS_BUFFER_TOO_SMALL;
+
+    report_buf = (unsigned char *)params->report_buf + caps->start_byte + bit_offset / 8;
+    copy_bits( report_buf, params->value_buf, bit_count, start_bit + bit_offset % 8 );
+
+    return HIDP_STATUS_NULL;
+}
+
 static NTSTATUS set_scaled_usage_value( const struct hid_value_caps *caps, void *user )
 {
-    ULONG bit_count = caps->bit_size * caps->report_count;
     struct usage_value_params *params = user;
-    unsigned char *report_buf;
     LONG value, log_range, phy_range;
 
     if (caps->logical_min > caps->logical_max) return HIDP_STATUS_BAD_LOG_PHY_VALUES;
     if (caps->physical_min > caps->physical_max) return HIDP_STATUS_BAD_LOG_PHY_VALUES;
 
-    if ((bit_count + 7) / 8 > sizeof(value)) return HIDP_STATUS_BUFFER_TOO_SMALL;
     if (sizeof(LONG) > params->value_len) return HIDP_STATUS_BUFFER_TOO_SMALL;
     value = *(LONG *)params->value_buf;
 
@@ -471,17 +490,16 @@ static NTSTATUS set_scaled_usage_value( const struct hid_value_caps *caps, void 
         value = caps->logical_min + value;
     }
 
-    report_buf = (unsigned char *)params->report_buf + caps->start_byte;
-    copy_bits( report_buf, (unsigned char *)&value, bit_count, caps->start_bit );
-
-    return HIDP_STATUS_NULL;
+    params->value_buf = &value;
+    params->value_len = sizeof(value);
+    return set_usage_value( caps, params );
 }
 
 NTSTATUS WINAPI HidP_SetScaledUsageValue( HIDP_REPORT_TYPE report_type, USAGE usage_page, USHORT collection,
                                           USAGE usage, LONG value, PHIDP_PREPARSED_DATA preparsed_data,
                                           char *report_buf, ULONG report_len )
 {
-    struct usage_value_params params = {.value_buf = &value, .value_len = sizeof(value), .report_buf = report_buf};
+    struct usage_value_params params = {.usage = usage, .value_buf = &value, .value_len = sizeof(value), .report_buf = report_buf};
     struct hid_preparsed_data *preparsed = (struct hid_preparsed_data *)preparsed_data;
     struct caps_filter filter = {.values = TRUE, .usage_page = usage_page, .collection = collection, .usage = usage };
     USHORT count = 1;
@@ -495,24 +513,10 @@ NTSTATUS WINAPI HidP_SetScaledUsageValue( HIDP_REPORT_TYPE report_type, USAGE us
     return enum_value_caps( preparsed, report_type, report_len, &filter, set_scaled_usage_value, &params, &count );
 }
 
-static NTSTATUS set_usage_value( const struct hid_value_caps *caps, void *user )
-{
-    struct usage_value_params *params = user;
-    ULONG bit_count = caps->bit_size * caps->report_count;
-    unsigned char *report_buf;
-
-    if ((bit_count + 7) / 8 > params->value_len) return HIDP_STATUS_BUFFER_TOO_SMALL;
-
-    report_buf = (unsigned char *)params->report_buf + caps->start_byte;
-    copy_bits( report_buf, params->value_buf, bit_count, caps->start_bit );
-
-    return HIDP_STATUS_NULL;
-}
-
 NTSTATUS WINAPI HidP_SetUsageValue( HIDP_REPORT_TYPE report_type, USAGE usage_page, USHORT collection, USAGE usage,
                                     ULONG value, PHIDP_PREPARSED_DATA preparsed_data, char *report_buf, ULONG report_len )
 {
-    struct usage_value_params params = {.value_buf = &value, .value_len = sizeof(value), .report_buf = report_buf};
+    struct usage_value_params params = {.usage = usage, .value_buf = &value, .value_len = sizeof(value), .report_buf = report_buf};
     struct hid_preparsed_data *preparsed = (struct hid_preparsed_data *)preparsed_data;
     struct caps_filter filter = {.values = TRUE, .usage_page = usage_page, .collection = collection, .usage = usage};
     USHORT count = 1;
@@ -530,7 +534,7 @@ NTSTATUS WINAPI HidP_SetUsageValueArray( HIDP_REPORT_TYPE report_type, USAGE usa
                                          USAGE usage, char *value_buf, USHORT value_len,
                                          PHIDP_PREPARSED_DATA preparsed_data, char *report_buf, ULONG report_len )
 {
-    struct usage_value_params params = {.value_buf = value_buf, .value_len = value_len, .report_buf = report_buf};
+    struct usage_value_params params = {.array = TRUE, .usage = usage, .value_buf = value_buf, .value_len = value_len, .report_buf = report_buf};
     struct hid_preparsed_data *preparsed = (struct hid_preparsed_data *)preparsed_data;
     struct caps_filter filter = {.values = TRUE, .array = TRUE, .usage_page = usage_page, .collection = collection, .usage = usage};
     USHORT count = 1;

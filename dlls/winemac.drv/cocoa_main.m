@@ -22,8 +22,6 @@
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 
-#include "wine/hostaddrspace_enter.h"
-
 #include "macdrv_cocoa.h"
 #import "cocoa_app.h"
 

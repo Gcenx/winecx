@@ -19,8 +19,6 @@
 #ifndef __WINE_ACLUI_H
 #define __WINE_ACLUI_H
 
-#include "wine/winheader_enter.h"
-
 #include <objbase.h>
 #include <commctrl.h>
 #include <accctrl.h>
@@ -236,7 +234,5 @@ HRESULT WINAPI EditSecurityAdvanced(HWND owner, LPSECURITYINFO psi, SI_PAGE_TYPE
 #ifdef __cplusplus
 }
 #endif  /* __cplusplus */
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_ACLUI_H */

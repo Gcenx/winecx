@@ -124,7 +124,7 @@ static ULONG WINAPI HTMLLocation_Release(IHTMLLocation *iface)
         if(This->window)
             This->window->location = NULL;
         release_dispex(&This->dispex);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -201,7 +201,7 @@ static HRESULT WINAPI HTMLLocation_get_href(IHTMLLocation *iface, BSTR *p)
     case INTERNET_SCHEME_FILE:
         {
             /* prepend a slash */
-            url_path = HeapAlloc(GetProcessHeap(), 0, (url.dwUrlPathLength + 1) * sizeof(WCHAR));
+            url_path = malloc((url.dwUrlPathLength + 1) * sizeof(WCHAR));
             if(!url_path)
                 return E_OUTOFMEMORY;
             url_path[0] = '/';
@@ -216,7 +216,7 @@ static HRESULT WINAPI HTMLLocation_get_href(IHTMLLocation *iface, BSTR *p)
     case INTERNET_SCHEME_FTP:
         if(!url.dwUrlPathLength) {
             /* add a slash if it's blank */
-            url_path = url.lpszUrlPath = HeapAlloc(GetProcessHeap(), 0, 1 * sizeof(WCHAR));
+            url_path = url.lpszUrlPath = malloc(sizeof(WCHAR));
             if(!url.lpszUrlPath)
                 return E_OUTOFMEMORY;
             url.lpszUrlPath[0] = '/';
@@ -247,7 +247,7 @@ static HRESULT WINAPI HTMLLocation_get_href(IHTMLLocation *iface, BSTR *p)
     }
     SetLastError(0);
 
-    buf = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+    buf = malloc(len * sizeof(WCHAR));
     if(!buf) {
         ret = E_OUTOFMEMORY;
         goto cleanup;
@@ -269,8 +269,8 @@ static HRESULT WINAPI HTMLLocation_get_href(IHTMLLocation *iface, BSTR *p)
     ret = S_OK;
 
 cleanup:
-    HeapFree(GetProcessHeap(), 0, buf);
-    HeapFree(GetProcessHeap(), 0, url_path);
+    free(buf);
+    free(url_path);
 
     return ret;
 }
@@ -524,8 +524,29 @@ static HRESULT WINAPI HTMLLocation_get_search(IHTMLLocation *iface, BSTR *p)
 static HRESULT WINAPI HTMLLocation_put_hash(IHTMLLocation *iface, BSTR v)
 {
     HTMLLocation *This = impl_from_IHTMLLocation(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    WCHAR *hash = v;
+    HRESULT hres;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    if(!This->window || !This->window->base.outer_window) {
+        FIXME("No window available\n");
+        return E_FAIL;
+    }
+
+    if(hash[0] != '#') {
+        unsigned size = (1 /* # */ + wcslen(v) + 1) * sizeof(WCHAR);
+        if(!(hash = malloc(size)))
+            return E_OUTOFMEMORY;
+        hash[0] = '#';
+        memcpy(hash + 1, v, size - sizeof(WCHAR));
+    }
+
+    hres = navigate_url(This->window->base.outer_window, hash, This->window->base.outer_window->uri, BINDING_NAVIGATED);
+
+    if(hash != v)
+        free(hash);
+    return hres;
 }
 
 static HRESULT WINAPI HTMLLocation_get_hash(IHTMLLocation *iface, BSTR *p)
@@ -561,8 +582,21 @@ static HRESULT WINAPI HTMLLocation_get_hash(IHTMLLocation *iface, BSTR *p)
 static HRESULT WINAPI HTMLLocation_reload(IHTMLLocation *iface, VARIANT_BOOL flag)
 {
     HTMLLocation *This = impl_from_IHTMLLocation(iface);
-    FIXME("(%p)->(%x)\n", This, flag);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%x)\n", This, flag);
+
+    if(!This->window) {
+        FIXME("No window available\n");
+        return E_FAIL;
+    }
+
+    /* reload is supposed to fail if called from a script with different origin, but IE doesn't care */
+    if(!is_main_content_window(This->window->base.outer_window)) {
+        FIXME("Unsupported on iframe\n");
+        return E_NOTIMPL;
+    }
+
+    return reload_page(This->window->base.outer_window);
 }
 
 static HRESULT WINAPI HTMLLocation_replace(IHTMLLocation *iface, BSTR bstr)
@@ -642,7 +676,7 @@ HRESULT HTMLLocation_Create(HTMLInnerWindow *window, HTMLLocation **ret)
 {
     HTMLLocation *location;
 
-    location = heap_alloc(sizeof(*location));
+    location = malloc(sizeof(*location));
     if(!location)
         return E_OUTOFMEMORY;
 

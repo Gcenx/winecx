@@ -220,10 +220,6 @@ static NTSTATUS ntlm_fork( void *args )
     return SEC_E_OK;
 }
 
-#define NTLM_AUTH_MAJOR_VERSION 3
-#define NTLM_AUTH_MINOR_VERSION 0
-#define NTLM_AUTH_MICRO_VERSION 25
-
 static NTSTATUS ntlm_check_version( void *args )
 {
     struct check_version_params *check_params = args;
@@ -243,25 +239,15 @@ static NTSTATUS ntlm_check_version( void *args )
     if ((len = read( ctx.pipe_in, buf, sizeof(buf) - 1 )) > 8)
     {
         char *newline;
-        int major = 0, minor = 0, micro = 0;
 
         if ((newline = memchr( buf, '\n', len ))) *newline = 0;
         else buf[len] = 0;
 
-        if (sscanf( buf, "Version %d.%d.%d", &major, &minor, &micro ) == 3)
-        {
-            if (((major > NTLM_AUTH_MAJOR_VERSION) ||
-                 (major == NTLM_AUTH_MAJOR_VERSION && minor > NTLM_AUTH_MINOR_VERSION) ||
-                 (major == NTLM_AUTH_MAJOR_VERSION && minor == NTLM_AUTH_MINOR_VERSION &&
-                  micro >= NTLM_AUTH_MICRO_VERSION)))
-            {
-                TRACE( "detected ntlm_auth version %d.%d.%d\n", major, minor, micro );
-                status = STATUS_SUCCESS;
-            }
-        }
+        TRACE( "detected ntlm_auth version %s\n", debugstr_a(buf) );
+        status = STATUS_SUCCESS;
     }
 
-    if (status && getenv("CX_ROOT")) /* CrossOver hack 13228 */
+    if (status) /* CrossOver hack 13228 */
     {
         ntlm_cleanup( &ctx );
         memset( &ctx, 0, sizeof(ctx) );
@@ -273,30 +259,24 @@ static NTSTATUS ntlm_check_version( void *args )
 
         if (ntlm_fork( &params ) == SEC_E_OK && (len = read( ctx.pipe_in, buf, sizeof(buf) - 1 )) > 8)
         {
+            static const char config_file_format[] = "--configfile=%s/smb.conf";
             char *newline;
-            int major = 0, minor = 0, micro = 0;
 
             if ((newline = memchr( buf, '\n', len ))) *newline = 0;
             else buf[len] = 0;
 
-            if (sscanf( buf, "Version %d.%d.%d", &major, &minor, &micro ) == 3)
+            TRACE( "detected cxntlm_auth version %s datadir %s\n", debugstr_a(buf), datadir );
+            if (datadir)
             {
-                static const char config_file_format[] = "--configfile=%s/smb.conf";
-                TRACE( "detected cxntlm_auth version %d.%d.%d datadir %s\n", major, minor, micro, datadir );
-                if (datadir)
-                {
-                    config_file_option = malloc( sizeof(config_file_format) + strlen(datadir) );
-                    sprintf( config_file_option, config_file_format, datadir );
-                }
-                status = STATUS_SUCCESS;
+                config_file_option = malloc( sizeof(config_file_format) + strlen(datadir) );
+                sprintf( config_file_option, config_file_format, datadir );
             }
+            status = STATUS_SUCCESS;
         }
     }
 
-    if (status) ERR_(winediag)( "ntlm_auth was not found or is outdated. "
-                              "Make sure that ntlm_auth >= %d.%d.%d is in your path. "
-                              "Usually, you can find it in the winbind package of your distribution.\n",
-                              NTLM_AUTH_MAJOR_VERSION, NTLM_AUTH_MINOR_VERSION, NTLM_AUTH_MICRO_VERSION );
+    if (status) ERR_(winediag)( "ntlm_auth was not found. Make sure that ntlm_auth >= 3.0.25 is in your path. "
+                                "Usually, you can find it in the winbind package of your distribution.\n" );
     ntlm_cleanup( &ctx );
     return status;
 }

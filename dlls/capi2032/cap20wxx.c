@@ -29,9 +29,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(capi);
 
-static unixlib_handle_t capi_handle;
-
-#define CAPI_CALL( func, params ) __wine_unix_call( capi_handle, unix_ ## func, params )
+#define CAPI_CALL( func, params ) WINE_UNIX_CALL( unix_ ## func, params )
 
 
 BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, LPVOID reserved )
@@ -40,8 +38,7 @@ BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, LPVOID reserved )
     {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls( instance );
-        return !NtQueryVirtualMemory( GetCurrentProcess(), instance, MemoryWineUnixFuncs,
-                                      &capi_handle, sizeof(capi_handle), NULL );
+        return !__wine_init_unix_call();
     }
     return TRUE;
 }
@@ -55,7 +52,7 @@ DWORD WINAPI CAPI_REGISTER (DWORD MessageBufferSize, DWORD maxLogicalConnection,
     DWORD fret;
 
     fret = CAPI_CALL( register, &params );
-    TRACE ( "(%x) -> %x\n", *pApplID, fret);
+    TRACE ( "(%lx) -> %lx\n", *pApplID, fret);
     return fret;
 }
 
@@ -66,7 +63,7 @@ DWORD WINAPI CAPI_RELEASE (DWORD ApplID) {
     DWORD fret;
 
     fret = CAPI_CALL( release, &params );
-    TRACE ("(%x) -> %x\n", ApplID, fret);
+    TRACE ("(%lx) -> %lx\n", ApplID, fret);
     return fret;
 }
 
@@ -77,7 +74,7 @@ DWORD WINAPI CAPI_PUT_MESSAGE (DWORD ApplID, PVOID pCAPIMessage) {
     DWORD fret;
 
     fret = CAPI_CALL( put_message, &params );
-    TRACE ("(%x) -> %x\n", ApplID, fret);
+    TRACE ("(%lx) -> %lx\n", ApplID, fret);
     return fret;
 }
 
@@ -88,7 +85,7 @@ DWORD WINAPI CAPI_GET_MESSAGE (DWORD ApplID, PVOID *ppCAPIMessage) {
     DWORD fret;
 
     fret = CAPI_CALL( get_message, &params );
-    TRACE ("(%x) -> %x\n", ApplID, fret);
+    TRACE ("(%lx) -> %lx\n", ApplID, fret);
     return fret;
 }
 
@@ -96,7 +93,7 @@ DWORD WINAPI CAPI_GET_MESSAGE (DWORD ApplID, PVOID *ppCAPIMessage) {
 \*---------------------------------------------------------------------------*/
 DWORD WINAPI CAPI_WAIT_FOR_SIGNAL (DWORD ApplID) {
     struct waitformessage_params params = { ApplID };
-    TRACE ("(%x)\n", ApplID);
+    TRACE ("(%lx)\n", ApplID);
 
     return CAPI_CALL( waitformessage, &params );
 }
@@ -111,7 +108,7 @@ DWORD WINAPI CAPI_GET_MANUFACTURER (char *SzBuffer) {
     if (!strncmp (SzBuffer, "AVM", 3)) {
         strcpy (SzBuffer, "AVM-GmbH");
     }
-    TRACE ("(%s) -> %x\n", SzBuffer, fret);
+    TRACE ("(%s) -> %lx\n", SzBuffer, fret);
     return fret;
 }
 
@@ -122,7 +119,7 @@ DWORD WINAPI CAPI_GET_VERSION (DWORD *pCAPIMajor, DWORD *pCAPIMinor, DWORD *pMan
     DWORD fret;
 
     fret = CAPI_CALL( get_version, &params );
-    TRACE ("(%x.%x,%x.%x) -> %x\n", *pCAPIMajor, *pCAPIMinor, *pManufacturerMajor,
+    TRACE ("(%lx.%lx,%lx.%lx) -> %lx\n", *pCAPIMajor, *pCAPIMinor, *pManufacturerMajor,
              *pManufacturerMinor, fret);
     return fret;
 }
@@ -134,7 +131,7 @@ DWORD WINAPI CAPI_GET_SERIAL_NUMBER (char *SzBuffer) {
     DWORD fret;
 
     fret = CAPI_CALL( get_serial_number, &params );
-    TRACE ("(%s) -> %x\n", SzBuffer, fret);
+    TRACE ("(%s) -> %lx\n", SzBuffer, fret);
     return fret;
 }
 
@@ -145,7 +142,7 @@ DWORD WINAPI CAPI_GET_PROFILE (PVOID SzBuffer, DWORD CtlrNr) {
     DWORD fret;
 
     fret = CAPI_CALL( get_profile, &params );
-    TRACE ("(%x,%x) -> %x\n", CtlrNr, *(unsigned short *)SzBuffer, fret);
+    TRACE ("(%lx,%x) -> %lx\n", CtlrNr, *(unsigned short *)SzBuffer, fret);
     return fret;
 }
 
@@ -155,7 +152,7 @@ DWORD WINAPI CAPI_INSTALLED (void) {
     DWORD fret;
 
     fret = CAPI_CALL( isinstalled, NULL );
-    TRACE ("() -> %x\n", fret);
+    TRACE ("() -> %lx\n", fret);
     return fret;
 }
 

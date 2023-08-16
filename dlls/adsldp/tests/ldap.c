@@ -37,6 +37,8 @@ DEFINE_GUID(CLSID_LDAP,0x228d9a81,0xc302,0x11cf,0x9a,0xa4,0x00,0xaa,0x00,0x4a,0x
 DEFINE_GUID(CLSID_LDAPNamespace,0x228d9a82,0xc302,0x11cf,0x9a,0xa4,0x00,0xaa,0x00,0x4a,0x56,0x91);
 DEFINE_OLEGUID(CLSID_PointerMoniker,0x306,0,0);
 
+static BOOL server_down;
+
 static const struct
 {
     const WCHAR *path;
@@ -74,6 +76,8 @@ static void test_LDAP(void)
     BSTR path, user, password;
     int i;
 
+    if (server_down) return;
+
     hr = CoCreateInstance(&CLSID_LDAPNamespace, 0, CLSCTX_INPROC_SERVER, &IID_IADs, (void **)&ads);
     ok(hr == S_OK, "got %#lx\n", hr);
     IADs_Release(ads);
@@ -99,6 +103,7 @@ static void test_LDAP(void)
         {
             SysFreeString(path);
             skip("server is down\n");
+            server_down = TRUE;
             break;
         }
         ok(hr == test[i].hr || hr == test[i].hr_ads_open, "%d: got %#lx, expected %#lx\n", i, hr, test[i].hr);
@@ -110,6 +115,7 @@ static void test_LDAP(void)
         {
             SysFreeString(path);
             skip("server is down\n");
+            server_down = TRUE;
             break;
         }
         ok(hr == test[i].hr || hr == test[i].hr_ads_get, "%d: got %#lx, expected %#lx\n", i, hr, test[i].hr);
@@ -121,6 +127,7 @@ static void test_LDAP(void)
         {
             SysFreeString(path);
             skip("server is down\n");
+            server_down = TRUE;
             break;
         }
         ok(hr == test[i].hr || hr == test[i].hr_ads_get, "%d: got %#lx, expected %#lx\n", i, hr, test[i].hr);
@@ -149,6 +156,8 @@ static void test_ParseDisplayName(void)
     ULONG count;
     int i;
 
+    if (server_down) return;
+
     hr = CoCreateInstance(&CLSID_LDAP, 0, CLSCTX_INPROC_SERVER, &IID_IParseDisplayName, (void **)&parse);
     ok(hr == S_OK, "got %#lx\n", hr);
     IParseDisplayName_Release(parse);
@@ -172,6 +181,7 @@ static void test_ParseDisplayName(void)
         {
             SysFreeString(path);
             skip("server is down\n");
+            server_down = TRUE;
             break;
         }
         ok(hr == test[i].hr || hr == test[i].hr_ads_open, "%d: got %#lx, expected %#lx\n", i, hr, test[i].hr);
@@ -190,6 +200,12 @@ static void test_ParseDisplayName(void)
 
         count = 0xdeadbeef;
         hr = MkParseDisplayName(bc, test[i].path, &count, &mk);
+        if (hr == HRESULT_FROM_WIN32(ERROR_DS_SERVER_DOWN))
+        {
+            skip("server is down\n");
+            server_down = TRUE;
+            break;
+        }
         todo_wine_if(i == 0 || i == 1 || i == 11 || i == 12)
         ok(hr == test[i].hr, "%d: got %#lx, expected %#lx\n", i, hr, test[i].hr);
         if (hr == S_OK)
@@ -226,11 +242,13 @@ static void do_search(const struct search *s)
 {
     HRESULT hr;
     IDirectorySearch *ds;
-    ADS_SEARCHPREF_INFO pref;
+    ADS_SEARCHPREF_INFO pref[2];
     ADS_SEARCH_HANDLE sh;
     ADS_SEARCH_COLUMN col;
     LPWSTR name;
     const struct result *res;
+
+    if (server_down) return;
 
     trace("search DN %s\n", wine_dbgstr_w(s->dn));
 
@@ -238,17 +256,25 @@ static void do_search(const struct search *s)
     if (hr == HRESULT_FROM_WIN32(ERROR_DS_SERVER_DOWN))
     {
         skip("server is down\n");
+        server_down = TRUE;
         return;
     }
     ok(hr == S_OK, "got %#lx\n", hr);
 
-    pref.dwSearchPref = ADS_SEARCHPREF_SEARCH_SCOPE;
-    pref.vValue.dwType = ADSTYPE_INTEGER;
-    pref.vValue.Integer = s->scope;
-    pref.dwStatus = 0xdeadbeef;
-    hr = IDirectorySearch_SetSearchPreference(ds, &pref, 1);
+    pref[0].dwSearchPref = ADS_SEARCHPREF_SEARCH_SCOPE;
+    pref[0].vValue.dwType = ADSTYPE_INTEGER;
+    pref[0].vValue.Integer = s->scope;
+    pref[0].dwStatus = 0xdeadbeef;
+
+    pref[1].dwSearchPref = ADS_SEARCHPREF_SIZE_LIMIT;
+    pref[1].vValue.dwType = ADSTYPE_INTEGER;
+    pref[1].vValue.Integer = 5;
+    pref[1].dwStatus = 0xdeadbeef;
+
+    hr = IDirectorySearch_SetSearchPreference(ds, pref, ARRAY_SIZE(pref));
     ok(hr == S_OK, "got %#lx\n", hr);
-    ok(pref.dwStatus == ADS_STATUS_S_OK, "got %d\n", pref.dwStatus);
+    ok(pref[0].dwStatus == ADS_STATUS_S_OK, "got %u\n", pref[0].dwStatus);
+    ok(pref[1].dwStatus == ADS_STATUS_S_OK, "got %u\n", pref[1].dwStatus);
 
     hr = IDirectorySearch_ExecuteSearch(ds, (WCHAR *)L"(objectClass=*)", NULL, ~0, &sh);
     ok(hr == S_OK, "got %#lx\n", hr);
@@ -283,8 +309,6 @@ static void do_search(const struct search *s)
                 ok(!wcscmp(res->values[i], col.pADsValues[i].CaseIgnoreString),
                    "expected %s, got %s\n", wine_dbgstr_w(res->values[i]), wine_dbgstr_w(col.pADsValues[i].CaseIgnoreString));
             }
-
-            ok(!res->values[i], "expected extra value %s\n", wine_dbgstr_w(res->values[i]));
 
             IDirectorySearch_FreeColumn(ds, &col);
             FreeADsMem(name);
@@ -346,10 +370,12 @@ static void test_DirectorySearch(void)
     };
     HRESULT hr;
     IDirectorySearch *ds;
-    ADS_SEARCHPREF_INFO pref;
+    ADS_SEARCHPREF_INFO pref[2];
     ADS_SEARCH_HANDLE sh;
     ADS_SEARCH_COLUMN col;
     LPWSTR name;
+
+    if (server_down) return;
 
     hr = ADsGetObject(L"LDAP:", &IID_IDirectorySearch, (void **)&ds);
     ok(hr == E_NOINTERFACE, "got %#lx\n", hr);
@@ -358,6 +384,7 @@ static void test_DirectorySearch(void)
     if (hr == HRESULT_FROM_WIN32(ERROR_DS_SERVER_DOWN))
     {
         skip("server is down\n");
+        server_down = TRUE;
         return;
     }
     ok(hr == E_NOINTERFACE, "got %#lx\n", hr);
@@ -366,26 +393,31 @@ static void test_DirectorySearch(void)
     if (hr == HRESULT_FROM_WIN32(ERROR_DS_SERVER_DOWN))
     {
         skip("server is down\n");
+        server_down = TRUE;
         return;
     }
     ok(hr == S_OK, "got %#lx\n", hr);
 
-    pref.dwSearchPref = ADS_SEARCHPREF_SEARCH_SCOPE;
-    pref.vValue.dwType = ADSTYPE_INTEGER;
-    pref.vValue.Integer = ADS_SCOPE_BASE;
-    pref.dwStatus = 0xdeadbeef;
-    hr = IDirectorySearch_SetSearchPreference(ds, &pref, 1);
+    pref[0].dwSearchPref = ADS_SEARCHPREF_SEARCH_SCOPE;
+    pref[0].vValue.dwType = ADSTYPE_INTEGER;
+    pref[0].vValue.Integer = ADS_SCOPE_BASE;
+    pref[0].dwStatus = 0xdeadbeef;
+
+    pref[1].dwSearchPref = ADS_SEARCHPREF_SIZE_LIMIT;
+    pref[1].vValue.dwType = ADSTYPE_INTEGER;
+    pref[1].vValue.Integer = 5;
+    pref[1].dwStatus = 0xdeadbeef;
+
+    hr = IDirectorySearch_SetSearchPreference(ds, pref, ARRAY_SIZE(pref));
     ok(hr == S_OK, "got %#lx\n", hr);
-    ok(pref.dwStatus == ADS_STATUS_S_OK, "got %d\n", pref.dwStatus);
+    ok(pref[0].dwStatus == ADS_STATUS_S_OK, "got %u\n", pref[0].dwStatus);
+    ok(pref[1].dwStatus == ADS_STATUS_S_OK, "got %u\n", pref[1].dwStatus);
 
     hr = IDirectorySearch_ExecuteSearch(ds, (WCHAR *)L"(objectClass=*)", NULL, ~0, NULL);
     ok(hr == E_ADS_BAD_PARAMETER, "got %#lx\n", hr);
 
-    if (0) /* crashes under XP */
-    {
     hr = IDirectorySearch_ExecuteSearch(ds, (WCHAR *)L"(objectClass=*)", NULL, 1, &sh);
     ok(hr == E_ADS_BAD_PARAMETER, "got %#lx\n", hr);
-    }
 
     hr = IDirectorySearch_ExecuteSearch(ds, (WCHAR *)L"(objectClass=*)", NULL, ~0, &sh);
     ok(hr == S_OK, "got %#lx\n", hr);
@@ -421,8 +453,8 @@ static void test_DirectorySearch(void)
 
         name = (void *)0xdeadbeef;
         hr = IDirectorySearch_GetNextColumnName(ds, sh, &name);
-        ok(hr == S_ADS_NOMORE_COLUMNS || broken(hr == S_OK) /* XP */, "got %#lx\n", hr);
-        ok(name == NULL || broken(name && !wcscmp(name, L"ADsPath")) /* XP */, "got %p/%s\n", name, wine_dbgstr_w(name));
+        ok(hr == S_ADS_NOMORE_COLUMNS, "got %#lx\n", hr);
+        ok(name == NULL, "got %p/%s\n", name, wine_dbgstr_w(name));
     }
 
     hr = IDirectorySearch_GetNextRow(ds, sh);
@@ -431,21 +463,18 @@ static void test_DirectorySearch(void)
     name = NULL;
     hr = IDirectorySearch_GetNextColumnName(ds, sh, &name);
     todo_wine
-    ok(hr == S_OK || broken(hr == S_ADS_NOMORE_COLUMNS) /* XP */, "got %#lx\n", hr);
+    ok(hr == S_OK, "got %#lx\n", hr);
     todo_wine
-    ok((name && !wcscmp(name, L"ADsPath")) || broken(!name) /* XP */, "got %s\n", wine_dbgstr_w(name));
+    ok(name && !wcscmp(name, L"ADsPath"), "got %s\n", wine_dbgstr_w(name));
     FreeADsMem(name);
 
     name = (void *)0xdeadbeef;
     hr = IDirectorySearch_GetNextColumnName(ds, sh, &name);
-    ok(hr == S_ADS_NOMORE_COLUMNS || broken(hr == S_OK) /* XP */, "got %#lx\n", hr);
-    ok(name == NULL || broken(name && !wcscmp(name, L"ADsPath")) /* XP */, "got %p/%s\n", name, wine_dbgstr_w(name));
+    ok(hr == S_ADS_NOMORE_COLUMNS, "got %#lx\n", hr);
+    ok(name == NULL, "got %p/%s\n", name, wine_dbgstr_w(name));
 
-    if (0) /* crashes under XP */
-    {
     hr = IDirectorySearch_GetColumn(ds, sh, NULL, &col);
     ok(hr == E_ADS_BAD_PARAMETER, "got %#lx\n", hr);
-    }
 
     hr = IDirectorySearch_GetFirstRow(ds, sh);
     ok(hr == S_OK, "got %#lx\n", hr);
@@ -453,8 +482,8 @@ static void test_DirectorySearch(void)
     memset(&col, 0x55, sizeof(col));
     hr = IDirectorySearch_GetColumn(ds, sh, (WCHAR *)L"deadbeef", &col);
     ok(hr == E_ADS_COLUMN_NOT_SET, "got %#lx\n", hr);
-    ok(!col.pszAttrName || broken(col.pszAttrName != NULL) /* XP */, "got %p\n", col.pszAttrName);
-    ok(col.dwADsType == ADSTYPE_INVALID || broken(col.dwADsType != ADSTYPE_INVALID) /* XP */, "got %d\n", col.dwADsType);
+    ok(!col.pszAttrName, "got %p\n", col.pszAttrName);
+    ok(col.dwADsType == ADSTYPE_INVALID, "got %d\n", col.dwADsType);
     ok(!col.pADsValues, "got %p\n", col.pADsValues);
     ok(!col.dwNumValues, "got %lu\n", col.dwNumValues);
     ok(!col.hReserved, "got %p\n", col.hReserved);
@@ -475,14 +504,17 @@ static void test_DirectoryObject(void)
     IDirectoryObject *dirobj;
     IUnknown *unk;
     IDirectorySearch *ds;
-    ADS_SEARCHPREF_INFO pref[2];
+    ADS_SEARCHPREF_INFO pref[3];
     ADS_SEARCH_HANDLE sh;
     ADS_SEARCH_COLUMN col;
+
+    if (server_down) return;
 
     hr = ADsGetObject(L"LDAP://ldap.forumsys.com/OU=scientists,DC=example,DC=com", &IID_IDirectoryObject, (void **)&dirobj);
     if (hr == HRESULT_FROM_WIN32(ERROR_DS_SERVER_DOWN))
     {
         skip("server is down\n");
+        server_down = TRUE;
         return;
     }
     ok(hr == S_OK, "got %#lx\n", hr);
@@ -504,15 +536,23 @@ static void test_DirectoryObject(void)
     pref[0].vValue.dwType = ADSTYPE_INTEGER;
     pref[0].vValue.Integer = ADS_SCOPE_BASE;
     pref[0].dwStatus = 0xdeadbeef;
+
     pref[1].dwSearchPref = ADS_SEARCHPREF_SECURITY_MASK;
     pref[1].vValue.dwType = ADSTYPE_INTEGER;
     pref[1].vValue.Integer = ADS_SECURITY_INFO_OWNER | ADS_SECURITY_INFO_GROUP | ADS_SECURITY_INFO_DACL;
     pref[1].dwStatus = 0xdeadbeef;
+
+    pref[2].dwSearchPref = ADS_SEARCHPREF_SIZE_LIMIT;
+    pref[2].vValue.dwType = ADSTYPE_INTEGER;
+    pref[2].vValue.Integer = 5;
+    pref[2].dwStatus = 0xdeadbeef;
+
     hr = IDirectorySearch_SetSearchPreference(ds, pref, ARRAY_SIZE(pref));
     ok(hr == S_ADS_ERRORSOCCURRED, "got %#lx\n", hr);
     ok(pref[0].dwStatus == ADS_STATUS_S_OK, "got %d\n", pref[0].dwStatus);
     /* ldap.forumsys.com doesn't support NT security, real ADs DC - does  */
     ok(pref[1].dwStatus == ADS_STATUS_INVALID_SEARCHPREF, "got %d\n", pref[1].dwStatus);
+    ok(pref[2].dwStatus == ADS_STATUS_S_OK, "got %d\n", pref[2].dwStatus);
 
     hr = IDirectorySearch_ExecuteSearch(ds, (WCHAR *)L"(objectClass=*)", NULL, ~0, &sh);
     ok(hr == S_OK, "got %#lx\n", hr);
@@ -530,12 +570,19 @@ static void test_DirectoryObject(void)
     pref[0].vValue.dwType = ADSTYPE_BOOLEAN;
     pref[0].vValue.Integer = 1;
     pref[0].dwStatus = 0xdeadbeef;
-    hr = IDirectorySearch_SetSearchPreference(ds, pref, 1);
+
+    pref[1].dwSearchPref = ADS_SEARCHPREF_SIZE_LIMIT;
+    pref[1].vValue.dwType = ADSTYPE_INTEGER;
+    pref[1].vValue.Integer = 5;
+    pref[1].dwStatus = 0xdeadbeef;
+
+    hr = IDirectorySearch_SetSearchPreference(ds, pref, 2);
     ok(hr == S_OK, "got %#lx\n", hr);
     ok(pref[0].dwStatus == ADS_STATUS_S_OK, "got %d\n", pref[0].dwStatus);
+    ok(pref[1].dwStatus == ADS_STATUS_S_OK, "got %d\n", pref[1].dwStatus);
 
     hr = IDirectorySearch_ExecuteSearch(ds, (WCHAR *)L"(objectClass=*)", NULL, ~0, &sh);
-    ok(hr == HRESULT_FROM_WIN32(ERROR_DS_UNAVAILABLE_CRIT_EXTENSION) || broken(hr == S_OK) /* XP */, "got %#lx\n", hr);
+    todo_wine ok(hr == S_OK, "got %#lx\n", hr);
     if (hr == S_OK)
     {
         hr = IDirectorySearch_GetNextRow(ds, sh);

@@ -21,6 +21,9 @@
 @ cdecl wined3d_adapter_get_identifier(ptr long ptr)
 @ cdecl wined3d_adapter_get_output(ptr long)
 @ cdecl wined3d_adapter_get_output_count(ptr)
+@ cdecl wined3d_adapter_get_video_memory_info(ptr long long ptr)
+@ cdecl wined3d_adapter_register_budget_change_notification(ptr ptr ptr)
+@ cdecl wined3d_adapter_unregister_budget_change_notification(long)
 
 @ cdecl wined3d_blend_state_create(ptr ptr ptr ptr ptr)
 @ cdecl wined3d_blend_state_decref(ptr)
@@ -257,6 +260,8 @@
 @ cdecl wined3d_stateblock_set_vs_consts_f(ptr long long ptr)
 @ cdecl wined3d_stateblock_set_vs_consts_i(ptr long long ptr)
 
+@ cdecl wined3d_streaming_buffer_map(ptr ptr long long ptr ptr)
+@ cdecl wined3d_streaming_buffer_unmap(ptr)
 @ cdecl wined3d_streaming_buffer_upload(ptr ptr ptr long long ptr)
 
 @ cdecl wined3d_swapchain_create(ptr ptr ptr ptr ptr ptr)

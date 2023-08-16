@@ -20,8 +20,6 @@
 #ifndef __WINE_TMSCHEMA_H
 #define __WINE_TMSCHEMA_H
 
-#include "wine/winheader_enter.h"
-
 #include <schemadef.h>
 
 BEGIN_TM_SCHEMA(ThemeMgrSchema)
@@ -1271,6 +1269,4 @@ BEGIN_TM_PART_STATES(VERTTHUMB)
 END_TM_PART_STATES()
 
 END_TM_SCHEMA(ThemeMgrSchema)
-#include "wine/winheader_exit.h"
-
 #endif

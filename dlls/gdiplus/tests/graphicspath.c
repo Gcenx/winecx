@@ -114,7 +114,7 @@ static void _ok_path_fudge(GpPath* path, const path_test_t *expected, INT expect
         stringify_point_type(types[idx], name);
 
         todo_wine_if (expected[eidx].todo || numskip)
-            ok_(__FILE__,line)(match, "Expected #%d: %s (%.1f,%.1f) but got %s (%.1f,%.1f)\n", eidx,
+            ok_(__FILE__,line)(match, "Expected #%d: %s (%.6f,%.6f) but got %s (%.6f,%.6f)\n", eidx,
                ename, expected[eidx].X, expected[eidx].Y,
                name, points[idx].X, points[idx].Y);
 
@@ -1655,7 +1655,6 @@ static void test_widen_cap(void)
         const path_test_t *expected;
         INT expected_size;
         BOOL dashed;
-        BOOL todo_size;
     }
     caps[] =
     {
@@ -1676,15 +1675,18 @@ static void test_widen_cap(void)
         { LineCapDiamondAnchor, 10.0, widenline_capdiamondanchor_path,
                 ARRAY_SIZE(widenline_capdiamondanchor_path) },
         { LineCapArrowAnchor, 10.0, widenline_caparrowanchor_path,
-                ARRAY_SIZE(widenline_caparrowanchor_path), FALSE, TRUE },
+                ARRAY_SIZE(widenline_caparrowanchor_path) },
         { LineCapSquareAnchor, 0.0, widenline_capsquareanchor_thin_path,
                 ARRAY_SIZE(widenline_capsquareanchor_thin_path) },
         { LineCapSquareAnchor, 10.0, widenline_capsquareanchor_dashed_path,
                 ARRAY_SIZE(widenline_capsquareanchor_dashed_path), TRUE },
     };
+
+    GpAdjustableArrowCap *arrowcap;
     GpStatus status;
     GpPath *path;
     GpPen *pen;
+
     int i;
 
     status = GdipCreatePath(FillModeAlternate, &path);
@@ -1726,7 +1728,7 @@ static void test_widen_cap(void)
             }
         }
 
-        ok_path_fudge(path, caps[i].expected, caps[i].expected_size, caps[i].todo_size, 0.000005);
+        ok_path_fudge(path, caps[i].expected, caps[i].expected_size, FALSE, 0.000005);
 
         GdipDeletePen(pen);
     }
@@ -1749,6 +1751,16 @@ static void test_widen_cap(void)
     expect(Ok, status);
     ok_path_fudge(path, widenline_capsquareanchor_multifigure_path,
         ARRAY_SIZE(widenline_capsquareanchor_multifigure_path), FALSE, 0.000005);
+
+    status = GdipCreateAdjustableArrowCap(4.0, 4.0, TRUE, &arrowcap);
+    ok(status == Ok, "Failed to create adjustable cap, %d\n", status);
+    status = GdipSetAdjustableArrowCapMiddleInset(arrowcap, 1.0);
+    ok(status == Ok, "Failed to set middle inset inadjustable cap, %d\n", status);
+    status = GdipSetPenCustomEndCap(pen, (GpCustomLineCap*)arrowcap);
+    ok(status == Ok, "Failed to create custom end cap, %d\n", status);
+    status = GdipWidenPath(path, pen, NULL, FlatnessDefault);
+    expect(Ok, status);
+
     GdipDeletePen(pen);
 
     GdipDeletePath(path);

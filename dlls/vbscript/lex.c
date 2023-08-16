@@ -229,14 +229,14 @@ static int parse_date_literal(parser_ctx_t *ctx, DATE *ret)
 
     len += ctx->ptr-ptr;
 
-    rptr = heap_alloc((len+1)*sizeof(WCHAR));
+    rptr = malloc((len+1)*sizeof(WCHAR));
     if(!rptr)
         return 0;
 
     memcpy( rptr, ptr, len * sizeof(WCHAR));
     rptr[len] = 0;
     res = VarDateFromStr(rptr, ctx->lcid, 0, ret);
-    heap_free(rptr);
+    free(rptr);
     if (FAILED(res)) {
         FIXME("Invalid date literal\n");
         return 0;
@@ -422,7 +422,6 @@ static int parse_next_token(void *lval, unsigned *loc, parser_ctx_t *ctx)
     case ':':
     case ')':
     case ',':
-    case '=':
     case '+':
     case '*':
     case '/':
@@ -474,9 +473,19 @@ static int parse_next_token(void *lval, unsigned *loc, parser_ctx_t *ctx)
     case '#':
         return parse_date_literal(ctx, lval);
     case '&':
-        if(*++ctx->ptr == 'h' || *ctx->ptr == 'H')
+        if((*++ctx->ptr == 'h' || *ctx->ptr == 'H') && hex_to_int(ctx->ptr[1]) != -1)
             return parse_hex_literal(ctx, lval);
         return '&';
+    case '=':
+        switch(*++ctx->ptr) {
+        case '<':
+            ctx->ptr++;
+            return tLTEQ;
+        case '>':
+            ctx->ptr++;
+            return tGTEQ;
+        }
+        return '=';
     case '<':
         switch(*++ctx->ptr) {
         case '>':
@@ -491,9 +500,13 @@ static int parse_next_token(void *lval, unsigned *loc, parser_ctx_t *ctx)
         }
         return '<';
     case '>':
-        if(*++ctx->ptr == '=') {
+        switch(*++ctx->ptr) {
+        case '=':
             ctx->ptr++;
             return tGTEQ;
+        case '<':
+            ctx->ptr++;
+            return tNEQ;
         }
         return '>';
     default:

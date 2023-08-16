@@ -67,6 +67,7 @@ struct object_properties
     LONG deadzone;
     LONG saturation;
     DWORD calibration_mode;
+    DWORD granularity;
 };
 
 enum device_status
@@ -103,8 +104,8 @@ struct dinput_device
     BOOL                        overflow;    /* return DI_BUFFEROVERFLOW in 'GetDeviceData' */
     DWORD                       buffersize;  /* size of the queue - set in 'SetProperty'    */
 
-    DIDATAFORMAT *device_format;
-    DIDATAFORMAT *user_format;
+    DIDATAFORMAT device_format;
+    DIDATAFORMAT user_format;
 
     /* Action mapping */
     int                         num_actions; /* number of actions mapped */
@@ -123,9 +124,9 @@ struct dinput_device
     struct object_properties *object_properties;
 };
 
-extern HRESULT dinput_device_alloc( SIZE_T size, const struct dinput_device_vtbl *vtbl, const GUID *guid,
-                                    struct dinput *dinput, void **out ) DECLSPEC_HIDDEN;
-extern HRESULT dinput_device_init( IDirectInputDevice8W *iface );
+extern void dinput_device_init( struct dinput_device *device, const struct dinput_device_vtbl *vtbl,
+                                const GUID *guid, struct dinput *dinput );
+extern HRESULT dinput_device_init_device_format( IDirectInputDevice8W *iface );
 extern void dinput_device_destroy( IDirectInputDevice8W *iface );
 
 extern BOOL get_app_key(HKEY*, HKEY*) DECLSPEC_HIDDEN;

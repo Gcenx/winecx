@@ -19,8 +19,6 @@
 #ifndef __SQLTYPES_H
 #define __SQLTYPES_H
 
-#include "wine/winheader_enter.h"
-
 #ifndef ODBCVER
 #define ODBCVER	0x0351
 #endif
@@ -246,7 +244,5 @@ typedef SQLULEN BOOKMARK;
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

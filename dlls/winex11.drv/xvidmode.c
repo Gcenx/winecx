@@ -19,6 +19,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <assert.h>
@@ -42,7 +46,6 @@
 #include "windef.h"
 #include "wingdi.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xvidmode);
 
@@ -82,17 +85,12 @@ static int XVidModeErrorHandler(Display *dpy, XErrorEvent *event, void *arg)
 }
 
 /* XF86VidMode display settings handler */
-static BOOL xf86vm_get_id(const WCHAR *device_name, ULONG_PTR *id)
+static BOOL xf86vm_get_id(const WCHAR *device_name, BOOL is_primary, ULONG_PTR *id)
 {
-    WCHAR primary_adapter[CCHDEVICENAME];
-
-    if (!get_primary_adapter( primary_adapter ))
-        return FALSE;
-
     /* XVidMode only supports changing the primary adapter settings.
      * For non-primary adapters, an id is still provided but getting
      * and changing non-primary adapters' settings will be ignored. */
-    *id = !lstrcmpiW( device_name, primary_adapter ) ? 1 : 0;
+    *id = is_primary ? 1 : 0;
     return TRUE;
 }
 
@@ -134,10 +132,10 @@ static BOOL xf86vm_get_modes(ULONG_PTR id, DWORD flags, DEVMODEW **new_modes, UI
     /* Display modes in different color depth, with a XF86VidModeModeInfo * at the end of each
      * DEVMODEW as driver private data */
     size += (xf86vm_mode_count * DEPTH_COUNT) * (sizeof(DEVMODEW) + sizeof(XF86VidModeModeInfo *));
-    ptr = heap_alloc_zero(size);
+    ptr = calloc(1, size);
     if (!ptr)
     {
-        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        RtlSetLastWin32Error( ERROR_NOT_ENOUGH_MEMORY );
         return FALSE;
     }
 
@@ -168,7 +166,7 @@ static void xf86vm_free_modes(DEVMODEW *modes)
         memcpy(&xf86vm_modes, (BYTE *)modes - sizeof(xf86vm_modes), sizeof(xf86vm_modes));
         XFree(xf86vm_modes);
     }
-    heap_free(modes);
+    free(modes);
 }
 
 static BOOL xf86vm_get_current_mode(ULONG_PTR id, DEVMODEW *mode)
@@ -212,7 +210,7 @@ static BOOL xf86vm_get_current_mode(ULONG_PTR id, DEVMODEW *mode)
     return TRUE;
 }
 
-static LONG xf86vm_set_current_mode(ULONG_PTR id, DEVMODEW *mode)
+static LONG xf86vm_set_current_mode(ULONG_PTR id, const DEVMODEW *mode)
 {
     XF86VidModeModeInfo *xf86vm_mode;
     Bool ret;
@@ -230,7 +228,8 @@ static LONG xf86vm_set_current_mode(ULONG_PTR id, DEVMODEW *mode)
     }
 
     if (mode->dmFields & DM_BITSPERPEL && mode->dmBitsPerPel != screen_bpp)
-        WARN("Cannot change screen bit depth from %dbits to %dbits!\n", screen_bpp, mode->dmBitsPerPel);
+        WARN("Cannot change screen bit depth from %dbits to %dbits!\n",
+             screen_bpp, (int)mode->dmBitsPerPel);
 
     assert(mode->dmDriverExtra == sizeof(XF86VidModeModeInfo *));
     memcpy(&xf86vm_mode, (BYTE *)mode + sizeof(*mode), sizeof(xf86vm_mode));
@@ -454,7 +453,7 @@ static BOOL xf86vm_get_gamma_ramp(struct x11drv_gamma_ramp *ramp)
     }
     else
     {
-        if (!(red = heap_calloc(xf86vm_gammaramp_size, 3 * sizeof(*red))))
+        if (!(red = calloc(xf86vm_gammaramp_size, 3 * sizeof(*red))))
             return FALSE;
         green = red + xf86vm_gammaramp_size;
         blue = green + xf86vm_gammaramp_size;
@@ -466,7 +465,7 @@ static BOOL xf86vm_get_gamma_ramp(struct x11drv_gamma_ramp *ramp)
         interpolate_gamma_ramp(ramp->red, ramp->green, ramp->blue, GAMMA_RAMP_SIZE,
                                red, green, blue, xf86vm_gammaramp_size);
     if (red != ramp->red)
-        heap_free(red);
+        free(red);
     return ret;
 }
 
@@ -483,7 +482,7 @@ static BOOL xf86vm_set_gamma_ramp(struct x11drv_gamma_ramp *ramp)
     }
     else
     {
-        if (!(red = heap_calloc(xf86vm_gammaramp_size, 3 * sizeof(*red))))
+        if (!(red = calloc(xf86vm_gammaramp_size, 3 * sizeof(*red))))
             return FALSE;
         green = red + xf86vm_gammaramp_size;
         blue = green + xf86vm_gammaramp_size;
@@ -499,7 +498,7 @@ static BOOL xf86vm_set_gamma_ramp(struct x11drv_gamma_ramp *ramp)
     if (X11DRV_check_error()) ret = FALSE;
 
     if (red != ramp->red)
-        heap_free(red);
+        free(red);
     return ret;
 }
 #endif

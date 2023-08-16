@@ -131,7 +131,6 @@ struct joystick
     UINT timer;
     DWORD threshold;
     BOOL changed;
-    ULONG last_check;
 };
 
 static DIDEVICEINSTANCEW instances[16];
@@ -160,7 +159,7 @@ static BOOL WINAPI joystick_load_once( INIT_ONCE *once, void *param, void **cont
     return TRUE;
 }
 
-void joystick_unload()
+void joystick_unload(void)
 {
     int i;
 
@@ -313,6 +312,7 @@ UINT WINAPI DECLSPEC_HOTPATCH joyGetNumDevs(void)
  */
 MMRESULT WINAPI DECLSPEC_HOTPATCH joyGetDevCapsW( UINT_PTR id, JOYCAPSW *caps, UINT size )
 {
+    static ULONG last_check;
     DIDEVICEOBJECTINSTANCEW instance = {.dwSize = sizeof(DIDEVICEOBJECTINSTANCEW)};
     DIDEVCAPS dicaps = {.dwSize = sizeof(DIDEVCAPS)};
     DIPROPDWORD diprop =
@@ -342,9 +342,9 @@ MMRESULT WINAPI DECLSPEC_HOTPATCH joyGetDevCapsW( UINT_PTR id, JOYCAPSW *caps, U
 
     EnterCriticalSection( &joystick_cs );
 
-    if (!(device = joysticks[id].device) && (ticks - joysticks[id].last_check) >= 2000)
+    if (!(device = joysticks[id].device) && (ticks - last_check) >= 2000)
     {
-        joysticks[id].last_check = ticks;
+        last_check = ticks;
         find_joysticks();
     }
 
@@ -464,6 +464,7 @@ MMRESULT WINAPI DECLSPEC_HOTPATCH joyGetDevCapsA( UINT_PTR id, JOYCAPSA *caps, U
  */
 MMRESULT WINAPI DECLSPEC_HOTPATCH joyGetPosEx( UINT id, JOYINFOEX *info )
 {
+    static ULONG last_check;
     DWORD i, ticks = GetTickCount();
     MMRESULT res = JOYERR_NOERROR;
     IDirectInputDevice8W *device;
@@ -477,9 +478,9 @@ MMRESULT WINAPI DECLSPEC_HOTPATCH joyGetPosEx( UINT id, JOYINFOEX *info )
 
     EnterCriticalSection( &joystick_cs );
 
-    if (!(device = joysticks[id].device) && (ticks - joysticks[id].last_check) >= 2000)
+    if (!(device = joysticks[id].device) && (ticks - last_check) >= 2000)
     {
-        joysticks[id].last_check = ticks;
+        last_check = ticks;
         find_joysticks();
     }
 

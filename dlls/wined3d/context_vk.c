@@ -1985,10 +1985,9 @@ static int wined3d_graphics_pipeline_vk_compare(const void *key, const struct wi
     if ((ret = wined3d_uint32_compare(a->ts_desc.patchControlPoints, b->ts_desc.patchControlPoints)))
         return ret;
 
-    if ((ret = memcmp(&a->viewport, &b->viewport, sizeof(a->viewport))))
+    if ((ret = memcmp(a->viewports, b->viewports, sizeof(a->viewports))))
         return ret;
-
-    if ((ret = memcmp(&a->scissor, &b->scissor, sizeof(a->scissor))))
+    if ((ret = memcmp(a->scissors, b->scissors, sizeof(a->scissors))))
         return ret;
 
     if ((ret = memcmp(&a->rs_desc, &b->rs_desc, sizeof(a->rs_desc))))
@@ -2066,10 +2065,8 @@ static void wined3d_context_vk_init_graphics_pipeline_key(struct wined3d_context
     key->ts_desc.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
 
     key->vp_desc.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    key->vp_desc.viewportCount = 1;
-    key->vp_desc.pViewports = &key->viewport;
-    key->vp_desc.scissorCount = 1;
-    key->vp_desc.pScissors = &key->scissor;
+    key->vp_desc.pViewports = key->viewports;
+    key->vp_desc.pScissors = key->scissors;
 
     key->rs_desc.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     key->rs_desc.lineWidth = 1.0f;
@@ -2418,36 +2415,65 @@ static bool wined3d_context_vk_update_graphics_pipeline_key(struct wined3d_conte
             || wined3d_context_is_graphics_state_dirty(&context_vk->c, STATE_SCISSORRECT)
             || wined3d_context_is_graphics_state_dirty(&context_vk->c, STATE_RASTERIZER))
     {
-        key->viewport.x = state->viewports[0].x;
-        key->viewport.y = state->viewports[0].y;
-        key->viewport.width = state->viewports[0].width;
-        key->viewport.height = state->viewports[0].height;
-        key->viewport.minDepth = state->viewports[0].min_z;
-        key->viewport.maxDepth = state->viewports[0].max_z;
+        key->vp_desc.viewportCount = (context_vk->vk_info->multiple_viewports ? WINED3D_MAX_VIEWPORTS : 1);
+        key->vp_desc.scissorCount = key->vp_desc.viewportCount;
 
-        if (state->rasterizer_state && state->rasterizer_state->desc.scissor)
+        for (i = 0; i < key->vp_desc.viewportCount; ++i)
         {
-            const RECT *r = &state->scissor_rects[0];
+            const struct wined3d_viewport *src_viewport = &state->viewports[i];
+            VkViewport *viewport = &key->viewports[i];
+            VkRect2D *scissor = &key->scissors[i];
 
-            key->scissor.offset.x = r->left;
-            key->scissor.offset.y = r->top;
-            key->scissor.extent.width =  r->right - r->left;
-            key->scissor.extent.height = r->bottom - r->top;
+            if (i >= state->viewport_count)
+            {
+                viewport->x = 0.0f;
+                viewport->y = 0.0f;
+                viewport->width = 1.0f;
+                viewport->height = 1.0f;
+                viewport->minDepth = 0.0f;
+                viewport->maxDepth = 0.0f;
+
+                memset(scissor, 0, sizeof(*scissor));
+                continue;
+            }
+
+            viewport->x = src_viewport->x;
+            viewport->y = src_viewport->y;
+            viewport->width = src_viewport->width;
+            viewport->height = src_viewport->height;
+            viewport->minDepth = src_viewport->min_z;
+            viewport->maxDepth = src_viewport->max_z;
+
+            if (state->rasterizer_state && state->rasterizer_state->desc.scissor)
+            {
+                const RECT *r = &state->scissor_rects[i];
+
+                if (i >= state->scissor_rect_count)
+                {
+                    memset(scissor, 0, sizeof(*scissor));
+                    continue;
+                }
+
+                scissor->offset.x = r->left;
+                scissor->offset.y = r->top;
+                scissor->extent.width =  r->right - r->left;
+                scissor->extent.height = r->bottom - r->top;
+            }
+            else
+            {
+                scissor->offset.x = viewport->x;
+                scissor->offset.y = viewport->y;
+                scissor->extent.width = viewport->width;
+                scissor->extent.height = viewport->height;
+            }
+            /* Scissor offsets need to be non-negative (VUID-VkPipelineViewportStateCreateInfo-x-02821) */
+            if (scissor->offset.x < 0)
+                scissor->offset.x = 0;
+            if (scissor->offset.y < 0)
+                scissor->offset.y = 0;
+            viewport->y += viewport->height;
+            viewport->height = -viewport->height;
         }
-        else
-        {
-            key->scissor.offset.x = key->viewport.x;
-            key->scissor.offset.y = key->viewport.y;
-            key->scissor.extent.width = key->viewport.width;
-            key->scissor.extent.height = key->viewport.height;
-        }
-        /* Scissor offsets need to be non-negative (VUID-VkPipelineViewportStateCreateInfo-x-02821) */
-        if (key->scissor.offset.x < 0)
-            key->scissor.offset.x = 0;
-        if (key->scissor.offset.y < 0)
-            key->scissor.offset.y = 0;
-        key->viewport.y += key->viewport.height;
-        key->viewport.height = -key->viewport.height;
 
         update = true;
     }
@@ -2548,21 +2574,18 @@ static bool wined3d_context_vk_begin_render_pass(struct wined3d_context_vk *cont
     unsigned int fb_width, fb_height, fb_layer_count;
     struct wined3d_rendertarget_view_vk *rtv_vk;
     struct wined3d_rendertarget_view *view;
-    struct wined3d_adapter_vk *adapter_vk;
     const VkPhysicalDeviceLimits *limits;
     struct wined3d_query_vk *query_vk;
     VkRenderPassBeginInfo begin_info;
     unsigned int attachment_count, i;
     struct wined3d_texture *texture;
     VkFramebufferCreateInfo fb_desc;
-    int offset_x = 0, offset_y = 0;
     VkResult vr;
 
     if (context_vk->vk_render_pass)
         return true;
 
-    adapter_vk = wined3d_adapter_vk(device_vk->d.adapter);
-    limits = &adapter_vk->device_limits;
+    limits = &wined3d_adapter_vk(device_vk->d.adapter)->device_limits;
     fb_width = limits->maxFramebufferWidth;
     fb_height = limits->maxFramebufferHeight;
     fb_layer_count = limits->maxFramebufferLayers;
@@ -2659,26 +2682,6 @@ static bool wined3d_context_vk_begin_render_pass(struct wined3d_context_vk *cont
     fb_desc.height = fb_height;
     fb_desc.layers = fb_layer_count;
 
-    /* CX Hack 20098: on Apple's tiled GPUs, we should trim the render area, so that it doesn't
-     * try to preallocate huge amounts of memory for rasterization when there's no attachments.
-     * For now, let's always do that if we're running with MoltenVK. We could detect only
-     * the tiled architecture GPUs if needed. */
-    context_vk->hack_render_area_trimmed_to_viewport = 0;
-    if (adapter_vk->driver_properties.driverID == VK_DRIVER_ID_MOLTENVK &&
-            !attachment_count)
-    {
-        WARN("No attachments, trimming render area to the viewport.\n");
-
-        fb_width = ceilf(context_vk->graphics.pipeline_key_vk.viewport.width);
-        fb_height = ceilf(-context_vk->graphics.pipeline_key_vk.viewport.height);
-        fb_desc.layers = 1;
-
-        offset_x = context_vk->graphics.pipeline_key_vk.viewport.x;
-        offset_y = context_vk->graphics.pipeline_key_vk.viewport.y + context_vk->graphics.pipeline_key_vk.viewport.height;
-
-        context_vk->hack_render_area_trimmed_to_viewport = 1;
-    }
-
     if ((vr = VK_CALL(vkCreateFramebuffer(device_vk->vk_device, &fb_desc, NULL, &context_vk->vk_framebuffer))) < 0)
     {
         WARN("Failed to create Vulkan framebuffer, vr %s.\n", wined3d_debug_vkresult(vr));
@@ -2689,8 +2692,8 @@ static bool wined3d_context_vk_begin_render_pass(struct wined3d_context_vk *cont
     begin_info.pNext = NULL;
     begin_info.renderPass = context_vk->vk_render_pass;
     begin_info.framebuffer = context_vk->vk_framebuffer;
-    begin_info.renderArea.offset.x = offset_x;
-    begin_info.renderArea.offset.y = offset_y;
+    begin_info.renderArea.offset.x = 0;
+    begin_info.renderArea.offset.y = 0;
     begin_info.renderArea.extent.width = fb_width;
     begin_info.renderArea.extent.height = fb_height;
     begin_info.pClearValues = clear_values;
@@ -3447,7 +3450,6 @@ VkCommandBuffer wined3d_context_vk_apply_draw_state(struct wined3d_context_vk *c
         const struct wined3d_state *state, struct wined3d_buffer_vk *indirect_vk, bool indexed)
 {
     struct wined3d_device_vk *device_vk = wined3d_device_vk(context_vk->c.device);
-    struct wined3d_adapter_vk *adapter_vk = wined3d_adapter_vk(device_vk->d.adapter);
     const struct wined3d_vk_info *vk_info = context_vk->vk_info;
     const struct wined3d_blend_state *b = state->blend_state;
     bool dual_source_blend = b && b->dual_source;
@@ -3533,13 +3535,6 @@ VkCommandBuffer wined3d_context_vk_apply_draw_state(struct wined3d_context_vk *c
         context_vk->sample_count = VK_SAMPLE_COUNT_1_BIT;
     if (context_vk->c.shader_update_mask & ~(1u << WINED3D_SHADER_TYPE_COMPUTE))
     {
-        /* There's a feature bit in the VkPhysicalDeviceFeatures structure we
-         * could have used for this, but the version of MoltenVK we ship with
-         * CrossOver sets it to true in order to make DXVK work. */
-        if (adapter_vk->driver_properties.driverID == VK_DRIVER_ID_MOLTENVK
-                && state->shader[WINED3D_SHADER_TYPE_GEOMETRY]
-                && state->shader[WINED3D_SHADER_TYPE_GEOMETRY]->function)
-            FIXME("The application uses geometry shaders, but the Vulkan implementation does not support them.\n");
         device_vk->d.shader_backend->shader_select(device_vk->d.shader_priv, &context_vk->c, state);
         if (!context_vk->graphics.vk_pipeline_layout)
         {
@@ -3602,9 +3597,7 @@ VkCommandBuffer wined3d_context_vk_apply_draw_state(struct wined3d_context_vk *c
         return VK_NULL_HANDLE;
     }
 
-    if (wined3d_context_is_graphics_state_dirty(&context_vk->c, STATE_FRAMEBUFFER) ||
-            (context_vk->hack_render_area_trimmed_to_viewport &&
-            wined3d_context_is_graphics_state_dirty(&context_vk->c, STATE_VIEWPORT)))
+    if (wined3d_context_is_graphics_state_dirty(&context_vk->c, STATE_FRAMEBUFFER))
         wined3d_context_vk_end_current_render_pass(context_vk);
     if (!wined3d_context_vk_begin_render_pass(context_vk, vk_command_buffer, state, vk_info))
     {

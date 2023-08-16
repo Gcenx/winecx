@@ -50,12 +50,10 @@
 #include "windows.gaming.input.custom.h"
 #undef Size
 
-#define MAKE_FUNC(f) static typeof(f) *p ## f
-MAKE_FUNC( RoGetActivationFactory );
-MAKE_FUNC( RoInitialize );
-MAKE_FUNC( WindowsCreateString );
-MAKE_FUNC( WindowsDeleteString );
-#undef MAKE_FUNC
+static HRESULT (WINAPI *pRoGetActivationFactory)( HSTRING, REFIID, void** );
+static HRESULT (WINAPI *pRoInitialize)( RO_INIT_TYPE );
+static HRESULT (WINAPI *pWindowsCreateString)( const WCHAR*, UINT32, HSTRING* );
+static HRESULT (WINAPI *pWindowsDeleteString)( HSTRING str );
 
 static BOOL load_combase_functions(void)
 {
@@ -75,12 +73,12 @@ failed:
     return FALSE;
 }
 
-static DWORD wait_for_events( DWORD count, HANDLE *events, DWORD timeout )
+DWORD msg_wait_for_events_( const char *file, int line, DWORD count, HANDLE *events, DWORD timeout )
 {
-    DWORD ret, end = GetTickCount() + timeout;
+    DWORD ret, end = GetTickCount() + min( timeout, 5000 );
     MSG msg;
 
-    while ((ret = MsgWaitForMultipleObjects( count, events, FALSE, timeout, QS_ALLINPUT )) <= count)
+    while ((ret = MsgWaitForMultipleObjects( count, events, FALSE, min( timeout, 5000 ), QS_ALLINPUT )) <= count)
     {
         while (PeekMessageW( &msg, 0, 0, 0, PM_REMOVE ))
         {
@@ -88,12 +86,13 @@ static DWORD wait_for_events( DWORD count, HANDLE *events, DWORD timeout )
             DispatchMessageW( &msg );
         }
         if (ret < count) return ret;
-        if (timeout == INFINITE) continue;
+        if (timeout >= 5000) continue;
         if (end <= GetTickCount()) timeout = 0;
         else timeout = end - GetTickCount();
     }
 
-    ok( ret == WAIT_TIMEOUT, "MsgWaitForMultipleObjects returned %#lx\n", ret );
+    if (timeout >= 5000) ok_(file, line)( 0, "MsgWaitForMultipleObjects returned %#lx\n", ret );
+    else ok_(file, line)( ret == WAIT_TIMEOUT, "MsgWaitForMultipleObjects returned %#lx\n", ret );
     return ret;
 }
 
@@ -133,6 +132,7 @@ static BOOL test_input_lost( DWORD version )
             END_COLLECTION,
         END_COLLECTION,
     };
+    C_ASSERT(sizeof(report_desc) < MAX_HID_DESCRIPTOR_LEN);
 #include "pop_hid_macros.h"
 
     struct hid_device_desc desc =
@@ -166,9 +166,9 @@ static BOOL test_input_lost( DWORD version )
 
     desc.report_descriptor_len = sizeof(report_desc);
     memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
 
-    if (!hid_device_start( &desc )) goto done;
+    if (!hid_device_start( &desc, 1 )) goto done;
     if (FAILED(hr = dinput_test_create_device( version, &devinst, &device ))) goto done;
 
     hr = IDirectInputDevice8_SetDataFormat( device, &c_dfDIJoystick2 );
@@ -188,7 +188,7 @@ static BOOL test_input_lost( DWORD version )
     ok( hr == DI_OK, "GetDeviceData returned %#lx\n", hr );
     ok( count == 0, "got %lu expected 0\n", count );
 
-    hid_device_stop( &desc );
+    hid_device_stop( &desc, 1 );
 
     hr = IDirectInputDevice8_GetDeviceState( device, sizeof(state), &state );
     ok( hr == DIERR_INPUTLOST, "GetDeviceState returned %#lx\n", hr );
@@ -208,8 +208,8 @@ static BOOL test_input_lost( DWORD version )
     hr = IDirectInputDevice8_Unacquire( device );
     ok( hr == DI_NOEFFECT, "Unacquire returned: %#lx\n", hr );
 
-    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
-    hid_device_start( &desc );
+    fill_context( desc.context, ARRAY_SIZE(desc.context) );
+    hid_device_start( &desc, 1 );
 
     hr = IDirectInputDevice8_Acquire( device );
     ok( hr == S_OK, "Acquire returned %#lx\n", hr );
@@ -220,7 +220,7 @@ static BOOL test_input_lost( DWORD version )
     ok( ref == 0, "Release returned %ld\n", ref );
 
 done:
-    hid_device_stop( &desc );
+    hid_device_stop( &desc, 1 );
     cleanup_registry_keys();
 
     winetest_pop_context();
@@ -313,6 +313,7 @@ static void test_RegisterDeviceNotification(void)
     DEV_BROADCAST_HDR *header = (DEV_BROADCAST_HDR *)buffer;
     HANDLE hwnd, thread, stop_event;
     HDEVNOTIFY devnotify;
+    DWORD ret;
     MSG msg;
 
     RegisterClassExW( &class );
@@ -395,7 +396,9 @@ static void test_RegisterDeviceNotification(void)
 
     while (device_change_count < device_change_expect)
     {
-        MsgWaitForMultipleObjects( 0, NULL, FALSE, INFINITE, QS_ALLINPUT );
+        ret = MsgWaitForMultipleObjects( 0, NULL, FALSE, 5000, QS_ALLINPUT );
+        ok( !ret, "MsgWaitForMultipleObjects returned %#lx\n", ret );
+        if (ret) break;
         while (PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ))
         {
             TranslateMessage( &msg );
@@ -405,7 +408,8 @@ static void test_RegisterDeviceNotification(void)
         if (device_change_count == device_change_expect / 2) SetEvent( stop_event );
     }
 
-    WaitForSingleObject( thread, INFINITE );
+    ret = WaitForSingleObject( thread, 5000 );
+    ok( !ret, "WaitForSingleObject returned %#lx\n", ret );
     CloseHandle( thread );
     CloseHandle( stop_event );
 
@@ -429,7 +433,9 @@ static void test_RegisterDeviceNotification(void)
 
     while (device_change_count < device_change_expect)
     {
-        MsgWaitForMultipleObjects( 0, NULL, FALSE, INFINITE, QS_ALLINPUT );
+        ret = MsgWaitForMultipleObjects( 0, NULL, FALSE, 5000, QS_ALLINPUT );
+        ok( !ret, "MsgWaitForMultipleObjects returned %#lx\n", ret );
+        if (ret) break;
         while (PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ))
         {
             TranslateMessage( &msg );
@@ -439,7 +445,8 @@ static void test_RegisterDeviceNotification(void)
         if (device_change_count == device_change_expect / 2) SetEvent( stop_event );
     }
 
-    WaitForSingleObject( thread, INFINITE );
+    ret = WaitForSingleObject( thread, 5000 );
+    ok( !ret, "WaitForSingleObject returned %#lx\n", ret );
     CloseHandle( thread );
     CloseHandle( stop_event );
 
@@ -460,7 +467,9 @@ static void test_RegisterDeviceNotification(void)
 
     while (device_change_count < device_change_expect)
     {
-        MsgWaitForMultipleObjects( 0, NULL, FALSE, INFINITE, QS_ALLINPUT );
+        ret = MsgWaitForMultipleObjects( 0, NULL, FALSE, 5000, QS_ALLINPUT );
+        ok( !ret, "MsgWaitForMultipleObjects returned %#lx\n", ret );
+        if (ret) break;
         while (PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ))
         {
             TranslateMessage( &msg );
@@ -470,7 +479,8 @@ static void test_RegisterDeviceNotification(void)
         if (device_change_count == device_change_expect / 2) SetEvent( stop_event );
     }
 
-    WaitForSingleObject( thread, INFINITE );
+    ret = WaitForSingleObject( thread, 5000 );
+    ok( !ret, "WaitForSingleObject returned %#lx\n", ret );
     CloseHandle( thread );
     CloseHandle( stop_event );
 
@@ -503,7 +513,7 @@ static HRESULT WINAPI controller_handler_QueryInterface( IEventHandler_RawGameCo
         return S_OK;
     }
 
-    trace( "%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid( iid ) );
+    if (winetest_debug > 1) trace( "%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid( iid ) );
     *out = NULL;
     return E_NOINTERFACE;
 }
@@ -523,11 +533,11 @@ static HRESULT WINAPI controller_handler_Invoke( IEventHandler_RawGameController
 {
     struct controller_handler *impl = impl_from_IEventHandler_RawGameController( iface );
 
-    trace( "iface %p, sender %p, controller %p\n", iface, sender, controller );
+    if (winetest_debug > 1) trace( "iface %p, sender %p, controller %p\n", iface, sender, controller );
 
     ok( sender == NULL, "got sender %p\n", sender );
-    SetEvent( impl->event );
     impl->invoked = TRUE;
+    SetEvent( impl->event );
 
     return S_OK;
 }
@@ -710,7 +720,7 @@ static HRESULT WINAPI input_sink_OnInputResumed( IGameControllerInputSink *iface
 {
     struct custom_controller *impl = impl_from_IGameControllerInputSink( iface );
 
-    trace( "iface %p, timestamp %I64u\n", iface, timestamp );
+    if (winetest_debug > 1) trace( "iface %p, timestamp %I64u\n", iface, timestamp );
 
     ok( !controller_added.invoked, "controller added handler invoked\n" );
     ok( !impl->on_input_resumed_called, "OnInputResumed already called\n" );
@@ -723,7 +733,7 @@ static HRESULT WINAPI input_sink_OnInputSuspended( IGameControllerInputSink *ifa
 {
     struct custom_controller *impl = impl_from_IGameControllerInputSink( iface );
 
-    trace( "iface %p, timestamp %I64u\n", iface, timestamp );
+    if (winetest_debug > 1) trace( "iface %p, timestamp %I64u\n", iface, timestamp );
 
     ok( !controller_removed.invoked, "controller removed handler invoked\n" );
     ok( !impl->on_input_suspended_called, "OnInputSuspended already called\n" );
@@ -841,7 +851,7 @@ static HRESULT WINAPI custom_factory_CreateGameController( ICustomGameController
 {
     struct custom_factory *impl = impl_from_ICustomGameControllerFactory( iface );
 
-    trace( "iface %p, provider %p, value %p\n", iface, provider, value );
+    if (winetest_debug > 1) trace( "iface %p, provider %p, value %p\n", iface, provider, value );
 
     ok( !controller_added.invoked, "controller added handler invoked\n" );
     ok( !impl->create_controller_called, "unexpected call\n" );
@@ -865,7 +875,7 @@ static HRESULT WINAPI custom_factory_OnGameControllerAdded( ICustomGameControlle
 {
     struct custom_factory *impl = impl_from_ICustomGameControllerFactory( iface );
 
-    trace( "iface %p, value %p\n", iface, value );
+    if (winetest_debug > 1) trace( "iface %p, value %p\n", iface, value );
 
     ok( controller_added.invoked, "controller added handler not invoked\n" );
     ok( impl->create_controller_called, "CreateGameController not called\n" );
@@ -884,7 +894,7 @@ static HRESULT WINAPI custom_factory_OnGameControllerRemoved( ICustomGameControl
 {
     struct custom_factory *impl = impl_from_ICustomGameControllerFactory( iface );
 
-    trace( "iface %p, value %p\n", iface, value );
+    if (winetest_debug > 1) trace( "iface %p, value %p\n", iface, value );
 
     ok( controller_removed.invoked, "controller removed handler invoked\n" );
     ok( custom_controller.on_input_suspended_called, "OnInputSuspended not called\n" );
@@ -923,7 +933,6 @@ static LRESULT CALLBACK windows_gaming_input_wndproc( HWND hwnd, UINT msg, WPARA
         {
             ok( wparam == DBT_DEVICEREMOVECOMPLETE, "got wparam %#Ix\n", wparam );
             ok( controller_added.invoked, "controller added handler not invoked\n" );
-            ok( controller_removed.invoked, "controller removed handler not invoked\n" );
         }
         else
         {
@@ -1038,7 +1047,7 @@ static void test_windows_gaming_input(void)
     thread = CreateThread( NULL, 0, dinput_test_device_thread, stop_event, 0, NULL );
     ok( !!thread, "CreateThread failed, error %lu\n", GetLastError() );
 
-    wait_for_events( 1, &controller_added.event, INFINITE );
+    msg_wait_for_events( 1, &controller_added.event, 5000 );
 
     ok( controller_added.invoked, "controller added handler not invoked\n" );
     ok( !controller_removed.invoked, "controller removed handler invoked\n" );
@@ -1075,7 +1084,7 @@ static void test_windows_gaming_input(void)
     IRawGameController_Release( raw_controller );
 
     SetEvent( stop_event );
-    wait_for_events( 1, &controller_removed.event, INFINITE );
+    msg_wait_for_events( 1, &controller_removed.event, 5000 );
 
     ok( controller_added.invoked, "controller added handler not invoked\n" );
     ok( controller_removed.invoked, "controller removed handler not invoked\n" );
@@ -1115,7 +1124,8 @@ static void test_windows_gaming_input(void)
 
     IVectorView_RawGameController_Release( controller_view );
 
-    WaitForSingleObject( thread, INFINITE );
+    res = WaitForSingleObject( thread, 5000 );
+    ok( !res, "WaitForSingleObject returned %#lx\n", res );
     CloseHandle( thread );
     while (PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE )) DispatchMessageW( &msg );
 
@@ -1136,10 +1146,10 @@ static void test_windows_gaming_input(void)
 
     thread = CreateThread( NULL, 0, dinput_test_device_thread, stop_event, 0, NULL );
     ok( !!thread, "CreateThread failed, error %lu\n", GetLastError() );
-    wait_for_events( 1, &controller_added.event, INFINITE );
-    res = wait_for_events( 1, &custom_factory.added_event, 500 );
+    msg_wait_for_events( 1, &controller_added.event, 5000 );
+    res = msg_wait_for_events( 1, &custom_factory.added_event, 500 );
     todo_wine
-    ok( !res, "wait_for_events returned %#lx\n", res );
+    ok( !res, "msg_wait_for_events returned %#lx\n", res );
     hr = IRawGameControllerStatics_get_RawGameControllers( statics, &controller_view );
     ok( hr == S_OK, "get_RawGameControllers returned %#lx\n", hr );
     hr = IVectorView_RawGameController_GetAt( controller_view, 0, &raw_controller );
@@ -1184,10 +1194,10 @@ next:
     IGameController_Release( game_controller );
     IRawGameController_Release( raw_controller );
     SetEvent( stop_event );
-    res = wait_for_events( 1, &custom_factory.removed_event, 500 );
+    res = msg_wait_for_events( 1, &custom_factory.removed_event, 500 );
     todo_wine
-    ok( !res, "wait_for_events returned %#lx\n", res );
-    wait_for_events( 1, &controller_removed.event, INFINITE );
+    ok( !res, "msg_wait_for_events returned %#lx\n", res );
+    msg_wait_for_events( 1, &controller_removed.event, 5000 );
 
     hr = IRawGameControllerStatics_remove_RawGameControllerAdded( statics, controller_added_token );
     ok( hr == S_OK, "remove_RawGameControllerAdded returned %#lx\n", hr );
@@ -1201,7 +1211,8 @@ next:
     IGameControllerFactoryManagerStatics2_Release( manager_statics2 );
     IGameControllerFactoryManagerStatics_Release( manager_statics );
     IRawGameControllerStatics_Release( statics );
-    WaitForSingleObject( thread, INFINITE );
+    res = WaitForSingleObject( thread, 5000 );
+    ok( !res, "WaitForSingleObject returned %#lx\n", res );
     CloseHandle( thread );
     CloseHandle( stop_event );
 
@@ -1218,10 +1229,9 @@ next:
 
 START_TEST( hotplug )
 {
-    if (!dinput_test_init()) return;
+    dinput_test_init();
     if (!bus_device_start()) goto done;
 
-    CoInitialize( NULL );
     if (test_input_lost( 0x500 ))
     {
         test_input_lost( 0x700 );
@@ -1230,7 +1240,6 @@ START_TEST( hotplug )
         test_RegisterDeviceNotification();
         test_windows_gaming_input();
     }
-    CoUninitialize();
 
 done:
     bus_device_stop();

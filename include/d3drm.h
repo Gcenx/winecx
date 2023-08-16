@@ -20,8 +20,6 @@
 #ifndef __D3DRM_H__
 #define __D3DRM_H__
 
-#include "wine/winheader_enter.h"
-
 #include <ddraw.h>
 
 typedef struct IDirect3DRM *LPDIRECT3DRM, **LPLPDIRECT3DRM;
@@ -522,7 +520,5 @@ DECLARE_INTERFACE_(IDirect3DRM3,IUnknown)
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __D3DRM_H__ */

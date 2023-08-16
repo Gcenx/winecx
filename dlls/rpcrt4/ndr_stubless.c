@@ -1005,12 +1005,14 @@ LONG_PTR CDECL DECLSPEC_HIDDEN ndr_client_call( PMIDL_STUB_DESC pStubDesc, PFORM
 #ifdef __x86_64__
 
 __ASM_GLOBAL_FUNC( NdrClientCall2,
-                   "movq %r8,0x18(%rsp)\n\t"
-                   "movq %r9,0x20(%rsp)\n\t"
-                   "leaq 0x18(%rsp),%r8\n\t"
-                   "xorq %r9,%r9\n\t"
                    "subq $0x28,%rsp\n\t"
+                   __ASM_SEH(".seh_stackalloc 0x28\n\t")
+                   __ASM_SEH(".seh_endprologue\n\t")
                    __ASM_CFI(".cfi_adjust_cfa_offset 0x28\n\t")
+                   "movq %r8,0x40(%rsp)\n\t"
+                   "movq %r9,0x48(%rsp)\n\t"
+                   "leaq 0x40(%rsp),%r8\n\t"
+                   "xorq %r9,%r9\n\t"
                    "call " __ASM_NAME("ndr_client_call") "\n\t"
                    "addq $0x28,%rsp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset -0x28\n\t")
@@ -1246,7 +1248,7 @@ static LONG_PTR *stub_do_args(MIDL_STUB_MESSAGE *pStubMsg,
         case STUBLESS_FREE:
             if (params[i].attr.ServerAllocSize)
             {
-                HeapFree(GetProcessHeap(), 0, *(void **)pArg);
+                free(*(void **)pArg);
             }
             else if (param_needs_alloc(params[i].attr) &&
                      (!params[i].attr.MustFree || params[i].attr.IsSimpleRef))
@@ -1277,8 +1279,7 @@ static LONG_PTR *stub_do_args(MIDL_STUB_MESSAGE *pStubMsg,
             break;
         case STUBLESS_UNMARSHAL:
             if (params[i].attr.ServerAllocSize)
-                *(void **)pArg = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                                           params[i].attr.ServerAllocSize * 8);
+                *(void **)pArg = calloc(params[i].attr.ServerAllocSize, 8);
 
             if (params[i].attr.IsIn)
                 call_unmarshaller(pStubMsg, &pArg, &params[i], 0);
@@ -1415,7 +1416,7 @@ LONG WINAPI NdrStubCall2(
 
     TRACE("allocating memory for stack of size %x\n", stack_size);
 
-    args = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, stack_size);
+    args = calloc(1, stack_size);
     stubMsg.StackTop = args; /* used by conformance of top-level objects */
 
     /* add the implicit This pointer as the first arg to the function if we
@@ -1554,7 +1555,7 @@ LONG WINAPI NdrStubCall2(
         NdrFullPointerXlatFree(stubMsg.FullPtrXlatTables);
 
     /* free server function stack */
-    HeapFree(GetProcessHeap(), 0, args);
+    free(args);
 
     return S_OK;
 }
@@ -2040,7 +2041,7 @@ void RPC_ENTRY NdrAsyncServerCall(PRPC_MESSAGE pRpcMsg)
 
     TRACE("allocating memory for stack of size %x\n", async_call_data->stack_size);
 
-    args = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, async_call_data->stack_size);
+    args = calloc(1, async_call_data->stack_size);
     async_call_data->pStubMsg->StackTop = args; /* used by conformance of top-level objects */
 
     pAsync = I_RpcAllocate(sizeof(*pAsync));
@@ -2158,7 +2159,7 @@ RPC_STATUS NdrpCompleteAsyncServerCall(RPC_ASYNC_STATE *pAsync, void *Reply)
             if (async_call_data->pProcHeader->Oi_flags & Oi_OBJECT_PROC)
             {
                 ERR("objects not supported\n");
-                HeapFree(GetProcessHeap(), 0, async_call_data->pStubMsg->StackTop);
+                free(async_call_data->pStubMsg->StackTop);
                 I_RpcFree(async_call_data);
                 I_RpcFree(pAsync);
                 RpcRaiseException(RPC_X_BAD_STUB_DATA);
@@ -2204,7 +2205,7 @@ RPC_STATUS NdrpCompleteAsyncServerCall(RPC_ASYNC_STATE *pAsync, void *Reply)
 #endif
 
     /* free server function stack */
-    HeapFree(GetProcessHeap(), 0, async_call_data->pStubMsg->StackTop);
+    free(async_call_data->pStubMsg->StackTop);
     I_RpcFree(async_call_data);
     I_RpcFree(pAsync);
 
@@ -2246,11 +2247,13 @@ LONG_PTR CDECL DECLSPEC_HIDDEN ndr64_client_call( MIDL_STUBLESS_PROXY_INFO *info
 #ifdef __x86_64__
 
 __ASM_GLOBAL_FUNC( NdrClientCall3,
-                   "movq %r9,0x20(%rsp)\n\t"
-                   "leaq 0x20(%rsp),%r9\n\t"
-                   "pushq $0\n\t"
-                   "subq $0x20,%rsp\n\t"
+                   "subq $0x28,%rsp\n\t"
+                   __ASM_SEH(".seh_stackalloc 0x28\n\t")
+                   __ASM_SEH(".seh_endprologue\n\t")
                    __ASM_CFI(".cfi_adjust_cfa_offset 0x28\n\t")
+                   "movq %r9,0x48(%rsp)\n\t"
+                   "leaq 0x48(%rsp),%r9\n\t"
+                   "movq $0,0x20(%rsp)\n\t"
                    "call " __ASM_NAME("ndr64_client_call") "\n\t"
                    "addq $0x28,%rsp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset -0x28\n\t")
@@ -2306,11 +2309,13 @@ LONG_PTR CDECL DECLSPEC_HIDDEN ndr64_async_client_call( MIDL_STUBLESS_PROXY_INFO
 #ifdef __x86_64__
 
 __ASM_GLOBAL_FUNC( Ndr64AsyncClientCall,
-                   "movq %r9,0x20(%rsp)\n\t"
-                   "leaq 0x20(%rsp),%r9\n\t"
-                   "pushq $0\n\t"
-                   "subq $0x20,%rsp\n\t"
+                   "subq $0x28,%rsp\n\t"
+                   __ASM_SEH(".seh_stackalloc 0x28\n\t")
+                   __ASM_SEH(".seh_endprologue\n\t")
                    __ASM_CFI(".cfi_adjust_cfa_offset 0x28\n\t")
+                   "movq %r9,0x48(%rsp)\n\t"
+                   "leaq 0x48(%rsp),%r9\n\t"
+                   "movq $0,0x20(%rsp)\n\t"
                    "call " __ASM_NAME("ndr64_async_client_call") "\n\t"
                    "addq $0x28,%rsp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset -0x28\n\t")

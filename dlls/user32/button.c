@@ -38,18 +38,10 @@
  *  - BN_UNPUSHED/BN_UNHILITE
  */
 
-#include <stdarg.h>
-#include <string.h>
-#include <stdlib.h>
-
 #define OEMRESOURCE
 
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "controls.h"
-#include "win.h"
 #include "user_private.h"
+#include "controls.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(button);
@@ -118,19 +110,6 @@ static const pfPaint btnPaintFunc[MAX_BTN_TYPE] =
     OB_Paint     /* BS_OWNERDRAW */
 };
 
-/*********************************************************************
- * button class descriptor
- */
-const struct builtin_class_descr BUTTON_builtin_class =
-{
-    L"Button",           /* name */
-    CS_DBLCLKS | CS_VREDRAW | CS_HREDRAW | CS_PARENTDC, /* style  */
-    WINPROC_BUTTON,      /* proc */
-    NB_EXTRA_BYTES,      /* extra */
-    IDC_ARROW,           /* cursor */
-    0                    /* brush */
-};
-
 
 static inline LONG get_button_state( HWND hwnd )
 {
@@ -162,7 +141,7 @@ static inline void paint_button( HWND hwnd, LONG style, UINT action )
 {
     if (btnPaintFunc[style] && IsWindowVisible(hwnd))
     {
-        HDC hdc = GetDC( hwnd );
+        HDC hdc = NtUserGetDC( hwnd );
         btnPaintFunc[style]( hwnd, hdc, action );
         NtUserReleaseDC( hwnd, hdc );
     }
@@ -349,7 +328,7 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         /* Clear an old text here as Windows does */
         if (IsWindowVisible(hWnd))
         {
-            HDC hdc = GetDC(hWnd);
+            HDC hdc = NtUserGetDC(hWnd);
             HBRUSH hbrush;
             RECT client, rc;
             HWND parent = GetParent(hWnd);
@@ -382,7 +361,7 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         if (unicode) DefWindowProcW( hWnd, WM_SETTEXT, wParam, lParam );
         else DefWindowProcA( hWnd, WM_SETTEXT, wParam, lParam );
         if (btn_type == BS_GROUPBOX) /* Yes, only for BS_GROUPBOX */
-            InvalidateRect( hWnd, NULL, TRUE );
+            NtUserInvalidateRect( hWnd, NULL, TRUE );
         else
             paint_button( hWnd, btn_type, ODA_DRAWENTIRE );
         return 1; /* success. FIXME: check text length */
@@ -390,7 +369,7 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 
     case WM_SETFONT:
         set_button_font( hWnd, (HFONT)wParam );
-        if (lParam) InvalidateRect(hWnd, NULL, TRUE);
+        if (lParam) NtUserInvalidateRect(hWnd, NULL, TRUE);
         break;
 
     case WM_GETFONT:
@@ -415,11 +394,11 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         if (style & BS_NOTIFY)
             BUTTON_NOTIFY_PARENT(hWnd, BN_KILLFOCUS);
 
-        InvalidateRect( hWnd, NULL, FALSE );
+        NtUserInvalidateRect( hWnd, NULL, FALSE );
         break;
 
     case WM_SYSCOLORCHANGE:
-        InvalidateRect( hWnd, NULL, FALSE );
+        NtUserInvalidateRect( hWnd, NULL, FALSE );
         break;
 
     case BM_SETSTYLE:
@@ -429,7 +408,7 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 
         /* Only redraw if lParam flag is set.*/
         if (lParam)
-            InvalidateRect( hWnd, NULL, TRUE );
+            NtUserInvalidateRect( hWnd, NULL, TRUE );
 
         break;
 
@@ -452,7 +431,7 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
             return 0;
         }
         oldHbitmap = (HBITMAP)SetWindowLongPtrW( hWnd, HIMAGE_GWL_OFFSET, lParam );
-	InvalidateRect( hWnd, NULL, FALSE );
+	NtUserInvalidateRect( hWnd, NULL, FALSE );
 	return (LRESULT)oldHbitmap;
 
     case BM_GETIMAGE:

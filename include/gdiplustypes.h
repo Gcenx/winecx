@@ -19,8 +19,6 @@
 #ifndef _GDIPLUSTYPES_H
 #define _GDIPLUSTYPES_H
 
-#include "wine/winheader_enter.h"
-
 typedef float REAL;
 
 enum Status{
@@ -275,7 +273,5 @@ typedef struct CharacterRange
 typedef enum Status Status;
 
 #endif /* end of c typedefs */
-
-#include "wine/winheader_exit.h"
 
 #endif

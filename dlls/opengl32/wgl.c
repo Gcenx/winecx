@@ -18,357 +18,68 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 #include <stdlib.h>
-#include <string.h>
-#include <sys/types.h>
 #include <math.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
-#include "winuser.h"
 #include "winreg.h"
-#include "wingdi.h"
-#include "winternl.h"
-#include "winnt.h"
+#include "ntuser.h"
+#include "malloc.h"
 
-#include "opengl_ext.h"
-#include "wine/gdi_driver.h"
+#include "unixlib.h"
+#include "private.h"
+
 #include "wine/glu.h"
-#include "wine/static_strings.h"
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(wgl);
+WINE_DEFAULT_DEBUG_CHANNEL(opengl);
 WINE_DECLARE_DEBUG_CHANNEL(fps);
-
-/*
- * Get a config key from either the app-specific or the default config
- */
-
-inline static DWORD get_config_key( HKEY defkey, HKEY appkey, const char *name,
-                                    char *buffer, DWORD *size )
-{
-    if (appkey && !RegQueryValueExA( appkey, name, 0, NULL, (LPBYTE)buffer, size )) return 0;
-    if (defkey && !RegQueryValueExA( defkey, name, 0, NULL, (LPBYTE)buffer, size )) return 0;
-    return ERROR_FILE_NOT_FOUND;
-}
-
-/* handle management */
-
-#define MAX_WGL_HANDLES 1024
-
-enum wgl_handle_type
-{
-    HANDLE_PBUFFER = 0 << 12,
-    HANDLE_CONTEXT = 1 << 12,
-    HANDLE_CONTEXT_V3 = 3 << 12,
-    HANDLE_TYPE_MASK = 15 << 12
-};
-
-struct opengl_context
-{
-    DWORD               tid;           /* thread that the context is current in */
-    HDC                 draw_dc;       /* current drawing DC */
-    HDC                 read_dc;       /* current reading DC */
-    void     (CALLBACK *debug_callback)(GLenum, GLenum, GLuint, GLenum,
-                                        GLsizei, const GLchar *, const void *); /* debug callback */
-    const void         *debug_user;    /* debug user parameter */
-    GLubyte            *extensions;    /* extension string */
-    GLuint             *disabled_exts; /* indices of disabled extensions */
-    struct wgl_context *drv_ctx;       /* driver context */
-};
-
-struct wgl_handle
-{
-    UINT                 handle;
-    struct opengl_funcs *funcs;
-    union
-    {
-        struct opengl_context *context;  /* for HANDLE_CONTEXT */
-        struct wgl_pbuffer    *pbuffer;  /* for HANDLE_PBUFFER */
-        struct wgl_handle     *next;     /* for free handles */
-    } u;
-};
-
-static struct wgl_handle wgl_handles[MAX_WGL_HANDLES];
-static struct wgl_handle *next_free;
-static unsigned int handle_count;
-
-static CRITICAL_SECTION wgl_section;
-static CRITICAL_SECTION_DEBUG critsect_debug =
-{
-    0, 0, &wgl_section,
-    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": wgl_section") }
-};
-static CRITICAL_SECTION wgl_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
 
-DECLARE_STATIC_STRINGS(gl_strings);
+#ifndef _WIN64
 
-static inline HANDLE next_handle( struct wgl_handle *ptr, enum wgl_handle_type type )
+static char **wow64_strings;
+static SIZE_T wow64_strings_count;
+
+static CRITICAL_SECTION wow64_cs;
+static CRITICAL_SECTION_DEBUG wow64_cs_debug =
 {
-    WORD generation = HIWORD( ptr->handle ) + 1;
-    if (!generation) generation++;
-    ptr->handle = MAKELONG( ptr - wgl_handles, generation ) | type;
-    return ULongToHandle( ptr->handle );
-}
+    0, 0, &wow64_cs,
+    { &wow64_cs_debug.ProcessLocksList, &wow64_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": wow64_cs") }
+};
+static CRITICAL_SECTION wow64_cs = { &wow64_cs_debug, -1, 0, 0, 0, 0 };
 
-/* the current context is assumed valid and doesn't need locking */
-static inline struct wgl_handle *get_current_context_ptr(void)
+static void append_wow64_string( char *str )
 {
-    if (!NtCurrentTeb()->glCurrentRC) return NULL;
-    return &wgl_handles[LOWORD(NtCurrentTeb()->glCurrentRC) & ~HANDLE_TYPE_MASK];
-}
+    char **tmp;
 
-static struct wgl_handle *get_handle_ptr( HANDLE handle, enum wgl_handle_type type )
-{
-    unsigned int index = LOWORD( handle ) & ~HANDLE_TYPE_MASK;
+    EnterCriticalSection( &wow64_cs );
 
-    EnterCriticalSection( &wgl_section );
-    if (index < handle_count && ULongToHandle(wgl_handles[index].handle) == handle)
-        return &wgl_handles[index];
-
-    LeaveCriticalSection( &wgl_section );
-    SetLastError( ERROR_INVALID_HANDLE );
-    return NULL;
-}
-
-static void release_handle_ptr( struct wgl_handle *ptr )
-{
-    if (ptr) LeaveCriticalSection( &wgl_section );
-}
-
-static HANDLE alloc_handle( enum wgl_handle_type type, struct opengl_funcs *funcs, void *user_ptr )
-{
-    HANDLE handle = 0;
-    struct wgl_handle *ptr = NULL;
-
-    EnterCriticalSection( &wgl_section );
-    if ((ptr = next_free))
-        next_free = next_free->u.next;
-    else if (handle_count < MAX_WGL_HANDLES)
-        ptr = &wgl_handles[handle_count++];
-
-    if (ptr)
+    if (!(tmp = realloc( wow64_strings, (wow64_strings_count + 1) * sizeof(*wow64_strings) )))
+        ERR( "Failed to allocate memory for wow64 strings\n" );
+    else
     {
-        ptr->funcs = funcs;
-        ptr->u.context = user_ptr;
-        handle = next_handle( ptr, type );
+        wow64_strings = tmp;
+        wow64_strings[wow64_strings_count] = str;
+        wow64_strings_count += 1;
     }
-    else SetLastError( ERROR_NOT_ENOUGH_MEMORY );
-    LeaveCriticalSection( &wgl_section );
-    return handle;
+
+    LeaveCriticalSection( &wow64_cs );
 }
 
-static void free_handle_ptr( struct wgl_handle *ptr )
+static void cleanup_wow64_strings(void)
 {
-    ptr->handle |= 0xffff;
-    ptr->u.next = next_free;
-    ptr->funcs = NULL;
-    next_free = ptr;
-    LeaveCriticalSection( &wgl_section );
+    while (wow64_strings_count--) free( wow64_strings[wow64_strings_count] );
+    free( wow64_strings );
 }
 
-static inline enum wgl_handle_type get_current_context_type(void)
-{
-    if (!NtCurrentTeb()->glCurrentRC) return HANDLE_CONTEXT;
-    return LOWORD(NtCurrentTeb()->glCurrentRC) & HANDLE_TYPE_MASK;
-}
-
-/***********************************************************************
- *		wglCopyContext (OPENGL32.@)
- */
-BOOL WINAPI wglCopyContext(HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask)
-{
-    struct wgl_handle *src, *dst;
-    BOOL ret = FALSE;
-
-    if (!(src = get_handle_ptr( hglrcSrc, HANDLE_CONTEXT ))) return FALSE;
-    if ((dst = get_handle_ptr( hglrcDst, HANDLE_CONTEXT )))
-    {
-        if (src->funcs != dst->funcs) SetLastError( ERROR_INVALID_HANDLE );
-        else ret = src->funcs->wgl.p_wglCopyContext( src->u.context->drv_ctx,
-                                                     dst->u.context->drv_ctx, mask );
-    }
-    release_handle_ptr( dst );
-    release_handle_ptr( src );
-    return ret;
-}
-
-/***********************************************************************
- *		wglDeleteContext (OPENGL32.@)
- */
-BOOL WINAPI wglDeleteContext(HGLRC hglrc)
-{
-    struct wgl_handle *ptr = get_handle_ptr( hglrc, HANDLE_CONTEXT );
-
-    if (!ptr) return FALSE;
-
-    if (ptr->u.context->tid && ptr->u.context->tid != GetCurrentThreadId())
-    {
-        SetLastError( ERROR_BUSY );
-        release_handle_ptr( ptr );
-        return FALSE;
-    }
-    if (hglrc == NtCurrentTeb()->glCurrentRC) wglMakeCurrent( 0, 0 );
-    ptr->funcs->wgl.p_wglDeleteContext( ptr->u.context->drv_ctx );
-    HeapFree( GetProcessHeap(), 0, ptr->u.context->disabled_exts );
-    HeapFree( GetProcessHeap(), 0, ptr->u.context->extensions );
-    HeapFree( GetProcessHeap(), 0, ptr->u.context );
-    free_handle_ptr( ptr );
-    return TRUE;
-}
-
-/***********************************************************************
- *		wglMakeCurrent (OPENGL32.@)
- */
-BOOL WINAPI wglMakeCurrent(HDC hdc, HGLRC hglrc)
-{
-    BOOL ret = TRUE;
-    struct wgl_handle *ptr, *prev = get_current_context_ptr();
-
-    if (hglrc)
-    {
-        if (!(ptr = get_handle_ptr( hglrc, HANDLE_CONTEXT ))) return FALSE;
-        if (!ptr->u.context->tid || ptr->u.context->tid == GetCurrentThreadId())
-        {
-            ret = ptr->funcs->wgl.p_wglMakeCurrent( hdc, ptr->u.context->drv_ctx );
-            if (ret)
-            {
-                if (prev) prev->u.context->tid = 0;
-                ptr->u.context->tid = GetCurrentThreadId();
-                ptr->u.context->draw_dc = hdc;
-                ptr->u.context->read_dc = hdc;
-                NtCurrentTeb()->glCurrentRC = hglrc;
-                NtCurrentTeb()->glTable = ptr->funcs;
-            }
-        }
-        else
-        {
-            SetLastError( ERROR_BUSY );
-            ret = FALSE;
-        }
-        release_handle_ptr( ptr );
-    }
-    else if (prev)
-    {
-        if (!prev->funcs->wgl.p_wglMakeCurrent( 0, NULL )) return FALSE;
-        prev->u.context->tid = 0;
-        NtCurrentTeb()->glCurrentRC = 0;
-        NtCurrentTeb()->glTable = &null_opengl_funcs;
-    }
-    else if (!hdc)
-    {
-        SetLastError( ERROR_INVALID_HANDLE );
-        ret = FALSE;
-    }
-    return ret;
-}
-
-/***********************************************************************
- *		wglCreateContextAttribsARB
- *
- * Provided by the WGL_ARB_create_context extension.
- */
-HGLRC WINAPI wglCreateContextAttribsARB( HDC hdc, HGLRC share, const int *attribs )
-{
-    HGLRC ret = 0;
-    struct wgl_context *drv_ctx;
-    struct wgl_handle *share_ptr = NULL;
-    struct opengl_context *context;
-    struct opengl_funcs *funcs = get_dc_funcs( hdc );
-
-    if (!funcs)
-    {
-        SetLastError( ERROR_DC_NOT_FOUND );
-        return 0;
-    }
-    if (!funcs->ext.p_wglCreateContextAttribsARB) return 0;
-    if (share && !(share_ptr = get_handle_ptr( share, HANDLE_CONTEXT )))
-    {
-        SetLastError( ERROR_INVALID_OPERATION );
-        return 0;
-    }
-    if ((drv_ctx = funcs->ext.p_wglCreateContextAttribsARB( hdc,
-                                              share_ptr ? share_ptr->u.context->drv_ctx : NULL, attribs )))
-    {
-        if ((context = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*context) )))
-        {
-            enum wgl_handle_type type = HANDLE_CONTEXT;
-
-            if (attribs)
-            {
-                while (*attribs)
-                {
-                    if (attribs[0] == WGL_CONTEXT_MAJOR_VERSION_ARB)
-                    {
-                        if (attribs[1] >= 3)
-                            type = HANDLE_CONTEXT_V3;
-                        break;
-                    }
-                    attribs += 2;
-                }
-            }
-
-            context->drv_ctx = drv_ctx;
-            if (!(ret = alloc_handle( type, funcs, context )))
-                HeapFree( GetProcessHeap(), 0, context );
-        }
-        if (!ret) funcs->wgl.p_wglDeleteContext( drv_ctx );
-    }
-    release_handle_ptr( share_ptr );
-    return ret;
-
-}
-
-/***********************************************************************
- *		wglMakeContextCurrentARB
- *
- * Provided by the WGL_ARB_make_current_read extension.
- */
-BOOL WINAPI wglMakeContextCurrentARB( HDC draw_hdc, HDC read_hdc, HGLRC hglrc )
-{
-    BOOL ret = TRUE;
-    struct wgl_handle *ptr, *prev = get_current_context_ptr();
-
-    if (hglrc)
-    {
-        if (!(ptr = get_handle_ptr( hglrc, HANDLE_CONTEXT ))) return FALSE;
-        if (!ptr->u.context->tid || ptr->u.context->tid == GetCurrentThreadId())
-        {
-            ret = (ptr->funcs->ext.p_wglMakeContextCurrentARB &&
-                   ptr->funcs->ext.p_wglMakeContextCurrentARB( draw_hdc, read_hdc,
-                                                               ptr->u.context->drv_ctx ));
-            if (ret)
-            {
-                if (prev) prev->u.context->tid = 0;
-                ptr->u.context->tid = GetCurrentThreadId();
-                ptr->u.context->draw_dc = draw_hdc;
-                ptr->u.context->read_dc = read_hdc;
-                NtCurrentTeb()->glCurrentRC = hglrc;
-                NtCurrentTeb()->glTable = ptr->funcs;
-            }
-        }
-        else
-        {
-            SetLastError( ERROR_BUSY );
-            ret = FALSE;
-        }
-        release_handle_ptr( ptr );
-    }
-    else if (prev)
-    {
-        if (!prev->funcs->wgl.p_wglMakeCurrent( 0, NULL )) return FALSE;
-        prev->u.context->tid = 0;
-        NtCurrentTeb()->glCurrentRC = 0;
-        NtCurrentTeb()->glTable = &null_opengl_funcs;
-    }
-    return ret;
-}
+#endif
 
 /***********************************************************************
  *		wglGetCurrentReadDCARB
@@ -377,29 +88,8 @@ BOOL WINAPI wglMakeContextCurrentARB( HDC draw_hdc, HDC read_hdc, HGLRC hglrc )
  */
 HDC WINAPI wglGetCurrentReadDCARB(void)
 {
-    struct wgl_handle *ptr = get_current_context_ptr();
-
-    if (!ptr) return 0;
-    return ptr->u.context->read_dc;
-}
-
-/***********************************************************************
- *		wglShareLists (OPENGL32.@)
- */
-BOOL WINAPI wglShareLists(HGLRC hglrcSrc, HGLRC hglrcDst)
-{
-    BOOL ret = FALSE;
-    struct wgl_handle *src, *dst;
-
-    if (!(src = get_handle_ptr( hglrcSrc, HANDLE_CONTEXT ))) return FALSE;
-    if ((dst = get_handle_ptr( hglrcDst, HANDLE_CONTEXT )))
-    {
-        if (src->funcs != dst->funcs) SetLastError( ERROR_INVALID_HANDLE );
-        else ret = src->funcs->wgl.p_wglShareLists( src->u.context->drv_ctx, dst->u.context->drv_ctx );
-    }
-    release_handle_ptr( dst );
-    release_handle_ptr( src );
-    return ret;
+    if (!NtCurrentTeb()->glCurrentRC) return 0;
+    return NtCurrentTeb()->glReserved1[1];
 }
 
 /***********************************************************************
@@ -407,40 +97,8 @@ BOOL WINAPI wglShareLists(HGLRC hglrcSrc, HGLRC hglrcDst)
  */
 HDC WINAPI wglGetCurrentDC(void)
 {
-    struct wgl_handle *ptr = get_current_context_ptr();
-
-    if (!ptr) return 0;
-    return ptr->u.context->draw_dc;
-}
-
-/***********************************************************************
- *		wgl_create_context wrapper for hooking
- */
-static HGLRC wgl_create_context(HDC hdc)
-{
-    HGLRC ret = 0;
-    struct wgl_context *drv_ctx;
-    struct opengl_context *context;
-    struct opengl_funcs *funcs = get_dc_funcs( hdc );
-
-    if (!funcs) return 0;
-    if (!(drv_ctx = funcs->wgl.p_wglCreateContext( hdc ))) return 0;
-    if ((context = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*context) )))
-    {
-        context->drv_ctx = drv_ctx;
-        if (!(ret = alloc_handle( HANDLE_CONTEXT, funcs, context )))
-            HeapFree( GetProcessHeap(), 0, context );
-    }
-    if (!ret) funcs->wgl.p_wglDeleteContext( drv_ctx );
-    return ret;
-}
-
-/***********************************************************************
- *		wglCreateContext (OPENGL32.@)
- */
-HGLRC WINAPI wglCreateContext(HDC hdc)
-{
-    return wgl_create_context(hdc);
+    if (!NtCurrentTeb()->glCurrentRC) return 0;
+    return NtCurrentTeb()->glReserved1[0];
 }
 
 /***********************************************************************
@@ -452,16 +110,6 @@ HGLRC WINAPI wglGetCurrentContext(void)
 }
 
 /***********************************************************************
- *		wglDescribePixelFormat (OPENGL32.@)
- */
-INT WINAPI wglDescribePixelFormat(HDC hdc, INT format, UINT size, PIXELFORMATDESCRIPTOR *descr )
-{
-    struct opengl_funcs *funcs = get_dc_funcs( hdc );
-    if (!funcs) return 0;
-    return funcs->wgl.p_wglDescribePixelFormat( hdc, format, size, descr );
-}
-
-/***********************************************************************
  *		wglChoosePixelFormat (OPENGL32.@)
  */
 INT WINAPI wglChoosePixelFormat(HDC hdc, const PIXELFORMATDESCRIPTOR* ppfd)
@@ -470,11 +118,11 @@ INT WINAPI wglChoosePixelFormat(HDC hdc, const PIXELFORMATDESCRIPTOR* ppfd)
     int i, count, best_format;
     int bestDBuffer = -1, bestStereo = -1;
 
-    TRACE_(wgl)( "%p %p: size %u version %u flags %u type %u color %u %u,%u,%u,%u "
-                 "accum %u depth %u stencil %u aux %u\n",
-                 hdc, ppfd, ppfd->nSize, ppfd->nVersion, ppfd->dwFlags, ppfd->iPixelType,
-                 ppfd->cColorBits, ppfd->cRedBits, ppfd->cGreenBits, ppfd->cBlueBits, ppfd->cAlphaBits,
-                 ppfd->cAccumBits, ppfd->cDepthBits, ppfd->cStencilBits, ppfd->cAuxBuffers );
+    TRACE( "%p %p: size %u version %u flags %lu type %u color %u %u,%u,%u,%u "
+           "accum %u depth %u stencil %u aux %u\n",
+           hdc, ppfd, ppfd->nSize, ppfd->nVersion, ppfd->dwFlags, ppfd->iPixelType,
+           ppfd->cColorBits, ppfd->cRedBits, ppfd->cGreenBits, ppfd->cBlueBits, ppfd->cAlphaBits,
+           ppfd->cAccumBits, ppfd->cDepthBits, ppfd->cStencilBits, ppfd->cAuxBuffers );
 
     count = wglDescribePixelFormat( hdc, 0, 0, NULL );
     if (!count) return 0;
@@ -579,18 +227,6 @@ INT WINAPI wglChoosePixelFormat(HDC hdc, const PIXELFORMATDESCRIPTOR* ppfd)
                 continue;
             }
         }
-        if (ppfd->cDepthBits && !(ppfd->dwFlags & PFD_DEPTH_DONTCARE))
-        {
-            if (((ppfd->cDepthBits > best.cDepthBits) && (format.cDepthBits > best.cDepthBits)) ||
-                ((format.cDepthBits >= ppfd->cDepthBits) && (format.cDepthBits < best.cDepthBits)))
-                goto found;
-
-            if (best.cDepthBits != format.cDepthBits)
-            {
-                TRACE( "depth mismatch for iPixelFormat=%d\n", i );
-                continue;
-            }
-        }
         if (ppfd->cStencilBits)
         {
             if (((ppfd->cStencilBits > best.cStencilBits) && (format.cStencilBits > best.cStencilBits)) ||
@@ -600,6 +236,18 @@ INT WINAPI wglChoosePixelFormat(HDC hdc, const PIXELFORMATDESCRIPTOR* ppfd)
             if (best.cStencilBits != format.cStencilBits)
             {
                 TRACE( "stencil mismatch for iPixelFormat=%d\n", i );
+                continue;
+            }
+        }
+        if (ppfd->cDepthBits && !(ppfd->dwFlags & PFD_DEPTH_DONTCARE))
+        {
+            if (((ppfd->cDepthBits > best.cDepthBits) && (format.cDepthBits > best.cDepthBits)) ||
+                ((format.cDepthBits >= ppfd->cDepthBits) && (format.cDepthBits < best.cDepthBits)))
+                goto found;
+
+            if (best.cDepthBits != format.cDepthBits)
+            {
+                TRACE( "depth mismatch for iPixelFormat=%d\n", i );
                 continue;
             }
         }
@@ -636,23 +284,18 @@ INT WINAPI wglChoosePixelFormat(HDC hdc, const PIXELFORMATDESCRIPTOR* ppfd)
  */
 INT WINAPI wglGetPixelFormat(HDC hdc)
 {
-    struct opengl_funcs *funcs = get_dc_funcs( hdc );
-    if (!funcs)
-    {
-        SetLastError( ERROR_INVALID_PIXEL_FORMAT );
-        return 0;
-    }
-    return funcs->wgl.p_wglGetPixelFormat( hdc );
-}
+    struct wglGetPixelFormat_params args = { .teb = NtCurrentTeb(), .hdc = hdc };
+    NTSTATUS status;
 
-/***********************************************************************
- *		 wglSetPixelFormat(OPENGL32.@)
- */
-BOOL WINAPI wglSetPixelFormat( HDC hdc, INT format, const PIXELFORMATDESCRIPTOR *descr )
-{
-    struct opengl_funcs *funcs = get_dc_funcs( hdc );
-    if (!funcs) return FALSE;
-    return funcs->wgl.p_wglSetPixelFormat( hdc, format, descr );
+    TRACE( "hdc %p\n", hdc );
+
+    if ((status = UNIX_CALL( wglGetPixelFormat, &args )))
+    {
+        WARN( "wglGetPixelFormat returned %#lx\n", status );
+        SetLastError( ERROR_INVALID_PIXEL_FORMAT );
+    }
+
+    return args.ret;
 }
 
 /***********************************************************************
@@ -660,12 +303,11 @@ BOOL WINAPI wglSetPixelFormat( HDC hdc, INT format, const PIXELFORMATDESCRIPTOR 
  */
 BOOL WINAPI DECLSPEC_HOTPATCH wglSwapBuffers( HDC hdc )
 {
-    const struct opengl_funcs *funcs = get_dc_funcs( hdc );
+    struct wglSwapBuffers_params args = { .teb = NtCurrentTeb(), .hdc = hdc };
+    NTSTATUS status;
 
-    if (!funcs || !funcs->wgl.p_wglSwapBuffers) return FALSE;
-    if (!funcs->wgl.p_wglSwapBuffers( hdc )) return FALSE;
-
-    if (TRACE_ON(fps))
+    if ((status = UNIX_CALL( wglSwapBuffers, &args ))) WARN( "wglSwapBuffers returned %#lx\n", status );
+    else if (TRACE_ON(fps))
     {
         static long prev_time, start_time;
         static unsigned long frames, frames_total;
@@ -683,22 +325,21 @@ BOOL WINAPI DECLSPEC_HOTPATCH wglSwapBuffers( HDC hdc )
             if (start_time == 0) start_time = time;
         }
     }
-    return TRUE;
+
+    return args.ret;
 }
 
 /***********************************************************************
  *		wglCreateLayerContext (OPENGL32.@)
  */
-HGLRC WINAPI wglCreateLayerContext(HDC hdc,
-				   int iLayerPlane) {
-  TRACE("(%p,%d)\n", hdc, iLayerPlane);
+HGLRC WINAPI wglCreateLayerContext( HDC hdc, int iLayerPlane )
+{
+    TRACE("(%p,%d)\n", hdc, iLayerPlane);
 
-  if (iLayerPlane == 0) {
-      return wgl_create_context(hdc);
-  }
-  FIXME("no handler for layer %d\n", iLayerPlane);
+    if (iLayerPlane == 0) return wglCreateContext( hdc );
 
-  return NULL;
+    FIXME("no handler for layer %d\n", iLayerPlane);
+    return NULL;
 }
 
 /***********************************************************************
@@ -727,221 +368,23 @@ int WINAPI wglGetLayerPaletteEntries(HDC hdc,
   return 0;
 }
 
-static BOOL filter_extensions(const char *HOSTPTR extensions, GLubyte **exts_list, GLuint **disabled_exts);
-
-void WINAPI glGetIntegerv(GLenum pname, GLint *data)
-{
-    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-
-    TRACE("(%d, %p)\n", pname, data);
-    if (pname == GL_NUM_EXTENSIONS)
-    {
-        struct wgl_handle *ptr = get_current_context_ptr();
-
-        if (ptr->u.context->disabled_exts ||
-            filter_extensions(NULL, NULL, &ptr->u.context->disabled_exts))
-        {
-            const GLuint *disabled_exts = ptr->u.context->disabled_exts;
-            GLint count, disabled_count = 0;
-
-            funcs->gl.p_glGetIntegerv(pname, &count);
-            while (*disabled_exts++ != ~0u)
-                disabled_count++;
-            *data = count - disabled_count;
-            return;
-        }
-    }
-    funcs->gl.p_glGetIntegerv(pname, data);
-}
-
-const GLubyte * WINAPI glGetStringi(GLenum name, GLuint index)
-{
-    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-
-    TRACE("(%d, %d)\n", name, index);
-    if (!funcs->ext.p_glGetStringi)
-    {
-        void * HOSTPTR *func_ptr = (void *HOSTPTR *)&funcs->ext.p_glGetStringi;
-
-        *func_ptr = funcs->wgl.p_wglGetProcAddress("glGetStringi");
-    }
-
-    if (name == GL_EXTENSIONS)
-    {
-        struct wgl_handle *ptr = get_current_context_ptr();
-
-        if (ptr->u.context->disabled_exts ||
-            filter_extensions(NULL, NULL, &ptr->u.context->disabled_exts))
-        {
-            const GLuint *disabled_exts = ptr->u.context->disabled_exts;
-            unsigned int disabled_count = 0;
-
-            while (index + disabled_count >= *disabled_exts++)
-                disabled_count++;
-            return wine_static_ustring_add(&gl_strings, funcs->ext.p_glGetStringi(name, index + disabled_count));
-        }
-    }
-    return wine_static_ustring_add(&gl_strings, funcs->ext.p_glGetStringi(name, index));
-}
-
-/* check if the extension is present in the list */
-static BOOL has_extension( const char *list, const char *ext, size_t len )
-{
-    if (!list)
-    {
-        const char *gl_ext;
-        unsigned int i;
-        GLint extensions_count;
-
-        glGetIntegerv(GL_NUM_EXTENSIONS, &extensions_count);
-        for (i = 0; i < extensions_count; ++i)
-        {
-            gl_ext = (const char *)glGetStringi(GL_EXTENSIONS, i);
-            if (!strncmp(gl_ext, ext, len) && !gl_ext[len])
-                return TRUE;
-        }
-        return FALSE;
-    }
-
-    while (list)
-    {
-        while (*list == ' ') list++;
-        if (!strncmp( list, ext, len ) && (!list[len] || list[len] == ' ')) return TRUE;
-        list = strchr( list, ' ' );
-    }
-    return FALSE;
-}
-
-static int compar(const void * HOSTPTR elt_a, const void * HOSTPTR elt_b) {
-  return strcmp(((const OpenGL_extension * HOSTPTR) elt_a)->name,
-		((const OpenGL_extension * HOSTPTR) elt_b)->name);
-}
-
-/* Check if a GL extension is supported */
-static BOOL is_extension_supported(const char* extension)
-{
-    enum wgl_handle_type type = get_current_context_type();
-    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-    const char *gl_ext_string = NULL;
-    size_t len;
-
-    TRACE("Checking for extension '%s'\n", extension);
-
-    if (type == HANDLE_CONTEXT)
-    {
-        gl_ext_string = (const char*)glGetString(GL_EXTENSIONS);
-        if (!gl_ext_string)
-        {
-            ERR("No OpenGL extensions found, check if your OpenGL setup is correct!\n");
-            return FALSE;
-        }
-    }
-
-    /* We use the GetProcAddress function from the display driver to retrieve function pointers
-     * for OpenGL and WGL extensions. In case of winex11.drv the OpenGL extension lookup is done
-     * using glXGetProcAddress. This function is quite unreliable in the sense that its specs don't
-     * require the function to return NULL when an extension isn't found. For this reason we check
-     * if the OpenGL extension required for the function we are looking up is supported. */
-
-    while ((len = strcspn(extension, " ")) != 0)
-    {
-        /* Check if the extension is part of the GL extension string to see if it is supported. */
-        if (has_extension(gl_ext_string, extension, len))
-            return TRUE;
-
-        /* In general an OpenGL function starts as an ARB/EXT extension and at some stage
-         * it becomes part of the core OpenGL library and can be reached without the ARB/EXT
-         * suffix as well. In the extension table, these functions contain GL_VERSION_major_minor.
-         * Check if we are searching for a core GL function */
-        if(strncmp(extension, "GL_VERSION_", 11) == 0)
-        {
-            const GLubyte *HOSTPTR gl_version = funcs->gl.p_glGetString(GL_VERSION);
-            const char *version = extension + 11; /* Move past 'GL_VERSION_' */
-
-            if(!gl_version) {
-                ERR("No OpenGL version found!\n");
-                return FALSE;
-            }
-
-            /* Compare the major/minor version numbers of the native OpenGL library and what is required by the function.
-             * The gl_version string is guaranteed to have at least a major/minor and sometimes it has a release number as well. */
-            if( (gl_version[0] > version[0]) || ((gl_version[0] == version[0]) && (gl_version[2] >= version[2])) ) {
-                return TRUE;
-            }
-            WARN("The function requires OpenGL version '%c.%c' while your drivers only provide '%c.%c'\n", version[0], version[2], gl_version[0], gl_version[2]);
-        }
-
-        if (extension[len] == ' ') len++;
-        extension += len;
-    }
-
-    return FALSE;
-}
-
 /***********************************************************************
  *		wglGetProcAddress (OPENGL32.@)
  */
 PROC WINAPI wglGetProcAddress( LPCSTR name )
 {
-    struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-    void *HOSTPTR *func_ptr;
-    OpenGL_extension  ext;
-    const OpenGL_extension *ext_ret;
+    struct wglGetProcAddress_params args = { .teb = NtCurrentTeb(), .lpszProc = name };
+    const void *proc;
+    NTSTATUS status;
 
     if (!name) return NULL;
+    if ((status = UNIX_CALL( wglGetProcAddress, &args )))
+        WARN( "wglGetProcAddress %s returned %#lx\n", debugstr_a(name), status );
+    if (args.ret == (void *)-1) return NULL;
 
-    /* Without an active context opengl32 doesn't know to what
-     * driver it has to dispatch wglGetProcAddress.
-     */
-    if (!get_current_context_ptr())
-    {
-        WARN("No active WGL context found\n");
-        return NULL;
-    }
-
-    ext.name = name;
-    ext_ret = ADDRSPACECAST(void *, bsearch(&ext, extension_registry, extension_registry_size, sizeof(ext), compar));
-    if (!ext_ret)
-    {
-        WARN("Function %s unknown\n", name);
-        return NULL;
-    }
-
-    func_ptr = (void *HOSTPTR *)&funcs->ext + (ext_ret - extension_registry);
-    if (!*func_ptr)
-    {
-        void *HOSTPTR driver_func = funcs->wgl.p_wglGetProcAddress( name );
-
-        if (!is_extension_supported(ext_ret->extension))
-        {
-            unsigned int i;
-            static const struct { const char *name, *alt; } alternatives[] =
-            {
-                { "glCopyTexSubImage3DEXT", "glCopyTexSubImage3D" },     /* needed by RuneScape */
-                { "glVertexAttribDivisor", "glVertexAttribDivisorARB"},  /* needed by Caffeine */
-            };
-
-            for (i = 0; i < ARRAY_SIZE(alternatives); i++)
-            {
-                if (strcmp( name, alternatives[i].name )) continue;
-                WARN("Extension %s required for %s not supported, trying %s\n",
-                    ext_ret->extension, name, alternatives[i].alt );
-                return wglGetProcAddress( alternatives[i].alt );
-            }
-            WARN("Extension %s required for %s not supported\n", ext_ret->extension, name);
-            return NULL;
-        }
-
-        if (driver_func == NULL)
-        {
-            WARN("Function %s not supported by driver\n", name);
-            return NULL;
-        }
-        *func_ptr = driver_func;
-    }
-
-    TRACE("returning %s -> %p\n", name, ext_ret->func);
-    return ext_ret->func;
+    proc = extension_procs[(UINT_PTR)args.ret];
+    TRACE( "returning %s -> %p\n", name, proc );
+    return proc;
 }
 
 /***********************************************************************
@@ -997,148 +440,18 @@ BOOL WINAPI wglSwapLayerBuffers(HDC hdc,
 }
 
 /***********************************************************************
- *		wglBindTexImageARB
- *
- * Provided by the WGL_ARB_render_texture extension.
- */
-BOOL WINAPI wglBindTexImageARB( HPBUFFERARB handle, int buffer )
-{
-    struct wgl_handle *ptr = get_handle_ptr( handle, HANDLE_PBUFFER );
-    BOOL ret;
-
-    if (!ptr) return FALSE;
-    ret = ptr->funcs->ext.p_wglBindTexImageARB( ptr->u.pbuffer, buffer );
-    release_handle_ptr( ptr );
-    return ret;
-}
-
-/***********************************************************************
- *		wglReleaseTexImageARB
- *
- * Provided by the WGL_ARB_render_texture extension.
- */
-BOOL WINAPI wglReleaseTexImageARB( HPBUFFERARB handle, int buffer )
-{
-    struct wgl_handle *ptr = get_handle_ptr( handle, HANDLE_PBUFFER );
-    BOOL ret;
-
-    if (!ptr) return FALSE;
-    ret = ptr->funcs->ext.p_wglReleaseTexImageARB( ptr->u.pbuffer, buffer );
-    release_handle_ptr( ptr );
-    return ret;
-}
-
-/***********************************************************************
- *		wglSetPbufferAttribARB
- *
- * Provided by the WGL_ARB_render_texture extension.
- */
-BOOL WINAPI wglSetPbufferAttribARB( HPBUFFERARB handle, const int *attribs )
-{
-    struct wgl_handle *ptr = get_handle_ptr( handle, HANDLE_PBUFFER );
-    BOOL ret;
-
-    if (!ptr) return FALSE;
-    ret = ptr->funcs->ext.p_wglSetPbufferAttribARB( ptr->u.pbuffer, attribs );
-    release_handle_ptr( ptr );
-    return ret;
-}
-
-/***********************************************************************
- *		wglCreatePbufferARB
- *
- * Provided by the WGL_ARB_pbuffer extension.
- */
-HPBUFFERARB WINAPI wglCreatePbufferARB( HDC hdc, int format, int width, int height, const int *attribs )
-{
-    HPBUFFERARB ret;
-    struct wgl_pbuffer *pbuffer;
-    struct opengl_funcs *funcs = get_dc_funcs( hdc );
-
-    if (!funcs || !funcs->ext.p_wglCreatePbufferARB) return 0;
-    if (!(pbuffer = funcs->ext.p_wglCreatePbufferARB( hdc, format, width, height, attribs ))) return 0;
-    ret = alloc_handle( HANDLE_PBUFFER, funcs, pbuffer );
-    if (!ret) funcs->ext.p_wglDestroyPbufferARB( pbuffer );
-    return ret;
-}
-
-/***********************************************************************
- *		wglGetPbufferDCARB
- *
- * Provided by the WGL_ARB_pbuffer extension.
- */
-HDC WINAPI wglGetPbufferDCARB( HPBUFFERARB handle )
-{
-    struct wgl_handle *ptr = get_handle_ptr( handle, HANDLE_PBUFFER );
-    HDC ret;
-
-    if (!ptr) return 0;
-    ret = ptr->funcs->ext.p_wglGetPbufferDCARB( ptr->u.pbuffer );
-    release_handle_ptr( ptr );
-    return ret;
-}
-
-/***********************************************************************
- *		wglReleasePbufferDCARB
- *
- * Provided by the WGL_ARB_pbuffer extension.
- */
-int WINAPI wglReleasePbufferDCARB( HPBUFFERARB handle, HDC hdc )
-{
-    struct wgl_handle *ptr = get_handle_ptr( handle, HANDLE_PBUFFER );
-    BOOL ret;
-
-    if (!ptr) return FALSE;
-    ret = ptr->funcs->ext.p_wglReleasePbufferDCARB( ptr->u.pbuffer, hdc );
-    release_handle_ptr( ptr );
-    return ret;
-}
-
-/***********************************************************************
- *		wglDestroyPbufferARB
- *
- * Provided by the WGL_ARB_pbuffer extension.
- */
-BOOL WINAPI wglDestroyPbufferARB( HPBUFFERARB handle )
-{
-    struct wgl_handle *ptr = get_handle_ptr( handle, HANDLE_PBUFFER );
-
-    if (!ptr) return FALSE;
-    ptr->funcs->ext.p_wglDestroyPbufferARB( ptr->u.pbuffer );
-    free_handle_ptr( ptr );
-    return TRUE;
-}
-
-/***********************************************************************
- *		wglQueryPbufferARB
- *
- * Provided by the WGL_ARB_pbuffer extension.
- */
-BOOL WINAPI wglQueryPbufferARB( HPBUFFERARB handle, int attrib, int *value )
-{
-    struct wgl_handle *ptr = get_handle_ptr( handle, HANDLE_PBUFFER );
-    BOOL ret;
-
-    if (!ptr) return FALSE;
-    ret = ptr->funcs->ext.p_wglQueryPbufferARB( ptr->u.pbuffer, attrib, value );
-    release_handle_ptr( ptr );
-    return ret;
-}
-
-/***********************************************************************
  *		wglUseFontBitmaps_common
  */
 static BOOL wglUseFontBitmaps_common( HDC hdc, DWORD first, DWORD count, DWORD listBase, BOOL unicode )
 {
-    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
      GLYPHMETRICS gm;
      unsigned int glyph, size = 0;
      void *bitmap = NULL, *gl_bitmap = NULL;
      int org_alignment;
      BOOL ret = TRUE;
 
-     funcs->gl.p_glGetIntegerv(GL_UNPACK_ALIGNMENT, &org_alignment);
-     funcs->gl.p_glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+     glGetIntegerv( GL_UNPACK_ALIGNMENT, &org_alignment );
+     glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
 
      for (glyph = first; glyph < first + count; glyph++) {
          unsigned int needed_size, height, width, width_int;
@@ -1148,7 +461,7 @@ static BOOL wglUseFontBitmaps_common( HDC hdc, DWORD first, DWORD count, DWORD l
          else
              needed_size = GetGlyphOutlineA(hdc, glyph, GGO_BITMAP, &gm, 0, NULL, &identity);
 
-         TRACE("Glyph: %3d / List: %d size %d\n", glyph, listBase, needed_size);
+         TRACE("Glyph: %3d / List: %ld size %d\n", glyph, listBase, needed_size);
          if (needed_size == GDI_ERROR) {
              ret = FALSE;
              break;
@@ -1156,10 +469,10 @@ static BOOL wglUseFontBitmaps_common( HDC hdc, DWORD first, DWORD count, DWORD l
 
          if (needed_size > size) {
              size = needed_size;
-             HeapFree(GetProcessHeap(), 0, bitmap);
-             HeapFree(GetProcessHeap(), 0, gl_bitmap);
-             bitmap = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-             gl_bitmap = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+             free( bitmap );
+             free( gl_bitmap );
+             bitmap = calloc( 1, size );
+             gl_bitmap = calloc( 1, size );
          }
          if (needed_size != 0) {
              if (unicode)
@@ -1171,12 +484,13 @@ static BOOL wglUseFontBitmaps_common( HDC hdc, DWORD first, DWORD count, DWORD l
              if (!ret) break;
          }
 
-         if (TRACE_ON(wgl)) {
+         if (TRACE_ON(opengl))
+         {
              unsigned int bitmask;
              unsigned char *bitmap_ = bitmap;
 
              TRACE("  - bbox: %d x %d\n", gm.gmBlackBoxX, gm.gmBlackBoxY);
-             TRACE("  - origin: (%d, %d)\n", gm.gmptGlyphOrigin.x, gm.gmptGlyphOrigin.y);
+             TRACE("  - origin: (%ld, %ld)\n", gm.gmptGlyphOrigin.x, gm.gmptGlyphOrigin.y);
              TRACE("  - increment: %d - %d\n", gm.gmCellIncX, gm.gmCellIncY);
              if (needed_size != 0) {
                  TRACE("  - bitmap:\n");
@@ -1211,22 +525,20 @@ static BOOL wglUseFontBitmaps_common( HDC hdc, DWORD first, DWORD count, DWORD l
              }
          }
 
-         funcs->gl.p_glNewList(listBase++, GL_COMPILE);
+         glNewList( listBase++, GL_COMPILE );
          if (needed_size != 0) {
-             funcs->gl.p_glBitmap(gm.gmBlackBoxX, gm.gmBlackBoxY,
-                     0 - gm.gmptGlyphOrigin.x, (int) gm.gmBlackBoxY - gm.gmptGlyphOrigin.y,
-                     gm.gmCellIncX, gm.gmCellIncY,
-                     gl_bitmap);
+             glBitmap( gm.gmBlackBoxX, gm.gmBlackBoxY, 0 - gm.gmptGlyphOrigin.x,
+                       (int)gm.gmBlackBoxY - gm.gmptGlyphOrigin.y, gm.gmCellIncX, gm.gmCellIncY, gl_bitmap );
          } else {
              /* This is the case of 'empty' glyphs like the space character */
-             funcs->gl.p_glBitmap(0, 0, 0, 0, gm.gmCellIncX, gm.gmCellIncY, NULL);
+             glBitmap( 0, 0, 0, 0, gm.gmCellIncX, gm.gmCellIncY, NULL );
          }
-         funcs->gl.p_glEndList();
+         glEndList();
      }
 
-     funcs->gl.p_glPixelStorei(GL_UNPACK_ALIGNMENT, org_alignment);
-     HeapFree(GetProcessHeap(), 0, bitmap);
-     HeapFree(GetProcessHeap(), 0, gl_bitmap);
+     glPixelStorei( GL_UNPACK_ALIGNMENT, org_alignment );
+     free( bitmap );
+     free( gl_bitmap );
      return ret;
 }
 
@@ -1251,28 +563,6 @@ static void fixed_to_double(POINTFX fixed, UINT em_size, GLdouble vertex[3])
     vertex[0] = (fixed.x.value + (GLdouble)fixed.x.fract / (1 << 16)) / em_size;
     vertex[1] = (fixed.y.value + (GLdouble)fixed.y.fract / (1 << 16)) / em_size;
     vertex[2] = 0.0;
-}
-
-static void WINAPI tess_callback_vertex(GLvoid *vertex)
-{
-    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-    GLdouble *dbl = vertex;
-    TRACE("%f, %f, %f\n", dbl[0], dbl[1], dbl[2]);
-    funcs->gl.p_glVertex3dv(vertex);
-}
-
-static void WINAPI tess_callback_begin(GLenum which)
-{
-    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-    TRACE("%d\n", which);
-    funcs->gl.p_glBegin(which);
-}
-
-static void WINAPI tess_callback_end(void)
-{
-    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-    TRACE("\n");
-    funcs->gl.p_glEnd();
 }
 
 typedef struct _bezier_vector {
@@ -1356,7 +646,6 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
                                       LPGLYPHMETRICSFLOAT lpgmf,
                                       BOOL unicode)
 {
-    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
     UINT glyph;
     GLUtesselator *tess = NULL;
     LOGFONTW lf;
@@ -1364,7 +653,7 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
     UINT em_size = 1024;
     RECT rc;
 
-    TRACE("(%p, %d, %d, %d, %f, %f, %d, %p, %s)\n", hdc, first, count,
+    TRACE("(%p, %ld, %ld, %ld, %f, %f, %d, %p, %s)\n", hdc, first, count,
           listBase, deviation, extrusion, format, lpgmf, unicode ? "W" : "A");
 
     if(deviation <= 0.0)
@@ -1378,9 +667,9 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
             ERR("glu32 is required for this function but isn't available\n");
             return FALSE;
         }
-        gluTessCallback(tess, GLU_TESS_VERTEX, (void *)tess_callback_vertex);
-        gluTessCallback(tess, GLU_TESS_BEGIN, (void *)tess_callback_begin);
-        gluTessCallback(tess, GLU_TESS_END, tess_callback_end);
+        gluTessCallback( tess, GLU_TESS_VERTEX, (void *)glVertex3dv );
+        gluTessCallback( tess, GLU_TESS_BEGIN, (void *)glBegin );
+        gluTessCallback( tess, GLU_TESS_END, glEnd );
     }
 
     GetObjectW(GetCurrentObject(hdc, OBJ_FONT), sizeof(lf), &lf);
@@ -1410,7 +699,7 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
         if(needed == GDI_ERROR)
             goto error;
 
-        buf = HeapAlloc(GetProcessHeap(), 0, needed);
+        buf = malloc( needed );
 
         if(unicode)
             GetGlyphOutlineW(hdc, glyph, GGO_NATIVE, &gm, needed, buf, &identity);
@@ -1433,19 +722,18 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
             lpgmf++;
         }
 
-        funcs->gl.p_glNewList(listBase++, GL_COMPILE);
-        funcs->gl.p_glFrontFace(GL_CCW);
+        glNewList( listBase++, GL_COMPILE );
+        glFrontFace( GL_CCW );
         if(format == WGL_FONT_POLYGONS)
         {
-            funcs->gl.p_glNormal3d(0.0, 0.0, 1.0);
+            glNormal3d( 0.0, 0.0, 1.0 );
             gluTessNormal(tess, 0, 0, 1);
             gluTessBeginPolygon(tess, NULL);
         }
 
         while(!vertices)
         {
-            if(vertex_total != -1)
-                vertices = HeapAlloc(GetProcessHeap(), 0, vertex_total * 3 * sizeof(GLdouble));
+            if (vertex_total != -1) vertices = malloc( vertex_total * 3 * sizeof(GLdouble) );
             vertex_total = 0;
 
             pph = (TTPOLYGONHEADER*)buf;
@@ -1457,18 +745,14 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
                 if(vertices)
                     TRACE("\tstart %d, %d\n", pph->pfxStart.x.value, pph->pfxStart.y.value);
 
-                if(format == WGL_FONT_POLYGONS)
-                    gluTessBeginContour(tess);
-                else
-                    funcs->gl.p_glBegin(GL_LINE_LOOP);
+                if (format == WGL_FONT_POLYGONS) gluTessBeginContour( tess );
+                else glBegin( GL_LINE_LOOP );
 
                 if(vertices)
                 {
                     fixed_to_double(pph->pfxStart, em_size, vertices);
-                    if(format == WGL_FONT_POLYGONS)
-                        gluTessVertex(tess, vertices, vertices);
-                    else
-                        funcs->gl.p_glVertex3d(vertices[0], vertices[1], vertices[2]);
+                    if (format == WGL_FONT_POLYGONS) gluTessVertex( tess, vertices, vertices );
+                    else glVertex3d( vertices[0], vertices[1], vertices[2] );
                     vertices += 3;
                 }
                 vertex_total++;
@@ -1488,10 +772,8 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
                                 TRACE("\t\tline to %d, %d\n",
                                       ppc->apfx[i].x.value, ppc->apfx[i].y.value);
                                 fixed_to_double(ppc->apfx[i], em_size, vertices);
-                                if(format == WGL_FONT_POLYGONS)
-                                    gluTessVertex(tess, vertices, vertices);
-                                else
-                                    funcs->gl.p_glVertex3d(vertices[0], vertices[1], vertices[2]);
+                                if (format == WGL_FONT_POLYGONS) gluTessVertex( tess, vertices, vertices );
+                                else glVertex3d( vertices[0], vertices[1], vertices[2] );
                                 vertices += 3;
                             }
                             fixed_to_double(ppc->apfx[i], em_size, previous);
@@ -1525,7 +807,7 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
                                 curve[2].y = (curve[1].y + curve[2].y)/2;
                             }
                             num = bezier_approximate(curve, NULL, deviation);
-                            points = HeapAlloc(GetProcessHeap(), 0, num*sizeof(bezier_vector));
+                            points = malloc( num * sizeof(bezier_vector) );
                             num = bezier_approximate(curve, points, deviation);
                             vertex_total += num;
                             if(vertices)
@@ -1536,45 +818,38 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
                                     vertices[0] = points[j].x;
                                     vertices[1] = points[j].y;
                                     vertices[2] = 0.0;
-                                    if(format == WGL_FONT_POLYGONS)
-                                        gluTessVertex(tess, vertices, vertices);
-                                    else
-                                        funcs->gl.p_glVertex3d(vertices[0], vertices[1], vertices[2]);
+                                    if (format == WGL_FONT_POLYGONS) gluTessVertex( tess, vertices, vertices );
+                                    else glVertex3d( vertices[0], vertices[1], vertices[2] );
                                     vertices += 3;
                                 }
                             }
-                            HeapFree(GetProcessHeap(), 0, points);
+                            free( points );
                             previous[0] = curve[2].x;
                             previous[1] = curve[2].y;
                         }
                         break;
                     default:
                         ERR("\t\tcurve type = %d\n", ppc->wType);
-                        if(format == WGL_FONT_POLYGONS)
-                            gluTessEndContour(tess);
-                        else
-                            funcs->gl.p_glEnd();
+                        if (format == WGL_FONT_POLYGONS) gluTessEndContour( tess );
+                        else glEnd();
                         goto error_in_list;
                     }
 
                     ppc = (TTPOLYCURVE*)((char*)ppc + sizeof(*ppc) +
                                          (ppc->cpfx - 1) * sizeof(POINTFX));
                 }
-                if(format == WGL_FONT_POLYGONS)
-                    gluTessEndContour(tess);
-                else
-                    funcs->gl.p_glEnd();
+                if (format == WGL_FONT_POLYGONS) gluTessEndContour( tess );
+                else glEnd();
                 pph = (TTPOLYGONHEADER*)((char*)pph + pph->cb);
             }
         }
 
 error_in_list:
-        if(format == WGL_FONT_POLYGONS)
-            gluTessEndPolygon(tess);
-        funcs->gl.p_glTranslated((GLdouble)gm.gmCellIncX / em_size, (GLdouble)gm.gmCellIncY / em_size, 0.0);
-        funcs->gl.p_glEndList();
-        HeapFree(GetProcessHeap(), 0, buf);
-        HeapFree(GetProcessHeap(), 0, vertices);
+        if (format == WGL_FONT_POLYGONS) gluTessEndPolygon( tess );
+        glTranslated( (GLdouble)gm.gmCellIncX / em_size, (GLdouble)gm.gmCellIncY / em_size, 0.0 );
+        glEndList();
+        free( buf );
+        free( vertices );
     }
 
  error:
@@ -1623,170 +898,30 @@ GLint WINAPI glDebugEntry( GLint unknown1, GLint unknown2 )
     return 0;
 }
 
-static GLubyte *filter_extensions_list(const char *HOSTPTR extensions, const char *disabled)
+const GLubyte * WINAPI glGetStringi( GLenum name, GLuint index )
 {
-    char *p, *str;
-    const char *HOSTPTR end;
-
-    p = str = HeapAlloc(GetProcessHeap(), 0, strlen(extensions) + 2);
-    if (!str)
-        return NULL;
-
-    TRACE( "GL_EXTENSIONS:\n" );
-
-    for (;;)
+    struct glGetStringi_params args =
     {
-        while (*extensions == ' ')
-            extensions++;
-        if (!*extensions)
-            break;
-        if (!(end = strchr(extensions, ' ')))
-            end = extensions + strlen(extensions);
-        memcpy(p, extensions, end - extensions);
-        p[end - extensions] = 0;
-        if (!has_extension(disabled, p, strlen(p)))
-        {
-            TRACE("++ %s\n", p);
-            p += end - extensions;
-            *p++ = ' ';
-        }
-        else
-        {
-            TRACE("-- %s (disabled by config)\n", p);
-        }
-        extensions = end;
-    }
-    *p = 0;
-    return (GLubyte *)str;
-}
+        .teb = NtCurrentTeb(),
+        .name = name,
+        .index = index,
+    };
+    NTSTATUS status;
+#ifndef _WIN64
+    GLubyte *wow64_str = NULL;
+#endif
 
-static GLuint *filter_extensions_index(const char *disabled)
-{
-    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-    const char *ext, *end, *HOSTPTR gl_ext;
-    GLuint *disabled_exts, *new_disabled_exts;
-    unsigned int i = 0, j, disabled_size;
-    GLint extensions_count;
+    TRACE( "name %d, index %d\n", name, index );
 
-    if (!funcs->ext.p_glGetStringi)
-    {
-        void *HOSTPTR *func_ptr = (void *HOSTPTR *)&funcs->ext.p_glGetStringi;
-
-        *func_ptr = funcs->wgl.p_wglGetProcAddress("glGetStringi");
-        if (!funcs->ext.p_glGetStringi)
-            return NULL;
-    }
-
-    funcs->gl.p_glGetIntegerv(GL_NUM_EXTENSIONS, &extensions_count);
-    disabled_size = 2;
-    disabled_exts = HeapAlloc(GetProcessHeap(), 0, disabled_size * sizeof(*disabled_exts));
-    if (!disabled_exts)
-        return NULL;
-
-    TRACE( "GL_EXTENSIONS:\n" );
-
-    for (j = 0; j < extensions_count; ++j)
-    {
-        gl_ext = (const char *HOSTPTR)funcs->ext.p_glGetStringi(GL_EXTENSIONS, j);
-        ext = disabled;
-        for (;;)
-        {
-            while (*ext == ' ')
-                ext++;
-            if (!*ext)
-            {
-                TRACE("++ %s\n", gl_ext);
-                break;
-            }
-            if (!(end = strchr(ext, ' ')))
-                end = ext + strlen(ext);
-
-            if (!strncmp(gl_ext, ext, end - ext) && !gl_ext[end - ext])
-            {
-                if (i + 1 == disabled_size)
-                {
-                    disabled_size *= 2;
-                    new_disabled_exts = HeapReAlloc(GetProcessHeap(), 0, disabled_exts,
-                                                    disabled_size * sizeof(*disabled_exts));
-                    if (!new_disabled_exts)
-                    {
-                        disabled_exts[i] = ~0u;
-                        return disabled_exts;
-                    }
-                    disabled_exts = new_disabled_exts;
-                }
-                TRACE("-- %s (disabled by config)\n", gl_ext);
-                disabled_exts[i++] = j;
-                break;
-            }
-            ext = end;
-        }
-    }
-    disabled_exts[i] = ~0u;
-    return disabled_exts;
-}
-
-/* build the extension string by filtering out the disabled extensions */
-static BOOL filter_extensions(const char *HOSTPTR extensions, GLubyte **exts_list, GLuint **disabled_exts)
-{
-    static const char *disabled;
-
-    if (!disabled)
-    {
-        DWORD size;
-        char *str = NULL;
-        HKEY hkey = 0;
-        HKEY appkey = 0;
-        char buffer[MAX_PATH+10];
-
-        /* @@ Wine registry key: HKLM\Software\Wine\OpenGL */
-        if (RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\OpenGL", &hkey)) hkey = 0;
-        size = GetModuleFileNameA( 0, buffer, MAX_PATH );
-        if (size && size < MAX_PATH)
-        {
-            HKEY tmpkey;
-            /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe\OpenGL */
-            if (!RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\AppDefaults", &tmpkey ))
-            {
-                char *p, *appname = buffer;
-                if ((p = strrchr( appname, '/' ))) appname = p + 1;
-                if ((p = strrchr( appname, '\\' ))) appname = p + 1;
-                strcat( appname, "\\OpenGL" );
-                TRACE("appname = [%s]\n", appname);
-                if (RegOpenKeyA( tmpkey, appname, &appkey )) appkey = 0;
-                RegCloseKey( tmpkey );
-            }
-        }
-
-        if (hkey || appkey)
-        {
-            if (!get_config_key( hkey, appkey, "DisabledExtensions", NULL, &size))
-            {
-                str = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-                get_config_key( hkey, appkey, "DisabledExtensions", str, &size);
-                TRACE("found DisabledExtensions=%s\n", debugstr_a(str));
-            }
-            if (appkey) RegCloseKey( appkey );
-            if (hkey) RegCloseKey( hkey );
-        }
-        if (str)
-        {
-            if (InterlockedCompareExchangePointer( (void **)&disabled, str, NULL ))
-                HeapFree( GetProcessHeap(), 0, str );
-        }
-        else disabled = "";
-    }
-
-    if (!disabled[0])
-        return FALSE;
-
-    if (extensions && !*exts_list)
-        *exts_list = filter_extensions_list(extensions, disabled);
-
-    if (!*disabled_exts)
-        *disabled_exts = filter_extensions_index(disabled);
-
-    return (exts_list && *exts_list) || *disabled_exts;
+#ifndef _WIN64
+    if (UNIX_CALL( glGetStringi, &args ) == STATUS_BUFFER_TOO_SMALL) args.ret = wow64_str = malloc( (size_t)args.ret );
+#endif
+    if ((status = UNIX_CALL( glGetStringi, &args ))) WARN( "glGetStringi returned %#lx\n", status );
+#ifndef _WIN64
+    if (args.ret != wow64_str) free( wow64_str );
+    else if (args.ret) append_wow64_string( (char *)args.ret );
+#endif
+    return args.ret;
 }
 
 /***********************************************************************
@@ -1794,74 +929,352 @@ static BOOL filter_extensions(const char *HOSTPTR extensions, GLubyte **exts_lis
  */
 const GLubyte * WINAPI glGetString( GLenum name )
 {
-    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-    const GLubyte *HOSTPTR ret = funcs->gl.p_glGetString( name );
+    struct glGetString_params args = { .teb = NtCurrentTeb(), .name = name };
+    NTSTATUS status;
+#ifndef _WIN64
+    GLubyte *wow64_str = NULL;
+#endif
 
-    if (name == GL_EXTENSIONS && ret)
+    TRACE( "name %d\n", name );
+
+#ifndef _WIN64
+    if (UNIX_CALL( glGetString, &args ) == STATUS_BUFFER_TOO_SMALL) args.ret = wow64_str = malloc( (size_t)args.ret );
+#endif
+    if ((status = UNIX_CALL( glGetString, &args ))) WARN( "glGetString returned %#lx\n", status );
+#ifndef _WIN64
+    if (args.ret != wow64_str) free( wow64_str );
+    else if (args.ret) append_wow64_string( (char *)args.ret );
+#endif
+    return args.ret;
+}
+
+const char * WINAPI wglGetExtensionsStringARB( HDC hdc )
+{
+    struct wglGetExtensionsStringARB_params args = { .teb = NtCurrentTeb(), .hdc = hdc };
+    NTSTATUS status;
+#ifndef _WIN64
+    char *wow64_str = NULL;
+#endif
+
+    TRACE( "hdc %p\n", hdc );
+
+#ifndef _WIN64
+    if (UNIX_CALL( wglGetExtensionsStringARB, &args ) == STATUS_BUFFER_TOO_SMALL) args.ret = wow64_str = malloc( (size_t)args.ret );
+#endif
+    if ((status = UNIX_CALL( wglGetExtensionsStringARB, &args ))) WARN( "wglGetExtensionsStringARB returned %#lx\n", status );
+#ifndef _WIN64
+    if (args.ret != wow64_str) free( wow64_str );
+    else if (args.ret) append_wow64_string( wow64_str );
+#endif
+    return args.ret;
+}
+
+const char * WINAPI wglGetExtensionsStringEXT(void)
+{
+    struct wglGetExtensionsStringEXT_params args = { .teb = NtCurrentTeb() };
+    NTSTATUS status;
+#ifndef _WIN64
+    char *wow64_str = NULL;
+#endif
+
+    TRACE( "\n" );
+
+#ifndef _WIN64
+    if (UNIX_CALL( wglGetExtensionsStringEXT, &args ) == STATUS_BUFFER_TOO_SMALL) args.ret = wow64_str = malloc( (size_t)args.ret );
+#endif
+    if ((status = UNIX_CALL( wglGetExtensionsStringEXT, &args ))) WARN( "wglGetExtensionsStringEXT returned %#lx\n", status );
+#ifndef _WIN64
+    if (args.ret != wow64_str) free( wow64_str );
+    else if (args.ret) append_wow64_string( wow64_str );
+#endif
+    return args.ret;
+}
+
+const GLchar * WINAPI wglQueryCurrentRendererStringWINE( GLenum attribute )
+{
+    struct wglQueryCurrentRendererStringWINE_params args = { .teb = NtCurrentTeb(), .attribute = attribute };
+    NTSTATUS status;
+#ifndef _WIN64
+    char *wow64_str = NULL;
+#endif
+
+    TRACE( "attribute %d\n", attribute );
+
+#ifndef _WIN64
+    if (UNIX_CALL( wglQueryCurrentRendererStringWINE, &args ) == STATUS_BUFFER_TOO_SMALL) args.ret = wow64_str = malloc( (size_t)args.ret );
+#endif
+    if ((status = UNIX_CALL( wglQueryCurrentRendererStringWINE, &args ))) WARN( "wglQueryCurrentRendererStringWINE returned %#lx\n", status );
+#ifndef _WIN64
+    if (args.ret != wow64_str) free( wow64_str );
+    else if (args.ret) append_wow64_string( wow64_str );
+#endif
+    return args.ret;
+}
+
+const GLchar * WINAPI wglQueryRendererStringWINE( HDC dc, GLint renderer, GLenum attribute )
+{
+    struct wglQueryRendererStringWINE_params args =
     {
-        struct wgl_handle *ptr = get_current_context_ptr();
-        if (ptr->u.context->extensions ||
-            filter_extensions((const char *HOSTPTR)ret, &ptr->u.context->extensions, &ptr->u.context->disabled_exts))
-            return ptr->u.context->extensions;
+        .teb = NtCurrentTeb(),
+        .dc = dc,
+        .renderer = renderer,
+        .attribute = attribute,
+    };
+    NTSTATUS status;
+#ifndef _WIN64
+    char *wow64_str = NULL;
+#endif
+
+    TRACE( "dc %p, renderer %d, attribute %d\n", dc, renderer, attribute );
+
+#ifndef _WIN64
+    if (UNIX_CALL( wglQueryCurrentRendererStringWINE, &args ) == STATUS_BUFFER_TOO_SMALL) args.ret = wow64_str = malloc( (size_t)args.ret );
+#endif
+    if ((status = UNIX_CALL( wglQueryRendererStringWINE, &args ))) WARN( "wglQueryRendererStringWINE returned %#lx\n", status );
+#ifndef _WIN64
+    if (args.ret != wow64_str) free( wow64_str );
+    else if (args.ret) append_wow64_string( wow64_str );
+#endif
+    return args.ret;
+}
+
+#ifndef _WIN64
+static void *get_buffer_pointer( GLenum target )
+{
+    void (WINAPI *p_glGetBufferPointerv)( GLenum target, GLenum pname, void **params );
+    void *ptr;
+    if (!(p_glGetBufferPointerv = (void *)wglGetProcAddress( "glGetBufferPointerv" ))) return 0;
+    p_glGetBufferPointerv( target, GL_BUFFER_MAP_POINTER, &ptr );
+    return ptr;
+}
+
+static void *get_named_buffer_pointer( GLint buffer )
+{
+    void (WINAPI *p_glGetNamedBufferPointerv)( GLuint buffer, GLenum pname, void **params );
+    void *ptr;
+    if (!(p_glGetNamedBufferPointerv = (void *)wglGetProcAddress( "glGetNamedBufferPointerv" ))) return 0;
+    p_glGetNamedBufferPointerv( buffer, GL_BUFFER_MAP_POINTER, &ptr );
+    return ptr;
+}
+#endif
+
+static void *gl_map_buffer( enum unix_funcs code, GLenum target, GLenum access )
+{
+    struct glMapBuffer_params args =
+    {
+        .teb = NtCurrentTeb(),
+        .target = target,
+        .access = access,
+    };
+    NTSTATUS status;
+
+    TRACE( "target %d, access %d\n", target, access );
+
+    if (!(status = WINE_UNIX_CALL( code, &args ))) return args.ret;
+#ifndef _WIN64
+    if (status == STATUS_INVALID_ADDRESS)
+    {
+        TRACE( "Unable to map wow64 buffer directly, using copy buffer!\n" );
+        if (!(args.ret = _aligned_malloc( (size_t)args.ret, 16 ))) status = STATUS_NO_MEMORY;
+        else if (!(status = WINE_UNIX_CALL( code, &args ))) return args.ret;
+        _aligned_free( args.ret );
     }
-    return wine_static_ustring_add(&gl_strings, ret);
+#endif
+    WARN( "glMapBuffer returned %#lx\n", status );
+    return args.ret;
 }
 
-/* wrapper for glDebugMessageCallback* functions */
-static void gl_debug_message_callback( GLenum source, GLenum type, GLuint id, GLenum severity,
-                                       GLsizei length, const GLchar *message,const void *userParam )
+void * WINAPI glMapBuffer( GLenum target, GLenum access )
 {
-    struct wgl_handle *ptr = (struct wgl_handle *)userParam;
-    GLchar *temp;
-    if (!ptr->u.context->debug_callback) return;
-    if ((temp = mirror_callback_string(message)))
-        ptr->u.context->debug_callback( source, type, id, severity, length, temp, ptr->u.context->debug_user );
-    gl_temp_free(temp);
+    return gl_map_buffer( unix_glMapBuffer, target, access );
 }
 
-/***********************************************************************
- *      glDebugMessageCallback
- */
-void WINAPI glDebugMessageCallback( GLDEBUGPROC callback, const void *userParam )
+void * WINAPI glMapBufferARB( GLenum target, GLenum access )
 {
-    struct wgl_handle *ptr = get_current_context_ptr();
-    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-
-    TRACE( "(%p, %p)\n", callback, userParam );
-
-    ptr->u.context->debug_callback = callback;
-    ptr->u.context->debug_user     = userParam;
-    funcs->ext.p_glDebugMessageCallback( gl_debug_message_callback, ptr );
+    return gl_map_buffer( unix_glMapBufferARB, target, access );
 }
 
-/***********************************************************************
- *      glDebugMessageCallbackAMD
- */
-void WINAPI glDebugMessageCallbackAMD( GLDEBUGPROCAMD callback, void *userParam )
+void * WINAPI glMapBufferRange( GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access )
 {
-    struct wgl_handle *ptr = get_current_context_ptr();
-    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
+    struct glMapBufferRange_params args =
+    {
+        .teb = NtCurrentTeb(),
+        .target = target,
+        .offset = offset,
+        .length = length,
+        .access = access,
+    };
+    NTSTATUS status;
 
-    TRACE( "(%p, %p)\n", callback, userParam );
+    TRACE( "target %d, offset %Id, length %Id, access %d\n", target, offset, length, access );
 
-    ptr->u.context->debug_callback = callback;
-    ptr->u.context->debug_user     = userParam;
-    funcs->ext.p_glDebugMessageCallbackAMD( gl_debug_message_callback, ptr );
+    if (!(status = UNIX_CALL( glMapBufferRange, &args ))) return args.ret;
+#ifndef _WIN64
+    if (status == STATUS_INVALID_ADDRESS)
+    {
+        TRACE( "Unable to map wow64 buffer directly, using copy buffer!\n" );
+        if (!(args.ret = _aligned_malloc( length, 16 ))) status = STATUS_NO_MEMORY;
+        else if (!(status = UNIX_CALL( glMapBufferRange, &args ))) return args.ret;
+        _aligned_free( args.ret );
+    }
+#endif
+    WARN( "glMapBufferRange returned %#lx\n", status );
+    return args.ret;
 }
 
-/***********************************************************************
- *      glDebugMessageCallbackARB
- */
-void WINAPI glDebugMessageCallbackARB( GLDEBUGPROCARB callback, const void *userParam )
+static void *gl_map_named_buffer( enum unix_funcs code, GLuint buffer, GLenum access )
 {
-    struct wgl_handle *ptr = get_current_context_ptr();
-    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
+    struct glMapNamedBuffer_params args =
+    {
+        .teb = NtCurrentTeb(),
+        .buffer = buffer,
+        .access = access,
+    };
+    NTSTATUS status;
 
-    TRACE( "(%p, %p)\n", callback, userParam );
+    TRACE( "(%d, %d)\n", buffer, access );
 
-    ptr->u.context->debug_callback = callback;
-    ptr->u.context->debug_user     = userParam;
-    funcs->ext.p_glDebugMessageCallbackARB( gl_debug_message_callback, ptr );
+    if (!(status = WINE_UNIX_CALL( code, &args ))) return args.ret;
+#ifndef _WIN64
+    if (status == STATUS_INVALID_ADDRESS)
+    {
+        TRACE( "Unable to map wow64 buffer directly, using copy buffer!\n" );
+        if (!(args.ret = _aligned_malloc( (size_t)args.ret, 16 ))) status = STATUS_NO_MEMORY;
+        else if (!(status = WINE_UNIX_CALL( code, &args ))) return args.ret;
+        _aligned_free( args.ret );
+    }
+#endif
+    WARN( "glMapNamedBuffer returned %#lx\n", status );
+    return args.ret;
+}
+
+void * WINAPI glMapNamedBuffer( GLuint buffer, GLenum access )
+{
+    return gl_map_named_buffer( unix_glMapNamedBuffer, buffer, access );
+}
+
+void * WINAPI glMapNamedBufferEXT( GLuint buffer, GLenum access )
+{
+    return gl_map_named_buffer( unix_glMapNamedBufferEXT, buffer, access );
+}
+
+static void *gl_map_named_buffer_range( enum unix_funcs code, GLuint buffer, GLintptr offset, GLsizeiptr length, GLbitfield access )
+{
+    struct glMapNamedBufferRange_params args =
+    {
+        .teb = NtCurrentTeb(),
+        .buffer = buffer,
+        .offset = offset,
+        .length = length,
+        .access = access,
+    };
+    NTSTATUS status;
+
+    TRACE( "buffer %d, offset %Id, length %Id, access %d\n", buffer, offset, length, access );
+
+    if (!(status = WINE_UNIX_CALL( code, &args ))) return args.ret;
+#ifndef _WIN64
+    if (status == STATUS_INVALID_ADDRESS)
+    {
+        TRACE( "Unable to map wow64 buffer directly, using copy buffer!\n" );
+        if (!(args.ret = _aligned_malloc( length, 16 ))) status = STATUS_NO_MEMORY;
+        else if (!(status = WINE_UNIX_CALL( code, &args ))) return args.ret;
+        _aligned_free( args.ret );
+    }
+#endif
+    WARN( "glMapNamedBufferRange returned %#lx\n", status );
+    return args.ret;
+}
+
+void * WINAPI glMapNamedBufferRange( GLuint buffer, GLintptr offset, GLsizeiptr length, GLbitfield access )
+{
+    return gl_map_named_buffer_range( unix_glMapNamedBufferRange, buffer, offset, length, access );
+}
+
+void * WINAPI glMapNamedBufferRangeEXT( GLuint buffer, GLintptr offset, GLsizeiptr length, GLbitfield access )
+{
+    return gl_map_named_buffer_range( unix_glMapNamedBufferRangeEXT, buffer, offset, length, access );
+}
+
+static GLboolean gl_unmap_buffer( enum unix_funcs code, GLenum target )
+{
+    struct glUnmapBuffer_params args =
+    {
+        .teb = NtCurrentTeb(),
+        .target = target,
+    };
+    NTSTATUS status;
+#ifndef _WIN64
+    void *ptr = get_buffer_pointer( target );
+#endif
+
+    TRACE( "target %d\n", target );
+
+    if (!(status = WINE_UNIX_CALL( code, &args ))) return args.ret;
+#ifndef _WIN64
+    if (status == STATUS_INVALID_ADDRESS)
+    {
+        TRACE( "Releasing wow64 copy buffer %p\n", ptr );
+        _aligned_free( ptr );
+        return args.ret;
+    }
+#endif
+    WARN( "glUnmapBuffer returned %#lx\n", status );
+    return args.ret;
+}
+
+GLboolean WINAPI glUnmapBuffer( GLenum target )
+{
+    return gl_unmap_buffer( unix_glUnmapBuffer, target );
+}
+
+GLboolean WINAPI glUnmapBufferARB( GLenum target )
+{
+    return gl_unmap_buffer( unix_glUnmapBufferARB, target );
+}
+
+static GLboolean gl_unmap_named_buffer( enum unix_funcs code, GLuint buffer )
+{
+    struct glUnmapNamedBuffer_params args =
+    {
+        .teb = NtCurrentTeb(),
+        .buffer = buffer,
+    };
+    NTSTATUS status;
+#ifndef _WIN64
+    void *ptr = get_named_buffer_pointer( buffer );
+#endif
+
+    TRACE( "buffer %d\n", buffer );
+
+    if (!(status = WINE_UNIX_CALL( code, &args ))) return args.ret;
+#ifndef _WIN64
+    if (status == STATUS_INVALID_ADDRESS)
+    {
+        TRACE( "Releasing wow64 copy buffer %p\n", ptr );
+        _aligned_free( ptr );
+        return args.ret;
+    }
+#endif
+    WARN( "glUnmapNamedBuffer returned %#lx\n", status );
+    return args.ret;
+}
+
+GLboolean WINAPI glUnmapNamedBuffer( GLuint buffer )
+{
+    return gl_unmap_named_buffer( unix_glUnmapNamedBuffer, buffer );
+}
+
+GLboolean WINAPI glUnmapNamedBufferEXT( GLuint buffer )
+{
+    return gl_unmap_named_buffer( unix_glUnmapNamedBufferEXT, buffer );
+}
+
+static BOOL WINAPI call_opengl_debug_message_callback( struct wine_gl_debug_message_params *params, ULONG size )
+{
+    params->user_callback( params->source, params->type, params->id, params->severity,
+                           params->length, params->message, params->user_data );
+    return TRUE;
 }
 
 /***********************************************************************
@@ -1869,17 +1282,36 @@ void WINAPI glDebugMessageCallbackARB( GLDEBUGPROCARB callback, const void *user
  */
 BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
 {
+    void **kernel_callback_table;
+    NTSTATUS status;
+
     switch(reason)
     {
     case DLL_PROCESS_ATTACH:
-        NtCurrentTeb()->glTable = &null_opengl_funcs;
-        break;
+        if ((status = __wine_init_unix_call()))
+        {
+            ERR( "Failed to load unixlib, status %#lx\n", status );
+            return FALSE;
+        }
+
+        kernel_callback_table = NtCurrentTeb()->Peb->KernelCallbackTable;
+        kernel_callback_table[NtUserCallOpenGLDebugMessageCallback] = call_opengl_debug_message_callback;
+        /* fallthrough */
     case DLL_THREAD_ATTACH:
-        NtCurrentTeb()->glTable = &null_opengl_funcs;
+        if ((status = UNIX_CALL( thread_attach, NtCurrentTeb() )))
+        {
+            WARN( "Failed to initialize thread, status %#lx\n", status );
+            return FALSE;
+        }
         break;
+
     case DLL_PROCESS_DETACH:
-        wine_static_string_free(&gl_strings);
-        break;
+        if (reserved) break;
+        UNIX_CALL( process_detach, NULL );
+#ifndef _WIN64
+        cleanup_wow64_strings();
+#endif
+        return TRUE;
     }
     return TRUE;
 }

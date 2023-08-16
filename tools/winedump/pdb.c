@@ -29,7 +29,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winedump.h"
-#include "wine/mscvpdb.h"
 
 struct pdb_reader
 {
@@ -206,19 +205,89 @@ static unsigned get_stream_by_name(struct pdb_reader* reader, const char* name)
     return -1;
 }
 
-static void *read_string_table(struct pdb_reader* reader)
+static PDB_STRING_TABLE* read_string_table(struct pdb_reader* reader)
 {
-    unsigned    stream_idx;
-    void*       ret;
+    unsigned            stream_idx;
+    PDB_STRING_TABLE*   ret;
+    unsigned            stream_size;
 
     stream_idx = get_stream_by_name(reader, "/names");
     if (stream_idx == -1) return NULL;
     ret = reader->read_file(reader, stream_idx);
     if (!ret) return NULL;
-    if(*(const UINT *)ret == 0xeffeeffe) return ret;
-    printf("wrong header %x expecting 0xeffeeffe\n", *(const UINT *)ret);
+    stream_size = pdb_get_file_size(reader, stream_idx);
+    if (ret->magic == 0xeffeeffe && sizeof(*ret) + ret->length < stream_size) return ret;
+    printf("Improper string table header (magic=%x)\n", ret->magic);
+    dump_data((const unsigned char*)ret, stream_size, "    ");
     free( ret );
     return NULL;
+}
+
+const char* pdb_get_string_table_entry(const PDB_STRING_TABLE* table, unsigned ofs)
+{
+    if (!table) return "<<no string table>>";
+    if (ofs >= table->length) return "<<invalid string table offset>>";
+    /* strings start after header */
+    return (char*)(table + 1) + ofs;
+}
+
+static void dump_dbi_hash_table(const BYTE* root, unsigned size, const char* name, const char* pfx)
+{
+    if (size >= sizeof(DBI_HASH_HEADER))
+    {
+        const DBI_HASH_HEADER* hdr = (const DBI_HASH_HEADER*)root;
+
+        printf("%s%s symbols hash:\n", pfx, name);
+        printf("%s\tSignature: 0x%x\n", pfx, hdr->signature);
+        printf("%s\tVersion: 0x%x (%u)\n", pfx, hdr->version, hdr->version - 0xeffe0000);
+        printf("%s\tSize of hash records: %u\n", pfx, hdr->size_hash_records);
+        printf("%s\tUnknown: %u\n", pfx, hdr->unknown);
+
+        if (hdr->signature != 0xFFFFFFFF ||
+            hdr->version != 0xeffe0000 + 19990810 ||
+            (hdr->size_hash_records % sizeof(DBI_HASH_RECORD)) != 0 ||
+            sizeof(DBI_HASH_HEADER) + hdr->size_hash_records + DBI_BITMAP_HASH_SIZE > size ||
+            (size - (sizeof(DBI_HASH_HEADER) + hdr->size_hash_records + DBI_BITMAP_HASH_SIZE)) % sizeof(unsigned))
+        {
+            printf("%s\t\tIncorrect hash structure\n", pfx);
+        }
+        else
+        {
+            unsigned i;
+            unsigned num_hash_records = hdr->size_hash_records / sizeof(DBI_HASH_RECORD);
+            const DBI_HASH_RECORD* hr = (const DBI_HASH_RECORD*)(hdr + 1);
+            unsigned* bitmap = (unsigned*)((char*)(hdr + 1) + hdr->size_hash_records);
+            unsigned* buckets = (unsigned*)((char*)(hdr + 1) + hdr->size_hash_records + DBI_BITMAP_HASH_SIZE);
+            unsigned index, last_index = (size - (sizeof(DBI_HASH_HEADER) + hdr->size_hash_records + DBI_BITMAP_HASH_SIZE)) / sizeof(unsigned);
+
+            /* Yes, offsets for accessiong hr[] are stored as multiple of 12; and not
+             * as multiple of sizeof(*hr) = 8 as one might expect.
+             * Perhaps, native implementation likes to keep the same offsets between
+             * in memory representation vs on file representations.
+             */
+            for (index = 0, i = 0; i <= DBI_MAX_HASH; i++)
+            {
+                if (bitmap[i / 32] & (1u << (i % 32)))
+                {
+                    unsigned j;
+                    printf("%s\t[%u]\n", pfx, i);
+                    for (j = buckets[index] / 12; j < (index + 1 < last_index ? buckets[index + 1] / 12 : num_hash_records); j++)
+                        printf("%s\t\t[%u] offset=%08x unk=%x\n", pfx, j, hr[j].offset - 1, hr[j].unknown);
+                    index++;
+                }
+                else
+                    printf("%s\t[%u] <<empty>>\n", pfx, i);
+            }
+            /* shouldn't happen */
+            if (sizeof(DBI_HASH_HEADER) + hdr->size_hash_records + DBI_BITMAP_HASH_SIZE + index * sizeof(unsigned) > size)
+            {
+                printf("%s-- left over %u bytes\n", pfx,
+                       size - (unsigned)(sizeof(DBI_HASH_HEADER) + hdr->size_hash_records + DBI_BITMAP_HASH_SIZE + index * sizeof(unsigned)));
+            }
+        }
+    }
+    else
+        printf("%sNo header in symbols hash\n", pfx);
 }
 
 static void dump_global_symbol(struct pdb_reader* reader, unsigned file)
@@ -231,34 +300,41 @@ static void dump_global_symbol(struct pdb_reader* reader, unsigned file)
 
     size = pdb_get_file_size(reader, file);
 
-    printf("Global symbols table:\n");
-    dump_data(global, size, "\t");
+    dump_dbi_hash_table(global, size, "Global", "");
     free(global);
 }
 
 static void dump_public_symbol(struct pdb_reader* reader, unsigned file)
 {
-    void*  public = NULL;
-    DWORD  size;
+    unsigned            size;
+    DBI_PUBLIC_HEADER*  hdr;
 
-    public = reader->read_file(reader, file);
-    if (!public) return;
+    hdr = reader->read_file(reader, file);
+    if (!hdr) return;
 
     size = pdb_get_file_size(reader, file);
 
-    printf("Public symbols table:\n");
-    dump_data(public, size, "\t");
-    free(public);
+    printf("Public symbols table: (%u)\n", size);
+
+    printf("\tHash size:              %u\n", hdr->hash_size);
+    printf("\tAddress map size:       %u\n", hdr->address_map_size);
+    printf("\tNumber of thunks:       %u\n", hdr->num_thunks);
+    printf("\tSize of thunk:          %u\n", hdr->size_thunk);
+    printf("\tSection of thunk table: %u\n", hdr->section_thunk_table);
+    printf("\tOffset of thunk table:  %u\n", hdr->offset_thunk_table);
+    printf("\tNumber of sections:     %u\n", hdr->num_sects);
+
+    dump_dbi_hash_table((const BYTE*)(hdr + 1), hdr->hash_size, "Public", "\t");
+    free(hdr);
 }
 
 static void pdb_dump_symbols(struct pdb_reader* reader, PDB_STREAM_INDEXES* sidx)
 {
-    PDB_SYMBOLS*    symbols;
-    unsigned char*  modimage;
-    const char*     file;
-    char*           filesimage;
-    DWORD           filessize = 0;
-    char            tcver[32];
+    PDB_SYMBOLS*        symbols;
+    unsigned char*      modimage;
+    const char*         file;
+    PDB_STRING_TABLE*   filesimage;
+    char                tcver[32];
 
     sidx->FPO = sidx->unk0 = sidx->unk1 = sidx->unk2 = sidx->unk3 = sidx->segments =
         sidx->unk4 = sidx->unk5 = sidx->unk6 = sidx->FPO_EXT = sidx->unk7 = -1;
@@ -281,30 +357,30 @@ static void pdb_dump_symbols(struct pdb_reader* reader, PDB_STREAM_INDEXES* sidx
     else
         sprintf(tcver, "old-%x", symbols->flags);
     printf("Symbols:\n"
-           "\tsignature:       %08x\n"
-           "\tversion:         %u\n"
-           "\tage:             %08x\n"
-           "\tglobal_file:     %u\n"
-           "\tbuilder:         %s\n"
-           "\tpublic_file:     %u\n"
-           "\tbldVer:          %u\n"
-           "\tgsym_file:       %u\n"
-           "\trbldVer:         %u\n"
-           "\tmodule_size:     %08x\n"
-           "\toffset_size:     %08x\n"
-           "\thash_size:       %08x\n"
-           "\tsrc_module_size: %08x\n"
-           "\tpdbimport_size:  %08x\n"
-           "\tresvd0:          %08x\n"
-           "\tstream_idx_size: %08x\n"
-           "\tunknown2_size:   %08x\n"
-           "\tresvd3:          %04x\n"
-           "\tmachine:         %s\n"
-           "\tresvd4           %08x\n",
+           "\tsignature:        %08x\n"
+           "\tversion:          %u\n"
+           "\tage:              %08x\n"
+           "\tglobal_hash_file: %u\n"
+           "\tbuilder:          %s\n"
+           "\tpublic_file:      %u\n"
+           "\tbldVer:           %u\n"
+           "\tgsym_file:        %u\n"
+           "\trbldVer:          %u\n"
+           "\tmodule_size:      %08x\n"
+           "\toffset_size:      %08x\n"
+           "\thash_size:        %08x\n"
+           "\tsrc_module_size:  %08x\n"
+           "\tpdbimport_size:   %08x\n"
+           "\tresvd0:           %08x\n"
+           "\tstream_idx_size:  %08x\n"
+           "\tunknown2_size:    %08x\n"
+           "\tresvd3:           %04x\n"
+           "\tmachine:          %s\n"
+           "\tresvd4            %08x\n",
            symbols->signature,
            symbols->version,
            symbols->age,
-           symbols->global_file,
+           symbols->global_hash_file,
            tcver, /* from symbols->flags */
            symbols->public_file,
            symbols->bldVer,
@@ -332,7 +408,6 @@ static void pdb_dump_symbols(struct pdb_reader* reader, PDB_STREAM_INDEXES* sidx
     }
 
     if (!(filesimage = read_string_table(reader))) printf("string table not found\n");
-    else filessize = *(const DWORD*)(filesimage + 8);
 
     if (symbols->srcmodule_size)
     {
@@ -592,7 +667,7 @@ static void pdb_dump_symbols(struct pdb_reader* reader, PDB_STREAM_INDEXES* sidx
                 codeview_dump_linetab((const char*)modimage + symbol_size, TRUE, "        ");
             else if (lineno2_size) /* actually, only one of the 2 lineno should be present */
                 codeview_dump_linetab2((const char*)modimage + symbol_size, lineno2_size,
-                                       filesimage ? filesimage + 12 : NULL, filessize, "        ");
+                                       filesimage, "        ");
             /* what's that part ??? */
             if (0)
                 dump_data(modimage + symbol_size + lineno_size + lineno2_size,
@@ -602,24 +677,160 @@ static void pdb_dump_symbols(struct pdb_reader* reader, PDB_STREAM_INDEXES* sidx
 
         file = (char*)((DWORD_PTR)(lib_name + strlen(lib_name) + 1 + 3) & ~3);
     }
-    dump_global_symbol(reader, symbols->global_file);
+    dump_global_symbol(reader, symbols->global_hash_file);
     dump_public_symbol(reader, symbols->public_file);
+
     free(symbols);
     free(filesimage);
 }
 
-static void pdb_dump_types_hash(struct pdb_reader* reader, unsigned file, const char* strmname)
+static BOOL is_bit_set(const unsigned* dw, unsigned len, unsigned i)
+{
+    if (i >= len * sizeof(unsigned) * 8) return FALSE;
+    return (dw[i >> 5] & (1u << (i & 31u))) != 0;
+}
+
+static void pdb_dump_hash_value(const BYTE* ptr, unsigned len)
+{
+    int i;
+
+    printf("[");
+    for (i = len - 1; i >= 0; i--)
+        printf("%02x", ptr[i]);
+    printf("]");
+}
+
+static struct
+{
+    const BYTE* hash;
+    unsigned hash_size;
+} collision_arg;
+
+static int collision_compar(const void *p1, const void *p2)
+{
+    unsigned idx1 = *(unsigned*)p1;
+    unsigned idx2 = *(unsigned*)p2;
+    return memcmp(collision_arg.hash + idx1 * collision_arg.hash_size,
+                  collision_arg.hash + idx2 * collision_arg.hash_size,
+                  collision_arg.hash_size);
+}
+
+static void pdb_dump_types_hash(struct pdb_reader* reader, const PDB_TYPES* types, const char* strmname)
 {
     void*  hash = NULL;
-    DWORD  size;
-
-    hash = reader->read_file(reader, file);
+    unsigned i, strmsize;
+    const unsigned* table;
+    PDB_STRING_TABLE* strbase;
+    unsigned *collision;
+    hash = reader->read_file(reader, types->hash_file);
     if (!hash) return;
 
-    size = pdb_get_file_size(reader, file);
-
     printf("Types (%s) hash:\n", strmname);
-    dump_data(hash, size, "    ");
+    strmsize = pdb_get_file_size(reader, types->hash_file);
+    if (types->hash_offset + types->hash_len > strmsize ||
+        (types->last_index - types->first_index) * types->hash_size != types->hash_len ||
+        types->search_offset + types->search_len > strmsize ||
+        types->type_remap_offset + types->type_remap_len > strmsize)
+    {
+        printf("\nIncoherent sizes... skipping\n");
+        return;
+    }
+    printf("\n\tIndexes => hash value:\n");
+    for (i = types->first_index; i < types->last_index; i++)
+    {
+        printf("\t\t%08x => ", i);
+        pdb_dump_hash_value((const BYTE*)hash + types->hash_offset + (i - types->first_index) * types->hash_size, types->hash_size);
+        printf("\n");
+    }
+    /* print collisions in hash table (if any) */
+    collision = malloc((types->last_index - types->first_index) * sizeof(unsigned));
+    if (collision)
+    {
+        unsigned head_printed = 0;
+
+        collision_arg.hash = (const BYTE*)hash + types->hash_offset;
+        collision_arg.hash_size = types->hash_size;
+
+        for (i = 0; i < types->last_index - types->first_index; i++) collision[i] = i;
+        qsort(collision, types->last_index - types->first_index, sizeof(unsigned), collision_compar);
+        for (i = 0; i < types->last_index - types->first_index; i++)
+        {
+            unsigned j;
+            for (j = i + 1; j < types->last_index - types->first_index; j++)
+                if (memcmp((const BYTE*)hash + types->hash_offset + collision[i] * types->hash_size,
+                           (const BYTE*)hash + types->hash_offset + collision[j] * types->hash_size,
+                           types->hash_size))
+                    break;
+            if (j > i + 1)
+            {
+                unsigned k;
+                if (!head_printed)
+                {
+                    printf("\n\t\tCollisions:\n");
+                    head_printed = 1;
+                }
+                printf("\t\t\tHash ");
+                pdb_dump_hash_value((const BYTE*)hash + types->hash_offset + collision[i] * types->hash_size, types->hash_size);
+                printf(":");
+                for (k = i; k < j; k++)
+                    printf(" %x", types->first_index + collision[k]);
+                printf("\n");
+                i = j - 1;
+            }
+        }
+        free(collision);
+    }
+    printf("\n\tIndexes => offsets:\n");
+    table = (const unsigned*)((const BYTE*)hash + types->search_offset);
+    for (i = 0; i < types->search_len / (2 * sizeof(unsigned)); i += 2)
+    {
+        printf("\t\t%08x => %08x\n", table[2 * i + 0], table[2 * i + 1]);
+    }
+    if (types->type_remap_len && (strbase = read_string_table(reader)))
+    {
+        unsigned num, capa, count_present, count_deleted;
+        const unsigned* present_bitset;
+        const unsigned* deleted_bitset;
+
+        printf("\n\tType remap:\n");
+        table = (const unsigned*)((const BYTE*)hash + types->type_remap_offset);
+        num = *table++;
+        capa = *table++;
+        count_present = *table++;
+        present_bitset = table;
+        table += count_present;
+        count_deleted = *table++;
+        deleted_bitset = table;
+        table += count_deleted;
+        printf("\t\tNumber of present entries: %u\n", num);
+        printf("\t\tCapacity: %u\n", capa);
+        printf("\t\tBitset present:\n");
+        printf("\t\t\tCount: %u\n", count_present);
+        printf("\t\t\tBitset: ");
+        pdb_dump_hash_value((const BYTE*)present_bitset, count_present * sizeof(unsigned));
+        printf("\n");
+        printf("\t\tBitset deleted:\n");
+        printf("\t\t\tCount: %u\n", count_deleted);
+        printf("\t\t\tBitset: ");
+        pdb_dump_hash_value((const BYTE*)deleted_bitset, count_deleted * sizeof(unsigned));
+        printf("\n");
+        for (i = 0; i < capa; ++i)
+        {
+            printf("\t\t%2u) %c",
+                   i,
+                   is_bit_set(present_bitset, count_present, i) ? 'P' :
+                   is_bit_set(deleted_bitset, count_deleted, i) ? 'D' : '_');
+            if (is_bit_set(present_bitset, count_present, i))
+            {
+                printf(" %s => ", pdb_get_string_table_entry(strbase, *table++));
+                pdb_dump_hash_value((const BYTE*)table, types->hash_size);
+                table = (const unsigned*)((const BYTE*)table + types->hash_size);
+            }
+            printf("\n");
+        }
+        free(strbase);
+        printf("\n");
+    }
     free(hash);
 }
 
@@ -657,39 +868,39 @@ static void pdb_dump_types(struct pdb_reader* reader, unsigned strmidx, const ch
 
     /* Read type table */
     printf("Types (%s):\n"
-           "\tversion:        %u\n"
-           "\ttype_offset:    %08x\n"
-           "\tfirst_index:    %x\n"
-           "\tlast_index:     %x\n"
-           "\ttype_size:      %x\n"
-           "\tfile:           %x\n"
-           "\tpad:            %x\n"
-           "\thash_size:      %x\n"
-           "\thash_base:      %x\n"
-           "\thash_offset:    %x\n"
-           "\thash_len:       %x\n"
-           "\tsearch_offset:  %x\n"
-           "\tsearch_len:     %x\n"
-           "\tunknown_offset: %x\n"
-           "\tunknown_len:    %x\n",
+           "\tversion:           %u\n"
+           "\ttype_offset:       %08x\n"
+           "\tfirst_index:       %x\n"
+           "\tlast_index:        %x\n"
+           "\ttype_size:         %x\n"
+           "\thash_file:         %x\n"
+           "\tpad:               %x\n"
+           "\thash_size:         %x\n"
+           "\thash_buckets       %x\n"
+           "\thash_offset:       %x\n"
+           "\thash_len:          %x\n"
+           "\tsearch_offset:     %x\n"
+           "\tsearch_len:        %x\n"
+           "\ttype_remap_offset: %x\n"
+           "\ttype_remap_len:    %x\n",
            strmname,
            types->version,
            types->type_offset,
            types->first_index,
            types->last_index,
            types->type_size,
-           types->file,
+           types->hash_file,
            types->pad,
            types->hash_size,
-           types->hash_base,
+           types->hash_num_buckets,
            types->hash_offset,
            types->hash_len,
            types->search_offset,
            types->search_len,
-           types->unknown_offset,
-           types->unknown_len);
+           types->type_remap_offset,
+           types->type_remap_len);
     codeview_dump_types_from_block((const char*)types + types->type_offset, types->type_size);
-    pdb_dump_types_hash(reader, types->file, strmname);
+    pdb_dump_types_hash(reader, types, strmname);
     free(types);
 }
 
@@ -720,14 +931,13 @@ static void pdb_dump_fpo(struct pdb_reader* reader, unsigned stream_idx)
 static void pdb_dump_fpo_ext(struct pdb_reader* reader, unsigned stream_idx)
 {
     PDB_FPO_DATA*       fpoext;
-    unsigned            i, size, strsize;
-    char*               strbase;
+    unsigned            i, size;
+    PDB_STRING_TABLE*   strbase;
 
     if (stream_idx == (WORD)-1) return;
     strbase = read_string_table(reader);
     if (!strbase) return;
 
-    strsize = *(const DWORD*)(strbase + 8);
     fpoext = reader->read_file(reader, stream_idx);
     size = pdb_get_file_size(reader, stream_idx);
     if (fpoext && (size % sizeof(*fpoext)) == 0)
@@ -740,7 +950,7 @@ static void pdb_dump_fpo_ext(struct pdb_reader* reader, unsigned stream_idx)
             printf("\t%08x %08x %8x %8x %8x %6x   %8x %08x %s\n",
                    fpoext[i].start, fpoext[i].func_size, fpoext[i].locals_size, fpoext[i].params_size,
                    fpoext[i].maxstack_size, fpoext[i].prolog_size, fpoext[i].savedregs_size, fpoext[i].flags,
-                   fpoext[i].str_offset < strsize ? strbase + 12 + fpoext[i].str_offset : "<out of bounds>");
+                   pdb_get_string_table_entry(strbase, fpoext[i].str_offset));
         }
     }
     free(fpoext);

@@ -50,34 +50,25 @@ extern const GUID expect_guid_product;
 extern const WCHAR expect_path[];
 extern const WCHAR expect_path_end[];
 
-extern HANDLE device_added, device_removed;
 extern HINSTANCE instance;
 extern BOOL localized; /* object names get translated */
 
-BOOL hid_device_start( struct hid_device_desc *desc );
-void hid_device_stop( struct hid_device_desc *desc );
+BOOL hid_device_start( struct hid_device_desc *desc, UINT count );
+void hid_device_stop( struct hid_device_desc *desc, UINT count );
 BOOL bus_device_start(void);
 void bus_device_stop(void);
 
 void cleanup_registry_keys(void);
 
 #define dinput_test_init() dinput_test_init_( __FILE__, __LINE__ )
-BOOL dinput_test_init_( const char *file, int line );
+void dinput_test_init_( const char *file, int line );
 void dinput_test_exit(void);
 
 HRESULT dinput_test_create_device( DWORD version, DIDEVICEINSTANCEW *devinst, IDirectInputDevice8W **device );
 DWORD WINAPI dinput_test_device_thread( void *stop_event );
 
-#define fill_context( line, a, b )                                                                 \
-    do                                                                                             \
-    {                                                                                              \
-        const char *source_file;                                                                   \
-        source_file = strrchr( __FILE__, '/' );                                                    \
-        if (!source_file) source_file = strrchr( __FILE__, '\\' );                                 \
-        if (!source_file) source_file = __FILE__;                                                  \
-        else source_file++;                                                                        \
-        snprintf( a, b, "%s:%d", source_file, line );                                              \
-    } while (0)
+#define fill_context( a, b ) fill_context_( __FILE__, __LINE__, a, b )
+void fill_context_( const char *file, int line, char *buffer, SIZE_T size );
 
 #define check_member_( file, line, val, exp, fmt, member )                                         \
     ok_(file, line)( (val).member == (exp).member, "got " #member " " fmt "\n", (val).member )
@@ -100,13 +91,24 @@ DWORD WINAPI dinput_test_device_thread( void *stop_event );
 BOOL sync_ioctl_( const char *file, int line, HANDLE device, DWORD code, void *in_buf, DWORD in_len,
                   void *out_buf, DWORD *ret_len, DWORD timeout );
 
-#define set_hid_expect( a, b, c ) set_hid_expect_( __FILE__, __LINE__, a, b, c )
-void set_hid_expect_( const char *file, int line, HANDLE device, struct hid_expect *expect, DWORD expect_size );
+#define set_hid_expect( a, b, c ) set_hid_expect_( __FILE__, __LINE__, a, NULL, b, c )
+#define bus_set_hid_expect( a, b, c, d ) set_hid_expect_( __FILE__, __LINE__, a, b, c, d )
+void set_hid_expect_( const char *file, int line, HANDLE device, struct hid_device_desc *desc,
+                      struct hid_expect *expect, DWORD expect_size );
 
-#define wait_hid_expect( a, b ) wait_hid_expect_( __FILE__, __LINE__, a, b, FALSE )
-void wait_hid_expect_( const char *file, int line, HANDLE device, DWORD timeout, BOOL todo );
+#define wait_hid_expect( a, b ) wait_hid_expect_( __FILE__, __LINE__, a, NULL, b, FALSE, FALSE )
+#define wait_hid_pending( a, b ) wait_hid_expect_( __FILE__, __LINE__, a, NULL, b, TRUE, FALSE )
+#define bus_wait_hid_expect( a, b, c ) wait_hid_expect_( __FILE__, __LINE__, a, b, c, FALSE, FALSE )
+#define bus_wait_hid_pending( a, b, c ) wait_hid_expect_( __FILE__, __LINE__, a, b, c, TRUE, FALSE )
+void wait_hid_expect_( const char *file, int line, HANDLE device, struct hid_device_desc *desc,
+                       DWORD timeout, BOOL wait_pending, BOOL todo );
 
-#define send_hid_input( a, b, c ) send_hid_input_( __FILE__, __LINE__, a, b, c )
-void send_hid_input_( const char *file, int line, HANDLE device, struct hid_expect *expect, DWORD expect_size );
+#define send_hid_input( a, b, c ) send_hid_input_( __FILE__, __LINE__, a, NULL, b, c )
+#define bus_send_hid_input( a, b, c, d ) send_hid_input_( __FILE__, __LINE__, a, b, c, d )
+void send_hid_input_( const char *file, int line, HANDLE device, struct hid_device_desc *desc,
+                      struct hid_expect *expect, DWORD expect_size );
+
+#define msg_wait_for_events( a, b, c ) msg_wait_for_events_( __FILE__, __LINE__, a, b, c )
+DWORD msg_wait_for_events_( const char *file, int line, DWORD count, HANDLE *events, DWORD timeout );
 
 #endif /* __WINE_DINPUT_TEST_H */

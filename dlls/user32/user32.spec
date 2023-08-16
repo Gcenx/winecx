@@ -25,9 +25,9 @@
 # @ stub BuildReasonArray
 @ stdcall CalcChildScroll(long long)
 @ stdcall CalcMenuBar(long long long long ptr) CalcMenuBar
-@ stdcall CallMsgFilter(ptr long) CallMsgFilterA
-@ stdcall CallMsgFilterA(ptr long)
-@ stdcall CallMsgFilterW(ptr long)
+@ stdcall CallMsgFilter(ptr long) NtUserCallMsgFilter
+@ stdcall CallMsgFilterA(ptr long) NtUserCallMsgFilter
+@ stdcall CallMsgFilterW(ptr long) NtUserCallMsgFilter
 @ stdcall CallNextHookEx(long long long long) NtUserCallNextHookEx
 @ stdcall CallWindowProcA(ptr long long long long)
 @ stdcall CallWindowProcW(ptr long long long long)
@@ -76,6 +76,7 @@
 @ stdcall CloseClipboard() NtUserCloseClipboard
 @ stdcall CloseDesktop(long) NtUserCloseDesktop
 @ stdcall CloseTouchInputHandle(long)
+@ stdcall CloseGestureInfoHandle(long)
 @ stdcall CloseWindow(long)
 @ stdcall CloseWindowStation(long) NtUserCloseWindowStation
 @ stdcall CopyAcceleratorTableA(long ptr long)
@@ -86,7 +87,7 @@
 @ stdcall CountClipboardFormats() NtUserCountClipboardFormats
 @ stdcall CreateAcceleratorTableA(ptr long)
 @ stdcall CreateAcceleratorTableW(ptr long) NtUserCreateAcceleratorTable
-@ stdcall CreateCaret(long long long long)
+@ stdcall CreateCaret(long long long long) NtUserCreateCaret
 @ stdcall CreateCursor(long long long long long ptr ptr)
 @ stdcall CreateDesktopA(str str ptr long long ptr)
 @ stdcall CreateDesktopW(wstr wstr ptr long long ptr)
@@ -153,7 +154,7 @@
 @ stdcall DefWindowProcA(long long long long)
 @ stdcall DefWindowProcW(long long long long)
 @ stdcall DeferWindowPos(long long long long long long long long)
-@ stdcall DeleteMenu(long long long)
+@ stdcall DeleteMenu(long long long) NtUserDeleteMenu
 @ stdcall DeregisterShellHookWindow (long)
 @ stdcall DestroyAcceleratorTable(long) NtUserDestroyAcceleratorTable
 @ stdcall DestroyCaret()
@@ -182,11 +183,11 @@
 @ stdcall DlgDirSelectExA(long ptr long long)
 @ stdcall DlgDirSelectExW(long ptr long long)
 @ stdcall DragDetect(long int64)
-@ stub DragObject
+@ stdcall DragObject(long long long long long) NtUserDragObject
 @ stdcall DrawAnimatedRects(long long ptr ptr)
 @ stdcall DrawCaption(long long ptr long)
 @ stdcall DrawCaptionTempA(long long ptr long long str long)
-@ stdcall DrawCaptionTempW(long long ptr long long wstr long)
+@ stdcall DrawCaptionTempW(long long ptr long long wstr long) NtUserDrawCaptionTemp
 @ stdcall DrawEdge(long ptr long long)
 @ stdcall DrawFocusRect(long ptr)
 @ stub DrawFrame
@@ -194,7 +195,7 @@
 @ stdcall DrawIcon(long long long long)
 @ stdcall DrawIconEx(long long long long long long long long long) NtUserDrawIconEx
 @ stdcall DrawMenuBar(long)
-@ stdcall DrawMenuBarTemp(long long ptr long long)
+@ stdcall DrawMenuBarTemp(long long ptr long long) NtUserDrawMenuBarTemp
 @ stdcall DrawStateA(long long ptr long long long long long long long)
 @ stdcall DrawStateW(long long ptr long long long long long long long)
 @ stdcall DrawTextA(long str long ptr long)
@@ -206,11 +207,11 @@
 @ stdcall EnableMenuItem(long long long) NtUserEnableMenuItem
 @ stdcall EnableMouseInPointer(long)
 @ stdcall EnableNonClientDpiScaling(long)
-@ stdcall EnableScrollBar(long long long)
+@ stdcall -import EnableScrollBar(long long long) NtUserEnableScrollBar
 @ stdcall EnableWindow(long long)
 @ stdcall EndDeferWindowPos(long)
 @ stdcall EndDialog(long long)
-@ stdcall EndMenu()
+@ stdcall EndMenu() NtUserEndMenu
 @ stdcall EndPaint(long ptr) NtUserEndPaint
 @ stub EndTask
 # @ stub EnterReaderModeHelper
@@ -259,8 +260,8 @@
 @ stdcall GetAutoRotationState(ptr)
 @ stdcall GetAwarenessFromDpiAwarenessContext(long)
 @ stdcall GetCapture()
-@ stdcall GetCaretBlinkTime()
-@ stdcall GetCaretPos(ptr)
+@ stdcall GetCaretBlinkTime() NtUserGetCaretBlinkTime
+@ stdcall GetCaretPos(ptr) NtUserGetCaretPos
 @ stdcall GetClassInfoA(long str ptr)
 @ stdcall GetClassInfoExA(long str ptr)
 @ stdcall GetClassInfoExW(long wstr ptr)
@@ -286,7 +287,7 @@
 @ stdcall GetCursorFrameInfo(long long long ptr ptr)
 @ stdcall GetCursorInfo(ptr) NtUserGetCursorInfo
 @ stdcall GetCursorPos(ptr)
-@ stdcall GetDC(long)
+@ stdcall GetDC(long) NtUserGetDC
 @ stdcall GetDCEx(long long long) NtUserGetDCEx
 @ stdcall GetDesktopWindow()
 @ stdcall GetDialogBaseUnits()
@@ -304,6 +305,7 @@
 @ stdcall GetFocus()
 @ stdcall GetForegroundWindow() NtUserGetForegroundWindow
 @ stdcall GetGestureConfig(long long long ptr ptr long)
+@ stdcall GetGestureExtraArgs(long long ptr)
 @ stdcall GetGestureInfo(long ptr)
 @ stdcall GetGUIThreadInfo(long ptr) NtUserGetGUIThreadInfo
 @ stdcall GetGuiResources(long long)
@@ -312,7 +314,7 @@
 @ stdcall GetIconInfoExW(long ptr)
 @ stub GetInputDesktop
 @ stdcall GetInputState()
-@ stdcall GetInternalWindowPos(long ptr ptr)
+@ stdcall GetInternalWindowPos(long ptr ptr) NtUserGetInternalWindowPos
 @ stdcall GetKBCodePage()
 @ stdcall GetKeyNameTextA(long ptr long)
 @ stdcall GetKeyNameTextW(long ptr long) NtUserGetKeyNameText
@@ -328,7 +330,7 @@
 @ stdcall GetLayeredWindowAttributes(long ptr ptr ptr) NtUserGetLayeredWindowAttributes
 @ stdcall GetListBoxInfo(long)
 @ stdcall GetMenu(long)
-@ stdcall GetMenuBarInfo(long long long ptr)
+@ stdcall GetMenuBarInfo(long long long ptr) NtUserGetMenuBarInfo
 @ stdcall GetMenuCheckMarkDimensions()
 @ stdcall GetMenuContextHelpId(long)
 @ stdcall GetMenuDefaultItem(long long long)
@@ -357,7 +359,10 @@
 @ stdcall GetParent(long)
 @ stdcall GetPhysicalCursorPos(ptr)
 @ stdcall GetPointerDevices(ptr ptr)
+@ stdcall GetPointerInfo(long ptr)
 @ stdcall GetPointerType(long ptr)
+@ stdcall GetPointerTouchInfo(long ptr)
+@ stdcall GetPointerTouchInfoHistory(long ptr ptr)
 @ stdcall GetPriorityClipboardFormat(ptr long) NtUserGetPriorityClipboardFormat
 @ stdcall GetProcessDefaultLayout(ptr)
 @ stdcall GetProcessDpiAwarenessInternal(long ptr)
@@ -366,14 +371,14 @@
 @ stdcall GetPropA(long str)
 @ stdcall GetPropW(long wstr)
 @ stdcall GetQueueStatus(long) NtUserGetQueueStatus
-@ stdcall GetRawInputBuffer(ptr ptr long)
-@ stdcall GetRawInputData(ptr long ptr ptr long)
+@ stdcall GetRawInputBuffer(ptr ptr long) NtUserGetRawInputBuffer
+@ stdcall GetRawInputData(ptr long ptr ptr long) NtUserGetRawInputData
 @ stdcall GetRawInputDeviceInfoA(ptr long ptr ptr)
-@ stdcall GetRawInputDeviceInfoW(ptr long ptr ptr)
-@ stdcall GetRawInputDeviceList(ptr ptr long)
+@ stdcall GetRawInputDeviceInfoW(ptr long ptr ptr) NtUserGetRawInputDeviceInfo
+@ stdcall GetRawInputDeviceList(ptr ptr long) NtUserGetRawInputDeviceList
 # @ stub GetReasonTitleFromReasonCode
-@ stdcall GetRegisteredRawInputDevices(ptr ptr long)
-@ stdcall GetScrollBarInfo(long long ptr)
+@ stdcall GetRegisteredRawInputDevices(ptr ptr long) NtUserGetRegisteredRawInputDevices
+@ stdcall GetScrollBarInfo(long long ptr) NtUserGetScrollBarInfo
 @ stdcall GetScrollInfo(long long ptr)
 @ stdcall GetScrollPos(long long)
 @ stdcall GetScrollRange(long long ptr ptr)
@@ -381,7 +386,7 @@
 @ stdcall GetSubMenu(long long)
 @ stdcall GetSysColor(long)
 @ stdcall GetSysColorBrush(long)
-@ stdcall GetSystemMenu(long long)
+@ stdcall GetSystemMenu(long long) NtUserGetSystemMenu
 @ stdcall GetSystemMetrics(long)
 @ stdcall GetSystemMetricsForDpi(long long)
 @ stdcall GetTabbedTextExtentA(long str long long ptr)
@@ -389,7 +394,7 @@
 @ stdcall GetTaskmanWindow ()
 @ stdcall GetThreadDesktop(long) NtUserGetThreadDesktop
 @ stdcall GetThreadDpiAwarenessContext()
-@ stdcall GetTitleBarInfo(long ptr)
+@ stdcall GetTitleBarInfo(long ptr) NtUserGetTitleBarInfo
 @ stdcall GetTopWindow(long)
 @ stdcall GetTouchInputInfo(long long ptr long)
 @ stdcall GetUpdateRect(long ptr long) NtUserGetUpdateRect
@@ -401,7 +406,7 @@
 # @ stub GetWinStationInfo
 @ stdcall GetWindow(long long)
 @ stdcall GetWindowContextHelpId(long)
-@ stdcall GetWindowDC(long)
+@ stdcall GetWindowDC(long) NtUserGetWindowDC
 @ stdcall GetWindowDisplayAffinity(long ptr)
 @ stdcall GetWindowDpiAwarenessContext(long)
 @ stdcall GetWindowInfo(long ptr)
@@ -412,7 +417,7 @@
 @ stdcall GetWindowModuleFileName(long ptr long) GetWindowModuleFileNameA
 @ stdcall GetWindowModuleFileNameA(long ptr long)
 @ stdcall GetWindowModuleFileNameW(long ptr long)
-@ stdcall GetWindowPlacement(long ptr)
+@ stdcall GetWindowPlacement(long ptr) NtUserGetWindowPlacement
 @ stdcall GetWindowRect(long ptr)
 @ stdcall GetWindowRgn(long long)
 @ stdcall GetWindowRgnBox(long ptr)
@@ -425,8 +430,8 @@
 @ stdcall GrayStringA(long long ptr long long long long long long)
 @ stdcall GrayStringW(long long ptr long long long long long long)
 # @ stub HasSystemSleepStarted
-@ stdcall HideCaret(long)
-@ stdcall HiliteMenuItem(long long long long)
+@ stdcall HideCaret(long) NtUserHideCaret
+@ stdcall HiliteMenuItem(long long long long) NtUserHiliteMenuItem
 # @ stub IMPGetIMEA
 # @ stub IMPGetIMEW
 # @ stub IMPQueryIMEA
@@ -445,11 +450,11 @@
 @ stdcall InsertMenuItemA(long long long ptr)
 @ stdcall InsertMenuItemW(long long long ptr)
 @ stdcall InsertMenuW(long long long long ptr)
-@ stdcall InternalGetWindowIcon(ptr long)
+@ stdcall InternalGetWindowIcon(ptr long) NtUserInternalGetWindowIcon
 @ stdcall InternalGetWindowText(long ptr long) NtUserInternalGetWindowText
 @ stdcall IntersectRect(ptr ptr ptr)
-@ stdcall InvalidateRect(long ptr long)
-@ stdcall InvalidateRgn(long long long)
+@ stdcall InvalidateRect(long ptr long) NtUserInvalidateRect
+@ stdcall InvalidateRgn(long long long) NtUserInvalidateRgn
 @ stdcall InvertRect(long ptr)
 @ stdcall -import IsCharAlphaA(long)
 @ stdcall -import IsCharAlphaNumericA(long)
@@ -510,10 +515,10 @@
 @ stdcall LoadStringW(long long ptr long)
 @ stdcall LockSetForegroundWindow (long)
 @ stub LockWindowStation
-@ stdcall LockWindowUpdate(long)
+@ stdcall LockWindowUpdate(long) NtUserLockWindowUpdate
 @ stdcall LockWorkStation()
 @ stdcall LogicalToPhysicalPoint(long ptr)
-@ stdcall LogicalToPhysicalPointForPerMonitorDPI(long ptr)
+@ stdcall LogicalToPhysicalPointForPerMonitorDPI(long ptr) NtUserLogicalToPerMonitorDPIPhysicalPoint
 @ stdcall LookupIconIdFromDirectory(ptr long)
 @ stdcall LookupIconIdFromDirectoryEx(ptr long long long long)
 @ stub MBToWCSEx
@@ -565,14 +570,14 @@
 @ stdcall PeekMessageA(ptr long long long long)
 @ stdcall PeekMessageW(ptr long long long long)
 @ stdcall PhysicalToLogicalPoint(long ptr)
-@ stdcall PhysicalToLogicalPointForPerMonitorDPI(long ptr)
+@ stdcall PhysicalToLogicalPointForPerMonitorDPI(long ptr) NtUserPerMonitorDPIPhysicalToLogicalPoint
 @ stub PlaySoundEvent
 @ stdcall PostMessageA(long long long long)
 @ stdcall PostMessageW(long long long long)
 @ stdcall PostQuitMessage(long)
 @ stdcall PostThreadMessageA(long long long long)
 @ stdcall PostThreadMessageW(long long long long) NtUserPostThreadMessage
-@ stdcall PrintWindow(long long long)
+@ stdcall PrintWindow(long long long) NtUserPrintWindow
 @ stdcall PrivateExtractIconExA(str long ptr ptr long)
 @ stdcall PrivateExtractIconExW(wstr long ptr ptr long)
 @ stdcall PrivateExtractIconsA (str long long long ptr ptr long long)
@@ -605,7 +610,7 @@
 @ stub RegisterNetworkCapabilities
 @ stdcall RegisterPointerDeviceNotifications(long long)
 @ stdcall RegisterPowerSettingNotification(long ptr long)
-@ stdcall RegisterRawInputDevices(ptr long long)
+@ stdcall RegisterRawInputDevices(ptr long long) NtUserRegisterRawInputDevices
 @ stdcall RegisterServicesProcess(long)
 @ stdcall RegisterShellHookWindow (long)
 @ stdcall RegisterSuspendResumeNotification(long long)
@@ -619,7 +624,7 @@
 @ stdcall ReleaseCapture()
 @ stdcall ReleaseDC(long long) NtUserReleaseDC
 @ stdcall RemoveClipboardFormatListener(long) NtUserRemoveClipboardFormatListener
-@ stdcall RemoveMenu(long long long)
+@ stdcall RemoveMenu(long long long) NtUserRemoveMenu
 @ stdcall RemovePropA(long str)
 @ stdcall RemovePropW(long wstr)
 @ stdcall ReplyMessage(long)
@@ -630,7 +635,7 @@
 @ stdcall ScrollChildren(long long long long)
 @ stdcall ScrollDC(long long long ptr ptr long ptr) NtUserScrollDC
 @ stdcall ScrollWindow(long long long ptr ptr)
-@ stdcall ScrollWindowEx(long long long ptr ptr long ptr long)
+@ stdcall ScrollWindowEx(long long long ptr ptr long ptr long) NtUserScrollWindowEx
 @ stdcall SendDlgItemMessageA(long long long long long)
 @ stdcall SendDlgItemMessageW(long long long long long)
 @ stdcall SendIMEMessageExA(long long)
@@ -673,7 +678,7 @@
 @ stdcall SetFocus(long) NtUserSetFocus
 @ stdcall SetForegroundWindow(long)
 @ stdcall SetGestureConfig(ptr long long ptr long)
-@ stdcall SetInternalWindowPos(long long ptr ptr)
+@ stdcall SetInternalWindowPos(long long ptr ptr) NtUserSetInternalWindowPos
 @ stdcall SetKeyboardState(ptr) NtUserSetKeyboardState
 @ stdcall SetLastErrorEx(long long)
 @ stdcall SetLayeredWindowAttributes(ptr long long long) NtUserSetLayeredWindowAttributes
@@ -699,15 +704,15 @@
 @ stdcall SetPropW(long wstr long)
 @ stdcall SetRect(ptr long long long long)
 @ stdcall SetRectEmpty(ptr)
-@ stdcall SetScrollInfo(long long ptr long)
+@ stdcall -import SetScrollInfo(long long ptr long) NtUserSetScrollInfo
 @ stdcall SetScrollPos(long long long long)
 @ stdcall SetScrollRange(long long long long long)
 @ stdcall SetShellWindow(long)
-@ stdcall SetShellWindowEx (long long)
+@ stdcall SetShellWindowEx(long long) NtUserSetShellWindowEx
 @ stdcall SetSysColors(long ptr ptr) NtUserSetSysColors
 @ stdcall SetSysColorsTemp(ptr ptr long)
 @ stdcall SetSystemCursor(long long)
-@ stdcall SetSystemMenu(long long)
+@ stdcall SetSystemMenu(long long) NtUserSetSystemMenu
 @ stdcall SetSystemTimer(long long long ptr)
 @ stdcall SetTaskmanWindow (long)
 @ stdcall SetThreadDesktop(long) NtUserSetThreadDesktop
@@ -725,7 +730,7 @@
 @ stdcall -arch=win64 SetWindowLongPtrA(long long long)
 @ stdcall -arch=win64 SetWindowLongPtrW(long long long)
 @ stdcall SetWindowLongW(long long long)
-@ stdcall SetWindowPlacement(long ptr)
+@ stdcall SetWindowPlacement(long ptr) NtUserSetWindowPlacement
 @ stdcall SetWindowPos(long long long long long long long) NtUserSetWindowPos
 @ stdcall SetWindowRgn(long long long) NtUserSetWindowRgn
 @ stdcall SetWindowStationUser(long long)
@@ -736,10 +741,10 @@
 @ stdcall SetWindowsHookExA(long long long long)
 @ stdcall SetWindowsHookExW(long long long long)
 @ stdcall SetWindowsHookW(long ptr)
-@ stdcall ShowCaret(long)
+@ stdcall ShowCaret(long) NtUserShowCaret
 @ stdcall -import ShowCursor(long) NtUserShowCursor
 @ stdcall ShowOwnedPopups(long long)
-@ stdcall ShowScrollBar(long long long)
+@ stdcall ShowScrollBar(long long long) NtUserShowScrollBar
 @ stub ShowStartGlass
 @ stdcall ShowWindow(long long) NtUserShowWindow
 @ stdcall ShowWindowAsync(long long) NtUserShowWindowAsync
@@ -762,12 +767,12 @@
 @ stdcall ToAsciiEx(long long ptr ptr long long)
 @ stdcall ToUnicode(long long ptr ptr long long)
 @ stdcall ToUnicodeEx(long long ptr ptr long long long) NtUserToUnicodeEx
-@ stdcall TrackMouseEvent(ptr)
+@ stdcall TrackMouseEvent(ptr) NtUserTrackMouseEvent
 @ stdcall TrackPopupMenu(long long long long long long ptr)
-@ stdcall TrackPopupMenuEx(long long long long long ptr)
+@ stdcall TrackPopupMenuEx(long long long long long ptr) NtUserTrackPopupMenuEx
 @ stdcall TranslateAccelerator(long long ptr) TranslateAcceleratorA
 @ stdcall TranslateAcceleratorA(long long ptr)
-@ stdcall TranslateAcceleratorW(long long ptr)
+@ stdcall TranslateAcceleratorW(long long ptr) NtUserTranslateAccelerator
 @ stdcall TranslateMDISysAccel(long ptr)
 @ stdcall TranslateMessage(ptr)
 # @ stub TranslateMessageEx
@@ -803,7 +808,7 @@
 @ stdcall UserSignalProc(long long long long)
 # @ stub VRipOutput
 # @ stub VTagOutput
-@ stdcall ValidateRect(long ptr)
+@ stdcall ValidateRect(long ptr) NtUserValidateRect
 @ stdcall ValidateRgn(long long)
 @ stdcall VkKeyScanA(long)
 @ stdcall VkKeyScanExA(long long)
@@ -815,7 +820,7 @@
 @ stdcall WINNLSGetIMEHotkey(long)
 @ stub WNDPROC_CALLBACK
 @ stdcall WaitForInputIdle(long long)
-@ stdcall WaitMessage()
+@ stdcall WaitMessage() NtUserWaitMessage
 # @ stub Win32PoolAllocationStats
 @ stdcall WinHelpA(long str long long)
 @ stdcall WinHelpW(long wstr long long)

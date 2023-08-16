@@ -20,6 +20,7 @@
 
 #include <windows.h>
 #include <commctrl.h>
+#include <imm.h>
 
 #include "wine/test.h"
 #include "v6util.h"
@@ -52,6 +53,53 @@ struct edit_notify {
 };
 
 static struct edit_notify notifications;
+
+/* try to make sure pending X events have been processed before continuing */
+static void flush_events(void)
+{
+    MSG msg;
+    int diff = 200;
+    int min_timeout = 100;
+    DWORD time = GetTickCount() + diff;
+
+    while (diff > 0)
+    {
+        if (MsgWaitForMultipleObjects(0, NULL, FALSE, min_timeout, QS_ALLINPUT) == WAIT_TIMEOUT)
+            break;
+        while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+            DispatchMessageA(&msg);
+        diff = time - GetTickCount();
+    }
+}
+
+static BOOL open_clipboard(HWND hwnd)
+{
+    DWORD start = GetTickCount();
+    while (1)
+    {
+        BOOL ret = OpenClipboard(hwnd);
+        if (ret || GetLastError() != ERROR_ACCESS_DENIED)
+            return ret;
+        if (GetTickCount() - start > 100)
+        {
+            char classname[256];
+            DWORD le = GetLastError();
+            HWND clipwnd = GetOpenClipboardWindow();
+            /* Provide a hint as to the source of interference:
+             * - The class name would typically be CLIPBRDWNDCLASS if the
+             *   clipboard was opened by a Windows application using the
+             *   ole32 API.
+             * - And it would be __wine_clipboard_manager if it was opened in
+             *   response to a native application.
+             */
+            GetClassNameA(clipwnd, classname, ARRAY_SIZE(classname));
+            trace("%p (%s) opened the clipboard\n", clipwnd, classname);
+            SetLastError(le);
+            return ret;
+        }
+        Sleep(15);
+    }
+}
 
 static INT_PTR CALLBACK multi_edit_dialog_proc(HWND hdlg, UINT msg, WPARAM wparam, LPARAM lparam)
 {
@@ -1200,7 +1248,7 @@ static void test_char_from_pos(void)
     SendMessageA(hwEdit, WM_SETTEXT, 0, (LPARAM)"aa");
     lo = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 0, 0));
     hi = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 1, 0));
-    mid = lo + (hi - lo) / 2;
+    mid = lo + (hi - lo + 1) / 2;
 
     for (i = lo; i < mid; i++)
     {
@@ -1222,7 +1270,7 @@ static void test_char_from_pos(void)
     SendMessageA(hwEdit, WM_SETTEXT, 0, (LPARAM)"aa");
     lo = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 0, 0));
     hi = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 1, 0));
-    mid = lo + (hi - lo) / 2;
+    mid = lo + (hi - lo + 1) / 2;
 
     for (i = lo; i < mid; i++)
     {
@@ -1244,7 +1292,7 @@ static void test_char_from_pos(void)
     SendMessageA(hwEdit, WM_SETTEXT, 0, (LPARAM)"aa");
     lo = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 0, 0));
     hi = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 1, 0));
-    mid = lo + (hi - lo) / 2;
+    mid = lo + (hi - lo + 1) / 2;
 
     for (i = lo; i < mid; i++)
     {
@@ -1266,7 +1314,7 @@ static void test_char_from_pos(void)
     SendMessageA(hwEdit, WM_SETTEXT, 0, (LPARAM)"aa");
     lo = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 0, 0));
     hi = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 1, 0));
-    mid = lo + (hi - lo) / 2 + 1;
+    mid = lo + (hi - lo + 1) / 2;
 
     for (i = lo; i < mid; i++)
     {
@@ -1288,7 +1336,7 @@ static void test_char_from_pos(void)
     SendMessageA(hwEdit, WM_SETTEXT, 0, (LPARAM)"aa");
     lo = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 0, 0));
     hi = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 1, 0));
-    mid = lo + (hi - lo) / 2 + 1;
+    mid = lo + (hi - lo + 1) / 2;
 
     for (i = lo; i < mid; i++)
     {
@@ -1310,7 +1358,7 @@ static void test_char_from_pos(void)
     SendMessageA(hwEdit, WM_SETTEXT, 0, (LPARAM)"aa");
     lo = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 0, 0));
     hi = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 1, 0));
-    mid = lo + (hi - lo) / 2 + 1;
+    mid = lo + (hi - lo + 1) / 2;
 
     for (i = lo; i < mid; i++)
     {
@@ -2054,30 +2102,75 @@ do { \
     edit_pos_ok(test_left, format_rect.left - left_margin, left); \
 } while(0)
 
-static void test_text_position_style(DWORD style)
-{
-    HWND hwEdit;
-    HFONT font, oldFont;
-    HDC dc;
-    TEXTMETRICA metrics;
-    INT b, bm, b2, b3;
-    BOOL xb, single_line = !(style & ES_MULTILINE);
+/* Starting with Win10, multiline edit controls can have any value for height.
+ * Before, they always have a height which is a multiple of the font height.
+ * So detect which model we're running the tests on, and adjust the expected
+ * height accordingly.
+ */
 
-    b = GetSystemMetrics(SM_CYBORDER) + 1;
-    b2 = 2 * b;
-    b3 = 3 * b;
-    bm = b2 - 1;
+static BOOL old_height_model;
+
+static DWORD compute_height(BOOL single_line, unsigned line_height, unsigned incr, unsigned limit)
+{
+    if (single_line) return line_height;
+    if (incr >= limit) incr -= limit;
+    return old_height_model ? (line_height + incr) - ((line_height + incr) % line_height) : line_height + incr;
+}
+
+static void get_font_and_metrics(HFONT *font, TEXTMETRICA *metrics)
+{
+    HDC dc;
+    HFONT old_font;
+    BOOL xb;
 
     /* Get a stock font for which we can determine the metrics */
-    font = GetStockObject(SYSTEM_FONT);
-    ok (font != NULL, "GetStockObject SYSTEM_FONT failed\n");
+    *font = GetStockObject(SYSTEM_FONT);
+    ok (*font != NULL, "GetStockObject SYSTEM_FONT failed\n");
     dc = GetDC(NULL);
     ok (dc != NULL, "GetDC() failed\n");
-    oldFont = SelectObject(dc, font);
-    xb = GetTextMetricsA(dc, &metrics);
+    old_font = SelectObject(dc, font);
+    xb = GetTextMetricsA(dc, metrics);
     ok (xb, "GetTextMetrics failed\n");
-    SelectObject(dc, oldFont);
+    SelectObject(dc, old_font);
     ReleaseDC(NULL, dc);
+}
+
+static BOOL determine_height_model(void)
+{
+    HWND hedit;
+    HFONT font;
+    TEXTMETRICA metrics;
+    RECT format_rect;
+    BOOL ret = TRUE;
+
+    get_font_and_metrics(&font, &metrics);
+    hedit = create_child_editcontrol(ES_MULTILINE | ES_AUTOHSCROLL | ES_AUTOVSCROLL | WS_VISIBLE, 0);
+    SendMessageA(hedit, WM_SETFONT, (WPARAM) font, FALSE);
+
+    set_client_height(hedit, metrics.tmHeight + 1);
+    SendMessageA(hedit, EM_GETRECT, 0, (LPARAM) &format_rect);
+
+    old_height_model = TRUE;
+    if (format_rect.bottom - format_rect.top == metrics.tmHeight + 1)
+        old_height_model = FALSE;
+    else
+        ret = format_rect.bottom - format_rect.top == metrics.tmHeight;
+
+    destroy_child_editcontrol(hedit);
+    return ret;
+}
+
+static void test_text_position_style(DWORD style)
+{
+    HWND hedit;
+    HFONT font;
+    TEXTMETRICA metrics;
+    INT b, b2, incr;
+    BOOL single_line = !(style & ES_MULTILINE);
+
+    get_font_and_metrics(&font, &metrics);
+    b = GetSystemMetrics(SM_CYBORDER) + 1;
+    b2 = 2 * b;
 
     /* Windows' edit control has some bugs in multi-line mode:
      * - Sometimes the format rectangle doesn't get updated
@@ -2089,94 +2182,87 @@ static void test_text_position_style(DWORD style)
 
     /* Edit controls that are in a parent window */
 
-    hwEdit = create_child_editcontrol(style | WS_VISIBLE, 0);
-    SendMessageA(hwEdit, WM_SETFONT, (WPARAM) font, FALSE);
+    hedit = create_child_editcontrol(style | WS_VISIBLE, 0);
+    SendMessageA(hedit, WM_SETFONT, (WPARAM) font, FALSE);
     if (single_line)
-    check_pos(hwEdit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, 0);
-    check_pos(hwEdit, metrics.tmHeight     , 0, metrics.tmHeight    , 0);
-    check_pos(hwEdit, metrics.tmHeight +  1, 0, metrics.tmHeight    , 0);
-    check_pos(hwEdit, metrics.tmHeight +  2, 0, metrics.tmHeight    , 0);
-    check_pos(hwEdit, metrics.tmHeight + 10, 0, metrics.tmHeight    , 0);
-    destroy_child_editcontrol(hwEdit);
+    check_pos(hedit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, 0);
+    for (incr = 0; incr < 4 * metrics.tmHeight; incr++)
+        check_pos(hedit, metrics.tmHeight + incr, 0,
+                  compute_height(single_line, metrics.tmHeight, incr, 0), 0);
+    destroy_child_editcontrol(hedit);
 
-    hwEdit = create_child_editcontrol(style | WS_BORDER | WS_VISIBLE, 0);
-    SendMessageA(hwEdit, WM_SETFONT, (WPARAM) font, FALSE);
+    hedit = create_child_editcontrol(style | WS_BORDER | WS_VISIBLE, 0);
+    SendMessageA(hedit, WM_SETFONT, (WPARAM) font, FALSE);
     if (single_line)
-    check_pos(hwEdit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, b);
-    check_pos(hwEdit, metrics.tmHeight     , 0, metrics.tmHeight    , b);
-    check_pos(hwEdit, metrics.tmHeight +  1, 0, metrics.tmHeight    , b);
-    check_pos(hwEdit, metrics.tmHeight + bm, 0, metrics.tmHeight    , b);
-    check_pos(hwEdit, metrics.tmHeight + b2, b, metrics.tmHeight    , b);
-    check_pos(hwEdit, metrics.tmHeight + b3, b, metrics.tmHeight    , b);
-    destroy_child_editcontrol(hwEdit);
+    check_pos(hedit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, b);
+    for (incr = 0; incr < 4 * metrics.tmHeight; incr++)
+        check_pos(hedit, metrics.tmHeight + incr, incr >= b2 ? b : 0,
+                  compute_height(single_line, metrics.tmHeight, incr, b2), b);
+    destroy_child_editcontrol(hedit);
 
-    hwEdit = create_child_editcontrol(style | WS_VISIBLE, WS_EX_CLIENTEDGE);
-    SendMessageA(hwEdit, WM_SETFONT, (WPARAM) font, FALSE);
+    hedit = create_child_editcontrol(style | WS_VISIBLE, WS_EX_CLIENTEDGE);
+    SendMessageA(hedit, WM_SETFONT, (WPARAM) font, FALSE);
     if (single_line)
-    check_pos(hwEdit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, 1);
-    check_pos(hwEdit, metrics.tmHeight     , 0, metrics.tmHeight    , 1);
-    check_pos(hwEdit, metrics.tmHeight +  1, 0, metrics.tmHeight    , 1);
-    check_pos(hwEdit, metrics.tmHeight +  2, 1, metrics.tmHeight    , 1);
-    check_pos(hwEdit, metrics.tmHeight + 10, 1, metrics.tmHeight    , 1);
-    destroy_child_editcontrol(hwEdit);
+    check_pos(hedit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, 1);
+    for (incr = 0; incr < 4 * metrics.tmHeight; incr++)
+        check_pos(hedit, metrics.tmHeight + incr, incr >= 2 ? 1 : 0,
+                  compute_height(single_line, metrics.tmHeight, incr, 2), 1);
+    destroy_child_editcontrol(hedit);
 
-    hwEdit = create_child_editcontrol(style | WS_BORDER | WS_VISIBLE, WS_EX_CLIENTEDGE);
-    SendMessageA(hwEdit, WM_SETFONT, (WPARAM) font, FALSE);
+    hedit = create_child_editcontrol(style | WS_BORDER | WS_VISIBLE, WS_EX_CLIENTEDGE);
+    SendMessageA(hedit, WM_SETFONT, (WPARAM) font, FALSE);
     if (single_line)
-    check_pos(hwEdit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, 1);
-    check_pos(hwEdit, metrics.tmHeight     , 0, metrics.tmHeight    , 1);
-    check_pos(hwEdit, metrics.tmHeight +  1, 0, metrics.tmHeight    , 1);
-    check_pos(hwEdit, metrics.tmHeight +  2, 1, metrics.tmHeight    , 1);
-    check_pos(hwEdit, metrics.tmHeight + 10, 1, metrics.tmHeight    , 1);
-    destroy_child_editcontrol(hwEdit);
+    check_pos(hedit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, 1);
+    for (incr = 0; incr < 4 * metrics.tmHeight; incr++)
+        check_pos(hedit, metrics.tmHeight + incr, incr >= 2 ? 1 : 0,
+                  compute_height(single_line, metrics.tmHeight, incr, 2), 1);
+    destroy_child_editcontrol(hedit);
 
 
     /* Edit controls that are popup windows */
 
-    hwEdit = create_editcontrol(style | WS_POPUP, 0);
-    SendMessageA(hwEdit, WM_SETFONT, (WPARAM) font, FALSE);
+    hedit = create_editcontrol(style | WS_POPUP, 0);
+    SendMessageA(hedit, WM_SETFONT, (WPARAM) font, FALSE);
     if (single_line)
-    check_pos(hwEdit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, 0);
-    check_pos(hwEdit, metrics.tmHeight     , 0, metrics.tmHeight    , 0);
-    check_pos(hwEdit, metrics.tmHeight +  1, 0, metrics.tmHeight    , 0);
-    check_pos(hwEdit, metrics.tmHeight +  2, 0, metrics.tmHeight    , 0);
-    check_pos(hwEdit, metrics.tmHeight + 10, 0, metrics.tmHeight    , 0);
-    DestroyWindow(hwEdit);
+    check_pos(hedit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, 0);
+    for (incr = 0; incr < 4 * metrics.tmHeight; incr++)
+        check_pos(hedit, metrics.tmHeight + incr, 0,
+                  compute_height(single_line, metrics.tmHeight, incr, 0), 0);
+    DestroyWindow(hedit);
 
-    hwEdit = create_editcontrol(style | WS_POPUP | WS_BORDER, 0);
-    SendMessageA(hwEdit, WM_SETFONT, (WPARAM) font, FALSE);
+    hedit = create_editcontrol(style | WS_POPUP | WS_BORDER, 0);
+    SendMessageA(hedit, WM_SETFONT, (WPARAM) font, FALSE);
     if (single_line)
-    check_pos(hwEdit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, b);
-    check_pos(hwEdit, metrics.tmHeight     , 0, metrics.tmHeight    , b);
-    check_pos(hwEdit, metrics.tmHeight +  1, 0, metrics.tmHeight    , b);
-    check_pos(hwEdit, metrics.tmHeight + bm, 0, metrics.tmHeight    , b);
-    check_pos(hwEdit, metrics.tmHeight + b2, b, metrics.tmHeight    , b);
-    check_pos(hwEdit, metrics.tmHeight + b3, b, metrics.tmHeight    , b);
-    DestroyWindow(hwEdit);
+    check_pos(hedit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, b);
+    for (incr = 0; incr < 4 * metrics.tmHeight; incr++)
+        check_pos(hedit, metrics.tmHeight + incr, incr >= b2 ? b : 0,
+                  compute_height(single_line, metrics.tmHeight, incr, b2), b);
+    DestroyWindow(hedit);
 
-    hwEdit = create_editcontrol(style | WS_POPUP, WS_EX_CLIENTEDGE);
-    SendMessageA(hwEdit, WM_SETFONT, (WPARAM) font, FALSE);
+    hedit = create_editcontrol(style | WS_POPUP, WS_EX_CLIENTEDGE);
+    SendMessageA(hedit, WM_SETFONT, (WPARAM) font, FALSE);
     if (single_line)
-    check_pos(hwEdit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, 1);
-    check_pos(hwEdit, metrics.tmHeight     , 0, metrics.tmHeight    , 1);
-    check_pos(hwEdit, metrics.tmHeight +  1, 0, metrics.tmHeight    , 1);
-    check_pos(hwEdit, metrics.tmHeight +  2, 1, metrics.tmHeight    , 1);
-    check_pos(hwEdit, metrics.tmHeight + 10, 1, metrics.tmHeight    , 1);
-    DestroyWindow(hwEdit);
+    check_pos(hedit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, 1);
+    for (incr = 0; incr < 4 * metrics.tmHeight; incr++)
+        check_pos(hedit, metrics.tmHeight + incr, incr >= 2 ? 1 : 0,
+                  compute_height(single_line, metrics.tmHeight, incr, 2), 1);
+    DestroyWindow(hedit);
 
-    hwEdit = create_editcontrol(style | WS_POPUP | WS_BORDER, WS_EX_CLIENTEDGE);
-    SendMessageA(hwEdit, WM_SETFONT, (WPARAM) font, FALSE);
+    hedit = create_editcontrol(style | WS_POPUP | WS_BORDER, WS_EX_CLIENTEDGE);
+    SendMessageA(hedit, WM_SETFONT, (WPARAM) font, FALSE);
     if (single_line)
-    check_pos(hwEdit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, 1);
-    check_pos(hwEdit, metrics.tmHeight     , 0, metrics.tmHeight    , 1);
-    check_pos(hwEdit, metrics.tmHeight +  1, 0, metrics.tmHeight    , 1);
-    check_pos(hwEdit, metrics.tmHeight +  2, 1, metrics.tmHeight    , 1);
-    check_pos(hwEdit, metrics.tmHeight + 10, 1, metrics.tmHeight    , 1);
-    DestroyWindow(hwEdit);
+    check_pos(hedit, metrics.tmHeight -  1, 0, metrics.tmHeight - 1, 1);
+    for (incr = 0; incr < 4 * metrics.tmHeight; incr++)
+        check_pos(hedit, metrics.tmHeight + incr, incr >= 2 ? 1 : 0,
+                  compute_height(single_line, metrics.tmHeight, incr, 2), 1);
+    DestroyWindow(hedit);
 }
 
 static void test_text_position(void)
 {
+    ok (determine_height_model(), "Unable to guess the height model, forcing old one\n");
+    trace("EDIT: Using %s model for height computation\n", old_height_model ? "old" : "new");
+
     trace("EDIT: Text position (Single line)\n");
     test_text_position_style(ES_AUTOHSCROLL | ES_AUTOVSCROLL);
     trace("EDIT: Text position (Multi line)\n");
@@ -2207,7 +2293,7 @@ static void test_espassword(void)
     ok(r == strlen(password), "Expected: %s, got len %ld\n", password, r);
     ok(strcmp(buffer, password) == 0, "expected %s, got %s\n", password, buffer);
 
-    r = OpenClipboard(hwEdit);
+    r = open_clipboard(hwEdit);
     ok(r == TRUE, "expected %d, got %ld\n", TRUE, r);
     r = EmptyClipboard();
     ok(r == TRUE, "expected %d, got %ld\n", TRUE, r);
@@ -3160,6 +3246,26 @@ static void test_EM_GETHANDLE(void)
     DestroyWindow(hEdit);
 }
 
+/* In Windows 10+, the WM_PASTE message isn't always successful.
+ * So retry in case of failure.
+ */
+#define check_paste(a, b) _check_paste(__LINE__, (a), (b))
+static void _check_paste(unsigned int line, HWND hedit, const char *content)
+{
+    /* only retry on windows platform */
+    int tries = strcmp(winetest_platform, "wine") ? 3 : 1;
+    int len = 0;
+
+    SendMessageA(hedit, WM_SETTEXT, 0, (LPARAM)"");
+    do
+    {
+        SendMessageA(hedit, WM_PASTE, 0, 0);
+        if ((len = SendMessageA(hedit, WM_GETTEXTLENGTH, 0, 0))) break;
+        Sleep(1);
+    } while (--tries > 0);
+    ok_(__FILE__, line)(len == strlen(content), "Unexpected len %u in edit\n", len);
+}
+
 static void test_paste(void)
 {
     static const char *str = "this is a simple text";
@@ -3167,7 +3273,7 @@ static void test_paste(void)
     HWND hEdit, hMultilineEdit;
     HANDLE hmem, hmem_ret;
     char *buffer;
-    int r, len;
+    int r;
 
     hEdit = create_editcontrol(ES_AUTOHSCROLL | ES_AUTOVSCROLL, 0);
     hMultilineEdit = create_editcontrol(ES_AUTOHSCROLL | ES_AUTOVSCROLL | ES_MULTILINE, 0);
@@ -3180,7 +3286,7 @@ static void test_paste(void)
     strcpy(buffer, str);
     GlobalUnlock(hmem);
 
-    r = OpenClipboard(hEdit);
+    r = open_clipboard(hEdit);
     ok(r == TRUE, "expected %d, got %d\n", TRUE, r);
     r = EmptyClipboard();
     ok(r == TRUE, "expected %d, got %d\n", TRUE, r);
@@ -3190,10 +3296,7 @@ static void test_paste(void)
     ok(r == TRUE, "expected %d, got %d\n", TRUE, r);
 
     /* Paste single line */
-    SendMessageA(hEdit, WM_SETTEXT, 0, (LPARAM)"");
-    r = SendMessageA(hEdit, WM_PASTE, 0, 0);
-    len = SendMessageA(hEdit, WM_GETTEXTLENGTH, 0, 0);
-    ok(strlen(str) == len, "got %d\n", len);
+    check_paste(hEdit, str);
 
     /* Prepare clipboard data with multiline text */
     hmem = GlobalAlloc(GMEM_MOVEABLE, 255);
@@ -3203,7 +3306,7 @@ static void test_paste(void)
     strcpy(buffer, str2);
     GlobalUnlock(hmem);
 
-    r = OpenClipboard(hEdit);
+    r = open_clipboard(hEdit);
     ok(r == TRUE, "expected %d, got %d\n", TRUE, r);
     r = EmptyClipboard();
     ok(r == TRUE, "expected %d, got %d\n", TRUE, r);
@@ -3214,15 +3317,10 @@ static void test_paste(void)
 
     /* Paste multiline text in singleline edit - should be cut */
     SendMessageA(hEdit, WM_SETTEXT, 0, (LPARAM)"");
-    r = SendMessageA(hEdit, WM_PASTE, 0, 0);
-    len = SendMessageA(hEdit, WM_GETTEXTLENGTH, 0, 0);
-    ok(strlen("first line") == len, "got %d\n", len);
+    check_paste(hEdit, "first line");
 
     /* Paste multiline text in multiline edit */
-    SendMessageA(hMultilineEdit, WM_SETTEXT, 0, (LPARAM)"");
-    r = SendMessageA(hMultilineEdit, WM_PASTE, 0, 0);
-    len = SendMessageA(hMultilineEdit, WM_GETTEXTLENGTH, 0, 0);
-    ok(strlen(str2) == len, "got %d\n", len);
+    check_paste(hMultilineEdit, str2);
 
     /* Cleanup */
     DestroyWindow(hEdit);
@@ -3444,12 +3542,13 @@ static void test_change_focus(void)
     SetWindowLongPtrA(hwnd, GWLP_USERDATA, (LONG_PTR)oldproc);
 
     SetCursorPos(400, 400);
+    flush_events();
 
     SetFocus(parent_wnd);
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
     SetFocus(hwnd);
     while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
-    ok_sequence(sequences, COMBINED_SEQ_INDEX, setfocus_combined_seq, "Set focus", TRUE);
+    ok_sequence(sequences, COMBINED_SEQ_INDEX, setfocus_combined_seq, "Set focus", FALSE);
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
     SetFocus(parent_wnd);
@@ -3470,6 +3569,198 @@ static void test_change_focus(void)
 
     SetCursorPos(orig_pos.x, orig_pos.y);
 
+    DestroyWindow(hwnd);
+}
+
+static const struct message wm_ime_composition_seq[] =
+{
+    {WM_IME_STARTCOMPOSITION, sent},
+    {WM_IME_COMPOSITION, sent | wparam, 'W'},
+    {WM_IME_CHAR, sent | wparam | defwinproc, 'W'},
+    {WM_IME_CHAR, sent | wparam | defwinproc, 'i'},
+    {WM_IME_CHAR, sent | wparam | defwinproc, 'n'},
+    {WM_IME_CHAR, sent | wparam | defwinproc, 'e'},
+    {WM_IME_ENDCOMPOSITION, sent},
+    {WM_CHAR, sent | wparam, 'W'},
+    {WM_CHAR, sent | wparam, 'i'},
+    {WM_CHAR, sent | wparam, 'n'},
+    {WM_CHAR, sent | wparam, 'e'},
+    {0}
+};
+
+static const struct message wm_ime_char_seq[] =
+{
+    {WM_IME_CHAR, sent | wparam, '0'},
+    {WM_CHAR, sent | wparam, '0'},
+    {0}
+};
+
+static const struct message eimes_getcompstratonce_seq[] =
+{
+    {WM_IME_STARTCOMPOSITION, sent},
+    {WM_IME_COMPOSITION, sent | wparam, 'W'},
+    {WM_IME_ENDCOMPOSITION, sent},
+    {0}
+};
+
+static LRESULT CALLBACK edit_ime_subclass_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    WNDPROC oldproc = (WNDPROC)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
+    static LONG defwndproc_counter = 0;
+    struct message msg = {0};
+    LRESULT ret;
+
+    msg.message = message;
+    msg.flags = sent | wparam;
+    if (defwndproc_counter)
+        msg.flags |= defwinproc;
+    msg.wParam = wParam;
+
+    if (message < 0xc000 &&
+        message != WM_GETTEXTLENGTH &&
+        message != WM_GETTEXT &&
+        message != WM_GETFONT &&
+        message != WM_GETICON &&
+        message != WM_IME_SETCONTEXT &&
+        message != WM_IME_NOTIFY &&
+        message != WM_CTLCOLOREDIT &&
+        message != WM_PAINT &&
+        message != WM_ERASEBKGND &&
+        message != WM_NCHITTEST &&
+        message != WM_SETCURSOR &&
+        message != WM_MOUSEMOVE &&
+        message != WM_MOUSEACTIVATE &&
+        message != WM_KEYUP &&
+        (message < EM_GETSEL || message > EM_GETIMESTATUS))
+    {
+        add_message(sequences, COMBINED_SEQ_INDEX, &msg);
+    }
+
+    defwndproc_counter++;
+    if (IsWindowUnicode(hwnd))
+        ret = CallWindowProcW(oldproc, hwnd, message, wParam, lParam);
+    else
+        ret = CallWindowProcA(oldproc, hwnd, message, wParam, lParam);
+    defwndproc_counter--;
+
+    return ret;
+}
+
+static void test_ime(void)
+{
+    WNDPROC old_proc;
+    LRESULT lr;
+    HIMC himc;
+    HWND hwnd;
+    BOOL ret;
+    MSG msg;
+
+    hwnd = create_editcontrol(WS_POPUP | WS_VISIBLE, 0);
+
+    /* Test EM_{GET|SET}IMESTATUS */
+    lr = SendMessageA(hwnd, EM_GETIMESTATUS, EMSIS_COMPOSITIONSTRING, 0);
+    ok(lr == 0, "Got unexpected lr %#Ix.\n", lr);
+
+    /* Note that EM_SETIMESTATUS always return 1, which is contrary to what MSDN says about
+     * returning the previous LPARAM value */
+    lr = SendMessageA(hwnd, EM_SETIMESTATUS, EMSIS_COMPOSITIONSTRING, EIMES_GETCOMPSTRATONCE);
+    ok(lr == 1, "Got unexpected lr %#Ix.\n", lr);
+    lr = SendMessageA(hwnd, EM_GETIMESTATUS, EMSIS_COMPOSITIONSTRING, 0);
+    ok(lr == EIMES_GETCOMPSTRATONCE, "Got unexpected lr %#Ix.\n", lr);
+
+    lr = SendMessageA(hwnd, EM_SETIMESTATUS, EMSIS_COMPOSITIONSTRING, EIMES_CANCELCOMPSTRINFOCUS);
+    ok(lr == 1, "Got unexpected lr %#Ix.\n", lr);
+    lr = SendMessageA(hwnd, EM_GETIMESTATUS, EMSIS_COMPOSITIONSTRING, 0);
+    ok(lr == EIMES_CANCELCOMPSTRINFOCUS, "Got unexpected lr %#Ix.\n", lr);
+
+    lr = SendMessageA(hwnd, EM_SETIMESTATUS, EMSIS_COMPOSITIONSTRING, EIMES_COMPLETECOMPSTRKILLFOCUS);
+    ok(lr == 1, "Got unexpected lr %#Ix.\n", lr);
+    lr = SendMessageA(hwnd, EM_GETIMESTATUS, EMSIS_COMPOSITIONSTRING, 0);
+    ok(lr == EIMES_COMPLETECOMPSTRKILLFOCUS, "Got unexpected lr %#Ix.\n", lr);
+
+    lr = SendMessageA(hwnd, EM_SETIMESTATUS, EMSIS_COMPOSITIONSTRING, EIMES_GETCOMPSTRATONCE
+                      | EIMES_CANCELCOMPSTRINFOCUS | EIMES_COMPLETECOMPSTRKILLFOCUS);
+    ok(lr == 1, "Got unexpected lr %#Ix.\n", lr);
+    lr = SendMessageA(hwnd, EM_GETIMESTATUS, EMSIS_COMPOSITIONSTRING, 0);
+    ok(lr == (EIMES_GETCOMPSTRATONCE | EIMES_CANCELCOMPSTRINFOCUS | EIMES_COMPLETECOMPSTRKILLFOCUS),
+       "Got unexpected lr %#Ix.\n", lr);
+
+    lr = SendMessageA(hwnd, EM_SETIMESTATUS, EMSIS_COMPOSITIONSTRING, 0);
+    ok(lr == 1, "Got unexpected lr %#Ix.\n", lr);
+    lr = SendMessageA(hwnd, EM_GETIMESTATUS, EMSIS_COMPOSITIONSTRING, 0);
+    ok(lr == 0, "Got unexpected lr %#Ix.\n", lr);
+
+    /* Invalid EM_{GET|SET}IMESTATUS status types and flags */
+    lr = SendMessageA(hwnd, EM_GETIMESTATUS, 0, 0);
+    ok(lr == 1, "Got unexpected lr %#Ix.\n", lr);
+
+    lr = SendMessageA(hwnd, EM_GETIMESTATUS, EMSIS_COMPOSITIONSTRING + 1, 0);
+    ok(lr == 1, "Got unexpected lr %#Ix.\n", lr);
+
+    lr = SendMessageA(hwnd, EM_SETIMESTATUS, 0, EIMES_GETCOMPSTRATONCE);
+    ok(lr == 1, "Got unexpected lr %#Ix.\n", lr);
+    lr = SendMessageA(hwnd, EM_GETIMESTATUS, EMSIS_COMPOSITIONSTRING, 0);
+    ok(lr == 0, "Got unexpected lr %#Ix.\n", lr);
+
+    lr = SendMessageA(hwnd, EM_SETIMESTATUS, EMSIS_COMPOSITIONSTRING + 1, EIMES_GETCOMPSTRATONCE);
+    ok(lr == 1, "Got unexpected lr %#Ix.\n", lr);
+    lr = SendMessageA(hwnd, EM_GETIMESTATUS, EMSIS_COMPOSITIONSTRING, 0);
+    ok(lr == 0, "Got unexpected lr %#Ix.\n", lr);
+
+    lr = SendMessageA(hwnd, EM_SETIMESTATUS, EMSIS_COMPOSITIONSTRING, 0xFFFFFFFF);
+    ok(lr == 1, "Got unexpected lr %#Ix.\n", lr);
+    lr = SendMessageA(hwnd, EM_GETIMESTATUS, EMSIS_COMPOSITIONSTRING, 0);
+    ok(lr == 0xFFFF, "Got unexpected lr %#Ix.\n", lr);
+
+    lr = SendMessageA(hwnd, EM_SETIMESTATUS, EMSIS_COMPOSITIONSTRING, 0);
+    ok(lr == 1, "Got unexpected lr %#Ix.\n", lr);
+    lr = SendMessageA(hwnd, EM_GETIMESTATUS, EMSIS_COMPOSITIONSTRING, 0);
+    ok(lr == 0, "Got unexpected lr %#Ix.\n", lr);
+
+    /* Test IME messages when EIMES_GETCOMPSTRATONCE is not set */
+    old_proc = (WNDPROC)SetWindowLongPtrA(hwnd, GWLP_WNDPROC, (LONG_PTR)edit_ime_subclass_proc);
+    SetWindowLongPtrA(hwnd, GWLP_USERDATA, (LONG_PTR)old_proc);
+    flush_events();
+
+    himc = ImmGetContext(hwnd);
+    ret = ImmSetCompositionStringA(himc, SCS_SETSTR, "Wine", 4, NULL, 0);
+    ok(ret, "ImmSetCompositionStringA failed.\n");
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    ret = ImmNotifyIME(himc, NI_COMPOSITIONSTR, CPS_COMPLETE, 0);
+    ok(ret, "ImmNotifyIME failed.\n");
+    /* Note that the following message loop is necessary to get the WM_CHAR messages because they
+     * are posted. Same for the later message loops in this function. */
+    while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
+    ok_sequence(sequences, COMBINED_SEQ_INDEX, wm_ime_composition_seq, "WM_IME_COMPOSITION", TRUE);
+
+    /* Test that WM_IME_CHAR is passed to DefWindowProc() to get WM_CHAR */
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    SendMessageA(hwnd, WM_IME_CHAR, '0', 1);
+    while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
+    ok_sequence(sequences, COMBINED_SEQ_INDEX, wm_ime_char_seq, "WM_IME_CHAR", FALSE);
+
+    /* Test IME messages when EIMES_GETCOMPSTRATONCE is set */
+    lr = SendMessageA(hwnd, EM_SETIMESTATUS, EMSIS_COMPOSITIONSTRING, EIMES_GETCOMPSTRATONCE);
+    ok(lr == 1, "Got unexpected lr %#Ix.\n", lr);
+    lr = SendMessageA(hwnd, EM_GETIMESTATUS, EMSIS_COMPOSITIONSTRING, 0);
+    ok(lr == EIMES_GETCOMPSTRATONCE, "Got unexpected lr %#Ix.\n", lr);
+
+    ret = ImmSetCompositionStringA(himc, SCS_SETSTR, "Wine", 4, NULL, 0);
+    ok(ret, "ImmSetCompositionStringA failed.\n");
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    ret = ImmNotifyIME(himc, NI_COMPOSITIONSTR, CPS_COMPLETE, 0);
+    ok(ret, "ImmNotifyIME failed.\n");
+    while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
+    ok_sequence(sequences, COMBINED_SEQ_INDEX, eimes_getcompstratonce_seq,
+                "WM_IME_COMPOSITION with EIMES_GETCOMPSTRATONCE", TRUE);
+
+    /* Test that WM_IME_CHAR is passed to DefWindowProc() to get WM_CHAR with EIMES_GETCOMPSTRATONCE */
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    SendMessageA(hwnd, WM_IME_CHAR, '0', 1);
+    while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
+    ok_sequence(sequences, COMBINED_SEQ_INDEX, wm_ime_char_seq, "WM_IME_CHAR", FALSE);
+
+    ImmReleaseContext(hwnd, himc);
     DestroyWindow(hwnd);
 }
 
@@ -3519,6 +3810,7 @@ START_TEST(edit)
     test_wordbreak_proc();
     test_change_focus();
     test_cue_banner();
+    test_ime();
 
     UnregisterWindowClasses();
 

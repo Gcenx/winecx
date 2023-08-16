@@ -28,9 +28,9 @@
 #include "winreg.h"
 #include "winternl.h"
 #include "propsys.h"
+#include "propkey.h"
 #include "initguid.h"
 #include "ole2.h"
-#include "propkey.h"
 #include "mmdeviceapi.h"
 #include "devpkey.h"
 #include "mmsystem.h"
@@ -47,8 +47,6 @@
 #include "unixlib.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(alsa);
-
-unixlib_handle_t alsa_handle = 0;
 
 #define NULL_PTR_ERR MAKE_HRESULT(SEVERITY_ERROR, FACILITY_WIN32, RPC_X_NULL_REF_POINTER)
 
@@ -203,9 +201,7 @@ BOOL WINAPI DllMain(HINSTANCE dll, DWORD reason, void *reserved)
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
-        if(NtQueryVirtualMemory(GetCurrentProcess(), dll, MemoryWineUnixFuncs,
-                                &alsa_handle, sizeof(alsa_handle), NULL))
-            return FALSE;
+        if(__wine_init_unix_call()) return FALSE;
         break;
 
     case DLL_PROCESS_DETACH:
@@ -215,14 +211,6 @@ BOOL WINAPI DllMain(HINSTANCE dll, DWORD reason, void *reserved)
     }
     return TRUE;
 }
-
-/* From <dlls/mmdevapi/mmdevapi.h> */
-enum DriverPriority {
-    Priority_Unavailable = 0,
-    Priority_Low,
-    Priority_Neutral,
-    Priority_Preferred
-};
 
 int WINAPI AUDDRV_GetPriority(void)
 {
@@ -246,6 +234,8 @@ static DWORD WINAPI alsa_timer_thread(void *user)
     struct timer_loop_params params;
     struct ACImpl *This = user;
 
+    SetThreadDescription(GetCurrentThread(), L"winealsa_timer");
+
     params.stream = This->stream;
 
     ALSA_CALL(timer_loop, &params);
@@ -264,7 +254,7 @@ static void set_device_guid(EDataFlow flow, HKEY drv_key, const WCHAR *key_name,
         lr = RegCreateKeyExW(HKEY_CURRENT_USER, drv_key_devicesW, 0, NULL, 0, KEY_WRITE,
                     NULL, &drv_key, NULL);
         if(lr != ERROR_SUCCESS){
-            ERR("RegCreateKeyEx(drv_key) failed: %u\n", lr);
+            ERR("RegCreateKeyEx(drv_key) failed: %lu\n", lr);
             return;
         }
         opened = TRUE;
@@ -273,14 +263,14 @@ static void set_device_guid(EDataFlow flow, HKEY drv_key, const WCHAR *key_name,
     lr = RegCreateKeyExW(drv_key, key_name, 0, NULL, 0, KEY_WRITE,
                 NULL, &key, NULL);
     if(lr != ERROR_SUCCESS){
-        ERR("RegCreateKeyEx(%s) failed: %u\n", wine_dbgstr_w(key_name), lr);
+        ERR("RegCreateKeyEx(%s) failed: %lu\n", wine_dbgstr_w(key_name), lr);
         goto exit;
     }
 
     lr = RegSetValueExW(key, guidW, 0, REG_BINARY, (BYTE*)guid,
                 sizeof(GUID));
     if(lr != ERROR_SUCCESS)
-        ERR("RegSetValueEx(%s\\guid) failed: %u\n", wine_dbgstr_w(key_name), lr);
+        ERR("RegSetValueEx(%s\\guid) failed: %lu\n", wine_dbgstr_w(key_name), lr);
 
     RegCloseKey(key);
 exit:
@@ -310,7 +300,7 @@ static void get_device_guid(EDataFlow flow, const char *device, GUID *guid)
                     RegCloseKey(key);
                     return;
                 }
-                ERR("Invalid type for device %s GUID: %u; ignoring and overwriting\n",
+                ERR("Invalid type for device %s GUID: %lu; ignoring and overwriting\n",
                         wine_dbgstr_w(key_name), type);
             }
             RegCloseKey(dev_key);
@@ -333,6 +323,7 @@ static void set_stream_volumes(ACImpl *This)
     params.master_volume = (This->session->mute ? 0.0f : This->session->master_vol);
     params.volumes = This->vols;
     params.session_volumes = This->session->channel_vols;
+    params.channel = 0;
 
     ALSA_CALL(set_volumes, &params);
 }
@@ -535,7 +526,7 @@ static ULONG WINAPI AudioClient_AddRef(IAudioClient3 *iface)
     ACImpl *This = impl_from_IAudioClient3(iface);
     ULONG ref;
     ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p) Refcount now %u\n", This, ref);
+    TRACE("(%p) Refcount now %lu\n", This, ref);
     return ref;
 }
 
@@ -545,7 +536,7 @@ static ULONG WINAPI AudioClient_Release(IAudioClient3 *iface)
     ULONG ref;
 
     ref = InterlockedDecrement(&This->ref);
-    TRACE("(%p) Refcount now %u\n", This, ref);
+    TRACE("(%p) Refcount now %lu\n", This, ref);
     if(!ref){
         IAudioClient3_Stop(iface);
         IMMDevice_Release(This->parent);
@@ -583,15 +574,15 @@ static void dump_fmt(const WAVEFORMATEX *fmt)
     TRACE(")\n");
 
     TRACE("nChannels: %u\n", fmt->nChannels);
-    TRACE("nSamplesPerSec: %u\n", fmt->nSamplesPerSec);
-    TRACE("nAvgBytesPerSec: %u\n", fmt->nAvgBytesPerSec);
+    TRACE("nSamplesPerSec: %lu\n", fmt->nSamplesPerSec);
+    TRACE("nAvgBytesPerSec: %lu\n", fmt->nAvgBytesPerSec);
     TRACE("nBlockAlign: %u\n", fmt->nBlockAlign);
     TRACE("wBitsPerSample: %u\n", fmt->wBitsPerSample);
     TRACE("cbSize: %u\n", fmt->cbSize);
 
     if(fmt->wFormatTag == WAVE_FORMAT_EXTENSIBLE){
         WAVEFORMATEXTENSIBLE *fmtex = (void*)fmt;
-        TRACE("dwChannelMask: %08x\n", fmtex->dwChannelMask);
+        TRACE("dwChannelMask: %08lx\n", fmtex->dwChannelMask);
         TRACE("Samples: %04x\n", fmtex->Samples.wReserved);
         TRACE("SubFormat: %s\n", wine_dbgstr_guid(&fmtex->SubFormat));
     }
@@ -686,7 +677,7 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient3 *iface,
     stream_handle stream;
     unsigned int i;
 
-    TRACE("(%p)->(%x, %x, %s, %s, %p, %s)\n", This, mode, flags,
+    TRACE("(%p)->(%x, %lx, %s, %s, %p, %s)\n", This, mode, flags,
           wine_dbgstr_longlong(duration), wine_dbgstr_longlong(period), fmt, debugstr_guid(sessionguid));
 
     if(!fmt)
@@ -705,7 +696,7 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient3 *iface,
                 AUDCLNT_SESSIONFLAGS_DISPLAY_HIDEWHENEXPIRED |
                 AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY |
                 AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM)){
-        FIXME("Unknown flags: %08x\n", flags);
+        FIXME("Unknown flags: %08lx\n", flags);
         return E_INVALIDARG;
     }
 
@@ -746,13 +737,15 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient3 *iface,
 
     dump_fmt(fmt);
 
-    params.alsa_name = This->alsa_name;
+    params.name = NULL;
+    params.device = This->alsa_name;
     params.flow = This->dataflow;
     params.share = mode;
     params.flags = flags;
     params.duration = duration;
     params.period = period;
     params.fmt = fmt;
+    params.channel_count = NULL;
     params.stream = &stream;
 
     ALSA_CALL(create_stream, &params);
@@ -807,7 +800,7 @@ static HRESULT WINAPI AudioClient_GetBufferSize(IAudioClient3 *iface,
         return AUDCLNT_E_NOT_INITIALIZED;
 
     params.stream = This->stream;
-    params.size = out;
+    params.frames = out;
 
     ALSA_CALL(get_buffer_size, &params);
 
@@ -870,7 +863,7 @@ static HRESULT WINAPI AudioClient_IsFormatSupported(IAudioClient3 *iface,
     TRACE("(%p)->(%x, %p, %p)\n", This, mode, fmt, out);
     if(fmt) dump_fmt(fmt);
 
-    params.alsa_name = This->alsa_name;
+    params.device = This->alsa_name;
     params.flow = This->dataflow;
     params.share = mode;
     params.fmt_in = fmt;
@@ -903,7 +896,7 @@ static HRESULT WINAPI AudioClient_GetMixFormat(IAudioClient3 *iface,
         return E_POINTER;
     *pwfx = NULL;
 
-    params.alsa_name = This->alsa_name;
+    params.device = This->alsa_name;
     params.flow = This->dataflow;
     params.fmt = CoTaskMemAlloc(sizeof(WAVEFORMATEXTENSIBLE));
     if(!params.fmt)
@@ -1192,7 +1185,7 @@ static HRESULT WINAPI AudioClient_InitializeSharedAudioStream(IAudioClient3 *ifa
 {
     ACImpl *This = impl_from_IAudioClient3(iface);
 
-    FIXME("(%p)->(0x%x, %u, %p, %s)\n", This, flags, period_frames, format, debugstr_guid(session_guid));
+    FIXME("(%p)->(0x%lx, %u, %p, %s)\n", This, flags, period_frames, format, debugstr_guid(session_guid));
 
     return E_NOTIMPL;
 }
@@ -1286,7 +1279,7 @@ static HRESULT WINAPI AudioRenderClient_ReleaseBuffer(
     ACImpl *This = impl_from_IAudioRenderClient(iface);
     struct release_render_buffer_params params;
 
-    TRACE("(%p)->(%u, %x)\n", This, written_frames, flags);
+    TRACE("(%p)->(%u, %lx)\n", This, written_frames, flags);
 
     params.stream = This->stream;
     params.written_frames = written_frames;
@@ -1363,7 +1356,7 @@ static HRESULT WINAPI AudioCaptureClient_GetBuffer(IAudioCaptureClient *iface,
     params.stream = This->stream;
     params.data = data;
     params.frames = frames;
-    params.flags = flags;
+    params.flags = (UINT*)flags;
     params.devpos = devpos;
     params.qpcpos = qpcpos;
 
@@ -1480,6 +1473,7 @@ static HRESULT WINAPI AudioClock_GetPosition(IAudioClock *iface, UINT64 *pos,
         return E_POINTER;
 
     params.stream = This->stream;
+    params.device = FALSE;
     params.pos = pos;
     params.qpctime = qpctime;
 
@@ -1601,7 +1595,7 @@ static ULONG WINAPI AudioSessionControl_AddRef(IAudioSessionControl2 *iface)
     AudioSessionWrapper *This = impl_from_IAudioSessionControl2(iface);
     ULONG ref;
     ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p) Refcount now %u\n", This, ref);
+    TRACE("(%p) Refcount now %lu\n", This, ref);
     return ref;
 }
 
@@ -1610,7 +1604,7 @@ static ULONG WINAPI AudioSessionControl_Release(IAudioSessionControl2 *iface)
     AudioSessionWrapper *This = impl_from_IAudioSessionControl2(iface);
     ULONG ref;
     ref = InterlockedDecrement(&This->ref);
-    TRACE("(%p) Refcount now %u\n", This, ref);
+    TRACE("(%p) Refcount now %lu\n", This, ref);
     if(!ref){
         if(This->client){
             EnterCriticalSection(&g_sessions_lock);
@@ -2297,7 +2291,7 @@ static ULONG WINAPI AudioSessionManager_AddRef(IAudioSessionManager2 *iface)
     SessionMgr *This = impl_from_IAudioSessionManager2(iface);
     ULONG ref;
     ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p) Refcount now %u\n", This, ref);
+    TRACE("(%p) Refcount now %lu\n", This, ref);
     return ref;
 }
 
@@ -2306,7 +2300,7 @@ static ULONG WINAPI AudioSessionManager_Release(IAudioSessionManager2 *iface)
     SessionMgr *This = impl_from_IAudioSessionManager2(iface);
     ULONG ref;
     ref = InterlockedDecrement(&This->ref);
-    TRACE("(%p) Refcount now %u\n", This, ref);
+    TRACE("(%p) Refcount now %lu\n", This, ref);
     if(!ref)
         HeapFree(GetProcessHeap(), 0, This);
     return ref;
@@ -2321,7 +2315,7 @@ static HRESULT WINAPI AudioSessionManager_GetAudioSessionControl(
     AudioSessionWrapper *wrapper;
     HRESULT hr;
 
-    TRACE("(%p)->(%s, %x, %p)\n", This, debugstr_guid(session_guid),
+    TRACE("(%p)->(%s, %lx, %p)\n", This, debugstr_guid(session_guid),
             flags, out);
 
     hr = get_audio_session(session_guid, This->device, 0, &session);
@@ -2348,7 +2342,7 @@ static HRESULT WINAPI AudioSessionManager_GetSimpleAudioVolume(
     AudioSessionWrapper *wrapper;
     HRESULT hr;
 
-    TRACE("(%p)->(%s, %x, %p)\n", This, debugstr_guid(session_guid),
+    TRACE("(%p)->(%s, %lx, %p)\n", This, debugstr_guid(session_guid),
             flags, out);
 
     hr = get_audio_session(session_guid, This->device, 0, &session);
@@ -2447,7 +2441,7 @@ HRESULT WINAPI AUDDRV_GetPropValue(GUID *guid, const PROPERTYKEY *prop, PROPVARI
     EDataFlow flow;
     unsigned int size = 0;
 
-    TRACE("%s, (%s,%u), %p\n", wine_dbgstr_guid(guid), wine_dbgstr_guid(&prop->fmtid), prop->pid, out);
+    TRACE("%s, (%s,%lu), %p\n", wine_dbgstr_guid(guid), wine_dbgstr_guid(&prop->fmtid), prop->pid, out);
 
     if(!get_alsa_name_by_guid(guid, name, sizeof(name), &flow))
     {
@@ -2455,7 +2449,7 @@ HRESULT WINAPI AUDDRV_GetPropValue(GUID *guid, const PROPERTYKEY *prop, PROPVARI
         return E_NOINTERFACE;
     }
 
-    params.alsa_name = name;
+    params.device = name;
     params.flow = flow;
     params.guid = guid;
     params.prop = prop;

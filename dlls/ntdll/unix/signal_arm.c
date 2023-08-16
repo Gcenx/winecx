@@ -55,6 +55,9 @@
 # define UNW_LOCAL_ONLY
 # include <libunwind.h>
 #endif
+#ifdef HAVE_LINK_H
+# include <link.h>
+#endif
 
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
@@ -173,28 +176,28 @@ enum arm_trap_code
 
 struct syscall_frame
 {
-    DWORD                 r0;             /* 000 */
-    DWORD                 r1;             /* 004 */
-    DWORD                 r2;             /* 008 */
-    DWORD                 r3;             /* 00c */
-    DWORD                 r4;             /* 010 */
-    DWORD                 r5;             /* 014 */
-    DWORD                 r6;             /* 018 */
-    DWORD                 r7;             /* 01c */
-    DWORD                 r8;             /* 020 */
-    DWORD                 r9;             /* 024 */
-    DWORD                 r10;            /* 028 */
-    DWORD                 r11;            /* 02c */
-    DWORD                 r12;            /* 030 */
-    DWORD                 pc;             /* 034 */
-    DWORD                 sp;             /* 038 */
-    DWORD                 lr;             /* 03c */
-    DWORD                 cpsr;           /* 040 */
-    DWORD                 restore_flags;  /* 044 */
-    DWORD                 fpscr;          /* 048 */
+    UINT                  r0;             /* 000 */
+    UINT                  r1;             /* 004 */
+    UINT                  r2;             /* 008 */
+    UINT                  r3;             /* 00c */
+    UINT                  r4;             /* 010 */
+    UINT                  r5;             /* 014 */
+    UINT                  r6;             /* 018 */
+    UINT                  r7;             /* 01c */
+    UINT                  r8;             /* 020 */
+    UINT                  r9;             /* 024 */
+    UINT                  r10;            /* 028 */
+    UINT                  r11;            /* 02c */
+    UINT                  r12;            /* 030 */
+    UINT                  pc;             /* 034 */
+    UINT                  sp;             /* 038 */
+    UINT                  lr;             /* 03c */
+    UINT                  cpsr;           /* 040 */
+    UINT                  restore_flags;  /* 044 */
+    UINT                  fpscr;          /* 048 */
     struct syscall_frame *prev_frame;     /* 04c */
     SYSTEM_SERVICE_TABLE *syscall_table;  /* 050 */
-    DWORD                 align[3];       /* 054 */
+    UINT                  align[3];       /* 054 */
     ULONGLONG             d[32];          /* 060 */
 };
 
@@ -223,13 +226,420 @@ static BOOL is_inside_syscall( ucontext_t *sigcontext )
 
 extern void raise_func_trampoline( EXCEPTION_RECORD *rec, CONTEXT *context, void *dispatcher );
 
-/***********************************************************************
- *           unwind_builtin_dll
- */
-NTSTATUS CDECL unwind_builtin_dll( ULONG type, struct _DISPATCHER_CONTEXT *dispatch, CONTEXT *context )
+struct exidx_entry
 {
+    uint32_t addr;
+    uint32_t data;
+};
+
+static uint32_t prel31_to_abs(const uint32_t *ptr)
+{
+    uint32_t prel31 = *ptr;
+    uint32_t rel = prel31 | ((prel31 << 1) & 0x80000000);
+    return (uintptr_t)ptr + rel;
+}
+
+static uint8_t get_byte(const uint32_t *ptr, int offset, int bytes)
+{
+    int word = offset >> 2;
+    int byte = offset & 0x3;
+    if (offset >= bytes)
+        return 0xb0; /* finish opcode */
+    return (ptr[word] >> (24 - 8*byte)) & 0xff;
+}
+
+static uint32_t get_uleb128(const uint32_t *ptr, int *offset, int bytes)
+{
+    int shift = 0;
+    uint32_t val = 0;
+    while (1)
+    {
+        uint8_t byte = get_byte(ptr, (*offset)++, bytes);
+        val |= (byte & 0x7f) << shift;
+        if ((byte & 0x80) == 0)
+            break;
+        shift += 7;
+    }
+    return val;
+}
+
+static void pop_regs(CONTEXT *context, uint32_t regs)
+{
+    int i;
+    DWORD new_sp = 0;
+    for (i = 0; i < 16; i++)
+    {
+        if (regs & (1U << i))
+        {
+            DWORD val = *(DWORD *)context->Sp;
+            if (i != 13)
+                (&context->R0)[i] = val;
+            else
+                new_sp = val;
+            context->Sp += 4;
+        }
+    }
+    if (regs & (1 << 13))
+        context->Sp = new_sp;
+}
+
+static void pop_vfp(CONTEXT *context, int first, int last)
+{
+    int i;
+    for (i = first; i <= last; i++)
+    {
+        context->u.D[i] = *(ULONGLONG *)context->Sp;
+        context->Sp += 8;
+    }
+}
+
+static uint32_t regmask(int first_bit, int n_bits)
+{
+    return ((1U << (n_bits + 1)) - 1) << first_bit;
+}
+
+/***********************************************************************
+ *           ehabi_virtual_unwind
+ */
+static NTSTATUS ehabi_virtual_unwind( UINT ip, DWORD *frame, CONTEXT *context,
+                                      const struct exidx_entry *entry,
+                                      PEXCEPTION_ROUTINE *handler, void **handler_data )
+{
+    const uint32_t *ptr;
+    const void *lsda = NULL;
+    int compact_inline = 0;
+    int offset = 0;
+    int bytes = 0;
+    int personality;
+    int extra_words;
+    int finish = 0;
+    int set_pc = 0;
+    UINT func_begin = prel31_to_abs(&entry->addr);
+
+    *frame = context->Sp;
+
+    TRACE( "ip %#x function %#x\n", ip, func_begin );
+
+    if (entry->data == 1)
+    {
+        ERR("EXIDX_CANTUNWIND\n");
+        return STATUS_UNSUCCESSFUL;
+    }
+    else if (entry->data & 0x80000000)
+    {
+        if ((entry->data & 0x7f000000) != 0)
+        {
+            ERR("compact inline EXIDX must have personality 0\n");
+            return STATUS_UNSUCCESSFUL;
+        }
+        ptr = &entry->data;
+        compact_inline = 1;
+    }
+    else
+    {
+        ptr = (uint32_t *)prel31_to_abs(&entry->data);
+    }
+
+    if ((*ptr & 0x80000000) == 0)
+    {
+        /* Generic */
+        void *personality_func = (void *)prel31_to_abs(ptr);
+        int words = (ptr[1] >> 24) & 0xff;
+        lsda = ptr + 1 + words + 1;
+
+        ERR("generic EHABI unwinding not supported\n");
+        (void)personality_func;
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    /* Compact */
+
+    personality = (*ptr >> 24) & 0x0f;
+    switch (personality)
+    {
+    case 0:
+        if (!compact_inline)
+            lsda = ptr + 1;
+        extra_words = 0;
+        offset = 1;
+        break;
+    case 1:
+        extra_words = (*ptr >> 16) & 0xff;
+        lsda = ptr + extra_words + 1;
+        offset = 2;
+        break;
+    case 2:
+        extra_words = (*ptr >> 16) & 0xff;
+        lsda = ptr + extra_words + 1;
+        offset = 2;
+        break;
+    default:
+        ERR("unsupported compact EXIDX personality %d\n", personality);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    /* Not inspecting the descriptors */
+    (void)lsda;
+
+    bytes = 4 + 4*extra_words;
+    while (offset < bytes && !finish)
+    {
+        uint8_t byte = get_byte(ptr, offset++, bytes);
+        if ((byte & 0xc0) == 0x00)
+        {
+            /* Increment Sp */
+            context->Sp += (byte & 0x3f) * 4 + 4;
+        }
+        else if ((byte & 0xc0) == 0x40)
+        {
+            /* Decrement Sp */
+            context->Sp -= (byte & 0x3f) * 4 + 4;
+        }
+        else if ((byte & 0xf0) == 0x80)
+        {
+            /* Pop {r4-r15} based on register mask */
+            int regs = ((byte & 0x0f) << 8) | get_byte(ptr, offset++, bytes);
+            if (!regs)
+            {
+                ERR("refuse to unwind\n");
+                return STATUS_UNSUCCESSFUL;
+            }
+            regs <<= 4;
+            pop_regs(context, regs);
+            if (regs & (1 << 15))
+                set_pc = 1;
+        }
+        else if ((byte & 0xf0) == 0x90)
+        {
+            /* Restore Sp from other register */
+            int reg = byte & 0x0f;
+            if (reg == 13 || reg == 15)
+            {
+                ERR("reserved opcode\n");
+                return STATUS_UNSUCCESSFUL;
+            }
+            context->Sp = (&context->R0)[reg];
+        }
+        else if ((byte & 0xf0) == 0xa0)
+        {
+            /* Pop r4-r(4+n) (+lr) */
+            int n = byte & 0x07;
+            int regs = regmask(4, n);
+            if (byte & 0x08)
+                regs |= 1 << 14;
+            pop_regs(context, regs);
+        }
+        else if (byte == 0xb0)
+        {
+            finish = 1;
+        }
+        else if (byte == 0xb1)
+        {
+            /* Pop {r0-r3} based on register mask */
+            int regs = get_byte(ptr, offset++, bytes);
+            if (regs == 0 || (regs & 0xf0) != 0)
+            {
+                ERR("spare opcode\n");
+                return STATUS_UNSUCCESSFUL;
+            }
+            pop_regs(context, regs);
+        }
+        else if (byte == 0xb2)
+        {
+            /* Increment Sp by a larger amount */
+            int imm = get_uleb128(ptr, &offset, bytes);
+            context->Sp += 0x204 + imm * 4;
+        }
+        else if (byte == 0xb3)
+        {
+            /* Pop VFP registers as if saved by FSTMFDX; this opcode
+             * is deprecated. */
+            ERR("FSTMFDX unsupported\n");
+            return STATUS_UNSUCCESSFUL;
+        }
+        else if ((byte & 0xfc) == 0xb4)
+        {
+            ERR("spare opcode\n");
+            return STATUS_UNSUCCESSFUL;
+        }
+        else if ((byte & 0xf8) == 0xb8)
+        {
+            /* Pop VFP registers as if saved by FSTMFDX; this opcode
+             * is deprecated. */
+            ERR("FSTMFDX unsupported\n");
+            return STATUS_UNSUCCESSFUL;
+        }
+        else if ((byte & 0xf8) == 0xc0)
+        {
+            ERR("spare opcode / iWMMX\n");
+            return STATUS_UNSUCCESSFUL;
+        }
+        else if ((byte & 0xfe) == 0xc8)
+        {
+            /* Pop VFP registers d(16+ssss)-d(16+ssss+cccc), or
+             * d(0+ssss)-d(0+ssss+cccc) as if saved by VPUSH */
+            int first, last;
+            if ((byte & 0x01) == 0)
+                first = 16;
+            else
+                first = 0;
+            byte = get_byte(ptr, offset++, bytes);
+            first += (byte & 0xf0) >> 4;
+            last = first + (byte & 0x0f);
+            if (last >= 32)
+            {
+                ERR("reserved opcode\n");
+                return STATUS_UNSUCCESSFUL;
+            }
+            pop_vfp(context, first, last);
+        }
+        else if ((byte & 0xf8) == 0xc8)
+        {
+            ERR("spare opcode\n");
+            return STATUS_UNSUCCESSFUL;
+        }
+        else if ((byte & 0xf8) == 0xd0)
+        {
+            /* Pop VFP registers d8-d(8+n) as if saved by VPUSH */
+            int n = byte & 0x07;
+            pop_vfp(context, 8, 8 + n);
+        }
+        else
+        {
+            ERR("spare opcode\n");
+            return STATUS_UNSUCCESSFUL;
+        }
+    }
+    if (offset > bytes)
+    {
+        ERR("truncated opcodes\n");
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    *handler      = NULL; /* personality */
+    *handler_data = NULL; /* lsda */
+
+    context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
+    if (!set_pc)
+        context->Pc = context->Lr;
+
+    /* There's no need to check for raise_func_trampoline and manually restore
+     * Lr separately from Pc like with libunwind; the EHABI unwind info
+     * describes how both of them are restored separately, and as long as
+     * the unwind info restored Pc, it doesn't have to be set from Lr. */
+
+    TRACE( "next function pc=%08lx\n", context->Pc );
+    TRACE("  r0=%08lx  r1=%08lx  r2=%08lx  r3=%08lx\n",
+          context->R0, context->R1, context->R2, context->R3 );
+    TRACE("  r4=%08lx  r5=%08lx  r6=%08lx  r7=%08lx\n",
+          context->R4, context->R5, context->R6, context->R7 );
+    TRACE("  r8=%08lx  r9=%08lx r10=%08lx r11=%08lx\n",
+          context->R8, context->R9, context->R10, context->R11 );
+    TRACE(" r12=%08lx  sp=%08lx  lr=%08lx  pc=%08lx\n",
+          context->R12, context->Sp, context->Lr, context->Pc );
+
+    return STATUS_SUCCESS;
+}
+
+#ifdef linux
+struct iterate_data
+{
+    ULONG_PTR ip;
+    int failed;
+    struct exidx_entry *entry;
+};
+
+static int contains_addr(struct dl_phdr_info *info, const ElfW(Phdr) *phdr, struct iterate_data *data)
+{
+    if (phdr->p_type != PT_LOAD)
+        return 0;
+    return data->ip >= info->dlpi_addr + phdr->p_vaddr && data->ip < info->dlpi_addr + phdr->p_vaddr + phdr->p_memsz;
+}
+
+static int check_exidx(struct dl_phdr_info *info, size_t info_size, void *arg)
+{
+    struct iterate_data *data = arg;
+    int i;
+    int found_addr;
+    const ElfW(Phdr) *exidx = NULL;
+    struct exidx_entry *begin, *end;
+
+    if (info->dlpi_phnum == 0 || data->ip < info->dlpi_addr || data->failed)
+        return 0;
+
+    found_addr = 0;
+    for (i = 0; i < info->dlpi_phnum; i++)
+    {
+        const ElfW(Phdr) *phdr = &info->dlpi_phdr[i];
+        if (contains_addr(info, phdr, data))
+            found_addr = 1;
+        if (phdr->p_type == PT_ARM_EXIDX)
+            exidx = phdr;
+    }
+
+    if (!found_addr || !exidx)
+    {
+        if (found_addr)
+        {
+            TRACE("found matching address in %s, but no EXIDX\n", info->dlpi_name);
+            data->failed = 1;
+        }
+        return 0;
+    }
+
+    begin = (struct exidx_entry *)(info->dlpi_addr + exidx->p_vaddr);
+    end = (struct exidx_entry *)(info->dlpi_addr + exidx->p_vaddr + exidx->p_memsz);
+    if (data->ip < prel31_to_abs(&begin->addr))
+    {
+        TRACE("%lx before EXIDX start at %x\n", data->ip, prel31_to_abs(&begin->addr));
+        data->failed = 1;
+        return 0;
+    }
+
+    while (begin + 1 < end)
+    {
+        struct exidx_entry *mid = begin + (end - begin)/2;
+        uint32_t abs_addr = prel31_to_abs(&mid->addr);
+        if (abs_addr > data->ip)
+        {
+            end = mid;
+        }
+        else if (abs_addr < data->ip)
+        {
+            begin = mid;
+        }
+        else
+        {
+            begin = mid;
+            end = mid + 1;
+        }
+    }
+
+    data->entry = begin;
+    TRACE("found %lx in %s, base %x, entry %p with addr %x (rel %x) data %x\n",
+          data->ip, info->dlpi_name, info->dlpi_addr, begin,
+          prel31_to_abs(&begin->addr),
+          prel31_to_abs(&begin->addr) - info->dlpi_addr, begin->data);
+    return 1;
+}
+
+static const struct exidx_entry *find_exidx_entry( void *ip )
+{
+    struct iterate_data data = {};
+
+    data.ip = (ULONG_PTR)ip;
+    data.failed = 0;
+    data.entry = NULL;
+    dl_iterate_phdr(check_exidx, &data);
+
+    return data.entry;
+}
+#endif
+
 #ifdef HAVE_LIBUNWIND
-    DWORD ip = context->Pc - (dispatch->ControlPcIsUnwound ? 2 : 0);
+static NTSTATUS libunwind_virtual_unwind( DWORD ip, DWORD *frame, CONTEXT *context,
+                                          PEXCEPTION_ROUTINE *handler, void **handler_data )
+{
     unw_context_t unw_context;
     unw_cursor_t cursor;
     unw_proc_info_t info;
@@ -261,8 +671,8 @@ NTSTATUS CDECL unwind_builtin_dll( ULONG type, struct _DISPATCHER_CONTEXT *dispa
         TRACE( "no info found for %x ip %x-%x, %s\n",
                ip, info.start_ip, info.end_ip, status == STATUS_SUCCESS ?
                "assuming leaf function" : "error, stuck" );
-        dispatch->LanguageHandler = NULL;
-        dispatch->EstablisherFrame = context->Sp;
+        *handler = NULL;
+        *frame = context->Sp;
         context->Pc = context->Lr;
         context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
         return status;
@@ -279,9 +689,9 @@ NTSTATUS CDECL unwind_builtin_dll( ULONG type, struct _DISPATCHER_CONTEXT *dispa
         return STATUS_INVALID_DISPOSITION;
     }
 
-    dispatch->LanguageHandler  = (void *)info.handler;
-    dispatch->HandlerData      = (void *)info.lsda;
-    dispatch->EstablisherFrame = context->Sp;
+    *handler      = (void *)info.handler;
+    *handler_data = (void *)info.lsda;
+    *frame        = context->Sp;
 
     for (i = 0; i <= 12; i++)
         unw_get_reg( &cursor, UNW_ARM_R0 + i, (unw_word_t *)&(&context->R0)[i] );
@@ -297,20 +707,42 @@ NTSTATUS CDECL unwind_builtin_dll( ULONG type, struct _DISPATCHER_CONTEXT *dispa
          * individual values, thus do that manually here.
          * (The function we unwind to might be a leaf function that hasn't
          * backed up its own original Lr value on the stack.) */
-        const DWORD *orig_lr = (const DWORD *) dispatch->EstablisherFrame;
+        const DWORD *orig_lr = (const DWORD *) *frame;
         context->Lr = *orig_lr;
     }
 
-    TRACE( "next function pc=%08x%s\n", context->Pc, rc ? "" : " (last frame)" );
-    TRACE("  r0=%08x  r1=%08x  r2=%08x  r3=%08x\n",
+    TRACE( "next function pc=%08lx%s\n", context->Pc, rc ? "" : " (last frame)" );
+    TRACE("  r0=%08lx  r1=%08lx  r2=%08lx  r3=%08lx\n",
           context->R0, context->R1, context->R2, context->R3 );
-    TRACE("  r4=%08x  r5=%08x  r6=%08x  r7=%08x\n",
+    TRACE("  r4=%08lx  r5=%08lx  r6=%08lx  r7=%08lx\n",
           context->R4, context->R5, context->R6, context->R7 );
-    TRACE("  r8=%08x  r9=%08x r10=%08x r11=%08x\n",
+    TRACE("  r8=%08lx  r9=%08lx r10=%08lx r11=%08lx\n",
           context->R8, context->R9, context->R10, context->R11 );
-    TRACE(" r12=%08x  sp=%08x  lr=%08x  pc=%08x\n",
+    TRACE(" r12=%08lx  sp=%08lx  lr=%08lx  pc=%08lx\n",
           context->R12, context->Sp, context->Lr, context->Pc );
     return STATUS_SUCCESS;
+}
+#endif
+
+/***********************************************************************
+ *           unwind_builtin_dll
+ */
+NTSTATUS unwind_builtin_dll( void *args )
+{
+    struct unwind_builtin_dll_params *params = args;
+    DISPATCHER_CONTEXT *dispatch = params->dispatch;
+    CONTEXT *context = params->context;
+    DWORD ip = context->Pc - (dispatch->ControlPcIsUnwound ? 2 : 0);
+#ifdef linux
+    const struct exidx_entry *entry = find_exidx_entry( (void *)ip );
+
+    if (entry)
+        return ehabi_virtual_unwind( ip, &dispatch->EstablisherFrame, context, entry,
+                                     &dispatch->LanguageHandler, &dispatch->HandlerData );
+#endif
+#ifdef HAVE_LIBUNWIND
+    return libunwind_virtual_unwind( ip, &dispatch->EstablisherFrame, context,
+                                     &dispatch->LanguageHandler, &dispatch->HandlerData );
 #else
     ERR("libunwind not available, unable to unwind\n");
     return STATUS_INVALID_DISPOSITION;
@@ -357,6 +789,35 @@ static inline WORD get_error_code( const ucontext_t *sigcontext )
 #else
     return 0;
 #endif
+}
+
+
+/***********************************************************************
+ *           get_udf_immediate
+ *
+ * Get the immediate operand if the PC is at a UDF instruction.
+ */
+static inline int get_udf_immediate( const ucontext_t *sigcontext )
+{
+    if (CPSR_sig(sigcontext) & 0x20)
+    {
+        WORD thumb_insn = *(WORD *)PC_sig(sigcontext);
+        if ((thumb_insn >> 8) == 0xde) return thumb_insn & 0xff;
+        if ((thumb_insn & 0xfff0) == 0xf7f0)  /* udf.w */
+        {
+            WORD ext = *(WORD *)(PC_sig(sigcontext) + 2);
+            if ((ext & 0xf000) == 0xa000) return ((thumb_insn & 0xf) << 12) | (ext & 0x0fff);
+        }
+    }
+    else
+    {
+        DWORD arm_insn = *(DWORD *)PC_sig(sigcontext);
+        if ((arm_insn & 0xfff000f0) == 0xe7f000f0)
+        {
+            return ((arm_insn >> 4) & 0xfff0) | (arm_insn & 0xf);
+        }
+    }
+    return -1;
 }
 
 
@@ -564,6 +1025,11 @@ __ASM_GLOBAL_FUNC( raise_func_trampoline,
                    "push {r3}\n\t" /* Original Sp */
                    __ASM_CFI(".cfi_escape 0x0f,0x03,0x7D,0x04,0x06\n\t") /* CFA, DW_OP_breg13 + 0x04, DW_OP_deref */
                    __ASM_CFI(".cfi_escape 0x10,0x0e,0x02,0x7D,0x0c\n\t") /* LR, DW_OP_breg13 + 0x0c */
+                   __ASM_EHABI(".save {sp}\n\t")
+                   __ASM_EHABI(".pad #-12\n\t")
+                   __ASM_EHABI(".save {pc}\n\t")
+                   __ASM_EHABI(".pad #8\n\t")
+                   __ASM_EHABI(".save {lr}\n\t")
                    /* We can't express restoring both Pc and Lr with CFI
                     * directives, but we manually load Lr from the stack
                     * in unwind_builtin_dll above. */
@@ -685,53 +1151,88 @@ NTSTATUS call_user_exception_dispatcher( EXCEPTION_RECORD *rec, CONTEXT *context
 }
 
 
-struct user_callback_frame
-{
-    struct syscall_frame frame;
-    void               **ret_ptr;
-    ULONG               *ret_len;
-    __wine_jmp_buf       jmpbuf;
-    NTSTATUS             status;
-};
+/***********************************************************************
+ *           call_user_mode_callback
+ */
+extern NTSTATUS CDECL call_user_mode_callback( void *func, void *stack, void **ret_ptr,
+                                               ULONG *ret_len, TEB *teb );
+__ASM_GLOBAL_FUNC( call_user_mode_callback,
+                   "push {r2-r12,lr}\n\t"
+                   "ldr r4, [sp, #0x30]\n\t"  /* teb */
+                   "ldr r5, [r4]\n\t"         /* teb->Tib.ExceptionList */
+                   "str r5, [sp, #0x28]\n\t"
+#ifndef __SOFTFP__
+                   "sub sp, sp, #0x90\n\t"
+                   "mov r5, sp\n\t"
+                   "vmrs r6, fpscr\n\t"
+                   "vstm r5, {d8-d15}\n\t"
+                   "str r6, [r5, #0x80]\n\t"
+#endif
+                   "sub sp, sp, #0x160\n\t"   /* sizeof(struct syscall_frame) + registers */
+                   "ldr r5, [r4, #0x1d8]\n\t" /* arm_thread_data()->syscall_frame */
+                   "str r5, [sp, #0x4c]\n\t"  /* frame->prev_frame */
+                   "str sp, [r4, #0x1d8]\n\t" /* arm_thread_data()->syscall_frame */
+                   "ldr r6, [r5, #0x50]\n\t"  /* prev_frame->syscall_table */
+                   "str r6, [sp, #0x50]\n\t"  /* frame->syscall_table */
+                   "mov ip, r0\n\t"
+                   "mov sp, r1\n\t"
+                   "pop {r0-r3}\n\t"
+                   "bx ip" )
+
+
+/***********************************************************************
+ *           user_mode_callback_return
+ */
+extern void CDECL DECLSPEC_NORETURN user_mode_callback_return( void *ret_ptr, ULONG ret_len,
+                                                               NTSTATUS status, TEB *teb );
+__ASM_GLOBAL_FUNC( user_mode_callback_return,
+                   "ldr r4, [r3, #0x1d8]\n\t" /* arm_thread_data()->syscall_frame */
+                   "ldr r5, [r4, #0x4c]\n\t"  /* frame->prev_frame */
+                   "str r5, [r3, #0x1d8]\n\t" /* arm_thread_data()->syscall_frame */
+                   "add r5, r4, #0x160\n\t"
+#ifndef __SOFTFP__
+                   "vldm r5, {d8-d15}\n\t"
+                   "ldr r6, [r5, #0x80]\n\t"
+                   "vmsr fpscr, r6\n\t"
+                   "add r5, r5, #0x90\n\t"
+#endif
+                   "mov sp, r5\n\t"
+                   "ldr r5, [sp, #0x28]\n\t"
+                   "str r5, [r3]\n\t"         /* teb->Tib.ExceptionList */
+                   "pop {r5, r6}\n\t"         /* ret_ptr, ret_len */
+                   "str r0, [r5]\n\t"         /* ret_ptr */
+                   "str r1, [r6]\n\t"         /* ret_len */
+                   "mov r0, r2\n\t"           /* status */
+                   "pop {r4-r12,pc}" )
+
 
 /***********************************************************************
  *           KeUserModeCallback
  */
 NTSTATUS WINAPI KeUserModeCallback( ULONG id, const void *args, ULONG len, void **ret_ptr, ULONG *ret_len )
 {
-    struct user_callback_frame callback_frame = { { 0 }, ret_ptr, ret_len };
+    struct syscall_frame *frame = arm_thread_data()->syscall_frame;
+    void *args_data = (void *)((frame->sp - len) & ~15);
+    ULONG_PTR *stack = args_data;
 
     /* if we have no syscall frame, call the callback directly */
-    if ((char *)&callback_frame < (char *)ntdll_get_thread_data()->kernel_stack ||
-        (char *)&callback_frame > (char *)arm_thread_data()->syscall_frame)
+    if ((char *)&frame < (char *)ntdll_get_thread_data()->kernel_stack ||
+        (char *)&frame > (char *)arm_thread_data()->syscall_frame)
     {
         NTSTATUS (WINAPI *func)(const void *, ULONG) = ((void **)NtCurrentTeb()->Peb->KernelCallbackTable)[id];
         return func( args, len );
     }
 
-    if ((char *)ntdll_get_thread_data()->kernel_stack + min_kernel_stack > (char *)&callback_frame)
+    if ((char *)ntdll_get_thread_data()->kernel_stack + min_kernel_stack > (char *)&frame)
         return STATUS_STACK_OVERFLOW;
 
-    if (!__wine_setjmpex( &callback_frame.jmpbuf, NULL ))
-    {
-        struct syscall_frame *frame = arm_thread_data()->syscall_frame;
-        void *args_data = (void *)((frame->sp - len) & ~15);
+    memcpy( args_data, args, len );
+    *(--stack) = 0;
+    *(--stack) = len;
+    *(--stack) = (ULONG_PTR)args_data;
+    *(--stack) = id;
 
-        memcpy( args_data, args, len );
-
-        callback_frame.frame.r0            = id;
-        callback_frame.frame.r1            = (ULONG_PTR)args;
-        callback_frame.frame.r2            = len;
-        callback_frame.frame.sp            = (ULONG_PTR)args_data;
-        callback_frame.frame.pc            = (ULONG_PTR)pKiUserCallbackDispatcher;
-        callback_frame.frame.restore_flags = CONTEXT_INTEGER;
-        callback_frame.frame.syscall_table = frame->syscall_table;
-        callback_frame.frame.prev_frame    = frame;
-        arm_thread_data()->syscall_frame = &callback_frame.frame;
-
-        __wine_syscall_dispatcher_return( &callback_frame.frame, 0 );
-    }
-    return callback_frame.status;
+    return call_user_mode_callback( pKiUserCallbackDispatcher, stack, ret_ptr, ret_len, NtCurrentTeb() );
 }
 
 
@@ -740,15 +1241,8 @@ NTSTATUS WINAPI KeUserModeCallback( ULONG id, const void *args, ULONG len, void 
  */
 NTSTATUS WINAPI NtCallbackReturn( void *ret_ptr, ULONG ret_len, NTSTATUS status )
 {
-    struct user_callback_frame *frame = (struct user_callback_frame *)arm_thread_data()->syscall_frame;
-
-    if (!frame->frame.prev_frame) return STATUS_NO_CALLBACK_ACTIVE;
-
-    *frame->ret_ptr = ret_ptr;
-    *frame->ret_len = ret_len;
-    frame->status = status;
-    arm_thread_data()->syscall_frame = frame->frame.prev_frame;
-    __wine_longjmp( &frame->jmpbuf, 1 );
+    if (!arm_thread_data()->syscall_frame->prev_frame) return STATUS_NO_CALLBACK_ACTIVE;
+    user_mode_callback_return( ret_ptr, ret_len, status, NtCurrentTeb() );
 }
 
 
@@ -760,23 +1254,22 @@ NTSTATUS WINAPI NtCallbackReturn( void *ret_ptr, ULONG ret_len, NTSTATUS status 
 static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
 {
     struct syscall_frame *frame = arm_thread_data()->syscall_frame;
-    DWORD i;
+    UINT i;
 
     if (!is_inside_syscall( context ) && !ntdll_get_thread_data()->jmp_buf) return FALSE;
 
-    TRACE( "code=%x flags=%x addr=%p pc=%08x tid=%04x\n",
-           rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
-           (DWORD)PC_sig(context), GetCurrentThreadId() );
+    TRACE( "code=%lx flags=%lx addr=%p pc=%08lx\n",
+           rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress, (DWORD)PC_sig(context) );
     for (i = 0; i < rec->NumberParameters; i++)
         TRACE( " info[%d]=%08lx\n", i, rec->ExceptionInformation[i] );
 
-    TRACE( " r0=%08x r1=%08x r2=%08x r3=%08x r4=%08x r5=%08x\n",
+    TRACE( " r0=%08lx r1=%08lx r2=%08lx r3=%08lx r4=%08lx r5=%08lx\n",
            (DWORD)REGn_sig(0, context), (DWORD)REGn_sig(1, context), (DWORD)REGn_sig(2, context),
            (DWORD)REGn_sig(3, context), (DWORD)REGn_sig(4, context), (DWORD)REGn_sig(5, context) );
-    TRACE( " r6=%08x r7=%08x r8=%08x r9=%08x r10=%08x r11=%08x\n",
+    TRACE( " r6=%08lx r7=%08lx r8=%08lx r9=%08lx r10=%08lx r11=%08lx\n",
            (DWORD)REGn_sig(6, context), (DWORD)REGn_sig(7, context), (DWORD)REGn_sig(8, context),
            (DWORD)REGn_sig(9, context), (DWORD)REGn_sig(10, context), (DWORD)FP_sig(context) );
-    TRACE( " r12=%08x sp=%08x lr=%08x pc=%08x cpsr=%08x\n",
+    TRACE( " r12=%08lx sp=%08lx lr=%08lx pc=%08lx cpsr=%08lx\n",
            (DWORD)IP_sig(context), (DWORD)SP_sig(context), (DWORD)LR_sig(context),
            (DWORD)PC_sig(context), (DWORD)CPSR_sig(context) );
 
@@ -790,7 +1283,7 @@ static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
     }
     else
     {
-        TRACE( "returning to user mode ip=%08x ret=%08x\n", frame->pc, rec->ExceptionCode );
+        TRACE( "returning to user mode ip=%08x ret=%08lx\n", frame->pc, rec->ExceptionCode );
         REGn_sig(0, context) = (DWORD)frame;
         REGn_sig(1, context) = rec->ExceptionCode;
         PC_sig(context)      = (DWORD)__wine_syscall_dispatcher_return;
@@ -812,13 +1305,28 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     switch (get_trap_code(signal, context))
     {
     case TRAP_ARM_PRIVINFLT:   /* Invalid opcode exception */
-        if (*(WORD *)PC_sig(context) == 0xdefe)  /* breakpoint */
+        switch (get_udf_immediate( context ))
         {
+        case 0xfb:  /* __fastfail */
+        {
+            CONTEXT ctx;
+            save_context( &ctx, sigcontext );
+            rec.ExceptionCode = STATUS_STACK_BUFFER_OVERRUN;
+            rec.ExceptionAddress = (void *)ctx.Pc;
+            rec.ExceptionFlags = EH_NONCONTINUABLE;
+            rec.NumberParameters = 1;
+            rec.ExceptionInformation[0] = ctx.R0;
+            NtRaiseException( &rec, &ctx, FALSE );
+            return;
+        }
+        case 0xfe:  /* breakpoint */
             rec.ExceptionCode = EXCEPTION_BREAKPOINT;
             rec.NumberParameters = 1;
             break;
+        default:
+            rec.ExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;
+            break;
         }
-        rec.ExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;
         break;
     case TRAP_ARM_PAGEFLT:  /* Page fault */
         rec.NumberParameters = 2;
@@ -1039,15 +1547,6 @@ void signal_free_thread( TEB *teb )
 
 
 /**********************************************************************
- *		signal_init_thread
- */
-void signal_init_thread( TEB *teb )
-{
-    __asm__ __volatile__( "mcr p15, 0, %0, c13, c0, 2" : : "r" (teb) );
-}
-
-
-/**********************************************************************
  *		signal_init_process
  */
 void signal_init_process(void)
@@ -1093,6 +1592,8 @@ void DECLSPEC_HIDDEN call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, B
     struct syscall_frame *frame = thread_data->syscall_frame;
     CONTEXT *ctx, context = { CONTEXT_ALL };
 
+    __asm__ __volatile__( "mcr p15, 0, %0, c13, c0, 2" : : "r" (teb) );
+
     context.R0 = (DWORD)entry;
     context.R1 = (DWORD)arg;
     context.Sp = (DWORD)teb->Tib.StackBase;
@@ -1124,6 +1625,7 @@ void DECLSPEC_HIDDEN call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, B
  *           signal_start_thread
  */
 __ASM_GLOBAL_FUNC( signal_start_thread,
+                   __ASM_EHABI(".cantunwind\n\t")
                    "push {r4-r12,lr}\n\t"
                    /* store exit frame */
                    "str sp, [r3, #0x1d4]\n\t" /* arm_thread_data()->exit_frame */
@@ -1140,6 +1642,7 @@ __ASM_GLOBAL_FUNC( signal_start_thread,
  *           signal_exit_thread
  */
 __ASM_GLOBAL_FUNC( signal_exit_thread,
+                   __ASM_EHABI(".cantunwind\n\t")
                    "ldr r3, [r2, #0x1d4]\n\t"  /* arm_thread_data()->exit_frame */
                    "mov ip, #0\n\t"
                    "str ip, [r2, #0x1d4]\n\t"
@@ -1153,6 +1656,7 @@ __ASM_GLOBAL_FUNC( signal_exit_thread,
  *           __wine_syscall_dispatcher
  */
 __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
+                   __ASM_EHABI(".cantunwind\n\t")
                    "mrc p15, 0, r1, c13, c0, 2\n\t" /* NtCurrentTeb() */
                    "ldr r1, [r1, #0x1d8]\n\t"       /* arm_thread_data()->syscall_frame */
                    "add r0, r1, #0x10\n\t"
@@ -1197,7 +1701,8 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "ldr r5, [r4]\n\t"               /* table->ServiceTable */
                    "ldr ip, [r5, ip, lsl #2]\n\t"
                    "blx ip\n"
-                   "4:\tldr ip, [r8, #0x44]\n\t"    /* frame->restore_flags */
+                   __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") ":\n\t"
+                   "ldr ip, [r8, #0x44]\n\t"    /* frame->restore_flags */
 #ifndef __SOFTFP__
                    "tst ip, #4\n\t"                 /* CONTEXT_FLOATING_POINT */
                    "beq 3f\n\t"
@@ -1217,18 +1722,54 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "5:\tmovw r0, #0x000d\n\t" /* STATUS_INVALID_PARAMETER */
                    "movt r0, #0xc000\n\t"
                    "add sp, sp, #0x10\n\t"
-                   "b 4b\n\t"
+                   "b " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") "\n\t"
                    ".globl " __ASM_NAME("__wine_syscall_dispatcher_return") "\n"
                    __ASM_NAME("__wine_syscall_dispatcher_return") ":\n\t"
                    "mov r8, r0\n\t"
                    "mov r0, r1\n\t"
-                   "b 4b" )
+                   "b " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") )
+
+
+/***********************************************************************
+ *           __wine_unix_call_dispatcher
+ */
+__ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
+                   __ASM_EHABI(".cantunwind\n\t")
+                   "mrc p15, 0, r1, c13, c0, 2\n\t" /* NtCurrentTeb() */
+                   "ldr r1, [r1, #0x1d8]\n\t"       /* arm_thread_data()->syscall_frame */
+                   "add ip, r1, #0x10\n\t"
+                   "stm ip, {r4-r12,lr}\n\t"
+                   "str sp, [r1, #0x38]\n\t"
+                   "str lr, [r1, #0x3c]\n\t"
+                   "mrs r4, CPSR\n\t"
+                   "bfi r4, lr, #5, #1\n\t"         /* set thumb bit */
+                   "str r4, [r1, #0x40]\n\t"
+                   "mov r4, #0\n\t"
+                   "str r4, [r1, #0x44]\n\t"        /* frame->restore_flags */
+#ifndef __SOFTFP__
+                   "vmrs r4, fpscr\n\t"
+                   "str r4, [r1, #0x48]\n\t"
+                   "add r4, r1, #0x60\n\t"
+                   "vstm r4, {d0-d15}\n\t"
+#endif
+                   "ldr ip, [r0, r2, lsl #2]\n\t"
+                   "mov sp, r1\n\t"
+                   "mov r0, r3\n\t"                 /* args */
+                   "blx ip\n"
+                   "mov r8, sp\n\t"
+                   "ldr r1, [r8, #0x44]\n\t"        /* frame->restore_flags */
+                   "cbnz r1, 1f\n\t"
+                   "ldr sp, [r8, #0x38]\n\t"
+                   "add r8, r8, #0x10\n\t"
+                   "ldm r8, {r4-r12,pc}\n\t"
+                   "1:\tb " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") )
 
 
 /***********************************************************************
  *           __wine_setjmpex
  */
 __ASM_GLOBAL_FUNC( __wine_setjmpex,
+                   __ASM_EHABI(".cantunwind\n\t")
                    "stm r0, {r1,r4-r11}\n"         /* jmp_buf->Frame,R4..R11 */
                    "str sp, [r0, #0x24]\n\t"       /* jmp_buf->Sp */
                    "str lr, [r0, #0x28]\n\t"       /* jmp_buf->Pc */
@@ -1246,6 +1787,7 @@ __ASM_GLOBAL_FUNC( __wine_setjmpex,
  *           __wine_longjmp
  */
 __ASM_GLOBAL_FUNC( __wine_longjmp,
+                   __ASM_EHABI(".cantunwind\n\t")
                    "ldm r0, {r3-r11}\n\t"          /* jmp_buf->Frame,R4..R11 */
                    "ldr sp, [r0, #0x24]\n\t"       /* jmp_buf->Sp */
                    "ldr r2, [r0, #0x28]\n\t"       /* jmp_buf->Pc */

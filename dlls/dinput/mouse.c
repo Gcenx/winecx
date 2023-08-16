@@ -91,20 +91,36 @@ HRESULT mouse_enum_device( DWORD type, DWORD flags, DIDEVICEINSTANCEW *instance,
     return DI_OK;
 }
 
+static BOOL CALLBACK init_object_properties( const DIDEVICEOBJECTINSTANCEW *instance, void *data )
+{
+    struct mouse *impl = (struct mouse *)data;
+    struct object_properties *properties = impl->base.object_properties + instance->dwOfs / sizeof(LONG);
+
+    properties->range_min = DIPROPRANGE_NOMIN;
+    properties->range_max = DIPROPRANGE_NOMAX;
+
+    /* The z-axis (wheel) has a different granularity */
+    if (instance->dwOfs == DIMOFS_Z)
+        properties->granularity = WHEEL_DELTA;
+    else
+        properties->granularity = 1;
+
+    return DIENUM_CONTINUE;
+}
+
 HRESULT mouse_create_device( struct dinput *dinput, const GUID *guid, IDirectInputDevice8W **out )
 {
     struct mouse *impl;
     HKEY hkey, appkey;
     WCHAR buffer[20];
-    HRESULT hr;
 
     TRACE( "dinput %p, guid %s, out %p\n", dinput, debugstr_guid( guid ), out );
 
     *out = NULL;
     if (!IsEqualGUID( &GUID_SysMouse, guid )) return DIERR_DEVICENOTREG;
 
-    if (FAILED(hr = dinput_device_alloc( sizeof(struct mouse), &mouse_vtbl, guid, dinput, (void **)&impl )))
-        return hr;
+    if (!(impl = calloc( 1, sizeof(*impl) ))) return E_OUTOFMEMORY;
+    dinput_device_init( &impl->base, &mouse_vtbl, guid, dinput );
     impl->base.crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": struct mouse*->base.crit");
 
     mouse_enum_device( 0, 0, &impl->base.instance, dinput->dwVersion );
@@ -112,6 +128,15 @@ HRESULT mouse_create_device( struct dinput *dinput, const GUID *guid, IDirectInp
     impl->base.caps.dwFirmwareRevision = 100;
     impl->base.caps.dwHardwareRevision = 100;
     impl->base.dwCoopLevel = DISCL_NONEXCLUSIVE | DISCL_BACKGROUND;
+
+    /* One object_properties per axis */
+    impl->base.object_properties = calloc( 3, sizeof(struct object_properties) );
+    if (!impl->base.object_properties)
+    {
+        IDirectInputDevice_Release( &impl->base.IDirectInputDevice8W_iface );
+        return E_OUTOFMEMORY;
+    }
+    IDirectInputDevice8_EnumObjects( &impl->base.IDirectInputDevice8W_iface, init_object_properties, impl, DIDFT_RELAXIS );
 
     get_app_key(&hkey, &appkey);
     if (!get_config_key( hkey, appkey, L"MouseWarpOverride", buffer, sizeof(buffer) ))
@@ -121,12 +146,6 @@ HRESULT mouse_create_device( struct dinput *dinput, const GUID *guid, IDirectInp
     }
     if (appkey) RegCloseKey(appkey);
     if (hkey) RegCloseKey(hkey);
-
-    if (FAILED(hr = dinput_device_init( &impl->base.IDirectInputDevice8W_iface )))
-    {
-        IDirectInputDevice_Release( &impl->base.IDirectInputDevice8W_iface );
-        return hr;
-    }
 
     if (dinput->dwVersion >= 0x0800)
     {
@@ -179,7 +198,7 @@ void dinput_mouse_rawinput_hook( IDirectInputDevice8W *iface, WPARAM wparam, LPA
     state->lX += rel.x;
     state->lY += rel.y;
 
-    if (impl->base.user_format->dwFlags & DIDF_ABSAXIS)
+    if (impl->base.user_format.dwFlags & DIDF_ABSAXIS)
     {
         pt.x = state->lX;
         pt.y = state->lY;
@@ -259,7 +278,7 @@ int dinput_mouse_hook( IDirectInputDevice8W *iface, WPARAM wparam, LPARAM lparam
             state->lX += pt.x = hook->pt.x - pt.x;
             state->lY += pt.y = hook->pt.y - pt.y;
 
-            if (impl->base.user_format->dwFlags & DIDF_ABSAXIS)
+            if (impl->base.user_format.dwFlags & DIDF_ABSAXIS)
             {
                 pt1.x = state->lX;
                 pt1.y = state->lY;
@@ -399,7 +418,7 @@ static HRESULT mouse_acquire( IDirectInputDevice8W *iface )
 
     /* Init the mouse state */
     GetCursorPos( &point );
-    if (impl->base.user_format->dwFlags & DIDF_ABSAXIS)
+    if (impl->base.user_format.dwFlags & DIDF_ABSAXIS)
     {
         state->lX = point.x;
         state->lY = point.y;

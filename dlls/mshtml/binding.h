@@ -51,6 +51,7 @@ typedef struct {
     nsIURI *referrer;
     char *content_type;
     char *charset;
+    nsresult status;
     UINT32 response_status;
     char *response_status_text;
     REQUEST_METHOD request_method;
@@ -103,6 +104,8 @@ struct nsChannelBSC {
     nsChannel *nschannel;
     nsIStreamListener *nslistener;
     nsISupports *nscontext;
+    ULONG progress;
+    ULONG total;
     BOOL is_js;
     BOOL is_doc_channel;
     BOOL response_processed;
@@ -116,7 +119,7 @@ struct BSCallbackVtbl {
     HRESULT (*start_binding)(BSCallback*);
     HRESULT (*stop_binding)(BSCallback*,HRESULT);
     HRESULT (*read_data)(BSCallback*,IStream*);
-    HRESULT (*on_progress)(BSCallback*,ULONG,LPCWSTR);
+    HRESULT (*on_progress)(BSCallback*,ULONG,ULONG,ULONG,LPCWSTR);
     HRESULT (*on_response)(BSCallback*,DWORD,LPCWSTR);
     HRESULT (*beginning_transaction)(BSCallback*,WCHAR**);
 };
@@ -137,11 +140,11 @@ typedef struct {
 HRESULT set_http_header(struct list*,const WCHAR*,int,const WCHAR*,int) DECLSPEC_HIDDEN;
 HRESULT create_redirect_nschannel(const WCHAR*,nsChannel*,nsChannel**) DECLSPEC_HIDDEN;
 
-HRESULT hlink_frame_navigate(HTMLDocument*,LPCWSTR,nsChannel*,DWORD,BOOL*) DECLSPEC_HIDDEN;
+HRESULT hlink_frame_navigate(HTMLDocumentObj*,LPCWSTR,nsChannel*,DWORD,BOOL*) DECLSPEC_HIDDEN;
 HRESULT create_doc_uri(IUri*,nsWineURI**) DECLSPEC_HIDDEN;
 HRESULT load_nsuri(HTMLOuterWindow*,nsWineURI*,nsIInputStream*,nsChannelBSC*,DWORD) DECLSPEC_HIDDEN;
 HRESULT set_moniker(HTMLOuterWindow*,IMoniker*,IUri*,IBindCtx*,nsChannelBSC*,BOOL) DECLSPEC_HIDDEN;
-void prepare_for_binding(HTMLDocument*,IMoniker*,DWORD) DECLSPEC_HIDDEN;
+void prepare_for_binding(HTMLDocumentObj*,IMoniker*,DWORD) DECLSPEC_HIDDEN;
 HRESULT super_navigate(HTMLOuterWindow*,IUri*,DWORD,const WCHAR*,BYTE*,DWORD) DECLSPEC_HIDDEN;
 HRESULT load_uri(HTMLOuterWindow*,IUri*,DWORD) DECLSPEC_HIDDEN;
 HRESULT navigate_new_window(HTMLOuterWindow*,IUri*,const WCHAR*,request_data_t*,IHTMLWindow2**) DECLSPEC_HIDDEN;
@@ -161,6 +164,7 @@ HRESULT read_stream(BSCallback*,IStream*,void*,DWORD,DWORD*) DECLSPEC_HIDDEN;
 HRESULT create_relative_uri(HTMLOuterWindow*,const WCHAR*,IUri**) DECLSPEC_HIDDEN;
 HRESULT create_uri(const WCHAR*,DWORD,IUri**) DECLSPEC_HIDDEN;
 IUri *get_uri_nofrag(IUri*) DECLSPEC_HIDDEN;
+BOOL compare_uri_ignoring_frag(IUri *uri1, IUri *uri2) DECLSPEC_HIDDEN;
 
 void set_current_mon(HTMLOuterWindow*,IMoniker*,DWORD) DECLSPEC_HIDDEN;
 void set_current_uri(HTMLOuterWindow*,IUri*) DECLSPEC_HIDDEN;

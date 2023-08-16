@@ -19,8 +19,6 @@
 #ifndef __WINE_SOFTPUB_H
 #define __WINE_SOFTPUB_H
 
-#include "wine/winheader_enter.h"
-
 #include <wintrust.h>
 
 #define WINTRUST_ACTION_GENERIC_CERT_VERIFY \
@@ -197,7 +195,5 @@ typedef struct DRIVER_VER_INFO_
     DWORD                 dwBuildNumberLow;
     DWORD                 dwBuildNumberHigh;
 } DRIVER_VER_INFO, *PDRIVER_VER_INFO;
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_SOFTPUB_H */

@@ -88,7 +88,7 @@ struct tex_op_args
     GLenum component_usage[3];
 };
 
-static GLenum d3dta_to_combiner_input(DWORD d3dta, DWORD stage, INT texture_idx) {
+static GLenum d3dta_to_combiner_input(unsigned int d3dta, DWORD stage, INT texture_idx) {
     switch (d3dta) {
         case WINED3DTA_DIFFUSE:
             return GL_PRIMARY_COLOR_NV;
@@ -144,7 +144,7 @@ static void get_src_and_opr_nvrc(DWORD stage, DWORD arg, BOOL is_alpha, GLenum* 
 }
 
 void set_tex_op_nvrc(const struct wined3d_gl_info *gl_info, const struct wined3d_state *state, BOOL is_alpha,
-        int stage, enum wined3d_texture_op op, DWORD arg1, DWORD arg2, DWORD arg3, INT texture_idx, DWORD dst)
+        int stage, enum wined3d_texture_op op, uint32_t arg1, uint32_t arg2, uint32_t arg3, INT texture_idx, DWORD dst)
 {
     struct tex_op_args tex_op_args = {{0}, {0}, {0}};
     GLenum portion = is_alpha ? GL_ALPHA : GL_RGB;
@@ -480,7 +480,7 @@ void set_tex_op_nvrc(const struct wined3d_gl_info *gl_info, const struct wined3d
 
 static void nvrc_colorop(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
-    DWORD stage = (state_id - STATE_TEXTURESTAGE(0, 0)) / (WINED3D_HIGHEST_TEXTURE_STATE + 1);
+    unsigned int stage = (state_id - STATE_TEXTURESTAGE(0, 0)) / (WINED3D_HIGHEST_TEXTURE_STATE + 1);
     struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
     BOOL tex_used = context->fixed_function_usage_map & (1u << stage);
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
@@ -583,7 +583,7 @@ static void nvrc_colorop(struct wined3d_context *context, const struct wined3d_s
 
 static void nvrc_resultarg(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
-    DWORD stage = (state_id - STATE_TEXTURESTAGE(0, 0)) / (WINED3D_HIGHEST_TEXTURE_STATE + 1);
+    unsigned int stage = (state_id - STATE_TEXTURESTAGE(0, 0)) / (WINED3D_HIGHEST_TEXTURE_STATE + 1);
 
     TRACE("Setting result arg for stage %u.\n", stage);
 
@@ -750,7 +750,7 @@ static void nvrc_fragment_get_caps(const struct wined3d_adapter *adapter, struct
     caps->MaxSimultaneousTextures = gl_info->limits.textures;
 }
 
-static DWORD nvrc_fragment_get_emul_mask(const struct wined3d_gl_info *gl_info)
+static unsigned int nvrc_fragment_get_emul_mask(const struct wined3d_gl_info *gl_info)
 {
     return GL_EXT_EMUL_ARB_MULTITEXTURE | GL_EXT_EMUL_EXT_FOG_COORD;
 }

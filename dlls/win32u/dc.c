@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include <assert.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -75,7 +79,7 @@ static inline DC *get_dc_obj( HDC hdc )
         return dc;
     default:
         GDI_ReleaseObj( hdc );
-        SetLastError( ERROR_INVALID_HANDLE );
+        RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
         return NULL;
     }
 }
@@ -108,8 +112,8 @@ static DC_ATTR *alloc_dc_attr(void)
     {
         SIZE_T size = system_info.AllocationGranularity;
         bucket->entries = NULL;
-        if (!NtAllocateVirtualMemory( GetCurrentProcess(), (void **)&bucket->entries, 0, &size,
-                                      MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE ))
+        if (!NtAllocateVirtualMemory( GetCurrentProcess(), (void **)&bucket->entries, zero_bits,
+                                      &size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE ))
         {
             bucket->next_free = NULL;
             bucket->next_unused = bucket->entries + 1;
@@ -213,10 +217,10 @@ DC *alloc_dc_ptr( DWORD magic )
     dc->physDev             = &dc->nulldrv;
     dc->thread              = GetCurrentThreadId();
     dc->refcount            = 1;
-    dc->hPen                = GDI_inc_ref_count( get_stock_object( BLACK_PEN ));
-    dc->hBrush              = GDI_inc_ref_count( get_stock_object( WHITE_BRUSH ));
-    dc->hFont               = GDI_inc_ref_count( get_stock_object( SYSTEM_FONT ));
-    dc->hPalette            = get_stock_object( DEFAULT_PALETTE );
+    dc->hPen                = GDI_inc_ref_count( GetStockObject( BLACK_PEN ));
+    dc->hBrush              = GDI_inc_ref_count( GetStockObject( WHITE_BRUSH ));
+    dc->hFont               = GDI_inc_ref_count( GetStockObject( SYSTEM_FONT ));
+    dc->hPalette            = GetStockObject( DEFAULT_PALETTE );
 
     set_initial_dc_state( dc );
 
@@ -226,7 +230,8 @@ DC *alloc_dc_ptr( DWORD magic )
         free( dc );
         return NULL;
     }
-    dc->attr->hdc = dc->nulldrv.hdc = dc->hSelf;
+    dc->nulldrv.hdc = dc->hSelf;
+    dc->attr->hdc = HandleToUlong( dc->hSelf );
     set_gdi_client_ptr( dc->hSelf, dc->attr );
 
     if (!font_driver.pCreateDC( &dc->physDev, NULL, NULL, NULL ))
@@ -467,11 +472,11 @@ static BOOL reset_dc_state( HDC hdc )
     set_initial_dc_state( dc );
     set_bk_color( dc, RGB( 255, 255, 255 ));
     set_text_color( dc, RGB( 0, 0, 0 ));
-    NtGdiSelectBrush( hdc, get_stock_object( WHITE_BRUSH ));
-    NtGdiSelectFont( hdc, get_stock_object( SYSTEM_FONT ));
-    NtGdiSelectPen( hdc, get_stock_object( BLACK_PEN ));
+    NtGdiSelectBrush( hdc, GetStockObject( WHITE_BRUSH ));
+    NtGdiSelectFont( hdc, GetStockObject( SYSTEM_FONT ));
+    NtGdiSelectPen( hdc, GetStockObject( BLACK_PEN ));
     NtGdiSetVirtualResolution( hdc, 0, 0, 0, 0 );
-    NtUserSelectPalette( hdc, get_stock_object( DEFAULT_PALETTE ), FALSE );
+    NtUserSelectPalette( hdc, GetStockObject( DEFAULT_PALETTE ), FALSE );
     NtGdiSetBoundsRect( hdc, NULL, DCB_DISABLE );
     NtGdiAbortPath( hdc );
 
@@ -505,7 +510,7 @@ static BOOL DC_DeleteObject( HGDIOBJ handle )
     if (!(dc = get_dc_ptr( handle ))) return FALSE;
     if (dc->refcount != 1)
     {
-        FIXME( "not deleting busy DC %p refcount %u\n", dc->hSelf, dc->refcount );
+        FIXME( "not deleting busy DC %p refcount %u\n", dc->hSelf, (int)dc->refcount );
         release_dc_ptr( dc );
         return FALSE;
     }
@@ -538,7 +543,7 @@ INT WINAPI NtGdiSaveDC( HDC hdc )
         release_dc_ptr( dc );
         return 0;
     }
-    if (!(newdc->attr = calloc( 1, sizeof(*newdc->attr) )))
+    if (!(newdc->attr = alloc_dc_attr() ))
     {
         free( newdc );
         release_dc_ptr( dc );
@@ -712,11 +717,10 @@ HDC WINAPI NtGdiOpenDCW( UNICODE_STRING *device, const DEVMODEW *devmode, UNICOD
     /* gdi_lock should not be locked */
     if (is_display)
         funcs = get_display_driver();
-    else if (hspool)
-    {
-        const struct gdi_dc_funcs * (CDECL *wine_get_gdi_driver)( unsigned int ) = hspool;
-        funcs = wine_get_gdi_driver( WINE_GDI_DRIVER_VERSION );
-    }
+    else if (type != WINE_GDI_DRIVER_VERSION)
+        ERR( "version mismatch: %u\n", (unsigned int)type );
+    else
+        funcs = hspool;
     if (!funcs)
     {
         ERR( "no driver found\n" );
@@ -729,7 +733,7 @@ HDC WINAPI NtGdiOpenDCW( UNICODE_STRING *device, const DEVMODEW *devmode, UNICOD
     if (is_display)
         dc->hBitmap = NtGdiCreateClientObj( NTGDI_OBJ_SURF );
     else
-        dc->hBitmap = GDI_inc_ref_count( get_stock_object( DEFAULT_BITMAP ));
+        dc->hBitmap = GDI_inc_ref_count( GetStockObject( DEFAULT_BITMAP ));
 
     TRACE("(device=%s, output=%s): returning %p\n",
           debugstr_us(device), debugstr_us(output), dc->hSelf );
@@ -796,7 +800,7 @@ HDC WINAPI NtGdiCreateCompatibleDC( HDC hdc )
 
     TRACE("(%p): returning %p\n", hdc, dc->hSelf );
 
-    dc->hBitmap = GDI_inc_ref_count( get_stock_object( DEFAULT_BITMAP ));
+    dc->hBitmap = GDI_inc_ref_count( GetStockObject( DEFAULT_BITMAP ));
     dc->attr->vis_rect.left   = 0;
     dc->attr->vis_rect.top    = 0;
     dc->attr->vis_rect.right  = 1;
@@ -928,6 +932,11 @@ BOOL WINAPI NtGdiGetAndSetDCDword( HDC hdc, UINT method, DWORD value, DWORD *pre
         set_bk_color( dc, value );
         break;
 
+    case NtGdiSetBkMode:
+        prev = dc->attr->background_mode;
+        dc->attr->background_mode = value;
+        break;
+
     case NtGdiSetTextColor:
         prev = dc->attr->text_color;
         set_text_color( dc, value );
@@ -950,6 +959,16 @@ BOOL WINAPI NtGdiGetAndSetDCDword( HDC hdc, UINT method, DWORD value, DWORD *pre
     case NtGdiSetGraphicsMode:
         prev = dc->attr->graphics_mode;
         ret = set_graphics_mode( dc, value );
+        break;
+
+    case NtGdiSetROP2:
+        prev = dc->attr->rop_mode;
+        dc->attr->rop_mode = value;
+        break;
+
+    case NtGdiSetTextAlign:
+        prev = dc->attr->text_align;
+        dc->attr->text_align = value;
         break;
 
     default:
@@ -1084,6 +1103,19 @@ BOOL WINAPI NtGdiSetBrushOrg( HDC hdc, INT x, INT y, POINT *oldorg )
 }
 
 
+BOOL set_viewport_org( HDC hdc, INT x, INT y, POINT *point )
+{
+    DC *dc;
+
+    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
+    if (point) *point = dc->attr->vport_org;
+    dc->attr->vport_org.x = x;
+    dc->attr->vport_org.y = y;
+    release_dc_ptr( dc );
+    return NtGdiComputeXformCoefficients( hdc );
+}
+
+
 /***********************************************************************
  *           NtGdiGetTransform    (win32u.@)
  *
@@ -1126,7 +1158,7 @@ BOOL WINAPI NtGdiGetTransform( HDC hdc, DWORD which, XFORM *xform )
         break;
 
     default:
-        FIXME("Unknown code %x\n", which);
+        FIXME("Unknown code %x\n", (int)which);
         ret = FALSE;
     }
 
@@ -1213,7 +1245,7 @@ BOOL WINAPI NtGdiGetDeviceGammaRamp( HDC hdc, void *ptr )
             PHYSDEV physdev = GET_DC_PHYSDEV( dc, pGetDeviceGammaRamp );
             ret = physdev->funcs->pGetDeviceGammaRamp( physdev, ptr );
         }
-        else SetLastError( ERROR_INVALID_PARAMETER );
+        else RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
 	release_dc_ptr( dc );
     }
     return ret;
@@ -1315,7 +1347,7 @@ BOOL WINAPI NtGdiSetDeviceGammaRamp( HDC hdc, void *ptr )
             if (check_gamma_ramps(ptr))
                 ret = physdev->funcs->pSetDeviceGammaRamp( physdev, ptr );
         }
-        else SetLastError( ERROR_INVALID_PARAMETER );
+        else RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
 	release_dc_ptr( dc );
     }
     return ret;
@@ -1418,7 +1450,7 @@ UINT WINAPI NtGdiSetBoundsRect( HDC hdc, const RECT *rect, UINT flags )
  */
 DWORD WINAPI NtGdiSetLayout( HDC hdc, LONG wox, DWORD layout )
 {
-    DWORD old_layout = GDI_ERROR;
+    UINT old_layout = GDI_ERROR;
     DC *dc;
 
     if ((dc = get_dc_ptr( hdc )))
@@ -1433,7 +1465,7 @@ DWORD WINAPI NtGdiSetLayout( HDC hdc, LONG wox, DWORD layout )
         release_dc_ptr( dc );
     }
 
-    TRACE("hdc : %p, old layout : %08x, new layout : %08x\n", hdc, old_layout, layout);
+    TRACE("hdc : %p, old layout : %08x, new layout : %08x\n", hdc, old_layout, (int)layout);
 
     return old_layout;
 }
@@ -1441,7 +1473,7 @@ DWORD WINAPI NtGdiSetLayout( HDC hdc, LONG wox, DWORD layout )
 /**********************************************************************
  *           __wine_get_icm_profile     (win32u.@)
  */
-BOOL CDECL __wine_get_icm_profile( HDC hdc, BOOL allow_default, DWORD *size, WCHAR *filename )
+BOOL WINAPI __wine_get_icm_profile( HDC hdc, BOOL allow_default, DWORD *size, WCHAR *filename )
 {
     PHYSDEV physdev;
     DC *dc;
@@ -1458,7 +1490,7 @@ BOOL CDECL __wine_get_icm_profile( HDC hdc, BOOL allow_default, DWORD *size, WCH
 /***********************************************************************
  *      __wine_get_wgl_driver  (win32u.@)
  */
-struct opengl_funcs * CDECL __wine_get_wgl_driver( HDC hdc, UINT version )
+struct opengl_funcs *__wine_get_wgl_driver( HDC hdc, UINT version )
 {
     BOOL is_display, is_memdc;
     DC *dc;

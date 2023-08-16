@@ -335,6 +335,8 @@ ok(obj.hasOwnProperty('source'), "obj.hasOwnProperty('source') is false");
 ok(!RegExp.hasOwnProperty('exec'), "RegExp.hasOwnProperty('exec') is true");
 ok(!RegExp.hasOwnProperty('source'), "RegExp.hasOwnProperty('source') is true");
 ok(RegExp.prototype.hasOwnProperty('source'), "RegExp.prototype.hasOwnProperty('source') is false");
+ok(RegExp.prototype.source === "", "RegExp.prototype.source = " + RegExp.prototype.source);
+ok(RegExp.prototype.lastIndex === 0, "RegExp.prototype.lastIndex = " + RegExp.prototype.lastIndex);
 
 String();
 new String();
@@ -1365,6 +1367,11 @@ ok(tmp === "0", "num().toString = " + tmp);
 tmp = (new Number(5.5)).toString(2);
 ok(tmp === "101.1", "num(5.5).toString(2) = " + tmp);
 
+tmp = (new Number(12)).toLocaleString();
+ok(tmp.indexOf(String.fromCharCode(0)) == -1, "invalid null byte");
+tmp = Number.prototype.toLocaleString.call(NaN);
+ok(tmp.indexOf(String.fromCharCode(0)) == -1, "invalid null byte");
+
 tmp = (new Number(3)).toFixed(3);
 ok(tmp === "3.000", "num(3).toFixed(3) = " + tmp);
 tmp = (new Number(3)).toFixed();
@@ -1955,7 +1962,7 @@ ok(isNaN(tmp), "Math.tan(-Infinity) is not NaN");
         [[[,2,undefined,3,{prop:0},],undefined,"  "],"[\n  null,\n  2,\n  null,\n  3,\n  {\n    \"prop\": 0\n  },\n  null\n]"]
     ];
 
-    var i, s, v;
+    var i, s, v, t;
 
     for(i=0; i < stringify_tests.length; i++) {
         s = JSON.stringify.apply(null, stringify_tests[i][0]);
@@ -2020,7 +2027,7 @@ ok(isNaN(tmp), "Math.tan(-Infinity) is not NaN");
         for(var prop in x) {
             if(!x.hasOwnProperty(prop))
                 continue;
-            if(!x.hasOwnProperty(prop))
+            if(!y.hasOwnProperty(prop))
                 return false;
             if(!json_cmp(x[prop], y[prop]))
                 return false;
@@ -2038,6 +2045,61 @@ ok(isNaN(tmp), "Math.tan(-Infinity) is not NaN");
         v = JSON.parse(parse_tests[i][0]);
         ok(json_cmp(v, parse_tests[i][1]), "parse[" + i + "] returned " + v + ", expected " + parse_tests[i][1]);
     }
+
+    v = [ [-1, "b"], {"length": -2, "0": -4, "1": -5}, [{}], [{"x": [null]}] ];
+    s =
+    '{' +
+        '"foo": true,' +
+        '"bar": [],' +
+        '"baz": "remove_me",' +
+        '"obj": {' +
+        '    "arr": [ [1, "b"], {"length": 2, "0": 4, "1": 5}, [{}], [{"x": [null]}] ],' +
+        '    "": "empty"' +
+        '},' +
+        '"last": false' +
+    '}';
+    o = JSON.parse(s), t = JSON.parse(s), i = new Object();
+    i[""] = t;
+    delete t.baz;   /* baz gets removed */
+    t.obj.arr = v;  /* has negative values */
+
+    var walk_expect = [
+        [ o, "foo", true ],
+        [ o, "bar", [] ],
+        [ o, "baz", "remove_me" ],
+        [ [1, "b"], "0", 1 ],
+        [ [-1, "b"], "1", "b" ],
+        [ [ [-1, "b"], {"length": 2, "0": 4, "1": 5}, [{}], [{"x": [null]}] ], "0", [-1, "b"] ],
+        [ {"length": 2, "0": 4, "1": 5}, "length", 2 ],
+        [ {"length": -2, "0": 4, "1": 5}, "0", 4 ],
+        [ {"length": -2, "0": -4, "1": 5}, "1", 5 ],
+        [ v, "1", {"length": -2, "0": -4, "1": -5} ],
+        [ [{}], "0", {} ],
+        [ v, "2", [{}] ],
+        [ [null], "0", null ],
+        [ {"x": [null]}, "x", [null] ],
+        [ [{"x": [null]}], "0", {"x": [null]} ],
+        [ v, "3", [{"x": [null]}] ],
+        [ { "arr": v, "": "empty" }, "arr", v ],
+        [ { "arr": v, "": "empty" }, "", "empty" ],
+        [ t, "obj", { "arr": v, "": "empty" } ],
+        [ t, "last", false ],
+        [ i, "", t ]
+    ];
+    i = 0;
+    v = JSON.parse(s, function(prop, value) {
+        var a = [this, prop, value];
+        ok(json_cmp(a, walk_expect[i]), "[walk step " + i + "] got [" + a + "], expected [" + walk_expect[i] + "]");
+        i++;
+        return (typeof value === 'number') ? -value : (value === "remove_me" ? undefined : value);
+    });
+    ok(i === walk_expect.length, "parse with reviver walked " + i + " steps, expected " + walk_expect.length);
+    ok(json_cmp(v, t), "parse with reviver returned wrong object");
+
+    v = JSON.parse('true', function(prop, value) { return prop === "" ? undefined : value; });
+    ok(v === undefined, "parse with reviver removing last prop returned " + v);
+    v = JSON.parse('true', function(prop, value) { return prop === "" ? false : value; });
+    ok(v === false, "parse with reviver setting last prop to false returned " + v);
 })();
 
 var func = function  (a) {
@@ -2592,8 +2654,11 @@ testException(function() {date.setTime();}, "E_ARG_NOT_OPT");
 testException(function() {date.setYear();}, "E_ARG_NOT_OPT");
 testException(function() {arr.test();}, "E_NO_PROPERTY");
 testException(function() {[1,2,3].sort(nullDisp);}, "E_JSCRIPT_EXPECTED");
+testException(function() {var o = new Object(); o.length = 1; o[0] = "a"; Array.prototype.toLocaleString.call(o);}, "E_NOT_ARRAY");
 testException(function() {Number.prototype.toString.call(arr);}, "E_NOT_NUM");
 testException(function() {Number.prototype.toFixed.call(arr);}, "E_NOT_NUM");
+testException(function() {Number.prototype.toLocaleString.call(arr);}, "E_NOT_NUM");
+testException(function() {Number.prototype.toLocaleString.call(null);}, "E_NOT_NUM");
 testException(function() {(new Number(3)).toString(1);}, "E_INVALID_CALL_ARG");
 testException(function() {(new Number(3)).toFixed(21);}, "E_FRACTION_DIGITS_OUT_OF_RANGE");
 testException(function() {(new Number(1)).toPrecision(0);}, "E_PRECISION_OUT_OF_RANGE");
@@ -2614,6 +2679,7 @@ testException(function() {"test" in nullDisp;}, "E_OBJECT_EXPECTED");
 testException(function() {new 3;}, "E_UNSUPPORTED_ACTION");
 testException(function() {new null;}, "E_OBJECT_EXPECTED");
 testException(function() {new nullDisp;}, "E_NO_PROPERTY");
+testException(function() {new Math.max(5);}, "E_UNSUPPORTED_ACTION");
 testException(function() {new VBArray();}, "E_NOT_VBARRAY");
 testException(function() {new VBArray(new VBArray(createArray()));}, "E_NOT_VBARRAY");
 testException(function() {VBArray.prototype.lbound.call(new Object());}, "E_NOT_VBARRAY");
@@ -2626,6 +2692,8 @@ testException(function() {null.toString();}, "E_OBJECT_EXPECTED");
 testException(function() {RegExp.prototype.toString.call(new Object());}, "E_REGEXP_EXPECTED");
 testException(function() {/a/.lastIndex();}, "E_NOT_FUNC");
 testException(function() {"a".length();}, "E_NOT_FUNC");
+testException(function() {((function() { var f = Number.prototype.toString; return (function() { return f(); }); })())();}, "E_NOT_NUM");
+testException(function() {((function() { var f = Object.prototype.hasOwnProperty; return (function() { return f("f"); }); })())();}, "E_OBJECT_EXPECTED");
 
 testException(function() { return arguments.callee(); }, "E_STACK_OVERFLOW");
 

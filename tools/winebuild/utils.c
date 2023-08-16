@@ -29,6 +29,7 @@
 
 #include "build.h"
 
+const char *temp_dir = NULL;
 static struct strarray tmp_files;
 static const char *output_file_source_name;
 
@@ -37,6 +38,7 @@ void cleanup_tmp_files(void)
 {
     unsigned int i;
     for (i = 0; i < tmp_files.count; i++) if (tmp_files.str[i]) unlink( tmp_files.str[i] );
+    if (temp_dir) rmdir( temp_dir );
 }
 
 
@@ -607,7 +609,7 @@ int remove_stdcall_decoration( char *name )
 {
     char *p, *end = strrchr( name, '@' );
     if (!end || !end[1] || end == name) return -1;
-    if (target.cpu != CPU_i386 && target.cpu != CPU_x86_32on64) return -1;
+    if (target.cpu != CPU_i386) return -1;
     /* make sure all the rest is digits */
     for (p = end + 1; *p; p++) if (!isdigit(*p)) return -1;
     *end = 0;
@@ -728,28 +730,28 @@ const char *get_stub_name( const ORDDEF *odp, const DLLSPEC *spec )
 }
 
 /* return the stdcall-decorated name for an entry point */
-const char *get_link_name( const ORDDEF *odp )
+const char *get_abi_name( const ORDDEF *odp, const char *name )
 {
     static char *buffer;
     char *ret;
 
-    if (target.cpu != CPU_i386) return odp->link_name;
+    if (target.cpu != CPU_i386) return name;
 
     switch (odp->type)
     {
     case TYPE_STDCALL:
         if (is_pe())
         {
-            if (odp->flags & FLAG_THISCALL) return odp->link_name;
-            if (odp->flags & FLAG_FASTCALL) ret = strmake( "@%s@%u", odp->link_name, get_args_size( odp ));
-            else if (!kill_at) ret = strmake( "%s@%u", odp->link_name, get_args_size( odp ));
-            else return odp->link_name;
+            if (odp->flags & FLAG_THISCALL) return name;
+            if (odp->flags & FLAG_FASTCALL) ret = strmake( "@%s@%u", name, get_args_size( odp ));
+            else if (!kill_at) ret = strmake( "%s@%u", name, get_args_size( odp ));
+            else return name;
         }
         else
         {
-            if (odp->flags & FLAG_THISCALL) ret = strmake( "__thiscall_%s", odp->link_name );
-            else if (odp->flags & FLAG_FASTCALL) ret = strmake( "__fastcall_%s", odp->link_name );
-            else return odp->link_name;
+            if (odp->flags & FLAG_THISCALL) ret = strmake( "__thiscall_%s", name );
+            else if (odp->flags & FLAG_FASTCALL) ret = strmake( "__fastcall_%s", name );
+            else return name;
         }
         break;
 
@@ -758,18 +760,23 @@ const char *get_link_name( const ORDDEF *odp )
         {
             int args = get_args_size( odp );
             if (odp->flags & FLAG_REGISTER) args += get_ptr_size();  /* context argument */
-            ret = strmake( "%s@%u", odp->link_name, args );
+            ret = strmake( "%s@%u", name, args );
         }
-        else return odp->link_name;
+        else return name;
         break;
 
     default:
-        return odp->link_name;
+        return name;
     }
 
     free( buffer );
     buffer = ret;
     return ret;
+}
+
+const char *get_link_name( const ORDDEF *odp )
+{
+    return get_abi_name( odp, odp->link_name );
 }
 
 /*******************************************************************
@@ -822,7 +829,6 @@ unsigned int get_alignment(unsigned int align)
     {
     case CPU_i386:
     case CPU_x86_64:
-    case CPU_x86_32on64:
         if (target.platform != PLATFORM_APPLE) return align;
         /* fall through */
     case CPU_ARM:
@@ -892,16 +898,6 @@ const char *asm_name( const char *sym )
     default:
         return sym;
     }
-}
-
-/* return the 32-bit-to-64-bit thunk name for a C function */
-const char *thunk32_name( const char *func )
-{
-    static const char *thunk_prefix = "wine";
-    static char *buffer;
-    free( buffer );
-    buffer = strmake( "%s_thunk_%s", thunk_prefix, func );
-    return buffer;
 }
 
 /* return an assembly function declaration for a C function name */
@@ -990,6 +986,38 @@ void output_rva( const char *format, ... )
     va_end( valist );
 }
 
+/* output an RVA pointer or ordinal for a function thunk */
+void output_thunk_rva( int ordinal, const char *format, ... )
+{
+    if (ordinal == -1)
+    {
+        va_list valist;
+
+        va_start( valist, format );
+        switch (target.platform)
+        {
+        case PLATFORM_MINGW:
+        case PLATFORM_WINDOWS:
+            output( "\t.rva " );
+            vfprintf( output_file, format, valist );
+            fputc( '\n', output_file );
+            if (get_ptr_size() == 8) output( "\t.long 0\n" );
+            break;
+        default:
+            output( "\t%s ", get_asm_ptr_keyword() );
+            vfprintf( output_file, format, valist );
+            output( " - .L__wine_spec_rva_base\n" );
+            break;
+        }
+        va_end( valist );
+    }
+    else
+    {
+        if (get_ptr_size() == 4) output( "\t.long 0x8000%04x\n", ordinal );
+        else output( "\t.quad 0x800000000000%04x\n", ordinal );
+    }
+}
+
 /* output the GNU note for non-exec stack */
 void output_gnu_stack_note(void)
 {
@@ -1027,9 +1055,11 @@ const char *asm_globl( const char *func )
         break;
     case PLATFORM_MINGW:
     case PLATFORM_WINDOWS:
-        buffer = strmake( "\t.globl %s%s\n%s%s:", target.cpu == CPU_i386 ? "_" : "", func,
-                          target.cpu == CPU_i386 ? "_" : "", func );
+    {
+        const char *name = asm_name( func );
+        buffer = strmake( "\t.globl %s\n%s:", name, name );
         break;
+    }
     default:
         buffer = strmake( "\t.globl %s\n\t.hidden %s\n%s:", func, func, func );
         break;
@@ -1037,25 +1067,15 @@ const char *asm_globl( const char *func )
     return buffer;
 }
 
-static const char *get_asm_ptr_keyword_for_size(unsigned int ptr_size)
+const char *get_asm_ptr_keyword(void)
 {
-    switch(ptr_size)
+    switch(get_ptr_size())
     {
     case 4: return ".long";
     case 8: return ".quad";
     }
     assert(0);
     return NULL;
-}
-
-const char *get_asm_ptr_keyword(void)
-{
-    return get_asm_ptr_keyword_for_size(get_ptr_size());
-}
-
-const char *get_asm_host_ptr_keyword(void)
-{
-    return get_asm_ptr_keyword_for_size(get_host_ptr_size());
 }
 
 const char *get_asm_string_keyword(void)

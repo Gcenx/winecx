@@ -19,8 +19,6 @@
 #ifndef __WINE_DXERR8_H
 #define __WINE_DXERR8_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif /* defined(__cplusplus) */
@@ -50,7 +48,5 @@ HRESULT WINAPI  DXTraceW(const char* strFile, DWORD dwLine, HRESULT hr, const WC
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_DXERR8_H */

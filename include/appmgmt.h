@@ -19,8 +19,6 @@
 #ifndef _APPMGMT_H
 #define _APPMGMT_H
 
-#include "wine/winheader_enter.h"
-
 typedef struct _MANAGEDAPPLICATION
 {
     LPWSTR pszPackageName;
@@ -52,7 +50,5 @@ DWORD WINAPI GetManagedApplications(GUID*,DWORD,DWORD,LPDWORD,PMANAGEDAPPLICATIO
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* _APPMGMT_H */

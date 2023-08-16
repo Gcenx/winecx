@@ -22,18 +22,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-#include <string.h>
-#include <stdlib.h>	/* abs() */
-#include <sys/types.h>
-
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winuser.h"
-#include "winnls.h"
+#include <stdlib.h>
 #include "user_private.h"
 #include "wine/debug.h"
 
@@ -115,9 +104,9 @@ static const IMAGE_RESOURCE_DIRECTORY *find_entry_by_id( const IMAGE_RESOURCE_DI
     while (min <= max)
     {
         pos = (min + max) / 2;
-        if (entry[pos].u.Id == id)
-            return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry[pos].u2.s2.OffsetToDirectory);
-        if (entry[pos].u.Id > id) max = pos - 1;
+        if (entry[pos].Id == id)
+            return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry[pos].OffsetToDirectory);
+        if (entry[pos].Id > id) max = pos - 1;
         else min = pos + 1;
     }
     return NULL;
@@ -134,7 +123,7 @@ static const IMAGE_RESOURCE_DIRECTORY *find_entry_default( const IMAGE_RESOURCE_
 {
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *entry;
     entry = (const IMAGE_RESOURCE_DIRECTORY_ENTRY *)(dir + 1);
-    return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry->u2.s2.OffsetToDirectory);
+    return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry->OffsetToDirectory);
 }
 
 /*************************************************************************
@@ -297,13 +286,13 @@ static UINT ICO_ExtractIconExW(
 	CloseHandle(hFile);
 	if (!fmapping)
 	{
-          WARN("CreateFileMapping error %d\n", GetLastError() );
+          WARN("CreateFileMapping error %ld\n", GetLastError() );
 	  return 0xFFFFFFFF;
 	}
 
 	if (!(peimage = MapViewOfFile(fmapping, FILE_MAP_READ, 0, 0, 0)))
 	{
-          WARN("MapViewOfFile error %d\n", GetLastError() );
+          WARN("MapViewOfFile error %ld\n", GetLastError() );
 	  CloseHandle(fmapping);
 	  return 0xFFFFFFFF;
 	}
@@ -332,7 +321,7 @@ static UINT ICO_ExtractIconExW(
 	  LPicoICONDIR	lpiID = NULL;
 	  ULONG		uSize = 0;
 
-          TRACE("-- OS2/icon Signature (0x%08x)\n", sig);
+          TRACE("-- OS2/icon Signature (0x%08lx)\n", sig);
 
 	  if (pData == (BYTE*)-1)
 	  {
@@ -340,7 +329,7 @@ static UINT ICO_ExtractIconExW(
 	    if (pCIDir)
 	    {
 	      iconDirCount = 1; iconCount = lpiID->idCount;
-              TRACE("-- icon found %p 0x%08x 0x%08x 0x%08x\n", pCIDir, uSize, iconDirCount, iconCount);
+              TRACE("-- icon found %p 0x%08lx 0x%08x 0x%08x\n", pCIDir, uSize, iconDirCount, iconCount);
 	    }
 	  }
 	  else while (pTInfo->type_id && !(pIconStorage && pIconDir))
@@ -453,7 +442,7 @@ static UINT ICO_ExtractIconExW(
 
 	    while(n<iconDirCount && xprdeTmp)
 	    {
-              if(xprdeTmp->u.Id ==  iId)
+              if(xprdeTmp->Id ==  iId)
               {
                   nIconIndex = n;
                   break;
@@ -489,7 +478,7 @@ static UINT ICO_ExtractIconExW(
 	    const IMAGE_RESOURCE_DIRECTORY *resdir;
 
 	    /* go down this resource entry, name */
-            resdir = (const IMAGE_RESOURCE_DIRECTORY *)((const char *)rootresdir + xresent->u2.s2.OffsetToDirectory);
+            resdir = (const IMAGE_RESOURCE_DIRECTORY *)((const char *)rootresdir + xresent->OffsetToDirectory);
 
 	    /* default language (0) */
 	    resdir = find_entry_default(resdir,rootresdir);

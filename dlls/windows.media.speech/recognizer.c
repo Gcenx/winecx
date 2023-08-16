@@ -124,7 +124,7 @@ static const struct ISpeechRecognitionCompilationResultVtbl compilation_result_v
 };
 
 
-static HRESULT WINAPI compilation_result_create( SpeechRecognitionResultStatus status, ISpeechRecognitionCompilationResult **out )
+static HRESULT compilation_result_create( SpeechRecognitionResultStatus status, ISpeechRecognitionCompilationResult **out )
 {
     struct compilation_result *impl;
 
@@ -244,10 +244,15 @@ static HRESULT WINAPI session_set_AutoStopSilenceTimeout( ISpeechContinuousRecog
     return E_NOTIMPL;
 }
 
+static HRESULT WINAPI start_callback( IInspectable *invoker )
+{
+    return S_OK;
+}
+
 static HRESULT WINAPI session_StartAsync( ISpeechContinuousRecognitionSession *iface, IAsyncAction **action )
 {
     FIXME("iface %p, action %p stub!\n", iface, action);
-    return E_NOTIMPL;
+    return async_action_create(NULL, start_callback, action);
 }
 
 static HRESULT WINAPI session_StartWithModeAsync( ISpeechContinuousRecognitionSession *iface,
@@ -480,7 +485,7 @@ static HRESULT WINAPI recognizer_CompileConstraintsAsync( ISpeechRecognizer *ifa
 {
     IAsyncOperation_IInspectable **value = (IAsyncOperation_IInspectable **)operation;
     FIXME("iface %p, operation %p semi-stub!\n", iface, operation);
-    return async_operation_create(&IID_IAsyncOperation_SpeechRecognitionCompilationResult, NULL, compile_callback, value);
+    return async_operation_inspectable_create(&IID_IAsyncOperation_SpeechRecognitionCompilationResult, NULL, compile_callback, value);
 }
 
 static HRESULT WINAPI recognizer_RecognizeAsync( ISpeechRecognizer *iface,

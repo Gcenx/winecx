@@ -481,7 +481,6 @@ static void kill_all_processes(void);
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include "wine/unicode.h"
 
 /* get the next char value taking surrogates into account */
 static inline unsigned int get_surrogate_value( const WCHAR *src, unsigned int srclen )
@@ -839,6 +838,8 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->desktop         = 0;
     process->token           = NULL;
     process->trace_data      = 0;
+    process->rawinput_devices = NULL;
+    process->rawinput_device_count = 0;
     process->rawinput_mouse  = NULL;
     process->rawinput_kbd    = NULL;
     memset( &process->image_info, 0, sizeof(process->image_info) );
@@ -850,7 +851,6 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     list_init( &process->classes );
     list_init( &process->surfaces );
     list_init( &process->views );
-    list_init( &process->rawinput_devices );
 
     process->end_time = 0;
 
@@ -948,6 +948,7 @@ static void process_destroy( struct object *obj )
     if (process->idle_event) release_object( process->idle_event );
     if (process->id) free_ptid( process->id );
     if (process->token) release_object( process->token );
+    free( process->rawinput_devices );
     free( process->dir_cache );
     free( process->image );
     if (do_esync()) esync_close_fd( process->esync_fd );
@@ -1133,8 +1134,6 @@ void kill_console_processes( struct thread *renderer, int exit_code )
 /* a process has been killed (i.e. its last thread died) */
 static void process_killed( struct process *process )
 {
-    struct list *ptr;
-
     assert( list_empty( &process->thread_list ));
     process->end_time = current_time;
     close_process_desktop( process );
@@ -1149,12 +1148,6 @@ static void process_killed( struct process *process )
     if (!process->is_system)
         log_process_event( process, "exit %x %u ", process->exit_code, (unsigned)((process->end_time-process->start_time)/TICKS_PER_SEC) );
 
-    while ((ptr = list_head( &process->rawinput_devices )))
-    {
-        struct rawinput_device_entry *entry = LIST_ENTRY( ptr, struct rawinput_device_entry, entry );
-        list_remove( &entry->entry );
-        free( entry );
-    }
     destroy_process_classes( process );
     free_mapped_views( process );
     free_process_user_handles( process );
@@ -1720,6 +1713,7 @@ DECL_HANDLER(get_process_image_name)
         }
         else set_error( STATUS_BUFFER_TOO_SMALL );
     }
+    else set_error( STATUS_INVALID_HANDLE );
     release_object( process );
 }
 

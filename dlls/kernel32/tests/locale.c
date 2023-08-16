@@ -72,11 +72,13 @@ static INT (WINAPI *pIdnToAscii)(DWORD, LPCWSTR, INT, LPWSTR, INT);
 static INT (WINAPI *pIdnToUnicode)(DWORD, LPCWSTR, INT, LPWSTR, INT);
 static INT (WINAPI *pGetLocaleInfoEx)(LPCWSTR, LCTYPE, LPWSTR, INT);
 static BOOL (WINAPI *pIsValidLocaleName)(LPCWSTR);
+static INT (WINAPI *pResolveLocaleName)(LPCWSTR,LPWSTR,INT);
 static INT (WINAPI *pCompareStringOrdinal)(const WCHAR *, INT, const WCHAR *, INT, BOOL);
 static INT (WINAPI *pCompareStringEx)(LPCWSTR, DWORD, LPCWSTR, INT, LPCWSTR, INT,
                                       LPNLSVERSIONINFO, LPVOID, LPARAM);
 static INT (WINAPI *pGetGeoInfoA)(GEOID, GEOTYPE, LPSTR, INT, LANGID);
 static INT (WINAPI *pGetGeoInfoW)(GEOID, GEOTYPE, LPWSTR, INT, LANGID);
+static INT (WINAPI *pGetGeoInfoEx)(const WCHAR *, GEOTYPE, PWSTR, INT);
 static INT (WINAPI *pGetUserDefaultGeoName)(LPWSTR, int);
 static BOOL (WINAPI *pSetUserGeoName)(PWSTR);
 static BOOL (WINAPI *pEnumSystemGeoID)(GEOCLASS, GEOID, GEO_ENUMPROC);
@@ -94,6 +96,7 @@ static INT (WINAPI *pFindStringOrdinal)(DWORD, LPCWSTR lpStringSource, INT, LPCW
 static BOOL (WINAPI *pGetNLSVersion)(NLS_FUNCTION,LCID,NLSVERSIONINFO*);
 static BOOL (WINAPI *pGetNLSVersionEx)(NLS_FUNCTION,LPCWSTR,NLSVERSIONINFOEX*);
 static DWORD (WINAPI *pIsValidNLSVersion)(NLS_FUNCTION,LPCWSTR,NLSVERSIONINFOEX*);
+static BOOL (WINAPI *pIsNLSDefinedString)(NLS_FUNCTION,DWORD,NLSVERSIONINFO*,const WCHAR *,int);
 static NTSTATUS (WINAPI *pRtlNormalizeString)(ULONG, LPCWSTR, INT, LPWSTR, INT*);
 static NTSTATUS (WINAPI *pRtlIsNormalizedString)(ULONG, LPCWSTR, INT, BOOLEAN*);
 static NTSTATUS (WINAPI *pNtGetNlsSectionPtr)(ULONG,ULONG,void*,void**,SIZE_T*);
@@ -125,10 +128,12 @@ static void InitFunctionPointers(void)
   X(IdnToUnicode);
   X(GetLocaleInfoEx);
   X(IsValidLocaleName);
+  X(ResolveLocaleName);
   X(CompareStringOrdinal);
   X(CompareStringEx);
   X(GetGeoInfoA);
   X(GetGeoInfoW);
+  X(GetGeoInfoEx);
   X(GetUserDefaultGeoName);
   X(SetUserGeoName);
   X(EnumSystemGeoID);
@@ -144,6 +149,7 @@ static void InitFunctionPointers(void)
   X(GetNLSVersion);
   X(GetNLSVersionEx);
   X(IsValidNLSVersion);
+  X(IsNLSDefinedString);
 
   mod = GetModuleHandleA("kernelbase");
   X(NlsValidateLocale);
@@ -216,6 +222,33 @@ static void expect_werr_(int line, int ret, const WCHAR *str, DWORD err, const c
       "Expected %s, got %ld and ret=%d\n", err_name, GetLastError(), ret);
   if (str)
       ok_(__FILE__, line)(wcscmp(str, L"pristine") == 0, "Expected a pristine buffer, got %s\n", wine_dbgstr_w(str));
+}
+
+static int get_utf16( const WCHAR *src, unsigned int srclen, unsigned int *ch )
+{
+    if (IS_HIGH_SURROGATE( src[0] ))
+    {
+        if (srclen <= 1) return 0;
+        if (!IS_LOW_SURROGATE( src[1] )) return 0;
+        *ch = 0x10000 + ((src[0] & 0x3ff) << 10) + (src[1] & 0x3ff);
+        return 2;
+    }
+    if (IS_LOW_SURROGATE( src[0] )) return 0;
+    *ch = src[0];
+    return 1;
+}
+
+static int put_utf16( WCHAR *str, unsigned int c )
+{
+    if (c < 0x10000)
+    {
+        *str = c;
+        return 1;
+    }
+    c -= 0x10000;
+    str[0] = 0xd800 | (c >> 10);
+    str[1] = 0xdc00 | (c & 0x3ff);
+    return 2;
 }
 
 #define NUO LOCALE_NOUSEROVERRIDE
@@ -1305,6 +1338,18 @@ static void test_GetCurrencyFormatA(void)
   ret = GetCurrencyFormatA(lcid, 0, "235", &format, buffer, ARRAY_SIZE(buffer));
   expect_str(ret, buffer, "$235.0");
 
+  format.Grouping = 31;
+  ret = GetCurrencyFormatA(lcid, 0, "1234567890", &format, buffer, ARRAY_SIZE(buffer));
+  expect_str(ret, buffer, "$1,2,3,4,5,6,7,890.0");
+
+  format.Grouping = 312;
+  ret = GetCurrencyFormatA(lcid, 0, "1234567890", &format, buffer, ARRAY_SIZE(buffer));
+  expect_str(ret, buffer, "$12,34,56,7,890.0");
+
+  format.Grouping = 310;
+  ret = GetCurrencyFormatA(lcid, 0, "1234567890", &format, buffer, ARRAY_SIZE(buffer));
+  expect_str(ret, buffer, "$123456,7,890.0");
+
   /* Grouping of a negative number */
   format.NegativeOrder = 2;
   ret = GetCurrencyFormatA(lcid, 0, "-235", &format, buffer, ARRAY_SIZE(buffer));
@@ -1314,6 +1359,14 @@ static void test_GetCurrencyFormatA(void)
   format.LeadingZero = 1;
   ret = GetCurrencyFormatA(lcid, 0, ".5", &format, buffer, ARRAY_SIZE(buffer));
   expect_str(ret, buffer, "$0.5");
+  ret = GetCurrencyFormatA(lcid, 0, "0.5", &format, buffer, ARRAY_SIZE(buffer));
+  expect_str(ret, buffer, "$0.5");
+
+  format.LeadingZero = 0;
+  ret = GetCurrencyFormatA(lcid, 0, "0.5", &format, buffer, ARRAY_SIZE(buffer));
+  expect_str(ret, buffer, "$.5");
+  ret = GetCurrencyFormatA(lcid, 0, "0.5", &format, buffer, ARRAY_SIZE(buffer));
+  expect_str(ret, buffer, "$.5");
 
   format.PositiveOrder = CY_POS_RIGHT;
   ret = GetCurrencyFormatA(lcid, 0, "1", &format, buffer, ARRAY_SIZE(buffer));
@@ -1458,14 +1511,29 @@ static void test_GetNumberFormatA(void)
   format.Grouping = 3;
   ret = GetNumberFormatA(lcid, 0, "235", &format, buffer, ARRAY_SIZE(buffer));
   expect_str(ret, buffer, "235.0");
+  ret = GetNumberFormatA(lcid, 0, "000235", &format, buffer, ARRAY_SIZE(buffer));
+  expect_str(ret, buffer, "235.0");
+
+  format.Grouping = 23;
+  ret = GetNumberFormatA(lcid, 0, "123456789", &format, buffer, ARRAY_SIZE(buffer));
+  expect_str(ret, buffer, "1,234,567,89.0");
+
+  format.Grouping = 230;
+  ret = GetNumberFormatA(lcid, 0, "123456789", &format, buffer, ARRAY_SIZE(buffer));
+  expect_str(ret, buffer, "1234,567,89.0");
 
   /* Grouping of a negative number */
   format.NegativeOrder = NEG_LEFT;
+  format.Grouping = 3;
   ret = GetNumberFormatA(lcid, 0, "-235", &format, buffer, ARRAY_SIZE(buffer));
+  expect_str(ret, buffer, "-235.0");
+  ret = GetNumberFormatA(lcid, 0, "-000235", &format, buffer, ARRAY_SIZE(buffer));
   expect_str(ret, buffer, "-235.0");
 
   format.LeadingZero = 1; /* Always provide leading zero */
   ret = GetNumberFormatA(lcid, 0, ".5", &format, buffer, ARRAY_SIZE(buffer));
+  expect_str(ret, buffer, "0.5");
+  ret = GetNumberFormatA(lcid, 0, "0000.5", &format, buffer, ARRAY_SIZE(buffer));
   expect_str(ret, buffer, "0.5");
 
   format.NegativeOrder = NEG_PARENS;
@@ -1638,6 +1706,14 @@ static void test_GetNumberFormatEx(void)
   format.LeadingZero = 1;
   ret = pGetNumberFormatEx(enW, 0, L".5", &format, buffer, ARRAY_SIZE(buffer));
   expect_wstr(ret, buffer, L"0.5");
+  ret = pGetNumberFormatEx(enW, 0, L"0.5", &format, buffer, ARRAY_SIZE(buffer));
+  expect_wstr(ret, buffer, L"0.5");
+
+  format.LeadingZero = 0;
+  ret = pGetNumberFormatEx(enW, 0, L".5", &format, buffer, ARRAY_SIZE(buffer));
+  expect_wstr(ret, buffer, L".5");
+  ret = pGetNumberFormatEx(enW, 0, L"0.5", &format, buffer, ARRAY_SIZE(buffer));
+  expect_wstr(ret, buffer, L".5");
 
   format.NegativeOrder = NEG_PARENS;
   ret = pGetNumberFormatEx(enW, 0, L"-1", &format, buffer, ARRAY_SIZE(buffer));
@@ -1740,7 +1816,12 @@ static void test_CompareStringA(void)
   static const char ABC_FF[] = {'A','B','C',0,0xFF};
   int ret, i;
   char a[256];
+  BOOL is_utf8;
+  CPINFOEXA cpinfo;
   LCID lcid = MAKELCID(MAKELANGID(LANG_FRENCH, SUBLANG_DEFAULT), SORT_DEFAULT);
+
+  GetCPInfoExA( CP_ACP, 0, &cpinfo );
+  is_utf8 = cpinfo.CodePage == CP_UTF8;
 
   for (i = 0; i < ARRAY_SIZE(comparestringa_data); i++)
   {
@@ -1789,12 +1870,6 @@ static void test_CompareStringA(void)
     ret = lstrcmpA(NULL, "");
     ok (ret == -1 || broken(ret == -2) /* win9x */, "lstrcmpA(NULL, \"\") should return -1, got %d\n", ret);
 
-
-    /* this requires collation table patch to make it MS compatible */
-    if (strcmp(winetest_platform, "wine") == 0)
-        skip("in Wine due to the lack of a compatible collation table\n");
-    else
-    {
     ret = CompareStringA(LOCALE_SYSTEM_DEFAULT, 0, "'o", -1, "-o", -1 );
     ok(ret == CSTR_LESS_THAN, "'o vs -o expected CSTR_LESS_THAN, got %d\n", ret);
 
@@ -1830,8 +1905,6 @@ static void test_CompareStringA(void)
 
     ret = CompareStringA(LOCALE_SYSTEM_DEFAULT, SORT_STRINGSORT, "-m", -1, "`o", -1 );
     ok(ret == CSTR_LESS_THAN, "-m vs `o expected CSTR_LESS_THAN, got %d\n", ret);
-    }
-
 
     /* WinXP handles embedded NULLs differently than earlier versions */
     ret = CompareStringA(LOCALE_USER_DEFAULT, 0, "aLuZkUtZ", 8, "aLuZkUtZ\0A", 10);
@@ -1849,16 +1922,16 @@ static void test_CompareStringA(void)
        "a\\0b vs a expected CSTR_EQUAL or CSTR_GREATER_THAN, got %d\n", ret);
 
     ret = CompareStringA(lcid, 0, "\2", 2, "\1", 2);
-    todo_wine ok(ret != CSTR_EQUAL, "\\2 vs \\1 expected unequal\n");
+    ok(ret != CSTR_EQUAL, "\\2 vs \\1 expected unequal\n");
 
     ret = CompareStringA(lcid, NORM_IGNORECASE | LOCALE_USE_CP_ACP, "#", -1, ".", -1);
-    todo_wine ok(ret == CSTR_LESS_THAN, "\"#\" vs \".\" expected CSTR_LESS_THAN, got %d\n", ret);
+    ok(ret == CSTR_LESS_THAN, "\"#\" vs \".\" expected CSTR_LESS_THAN, got %d\n", ret);
 
     ret = CompareStringA(lcid, NORM_IGNORECASE, "_", -1, ".", -1);
-    todo_wine ok(ret == CSTR_GREATER_THAN, "\"_\" vs \".\" expected CSTR_GREATER_THAN, got %d\n", ret);
+    ok(ret == CSTR_GREATER_THAN, "\"_\" vs \".\" expected CSTR_GREATER_THAN, got %d\n", ret);
 
     ret = lstrcmpiA("#", ".");
-    todo_wine ok(ret == -1, "\"#\" vs \".\" expected -1, got %d\n", ret);
+    ok(ret == -1, "\"#\" vs \".\" expected -1, got %d\n", ret);
 
     lcid = MAKELCID(MAKELANGID(LANG_POLISH, SUBLANG_DEFAULT), SORT_DEFAULT);
 
@@ -1874,16 +1947,16 @@ static void test_CompareStringA(void)
     ok (GetLastError() == 0xdeadbeef && ret == CSTR_EQUAL,
         "ret %d, error %ld, expected value %d\n", ret, GetLastError(), CSTR_EQUAL);
 
-    ret = CompareStringA(CP_ACP, 0, ABC_EE, 3, ABC_FF, 3);
+    ret = CompareStringA(LOCALE_USER_DEFAULT, 0, ABC_EE, 3, ABC_FF, 3);
     ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
-    ret = CompareStringA(CP_ACP, 0, ABC_EE, 5, ABC_FF, 3);
-    ok(ret == CSTR_GREATER_THAN, "expected CSTR_GREATER_THAN, got %d\n", ret);
-    ret = CompareStringA(CP_ACP, 0, ABC_EE, 3, ABC_FF, 5);
-    ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringA(CP_ACP, 0, ABC_EE, 5, ABC_FF, 5);
-    ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringA(CP_ACP, 0, ABC_FF, 5, ABC_EE, 5);
-    ok(ret == CSTR_GREATER_THAN, "expected CSTR_GREATER_THAN, got %d\n", ret);
+    ret = CompareStringA(LOCALE_USER_DEFAULT, 0, ABC_EE, 5, ABC_FF, 3);
+    ok(ret == CSTR_GREATER_THAN || (is_utf8 && ret == CSTR_EQUAL), "expected CSTR_GREATER_THAN, got %d\n", ret);
+    ret = CompareStringA(LOCALE_USER_DEFAULT, 0, ABC_EE, 3, ABC_FF, 5);
+    ok(ret == CSTR_LESS_THAN || (is_utf8 && ret == CSTR_EQUAL), "expected CSTR_LESS_THAN, got %d\n", ret);
+    ret = CompareStringA(LOCALE_USER_DEFAULT, 0, ABC_EE, 5, ABC_FF, 5);
+    ok(ret == CSTR_LESS_THAN || (is_utf8 && ret == CSTR_EQUAL), "expected CSTR_LESS_THAN, got %d\n", ret);
+    ret = CompareStringA(LOCALE_USER_DEFAULT, 0, ABC_FF, 5, ABC_EE, 5);
+    ok(ret == CSTR_GREATER_THAN || (is_utf8 && ret == CSTR_EQUAL), "expected CSTR_GREATER_THAN, got %d\n", ret);
 }
 
 static void test_CompareStringW(void)
@@ -1914,56 +1987,56 @@ static void test_CompareStringW(void)
     *str2 = 'B';
 
     /* CompareStringW should abort on the first non-matching character */
-    ret = CompareStringW(CP_ACP, 0, str1, 100, str2, 100);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, str1, 100, str2, 100);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
 
     success = VirtualFree(buf, 0, MEM_RELEASE);
     ok(success, "VirtualFree failed with %lu\n", GetLastError());
 
     SetLastError(0xdeadbeef);
-    ret = CompareStringW(CP_ACP, SORT_DIGITSASNUMBERS, L"NULL", -1, L"NULL", -1);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, SORT_DIGITSASNUMBERS, L"NULL", -1, L"NULL", -1);
     ok(ret == CSTR_EQUAL || broken(!ret && GetLastError() == ERROR_INVALID_FLAGS) /* <Win7 */,
         "expected CSTR_EQUAL, got %d, last error %ld\n", ret, GetLastError());
 
-    ret = CompareStringW(CP_ACP, 0, ABC_EE, 3, ABC_FF, 3);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_EE, 3, ABC_FF, 3);
     ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, 0, ABC_EE, 5, ABC_FF, 3);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_EE, 5, ABC_FF, 3);
     ok(ret == CSTR_GREATER_THAN, "expected CSTR_GREATER_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, 0, ABC_EE, 3, ABC_FF, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_EE, 3, ABC_FF, 5);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, 0, ABC_EE, 5, ABC_FF, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_EE, 5, ABC_FF, 5);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, 0, ABC_FF, 5, ABC_EE, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_FF, 5, ABC_EE, 5);
     ok(ret == CSTR_GREATER_THAN, "expected CSTR_GREATER_THAN, got %d\n", ret);
 
-    ret = CompareStringW(CP_ACP, 0, ABC_EE, 4, A_ACUTE_BC, 4);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_EE, 4, A_ACUTE_BC, 4);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, 0, ABC_EE, 4, A_ACUTE_BC_DECOMP, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_EE, 4, A_ACUTE_BC_DECOMP, 5);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, 0, A_ACUTE_BC, 4, A_ACUTE_BC_DECOMP, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, A_ACUTE_BC, 4, A_ACUTE_BC_DECOMP, 5);
     ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
 
-    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, ABC_EE, 3, A_ACUTE_BC, 4);
-    todo_wine ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, ABC_EE, 4, A_ACUTE_BC_DECOMP, 5);
-    todo_wine ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, A_ACUTE_BC, 4, A_ACUTE_BC_DECOMP, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORENONSPACE, ABC_EE, 3, A_ACUTE_BC, 4);
+    ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORENONSPACE, ABC_EE, 4, A_ACUTE_BC_DECOMP, 5);
+    ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORENONSPACE, A_ACUTE_BC, 4, A_ACUTE_BC_DECOMP, 5);
     ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
 
-    ret = CompareStringW(CP_ACP, 0, ABC_EE, 4, A_NULL_BC, 4);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, ABC_EE, 4, A_NULL_BC, 4);
     ok(ret == CSTR_EQUAL, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, ABC_EE, 4, A_NULL_BC, 4);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORENONSPACE, ABC_EE, 4, A_NULL_BC, 4);
     ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
 
-    ret = CompareStringW(CP_ACP, 0, A_NULL_BC, 4, A_ACUTE_BC, 4);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, A_NULL_BC, 4, A_ACUTE_BC, 4);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, A_NULL_BC, 4, A_ACUTE_BC, 4);
-    todo_wine ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORENONSPACE, A_NULL_BC, 4, A_ACUTE_BC, 4);
+    ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
 
-    ret = CompareStringW(CP_ACP, 0, A_NULL_BC, 4, A_ACUTE_BC_DECOMP, 5);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, 0, A_NULL_BC, 4, A_ACUTE_BC_DECOMP, 5);
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
-    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, A_NULL_BC, 4, A_ACUTE_BC_DECOMP, 5);
-    todo_wine ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
+    ret = CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORENONSPACE, A_NULL_BC, 4, A_ACUTE_BC_DECOMP, 5);
+    ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
 }
 
 struct comparestringex_test {
@@ -1973,159 +2046,158 @@ struct comparestringex_test {
     const WCHAR second[2];
     INT ret;
     INT broken;
-    BOOL todo;
 };
 
 static const struct comparestringex_test comparestringex_tests[] = {
     /* default behavior */
     { /* 0 */
       "tr-TR", 0,
-      {'i',0},   {'I',0},   CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {'I',0},   CSTR_LESS_THAN,    -1
     },
     { /* 1 */
       "tr-TR", 0,
-      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 2 */
       "tr-TR", 0,
-      {'i',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {0x131,0}, CSTR_LESS_THAN,    -1
     },
     { /* 3 */
       "tr-TR", 0,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 4 */
       "tr-TR", 0,
-      {'I',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x131,0}, CSTR_LESS_THAN,    -1
     },
     { /* 5 */
       "tr-TR", 0,
-      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1,                TRUE
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1
     },
     /* with NORM_IGNORECASE */
     { /* 6 */
       "tr-TR", NORM_IGNORECASE,
-      {'i',0},   {'I',0},   CSTR_EQUAL,        -1,                FALSE
+      {'i',0},   {'I',0},   CSTR_EQUAL,        -1
     },
     { /* 7 */
       "tr-TR", NORM_IGNORECASE,
-      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 8 */
       "tr-TR", NORM_IGNORECASE,
-      {'i',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {0x131,0}, CSTR_LESS_THAN,    -1
     },
     { /* 9 */
       "tr-TR", NORM_IGNORECASE,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 10 */
       "tr-TR", NORM_IGNORECASE,
-      {'I',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x131,0}, CSTR_LESS_THAN,    -1
     },
     { /* 11 */
       "tr-TR", NORM_IGNORECASE,
-      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1,                TRUE
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1
     },
     /* with NORM_LINGUISTIC_CASING */
     { /* 12 */
       "tr-TR", NORM_LINGUISTIC_CASING,
-      {'i',0},   {'I',0},   CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+      {'i',0},   {'I',0},   CSTR_GREATER_THAN, CSTR_LESS_THAN
     },
     { /* 13 */
       "tr-TR", NORM_LINGUISTIC_CASING,
-      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 14 */
       "tr-TR", NORM_LINGUISTIC_CASING,
-      {'i',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+      {'i',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN
     },
     { /* 15 */
       "tr-TR", NORM_LINGUISTIC_CASING,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 16 */
       "tr-TR", NORM_LINGUISTIC_CASING,
-      {'I',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+      {'I',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN
     },
     { /* 17 */
       "tr-TR", NORM_LINGUISTIC_CASING,
-      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1,                TRUE
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1
     },
     /* with LINGUISTIC_IGNORECASE */
     { /* 18 */
       "tr-TR", LINGUISTIC_IGNORECASE,
-      {'i',0},   {'I',0},   CSTR_EQUAL,        -1,                TRUE
+      {'i',0},   {'I',0},   CSTR_EQUAL,        -1
     },
     { /* 19 */
       "tr-TR", LINGUISTIC_IGNORECASE,
-      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 20 */
       "tr-TR", LINGUISTIC_IGNORECASE,
-      {'i',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'i',0},   {0x131,0}, CSTR_LESS_THAN,    -1
     },
     { /* 21 */
       "tr-TR", LINGUISTIC_IGNORECASE,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 22 */
       "tr-TR", LINGUISTIC_IGNORECASE,
-      {'I',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x131,0}, CSTR_LESS_THAN,    -1
     },
     { /* 23 */
       "tr-TR", LINGUISTIC_IGNORECASE,
-      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1,                TRUE
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1
     },
     /* with NORM_LINGUISTIC_CASING | NORM_IGNORECASE */
     { /* 24 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
-      {'i',0},   {'I',0},   CSTR_GREATER_THAN, CSTR_EQUAL,        TRUE
+      {'i',0},   {'I',0},   CSTR_GREATER_THAN, CSTR_EQUAL
     },
     { /* 25 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
-      {'i',0},   {0x130,0}, CSTR_EQUAL,        CSTR_LESS_THAN,    TRUE
+      {'i',0},   {0x130,0}, CSTR_EQUAL,        CSTR_LESS_THAN
     },
     { /* 26 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
-      {'i',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+      {'i',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN
     },
     { /* 27 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1
      },
     { /* 28 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
-      {'I',0},   {0x131,0}, CSTR_EQUAL,        CSTR_LESS_THAN,    TRUE
+      {'I',0},   {0x131,0}, CSTR_EQUAL,        CSTR_LESS_THAN
     },
     { /* 29 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
-      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1,                TRUE
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1
     },
     /* with NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE */
     { /* 30 */
       "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
-      {'i',0},   {'I',0},   CSTR_GREATER_THAN, CSTR_EQUAL,        TRUE
+      {'i',0},   {'I',0},   CSTR_GREATER_THAN, CSTR_EQUAL
     },
     { /* 31 */
       "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
-      {'i',0},   {0x130,0}, CSTR_EQUAL,        CSTR_LESS_THAN,    TRUE
+      {'i',0},   {0x130,0}, CSTR_EQUAL,        CSTR_LESS_THAN
     },
     { /* 32 */
       "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
-      {'i',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+      {'i',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN
     },
     { /* 33 */
       "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1
     },
     { /* 34 */
       "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
-      {'I',0},   {0x131,0}, CSTR_EQUAL,        CSTR_LESS_THAN,    TRUE
+      {'I',0},   {0x131,0}, CSTR_EQUAL,        CSTR_LESS_THAN
     },
     { /* 35 */
       "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
-      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN
     }
 };
 
@@ -2148,9 +2220,8 @@ static void test_CompareStringEx(void)
 
         MultiByteToWideChar(CP_ACP, 0, e->locale, -1, locale, ARRAY_SIZE(locale));
         ret = pCompareStringEx(locale, e->flags, e->first, -1, e->second, -1, NULL, NULL, 0);
-        todo_wine_if (e->todo)
-            ok(ret == e->ret || broken(ret == e->broken),
-               "%d: got %s, expected %s\n", i, op[ret], op[e->ret]);
+        ok(ret == e->ret || broken(ret == e->broken),
+           "%d: got %s, expected %s\n", i, op[ret], op[e->ret]);
     }
 
 }
@@ -2287,7 +2358,7 @@ static void test_LCMapStringA(void)
     ok(ret2, "LCMapStringA must succeed\n");
     ok(buf2[ret2-1] == 0, "LCMapStringA not null-terminated\n" );
     ok(ret == ret2, "lengths of sort keys must be equal\n");
-    ok(!lstrcmpA(buf, buf2), "sort keys must be equal\n");
+    ok(!memcmp(buf, buf2, ret), "sort keys must be equal\n");
 
     /* test we get the same length when no dest buffer is provided */
     ret2 = LCMapStringA(LOCALE_USER_DEFAULT, LCMAP_SORTKEY,
@@ -2303,7 +2374,7 @@ static void test_LCMapStringA(void)
                        lower_case, -1, buf2, sizeof(buf2));
     ok(ret2, "LCMapStringA must succeed\n");
     ok(ret == ret2, "lengths of sort keys must be equal\n");
-    ok(!lstrcmpA(buf, buf2), "sort keys must be equal\n");
+    ok(!memcmp(buf, buf2, ret), "sort keys must be equal\n");
 
     /* Don't test LCMAP_SORTKEY | NORM_IGNORENONSPACE, produces different
        results from plain LCMAP_SORTKEY on Vista */
@@ -2316,7 +2387,7 @@ static void test_LCMapStringA(void)
                        symbols_stripped, -1, buf2, sizeof(buf2));
     ok(ret2, "LCMapStringA must succeed\n");
     ok(ret == ret2, "lengths of sort keys must be equal\n");
-    ok(!lstrcmpA(buf, buf2), "sort keys must be equal\n");
+    ok(!memcmp(buf, buf2, ret), "sort keys must be equal\n");
 
     /* test NORM_IGNORENONSPACE */
     lstrcpyA(buf, "foo");
@@ -2379,6 +2450,30 @@ static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *f
         0xff70, 0xff73, 0xff9e, 0xff6b, 0xff89, 0x91ce, 0x539f, 0xff8a,
         0x5e83, 0xff72, 0xff9d, 0xff80, 0xff9e, 0xff96, 0xff61, 0
     };
+    const static WCHAR math_text[] = {
+        0xd835, 0xdc00, 0xd835, 0xdc01, 0xd835, 0xdc02, 0xd835, 0xdc03,
+        0xd835, 0xdd52, 0xd835, 0xdd53, 0xd835, 0xdd54, 0xd835, 0xdd55, 0
+    };
+    const static WCHAR math_result[] = L"ABCDabcd";
+    const static WCHAR math_arabic_text[] = {
+        0xd83b, 0xde00, 0xd83b, 0xde01, 0xd83b, 0xde02, 0xd83b, 0xde03,
+        0xd83b, 0xde10, 0xd83b, 0xde11, 0xd83b, 0xde12, 0xd83b, 0xde13, 0
+    };
+    const static WCHAR math_arabic_result[] = {
+        0x0627, 0x0628, 0x062c, 0x062f, 0x0641, 0x0635, 0x0642, 0x0631, 0
+    };
+    const static WCHAR cjk_compat_text[] = {
+        0xd87e, 0xdc20, 0xd87e, 0xdc21, 0xd87e, 0xdc22, 0xd87e, 0xdc23,
+        0xd87e, 0xdc24, 0xd87e, 0xdc25, 0xd87e, 0xdc26, 0xd87e, 0xdc27, 0
+    };
+    const static WCHAR cjk_compat_result[] = {
+        0x523b, 0x5246, 0x5272, 0x5277, 0x3515, 0x52c7, 0x52c9, 0x52e4, 0
+    };
+    const static WCHAR accents_text[] = {
+        0x00e0, 0x00e7, ' ', 0x00e9, ',', 0x00ee, 0x00f1, '/', 0x00f6, 0x00fb, 0x00fd, '!', 0
+    };
+    const static WCHAR accents_result[] = L"ac e,in/ouy!";
+    const static WCHAR accents_result2[] = L"aceinouy";
     int ret, ret2, i;
     WCHAR buf[256], buf2[256];
     char *p_buf = (char *)buf, *p_buf2 = (char *)buf2;
@@ -2445,6 +2540,23 @@ static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *f
     ret2 = func_ptr(LCMAP_FULLWIDTH, halfwidth_text, -1, NULL, 0);
     ok(ret == ret2, "%s ret %d, expected value %d\n", func_name, ret2, ret);
 
+    ret = func_ptr(LCMAP_FULLWIDTH, math_text, -1, buf, ARRAY_SIZE(buf));
+    ok(ret == lstrlenW(buf) + 1, "%s ret %d, error %ld, expected value %d\n", func_name,
+       ret, GetLastError(), lstrlenW(buf) + 1);
+    ok(!lstrcmpW(buf, math_result), "%s string compare mismatch %s\n", func_name, debugstr_w(buf));
+
+    ret = func_ptr(LCMAP_FULLWIDTH, math_arabic_text, -1, buf, ARRAY_SIZE(buf));
+    ok(ret == lstrlenW(buf) + 1, "%s ret %d, error %ld, expected value %d\n", func_name,
+       ret, GetLastError(), lstrlenW(buf) + 1);
+    ok(!lstrcmpW(buf, math_arabic_result) ||
+       broken(!lstrcmpW( buf, math_arabic_text )), /* win7 */
+       "%s string compare mismatch %s\n", func_name, debugstr_w(buf));
+
+    ret = func_ptr(LCMAP_FULLWIDTH, cjk_compat_text, -1, buf, ARRAY_SIZE(buf));
+    ok(ret == lstrlenW(buf) + 1, "%s ret %d, error %ld, expected value %d\n", func_name,
+       ret, GetLastError(), lstrlenW(buf) + 1);
+    ok(!lstrcmpW(buf, cjk_compat_result), "%s string compare mismatch %s\n", func_name, debugstr_w(buf));
+
     /* test LCMAP_FULLWIDTH | LCMAP_HIRAGANA
        (half-width katakana is converted into full-width hiragana) */
     ret = func_ptr(LCMAP_FULLWIDTH | LCMAP_HIRAGANA, halfwidth_text, -1, buf, ARRAY_SIZE(buf));
@@ -2454,6 +2566,12 @@ static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *f
 
     ret2 = func_ptr(LCMAP_FULLWIDTH | LCMAP_HIRAGANA, halfwidth_text, -1, NULL, 0);
     ok(ret == ret2, "%s ret %d, expected value %d\n", func_name, ret, ret2);
+
+    /* LCMAP_FULLWIDTH | LCMAP_KATAKANA maps to full-width first */
+    ret = func_ptr(LCMAP_FULLWIDTH | LCMAP_KATAKANA, halfwidth_text, -1, buf, ARRAY_SIZE(buf));
+    ok(ret == lstrlenW(katakana_text) + 1, "%s ret %d, error %ld, expected value %d\n", func_name,
+       ret, GetLastError(), lstrlenW(katakana_text) + 1);
+    ok(!lstrcmpW(buf, katakana_text), "%s string compare mismatch\n", func_name);
 
     /* test LCMAP_HALFWIDTH */
     ret = func_ptr(LCMAP_HALFWIDTH, japanese_text, -1, buf, ARRAY_SIZE(buf));
@@ -2473,6 +2591,12 @@ static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *f
 
     ret2 = func_ptr(LCMAP_HALFWIDTH | LCMAP_KATAKANA, japanese_text, -1, NULL, 0);
     ok(ret == ret2, "%s ret %d, expected value %d\n", func_name, ret, ret2);
+
+    /* LCMAP_HALFWIDTH | LCMAP_HIRAGANA maps to Hiragana first */
+    ret = func_ptr(LCMAP_HALFWIDTH | LCMAP_HIRAGANA, japanese_text, -1, buf, ARRAY_SIZE(buf));
+    ret2 = func_ptr(LCMAP_HALFWIDTH, hiragana_text, -1, buf2, ARRAY_SIZE(buf2));
+    ok(ret == ret2, "%s ret %d, expected value %d\n", func_name, ret, ret2);
+    ok(!lstrcmpW(buf, buf2), "%s string compare mismatch %s vs %s\n", func_name, debugstr_w(buf), debugstr_w(buf2));
 
     /* test buffer overflow */
     SetLastError(0xdeadbeef);
@@ -2540,7 +2664,26 @@ static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *f
                        upper_case, lstrlenW(upper_case), buf2, sizeof(buf2));
     ok(ret, "%s func_ptr must succeed\n", func_name);
     ok(ret == ret2, "%s lengths of sort keys must be equal\n", func_name);
-    ok(!lstrcmpA(p_buf, p_buf2), "%s sort keys must be equal\n", func_name);
+    ok(!memcmp(p_buf, p_buf2, ret), "%s sort keys must be equal\n", func_name);
+
+    /* test contents with short buffer */
+    memset( buf, 0xcc, sizeof(buf) );
+    ret = func_ptr(LCMAP_SORTKEY, upper_case, -1, buf, ret - 1);
+    ok( !ret, "%s succeeded with %u\n", func_name, ret );
+    ok( GetLastError() == ERROR_INSUFFICIENT_BUFFER, "%s wrong error %lu\n", func_name, GetLastError() );
+    ret = (char *)memchr( p_buf, 0xcc, sizeof(buf) ) - p_buf;
+    ok( ret, "%s buffer not filled\n", func_name );
+    ok( p_buf[ret - 1] == 0x01, "%s buffer filled up to %02x\n", func_name, (BYTE)p_buf[ret - 1] );
+    ok( !memcmp( p_buf, p_buf2, ret - 1 ), "%s buffers differ\n", func_name );
+
+    memset( buf, 0xcc, sizeof(buf) );
+    ret = func_ptr(LCMAP_SORTKEY, upper_case, -1, buf, ret2 - 20);
+    ok( !ret, "%s succeeded with %u\n", func_name, ret );
+    ok( GetLastError() == ERROR_INSUFFICIENT_BUFFER, "%s wrong error %lu\n", func_name, GetLastError() );
+    ret = (char *)memchr( p_buf, 0xcc, sizeof(buf) ) - p_buf;
+    ok( ret, "%s buffer not filled\n", func_name );
+    ok( p_buf[ret - 1] == 0x01, "%s buffer filled up to %02x\n", func_name, (BYTE)p_buf[ret - 1] );
+    ok( !memcmp( p_buf, p_buf2, ret - 1 ), "%s buffers differ\n", func_name );
 
     /* test LCMAP_SORTKEY | NORM_IGNORECASE */
     ret = func_ptr(LCMAP_SORTKEY | NORM_IGNORECASE,
@@ -2550,7 +2693,7 @@ static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *f
                        lower_case, -1, buf2, sizeof(buf2));
     ok(ret2, "%s func_ptr must succeed\n", func_name);
     ok(ret == ret2, "%s lengths of sort keys must be equal\n", func_name);
-    ok(!lstrcmpA(p_buf, p_buf2), "%s sort keys must be equal\n", func_name);
+    ok(!memcmp(p_buf, p_buf2, ret), "%s sort keys must be equal\n", func_name);
 
     /* Don't test LCMAP_SORTKEY | NORM_IGNORENONSPACE, produces different
        results from plain LCMAP_SORTKEY on Vista */
@@ -2563,7 +2706,7 @@ static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *f
                        symbols_stripped, -1, buf2, sizeof(buf2));
     ok(ret2, "%s func_ptr must succeed\n", func_name);
     ok(ret == ret2, "%s lengths of sort keys must be equal\n", func_name);
-    ok(!lstrcmpA(p_buf, p_buf2), "%s sort keys must be equal\n", func_name);
+    ok(!memcmp(p_buf, p_buf2, ret), "%s sort keys must be equal\n", func_name);
 
     /* test NORM_IGNORENONSPACE */
     lstrcpyW(buf, fooW);
@@ -2571,6 +2714,12 @@ static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *f
     ok(ret == lstrlenW(lower_case) + 1, "%s func_ptr should return %d, ret = %d\n", func_name,
     lstrlenW(lower_case) + 1, ret);
     ok(!lstrcmpW(buf, lower_case), "%s string comparison mismatch\n", func_name);
+
+    lstrcpyW(buf, fooW);
+    ret = func_ptr(NORM_IGNORENONSPACE, accents_text, -1, buf, ARRAY_SIZE(buf));
+    ok(ret == lstrlenW(buf) + 1, "%s func_ptr should return %d, ret = %d\n", func_name,
+       lstrlenW(buf) + 1, ret);
+    ok(!lstrcmpW(buf, accents_result), "%s string comparison mismatch %s\n", func_name, debugstr_w(buf));
 
     /* test NORM_IGNORESYMBOLS */
     lstrcpyW(buf, fooW);
@@ -2585,6 +2734,19 @@ static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *f
     ok(ret == lstrlenW(symbols_stripped) + 1, "%s func_ptr should return %d, ret = %d\n", func_name,
     lstrlenW(symbols_stripped) + 1, ret);
     ok(!lstrcmpW(buf, symbols_stripped), "%s string comparison mismatch\n", func_name);
+
+    lstrcpyW(buf, fooW);
+    ret = func_ptr(NORM_IGNORESYMBOLS | NORM_IGNORENONSPACE, accents_text, -1, buf, ARRAY_SIZE(buf));
+    ok(ret == lstrlenW(buf) + 1, "%s func_ptr should return %d, ret = %d\n", func_name,
+       lstrlenW(buf) + 1, ret);
+    ok(!lstrcmpW(buf, accents_result2), "%s string comparison mismatch %s\n", func_name, debugstr_w(buf));
+
+    /* test small buffer */
+    lstrcpyW(buf, fooW);
+    ret = func_ptr(LCMAP_SORTKEY, lower_case, -1, buf, 2);
+    ok(ret == 0, "Expected a failure\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+           "%s unexpected error code %ld\n", func_name, GetLastError());
 
     /* test srclen = 0 */
     SetLastError(0xdeadbeef);
@@ -2608,10 +2770,13 @@ static void test_LCMapStringW(void)
 
     SetLastError(0xdeadbeef);
     ret = LCMapStringW((LCID)-1, LCMAP_LOWERCASE, upper_case, -1, buf, ARRAY_SIZE(buf));
-    todo_wine {
     ok(!ret, "LCMapStringW should fail with bad lcid\n");
     ok(GetLastError() == ERROR_INVALID_PARAMETER, "unexpected error code %ld\n", GetLastError());
-    }
+
+    SetLastError(0xdeadbeef);
+    ret = LCMapStringW((LCID)0xdead, LCMAP_HIRAGANA, upper_case, -1, buf, ARRAY_SIZE(buf));
+    ok(!ret, "LCMapStringW should fail with bad lcid\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "unexpected error code %ld\n", GetLastError());
 
     test_lcmapstring_unicode(LCMapStringW_wrapper, "LCMapStringW:");
 }
@@ -2637,10 +2802,13 @@ static void test_LCMapStringEx(void)
     SetLastError(0xdeadbeef);
     ret = pLCMapStringEx(invalidW, LCMAP_LOWERCASE,
                          upper_case, -1, buf, ARRAY_SIZE(buf), NULL, NULL, 0);
-    todo_wine {
     ok(!ret, "LCMapStringEx should fail with bad locale name\n");
     ok(GetLastError() == ERROR_INVALID_PARAMETER, "unexpected error code %ld\n", GetLastError());
-    }
+
+    SetLastError(0xdeadbeef);
+    ret = pLCMapStringEx(invalidW, LCMAP_HIRAGANA,
+                         upper_case, -1, buf, ARRAY_SIZE(buf), NULL, NULL, 0);
+    ok(ret, "LCMapStringEx should not fail with bad locale name\n");
 
     /* test reserved parameters */
     ret = pLCMapStringEx(LOCALE_NAME_USER_DEFAULT, LCMAP_LOWERCASE,
@@ -3089,7 +3257,6 @@ static void test_LocaleNameToLCID(void)
     else win_skip( "NlsValidateLocale not available\n" );
 }
 
-/* this requires collation table patch to make it MS compatible */
 static const char * const strings_sorted[] =
 {
 "'",
@@ -3176,9 +3343,11 @@ static int compare_string3(const void *e1, const void *e2)
     const char *s2 = *(const char *const *)e2;
     char key1[256], key2[256];
 
-    LCMapStringA(0, LCMAP_SORTKEY, s1, -1, key1, sizeof(key1));
-    LCMapStringA(0, LCMAP_SORTKEY, s2, -1, key2, sizeof(key2));
-    return strcmp(key1, key2);
+    int len1 = LCMapStringA(0, LCMAP_SORTKEY, s1, -1, key1, sizeof(key1));
+    int len2 = LCMapStringA(0, LCMAP_SORTKEY, s2, -1, key2, sizeof(key2));
+    int ret = memcmp(key1, key2, min(len1, len2));
+    if (!ret) ret = len1 - len2;
+    return ret;
 }
 
 static void test_sorting(void)
@@ -3188,13 +3357,6 @@ static void test_sorting(void)
     int i;
 
     assert(sizeof(buf) >= sizeof(strings));
-
-    /* this requires the collation table patch to make it MS compatible */
-    if (strcmp(winetest_platform, "wine") == 0)
-    {
-        skip("in Wine due to the lack of a compatible collation table\n");
-        return;
-    }
 
     /* 1. sort using lstrcmpA */
     memcpy(buf, strings, sizeof(strings));
@@ -3220,6 +3382,379 @@ static void test_sorting(void)
         ok(!strcmp(strings_sorted[i], str_buf[i]),
            "qsort using sort keys failed for element %d\n", i);
     }
+}
+
+struct sorting_test_entry {
+    const WCHAR *locale;
+    int result_sortkey;
+    int result_compare;
+    DWORD flags;
+    const WCHAR *first;
+    const WCHAR *second;
+};
+
+static const struct sorting_test_entry unicode_sorting_tests[] =
+{
+     /* Normal character */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x0037", L"\x277c" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x1eca", L"\x1ecb" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x1d05", L"\x1d48" },
+     /* Normal character diacritics */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x19d7", L"\x096d" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x00f5", L"\x1ecf" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x2793", L"\x0d70" },
+     /* Normal character case weights */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"A", L"a" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"z", L"Z" },
+     /* PUA character */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xe5a6", L"\xe5a5\x0333" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xe5d7", L"\xe5d6\x0330" },
+     /* Symbols add diacritic weight */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\u276a", L"\u2768" },
+     /* Symbols add case weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\u204d", L"\uff02" },
+     /* Default character, when there is main weight extra there must be no diacritic weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\ue6e3\u0a02", L"\ue6e3\u20dc" },
+     /* Unsortable characters */
+    { L"en-US",  0, CSTR_EQUAL,        0, L"a \u2060 b", L"a  b" },
+     /* Invalid/undefined characters */
+    { L"en-US",  0, CSTR_EQUAL,        0, L"a \xfff0 b", L"a  b" },
+    { L"en-US",  0, CSTR_EQUAL,        0, L"a\x139F a", L"a a" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"a\x139F a", L"a b" },
+     /* Default characters */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x00fc", L"\x016d" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x3fcb\x7fd5", L"\x0006\x3032" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x00fc\x30fd", L"\x00fa\x1833" },
+     /* Diacritic is added */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x1B56\x0330", L"\x1096" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x1817\x0333", L"\x19d7" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x04de\x05ac", L"\x0499" },
+     /* Diacritic can overflow */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x01ba\x0654", L"\x01b8" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x06b7\x06eb", L"\x06b6" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x1420\x0333", L"\x141f" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x1b56\x0654", L"\x1b56\x0655" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x1b56\x0654\x0654", L"\x1b56\x0655" },
+     /* Jamo case weight */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x11bc", L"\x110b" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x11c1", L"\x1111" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x11af", L"\x1105" },
+     /* Jamo main weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x11c2", L"\x11f5" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x1108", L"\x1121" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x1116", L"\x11c7" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x11b1", L"\x11d1" },
+     /* CJK main weight 1 */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x4550\x73d2", L"\x3211\x23ad" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x3265", L"\x4079" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x4c19\x68d0\x52d0", L"\x316d" },
+     /* CJK main weight 2 */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x72dd", L"\x6b8a" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x6785\x3bff\x6f83", L"\x7550\x34c9\x71a7" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x5d61", L"\x3aef" },
+     /* Symbols case weights */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x207a", L"\xfe62" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xfe65", L"\xff1e" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x2502", L"\xffe8" },
+     /* Symbols diacritic weights */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x21da", L"\x21dc" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x29fb", L"\x2295" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x0092", L"\x009c" },
+     /* NORM_IGNORESYMBOLS */
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x21da", L"\x21dc" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x29fb", L"\x2295" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x0092", L"\x009c" },
+    { L"en-US",  0, CSTR_EQUAL,        0, L"\x3099", L"\x309b" }, /* Small diacritic weights at the end get ignored */
+     /* Main weights have priority over diacritic weights */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"a b", L"\x0103 a" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"a",   L"\x0103" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"e x", L"\x0113 v" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"e",   L"\x0113" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"c s", L"\x0109 r" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"c",   L"\x0109" },
+     /* Diacritic weights have priority over case weights */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"a \x0103", L"A a" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"a",        L"A" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"e \x0113", L"E e" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"e",        L"E" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"c \x0109", L"C c" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"c",        L"C" },
+     /* Diacritic values for Jamo are not ignored */
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORENONSPACE, L"\x1152", L"\x1153" },
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORENONSPACE, L"\x1143", L"\x1145" },
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORENONSPACE, L"\x1196", L"\x1174" },
+     /* Jungseong < PUA */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x318e", L"\x382a" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xffcb", L"\x3d13" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xffcc", L"\x8632" },
+     /* Surrogate > PUA */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xd847", L"\x382a" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xd879", L"\x3d13" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xd850", L"\x8632" },
+     /* Unsortable combined with diacritics */
+    { L"en-US",  0, CSTR_EQUAL,        0, L"A\x0301\x0301", L"A\x0301\x00ad\x0301" },
+    { L"en-US",  0, CSTR_EQUAL,        0, L"b\x07f2\x07f2", L"b\x07f2\x2064\x07f2" },
+    { L"en-US",  0, CSTR_EQUAL,        0, L"X\x0337\x0337", L"X\x0337\xfffd\x0337" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORECASE, L"c", L"C" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORECASE, L"e", L"E" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORECASE, L"A", L"a" },
+    /* Punctuation primary weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x001b", L"\x001c" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x0005", L"\x0006" },
+     /* Punctuation diacritic/case weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x0027", L"\xff07" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x07f4", L"\x07f5" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x207b", L"\x0008" },
+     /* Punctuation primary weight has priority */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xff07", L"\x07f4" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xfe32", L"\x2014" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x058a", L"\x2027" },
+     /* Punctuation */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x207b", L"\x0008" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x0004", L"\x0011" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x207b", L"\x0008" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x0004", L"\x0011" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x207b", L"\x0008" },
+    { L"en-US", -1, CSTR_LESS_THAN,    SORT_STRINGSORT, L"\x0004", L"\x0011" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS | SORT_STRINGSORT, L"\x207b", L"\x0008" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS | SORT_STRINGSORT, L"\x0004", L"\x0011" },
+     /* Punctuation main weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    SORT_STRINGSORT, L"\x001a", L"\x001b" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x2027", L"\x2011" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x3030", L"\x301c" },
+     /* Punctuation diacritic weight */
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x058a", L"\x2010" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x07F5", L"\x07F4" },
+     /* Punctuation case weight */
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xfe32", L"\x2013" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xfe31", L"\xfe58" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xff07", L"\x0027" },
+     /* Punctuation NORM_IGNORESYMBOLS */
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x207b", L"\x0008" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS, L"\x0004", L"\x0011" },
+     /* Punctuation NORM_IGNORESYMBOLS SORT_STRINGSORT */
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS | SORT_STRINGSORT, L"\x207b", L"\x0008" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORESYMBOLS | SORT_STRINGSORT, L"\x0004", L"\x0011" },
+     /* Punctuation SORT_STRINGSORT main weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    SORT_STRINGSORT, L"\x001a", L"\x001b" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x2027", L"\x2011", },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x3030", L"\x301c", },
+     /* Punctuation SORT_STRINGSORT diacritic weight */
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x058a", L"\x2010" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\x07F5", L"\x07F4" },
+     /* Punctuation SORT_STRINGSORT case weight */
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xfe32", L"\x2013" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xfe31", L"\xfe58" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_STRINGSORT, L"\xff07", L"\x0027" },
+     /* Japanese main weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x04b0", L"\x32db" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x3093", L"\x1e62\x013f" },
+     /* Japanese diacritic weight */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30d3", L"\x30d4" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x307b", L"\x307c" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30ea", L"\x32f7" },
+     /* Japanese case weight small */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x31fb", L"\x30e9" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30db", L"\x31f9" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xff6d", L"\xff95" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\x31fb", L"\x30e9" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\x30db", L"\x31f9" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\xff6d", L"\xff95" },
+     /* Japanese case weight kana */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30d5", L"\x3075" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x306a", L"\x30ca" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x305a", L"\x30ba" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x30d5", L"\x3075" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x306a", L"\x30ca" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x305a", L"\x30ba" },
+     /* Japanese case weight width */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30bf", L"\xff80" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30ab", L"\xff76" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30a2", L"\xff71" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\x30bf", L"\xff80" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\x30ab", L"\xff76" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\x30a2", L"\xff71" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\x31a2", L"\x3110" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\x1342", L"\x133a" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNORENONSPACE, L"\x16a4", L"\x16a5" },
+     /* Kana small data must have priority over width data */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30b1\x30f6", L"\xff79\x30b1" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30a6\x30a5", L"\xff73\x30a6" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30a8\x30a7", L"\xff74\x30a8" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30b1", L"\xff79" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30a6", L"\xff73" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30a8", L"\xff74" },
+     /* Kana small data must have priority over kana type data */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x3046\x30a9", L"\x30a6\x30aa" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x304a\x3041", L"\x30aa\x3042" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x3059\x30a7", L"\x30b9\x30a8" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x3046", L"\x30a6" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x304a", L"\x30aa" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x3059", L"\x30b9" },
+     /* Kana type data must have priority over width data */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30a6\x30a8", L"\xff73\x3048" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30ab\x30a3", L"\xff76\x3043" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30b5\x30ac", L"\xff7b\x304c" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30a6", L"\xff73" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30ab", L"\xff76" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30b5", L"\xff7b" },
+     /* Case weights have priority over extra weights */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x305a a", L"\x30ba A" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30c1 b", L"\xff81 B" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xff8b x", L"\x31f6 X" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x305a", L"\x30ba" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30c1", L"\xff81" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xff8b", L"\x31f6" },
+     /* Extra weights have priority over special weights */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x0027\x31ff", L"\x007f\xff9b" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x07f5\x30f3", L"\x07f4\x3093" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xfe63\x30e0", L"\xff0d\x3080" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x0027", L"\x007f" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x07f5", L"\x07f4" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xfe63", L"\xff0d" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\xff68", L"\x30a3" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\xff75", L"\x30aa" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\x30e2", L"\xff93" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xff68", L"\x30a3" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\xff75", L"\x30aa" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x30e2", L"\xff93" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x30a8", L"\x3048" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x30af", L"\x304f" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREKANATYPE, L"\x3067", L"\x30c7" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30a8", L"\x3048" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30af", L"\x304f" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x3067", L"\x30c7" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\xffb7", L"\x3147" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\xffb6", L"\x3146" },
+    { L"en-US",  0, CSTR_EQUAL,        NORM_IGNOREWIDTH, L"\x3145", L"\xffb5" },
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORECASE, L"\xffb7", L"\x3147" },
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORECASE, L"\xffb6", L"\x3146" },
+    { L"en-US",  1, CSTR_GREATER_THAN, NORM_IGNORECASE, L"\x3145", L"\xffb5" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x3075\x30fc", L"\x30d5\x30fc" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x30a1\x30fc", L"\x30a2\x30fc" },
+     /* Coptic < Japanese */
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORECASE, L"\x2cff", L"\x30ba" },
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORECASE, L"\x2cdb", L"\x32de" },
+    { L"en-US", -1, CSTR_LESS_THAN,    NORM_IGNORECASE, L"\x2ce0", L"\x30c6" },
+     /* Hebrew > Japanese */
+    { L"en-US",  1, CSTR_GREATER_THAN, NORM_IGNORECASE, L"\x05d3", L"\x30ba" },
+    { L"en-US",  1, CSTR_GREATER_THAN, NORM_IGNORECASE, L"\x05e3", L"\x32de" },
+    { L"en-US",  1, CSTR_GREATER_THAN, NORM_IGNORECASE, L"\x05d7", L"\x30c6" },
+     /* Expansion */
+    { L"en-US",  0, CSTR_EQUAL,        0, L"\x00c6", L"\x0041\x0045" },
+    { L"en-US",  0, CSTR_EQUAL,        0, L"\x0f5c", L"\x0f5b\x0fb7" },
+    { L"en-US",  0, CSTR_EQUAL,        0, L"\x05f0", L"\x05d5\x05d5" },
+    { L"en-US", -1, CSTR_EQUAL,        0, L"\x0f75", L"\x0f71\x0f74" },
+    { L"en-US", -1, CSTR_EQUAL,        0, L"\xfc5e", L"\x064c\x0651" },
+    { L"en-US", -1, CSTR_EQUAL,        0, L"\xfb2b", L"\x05e9\x05c2" },
+    { L"en-US", -1, CSTR_EQUAL,        0, L"\xfe71", L"\x0640\x064b" },
+     /* Japanese locale */
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x6df8", L"\x654b\x29e9" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x685d\x1239\x1b61", L"\x59b6\x6542\x2a62\x04a7" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x62f3\x43e9", L"\x5760" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x634c", L"\x2f0d\x5f1c\x7124" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x69e7\x0502", L"\x57cc" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x7589", L"\x67c5" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x5ede\x765c", L"\x7324" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x5c7f\x5961", L"\x7cbe" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x3162", L"\x6a84\x1549\x0b60" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x769e\x448e", L"\x4e6e" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x59a4", L"\x5faa\x607c" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x529b", L"\x733f" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x6ff8\x2a0a", L"\x7953\x6712" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x6dfb", L"\x6793" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x67ed", L"\x6aa2" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x4e61", L"\x6350\x6b08" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x5118", L"\x53b3\x75b4" },
+    { L"ja-JP", -1, CSTR_LESS_THAN,    0, L"\x6bbf", L"\x65a3" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x5690", L"\x5fa8" },
+    { L"ja-JP",  1, CSTR_GREATER_THAN, 0, L"\x61e2", L"\x76e5" },
+     /* Misc locales */
+    { L"ko-KR", -1, CSTR_LESS_THAN,    0, L"\x8db6", L"\xd198" },
+    { L"ko-KR", -1, CSTR_LESS_THAN,    0, L"\x8f72", L"\xd2b9" },
+    { L"ko-KR", -1, CSTR_LESS_THAN,    0, L"\x91d8", L"\xd318" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x8db6", L"\xd198" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x8f72", L"\xd2b9" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x91d8", L"\xd318" },
+    { L"cs-CZ",  1, CSTR_GREATER_THAN, 0, L"\x0160", L"\x0219" },
+    { L"cs-CZ",  1, CSTR_GREATER_THAN, 0, L"\x059a", L"\x0308" },
+    { L"cs-CZ",  1, CSTR_GREATER_THAN, 0, L"\x013a", L"\x013f" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x0160", L"\x0219" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x059a", L"\x0308" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x013a", L"\x013f" },
+    { L"vi-VN", -1, CSTR_LESS_THAN,    0, L"\x1d8f", L"\x1ea8" },
+    { L"vi-VN", -1, CSTR_LESS_THAN,    0, L"\x0323", L"\xfe26" },
+    { L"vi-VN",  1, CSTR_GREATER_THAN, 0, L"R",      L"\xff32" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x1d8f", L"\x1ea8" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x0323", L"\xfe26" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"R",      L"\xff32" },
+    { L"zh-HK", -1, CSTR_LESS_THAN,    0, L"\x83ae", L"\x71b9" },
+    { L"zh-HK", -1, CSTR_LESS_THAN,    0, L"\x7e50", L"\xc683" },
+    { L"zh-HK",  1, CSTR_GREATER_THAN, 0, L"\x6c69", L"\x7f8a" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x83ae", L"\x71b9" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x7e50", L"\xc683" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x6c69", L"\x7f8a" },
+    { L"tr-TR",  1, CSTR_GREATER_THAN, 0, L"\x00dc", L"\x1ee9" },
+    { L"tr-TR",  1, CSTR_GREATER_THAN, 0, L"\x00fc", L"\x1ee6" },
+    { L"tr-TR", -1, CSTR_LESS_THAN,    0, L"\x0152", L"\x00d6" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x00dc", L"\x1ee9" },
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x00fc", L"\x1ee6" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\x0152", L"\x00d6" },
+    /* Diacritic is added */
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xa042\x09bc", L"\xa042" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xa063\x302b", L"\xa063" },
+    { L"en-US",  1, CSTR_GREATER_THAN, 0, L"\xa07e\x0c56", L"\xa07e" },
+    /* Reversed diacritics */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"\x00e9\x00e8", L"\x00e8\x00e9" },
+    { L"fr-FR",  1, CSTR_GREATER_THAN, 0, L"\x00e9\x00e8", L"\x00e8\x00e9" },
+    /* Digit sort */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"1230", L"321" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_DIGITSASNUMBERS, L"1230", L"321" },
+    { L"en-US",  1, CSTR_GREATER_THAN, SORT_DIGITSASNUMBERS, L"\xc6f\xc6c\xc6a", L"\xc6f\xc6e" },
+    /* Compressions */
+    { L"en-US", -1, CSTR_LESS_THAN,    0, L"E\x0300", L"F" },
+    { L"rm-CH",  1, CSTR_GREATER_THAN, 0, L"E\x0300", L"F" },
+};
+
+static void test_unicode_sorting(void)
+{
+    int i;
+    int ret1;
+    int ret2;
+    BYTE buffer[1000];
+    if (!pLCMapStringEx)
+    {
+        win_skip("LCMapStringEx not available\n");
+        return;
+    }
+    for (i = 0; i < ARRAY_SIZE(unicode_sorting_tests); i++)
+    {
+        BYTE buff1[1000];
+        BYTE buff2[1000];
+        int len1, len2;
+        int result;
+        const struct sorting_test_entry *entry = &unicode_sorting_tests[i];
+
+        len1 = pLCMapStringEx(entry->locale, LCMAP_SORTKEY | entry->flags, entry->first, -1, (WCHAR*)buff1, ARRAY_SIZE(buff1), NULL, NULL, 0);
+        len2 = pLCMapStringEx(entry->locale, LCMAP_SORTKEY | entry->flags, entry->second, -1, (WCHAR*)buff2, ARRAY_SIZE(buff2), NULL, NULL, 0);
+
+        result = memcmp(buff1, buff2, min(len1, len2));
+        if (result < 0) result = -1;
+        else if (result > 0) result = 1;
+        else if (len1 < len2) result = -1;
+        else if (len1 > len2) result = 1;
+
+        ok (result == entry->result_sortkey, "Test %d (%s, %s) - Expected %d, got %d\n",
+            i, wine_dbgstr_w(entry->first), wine_dbgstr_w(entry->second), entry->result_sortkey, result);
+
+        result = CompareStringEx(entry->locale, entry->flags,  entry->first, -1, entry->second, -1, NULL, NULL, 0);
+        ok (result == entry->result_compare, "Test %d (%s, %s) - Expected %d, got %d\n",
+            i, wine_dbgstr_w(entry->first), wine_dbgstr_w(entry->second), entry->result_compare, result);
+    }
+    /* Test diacritics when buffer is short */
+    ret1 = pLCMapStringEx(L"en-US", LCMAP_SORTKEY, L"\x0e49\x0e49\x0e49\x0e49\x0e49", -1, (WCHAR*)buffer, 20, NULL, NULL, 0);
+    ret2 = pLCMapStringEx(L"en-US", LCMAP_SORTKEY, L"\x0e49\x0e49\x0e49\x0e49\x0e49", -1, (WCHAR*)buffer, 0, NULL, NULL, 0);
+    ok(ret1 == ret2, "Got ret1=%d, ret2=%d\n", ret1, ret2);
 }
 
 static void test_FoldStringA(void)
@@ -3436,8 +3971,9 @@ static void test_FoldStringW(void)
 {
   int ret;
   WORD type;
-  unsigned int i, j;
-  WCHAR src[256], dst[256], ch, prev_ch = 1;
+  unsigned int i, j, len;
+  WCHAR src[256], dst[256];
+  UINT ch, prev_ch = 1;
   static const DWORD badFlags[] =
   {
     0,
@@ -3446,93 +3982,106 @@ static void test_FoldStringW(void)
     MAP_COMPOSITE|MAP_EXPAND_LIGATURES
   };
   /* Ranges of digits 0-9 : Must be sorted! */
-  static const WCHAR digitRanges[] =
+  static const struct { UINT ch, first, last; int broken; } digitRanges[] =
   {
-    0x0030, /* '0'-'9' */
-    0x0660, /* Eastern Arabic */
-    0x06F0, /* Arabic - Hindu */
-    0x07C0, /* Nko */
-    0x0966, /* Devengari */
-    0x09E6, /* Bengalii */
-    0x0A66, /* Gurmukhi */
-    0x0AE6, /* Gujarati */
-    0x0B66, /* Oriya */
-    0x0BE6, /* Tamil - No 0 */
-    0x0C66, /* Telugu */
-    0x0CE6, /* Kannada */
-    0x0D66, /* Maylayalam */
-    0x0DE6, /* Sinhala Lith */
-    0x0E50, /* Thai */
-    0x0ED0, /* Laos */
-    0x0F20, /* Tibet */
-    0x0F29, /* Tibet half - 0 is out of sequence */
-    0x1040, /* Myanmar */
-    0x1090, /* Myanmar Shan */
-    0x1368, /* Ethiopic - no 0 */
-    0x17E0, /* Khmer */
-    0x1810, /* Mongolian */
-    0x1946, /* Limbu */
-    0x19D0, /* New Tai Lue */
-    0x1A80, /* Tai Tham Hora */
-    0x1A90, /* Tai Tham Tham */
-    0x1B50, /* Balinese */
-    0x1BB0, /* Sundanese */
-    0x1C40, /* Lepcha */
-    0x1C50, /* Ol Chiki */
-    0x2070, /* Superscript - 1, 2, 3 are out of sequence */
-    0x2080, /* Subscript */
-    0x245F, /* Circled - 0 is out of sequence */
-    0x2473, /* Bracketed */
-    0x2487, /* Full stop */
-    0x24F4, /* Double Circled */
-    0x2775, /* Inverted circled - No 0 */
-    0x277F, /* Patterned circled - No 0 */
-    0x2789, /* Inverted Patterned circled - No 0 */
-    0x3020, /* Hangzhou */
-    0xA620, /* Vai */
-    0xA8D0, /* Saurashtra */
-    0xA900, /* Kayah Li */
-    0xA9D0, /* Javanese */
-    0xA9F0, /* Myanmar Tai Laing */
-    0xAA50, /* Cham */
-    0xABF0, /* Meetei Mayek */
-    0xff10, /* Pliene chasse (?) */
-    0xffff  /* Terminator */
-  };
-  /* Digits which are represented, but out of sequence */
-  static const WCHAR outOfSequenceDigits[] =
-  {
-      0xB9,   /* Superscript 1 */
-      0xB2,   /* Superscript 2 */
-      0xB3,   /* Superscript 3 */
-      0x0C78, /* Telugu Fraction 0 */
-      0x0C79, /* Telugu Fraction 1 */
-      0x0C7A, /* Telugu Fraction 2 */
-      0x0C7B, /* Telugu Fraction 3 */
-      0x0C7C, /* Telugu Fraction 1 */
-      0x0C7D, /* Telugu Fraction 2 */
-      0x0C7E, /* Telugu Fraction 3 */
-      0x0F33, /* Tibetan half zero */
-      0x19DA, /* New Tai Lue Tham 1 */
-      0x24EA, /* Circled 0 */
-      0x24FF, /* Negative Circled 0 */
-      0x3007, /* Ideographic number zero */
-      '\0'    /* Terminator */
-  };
-  /* Digits in digitRanges for which no representation is available */
-  static const WCHAR noDigitAvailable[] =
-  {
-      0x0BE6, /* No Tamil 0 */
-      0x0F29, /* No Tibetan half zero (out of sequence) */
-      0x1368, /* No Ethiopic 0 */
-      0x2473, /* No Bracketed 0 */
-      0x2487, /* No 0 Full stop */
-      0x24F4, /* No double circled 0 */
-      0x2775, /* No inverted circled 0 */
-      0x277F, /* No patterned circled */
-      0x2789, /* No inverted Patterned circled */
-      0x3020, /* No Hangzhou 0 */
-      '\0'    /* Terminator */
+      { 0x0030, 0, 9 },                   /* '0'-'9' */
+      { 0x00b2, 2, 3 },                   /* Superscript 2, 3 */
+      { 0x00b9, 1, 1 },                   /* Superscript 1 */
+      { 0x0660, 0, 9 },                   /* Eastern Arabic */
+      { 0x06f0, 0, 9 },                   /* Arabic - Hindu */
+      { 0x07c0, 0, 9 },                   /* Nko */
+      { 0x0966, 0, 9 },                   /* Devengari */
+      { 0x09e6, 0, 9 },                   /* Bengalii */
+      { 0x0a66, 0, 9 },                   /* Gurmukhi */
+      { 0x0ae6, 0, 9 },                   /* Gujarati */
+      { 0x0b66, 0, 9 },                   /* Oriya */
+      { 0x0be6, 0, 9 },                   /* Tamil */
+      { 0x0c66, 0, 9 },                   /* Telugu */
+      { 0x0c78, 0, 3, TRUE /*win7*/ },    /* Telugu Fraction */
+      { 0x0c7c, 1, 3, TRUE /*win7*/ },    /* Telugu Fraction */
+      { 0x0ce6, 0, 9 },                   /* Kannada */
+      { 0x0d66, 0, 9 },                   /* Maylayalam */
+      { 0x0de6, 0, 9, TRUE /*win10*/ },   /* Sinhala Lith */
+      { 0x0e50, 0, 9 },                   /* Thai */
+      { 0x0ed0, 0, 9 },                   /* Laos */
+      { 0x0f20, 0, 9 },                   /* Tibet */
+      { 0x1040, 0, 9 },                   /* Myanmar */
+      { 0x1090, 0, 9 },                   /* Myanmar Shan */
+      { 0x1369, 1, 9 },                   /* Ethiopic */
+      { 0x17e0, 0, 9 },                   /* Khmer */
+      { 0x1810, 0, 9 },                   /* Mongolian */
+      { 0x1946, 0, 9 },                   /* Limbu */
+      { 0x19d0, 0, 9 },                   /* New Tai Lue */
+      { 0x19da, 1, 1, TRUE /*win7*/ },    /* New Tai Lue Tham 1 */
+      { 0x1a80, 0, 9, TRUE /*win7*/ },    /* Tai Tham Hora */
+      { 0x1a90, 0, 9, TRUE /*win7*/ },    /* Tai Tham Tham */
+      { 0x1b50, 0, 9 },                   /* Balinese */
+      { 0x1bb0, 0, 9 },                   /* Sundanese */
+      { 0x1c40, 0, 9 },                   /* Lepcha */
+      { 0x1c50, 0, 9 },                   /* Ol Chiki */
+      { 0x2070, 0, 0 },                   /* Superscript 0 */
+      { 0x2074, 4, 9 },                   /* Superscript 4-9 */
+      { 0x2080, 0, 9 },                   /* Subscript */
+      { 0x2460, 1, 9 },                   /* Circled */
+      { 0x2474, 1, 9 },                   /* Bracketed */
+      { 0x2488, 1, 9 },                   /* Full stop */
+      { 0x24ea, 0, 0 },                   /* Circled 0 */
+      { 0x24f5, 1, 9 },                   /* Double Circled */
+      { 0x24ff, 0, 0 },                   /* Negative Circled 0 */
+      { 0x2776, 1, 9 },                   /* Inverted Circled */
+      { 0x2780, 1, 9 },                   /* Patterned Circled */
+      { 0x278a, 1, 9 },                   /* Inverted Patterned Circled */
+      { 0x3007, 0, 0 },                   /* Ideographic Number 0 */
+      { 0x3021, 1, 9 },                   /* Hangzhou */
+      { 0xa620, 0, 9 },                   /* Vai */
+      { 0xa8d0, 0, 9 },                   /* Saurashtra */
+      { 0xa8e0, 0, 9, TRUE /*win7*/ },    /* Combining Devanagari */
+      { 0xa900, 0, 9 },                   /* Kayah Li */
+      { 0xa9d0, 0, 9, TRUE /*win7*/ },    /* Javanese */
+      { 0xa9f0, 0, 9, TRUE /*win10*/ },   /* Myanmar Tai Laing */
+      { 0xaa50, 0, 9 },                   /* Cham */
+      { 0xabf0, 0, 9, TRUE /*win7*/ },    /* Meetei Mayek */
+      { 0xff10, 0, 9 },                   /* Full Width */
+      { 0x10107, 1, 9 },                  /* Aegean */
+      { 0x10320, 1, 1 },                  /* Old Italic Numeral 1 */
+      { 0x10321, 5, 5 },                  /* Old Italic Numeral 5 */
+      { 0x104a0, 0, 9 },                  /* Osmanya */
+      { 0x10a40, 1, 4, TRUE /*win10*/ },  /* Kharoshthi */
+      { 0x10d30, 0, 9, TRUE /*win10*/ },  /* Hanifi Rohingya */
+      { 0x10e60, 1, 9, TRUE /*win10*/ },  /* Rumi */
+      { 0x11052, 1, 9, TRUE /*win10*/ },  /* Brahmi Number */
+      { 0x11066, 0, 9, TRUE /*win10*/ },  /* Brahmi Digit */
+      { 0x110f0, 0, 9, TRUE /*win10*/ },  /* Sora Sompeng */
+      { 0x11136, 0, 9, TRUE /*win10*/ },  /* Chakma */
+      { 0x111d0, 0, 9, TRUE /*win10*/ },  /* Sharada */
+      { 0x112f0, 0, 9, TRUE /*win10*/ },  /* Khudawadi */
+      { 0x11450, 0, 9, TRUE /*win10*/ },  /* Newa */
+      { 0x114d0, 0, 9, TRUE /*win10*/ },  /* Tirhuta */
+      { 0x11650, 0, 9, TRUE /*win10*/ },  /* Modi */
+      { 0x116c0, 0, 9, TRUE /*win10*/ },  /* Takri */
+      { 0x11730, 0, 9, TRUE /*win10*/ },  /* Ahom */
+      { 0x118e0, 0, 9, TRUE /*win10*/ },  /* Warang */
+      { 0x11950, 0, 9, TRUE /*win10*/ },  /* Dives Akuru */
+      { 0x11c50, 0, 9, TRUE /*win10*/ },  /* Bhaiksuki */
+      { 0x11d50, 0, 9, TRUE /*win10*/ },  /* Masaram Gondi */
+      { 0x11da0, 0, 9, TRUE /*win10*/ },  /* Gunjala Gondi */
+      { 0x11f50, 0, 9, TRUE /*win10*/ },  /* Kawi */
+      { 0x16a60, 0, 9, TRUE /*win10*/ },  /* Mro */
+      { 0x16ac0, 0, 9, TRUE /*win10*/ },  /* Tangsa */
+      { 0x16b50, 0, 9, TRUE /*win10*/ },  /* Pahawh Hmong */
+      { 0x1d7ce, 0, 9 },                  /* Mathematical Bold */
+      { 0x1d7d8, 0, 9 },                  /* Mathematical Double Struck */
+      { 0x1d7e2, 0, 9 },                  /* Mathematical Sans Serif */
+      { 0x1d7ec, 0, 9 },                  /* Mathematical Sans Serif Bold */
+      { 0x1d7f6, 0, 9 },                  /* Mathematical Monospace */
+      { 0x1e140, 0, 9, TRUE /*win10*/ },  /* Nyiakeng Puachue Hmong */
+      { 0x1e2f0, 0, 9, TRUE /*win10*/ },  /* Wancho */
+      { 0x1e4f0, 0, 9, TRUE /*win10*/ },  /* Nag Mundari */
+      { 0x1e950, 0, 9, TRUE /*win10*/ },  /* Adlam */
+      { 0x1f100, 0, 0, TRUE /*win10*/ },  /* Full Stop */
+      { 0x1f101, 0, 9, TRUE /*win10*/ },  /* Comma */
+      { 0x1fbf0, 0, 9, TRUE /*win10*/ },  /* Segmented */
+      { 0x10ffff } /* Terminator */
   };
   static const WCHAR foldczone_src[] =
   {
@@ -3627,49 +4176,41 @@ static void test_FoldStringW(void)
   for (j = 0; j < ARRAY_SIZE(digitRanges); j++)
   {
     /* Check everything before this range */
-    for (ch = prev_ch; ch < digitRanges[j]; ch++)
+    for (ch = prev_ch; ch < digitRanges[j].ch; ch++)
     {
-      SetLastError(0xdeadbeef);
-      src[0] = ch;
-      src[1] = dst[0] = '\0';
-      ret = FoldStringW(MAP_FOLDDIGITS, src, -1, dst, 256);
-      ok(ret == 2, "Expected ret == 2, got %d, error %ld\n", ret, GetLastError());
-
-      ok(dst[0] == ch || wcschr(outOfSequenceDigits, ch) ||
-         (ch >= 0xa8e0 && ch <= 0xa8e9),  /* combining Devanagari on Win8 */
-         "MAP_FOLDDIGITS: ch 0x%04x Expected unchanged got %04x\n", ch, dst[0]);
-      GetStringTypeW( CT_CTYPE1, &ch, 1, &type );
-      ok(!(type & C1_DIGIT) || wcschr(outOfSequenceDigits, ch) ||
-         broken( ch >= 0xbf0 && ch <= 0xbf2 ), /* win2k */
-         "char %04x should not be a digit\n", ch );
+        len = put_utf16( src, ch );
+        src[len] = 0;
+        SetLastError(0xdeadbeef);
+        ret = FoldStringW(MAP_FOLDDIGITS, src, -1, dst, 256);
+        if (ret == 3)
+        {
+            ok( !wcscmp( src, dst ), "%s changed to %s\n", debugstr_w(src), debugstr_w(dst) );
+            continue;
+        }
+        ok(ret == 2, "Expected ret == 2, got %d, error %ld\n", ret, GetLastError());
+        ok(dst[0] == ch, "MAP_FOLDDIGITS: ch 0x%04x Expected unchanged got %04x\n", ch, dst[0]);
+        if (ch < 0x10000)
+        {
+            WCHAR wch = ch;
+            GetStringTypeW( CT_CTYPE1, &wch, 1, &type );
+            ok(!(type & C1_DIGIT), "char %04x should not be a digit\n", wch );
+        }
     }
-
-    if (digitRanges[j] == 0xffff)
+    if (digitRanges[j].ch == 0x10ffff)
       break; /* Finished the whole code point space */
 
-    for (ch = digitRanges[j]; ch < digitRanges[j] + 10; ch++)
+    for (ch = digitRanges[j].ch; ch <= digitRanges[j].ch + digitRanges[j].last - digitRanges[j].first; ch++)
     {
-      WCHAR c;
+        UINT exp = '0' + digitRanges[j].first + ch - digitRanges[j].ch;
 
-      /* Map out of sequence characters */
-      if      (ch == 0x2071) c = 0x00B9; /* Superscript 1 */
-      else if (ch == 0x2072) c = 0x00B2; /* Superscript 2 */
-      else if (ch == 0x2073) c = 0x00B3; /* Superscript 3 */
-      else if (ch == 0x245F) c = 0x24EA; /* Circled 0     */
-      else                   c = ch;
-      SetLastError(0xdeadbeef);
-      src[0] = c;
-      src[1] = dst[0] = '\0';
-      ret = FoldStringW(MAP_FOLDDIGITS, src, -1, dst, 256);
-      ok(ret == 2, "Expected ret == 2, got %d, error %ld\n", ret, GetLastError());
-
-      ok((dst[0] == '0' + ch - digitRanges[j] && dst[1] == '\0') ||
-         broken( dst[0] == ch ) ||  /* old Windows versions don't have all mappings */
-         (digitRanges[j] == 0x3020 && dst[0] == ch) || /* Hangzhou not present in all Windows versions */
-         (digitRanges[j] == 0x0F29 && dst[0] == ch) || /* Tibetan not present in all Windows versions */
-         wcschr(noDigitAvailable, c),
-         "MAP_FOLDDIGITS: ch %04x Expected %04x got %04x\n",
-         ch, '0' + digitRanges[j] - ch, dst[0]);
+        SetLastError(0xdeadbeef);
+        len = put_utf16( src, ch );
+        src[len] = 0;
+        ret = FoldStringW(MAP_FOLDDIGITS, src, -1, dst, 256);
+        ok(ret == 2 || broken( digitRanges[j].broken && ch >= 0x10000 ),
+           "%04x: Expected ret == 2, got %d, error %ld\n", ch, ret, GetLastError());
+        ok((dst[0] == exp && dst[1] == '\0') || broken( digitRanges[j].broken ),
+           "MAP_FOLDDIGITS: ch %04x Expected %04x got %04x\n", ch, exp, dst[0]);
     }
     prev_ch = ch;
   }
@@ -4435,29 +4976,31 @@ static void test_GetCPInfo(void)
         ok( ret, "UnmapViewOfFile failed err %lu\n", GetLastError() );
 
         status = pNtGetNlsSectionPtr( 11, 65001, NULL, &ptr, &size );
-        ok( status == STATUS_OBJECT_NAME_NOT_FOUND, "failed %lx\n", status );
-         if (pRtlInitCodePageTable)
-         {
-             static USHORT utf8[20] = { 0, CP_UTF8 };
+        ok( status == STATUS_OBJECT_NAME_NOT_FOUND || broken(!status), /* win10 1709 */
+            "failed %lx\n", status );
+        if (!status) UnmapViewOfFile( ptr );
+        if (pRtlInitCodePageTable)
+        {
+            static USHORT utf8[20] = { 0, CP_UTF8 };
 
-             memset( &table, 0xcc, sizeof(table) );
-             pRtlInitCodePageTable( utf8, &table );
-             ok( table.CodePage == CP_UTF8, "wrong codepage %u\n", table.CodePage );
-             if (table.MaximumCharacterSize)
-             {
-                 ok( table.MaximumCharacterSize == 4, "wrong char size %u\n", table.MaximumCharacterSize );
-                 ok( table.DefaultChar == '?', "wrong default char %x\n", table.DefaultChar );
-                 ok( table.UniDefaultChar == 0xfffd, "wrong default char %x\n", table.UniDefaultChar );
-                 ok( table.TransDefaultChar == '?', "wrong default char %x\n", table.TransDefaultChar );
-                 ok( table.TransUniDefaultChar == '?', "wrong default char %x\n", table.TransUniDefaultChar );
-                 ok( !table.DBCSCodePage, "wrong dbcs %u\n", table.DBCSCodePage );
-                 ok( !table.MultiByteTable, "wrong mbtable %p\n", table.MultiByteTable );
-                 ok( !table.WideCharTable, "wrong wctable %p\n", table.WideCharTable );
-                 ok( !table.DBCSRanges, "wrong ranges %p\n", table.DBCSRanges );
-                 ok( !table.DBCSOffsets, "wrong offsets %p\n", table.DBCSOffsets );
-             }
-             else win_skip( "utf-8 codepage not supported\n" );
-         }
+            memset( &table, 0xcc, sizeof(table) );
+            pRtlInitCodePageTable( utf8, &table );
+            ok( table.CodePage == CP_UTF8, "wrong codepage %u\n", table.CodePage );
+            if (table.MaximumCharacterSize)
+            {
+                ok( table.MaximumCharacterSize == 4, "wrong char size %u\n", table.MaximumCharacterSize );
+                ok( table.DefaultChar == '?', "wrong default char %x\n", table.DefaultChar );
+                ok( table.UniDefaultChar == 0xfffd, "wrong default char %x\n", table.UniDefaultChar );
+                ok( table.TransDefaultChar == '?', "wrong default char %x\n", table.TransDefaultChar );
+                ok( table.TransUniDefaultChar == '?', "wrong default char %x\n", table.TransUniDefaultChar );
+                ok( !table.DBCSCodePage, "wrong dbcs %u\n", table.DBCSCodePage );
+                ok( !table.MultiByteTable, "wrong mbtable %p\n", table.MultiByteTable );
+                ok( !table.WideCharTable, "wrong wctable %p\n", table.WideCharTable );
+                ok( !table.DBCSRanges, "wrong ranges %p\n", table.DBCSRanges );
+                ok( !table.DBCSOffsets, "wrong offsets %p\n", table.DBCSOffsets );
+            }
+            else win_skip( "utf-8 codepage not supported\n" );
+        }
 
         /* normalization tables */
 
@@ -5158,6 +5701,77 @@ static void test_IsValidLocaleName(void)
     ok(!ret, "RtlIsValidLocaleName should have failed\n");
 }
 
+static void test_ResolveLocaleName(void)
+{
+    static const struct { const WCHAR *name, *exp; BOOL broken; } tests[] =
+    {
+        { L"en-US", L"en-US" },
+        { L"en", L"en-US" },
+        { L"en-RR", L"en-US" },
+        { L"en-na", L"en-NA", TRUE /* <= win8 */ },
+        { L"EN-zz", L"en-US" },
+        { L"en-US", L"en-US" },
+        { L"de-DE_phoneb", L"de-DE" },
+        { L"DE-de-phoneb", L"de-DE" },
+        { L"fr-029", L"fr-029", TRUE /* <= win8 */ },
+        { L"fr-CH_XX", L"fr-CH", TRUE /* <= win10 1809 */ },
+        { L"fr-CHXX", L"fr-FR" },
+        { L"zh", L"zh-CN" },
+        { L"zh-Hant", L"zh-HK" },
+        { L"zh-hans", L"zh-CN" },
+        { L"ja-jp_radstr", L"ja-JP" },
+        { L"az", L"az-Latn-AZ" },
+        { L"uz", L"uz-Latn-UZ" },
+        { L"uz-cyrl", L"uz-Cyrl-UZ" },
+        { L"ia", L"ia-001", TRUE /* <= win10 1809 */ },
+        { L"zz", L"" },
+        { L"zzz-ZZZ", L"" },
+        { L"zzzz", L"" },
+        { L"zz+XX", NULL },
+        { L"zz.XX", NULL },
+        { LOCALE_NAME_INVARIANT, L"" },
+        { LOCALE_NAME_SYSTEM_DEFAULT, NULL },
+    };
+    INT i, ret;
+    WCHAR buffer[LOCALE_NAME_MAX_LENGTH];
+
+    if (!pResolveLocaleName)
+    {
+        win_skip( "ResolveLocaleName not available\n" );
+        return;
+    }
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
+    {
+        SetLastError( 0xdeadbeef );
+        memset( buffer, 0xcc, sizeof(buffer) );
+        ret = pResolveLocaleName( tests[i].name, buffer, sizeof(buffer) );
+        if (tests[i].exp)
+        {
+            ok( !wcscmp( buffer, tests[i].exp ) || broken( tests[i].broken ),
+                "%s: got %s\n", debugstr_w(tests[i].name), debugstr_w(buffer) );
+            ok( ret == wcslen(buffer) + 1, "%s: got %u\n", debugstr_w(tests[i].name), ret );
+        }
+        else
+        {
+            ok( !ret || broken( ret == 1 ) /* win7 */,
+                "%s: got %s\n", debugstr_w(tests[i].name), debugstr_w(buffer) );
+            if (!ret)
+                ok( GetLastError() == ERROR_INVALID_PARAMETER,
+                    "%s: wrong error %lu\n", debugstr_w(tests[i].name), GetLastError() );
+        }
+    }
+    SetLastError( 0xdeadbeef );
+    ret = pResolveLocaleName( L"en-US", buffer, 4 );
+    ok( !ret, "got %u\n", ret );
+    ok( GetLastError() == ERROR_INSUFFICIENT_BUFFER, "wrong error %lu\n", GetLastError() );
+    ok( !wcscmp( buffer, L"en-" ), "got %s\n", debugstr_w(buffer) );
+
+    SetLastError( 0xdeadbeef );
+    ret = pResolveLocaleName( L"en-US", NULL, 0 );
+    ok( ret == 6, "got %u\n", ret );
+    ok( GetLastError() == 0xdeadbeef, "wrong error %lu\n", GetLastError() );
+}
+
 static void test_CompareStringOrdinal(void)
 {
     INT ret;
@@ -5249,6 +5863,7 @@ static void test_CompareStringOrdinal(void)
 static void test_GetGeoInfo(void)
 {
     char buffA[20];
+    WCHAR buffW[20];
     INT ret;
 
     if (!pGetGeoInfoA)
@@ -5357,6 +5972,37 @@ static void test_GetGeoInfo(void)
     ret = pGetGeoInfoA(203, GEO_ID + 1, NULL, 0, 0);
     ok(ret == 0, "got %d\n", ret);
     ok(GetLastError() == ERROR_INVALID_FLAGS, "got %ld\n", GetLastError());
+
+    /* Test for GetGeoInfoEx */
+    if (!pGetGeoInfoEx)
+    {
+        win_skip("GetGeoInfoEx is not available\n");
+        return;
+    }
+
+    /* Test with ISO 3166-1 */
+    ret = pGetGeoInfoEx(L"AR", GEO_ISO3, buffW, ARRAYSIZE(buffW));
+    ok(ret != 0, "GetGeoInfoEx failed %ld.\n", GetLastError());
+    ok(!wcscmp(buffW, L"ARG"), "expected string to be ARG, got %ls\n", buffW);
+
+    /* Test with UN M.49 */
+    SetLastError(0xdeadbeef);
+    ret = pGetGeoInfoEx(L"032", GEO_ISO3, buffW, ARRAYSIZE(buffW));
+    ok(ret == 0, "expected GetGeoInfoEx to fail.\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER,
+                 "expected ERROR_INVALID_PARAMETER got %ld.\n", GetLastError());
+
+    /* Test GEO_ID */
+    ret = pGetGeoInfoEx(L"AR", GEO_ID, buffW, ARRAYSIZE(buffW));
+    ok(ret != 0, "GetGeoInfoEx failed %ld.\n", GetLastError());
+    ok(!wcscmp(buffW, L"11"), "expected string to be 11, got %ls\n", buffW);
+
+    /* Test with invalid geo type */
+    SetLastError(0xdeadbeef);
+    ret = pGetGeoInfoEx(L"AR", GEO_LCID, buffW, ARRAYSIZE(buffW));
+    ok(ret == 0, "expected GetGeoInfoEx to fail.\n");
+    ok(GetLastError() == ERROR_INVALID_FLAGS,
+                 "expected ERROR_INVALID_PARAMETER got %ld.\n", GetLastError());
 }
 
 static int geoidenum_count;
@@ -6073,43 +6719,40 @@ static void test_GetUserPreferredUILanguages(void)
 static void test_FindNLSStringEx(void)
 {
     INT res;
-    static WCHAR en_simpsimpW[] = {'S','i','m','p','l','e','S','i','m','p','l','e',0};
-    static WCHAR en_simpW[] = {'S','i','m','p','l','e',0};
-    static WCHAR comb_s_accent1W[] = {0x1e69, 'o','u','r','c','e',0};
-    static WCHAR comb_s_accent2W[] = {0x0073,0x323,0x307,'o','u','r','c','e',0};
-    static WCHAR comb_q_accent1W[] = {0x0071,0x0307,0x323,'u','o','t','e',0};
-    static WCHAR comb_q_accent2W[] = {0x0071,0x0323,0x307,'u','o','t','e',0};
+    static const WCHAR comb_s_accent1W[] = {0x1e69, 'o','u','r','c','e',0};
+    static const WCHAR comb_s_accent2W[] = {0x0073,0x323,0x307,'o','u','r','c','e',0};
+    static const WCHAR comb_q_accent1W[] = {'a','b',0x0071,0x0307,0x323,'u','o','t','e','\n',0};
+    static const WCHAR comb_q_accent2W[] = {0x0071,0x0323,0x307,'u','o','t','e',0};
     struct test_data {
         const WCHAR *locale;
         DWORD flags;
-        WCHAR *src;
-        INT src_size;
-        WCHAR *value;
-        INT val_size;
-        INT found;
+        const WCHAR *src;
+        const WCHAR *value;
         INT expected_ret;
         INT expected_found;
-        int todo;
-        BOOL broken_vista_servers;
     };
 
-    static struct test_data test_arr[] =
+    static struct test_data tests[] =
     {
-        { localeW, FIND_FROMSTART, en_simpsimpW, ARRAY_SIZE(en_simpsimpW)-1,
-          en_simpW, ARRAY_SIZE(en_simpW)-1, 0, 0, 6, 0, FALSE},
-        { localeW, FIND_FROMEND, en_simpsimpW, ARRAY_SIZE(en_simpsimpW)-1,
-          en_simpW, ARRAY_SIZE(en_simpW)-1, 0, 6, 6, 0, FALSE},
-        { localeW, FIND_STARTSWITH, en_simpsimpW, ARRAY_SIZE(en_simpsimpW)-1,
-          en_simpW, ARRAY_SIZE(en_simpW)-1, 0, 0, 6, 0, FALSE},
-        { localeW, FIND_ENDSWITH, en_simpsimpW, ARRAY_SIZE(en_simpsimpW)-1,
-          en_simpW, ARRAY_SIZE(en_simpW)-1, 0, 6, 6, 0, FALSE},
-        { localeW, FIND_FROMSTART, comb_s_accent1W, ARRAY_SIZE(comb_s_accent1W)-1,
-          comb_s_accent2W, ARRAY_SIZE(comb_s_accent2W)-1, 0, 0, 6, 1, TRUE },
-        { localeW, FIND_FROMSTART, comb_q_accent1W, ARRAY_SIZE(comb_q_accent1W)-1,
-          comb_q_accent2W, ARRAY_SIZE(comb_q_accent2W)-1, 0, 0, 7, 1, FALSE },
-        { 0 }
+        { localeW, FIND_FROMSTART, L"SimpleSimple", L"Simple", 0, 6},
+        { localeW, FIND_FROMEND, L"SimpleSimple", L"Simp", 6, 4},
+        { localeW, FIND_STARTSWITH, L"SimpleSimple", L"Simp", 0, 4},
+        { localeW, FIND_ENDSWITH, L"SimpleSimple", L"Simple", 6, 6},
+        { localeW, FIND_ENDSWITH, L"SimpleSimple", L"Simp", -1, 0xdeadbeef},
+        { localeW, FIND_FROMSTART, comb_s_accent1W, comb_s_accent2W, 0, 6 },
+        { localeW, FIND_FROMSTART, comb_q_accent1W, comb_q_accent2W, 2, 7 },
+        { localeW, FIND_STARTSWITH, L"--Option", L"--", 0, 2},
+        { localeW, FIND_ENDSWITH, L"Option--", L"--", 6, 2},
+        { localeW, FIND_FROMSTART, L"----", L"--", 0, 2},
+        { localeW, FIND_FROMEND, L"----", L"--", 2, 2},
+        { localeW, FIND_FROMSTART, L"opt1--opt2--opt3", L"--", 4, 2},
+        { localeW, FIND_FROMEND, L"opt1--opt2--opt3", L"--", 10, 2},
+        { localeW, FIND_FROMSTART, L"x-oss-security", L"x-oss-", 0, 6},
+        { localeW, FIND_FROMSTART, L"x-oss-security", L"-oss", 1, 4},
+        { localeW, FIND_FROMSTART, L"x-oss-security", L"-oss--", -1, 0xdeadbeef},
+        { localeW, FIND_FROMEND, L"x-oss-oss2", L"-oss", 5, 4},
     };
-    struct test_data *ptest;
+    unsigned int i;
 
     if (!pFindNLSStringEx)
     {
@@ -6152,33 +6795,17 @@ static void test_FindNLSStringEx(void)
     ok(ERROR_INVALID_PARAMETER == GetLastError(),
        "Expected ERROR_INVALID_PARAMETER as last error; got %ld\n", GetLastError());
 
-    for (ptest = test_arr; ptest->src != NULL; ptest++)
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
     {
-        todo_wine_if(ptest->todo)
-        {
-            res = pFindNLSStringEx(ptest->locale, ptest->flags, ptest->src, ptest->src_size,
-                                   ptest->value, ptest->val_size, &ptest->found, NULL, NULL, 0);
-            if (ptest->broken_vista_servers)
-            {
-                ok(res == ptest->expected_ret || /* Win 7 onwards */
-                   broken(res == -1), /* Win Vista, Server 2003 and 2008 */
-                   "Expected FindNLSStringEx to return %d. Returned value was %d\n",
-                   ptest->expected_ret, res);
-                ok(ptest->found == ptest->expected_found || /* Win 7 onwards */
-                   broken(ptest->found == 0), /* Win Vista, Server 2003 and 2008 */
-                   "Expected FindNLSStringEx to output %d. Value was %d\n",
-                   ptest->expected_found, ptest->found);
-            }
-            else
-            {
-                ok(res == ptest->expected_ret,
-                   "Expected FindNLSStringEx to return %d. Returned value was %d\n",
-                   ptest->expected_ret, res);
-                ok(ptest->found == ptest->expected_found,
-                   "Expected FindNLSStringEx to output %d. Value was %d\n",
-                   ptest->expected_found, ptest->found);
-            }
-        }
+        int found = 0xdeadbeef;
+        res = pFindNLSStringEx(tests[i].locale, tests[i].flags, tests[i].src, -1,
+                               tests[i].value, -1, &found, NULL, NULL, 0);
+        ok(res == tests[i].expected_ret,
+           "%u: Expected FindNLSStringEx to return %d. Returned value was %d\n", i,
+           tests[i].expected_ret, res);
+        ok(found == tests[i].expected_found,
+           "%u: Expected FindNLSStringEx to output %d. Value was %d\n", i,
+           tests[i].expected_found, found);
     }
 }
 
@@ -6269,19 +6896,6 @@ static void test_SetThreadUILanguage(void)
     res = pSetThreadUILanguage(0);
     todo_wine ok(res == MAKELANGID(LANG_DUTCH, SUBLANG_DUTCH_BELGIAN),
     "expected %d got %d\n", MAKELANGID(LANG_DUTCH, SUBLANG_DUTCH_BELGIAN), res);
-}
-
-static int put_utf16( WCHAR *str, unsigned int c )
-{
-    if (c < 0x10000)
-    {
-        *str = c;
-        return 1;
-    }
-    c -= 0x10000;
-    str[0] = 0xd800 | (c >> 10);
-    str[1] = 0xdc00 | (c & 0x3ff);
-    return 2;
 }
 
 /* read a Unicode string from NormalizationTest.txt format; helper for test_NormalizeString */
@@ -6810,154 +7424,150 @@ static void test_NormalizeString(void)
 
 static void test_SpecialCasing(void)
 {
-    int ret, i;
-    WCHAR exp, buffer[8];
-    static const WCHAR azCyrlazW[] = {'a','z','-','C','y','r','l','-','a','z',0};
-    static const WCHAR azLatnazW[] = {'a','z','-','L','a','t','n','-','a','z',0};
-    static const WCHAR deDEW[] = {'d','e','-','D','E',0};
-    static const WCHAR elGRW[] = {'e','l','-','G','R',0};
-    static const WCHAR enUSW[] = {'e','n','-','U','S',0};
-    static const WCHAR hyAMW[] = {'h','y','-','A','M',0};
-    static const WCHAR ltLTW[] = {'l','t','-','L','T',0};
-    static const WCHAR trTRW[] = {'t','r','-','T','R',0};
-    static const WCHAR TRTRW[] = {'T','R','-','T','R',0};
+    int ret, i, len;
+    UINT val = 0, exp;
+    WCHAR src[8], buffer[8];
     static const struct test {
         const WCHAR *lang;
         DWORD flags;
-        WCHAR ch;
-        WCHAR exp;      /* 0 if self */
-        WCHAR exp_ling; /* 0 if exp */
+        UINT ch;
+        UINT exp;      /* 0 if self */
+        UINT exp_ling; /* 0 if exp */
+        BOOL broken;
     } tests[] = {
-        {deDEW, LCMAP_UPPERCASE, 0x00DF},   /* LATIN SMALL LETTER SHARP S */
+        {L"de-DE", LCMAP_UPPERCASE, 0x00DF},   /* LATIN SMALL LETTER SHARP S */
 
-        {enUSW, LCMAP_UPPERCASE, 0xFB00},   /* LATIN SMALL LIGATURE FF */
-        {enUSW, LCMAP_UPPERCASE, 0xFB01},   /* LATIN SMALL LIGATURE FI */
-        {enUSW, LCMAP_UPPERCASE, 0xFB02},   /* LATIN SMALL LIGATURE FL */
-        {enUSW, LCMAP_UPPERCASE, 0xFB03},   /* LATIN SMALL LIGATURE FFI */
-        {enUSW, LCMAP_UPPERCASE, 0xFB04},   /* LATIN SMALL LIGATURE FFL */
-        {enUSW, LCMAP_UPPERCASE, 0xFB05},   /* LATIN SMALL LIGATURE LONG S T */
-        {enUSW, LCMAP_UPPERCASE, 0xFB06},   /* LATIN SMALL LIGATURE ST */
+        {L"en-US", LCMAP_UPPERCASE, 0xFB00},   /* LATIN SMALL LIGATURE FF */
+        {L"en-US", LCMAP_UPPERCASE, 0xFB01},   /* LATIN SMALL LIGATURE FI */
+        {L"en-US", LCMAP_UPPERCASE, 0xFB02},   /* LATIN SMALL LIGATURE FL */
+        {L"en-US", LCMAP_UPPERCASE, 0xFB03},   /* LATIN SMALL LIGATURE FFI */
+        {L"en-US", LCMAP_UPPERCASE, 0xFB04},   /* LATIN SMALL LIGATURE FFL */
+        {L"en-US", LCMAP_UPPERCASE, 0xFB05},   /* LATIN SMALL LIGATURE LONG S T */
+        {L"en-US", LCMAP_UPPERCASE, 0xFB06},   /* LATIN SMALL LIGATURE ST */
 
-        {hyAMW, LCMAP_UPPERCASE, 0x0587},   /* ARMENIAN SMALL LIGATURE ECH YIWN */
-        {hyAMW, LCMAP_UPPERCASE, 0xFB13},   /* ARMENIAN SMALL LIGATURE MEN NOW */
-        {hyAMW, LCMAP_UPPERCASE, 0xFB14},   /* ARMENIAN SMALL LIGATURE MEN ECH */
-        {hyAMW, LCMAP_UPPERCASE, 0xFB15},   /* ARMENIAN SMALL LIGATURE MEN INI */
-        {hyAMW, LCMAP_UPPERCASE, 0xFB16},   /* ARMENIAN SMALL LIGATURE VEW NOW */
-        {hyAMW, LCMAP_UPPERCASE, 0xFB17},   /* ARMENIAN SMALL LIGATURE MEN XEH */
+        {L"hy-AM", LCMAP_UPPERCASE, 0x0587},   /* ARMENIAN SMALL LIGATURE ECH YIWN */
+        {L"hy-AM", LCMAP_UPPERCASE, 0xFB13},   /* ARMENIAN SMALL LIGATURE MEN NOW */
+        {L"hy-AM", LCMAP_UPPERCASE, 0xFB14},   /* ARMENIAN SMALL LIGATURE MEN ECH */
+        {L"hy-AM", LCMAP_UPPERCASE, 0xFB15},   /* ARMENIAN SMALL LIGATURE MEN INI */
+        {L"hy-AM", LCMAP_UPPERCASE, 0xFB16},   /* ARMENIAN SMALL LIGATURE VEW NOW */
+        {L"hy-AM", LCMAP_UPPERCASE, 0xFB17},   /* ARMENIAN SMALL LIGATURE MEN XEH */
 
-        {enUSW, LCMAP_UPPERCASE, 0x0149},   /* LATIN SMALL LETTER N PRECEDED BY APOSTROPHE */
-        {elGRW, LCMAP_UPPERCASE, 0x0390},   /* GREEK SMALL LETTER IOTA WITH DIALYTIKA AND TONOS */
-        {elGRW, LCMAP_UPPERCASE, 0x03B0},   /* GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND TONOS */
-        {enUSW, LCMAP_UPPERCASE, 0x01F0},   /* LATIN SMALL LETTER J WITH CARON */
-        {enUSW, LCMAP_UPPERCASE, 0x1E96},   /* LATIN SMALL LETTER H WITH LINE BELOW */
-        {enUSW, LCMAP_UPPERCASE, 0x1E97},   /* LATIN SMALL LETTER T WITH DIAERESIS */
-        {enUSW, LCMAP_UPPERCASE, 0x1E98},   /* LATIN SMALL LETTER W WITH RING ABOVE */
-        {enUSW, LCMAP_UPPERCASE, 0x1E99},   /* LATIN SMALL LETTER Y WITH RING ABOVE */
-        {enUSW, LCMAP_UPPERCASE, 0x1E9A},   /* LATIN SMALL LETTER A WITH RIGHT HALF RING */
-        {elGRW, LCMAP_UPPERCASE, 0x1F50},   /* GREEK SMALL LETTER UPSILON WITH PSILI */
-        {elGRW, LCMAP_UPPERCASE, 0x1F52},   /* GREEK SMALL LETTER UPSILON WITH PSILI AND VARIA */
-        {elGRW, LCMAP_UPPERCASE, 0x1F54},   /* GREEK SMALL LETTER UPSILON WITH PSILI AND OXIA */
-        {elGRW, LCMAP_UPPERCASE, 0x1F56},   /* GREEK SMALL LETTER UPSILON WITH PSILI AND PERISPOMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FB6},   /* GREEK SMALL LETTER ALPHA WITH PERISPOMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FC6},   /* GREEK SMALL LETTER ETA WITH PERISPOMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FD2},   /* GREEK SMALL LETTER IOTA WITH DIALYTIKA AND VARIA */
-        {elGRW, LCMAP_UPPERCASE, 0x1FD3},   /* GREEK SMALL LETTER IOTA WITH DIALYTIKA AND OXIA */
-        {elGRW, LCMAP_UPPERCASE, 0x1FD6},   /* GREEK SMALL LETTER IOTA WITH PERISPOMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FD7},   /* GREEK SMALL LETTER IOTA WITH DIALYTIKA AND PERISPOMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FE2},   /* GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND VARIA */
-        {elGRW, LCMAP_UPPERCASE, 0x1FE3},   /* GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND OXIA */
-        {elGRW, LCMAP_UPPERCASE, 0x1FE4},   /* GREEK SMALL LETTER RHO WITH PSILI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FE6},   /* GREEK SMALL LETTER UPSILON WITH PERISPOMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FE7},   /* GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND PERISPOMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FF6},   /* GREEK SMALL LETTER OMEGA WITH PERISPOMENI */
+        {L"en-US", LCMAP_UPPERCASE, 0x0149},   /* LATIN SMALL LETTER N PRECEDED BY APOSTROPHE */
+        {L"el-GR", LCMAP_UPPERCASE, 0x0390,0,0,TRUE /*win7*/ }, /* GREEK SMALL LETTER IOTA WITH DIALYTIKA AND TONOS */
+        {L"el-GR", LCMAP_UPPERCASE, 0x03B0,0,0,TRUE /*win7*/ }, /* GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND TONOS */
+        {L"en-US", LCMAP_UPPERCASE, 0x01F0},   /* LATIN SMALL LETTER J WITH CARON */
+        {L"en-US", LCMAP_UPPERCASE, 0x1E96},   /* LATIN SMALL LETTER H WITH LINE BELOW */
+        {L"en-US", LCMAP_UPPERCASE, 0x1E97},   /* LATIN SMALL LETTER T WITH DIAERESIS */
+        {L"en-US", LCMAP_UPPERCASE, 0x1E98},   /* LATIN SMALL LETTER W WITH RING ABOVE */
+        {L"en-US", LCMAP_UPPERCASE, 0x1E99},   /* LATIN SMALL LETTER Y WITH RING ABOVE */
+        {L"en-US", LCMAP_UPPERCASE, 0x1E9A},   /* LATIN SMALL LETTER A WITH RIGHT HALF RING */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F50},   /* GREEK SMALL LETTER UPSILON WITH PSILI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F52},   /* GREEK SMALL LETTER UPSILON WITH PSILI AND VARIA */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F54},   /* GREEK SMALL LETTER UPSILON WITH PSILI AND OXIA */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F56},   /* GREEK SMALL LETTER UPSILON WITH PSILI AND PERISPOMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FB6},   /* GREEK SMALL LETTER ALPHA WITH PERISPOMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FC6},   /* GREEK SMALL LETTER ETA WITH PERISPOMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FD2},   /* GREEK SMALL LETTER IOTA WITH DIALYTIKA AND VARIA */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FD3},   /* GREEK SMALL LETTER IOTA WITH DIALYTIKA AND OXIA */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FD6},   /* GREEK SMALL LETTER IOTA WITH PERISPOMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FD7},   /* GREEK SMALL LETTER IOTA WITH DIALYTIKA AND PERISPOMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FE2},   /* GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND VARIA */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FE3},   /* GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND OXIA */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FE4},   /* GREEK SMALL LETTER RHO WITH PSILI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FE6},   /* GREEK SMALL LETTER UPSILON WITH PERISPOMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FE7},   /* GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND PERISPOMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FF6},   /* GREEK SMALL LETTER OMEGA WITH PERISPOMENI */
 
-        {elGRW, LCMAP_UPPERCASE, 0x1F80,0x1F88}, /* GREEK SMALL LETTER ALPHA WITH PSILI AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1F81,0x1F89}, /* GREEK SMALL LETTER ALPHA WITH DASIA AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1F82,0x1F8A}, /* GREEK SMALL LETTER ALPHA WITH PSILI AND VARIA AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1F83,0x1F8B}, /* GREEK SMALL LETTER ALPHA WITH DASIA AND VARIA AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1F84,0x1F8C}, /* GREEK SMALL LETTER ALPHA WITH PSILI AND OXIA AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1F85,0x1F8D}, /* GREEK SMALL LETTER ALPHA WITH DASIA AND OXIA AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1F86,0x1F8E}, /* GREEK SMALL LETTER ALPHA WITH PSILI AND PERISPOMENI AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1F87,0x1F8F}, /* GREEK SMALL LETTER ALPHA WITH DASIA AND PERISPOMENI AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F80,0x1F88}, /* GREEK SMALL LETTER ALPHA WITH PSILI AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F81,0x1F89}, /* GREEK SMALL LETTER ALPHA WITH DASIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F82,0x1F8A}, /* GREEK SMALL LETTER ALPHA WITH PSILI AND VARIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F83,0x1F8B}, /* GREEK SMALL LETTER ALPHA WITH DASIA AND VARIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F84,0x1F8C}, /* GREEK SMALL LETTER ALPHA WITH PSILI AND OXIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F85,0x1F8D}, /* GREEK SMALL LETTER ALPHA WITH DASIA AND OXIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F86,0x1F8E}, /* GREEK SMALL LETTER ALPHA WITH PSILI AND PERISPOMENI AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F87,0x1F8F}, /* GREEK SMALL LETTER ALPHA WITH DASIA AND PERISPOMENI AND YPOGEGRAMMENI */
 
-        {elGRW, LCMAP_LOWERCASE, 0x1F88,0x1F80}, /* GREEK CAPITAL LETTER ALPHA WITH PSILI AND PROSGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1F89,0x1F81}, /* GREEK CAPITAL LETTER ALPHA WITH DASIA AND PROSGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1F8A,0x1F82}, /* GREEK CAPITAL LETTER ALPHA WITH PSILI AND VARIA AND PROSGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1F8B,0x1F83}, /* GREEK CAPITAL LETTER ALPHA WITH DASIA AND VARIA AND PROSGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1F8C,0x1F84}, /* GREEK CAPITAL LETTER ALPHA WITH PSILI AND OXIA AND PROSGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1F8D,0x1F85}, /* GREEK CAPITAL LETTER ALPHA WITH DASIA AND OXIA AND PROSGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1F8E,0x1F86}, /* GREEK CAPITAL LETTER ALPHA WITH PSILI AND PERISPOMENI AND PROSGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1F8F,0x1F87}, /* GREEK CAPITAL LETTER ALPHA WITH DASIA AND PERISPOMENI AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1F88,0x1F80}, /* GREEK CAPITAL LETTER ALPHA WITH PSILI AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1F89,0x1F81}, /* GREEK CAPITAL LETTER ALPHA WITH DASIA AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1F8A,0x1F82}, /* GREEK CAPITAL LETTER ALPHA WITH PSILI AND VARIA AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1F8B,0x1F83}, /* GREEK CAPITAL LETTER ALPHA WITH DASIA AND VARIA AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1F8C,0x1F84}, /* GREEK CAPITAL LETTER ALPHA WITH PSILI AND OXIA AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1F8D,0x1F85}, /* GREEK CAPITAL LETTER ALPHA WITH DASIA AND OXIA AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1F8E,0x1F86}, /* GREEK CAPITAL LETTER ALPHA WITH PSILI AND PERISPOMENI AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1F8F,0x1F87}, /* GREEK CAPITAL LETTER ALPHA WITH DASIA AND PERISPOMENI AND PROSGEGRAMMENI */
 
-        {elGRW, LCMAP_UPPERCASE, 0x1F90,0x1F98}, /* GREEK SMALL LETTER ETA WITH PSILI AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1F91,0x1F99}, /* GREEK SMALL LETTER ETA WITH DASIA AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1F92,0x1F9A}, /* GREEK SMALL LETTER ETA WITH PSILI AND VARIA AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1F93,0x1F9B}, /* GREEK SMALL LETTER ETA WITH DASIA AND VARIA AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1F94,0x1F9C}, /* GREEK SMALL LETTER ETA WITH PSILI AND OXIA AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1F95,0x1F9D}, /* GREEK SMALL LETTER ETA WITH DASIA AND OXIA AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1F96,0x1F9E}, /* GREEK SMALL LETTER ETA WITH PSILI AND PERISPOMENI AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1F97,0x1F9F}, /* GREEK SMALL LETTER ETA WITH DASIA AND PERISPOMENI AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F90,0x1F98}, /* GREEK SMALL LETTER ETA WITH PSILI AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F91,0x1F99}, /* GREEK SMALL LETTER ETA WITH DASIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F92,0x1F9A}, /* GREEK SMALL LETTER ETA WITH PSILI AND VARIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F93,0x1F9B}, /* GREEK SMALL LETTER ETA WITH DASIA AND VARIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F94,0x1F9C}, /* GREEK SMALL LETTER ETA WITH PSILI AND OXIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F95,0x1F9D}, /* GREEK SMALL LETTER ETA WITH DASIA AND OXIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F96,0x1F9E}, /* GREEK SMALL LETTER ETA WITH PSILI AND PERISPOMENI AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1F97,0x1F9F}, /* GREEK SMALL LETTER ETA WITH DASIA AND PERISPOMENI AND YPOGEGRAMMENI */
 
-        {elGRW, LCMAP_LOWERCASE, 0x1FA8,0x1FA0}, /* GREEK CAPITAL LETTER OMEGA WITH PSILI AND PROSGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1FA9,0x1FA1}, /* GREEK CAPITAL LETTER OMEGA WITH DASIA AND PROSGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1FAA,0x1FA2}, /* GREEK CAPITAL LETTER OMEGA WITH PSILI AND VARIA AND PROSGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1FAB,0x1FA3}, /* GREEK CAPITAL LETTER OMEGA WITH DASIA AND VARIA AND PROSGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1FAC,0x1FA4}, /* GREEK CAPITAL LETTER OMEGA WITH PSILI AND OXIA AND PROSGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1FAD,0x1FA5}, /* GREEK CAPITAL LETTER OMEGA WITH DASIA AND OXIA AND PROSGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1FAE,0x1FA6}, /* GREEK CAPITAL LETTER OMEGA WITH PSILI AND PERISPOMENI AND PROSGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1FAF,0x1FA7}, /* GREEK CAPITAL LETTER OMEGA WITH DASIA AND PERISPOMENI AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1FA8,0x1FA0}, /* GREEK CAPITAL LETTER OMEGA WITH PSILI AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1FA9,0x1FA1}, /* GREEK CAPITAL LETTER OMEGA WITH DASIA AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1FAA,0x1FA2}, /* GREEK CAPITAL LETTER OMEGA WITH PSILI AND VARIA AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1FAB,0x1FA3}, /* GREEK CAPITAL LETTER OMEGA WITH DASIA AND VARIA AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1FAC,0x1FA4}, /* GREEK CAPITAL LETTER OMEGA WITH PSILI AND OXIA AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1FAD,0x1FA5}, /* GREEK CAPITAL LETTER OMEGA WITH DASIA AND OXIA AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1FAE,0x1FA6}, /* GREEK CAPITAL LETTER OMEGA WITH PSILI AND PERISPOMENI AND PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1FAF,0x1FA7}, /* GREEK CAPITAL LETTER OMEGA WITH DASIA AND PERISPOMENI AND PROSGEGRAMMENI */
 
-        {elGRW, LCMAP_UPPERCASE, 0x1FB3,0x1FBC}, /* GREEK SMALL LETTER ALPHA WITH YPOGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1FBC,0x1FB3}, /* GREEK CAPITAL LETTER ALPHA WITH PROSGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FC3,0x1FCC}, /* GREEK SMALL LETTER ETA WITH YPOGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1FCC,0x1FC3}, /* GREEK CAPITAL LETTER ETA WITH PROSGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FF3,0x1FFC}, /* GREEK SMALL LETTER OMEGA WITH YPOGEGRAMMENI */
-        {elGRW, LCMAP_LOWERCASE, 0x1FFC,0x1FF3}, /* GREEK CAPITAL LETTER OMEGA WITH PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FB3,0x1FBC}, /* GREEK SMALL LETTER ALPHA WITH YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1FBC,0x1FB3}, /* GREEK CAPITAL LETTER ALPHA WITH PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FC3,0x1FCC}, /* GREEK SMALL LETTER ETA WITH YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1FCC,0x1FC3}, /* GREEK CAPITAL LETTER ETA WITH PROSGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FF3,0x1FFC}, /* GREEK SMALL LETTER OMEGA WITH YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_LOWERCASE, 0x1FFC,0x1FF3}, /* GREEK CAPITAL LETTER OMEGA WITH PROSGEGRAMMENI */
 
-        {elGRW, LCMAP_UPPERCASE, 0x1FB2}, /* GREEK SMALL LETTER ALPHA WITH VARIA AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FB4}, /* GREEK SMALL LETTER ALPHA WITH OXIA AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FC2}, /* GREEK SMALL LETTER ETA WITH VARIA AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FC4}, /* GREEK SMALL LETTER ETA WITH OXIA AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FF2}, /* GREEK SMALL LETTER OMEGA WITH VARIA AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FF4}, /* GREEK SMALL LETTER OMEGA WITH OXIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FB2}, /* GREEK SMALL LETTER ALPHA WITH VARIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FB4}, /* GREEK SMALL LETTER ALPHA WITH OXIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FC2}, /* GREEK SMALL LETTER ETA WITH VARIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FC4}, /* GREEK SMALL LETTER ETA WITH OXIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FF2}, /* GREEK SMALL LETTER OMEGA WITH VARIA AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FF4}, /* GREEK SMALL LETTER OMEGA WITH OXIA AND YPOGEGRAMMENI */
 
-        {elGRW, LCMAP_UPPERCASE, 0x1FB7}, /* GREEK SMALL LETTER ALPHA WITH PERISPOMENI AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FC7}, /* GREEK SMALL LETTER ETA WITH PERISPOMENI AND YPOGEGRAMMENI */
-        {elGRW, LCMAP_UPPERCASE, 0x1FF7}, /* GREEK SMALL LETTER OMEGA WITH PERISPOMENI AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FB7}, /* GREEK SMALL LETTER ALPHA WITH PERISPOMENI AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FC7}, /* GREEK SMALL LETTER ETA WITH PERISPOMENI AND YPOGEGRAMMENI */
+        {L"el-GR", LCMAP_UPPERCASE, 0x1FF7}, /* GREEK SMALL LETTER OMEGA WITH PERISPOMENI AND YPOGEGRAMMENI */
 
-        {elGRW, LCMAP_LOWERCASE, 0x03A3,0x03C3}, /* GREEK CAPITAL LETTER SIGMA */
+        {L"el-GR", LCMAP_LOWERCASE, 0x03A3,0x03C3}, /* GREEK CAPITAL LETTER SIGMA */
 
-        {ltLTW, LCMAP_LOWERCASE, 'J','j'},        /* LATIN CAPITAL LETTER J */
-        {ltLTW, LCMAP_LOWERCASE, 0x012E,0x012F},  /* LATIN CAPITAL LETTER I WITH OGONEK */
-        {ltLTW, LCMAP_LOWERCASE, 0x00CC,0x00EC},  /* LATIN CAPITAL LETTER I WITH GRAVE */
-        {ltLTW, LCMAP_LOWERCASE, 0x00CD,0x00ED},  /* LATIN CAPITAL LETTER I WITH ACUTE */
-        {ltLTW, LCMAP_LOWERCASE, 0x0128,0x0129},  /* LATIN CAPITAL LETTER I WITH TILDE */
+        {L"lt-LT", LCMAP_LOWERCASE, 'J','j'},        /* LATIN CAPITAL LETTER J */
+        {L"lt-LT", LCMAP_LOWERCASE, 0x012E,0x012F},  /* LATIN CAPITAL LETTER I WITH OGONEK */
+        {L"lt-LT", LCMAP_LOWERCASE, 0x00CC,0x00EC},  /* LATIN CAPITAL LETTER I WITH GRAVE */
+        {L"lt-LT", LCMAP_LOWERCASE, 0x00CD,0x00ED},  /* LATIN CAPITAL LETTER I WITH ACUTE */
+        {L"lt-LT", LCMAP_LOWERCASE, 0x0128,0x0129},  /* LATIN CAPITAL LETTER I WITH TILDE */
 
-        {enUSW, LCMAP_UPPERCASE, 'i', 'I'}, /* LATIN SMALL LETTER I */
-        {ltLTW, LCMAP_UPPERCASE, 'i', 'I'}, /* LATIN SMALL LETTER I */
-        {trTRW, LCMAP_UPPERCASE, 'i', 'I', 0x0130}, /* LATIN SMALL LETTER I */
-        {TRTRW, LCMAP_UPPERCASE, 'i', 'I', 0x0130}, /* LATIN SMALL LETTER I */
-        {azCyrlazW, LCMAP_UPPERCASE, 'i', 'I', 0x0130}, /* LATIN SMALL LETTER I */
-        {azLatnazW, LCMAP_UPPERCASE, 'i', 'I', 0x0130}, /* LATIN SMALL LETTER I */
+        {L"en-US", LCMAP_UPPERCASE, 'i', 'I'}, /* LATIN SMALL LETTER I */
+        {L"lt-LT", LCMAP_UPPERCASE, 'i', 'I'}, /* LATIN SMALL LETTER I */
+        {L"tr-TR", LCMAP_UPPERCASE, 'i', 'I', 0x0130}, /* LATIN SMALL LETTER I */
+        {L"TR-TR", LCMAP_UPPERCASE, 'i', 'I', 0x0130}, /* LATIN SMALL LETTER I */
+        {L"az-Cyrl-az", LCMAP_UPPERCASE, 'i', 'I', 0x0130, TRUE /*win7*/}, /* LATIN SMALL LETTER I */
+        {L"az-Latn-az", LCMAP_UPPERCASE, 'i', 'I', 0x0130}, /* LATIN SMALL LETTER I */
 
-        {enUSW, LCMAP_LOWERCASE, 'I', 'i'}, /* LATIN CAPITAL LETTER I */
-        {ltLTW, LCMAP_LOWERCASE, 'I', 'i'}, /* LATIN CAPITAL LETTER I */
-        {trTRW, LCMAP_LOWERCASE, 'I', 'i', 0x0131}, /* LATIN CAPITAL LETTER I */
-        {TRTRW, LCMAP_LOWERCASE, 'I', 'i', 0x0131}, /* LATIN CAPITAL LETTER I */
-        {azCyrlazW, LCMAP_LOWERCASE, 'I', 'i', 0x0131}, /* LATIN CAPITAL LETTER I */
-        {azLatnazW, LCMAP_LOWERCASE, 'I', 'i', 0x0131}, /* LATIN CAPITAL LETTER I */
+        {L"en-US", LCMAP_LOWERCASE, 'I', 'i'}, /* LATIN CAPITAL LETTER I */
+        {L"lt-LT", LCMAP_LOWERCASE, 'I', 'i'}, /* LATIN CAPITAL LETTER I */
+        {L"tr-TR", LCMAP_LOWERCASE, 'I', 'i', 0x0131}, /* LATIN CAPITAL LETTER I */
+        {L"TR-TR", LCMAP_LOWERCASE, 'I', 'i', 0x0131}, /* LATIN CAPITAL LETTER I */
+        {L"az-Cyrl-az", LCMAP_LOWERCASE, 'I', 'i', 0x0131, TRUE /*win7*/}, /* LATIN CAPITAL LETTER I */
+        {L"az-Latn-az", LCMAP_LOWERCASE, 'I', 'i', 0x0131}, /* LATIN CAPITAL LETTER I */
 
-        {enUSW, LCMAP_LOWERCASE, 0x0130,0,'i'}, /* LATIN CAPITAL LETTER I WITH DOT ABOVE */
-        {trTRW, LCMAP_LOWERCASE, 0x0130,0,'i'}, /* LATIN CAPITAL LETTER I WITH DOT ABOVE */
-        {TRTRW, LCMAP_LOWERCASE, 0x0130,0,'i'}, /* LATIN CAPITAL LETTER I WITH DOT ABOVE */
-        {azCyrlazW, LCMAP_LOWERCASE, 0x0130,0,'i'}, /* LATIN CAPITAL LETTER I WITH DOT ABOVE */
-        {azLatnazW, LCMAP_LOWERCASE, 0x0130,0,'i'}, /* LATIN CAPITAL LETTER I WITH DOT ABOVE */
+        {L"en-US", LCMAP_LOWERCASE, 0x0130,0,'i'}, /* LATIN CAPITAL LETTER I WITH DOT ABOVE */
+        {L"tr-TR", LCMAP_LOWERCASE, 0x0130,0,'i'}, /* LATIN CAPITAL LETTER I WITH DOT ABOVE */
+        {L"TR-TR", LCMAP_LOWERCASE, 0x0130,0,'i'}, /* LATIN CAPITAL LETTER I WITH DOT ABOVE */
+        {L"az-Cyrl-az", LCMAP_LOWERCASE, 0x0130,0,'i'}, /* LATIN CAPITAL LETTER I WITH DOT ABOVE */
+        {L"az-Latn-az", LCMAP_LOWERCASE, 0x0130,0,'i'}, /* LATIN CAPITAL LETTER I WITH DOT ABOVE */
 
-        {enUSW, LCMAP_UPPERCASE, 0x0131,0,'I'}, /* LATIN SMALL LETTER DOTLESS I */
-        {trTRW, LCMAP_UPPERCASE, 0x0131,0,'I'}, /* LATIN SMALL LETTER DOTLESS I */
-        {TRTRW, LCMAP_UPPERCASE, 0x0131,0,'I'}, /* LATIN SMALL LETTER DOTLESS I */
-        {azCyrlazW, LCMAP_UPPERCASE, 0x0131,0,'I'}, /* LATIN SMALL LETTER DOTLESS I */
-        {azLatnazW, LCMAP_UPPERCASE, 0x0131,0,'I'}, /* LATIN SMALL LETTER DOTLESS I */
+        {L"en-US", LCMAP_UPPERCASE, 0x0131,0,'I'}, /* LATIN SMALL LETTER DOTLESS I */
+        {L"tr-TR", LCMAP_UPPERCASE, 0x0131,0,'I'}, /* LATIN SMALL LETTER DOTLESS I */
+        {L"TR-TR", LCMAP_UPPERCASE, 0x0131,0,'I'}, /* LATIN SMALL LETTER DOTLESS I */
+        {L"az-Cyrl-az", LCMAP_UPPERCASE, 0x0131,0,'I'}, /* LATIN SMALL LETTER DOTLESS I */
+        {L"az-Latn-az", LCMAP_UPPERCASE, 0x0131,0,'I'}, /* LATIN SMALL LETTER DOTLESS I */
+
+        {L"en-US", LCMAP_LOWERCASE, 0x10418,0x10440,0,TRUE /*win7*/}, /* DESERET CAPITAL LETTER GAY */
+        {L"en-US", LCMAP_UPPERCASE, 0x10431,0x10409,0,TRUE /*win7*/}, /* DESERET SMALL LETTER SHORT AH */
     };
 
     if (!pLCMapStringEx)
@@ -6966,26 +7576,29 @@ static void test_SpecialCasing(void)
         return;
     }
 
-    for (i = 0; i < ARRAY_SIZE(tests); i++) {
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
+    {
         memset(buffer, 0, sizeof(buffer));
+        len = put_utf16( src, tests[i].ch );
         ret = pLCMapStringEx(tests[i].lang, tests[i].flags,
-            &tests[i].ch, 1, buffer, ARRAY_SIZE(buffer), NULL, NULL, 0);
-        ok(ret == 1, "expected 1, got %d for %04x for %s\n", ret, tests[i].ch,
-            wine_dbgstr_w(tests[i].lang));
+                             src, len, buffer, ARRAY_SIZE(buffer), NULL, NULL, 0);
+        len = get_utf16( buffer, ret, &val );
+        ok(ret == len, "got %d for %04x for %s\n", ret, tests[i].ch, wine_dbgstr_w(tests[i].lang));
         exp = tests[i].exp ? tests[i].exp : tests[i].ch;
-        ok(buffer[0] == exp || broken(buffer[0] != exp),
+        ok(val == exp || broken(tests[i].broken),
             "expected %04x, got %04x for %04x for %s\n",
-            exp, buffer[0], tests[i].ch, wine_dbgstr_w(tests[i].lang));
+            exp, val, tests[i].ch, wine_dbgstr_w(tests[i].lang));
 
         memset(buffer, 0, sizeof(buffer));
+        len = put_utf16( src, tests[i].ch );
         ret = pLCMapStringEx(tests[i].lang, tests[i].flags|LCMAP_LINGUISTIC_CASING,
-            &tests[i].ch, 1, buffer, ARRAY_SIZE(buffer), NULL, NULL, 0);
-        ok(ret == 1, "expected 1, got %d for %04x for %s\n", ret, tests[i].ch,
-            wine_dbgstr_w(tests[i].lang));
+                             src, len, buffer, ARRAY_SIZE(buffer), NULL, NULL, 0);
+        len = get_utf16( buffer, ret, &val );
+        ok(ret == len, "got %d for %04x for %s\n", ret, tests[i].ch, wine_dbgstr_w(tests[i].lang));
         exp = tests[i].exp_ling ? tests[i].exp_ling : exp;
-        ok(buffer[0] == exp || broken(buffer[0] != exp),
+        ok(val == exp || broken(tests[i].broken),
             "expected %04x, got %04x for %04x for %s\n",
-            exp, buffer[0], tests[i].ch, wine_dbgstr_w(tests[i].lang));
+            exp, val, tests[i].ch, wine_dbgstr_w(tests[i].lang));
     }
 }
 
@@ -7207,6 +7820,56 @@ static void test_NLSVersion(void)
         ok( GetLastError() == 0xdeadbeef, "wrong error %lu\n", GetLastError() );
     }
     else win_skip( "IsValidNLSVersion not available\n" );
+
+    if (pIsNLSDefinedString)
+    {
+        SetLastError( 0xdeadbeef );
+        info.dwNLSVersionInfoSize = sizeof(info);
+        ret = pIsNLSDefinedString( COMPARE_STRING, 0, (NLSVERSIONINFO *)&info, L"A", 1 );
+        if (ret)
+            ok( GetLastError() == 0xdeadbeef, "wrong error %lu\n", GetLastError() );
+        else
+            ok( broken( GetLastError() == ERROR_INSUFFICIENT_BUFFER ), /* win7 */
+                "wrong error %lu\n", GetLastError() );
+
+        SetLastError( 0xdeadbeef );
+        info.dwNLSVersionInfoSize = sizeof(info) + 1;
+        ret = pIsNLSDefinedString( COMPARE_STRING, 0, (NLSVERSIONINFO *)&info, L"A", 1 );
+        ok( !ret, "IsNLSDefinedString succeeded\n" );
+        ok( GetLastError() == ERROR_INSUFFICIENT_BUFFER, "wrong error %lu\n", GetLastError() );
+
+        SetLastError( 0xdeadbeef );
+        info.dwNLSVersionInfoSize = offsetof( NLSVERSIONINFO, dwEffectiveId );
+        ret = pIsNLSDefinedString( COMPARE_STRING, 0, (NLSVERSIONINFO *)&info, L"A", 1 );
+        ok( ret, "IsNLSDefinedString failed err %lu\n", GetLastError() );
+        ok( GetLastError() == 0xdeadbeef, "wrong error %lu\n", GetLastError() );
+
+        SetLastError( 0xdeadbeef );
+        ret = pIsNLSDefinedString( 2, 0, (NLSVERSIONINFO *)&info, L"A", 1 );
+        ok( !ret, "IsNLSDefinedString succeeded\n" );
+        ok( GetLastError() == ERROR_INVALID_FLAGS, "wrong error %lu\n", GetLastError() );
+
+        SetLastError( 0xdeadbeef );
+        ret = pIsNLSDefinedString( COMPARE_STRING, 0, (NLSVERSIONINFO *)&info, L"ABC", -10 );
+        ok( ret, "IsNLSDefinedString failed err %lu\n", GetLastError() );
+        ok( GetLastError() == 0xdeadbeef, "wrong error %lu\n", GetLastError() );
+
+        SetLastError( 0xdeadbeef );
+        ret = pIsNLSDefinedString( COMPARE_STRING, 0, (NLSVERSIONINFO *)&info, L"ABC", -1 );
+        ok( ret, "IsNLSDefinedString failed err %lu\n", GetLastError() );
+        ok( GetLastError() == 0xdeadbeef, "wrong error %lu\n", GetLastError() );
+
+        SetLastError( 0xdeadbeef );
+        ret = pIsNLSDefinedString( COMPARE_STRING, 0, (NLSVERSIONINFO *)&info, L"\xd800", 1 );
+        ok( !ret, "IsNLSDefinedString failed err %lu\n", GetLastError() );
+        ok( GetLastError() == 0xdeadbeef, "wrong error %lu\n", GetLastError() );
+
+        SetLastError( 0xdeadbeef );
+        ret = pIsNLSDefinedString( COMPARE_STRING, 0, (NLSVERSIONINFO *)&info, L"\xd800", -20 );
+        ok( !ret, "IsNLSDefinedString failed err %lu\n", GetLastError() );
+        ok( GetLastError() == 0xdeadbeef, "wrong error %lu\n", GetLastError() );
+    }
+    else win_skip( "IsNLSDefinedString not available\n" );
 }
 
 static void test_locale_nls(void)
@@ -7596,9 +8259,107 @@ static void test_EnumCalendarInfoExW(void)
     }
 }
 
+/* Generate sort keys for a list of Unicode code points.
+ * Possible source files:
+ *   The Unicode collation test suite:  https://www.unicode.org/Public/UCA/latest/CollationTest.zip
+ *   The list of supported char compressions:  winedump nls/sortdefault.nls | grep \\-\>
+ */
+static void dump_sortkeys( char *argv[] )
+{
+    WCHAR data[128];
+    WCHAR locale[LOCALE_NAME_MAX_LENGTH];
+    BYTE key[256];
+    unsigned int i, val, pos, res, flags = 0;
+    char *p, *end, buffer[1024];
+    FILE *f = fopen( argv[1], "r" );
+
+    locale[0] = 0;
+    if (argv[2])
+    {
+        MultiByteToWideChar( CP_ACP, 0, argv[2], -1, locale, LOCALE_NAME_MAX_LENGTH );
+        if (argv[3]) flags = strtoul( argv[3], NULL, 0 );
+    }
+
+    if (!f)
+    {
+        fprintf( stderr, "cannot open %s\n", argv[1] );
+        return;
+    }
+    while (fgets( buffer, sizeof(buffer), f ))
+    {
+        if (buffer[0] && buffer[strlen(buffer)-1] == '\n') buffer[strlen(buffer)-1] = 0;
+        p = buffer;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '#') continue;
+        pos = 0;
+        while (*p && *p != ';' && *p != '-')
+        {
+            val = strtoul( p, &end, 16 );
+            if (end == p) break;
+            if (val >= 0x10000)
+            {
+                data[pos++] = 0xd800 | (val >> 10);
+                data[pos++] = 0xdc00 | (val & 0x3ff);
+            }
+            else data[pos++] = val;
+            p = end;
+            while (*p == ' ' || *p == '\t') p++;
+        }
+        *p = 0;
+        res = LCMapStringEx( locale, flags | LCMAP_SORTKEY, data, pos,
+                             (WCHAR *)key, sizeof(key), NULL, NULL, 0 );
+        printf( "%s:", buffer );
+        for (i = 0; i < res; i++) printf( " %02x", key[i] );
+        printf( "\n" );
+    }
+    fclose( f );
+}
+
+static BOOL CALLBACK EnumDateFormatsExEx_proc(LPWSTR date_format_string, CALID calendar_id, LPARAM lp)
+{
+    return TRUE;
+}
+
+static void test_EnumDateFormatsExEx(void)
+{
+    DWORD error;
+    BOOL ret;
+
+    /* Invalid locale name */
+    ret = EnumDateFormatsExEx(EnumDateFormatsExEx_proc, L"deadbeef", DATE_SHORTDATE, 0);
+    error = GetLastError();
+    ok(!ret, "EnumDateFormatsExEx succeeded.\n");
+    ok(error == ERROR_INVALID_PARAMETER, "Got unexpected error %#lx.\n", error);
+
+    /* yi-Hebr is missing on versions < Win10 */
+    /* Running the following tests will cause other tests that use LOCALE_CUSTOM_UNSPECIFIED to
+     * report yi-Hebr instead the default locale on Windows 10. So run them at the end */
+    ret = EnumDateFormatsExEx(EnumDateFormatsExEx_proc, L"yi-Hebr", DATE_SHORTDATE, 0);
+    error = GetLastError();
+    ok(ret || (!ret && error == ERROR_INVALID_PARAMETER), /* < Win10 */
+       "EnumDateFormatsExEx failed, error %#lx.\n", error);
+
+    ret = EnumDateFormatsExEx(EnumDateFormatsExEx_proc, L"yi-Hebr", DATE_LONGDATE, 0);
+    error = GetLastError();
+    ok(ret || (!ret && error == ERROR_INVALID_PARAMETER), /* < Win10 */
+       "EnumDateFormatsExEx failed, error %#lx.\n", error);
+}
+
 START_TEST(locale)
 {
+  char **argv;
+  int argc = winetest_get_mainargs( &argv );
+
   InitFunctionPointers();
+
+  if (argc >= 4)
+  {
+      if (!strcmp( argv[2], "sortkeys" ))
+      {
+          dump_sortkeys( argv + 2 );
+          return;
+      }
+  }
 
   test_EnumTimeFormatsA();
   test_EnumTimeFormatsW();
@@ -7633,6 +8394,7 @@ START_TEST(locale)
   test_GetStringTypeW();
   test_Idn();
   test_IsValidLocaleName();
+  test_ResolveLocaleName();
   test_CompareStringOrdinal();
   test_GetGeoInfo();
   test_EnumSystemGeoID();
@@ -7649,8 +8411,12 @@ START_TEST(locale)
   test_locale_nls();
   test_geo_name();
   test_sorting();
+  test_unicode_sorting();
   test_EnumCalendarInfoA();
   test_EnumCalendarInfoW();
   test_EnumCalendarInfoExA();
   test_EnumCalendarInfoExW();
+
+  /* Run this test at the end */
+  test_EnumDateFormatsExEx();
 }

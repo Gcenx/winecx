@@ -165,6 +165,14 @@ static void test_inset(void)
     expect(Ok, stat);
     expectf(0.0, inset);
 
+    stat = GdipSetCustomLineCapBaseInset(custom, 2.0);
+    expect(Ok, stat);
+
+    inset = (REAL)0xdeadbeef;
+    stat = GdipGetCustomLineCapBaseInset(custom, &inset);
+    expect(Ok, stat);
+    ok(inset == 2.0, "Unexpected inset value %f\n", inset);
+
     GdipDeleteCustomLineCap(custom);
     GdipDeletePath(path);
 }
@@ -283,13 +291,14 @@ static void test_create_adjustable_cap(void)
     ok(base == LineCapTriangle, "Unexpected base cap %d\n", base);
 
     stat = GdipSetCustomLineCapBaseCap((GpCustomLineCap*)cap, LineCapSquare);
-    todo_wine
     ok(stat == Ok, "Unexpected return code, %d\n", stat);
 
     stat = GdipGetCustomLineCapBaseCap((GpCustomLineCap*)cap, &base);
     ok(stat == Ok, "Unexpected return code, %d\n", stat);
-    todo_wine
     ok(base == LineCapSquare, "Unexpected base cap %d\n", base);
+
+    stat = GdipSetCustomLineCapBaseCap((GpCustomLineCap*)cap, LineCapSquareAnchor);
+    ok(stat == InvalidParameter, "Unexpected return code, %d\n", stat);
 
     /* Base inset */
     stat = GdipGetAdjustableArrowCapWidth(cap, &width);
@@ -371,6 +380,33 @@ static void test_captype(void)
     GdipDeleteCustomLineCap((GpCustomLineCap*)arrowcap);
 }
 
+static void test_strokecap(void)
+{
+    GpCustomLineCap *cap;
+    GpStatus stat;
+    GpPath *path;
+
+    /* default cap */
+    stat = GdipCreatePath(FillModeAlternate, &path);
+    ok(stat == Ok, "Failed to create path, %d\n", stat);
+    stat = GdipAddPathRectangle(path, 5.0, 5.0, 10.0, 10.0);
+    ok(stat == Ok, "AddPathRectangle failed, %d\n", stat);
+
+    stat = GdipCreateCustomLineCap(NULL, path, LineCapFlat, 0.0, &cap);
+    ok(stat == Ok, "Failed to create cap, %d\n", stat);
+
+    stat = GdipSetCustomLineCapStrokeCaps((GpCustomLineCap*)cap, LineCapSquare, LineCapFlat);
+    ok(stat == Ok, "Unexpected return code, %d\n", stat);
+
+    stat = GdipSetCustomLineCapStrokeCaps((GpCustomLineCap*)cap, LineCapSquareAnchor, LineCapFlat);
+    ok(stat == InvalidParameter, "Unexpected return code, %d\n", stat);
+
+    stat = GdipSetCustomLineCapStrokeCaps((GpCustomLineCap*)cap, LineCapFlat, LineCapSquareAnchor);
+    ok(stat == InvalidParameter, "Unexpected return code, %d\n", stat);
+    GdipDeleteCustomLineCap(cap);
+    GdipDeletePath(path);
+}
+
 START_TEST(customlinecap)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -396,6 +432,7 @@ START_TEST(customlinecap)
     test_scale();
     test_create_adjustable_cap();
     test_captype();
+    test_strokecap();
 
     GdiplusShutdown(gdiplusToken);
 }

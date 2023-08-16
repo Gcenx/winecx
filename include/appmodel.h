@@ -18,11 +18,12 @@
 #ifndef _APPMODEL_H_
 #define _APPMODEL_H_
 
-#include "wine/winheader_enter.h"
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
+
+#define APPLICATION_USER_MODEL_ID_MAX_LENGTH 130
+#define APPLICATION_USER_MODEL_ID_MIN_LENGTH 21
 
 typedef enum AppPolicyMediaFoundationCodecLoading
 {
@@ -96,7 +97,5 @@ LONG WINAPI PackageIdFromFullName(const WCHAR *full_name, UINT32 flags, UINT32 *
 #if defined(__cplusplus)
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* _APPMODEL_H_ */

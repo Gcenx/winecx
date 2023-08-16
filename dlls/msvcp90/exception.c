@@ -26,6 +26,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcp);
 
+#define CXX_FRAME_MAGIC_VC6 0x19930520
+
 CREATE_TYPE_INFO_VTABLE
 
 #define CLASS_IS_SIMPLE_TYPE          1
@@ -36,7 +38,7 @@ int* __cdecl __processing_throw(void);
 #if _MSVCP_VER >= 70 || defined(_MSVCIRT)
 typedef const char **exception_name;
 #define EXCEPTION_STR(name) (*name)
-#define EXCEPTION_NAME(str) ((exception_name)&str)
+#define EXCEPTION_NAME(str) (&str)
 #else
 typedef const char *exception_name;
 #define EXCEPTION_STR(name) (name)
@@ -96,7 +98,7 @@ exception* __thiscall exception_copy_ctor(exception *this, const exception *rhs)
         this->name = rhs->name;
         this->do_free = FALSE;
     } else
-        MSVCP_exception_ctor(this, EXCEPTION_NAME(rhs->name));
+        MSVCP_exception_ctor(this, (exception_name)EXCEPTION_NAME(rhs->name));
     TRACE("name = %s\n", this->name);
     return this;
 }
@@ -214,7 +216,7 @@ bad_alloc* __thiscall MSVCP_bad_alloc_ctor(bad_alloc *this, exception_name name)
 DEFINE_THISCALL_WRAPPER(MSVCP_bad_alloc_default_ctor, 4)
 bad_alloc* __thiscall MSVCP_bad_alloc_default_ctor(bad_alloc *this)
 {
-    static const char name[] = "bad allocation";
+    static const char *name = "bad allocation";
     return MSVCP_bad_alloc_ctor(this, EXCEPTION_NAME(name));
 }
 
@@ -946,6 +948,55 @@ bool __cdecl MSVCP__uncaught_exception(void)
 }
 
 #if _MSVCP_VER >= 140
+void** CDECL __current_exception(void);
+
+/* compute the this pointer for a base class of a given type */
+static inline void *get_this_pointer( const this_ptr_offsets *off, void *object )
+{
+    if (!object) return NULL;
+
+    if (off->vbase_descr >= 0)
+    {
+        int *offset_ptr;
+
+        /* move this ptr to vbase descriptor */
+        object = (char *)object + off->vbase_descr;
+        /* and fetch additional offset from vbase descriptor */
+        offset_ptr = (int *)(*(char **)object + off->vbase_offset);
+        object = (char *)object + *offset_ptr;
+    }
+
+    object = (char *)object + off->this_offset;
+    return object;
+}
+
+#ifdef __i386__
+extern void call_copy_ctor( void *func, void *this, void *src, int has_vbase );
+__ASM_GLOBAL_FUNC( call_copy_ctor,
+                   "pushl %ebp\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                   __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                   "movl %esp, %ebp\n\t"
+                   __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                   "pushl $1\n\t"
+                   "movl 12(%ebp), %ecx\n\t"
+                   "pushl 16(%ebp)\n\t"
+                   "call *8(%ebp)\n\t"
+                   "leave\n"
+                   __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                   __ASM_CFI(".cfi_same_value %ebp\n\t")
+                   "ret" );
+#else
+static inline void call_copy_ctor( void *func, void *this, void *src, int has_vbase )
+{
+    TRACE( "calling copy ctor %p object %p src %p\n", func, this, src );
+    if (has_vbase)
+        ((void (__cdecl*)(void*, void*, BOOL))func)(this, src, 1);
+    else
+        ((void (__cdecl*)(void*, void*))func)(this, src);
+}
+#endif
+
 int __cdecl __uncaught_exceptions(void)
 {
     return *__processing_throw();
@@ -1012,6 +1063,259 @@ void __cdecl __ExceptionPtrDestroy(exception_ptr *ep)
         HeapFree(GetProcessHeap(), 0, ep->rec);
         HeapFree(GetProcessHeap(), 0, ep->ref);
     }
+}
+
+/*********************************************************************
+ * ?__ExceptionPtrCopy@@YAXPAXPBX@Z
+ * ?__ExceptionPtrCopy@@YAXPEAXPEBX@Z
+ */
+void __cdecl __ExceptionPtrCopy(exception_ptr *ep, const exception_ptr *copy)
+{
+    TRACE("(%p %p)\n", ep, copy);
+
+    /* don't destroy object stored in ep */
+    *ep = *copy;
+    if (ep->ref)
+        InterlockedIncrement(copy->ref);
+}
+
+/*********************************************************************
+ * ?__ExceptionPtrAssign@@YAXPAXPBX@Z
+ * ?__ExceptionPtrAssign@@YAXPEAXPEBX@Z
+ */
+void __cdecl __ExceptionPtrAssign(exception_ptr *ep, const exception_ptr *assign)
+{
+    TRACE("(%p %p)\n", ep, assign);
+
+    /* don't destroy object stored in ep */
+    if (ep->ref)
+        InterlockedDecrement(ep->ref);
+
+    *ep = *assign;
+    if (ep->ref)
+        InterlockedIncrement(ep->ref);
+}
+
+/*********************************************************************
+ * ?__ExceptionPtrRethrow@@YAXPBX@Z
+ * ?__ExceptionPtrRethrow@@YAXPEBX@Z
+ */
+void __cdecl __ExceptionPtrRethrow(const exception_ptr *ep)
+{
+    TRACE("(%p)\n", ep);
+
+    if (!ep->rec)
+    {
+        static const char *exception_msg = "bad exception";
+        exception e;
+
+        MSVCP_exception_ctor(&e, &exception_msg);
+        _CxxThrowException(&e, &exception_cxx_type);
+        return;
+    }
+
+    RaiseException(ep->rec->ExceptionCode, ep->rec->ExceptionFlags & (~EH_UNWINDING),
+            ep->rec->NumberParameters, ep->rec->ExceptionInformation);
+}
+
+/*********************************************************************
+ * ?__ExceptionPtrCurrentException@@YAXPAX@Z
+ * ?__ExceptionPtrCurrentException@@YAXPEAX@Z
+ */
+#ifndef __x86_64__
+void __cdecl __ExceptionPtrCurrentException(exception_ptr *ep)
+{
+    void **current_exception = __current_exception();
+    EXCEPTION_RECORD *rec = current_exception ? *current_exception : NULL;
+
+    TRACE("(%p)\n", ep);
+
+    if (!rec)
+    {
+        ep->rec = NULL;
+        ep->ref = NULL;
+        return;
+    }
+
+    ep->rec = HeapAlloc(GetProcessHeap(), 0, sizeof(EXCEPTION_RECORD));
+    ep->ref = HeapAlloc(GetProcessHeap(), 0, sizeof(int));
+
+    *ep->rec = *rec;
+    *ep->ref = 1;
+
+    if (ep->rec->ExceptionCode == CXX_EXCEPTION)
+    {
+        const cxx_exception_type *et = (void*)ep->rec->ExceptionInformation[2];
+        const cxx_type_info *ti;
+        void **data, *obj;
+
+        ti = et->type_info_table->info[0];
+        data = HeapAlloc(GetProcessHeap(), 0, ti->size);
+
+        obj = (void*)ep->rec->ExceptionInformation[1];
+        if (ti->flags & CLASS_IS_SIMPLE_TYPE)
+        {
+            memcpy(data, obj, ti->size);
+            if (ti->size == sizeof(void *)) *data = get_this_pointer(&ti->offsets, *data);
+        }
+        else if (ti->copy_ctor)
+        {
+            call_copy_ctor(ti->copy_ctor, data, get_this_pointer(&ti->offsets, obj),
+                    ti->flags & CLASS_HAS_VIRTUAL_BASE_CLASS);
+        }
+        else
+            memcpy(data, get_this_pointer(&ti->offsets, obj), ti->size);
+        ep->rec->ExceptionInformation[1] = (ULONG_PTR)data;
+    }
+    return;
+}
+#else
+void __cdecl __ExceptionPtrCurrentException(exception_ptr *ep)
+{
+    void **current_exception = __current_exception();
+    EXCEPTION_RECORD *rec = current_exception ? *current_exception : NULL;
+
+    TRACE("(%p)\n", ep);
+
+    if (!rec)
+    {
+        ep->rec = NULL;
+        ep->ref = NULL;
+        return;
+    }
+
+    ep->rec = HeapAlloc(GetProcessHeap(), 0, sizeof(EXCEPTION_RECORD));
+    ep->ref = HeapAlloc(GetProcessHeap(), 0, sizeof(int));
+
+    *ep->rec = *rec;
+    *ep->ref = 1;
+
+    if (ep->rec->ExceptionCode == CXX_EXCEPTION)
+    {
+        const cxx_exception_type *et = (void*)ep->rec->ExceptionInformation[2];
+        const cxx_type_info *ti;
+        void **data, *obj;
+        char *base = RtlPcToFileHeader((void*)et, (void**)&base);
+
+        ti = (const cxx_type_info*)(base + ((const cxx_type_info_table*)(base + et->type_info_table))->info[0]);
+        data = HeapAlloc(GetProcessHeap(), 0, ti->size);
+
+        obj = (void*)ep->rec->ExceptionInformation[1];
+        if (ti->flags & CLASS_IS_SIMPLE_TYPE)
+        {
+            memcpy(data, obj, ti->size);
+            if (ti->size == sizeof(void *)) *data = get_this_pointer(&ti->offsets, *data);
+        }
+        else if (ti->copy_ctor)
+        {
+            call_copy_ctor(base + ti->copy_ctor, data, get_this_pointer(&ti->offsets, obj),
+                    ti->flags & CLASS_HAS_VIRTUAL_BASE_CLASS);
+        }
+        else
+            memcpy(data, get_this_pointer(&ti->offsets, obj), ti->size);
+        ep->rec->ExceptionInformation[1] = (ULONG_PTR)data;
+    }
+    return;
+}
+#endif
+
+/*********************************************************************
+ * ?__ExceptionPtrToBool@@YA_NPBX@Z
+ * ?__ExceptionPtrToBool@@YA_NPEBX@Z
+ */
+bool __cdecl __ExceptionPtrToBool(exception_ptr *ep)
+{
+    return !!ep->rec;
+}
+
+/*********************************************************************
+ * ?__ExceptionPtrCopyException@@YAXPAXPBX1@Z
+ * ?__ExceptionPtrCopyException@@YAXPEAXPEBX1@Z
+ */
+#ifndef __x86_64__
+void __cdecl __ExceptionPtrCopyException(exception_ptr *ep,
+        exception *object, const cxx_exception_type *type)
+{
+    const cxx_type_info *ti;
+    void **data;
+
+    __ExceptionPtrDestroy(ep);
+
+    ep->rec = HeapAlloc(GetProcessHeap(), 0, sizeof(EXCEPTION_RECORD));
+    ep->ref = HeapAlloc(GetProcessHeap(), 0, sizeof(int));
+    *ep->ref = 1;
+
+    memset(ep->rec, 0, sizeof(EXCEPTION_RECORD));
+    ep->rec->ExceptionCode = CXX_EXCEPTION;
+    ep->rec->ExceptionFlags = EH_NONCONTINUABLE;
+    ep->rec->NumberParameters = 3;
+    ep->rec->ExceptionInformation[0] = CXX_FRAME_MAGIC_VC6;
+    ep->rec->ExceptionInformation[2] = (ULONG_PTR)type;
+
+    ti = type->type_info_table->info[0];
+    data = HeapAlloc(GetProcessHeap(), 0, ti->size);
+    if (ti->flags & CLASS_IS_SIMPLE_TYPE)
+    {
+        memcpy(data, object, ti->size);
+        if (ti->size == sizeof(void *)) *data = get_this_pointer(&ti->offsets, *data);
+    }
+    else if (ti->copy_ctor)
+    {
+        call_copy_ctor(ti->copy_ctor, data, get_this_pointer(&ti->offsets, object),
+                ti->flags & CLASS_HAS_VIRTUAL_BASE_CLASS);
+    }
+    else
+        memcpy(data, get_this_pointer(&ti->offsets, object), ti->size);
+    ep->rec->ExceptionInformation[1] = (ULONG_PTR)data;
+}
+#else
+void __cdecl __ExceptionPtrCopyException(exception_ptr *ep,
+        exception *object, const cxx_exception_type *type)
+{
+    const cxx_type_info *ti;
+    void **data;
+    char *base;
+
+    RtlPcToFileHeader((void*)type, (void**)&base);
+    __ExceptionPtrDestroy(ep);
+
+    ep->rec = HeapAlloc(GetProcessHeap(), 0, sizeof(EXCEPTION_RECORD));
+    ep->ref = HeapAlloc(GetProcessHeap(), 0, sizeof(int));
+    *ep->ref = 1;
+
+    memset(ep->rec, 0, sizeof(EXCEPTION_RECORD));
+    ep->rec->ExceptionCode = CXX_EXCEPTION;
+    ep->rec->ExceptionFlags = EH_NONCONTINUABLE;
+    ep->rec->NumberParameters = 4;
+    ep->rec->ExceptionInformation[0] = CXX_FRAME_MAGIC_VC6;
+    ep->rec->ExceptionInformation[2] = (ULONG_PTR)type;
+    ep->rec->ExceptionInformation[3] = (ULONG_PTR)base;
+
+    ti = (const cxx_type_info*)(base + ((const cxx_type_info_table*)(base + type->type_info_table))->info[0]);
+    data = HeapAlloc(GetProcessHeap(), 0, ti->size);
+    if (ti->flags & CLASS_IS_SIMPLE_TYPE)
+    {
+        memcpy(data, object, ti->size);
+        if (ti->size == sizeof(void *)) *data = get_this_pointer(&ti->offsets, *data);
+    }
+    else if (ti->copy_ctor)
+    {
+        call_copy_ctor(base + ti->copy_ctor, data, get_this_pointer(&ti->offsets, object),
+                ti->flags & CLASS_HAS_VIRTUAL_BASE_CLASS);
+    }
+    else
+        memcpy(data, get_this_pointer(&ti->offsets, object), ti->size);
+    ep->rec->ExceptionInformation[1] = (ULONG_PTR)data;
+}
+#endif
+
+/*********************************************************************
+ * ?__ExceptionPtrCompare@@YA_NPBX0@Z
+ * ?__ExceptionPtrCompare@@YA_NPEBX0@Z
+ */
+bool __cdecl __ExceptionPtrCompare(const exception_ptr *ep1, const exception_ptr *ep2)
+{
+    return ep1->rec == ep2->rec;
 }
 #endif
 

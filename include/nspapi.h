@@ -21,8 +21,6 @@
 #ifndef _WINE_NSPAPI_
 #define _WINE_NSPAPI_
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif /* defined(__cplusplus) */
@@ -203,7 +201,5 @@ INT WINAPI GetServiceW(DWORD dwNameSpace, LPGUID lpGuid, LPSTR lpServiceName,
 #ifdef __cplusplus
 }      /* extern "C" */
 #endif /* defined(__cplusplus) */
-
-#include "wine/winheader_exit.h"
 
 #endif /* _WINE_NSPAPI_ */

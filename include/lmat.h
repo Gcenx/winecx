@@ -21,8 +21,6 @@
 #ifndef __WINE_LMAT_H
 #define __WINE_LMAT_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -62,7 +60,5 @@ NET_API_STATUS WINAPI NetScheduleJobEnum(LPCWSTR,LPBYTE*,DWORD,LPDWORD,LPDWORD,L
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_LMAT_H */

@@ -21,8 +21,6 @@
 #ifndef __WINE_IMM_H
 #define __WINE_IMM_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -577,7 +575,5 @@ BOOL   WINAPI ImmUnregisterWordW(HKL, LPCWSTR, DWORD, LPCWSTR);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_IMM_H */

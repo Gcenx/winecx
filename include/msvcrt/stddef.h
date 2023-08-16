@@ -18,8 +18,6 @@
 #ifndef __WINE_STDDEF_H
 #define __WINE_STDDEF_H
 
-#include "wine/winheader_enter.h"
-
 #include <corecrt.h>
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -42,7 +40,5 @@ _ACRTIMP __msvcrt_ulong __cdecl __threadhandle(void);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_STDDEF_H */

@@ -351,7 +351,7 @@ static inline BOOL wstrbuf_init(wstrbuf_t *buf)
 {
     buf->len = 0;
     buf->size = 16;
-    buf->buf = heap_alloc(buf->size * sizeof(WCHAR));
+    buf->buf = malloc(buf->size * sizeof(WCHAR));
     if (!buf->buf) return FALSE;
     *buf->buf = 0;
     return TRUE;
@@ -359,14 +359,14 @@ static inline BOOL wstrbuf_init(wstrbuf_t *buf)
 
 static inline void wstrbuf_finish(wstrbuf_t *buf)
 {
-    heap_free(buf->buf);
+    free(buf->buf);
 }
 
 static void wstrbuf_append_len(wstrbuf_t *buf, LPCWSTR str, int len)
 {
     if(buf->len+len >= buf->size) {
         buf->size = 2*buf->size+len;
-        buf->buf = heap_realloc(buf->buf, buf->size * sizeof(WCHAR));
+        buf->buf = realloc(buf->buf, buf->size * sizeof(WCHAR));
     }
 
     memcpy(buf->buf+buf->len, str, len*sizeof(WCHAR));
@@ -383,7 +383,7 @@ static void wstrbuf_append_nodetxt(wstrbuf_t *buf, LPCWSTR str, int len)
 
     if(buf->len+len >= buf->size) {
         buf->size = 2*buf->size+len;
-        buf->buf = heap_realloc(buf->buf, buf->size * sizeof(WCHAR));
+        buf->buf = realloc(buf->buf, buf->size * sizeof(WCHAR));
     }
 
     if(buf->len && iswspace(buf->buf[buf->len-1])) {
@@ -859,7 +859,7 @@ static ULONG WINAPI HTMLTxtRange_Release(IHTMLTxtRange *iface)
         if(This->doc)
             list_remove(&This->entry);
         release_dispex(&This->dispex);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -949,7 +949,7 @@ static HRESULT WINAPI HTMLTxtRange_put_text(IHTMLTxtRange *iface, BSTR v)
         return MSHTML_E_NODOC;
 
     nsAString_InitDepend(&text_str, v);
-    nsres = nsIDOMHTMLDocument_CreateTextNode(This->doc->nsdoc, &text_str, &text_node);
+    nsres = nsIDOMDocument_CreateTextNode(This->doc->dom_document, &text_str, &text_node);
     nsAString_Finish(&text_str);
     if(NS_FAILED(nsres)) {
         ERR("CreateTextNode failed: %08lx\n", nsres);
@@ -1159,7 +1159,12 @@ static HRESULT WINAPI HTMLTxtRange_expand(IHTMLTxtRange *iface, BSTR Unit, VARIA
         nsIDOMHTMLElement *nsbody = NULL;
         nsresult nsres;
 
-        nsres = nsIDOMHTMLDocument_GetBody(This->doc->nsdoc, &nsbody);
+        if(!This->doc->html_document) {
+            FIXME("Not implemented for XML document\n");
+            return E_NOTIMPL;
+        }
+
+        nsres = nsIDOMHTMLDocument_GetBody(This->doc->html_document, &nsbody);
         if(NS_FAILED(nsres) || !nsbody) {
             ERR("Could not get body: %08lx\n", nsres);
             break;
@@ -1318,7 +1323,7 @@ static HRESULT WINAPI HTMLTxtRange_select(IHTMLTxtRange *iface)
 
     TRACE("(%p)\n", This);
 
-    nsres = nsIDOMWindow_GetSelection(This->doc->basedoc.window->nswindow, &nsselection);
+    nsres = nsIDOMWindow_GetSelection(This->doc->outer_window->nswindow, &nsselection);
     if(NS_FAILED(nsres)) {
         ERR("GetSelection failed: %08lx\n", nsres);
         return E_FAIL;
@@ -1657,8 +1662,8 @@ static HRESULT exec_indent(HTMLTxtRange *This, VARIANT *in, VARIANT *out)
 
     TRACE("(%p)->(%p %p)\n", This, in, out);
 
-    if(!This->doc->nsdoc) {
-        WARN("NULL nsdoc\n");
+    if(!This->doc->dom_document) {
+        WARN("NULL dom_document\n");
         return E_NOTIMPL;
     }
 
@@ -1725,7 +1730,7 @@ HRESULT HTMLTxtRange_Create(HTMLDocumentNode *doc, nsIDOMRange *nsrange, IHTMLTx
 {
     HTMLTxtRange *ret;
 
-    ret = heap_alloc(sizeof(HTMLTxtRange));
+    ret = malloc(sizeof(HTMLTxtRange));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -1795,7 +1800,7 @@ static ULONG WINAPI HTMLDOMRange_Release(IHTMLDOMRange *iface)
         if(This->nsrange)
             nsIDOMRange_Release(This->nsrange);
         release_dispex(&This->dispex);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -2071,7 +2076,7 @@ HRESULT create_dom_range(nsIDOMRange *nsrange, compat_mode_t compat_mode, IHTMLD
 {
     HTMLDOMRange *ret;
 
-    ret = heap_alloc(sizeof(*ret));
+    ret = malloc(sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -2148,7 +2153,7 @@ static ULONG WINAPI MarkupPointer2_Release(IMarkupPointer2 *iface)
     TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref)
-        heap_free(This);
+        free(This);
 
     return ref;
 }
@@ -2382,7 +2387,7 @@ HRESULT create_markup_pointer(IMarkupPointer **ret)
 {
     MarkupPointer *markup_pointer;
 
-    if(!(markup_pointer = heap_alloc(sizeof(*markup_pointer))))
+    if(!(markup_pointer = malloc(sizeof(*markup_pointer))))
         return E_OUTOFMEMORY;
 
     markup_pointer->IMarkupPointer2_iface.lpVtbl = &MarkupPointer2Vtbl;

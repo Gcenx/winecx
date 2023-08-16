@@ -515,7 +515,6 @@ typedef struct tagMSIASSEMBLY
     DWORD attributes;
     LPWSTR display_name;
     LPWSTR tempdir;
-    BOOL installed;
     BOOL clr_version[CLR_VERSION_MAX];
 } MSIASSEMBLY;
 
@@ -806,6 +805,7 @@ extern UINT msi_check_patch_applicable( MSIPACKAGE *package, MSISUMMARYINFO *si 
 extern UINT msi_apply_patches( MSIPACKAGE *package ) DECLSPEC_HIDDEN;
 extern UINT msi_apply_registered_patch( MSIPACKAGE *package, LPCWSTR patch_code ) DECLSPEC_HIDDEN;
 extern void msi_free_patchinfo( MSIPATCHINFO *patch ) DECLSPEC_HIDDEN;
+extern UINT msi_patch_assembly( MSIPACKAGE *, MSIASSEMBLY *, MSIFILEPATCH * ) DECLSPEC_HIDDEN;
 
 /* action internals */
 extern UINT MSI_InstallPackage( MSIPACKAGE *, LPCWSTR, LPCWSTR ) DECLSPEC_HIDDEN;
@@ -1052,7 +1052,6 @@ extern UINT msi_set_sourcedir_props(MSIPACKAGE *package, BOOL replace) DECLSPEC_
 extern MSIASSEMBLY *msi_load_assembly(MSIPACKAGE *, MSICOMPONENT *) DECLSPEC_HIDDEN;
 extern UINT msi_install_assembly(MSIPACKAGE *, MSICOMPONENT *) DECLSPEC_HIDDEN;
 extern UINT msi_uninstall_assembly(MSIPACKAGE *, MSICOMPONENT *) DECLSPEC_HIDDEN;
-extern BOOL msi_init_assembly_caches(MSIPACKAGE *) DECLSPEC_HIDDEN;
 extern void msi_destroy_assembly_caches(MSIPACKAGE *) DECLSPEC_HIDDEN;
 extern BOOL msi_is_global_assembly(MSICOMPONENT *) DECLSPEC_HIDDEN;
 extern IAssemblyEnum *msi_create_assembly_enum(MSIPACKAGE *, const WCHAR *) DECLSPEC_HIDDEN;
@@ -1073,6 +1072,7 @@ static inline void msi_revert_fs_redirection( MSIPACKAGE *package )
 {
     if (is_wow64 && package->platform == PLATFORM_X64) Wow64RevertWow64FsRedirection( package->cookie );
 }
+extern BOOL msi_get_temp_file_name( MSIPACKAGE *, const WCHAR *, const WCHAR *, WCHAR * ) DECLSPEC_HIDDEN;
 extern HANDLE msi_create_file( MSIPACKAGE *, const WCHAR *, DWORD, DWORD, DWORD, DWORD ) DECLSPEC_HIDDEN;
 extern BOOL msi_delete_file( MSIPACKAGE *, const WCHAR * ) DECLSPEC_HIDDEN;
 extern BOOL msi_remove_directory( MSIPACKAGE *, const WCHAR * ) DECLSPEC_HIDDEN;
@@ -1137,30 +1137,6 @@ extern DWORD call_script(MSIHANDLE hPackage, INT type, LPCWSTR script, LPCWSTR f
 /* User interface messages from the actions */
 extern void msi_ui_progress(MSIPACKAGE *, int, int, int, int) DECLSPEC_HIDDEN;
 
-/* memory allocation macro functions */
-static void *msi_alloc( size_t len ) __WINE_ALLOC_SIZE(1);
-static inline void *msi_alloc( size_t len )
-{
-    return malloc( len );
-}
-
-static void *msi_alloc_zero( size_t len ) __WINE_ALLOC_SIZE(1);
-static inline void *msi_alloc_zero( size_t len )
-{
-    return calloc( 1, len );
-}
-
-static void *msi_realloc( void *mem, size_t len ) __WINE_ALLOC_SIZE(2);
-static inline void *msi_realloc( void *mem, size_t len )
-{
-    return realloc( mem, len );
-}
-
-static inline void msi_free( void *mem )
-{
-    free( mem );
-}
-
 static inline char *strdupWtoA( LPCWSTR str )
 {
     LPSTR ret = NULL;
@@ -1168,7 +1144,7 @@ static inline char *strdupWtoA( LPCWSTR str )
 
     if (!str) return ret;
     len = WideCharToMultiByte( CP_ACP, 0, str, -1, NULL, 0, NULL, NULL);
-    ret = msi_alloc( len );
+    ret = malloc( len );
     if (ret)
         WideCharToMultiByte( CP_ACP, 0, str, -1, ret, len, NULL, NULL );
     return ret;
@@ -1181,20 +1157,10 @@ static inline LPWSTR strdupAtoW( LPCSTR str )
 
     if (!str) return ret;
     len = MultiByteToWideChar( CP_ACP, 0, str, -1, NULL, 0 );
-    ret = msi_alloc( len * sizeof(WCHAR) );
+    ret = malloc( len * sizeof(WCHAR) );
     if (ret)
         MultiByteToWideChar( CP_ACP, 0, str, -1, ret, len );
     return ret;
-}
-
-static inline LPWSTR strdupW( LPCWSTR src )
-{
-    LPWSTR dest;
-    if (!src) return NULL;
-    dest = msi_alloc( (lstrlenW(src)+1)*sizeof(WCHAR) );
-    if (dest)
-        lstrcpyW(dest, src);
-    return dest;
 }
 
 #endif /* __WINE_MSI_PRIVATE__ */

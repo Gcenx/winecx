@@ -91,9 +91,9 @@ NTSTATUS WINAPI RtlpNtEnumerateSubKey( HANDLE handle, UNICODE_STRING *out, ULONG
   DWORD dwLen, dwResultLen;
   NTSTATUS ret;
 
-  if (out->Length)
+  if (out->MaximumLength)
   {
-    dwLen = out->Length + sizeof(KEY_BASIC_INFORMATION);
+    dwLen = out->MaximumLength + offsetof(KEY_BASIC_INFORMATION, Name);
     info = RtlAllocateHeap( GetProcessHeap(), 0, dwLen );
     if (!info)
       return STATUS_NO_MEMORY;
@@ -105,13 +105,13 @@ NTSTATUS WINAPI RtlpNtEnumerateSubKey( HANDLE handle, UNICODE_STRING *out, ULONG
   }
 
   ret = NtEnumerateKey( handle, index, KeyBasicInformation, info, dwLen, &dwResultLen );
-  dwResultLen -= sizeof(KEY_BASIC_INFORMATION);
+  dwResultLen -= offsetof(KEY_BASIC_INFORMATION, Name);
 
   if (ret == STATUS_BUFFER_OVERFLOW)
     out->Length = dwResultLen;
   else if (!ret)
   {
-    if (out->Length < info->NameLength)
+    if (out->MaximumLength < info->NameLength)
     {
       out->Length = dwResultLen;
       ret = STATUS_BUFFER_OVERFLOW;
@@ -138,7 +138,7 @@ NTSTATUS WINAPI RtlpNtQueryValueKey( HANDLE handle, ULONG *result_type, PBYTE de
     UNICODE_STRING name;
     NTSTATUS ret;
     DWORD dwResultLen;
-    DWORD dwLen = sizeof (KEY_VALUE_PARTIAL_INFORMATION) + (result_len ? *result_len : 0);
+    DWORD dwLen = offsetof(KEY_VALUE_PARTIAL_INFORMATION, Data[result_len ? *result_len : 0]);
 
     info = RtlAllocateHeap( GetProcessHeap(), 0, dwLen );
     if (!info)
@@ -229,7 +229,7 @@ NTSTATUS WINAPI RtlOpenCurrentUser(
 	UNICODE_STRING ObjectName;
 	NTSTATUS ret;
 
-	TRACE("(0x%08x, %p)\n",DesiredAccess, KeyHandle);
+	TRACE("(0x%08lx, %p)\n",DesiredAccess, KeyHandle);
 
         if ((ret = RtlFormatCurrentUserKeyPath(&ObjectName))) return ret;
 	InitializeObjectAttributes(&ObjectAttributes,&ObjectName,OBJ_CASE_INSENSITIVE,0, NULL);
@@ -475,7 +475,7 @@ NTSTATUS WINAPI RtlQueryRegistryValues(IN ULONG RelativeTo, IN PCWSTR Path,
     NTSTATUS status=STATUS_SUCCESS, ret = STATUS_SUCCESS;
     INT i;
 
-    TRACE("(%d, %s, %p, %p, %p)\n", RelativeTo, debugstr_w(Path), QueryTable, Context, Environment);
+    TRACE("(%ld, %s, %p, %p, %p)\n", RelativeTo, debugstr_w(Path), QueryTable, Context, Environment);
 
     if(Path == NULL)
         return STATUS_INVALID_PARAMETER;
@@ -643,7 +643,7 @@ NTSTATUS WINAPI RtlCheckRegistryKey(IN ULONG RelativeTo, IN PWSTR Path)
     HANDLE handle;
     NTSTATUS status;
 
-    TRACE("(%d, %s)\n", RelativeTo, debugstr_w(Path));
+    TRACE("(%ld, %s)\n", RelativeTo, debugstr_w(Path));
 
     if(!RelativeTo && (Path == NULL || Path[0] == 0))
         return STATUS_OBJECT_PATH_SYNTAX_BAD;
@@ -712,7 +712,7 @@ NTSTATUS WINAPI RtlDeleteRegistryValue(IN ULONG RelativeTo, IN PCWSTR Path, IN P
     HANDLE handle;
     UNICODE_STRING Value;
 
-    TRACE("(%d, %s, %s)\n", RelativeTo, debugstr_w(Path), debugstr_w(ValueName));
+    TRACE("(%ld, %s, %s)\n", RelativeTo, debugstr_w(Path), debugstr_w(ValueName));
 
     RtlInitUnicodeString(&Value, ValueName);
     if(RelativeTo == RTL_REGISTRY_HANDLE)
@@ -750,7 +750,7 @@ NTSTATUS WINAPI RtlWriteRegistryValue( ULONG RelativeTo, PCWSTR path, PCWSTR nam
     NTSTATUS status;
     UNICODE_STRING str;
 
-    TRACE( "(%d, %s, %s) -> %d: %p [%d]\n", RelativeTo, debugstr_w(path), debugstr_w(name),
+    TRACE( "(%ld, %s, %s) -> %ld: %p [%ld]\n", RelativeTo, debugstr_w(path), debugstr_w(name),
            type, data, length );
 
     RtlInitUnicodeString( &str, name );

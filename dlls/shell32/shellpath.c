@@ -2751,6 +2751,8 @@ static void create_link( const WCHAR *path, const char *xdg_name, const char *de
     char *target = NULL;
     HANDLE mgr;
 
+    FIXME("path=%s xdg_name=%s default_name=%s\n", debugstr_w(path), debugstr_a(xdg_name), debugstr_a(default_name));
+
     if ((mgr = CreateFileW( MOUNTMGR_DOS_DEVICE_NAME, GENERIC_READ | GENERIC_WRITE,
                             FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
                             0, 0 )) == INVALID_HANDLE_VALUE)
@@ -2766,10 +2768,7 @@ static void create_link( const WCHAR *path, const char *xdg_name, const char *de
     {
         if (link_folder( mgr, &nt_name, target )) goto done;
     }
-    if (link_folder( mgr, &nt_name, default_name )) goto done;
-
-    /* fall back to HOME */
-    link_folder( mgr, &nt_name, "$HOME" );
+    link_folder( mgr, &nt_name, default_name );
 
 done:
     RtlFreeUnicodeString( &nt_name );
@@ -2864,11 +2863,15 @@ static void _SHCreateSymbolicLink(int nFolder, const WCHAR *path)
 {
     DWORD folder = nFolder & CSIDL_FOLDER_MASK;
 
+    FIXME("nFolder=%lx (folder=%lx) path=%s\n", (unsigned long)nFolder, (unsigned long)folder, debugstr_a(path));
+
     switch (folder) {
         case CSIDL_PERSONAL:
+            FIXME("CSIDL_PERSONAL\n");
             create_link( path, "XDG_DOCUMENTS_DIR", "$HOME/Documents" );
             break;
         case CSIDL_DESKTOPDIRECTORY:
+            FIXME("CSIDL_DESKTOPDIRECTORY\n");
             if (!getenv("CX_DIRECT_DESKTOP"))
             {
                 _SHCreateDesktopSymbolicLink( path );
@@ -2877,18 +2880,23 @@ static void _SHCreateSymbolicLink(int nFolder, const WCHAR *path)
             create_link( path, "XDG_DESKTOP_DIR", "$HOME/Desktop" );
             break;
         case CSIDL_MYPICTURES:
+            FIXME("CSIDL_MYPICTURES\n");
             create_link( path, "XDG_PICTURES_DIR", "$HOME/Pictures" );
             break;
         case CSIDL_MYVIDEO:
+            FIXME("CSIDL_MYVIDEO\n");
             create_link( path, "XDG_VIDEOS_DIR", "$HOME/Movies" );
             break;
         case CSIDL_MYMUSIC:
+            FIXME("CSIDL_MYMUSIC\n");
             create_link( path, "XDG_MUSIC_DIR", "$HOME/Music" );
             break;
         case CSIDL_DOWNLOADS:
+            FIXME("CSIDL_DOWNLOADS\n");
             create_link( path, "XDG_DOWNLOAD_DIR", "$HOME/Downloads" );
             break;
         case CSIDL_TEMPLATES:
+            FIXME("CSIDL_TEMPLATES\n");
             create_link( path, "XDG_TEMPLATES_DIR", "$HOME/Templates" );
             break;
     }
@@ -3326,6 +3334,7 @@ void WINAPI wine_update_symbolic_links(HWND hwnd, HINSTANCE handle, LPCWSTR cmdl
     };
     UINT i;
     WCHAR path[MAX_PATH];
+    int ret;
 
     TRACE("\n");
 
@@ -3345,6 +3354,13 @@ void WINAPI wine_update_symbolic_links(HWND hwnd, HINSTANCE handle, LPCWSTR cmdl
 
         /* Replace the link. We have to do this manually because SHGetFolderPathW only updates broken links */
         _SHCreateSymbolicLink( ids[i], path );
+
+        /* _SHCreateSymbolicLink may not have created a link. Fall back to creating a directory. */
+        ret = SHCreateDirectoryExW(0, path, NULL);
+        if (ret && ret != ERROR_ALREADY_EXISTS)
+        {
+            WARN("Failed to create directory %s.\n", debugstr_w(path));
+        }
     }
 }
 

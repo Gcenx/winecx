@@ -100,12 +100,9 @@ static CRITICAL_SECTION device_list_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 static struct list device_list = LIST_INIT(device_list);
 
-static HMODULE instance;
-static unixlib_handle_t winebus_handle;
-
 static NTSTATUS winebus_call(unsigned int code, void *args)
 {
-    return __wine_unix_call(winebus_handle, code, args);
+    return WINE_UNIX_CALL(code, args);
 }
 
 static void unix_device_remove(DEVICE_OBJECT *device)
@@ -322,6 +319,8 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, UINT64 uni
     list_add_tail(&device_list, &ext->entry);
 
     RtlLeaveCriticalSection(&device_list_cs);
+
+    TRACE("created device %p/%#I64x\n", device, unix_device);
     return device;
 }
 
@@ -415,7 +414,7 @@ static BOOL deliver_next_report(struct device_extension *ext, IRP *irp)
 
     if (TRACE_ON(hid))
     {
-        TRACE("read input report length %lu:\n", report->length);
+        TRACE("device %p/%#I64x input report length %lu:\n", ext->device, ext->unix_device, report->length);
         for (i = 0; i < report->length;)
         {
             char buffer[256], *buf = buffer;
@@ -723,6 +722,8 @@ static NTSTATUS sdl_driver_init(void)
     };
     NTSTATUS status;
 
+    bus_options.split_controllers = check_bus_option(L"Split Controllers", 0);
+    if (bus_options.split_controllers) TRACE("SDL controller splitting enabled\n");
     bus_options.map_controllers = check_bus_option(L"Map Controllers", 1);
     if (!bus_options.map_controllers) TRACE("SDL controller to XInput HID gamepad mapping disabled\n");
     sdl_bus_load_mappings(&bus_options);
@@ -1193,10 +1194,7 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 
     TRACE( "(%p, %s)\n", driver, debugstr_w(path->Buffer) );
 
-    RtlPcToFileHeader(&DriverEntry, (void *)&instance);
-    if ((ret = NtQueryVirtualMemory(GetCurrentProcess(), instance, MemoryWineUnixFuncs,
-                                    &winebus_handle, sizeof(winebus_handle), NULL)))
-        return ret;
+    if ((ret = __wine_init_unix_call())) return ret;
 
     attr.Length = sizeof(attr);
     attr.ObjectName = path;

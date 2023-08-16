@@ -15,13 +15,6 @@
 
 #include <string.h>
 
-#ifdef HAVE_SYS_TYPES_H
-#include <sys/types.h>
-#endif
-#ifdef HAVE_CTYPE_H
-#include <ctype.h>
-#endif
-
 #include <libxml/xmlmemory.h>
 #include <libxml/parser.h>
 #include <libxml/tree.h>
@@ -194,36 +187,18 @@ xsltDocumentFunctionLoadDocument(xmlXPathParserContextPtr ctxt, xmlChar* URI)
     xmlXPathFreeContext(xptrctxt);
 #endif /* LIBXML_XPTR_ENABLED */
 
-    if (resObj == NULL)
-	goto out_fragment;
-
-    switch (resObj->type) {
-	case XPATH_NODESET:
-	    break;
-	case XPATH_UNDEFINED:
-	case XPATH_BOOLEAN:
-	case XPATH_NUMBER:
-	case XPATH_STRING:
-	case XPATH_POINT:
-	case XPATH_USERS:
-	case XPATH_XSLT_TREE:
-	case XPATH_RANGE:
-	case XPATH_LOCATIONSET:
-	    xsltTransformError(tctxt, NULL, NULL,
-		"document() : XPointer does not select a node set: #%s\n",
-		fragment);
-	goto out_object;
+    if ((resObj != NULL) && (resObj->type != XPATH_NODESET)) {
+        xsltTransformError(tctxt, NULL, NULL,
+            "document() : XPointer does not select a node set: #%s\n",
+            fragment);
+        xmlXPathFreeObject(resObj);
+        resObj = NULL;
     }
 
-    valuePush(ctxt, resObj);
-    xmlFree(fragment);
-    return;
-
-out_object:
-    xmlXPathFreeObject(resObj);
-
 out_fragment:
-    valuePush(ctxt, xmlXPathNewNodeSet(NULL));
+    if (resObj == NULL)
+        resObj = xmlXPathNewNodeSet(NULL);
+    valuePush(ctxt, resObj);
     xmlFree(fragment);
 }
 
@@ -633,7 +608,8 @@ xsltFormatNumberFunction(xmlXPathParserContextPtr ctxt, int nargs)
 
     switch (nargs) {
     case 3:
-	CAST_TO_STRING;
+        if ((ctxt->value != NULL) && (ctxt->value->type != XPATH_STRING))
+            xmlXPathStringFunction(ctxt, 1);
 	decimalObj = valuePop(ctxt);
         ncname = xsltSplitQName(sheet->dict, decimalObj->stringval, &prefix);
         if (prefix != NULL) {
@@ -659,13 +635,16 @@ xsltFormatNumberFunction(xmlXPathParserContextPtr ctxt, int nargs)
 	}
 	/* Intentional fall-through */
     case 2:
-	CAST_TO_STRING;
+        if ((ctxt->value != NULL) && (ctxt->value->type != XPATH_STRING))
+            xmlXPathStringFunction(ctxt, 1);
 	formatObj = valuePop(ctxt);
-	CAST_TO_NUMBER;
+        if ((ctxt->value != NULL) && (ctxt->value->type != XPATH_NUMBER))
+            xmlXPathNumberFunction(ctxt, 1);
 	numberObj = valuePop(ctxt);
 	break;
     default:
-	XP_ERROR(XPATH_INVALID_ARITY);
+	xmlXPathErr(ctxt, XPATH_INVALID_ARITY);
+        return;
     }
 
     if (formatValues != NULL) {

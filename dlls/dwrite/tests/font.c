@@ -321,11 +321,12 @@ typedef struct {
     BYTE data[1];
 } sbix_glyph_data;
 
-typedef struct {
+struct cblc_header
+{
     WORD majorVersion;
     WORD minorVersion;
     DWORD numSizes;
-} CBLCHeader;
+};
 
 typedef struct {
     BYTE res[12];
@@ -2653,10 +2654,8 @@ static void test_system_fontcollection(void)
 
         hr = IDWriteFactory6_GetSystemFontCollection(factory6, FALSE, DWRITE_FONT_FAMILY_MODEL_TYPOGRAPHIC,
                 &collection2);
-    todo_wine
         ok(hr == S_OK, "Failed to get collection, hr %#lx.\n", hr);
-    if (SUCCEEDED(hr))
-    {
+
         hr = IDWriteFactory6_GetSystemFontCollection(factory6, FALSE, DWRITE_FONT_FAMILY_MODEL_TYPOGRAPHIC, &c2);
         ok(hr == S_OK, "Failed to get collection, hr %#lx.\n", hr);
         ok(c2 == collection2 && collection != (IDWriteFontCollection *)c2, "Unexpected collection instance.\n");
@@ -2667,7 +2666,6 @@ static void test_system_fontcollection(void)
                 &collection2);
         ok(hr == S_OK, "Failed to get collection, hr %#lx.\n", hr);
         IDWriteFontCollection2_Release(collection2);
-    }
         IDWriteFactory6_Release(factory6);
     }
     else
@@ -3525,6 +3523,14 @@ struct dwrite_fonttable
     void  *context;
     UINT32 size;
 };
+
+static const void *table_read_ensure(const struct dwrite_fonttable *table, unsigned int offset, unsigned int size)
+{
+    if (size > table->size || offset > table->size - size)
+        return NULL;
+
+    return table->data + offset;
+}
 
 static WORD table_read_be_word(const struct dwrite_fonttable *table, void *ptr, DWORD offset)
 {
@@ -7982,9 +7988,10 @@ static void test_CreateFontFaceReference(void)
     IDWriteFontFace3 *fontface, *fontface1;
     DWRITE_FONT_AXIS_VALUE axis_values[16];
     IDWriteFontCollection1 *collection;
+    UINT32 axis_count, index, count, i;
+    IDWriteFontFaceReference1 *ref2;
     IDWriteFontFile *file, *file1;
     IDWriteFactory3 *factory;
-    UINT32 index, count, i;
     IDWriteFont3 *font3;
     ULONG refcount;
     WCHAR *path;
@@ -8091,6 +8098,13 @@ static void test_CreateFontFaceReference(void)
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(file != file1, "got %p, previous file %p\n", file1, file);
 
+    if (SUCCEEDED(IDWriteFontFaceReference_QueryInterface(ref, &IID_IDWriteFontFaceReference1, (void **)&ref2)))
+    {
+        axis_count = IDWriteFontFaceReference1_GetFontAxisValueCount(ref2);
+        ok(!axis_count, "Unexpected axis value count.\n");
+        IDWriteFontFaceReference1_Release(ref2);
+    }
+
     IDWriteFontFaceReference_Release(ref);
     IDWriteFontFile_Release(file);
     IDWriteFontFile_Release(file1);
@@ -8112,8 +8126,6 @@ static void test_CreateFontFaceReference(void)
 
         for (j = 0; j < font_count; j++)
         {
-            IDWriteFontFaceReference1 *ref2;
-
             hr = IDWriteFontFamily1_GetFont(family, j, &font3);
             ok(hr == S_OK, "Failed to get font, hr %#lx.\n", hr);
 
@@ -8132,7 +8144,7 @@ static void test_CreateFontFaceReference(void)
             if (SUCCEEDED(hr = IDWriteFontFaceReference_QueryInterface(ref, &IID_IDWriteFontFaceReference1,
                     (void **)&ref2)))
             {
-                UINT32 axis_count = IDWriteFontFaceReference1_GetFontAxisValueCount(ref2);
+                axis_count = IDWriteFontFaceReference1_GetFontAxisValueCount(ref2);
                 todo_wine
                 ok(axis_count >= 4, "Unexpected axis value count.\n");
 
@@ -9297,34 +9309,40 @@ static DWORD get_sbix_formats(IDWriteFontFace4 *fontface)
 
 static DWORD get_cblc_formats(IDWriteFontFace4 *fontface)
 {
-    CBLCBitmapSizeTable *sizes;
-    UINT32 num_sizes, size, s;
+    const CBLCBitmapSizeTable *sizes;
+    struct dwrite_fonttable cblc;
+    unsigned int i, num_sizes;
     BOOL exists = FALSE;
-    CBLCHeader *header;
     DWORD ret = 0;
-    void *context;
     HRESULT hr;
 
-    hr = IDWriteFontFace4_TryGetFontTable(fontface, MS_CBLC_TAG, (const void **)&header, &size, &context, &exists);
-    ok(hr == S_OK, "TryGetFontTable() failed, %#lx\n", hr);
-    ok(exists, "Expected CBLC table\n");
+    hr = IDWriteFontFace4_TryGetFontTable(fontface, MS_CBLC_TAG, (const void **)&cblc.data, &cblc.size, &cblc.context, &exists);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(exists, "Expected CBLC table.\n");
 
     if (!exists)
         return 0;
 
-    num_sizes = GET_BE_DWORD(header->numSizes);
-    sizes = (CBLCBitmapSizeTable *)(header + 1);
+    num_sizes = table_read_be_dword(&cblc, NULL, FIELD_OFFSET(struct cblc_header, numSizes));
+    if (!(sizes = table_read_ensure(&cblc, sizeof(struct cblc_header), num_sizes * sizeof(*sizes))))
+    {
+        skip("Malformed CBLC table.\n");
+        num_sizes = 0;
+    }
 
-    for (s = 0; s < num_sizes; s++) {
-        BYTE bpp = sizes[s].bitDepth;
-
+    for (i = 0; i < num_sizes; ++i)
+    {
+        BYTE bpp = sizes[i].bitDepth;
         if (bpp == 1 || bpp == 2 || bpp == 4 || bpp == 8)
             ret |= DWRITE_GLYPH_IMAGE_FORMATS_PNG;
         else if (bpp == 32)
             ret |= DWRITE_GLYPH_IMAGE_FORMATS_PREMULTIPLIED_B8G8R8A8;
+
+        if (ret == (DWRITE_GLYPH_IMAGE_FORMATS_PNG | DWRITE_GLYPH_IMAGE_FORMATS_PREMULTIPLIED_B8G8R8A8))
+            break;
     }
 
-    IDWriteFontFace4_ReleaseFontTable(fontface, context);
+    IDWriteFontFace4_ReleaseFontTable(fontface, cblc.context);
 
     return ret;
 }
@@ -9635,14 +9653,10 @@ static void test_fontsetbuilder(void)
         hr = IDWriteFontSetBuilder1_CreateFontSet(builder1, &fontset);
         ok(hr == S_OK, "Unexpected hr %#lx.\n",hr);
         hr = IDWriteFactory3_CreateFontCollectionFromFontSet(factory, fontset, &collection);
-        todo_wine
         ok(hr == S_OK, "Unexpected hr %#lx.\n",hr);
-        if (SUCCEEDED(hr))
-        {
-            count = IDWriteFontCollection1_GetFontFamilyCount(collection);
-            ok(count == 1, "Unexpected family count %u.\n", count);
-            IDWriteFontCollection1_Release(collection);
-        }
+        count = IDWriteFontCollection1_GetFontFamilyCount(collection);
+        ok(count == 1, "Unexpected family count %u.\n", count);
+        IDWriteFontCollection1_Release(collection);
         IDWriteFontSet_Release(fontset);
 
         hr = IDWriteFontSetBuilder1_AddFontFile(builder1, file);
@@ -9652,15 +9666,11 @@ static void test_fontsetbuilder(void)
         ok(hr == S_OK, "Unexpected hr %#lx.\n",hr);
 
         hr = IDWriteFactory3_CreateFontCollectionFromFontSet(factory, fontset, &collection);
-        todo_wine
         ok(hr == S_OK, "Unexpected hr %#lx.\n",hr);
-        if (SUCCEEDED(hr))
-        {
-            check_familymodel(collection, DWRITE_FONT_FAMILY_MODEL_WEIGHT_STRETCH_STYLE);
-            count = IDWriteFontCollection1_GetFontFamilyCount(collection);
-            ok(count == 1, "Unexpected family count %u.\n", count);
-            IDWriteFontCollection1_Release(collection);
-        }
+        check_familymodel(collection, DWRITE_FONT_FAMILY_MODEL_WEIGHT_STRETCH_STYLE);
+        count = IDWriteFontCollection1_GetFontFamilyCount(collection);
+        ok(count == 1, "Unexpected family count %u.\n", count);
+        IDWriteFontCollection1_Release(collection);
 
         /* No attempt to eliminate duplicates. */
         count = IDWriteFontSet_GetFontCount(fontset);
@@ -10384,22 +10394,20 @@ static void test_CreateFontCollectionFromFontSet(void)
     ok(hr == S_OK, "Unexpected hr %#lx.\n",hr);
 
     hr = IDWriteFactory5_CreateFontCollectionFromFontSet(factory, fontset, &collection);
-    todo_wine
     ok(hr == S_OK, "Unexpected hr %#lx.\n",hr);
 
-if (SUCCEEDED(hr))
-{
     count = IDWriteFontCollection1_GetFontFamilyCount(collection);
+    todo_wine
     ok(count == 2, "Unexpected family count %u.\n", count);
 
     /* Explicit fontset properties are prioritized and not replaced by actual properties from a file. */
     exists = FALSE;
     hr = IDWriteFontCollection1_FindFamilyName(collection, L"Another Font", &index, &exists);
     ok(hr == S_OK, "Unexpected hr %#lx.\n",hr);
+    todo_wine
     ok(!!exists, "Unexpected return value %d.\n", exists);
 
     IDWriteFontCollection1_Release(collection);
-}
     IDWriteFontSet_Release(fontset);
 
     IDWriteFontSetBuilder1_Release(builder);

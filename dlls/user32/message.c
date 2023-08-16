@@ -19,44 +19,16 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <assert.h>
-#include <stdarg.h>
-
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winuser.h"
-#include "winerror.h"
-#include "winnls.h"
-#include "dbt.h"
-#include "dde.h"
-#include "imm.h"
-#include "hidusage.h"
-#include "ddk/imm.h"
-#include "wine/server.h"
 #include "user_private.h"
-#include "win.h"
 #include "controls.h"
+#include "dde.h"
+#include "wine/server.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msg);
-
-
-/* Message class descriptor */
-const struct builtin_class_descr MESSAGE_builtin_class =
-{
-    L"Message",           /* name */
-    0,                    /* style */
-    WINPROC_MESSAGE,      /* proc */
-    0,                    /* extra */
-    0,                    /* cursor */
-    0                     /* brush */
-};
 
 
 /* pack a pointer into a 32/64 portable format */
@@ -72,10 +44,15 @@ static inline void *unpack_ptr( ULONGLONG ptr64 )
     return (void *)(ULONG_PTR)ptr64;
 }
 
+static struct wm_char_mapping_data *get_wmchar_data(void)
+{
+    return (struct wm_char_mapping_data *)(UINT_PTR)NtUserGetThreadInfo()->wmchar_data;
+}
+
 /* check for pending WM_CHAR message with DBCS trailing byte */
 static inline BOOL get_pending_wmchar( MSG *msg, UINT first, UINT last, BOOL remove )
 {
-    struct wm_char_mapping_data *data = get_user_thread_info()->wmchar_data;
+    struct wm_char_mapping_data *data = get_wmchar_data();
 
     if (!data || !data->get_msg.message) return FALSE;
     if ((first || last) && (first > WM_CHAR || last < WM_CHAR)) return FALSE;
@@ -131,7 +108,7 @@ BOOL map_wparam_AtoW( UINT message, WPARAM *wparam, enum wm_char_mapping mapping
          */
         if (mapping != WMCHAR_MAP_NOMAPPING)
         {
-            struct wm_char_mapping_data *data = get_user_thread_info()->wmchar_data;
+            struct wm_char_mapping_data *data = get_wmchar_data();
             BYTE low = LOBYTE(*wparam);
             cp = get_input_codepage();
 
@@ -164,7 +141,7 @@ BOOL map_wparam_AtoW( UINT message, WPARAM *wparam, enum wm_char_mapping mapping
                 {
                     if (!(data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) )))
                         return FALSE;
-                    get_user_thread_info()->wmchar_data = data;
+                    NtUserGetThreadInfo()->wmchar_data = (UINT_PTR)data;
                 }
                 TRACE( "storing lead byte %02x mapping %u\n", low, mapping );
                 data->lead_byte[mapping] = low;
@@ -222,11 +199,11 @@ static void map_wparam_WtoA( MSG *msg, BOOL remove )
             len = WideCharToMultiByte( cp, 0, wch, 1, (LPSTR)ch, 2, NULL, NULL );
             if (len == 2)  /* DBCS char */
             {
-                struct wm_char_mapping_data *data = get_user_thread_info()->wmchar_data;
+                struct wm_char_mapping_data *data = get_wmchar_data();
                 if (!data)
                 {
                     if (!(data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) ))) return;
-                    get_user_thread_info()->wmchar_data = data;
+                    NtUserGetThreadInfo()->wmchar_data = (UINT_PTR)data;
                 }
                 if (remove)
                 {
@@ -393,13 +370,13 @@ BOOL post_dde_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, DWORD 
                 ptr = &hpack;
                 size = sizeof(hpack);
                 lp = uiLo;
-                TRACE( "send dde-ack %lx %08lx => %p\n", uiLo, uiHi, h );
+                TRACE( "send dde-ack %Ix %08Ix => %p\n", uiLo, uiHi, h );
             }
         }
         else
         {
             /* uiHi should contain either an atom or 0 */
-            TRACE( "send dde-ack %lx atom=%lx\n", uiLo, uiHi );
+            TRACE( "send dde-ack %Ix atom=%Ix\n", uiLo, uiHi );
             lp = MAKELONG( uiLo, uiHi );
         }
         break;
@@ -428,7 +405,7 @@ BOOL post_dde_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, DWORD 
                 hunlock = (HGLOBAL)uiLo;
             }
         }
-        TRACE( "send ddepack %u %lx\n", size, uiHi );
+        TRACE( "send ddepack %u %Ix\n", size, uiHi );
         break;
     case WM_DDE_EXECUTE:
         if (lparam)
@@ -477,7 +454,7 @@ BOOL post_dde_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, DWORD 
  * Unpack a posted DDE message received from another process.
  */
 BOOL unpack_dde_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam,
-                         void **buffer, size_t size )
+                         const void *buffer, size_t size )
 {
     UINT_PTR	uiLo, uiHi;
     HGLOBAL	hMem = 0;
@@ -491,25 +468,24 @@ BOOL unpack_dde_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam
             ULONGLONG hpack;
             /* hMem is being passed */
             if (size != sizeof(hpack)) return FALSE;
-            if (!buffer || !*buffer) return FALSE;
             uiLo = *lparam;
-            memcpy( &hpack, *buffer, size );
+            memcpy( &hpack, buffer, size );
             hMem = unpack_ptr( hpack );
             uiHi = (UINT_PTR)hMem;
-            TRACE("recv dde-ack %lx mem=%lx[%lx]\n", uiLo, uiHi, GlobalSize( hMem ));
+            TRACE("recv dde-ack %Ix mem=%Ix[%Ix]\n", uiLo, uiHi, GlobalSize( hMem ));
         }
         else
         {
             uiLo = LOWORD( *lparam );
             uiHi = HIWORD( *lparam );
-            TRACE("recv dde-ack %lx atom=%lx\n", uiLo, uiHi);
+            TRACE("recv dde-ack %Ix atom=%Ix\n", uiLo, uiHi);
         }
 	*lparam = PackDDElParam( WM_DDE_ACK, uiLo, uiHi );
 	break;
     case WM_DDE_ADVISE:
     case WM_DDE_DATA:
     case WM_DDE_POKE:
-	if ((!buffer || !*buffer) && message != WM_DDE_DATA) return FALSE;
+	if (!size && message != WM_DDE_DATA) return FALSE;
 	uiHi = *lparam;
         if (size)
         {
@@ -517,7 +493,7 @@ BOOL unpack_dde_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam
                 return FALSE;
             if ((ptr = GlobalLock( hMem )))
             {
-                memcpy( ptr, *buffer, size );
+                memcpy( ptr, buffer, size );
                 GlobalUnlock( hMem );
             }
             else
@@ -533,13 +509,12 @@ BOOL unpack_dde_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam
     case WM_DDE_EXECUTE:
 	if (size)
 	{
-	    if (!buffer || !*buffer) return FALSE;
             if (!(hMem = GlobalAlloc( GMEM_MOVEABLE|GMEM_DDESHARE, size ))) return FALSE;
             if ((ptr = GlobalLock( hMem )))
 	    {
-		memcpy( ptr, *buffer, size );
+		memcpy( ptr, buffer, size );
 		GlobalUnlock( hMem );
-                TRACE( "exec: pairing c=%08lx s=%p\n", *lparam, hMem );
+                TRACE( "exec: pairing c=%08Ix s=%p\n", *lparam, hMem );
                 if (!dde_add_pair( (HGLOBAL)*lparam, hMem ))
                 {
                     GlobalFree( hMem );
@@ -557,25 +532,6 @@ BOOL unpack_dde_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam
     }
     return TRUE;
 }
-
-BOOL process_rawinput_message( MSG *msg, UINT hw_id, const struct hardware_msg_data *msg_data )
-{
-    struct rawinput_thread_data *thread_data = rawinput_thread_data();
-
-    if (msg->message == WM_INPUT_DEVICE_CHANGE)
-        rawinput_update_device_list();
-    else
-    {
-        thread_data->buffer->header.dwSize = RAWINPUT_BUFFER_SIZE;
-        if (!rawinput_from_hardware_message( thread_data->buffer, msg_data )) return FALSE;
-        thread_data->hw_id = hw_id;
-        msg->lParam = (LPARAM)hw_id;
-    }
-
-    msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
-    return TRUE;
-}
-
 
 /***********************************************************************
  *		SendMessageTimeoutW  (USER32.@)
@@ -616,12 +572,44 @@ LRESULT WINAPI SendMessageTimeoutA( HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 }
 
 
+static LRESULT dispatch_send_message( struct win_proc_params *params, WPARAM wparam, LPARAM lparam )
+{
+    struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
+    INPUT_MESSAGE_SOURCE prev_source = thread_info->msg_source;
+    LRESULT retval = 0;
+
+    static const INPUT_MESSAGE_SOURCE msg_source_unavailable = { IMDT_UNAVAILABLE, IMO_UNAVAILABLE };
+
+    /* params may contain arguments modified by wow, use original parameters instead */
+    params->wparam = wparam;
+    params->lparam = lparam;
+
+    thread_info->recursion_count++;
+
+    thread_info->msg_source = msg_source_unavailable;
+    SPY_EnterMessage( SPY_SENDMESSAGE, params->hwnd, params->msg, params->wparam, params->lparam );
+
+    retval = dispatch_win_proc_params( params );
+
+    SPY_ExitMessage( SPY_RESULT_OK, params->hwnd, params->msg, retval, params->wparam, params->lparam );
+    thread_info->msg_source = prev_source;
+    thread_info->recursion_count--;
+    return retval;
+}
+
+
 /***********************************************************************
  *		SendMessageW  (USER32.@)
  */
 LRESULT WINAPI SendMessageW( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
-    return NtUserMessageCall( hwnd, msg, wparam, lparam, NULL, NtUserSendMessage, FALSE );
+    struct win_proc_params params;
+    LRESULT retval;
+
+    params.hwnd = 0;
+    retval = NtUserMessageCall( hwnd, msg, wparam, lparam, &params, NtUserSendMessage, FALSE );
+    if (params.hwnd) retval = dispatch_send_message( &params, wparam, lparam );
+    return retval;
 }
 
 
@@ -630,6 +618,9 @@ LRESULT WINAPI SendMessageW( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
  */
 LRESULT WINAPI SendMessageA( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
+    struct win_proc_params params;
+    LRESULT retval;
+
     if (msg == WM_CHAR && !WIN_IsCurrentThread( hwnd ))
     {
         if (!map_wparam_AtoW( msg, &wparam, WMCHAR_MAP_SENDMESSAGE ))
@@ -637,7 +628,10 @@ LRESULT WINAPI SendMessageA( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
         return NtUserMessageCall( hwnd, msg, wparam, lparam, NULL, NtUserSendMessage, FALSE );
     }
 
-    return NtUserMessageCall( hwnd, msg, wparam, lparam, NULL, NtUserSendMessage, TRUE );
+    params.hwnd = 0;
+    retval = NtUserMessageCall( hwnd, msg, wparam, lparam, &params, NtUserSendMessage, TRUE );
+    if (params.hwnd) retval = dispatch_send_message( &params, wparam, lparam );
+    return retval;
 }
 
 
@@ -693,7 +687,7 @@ BOOL WINAPI SendMessageCallbackW( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
  */
 BOOL WINAPI ReplyMessage( LRESULT result )
 {
-    return NtUserReplyMessage( result, NULL );
+    return NtUserReplyMessage( result );
 }
 
 
@@ -711,10 +705,7 @@ BOOL WINAPI InSendMessage(void)
  */
 DWORD WINAPI InSendMessageEx( LPVOID reserved )
 {
-    struct received_message_info *info = get_user_thread_info()->receive_info;
-
-    if (info) return info->flags;
-    return ISMEX_NOSEND;
+    return NtUserGetThreadInfo()->receive_flags;
 }
 
 
@@ -851,6 +842,21 @@ BOOL WINAPI TranslateMessage( const MSG *msg )
 }
 
 
+static LRESULT dispatch_message( const MSG *msg, BOOL ansi )
+{
+    struct win_proc_params params;
+    LRESULT retval = 0;
+
+    if (!NtUserMessageCall( msg->hwnd, msg->message, msg->wParam, msg->lParam,
+                            &params, NtUserGetDispatchParams, ansi )) return 0;
+
+    SPY_EnterMessage( SPY_DISPATCHMESSAGE, msg->hwnd, msg->message, msg->wParam, msg->lParam );
+    retval = dispatch_win_proc_params( &params );
+    SPY_ExitMessage( SPY_RESULT_OK, msg->hwnd, msg->message, retval, msg->wParam, msg->lParam );
+    return retval;
+}
+
+
 /***********************************************************************
  *		DispatchMessageA (USER32.@)
  *
@@ -875,7 +881,12 @@ LRESULT WINAPI DECLSPEC_HOTPATCH DispatchMessageA( const MSG* msg )
         __ENDTRY
         return retval;
     }
-    return NtUserDispatchMessageA( msg );
+
+    /* whenever possible, avoid using NtUserDispatchMessage to make the call unwindable */
+    if (msg->message != WM_SYSTIMER && msg->message != WM_PAINT)
+        return dispatch_message( msg, TRUE );
+
+    return NtUserDispatchMessage( msg );
 }
 
 
@@ -923,6 +934,11 @@ LRESULT WINAPI DECLSPEC_HOTPATCH DispatchMessageW( const MSG* msg )
             return retval;
         }
     }
+
+    /* whenever possible, avoid using NtUserDispatchMessage to make the call unwindable */
+    if (msg->message != WM_SYSTIMER && msg->message != WM_PAINT)
+        return dispatch_message( msg, FALSE );
+
     return NtUserDispatchMessage( msg );
 }
 
@@ -1003,21 +1019,8 @@ LPARAM WINAPI SetMessageExtraInfo(LPARAM lParam)
  */
 BOOL WINAPI GetCurrentInputMessageSource( INPUT_MESSAGE_SOURCE *source )
 {
-    *source = get_user_thread_info()->msg_source;
+    *source = NtUserGetThreadInfo()->msg_source;
     return TRUE;
-}
-
-
-/***********************************************************************
- *		WaitMessage (USER.112) Suspend thread pending messages
- *		WaitMessage (USER32.@) Suspend thread pending messages
- *
- * WaitMessage() suspends a thread until events appear in the thread's
- * queue.
- */
-BOOL WINAPI WaitMessage(void)
-{
-    return NtUserMsgWaitForMultipleObjectsEx( 0, NULL, INFINITE, QS_ALLINPUT, 0 ) != WAIT_FAILED;
 }
 
 
@@ -1153,7 +1156,7 @@ static BOOL CALLBACK bcast_winsta( LPWSTR winsta, LPARAM lp )
 {
     BOOL ret;
     HWINSTA hwinsta = OpenWindowStationW( winsta, FALSE, WINSTA_ENUMDESKTOPS );
-    TRACE("hwinsta: %p/%s/%08x\n", hwinsta, debugstr_w( winsta ), GetLastError());
+    TRACE("hwinsta: %p/%s/%08lx\n", hwinsta, debugstr_w( winsta ), GetLastError());
     if (!hwinsta)
         return TRUE;
     ((BroadcastParm *)lp)->winsta = hwinsta;
@@ -1203,7 +1206,7 @@ LONG WINAPI BroadcastSystemMessageExW( DWORD flags, LPDWORD recipients, UINT msg
                                    | BSF_POSTMESSAGE | BSF_FORCEIFHUNG | BSF_NOTIMEOUTIFNOTHUNG
                                    | BSF_ALLOWSFW | BSF_SENDNOTIFYMESSAGE | BSF_RETURNHDESK | BSF_LUID );
 
-    TRACE("Flags: %08x, recipients: %p(0x%x), msg: %04x, wparam: %08lx, lparam: %08lx\n", flags, recipients,
+    TRACE("Flags: %08lx, recipients: %p(0x%lx), msg: %04x, wparam: %08Ix, lparam: %08Ix\n", flags, recipients,
          (recipients ? *recipients : recips), msg, wp, lp);
 
     if (flags & ~all_flags)
@@ -1233,7 +1236,7 @@ LONG WINAPI BroadcastSystemMessageExW( DWORD flags, LPDWORD recipients, UINT msg
         ret = parm.success;
     }
     else
-        FIXME("Recipients %08x not supported!\n", *recipients);
+        FIXME("Recipients %08lx not supported!\n", *recipients);
 
     return ret;
 }
@@ -1318,7 +1321,7 @@ BOOL WINAPI IsHungAppWindow( HWND hWnd )
  */
 BOOL WINAPI ChangeWindowMessageFilter( UINT message, DWORD flag )
 {
-    FIXME( "%x %08x\n", message, flag );
+    FIXME( "%x %08lx\n", message, flag );
     return TRUE;
 }
 
@@ -1327,6 +1330,6 @@ BOOL WINAPI ChangeWindowMessageFilter( UINT message, DWORD flag )
  */
 BOOL WINAPI ChangeWindowMessageFilterEx( HWND hwnd, UINT message, DWORD action, CHANGEFILTERSTRUCT *changefilter )
 {
-    FIXME( "%p %x %d %p\n", hwnd, message, action, changefilter );
+    FIXME( "%p %x %ld %p\n", hwnd, message, action, changefilter );
     return TRUE;
 }

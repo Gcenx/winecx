@@ -43,6 +43,9 @@ typedef struct
   HWND     hFindReplaceDlg;
   HWND     hEdit;
   HFONT    hFont; /* Font used by the edit control */
+  HWND     hStatusBar;
+  BOOL     bStatusBar;
+  WCHAR*   szStatusString;
   LOGFONTW lfFont;
   BOOL     bWrapLongLines;
   WCHAR    szFindText[MAX_PATH];
@@ -59,6 +62,9 @@ typedef struct
   INT      iMarginRight;
   WCHAR    szHeader[MAX_PATH];
   WCHAR    szFooter[MAX_PATH];
+  INT      trackedSel;
+  INT      lastLn;
+  INT      lastCol;
 
   FINDREPLACEW find;
   FINDREPLACEW lastFind;
@@ -71,3 +77,6 @@ extern NOTEPAD_GLOBALS Globals;
 VOID SetFileNameAndEncoding(LPCWSTR szFileName, ENCODING enc);
 void NOTEPAD_DoFind(FINDREPLACEW *fr);
 DWORD get_dpi(void);
+void UpdateStatusBar(void);
+void updateWindowSize(int width, int height);
+LRESULT CALLBACK EDIT_CallBackProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);

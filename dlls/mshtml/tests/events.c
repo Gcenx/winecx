@@ -28,8 +28,11 @@
 #include "ole2.h"
 #include "mshtml.h"
 #include "mshtmdid.h"
+#include "mshtmhst.h"
 #include "docobj.h"
 #include "hlink.h"
+#include "wininet.h"
+#include "shdeprecated.h"
 #include "dispex.h"
 
 #define DEFINE_EXPECT(func) \
@@ -57,6 +60,10 @@
         expect_ ## func = called_ ## func = FALSE; \
     }while(0)
 
+#define CLEAR_CALLED(func) \
+    expect_ ## func = called_ ## func = FALSE
+
+DEFINE_EXPECT(docobj_onclick);
 DEFINE_EXPECT(document_onclick);
 DEFINE_EXPECT(body_onclick);
 DEFINE_EXPECT(doc_onclick_attached);
@@ -76,6 +83,7 @@ DEFINE_EXPECT(iframe_onreadystatechange_complete);
 DEFINE_EXPECT(iframedoc_onreadystatechange);
 DEFINE_EXPECT(img_onload);
 DEFINE_EXPECT(img_onerror);
+DEFINE_EXPECT(input_onload);
 DEFINE_EXPECT(link_onload);
 DEFINE_EXPECT(input_onfocus);
 DEFINE_EXPECT(input_onblur);
@@ -90,6 +98,19 @@ DEFINE_EXPECT(submit_onclick_attached_check_cancel);
 DEFINE_EXPECT(submit_onclick_setret);
 DEFINE_EXPECT(elem2_cp_onclick);
 DEFINE_EXPECT(iframe_onload);
+DEFINE_EXPECT(visibilitychange);
+DEFINE_EXPECT(onbeforeunload);
+DEFINE_EXPECT(iframe_onbeforeunload);
+DEFINE_EXPECT(onunload);
+DEFINE_EXPECT(pagehide);
+DEFINE_EXPECT(iframe_onunload);
+DEFINE_EXPECT(iframe_pagehide);
+DEFINE_EXPECT(doc1_onstorage);
+DEFINE_EXPECT(doc1_onstoragecommit);
+DEFINE_EXPECT(window1_onstorage);
+DEFINE_EXPECT(doc2_onstorage);
+DEFINE_EXPECT(doc2_onstoragecommit);
+DEFINE_EXPECT(window2_onstorage);
 
 static HWND container_hwnd = NULL;
 static IHTMLWindow2 *window;
@@ -124,7 +145,15 @@ static const char readystate_doc_ie9_str[] =
     "<body><iframe id=\"iframe\"></iframe></body></html>";
 
 static const char img_doc_str[] =
-    "<html><body><img id=\"imgid\"></img></body></html>";
+    "<html><head><meta http-equiv=\"x-ua-compatible\" content=\"IE=8\" /></head>"
+    "<body><img id=\"imgid\"></img></body></html>";
+
+static const char img_doc_ie9_str[] =
+    "<html><head><meta http-equiv=\"x-ua-compatible\" content=\"IE=9\" /></head>"
+    "<body><img id=\"imgid\"></img></body></html>";
+
+static const char input_image_doc_str[] =
+    "<html><body><input type=\"image\" id=\"inputid\"></input></body></html>";
 
 static const char link_doc_str[] =
     "<html><body><link id=\"linkid\" rel=\"stylesheet\" type=\"text/css\"></link></body></html>";
@@ -134,6 +163,8 @@ static const char input_doc_str[] =
 
 static const char iframe_doc_str[] =
     "<html><body><iframe id=\"ifr\">Testing</iframe></body></html>";
+
+static void navigate(IHTMLDocument2*,const WCHAR*);
 
 static BOOL iface_cmp(IUnknown *iface1, IUnknown *iface2)
 {
@@ -956,6 +987,16 @@ static HRESULT WINAPI DispatchEx_GetNameSpaceParent(IDispatchEx *iface, IUnknown
     }; \
     static IDispatchEx event ## _obj = { &event ## FuncVtbl };
 
+static HRESULT WINAPI docobj_onclick(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    CHECK_EXPECT(docobj_onclick);
+    test_event_args(document_mode < 9 ? &DIID_DispHTMLDocument : NULL, id, wFlags, pdp, pvarRes, pei, pspCaller);
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(docobj_onclick);
+
 static HRESULT WINAPI document_onclick(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
         VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
 {
@@ -1047,12 +1088,23 @@ static HRESULT WINAPI img_onload(IDispatchEx *iface, DISPID id, LCID lcid, WORD 
         VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
 {
     CHECK_EXPECT(img_onload);
-    test_event_args(&DIID_DispHTMLImg, id, wFlags, pdp, pvarRes, pei, pspCaller);
+    test_event_args(document_mode < 9 ? &DIID_DispHTMLImg : NULL, id, wFlags, pdp, pvarRes, pei, pspCaller);
     test_event_src(L"IMG");
     return S_OK;
 }
 
 EVENT_HANDLER_FUNC_OBJ(img_onload);
+
+static HRESULT WINAPI input_onload(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    CHECK_EXPECT(input_onload);
+    test_event_args(&DIID_DispHTMLInputElement, id, wFlags, pdp, pvarRes, pei, pspCaller);
+    test_event_src(L"INPUT");
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(input_onload);
 
 static HRESULT WINAPI link_onload(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
         VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
@@ -1072,7 +1124,7 @@ static HRESULT WINAPI unattached_img_onload(IDispatchEx *iface, DISPID id, LCID 
 
     CHECK_EXPECT(img_onload);
 
-    test_event_args(&DIID_DispHTMLImg, id, wFlags, pdp, pvarRes, pei, pspCaller);
+    test_event_args(document_mode < 9 ? &DIID_DispHTMLImg : NULL, id, wFlags, pdp, pvarRes, pei, pspCaller);
     event_src = get_event_src();
     todo_wine
         ok(!event_src, "event_src != NULL\n");
@@ -1087,7 +1139,7 @@ static HRESULT WINAPI img_onerror(IDispatchEx *iface, DISPID id, LCID lcid, WORD
         VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
 {
     CHECK_EXPECT(img_onerror);
-    test_event_args(&DIID_DispHTMLImg, id, wFlags, pdp, pvarRes, pei, pspCaller);
+    test_event_args(document_mode < 9 ? &DIID_DispHTMLImg : NULL, id, wFlags, pdp, pvarRes, pei, pspCaller);
     test_event_src(L"IMG");
     return S_OK;
 }
@@ -1380,6 +1432,105 @@ static HRESULT WINAPI iframe_onreadystatechange(IDispatchEx *iface, DISPID id, L
 }
 
 EVENT_HANDLER_FUNC_OBJ(iframe_onreadystatechange);
+
+static HRESULT WINAPI onvisibilitychange(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    IDispatchEx *dispex;
+    HRESULT hres;
+    BSTR bstr;
+
+    CHECK_EXPECT(visibilitychange);
+    test_event_args(NULL, id, wFlags, pdp, pvarRes, pei, pspCaller);
+
+    hres = IDispatch_QueryInterface(V_DISPATCH(&pdp->rgvarg[1]), &IID_IDispatchEx, (void**)&dispex);
+    ok(hres == S_OK, "Could not get IDispatchEx: %08lx\n", hres);
+
+    bstr = SysAllocString(L"toString");
+    hres = IDispatchEx_GetDispID(dispex, bstr, 0, &id);
+    todo_wine
+    ok(hres == S_OK, "GetDispID(\"toString\") failed: %08lx\n", hres);
+    SysFreeString(bstr);
+
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(onvisibilitychange);
+
+static HRESULT WINAPI onbeforeunload(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    CHECK_EXPECT(onbeforeunload);
+    test_event_args(NULL, id, wFlags, pdp, pvarRes, pei, pspCaller);
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(onbeforeunload);
+
+static HRESULT WINAPI iframe_onbeforeunload(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    CHECK_EXPECT(iframe_onbeforeunload);
+    ok(called_onbeforeunload, "beforeunload not fired on parent window before iframe\n");
+    ok(!called_onunload, "unload fired on parent window before beforeunload on iframe\n");
+    ok(!called_iframe_onunload, "unload fired before beforeunload on iframe\n");
+    test_event_args(NULL, id, wFlags, pdp, pvarRes, pei, pspCaller);
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(iframe_onbeforeunload);
+
+static HRESULT WINAPI pagehide(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    CHECK_EXPECT(pagehide);
+    ok(!called_onunload, "unload fired before pagehide\n");
+    test_event_args(NULL, id, wFlags, pdp, pvarRes, pei, pspCaller);
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(pagehide);
+
+static HRESULT WINAPI onunload(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    CHECK_EXPECT(onunload);
+    if(expect_iframe_onunload) {
+        ok(called_onbeforeunload, "beforeunload not fired before unload\n");
+        ok(called_iframe_onbeforeunload, "beforeunload not fired on iframe before unload\n");
+        ok(called_pagehide, "pagehide not fired before unload\n");
+    }else
+        ok(!called_pagehide, "pagehide fired before unload in quirks mode\n");
+    test_event_args(NULL, id, wFlags, pdp, pvarRes, pei, pspCaller);
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(onunload);
+
+static HRESULT WINAPI iframe_pagehide(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    CHECK_EXPECT(iframe_pagehide);
+    ok(called_pagehide, "pagehide not fired on parent window before iframe\n");
+    ok(called_onunload, "unload not fired on parent window before pagehide on iframe\n");
+    ok(!called_iframe_onunload, "unload fired before pagehide on iframe\n");
+    test_event_args(NULL, id, wFlags, pdp, pvarRes, pei, pspCaller);
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(iframe_pagehide);
+
+static HRESULT WINAPI iframe_onunload(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    CHECK_EXPECT(iframe_onunload);
+    ok(called_onunload, "unload not fired on parent window before iframe\n");
+    ok(called_iframe_pagehide, "pagehide not fired before unload on iframe\n");
+    test_event_args(NULL, id, wFlags, pdp, pvarRes, pei, pspCaller);
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(iframe_onunload);
 
 static HRESULT WINAPI nocall(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
         VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
@@ -1889,6 +2040,7 @@ static void test_onclick(IHTMLDocument2 *doc)
     VariantClear(&v);
 
     if(document_mode >= 9) {
+        add_event_listener((IUnknown*)div, L"click", NULL, VARIANT_FALSE);
         add_event_listener((IUnknown*)div, L"click", (IDispatch*)&div_onclick_capture_obj, VARIANT_TRUE);
         add_event_listener((IUnknown*)div, L"click", (IDispatch*)&div_onclick_bubble_obj, VARIANT_FALSE);
     }
@@ -2043,6 +2195,7 @@ static void test_onclick(IHTMLDocument2 *doc)
     doc_detach_event(doc, L"onclick", (IDispatch*)&doc_onclick_attached_obj);
 
     if(document_mode >= 9) {
+        remove_event_listener((IUnknown*)div, L"click", NULL, VARIANT_FALSE);
         remove_event_listener((IUnknown*)div, L"click", (IDispatch*)&div_onclick_capture_obj, VARIANT_TRUE);
         remove_event_listener((IUnknown*)div, L"click", (IDispatch*)&div_onclick_bubble_obj, VARIANT_FALSE);
     }
@@ -2118,13 +2271,13 @@ static void test_imgload(IHTMLDocument2 *doc)
 {
     IHTMLImgElement *img;
     IHTMLElement *elem;
+    VARIANT_BOOL b;
     VARIANT v;
     BSTR str;
     HRESULT hres;
 
     elem = get_elem_id(doc, L"imgid");
     hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLImgElement, (void**)&img);
-    IHTMLElement_Release(elem);
     ok(hres == S_OK, "Could not get IHTMLImgElement iface: %08lx\n", hres);
 
     V_VT(&v) = VT_EMPTY;
@@ -2159,11 +2312,46 @@ static void test_imgload(IHTMLDocument2 *doc)
     str = SysAllocString(L"http://test.winehq.org/tests/winehq_snapshot/index_files/winehq_logo_text.png");
     hres = IHTMLImgElement_put_src(img, str);
     ok(hres == S_OK, "put_src failed: %08lx\n", hres);
-    SysFreeString(str);
 
     SET_EXPECT(img_onload);
     pump_msgs(&called_img_onload);
     CHECK_CALLED(img_onload);
+
+    hres = IHTMLImgElement_get_complete(img, &b);
+    ok(hres == S_OK, "get_complete failed: %08lx\n", hres);
+    ok(b == VARIANT_TRUE, "complete = %x\n", b);
+
+    /* cached images send synchronous load event in legacy modes */
+    if(document_mode < 9)
+        SET_EXPECT(img_onload);
+    hres = IHTMLImgElement_put_src(img, str);
+    ok(hres == S_OK, "put_src failed: %08lx\n", hres);
+    if(document_mode < 9) {
+        CHECK_CALLED(img_onload);
+        pump_msgs(NULL);
+    }else {
+        SET_EXPECT(img_onload);
+        pump_msgs(&called_img_onload);
+        CHECK_CALLED(img_onload);
+    }
+
+    if(document_mode < 9)
+        SET_EXPECT(img_onload);
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = str;
+    str = SysAllocString(L"src");
+    hres = IHTMLElement_setAttribute(elem, str, v, 0);
+    ok(hres == S_OK, "setAttribute failed: %08lx\n", hres);
+    SysFreeString(str);
+    VariantClear(&v);
+    if(document_mode < 9) {
+        CHECK_CALLED(img_onload);
+        pump_msgs(NULL);
+    }else {
+        SET_EXPECT(img_onload);
+        pump_msgs(&called_img_onload);
+        CHECK_CALLED(img_onload);
+    }
 
     SET_EXPECT(img_onerror);
 
@@ -2177,6 +2365,7 @@ static void test_imgload(IHTMLDocument2 *doc)
     CHECK_CALLED(img_onerror);
 
     IHTMLImgElement_Release(img);
+    IHTMLElement_Release(elem);
 
     /* test onload on unattached image */
     hres = IHTMLDocument2_createElement(doc, (str = SysAllocString(L"img")), &elem);
@@ -2214,6 +2403,48 @@ static void test_imgload(IHTMLDocument2 *doc)
     CHECK_CALLED(img_onload);
 
     IHTMLImgElement_Release(img);
+}
+
+static void test_inputload(IHTMLDocument2 *doc)
+{
+    IHTMLInputElement *input;
+    IHTMLElement *elem;
+    VARIANT v;
+    BSTR str;
+    HRESULT hres;
+
+    elem = get_elem_id(doc, L"inputid");
+    hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLInputElement, (void**)&input);
+    IHTMLElement_Release(elem);
+    ok(hres == S_OK, "Could not get IHTMLInputElement iface: %08lx\n", hres);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLInputElement_get_onload(input, &v);
+    ok(hres == S_OK, "get_onload failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_NULL, "V_VT(onload) = %d\n", V_VT(&v));
+
+    V_VT(&v) = VT_DISPATCH;
+    V_DISPATCH(&v) = (IDispatch*)&input_onload_obj;
+    hres = IHTMLInputElement_put_onload(input, v);
+    ok(hres == S_OK, "put_onload failed: %08lx\n", hres);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLInputElement_get_onload(input, &v);
+    ok(hres == S_OK, "get_onload failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(onload) = %d\n", V_VT(&v));
+    ok(V_DISPATCH(&v) == (IDispatch*)&input_onload_obj, "V_DISPATCH(onload) != input_onload_obj\n");
+    VariantClear(&v);
+
+    str = SysAllocString(L"http://test.winehq.org/tests/winehq_snapshot/index_files/winehq_logo_text.png?v=2");
+    hres = IHTMLInputElement_put_src(input, str);
+    ok(hres == S_OK, "put_src failed: %08lx\n", hres);
+    SysFreeString(str);
+
+    SET_EXPECT(input_onload);
+    pump_msgs(&called_input_onload);
+    CHECK_CALLED(input_onload);
+
+    IHTMLInputElement_Release(input);
 }
 
 static void test_link_load(IHTMLDocument2 *doc)
@@ -2358,6 +2589,188 @@ static void test_focus(IHTMLDocument2 *doc)
 
     IHTMLElement2_Release(elem2);
     IHTMLElement4_Release(div);
+}
+
+static void test_visibilitychange(IHTMLDocument2 *doc)
+{
+    if(!winetest_interactive) {
+        ShowWindow(container_hwnd, SW_SHOW);
+        pump_msgs(NULL);
+    }
+    add_event_listener((IUnknown*)doc, L"visibilitychange", (IDispatch*)&onvisibilitychange_obj, VARIANT_TRUE);
+
+    ShowWindow(container_hwnd, SW_HIDE);
+    pump_msgs(NULL);
+
+    ShowWindow(container_hwnd, SW_SHOW);
+    pump_msgs(NULL);
+
+    if(document_mode < 10) {
+        ShowWindow(container_hwnd, SW_MINIMIZE);
+        pump_msgs(NULL);
+
+        ShowWindow(container_hwnd, SW_RESTORE);
+        pump_msgs(NULL);
+    }else {
+        /* FIXME: currently not implemented in Wine, so we can't wait for it */
+        BOOL *expect = broken(1) ? &called_visibilitychange : NULL;
+
+        SET_EXPECT(visibilitychange);
+        ShowWindow(container_hwnd, SW_MINIMIZE);
+        pump_msgs(expect);
+        todo_wine
+        CHECK_CALLED(visibilitychange);
+
+        SET_EXPECT(visibilitychange);
+        ShowWindow(container_hwnd, SW_RESTORE);
+        pump_msgs(expect);
+        todo_wine
+        CHECK_CALLED(visibilitychange);
+    }
+
+    navigate(doc, document_mode < 10 ? L"blank_ie10.html" : L"blank.html");
+
+    if(document_mode >= 9)
+        add_event_listener((IUnknown*)doc, L"visibilitychange", (IDispatch*)&onvisibilitychange_obj, VARIANT_TRUE);
+
+    if(!winetest_interactive) {
+        ShowWindow(container_hwnd, SW_HIDE);
+        pump_msgs(NULL);
+    }
+}
+
+static void test_unload_event(IHTMLDocument2 *doc)
+{
+    IHTMLDocument2 *child_doc;
+    IHTMLFrameBase2 *iframe;
+    IHTMLDocument6 *doc6;
+    IHTMLElement2 *elem;
+    IHTMLWindow2 *child;
+    HRESULT hres;
+    VARIANT v;
+    BSTR bstr;
+
+    V_VT(&v) = VT_DISPATCH;
+    V_DISPATCH(&v) = (IDispatch*)&onunload_obj;
+    hres = IHTMLWindow2_put_onunload(window, v);
+    ok(hres == S_OK, "put_onunload failed: %08lx\n", hres);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLWindow2_get_onunload(window, &v);
+    ok(hres == S_OK, "get_onunload failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(onunload) = %d\n", V_VT(&v));
+    ok(V_DISPATCH(&v) == (IDispatch*)&onunload_obj, "V_DISPATCH(onunload) = %p\n", V_DISPATCH(&v));
+
+    V_VT(&v) = VT_DISPATCH;
+    V_DISPATCH(&v) = (IDispatch*)&onbeforeunload_obj;
+    hres = IHTMLWindow2_put_onbeforeunload(window, v);
+    ok(hres == S_OK, "put_onbeforeunload failed: %08lx\n", hres);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLWindow2_get_onbeforeunload(window, &v);
+    ok(hres == S_OK, "get_onbeforeunload failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(onbeforeunload) = %d\n", V_VT(&v));
+    ok(V_DISPATCH(&v) == (IDispatch*)&onbeforeunload_obj, "V_DISPATCH(onbeforeunload) = %p\n", V_DISPATCH(&v));
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IHTMLDocument6, (void**)&doc6);
+    ok(hres == S_OK, "Could not get IHTMLDocument6 iface: %08lx\n", hres);
+    bstr = SysAllocString(L"ifr");
+    hres = IHTMLDocument6_getElementById(doc6, bstr, &elem);
+    ok(hres == S_OK, "getElementById failed: %08lx\n", hres);
+    IHTMLDocument6_Release(doc6);
+    SysFreeString(bstr);
+
+    hres = IHTMLElement2_QueryInterface(elem, &IID_IHTMLFrameBase2, (void**)&iframe);
+    ok(hres == S_OK, "Could not get IHTMLFrameBase2 iface: %08lx\n", hres);
+    IHTMLElement2_Release(elem);
+    hres = IHTMLFrameBase2_get_contentWindow(iframe, &child);
+    ok(hres == S_OK, "get_contentWindow failed: %08lx\n", hres);
+    IHTMLFrameBase2_Release(iframe);
+
+    hres = IHTMLWindow2_get_document(child, &child_doc);
+    ok(hres == S_OK, "get_document failed: %08lx\n", hres);
+
+    V_VT(&v) = VT_DISPATCH;
+    V_DISPATCH(&v) = (IDispatch*)&iframe_onunload_obj;
+    hres = IHTMLWindow2_put_onunload(child, v);
+    ok(hres == S_OK, "put_onunload failed: %08lx\n", hres);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLWindow2_get_onunload(child, &v);
+    ok(hres == S_OK, "get_onunload failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(onunload) = %d\n", V_VT(&v));
+    ok(V_DISPATCH(&v) == (IDispatch*)&iframe_onunload_obj, "V_DISPATCH(onunload) = %p\n", V_DISPATCH(&v));
+
+    V_VT(&v) = VT_DISPATCH;
+    V_DISPATCH(&v) = (IDispatch*)&iframe_onbeforeunload_obj;
+    hres = IHTMLWindow2_put_onbeforeunload(child, v);
+    ok(hres == S_OK, "put_onbeforeunload failed: %08lx\n", hres);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLWindow2_get_onbeforeunload(child, &v);
+    ok(hres == S_OK, "get_onbeforeunload failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(onbeforeunload) = %d\n", V_VT(&v));
+    ok(V_DISPATCH(&v) == (IDispatch*)&iframe_onbeforeunload_obj, "V_DISPATCH(onbeforeunload) = %p\n", V_DISPATCH(&v));
+
+    add_event_listener((IUnknown*)window, L"pagehide", (IDispatch*)&pagehide_obj, VARIANT_TRUE);
+    add_event_listener((IUnknown*)child, L"pagehide", (IDispatch*)&iframe_pagehide_obj, VARIANT_TRUE);
+    add_event_listener((IUnknown*)doc, L"beforeunload", (IDispatch*)&nocall_obj, VARIANT_TRUE);
+    add_event_listener((IUnknown*)child_doc, L"beforeunload", (IDispatch*)&nocall_obj, VARIANT_TRUE);
+    add_event_listener((IUnknown*)doc, L"unload", (IDispatch*)&nocall_obj, VARIANT_TRUE);
+    add_event_listener((IUnknown*)child_doc, L"unload", (IDispatch*)&nocall_obj, VARIANT_TRUE);
+    IHTMLDocument2_Release(child_doc);
+    IHTMLWindow2_Release(child);
+
+    SET_EXPECT(onbeforeunload);
+    SET_EXPECT(iframe_onbeforeunload);
+    SET_EXPECT(onunload);
+    SET_EXPECT(pagehide);
+    SET_EXPECT(iframe_onunload);
+    SET_EXPECT(iframe_pagehide);
+    navigate(doc, L"blank.html");
+    CHECK_CALLED(iframe_pagehide);
+    CHECK_CALLED(iframe_onunload);
+    CHECK_CALLED(pagehide);
+    CHECK_CALLED(onunload);
+    CHECK_CALLED(iframe_onbeforeunload);
+    CHECK_CALLED(onbeforeunload);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLWindow2_get_onbeforeunload(window, &v);
+    ok(hres == S_OK, "get_onbeforeunload failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_NULL, "V_VT(onbeforeunload) = %d\n", V_VT(&v));
+
+    V_VT(&v) = VT_DISPATCH;
+    V_DISPATCH(&v) = (IDispatch*)&onunload_obj;
+    hres = IHTMLWindow2_put_onunload(window, v);
+    ok(hres == S_OK, "put_onunload failed: %08lx\n", hres);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLWindow2_get_onunload(window, &v);
+    ok(hres == S_OK, "get_onunload failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(onunload) = %d\n", V_VT(&v));
+    ok(V_DISPATCH(&v) == (IDispatch*)&onunload_obj, "V_DISPATCH(onunload) = %p\n", V_DISPATCH(&v));
+
+    V_VT(&v) = VT_DISPATCH;
+    V_DISPATCH(&v) = (IDispatch*)&onbeforeunload_obj;
+    hres = IHTMLWindow2_put_onbeforeunload(window, v);
+    ok(hres == S_OK, "put_onbeforeunload failed: %08lx\n", hres);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLWindow2_get_onbeforeunload(window, &v);
+    ok(hres == S_OK, "get_onbeforeunload failed: %08lx\n", hres);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(onbeforeunload) = %d\n", V_VT(&v));
+    ok(V_DISPATCH(&v) == (IDispatch*)&onbeforeunload_obj, "V_DISPATCH(onbeforeunload) = %p\n", V_DISPATCH(&v));
+
+    IOleDocumentView_Show(view, FALSE);
+
+    SET_EXPECT(onunload);
+    IOleDocumentView_CloseView(view, 0);
+    CHECK_CALLED(onunload);
+
+    IOleDocumentView_SetInPlaceSite(view, NULL);
+    IOleDocumentView_Release(view);
+    view = NULL;
 }
 
 static void test_submit(IHTMLDocument2 *doc)
@@ -2523,10 +2936,32 @@ static void test_submit(IHTMLDocument2 *doc)
 
 static void test_timeout(IHTMLDocument2 *doc)
 {
+    VARIANT expr, var, args[2];
+    DISPPARAMS dp = { args, NULL, 2, 0 };
     IHTMLWindow3 *win3;
-    VARIANT expr, var;
+    IDispatch *disp;
+    UINT argerr;
     LONG id;
     HRESULT hres;
+
+    /* First try the IHTMLWindow2 DISPIDs via IDispatch, since they're not exposed */
+    hres = IHTMLWindow2_QueryInterface(window, &IID_IDispatch, (void**)&disp);
+    ok(hres == S_OK, "Could not get IDispatch iface: %08lx\n", hres);
+
+    V_VT(&args[1]) = VT_BSTR;
+    V_BSTR(&args[1]) = SysAllocString(L"");
+    V_VT(&args[0]) = VT_I4;
+    V_I4(&args[0]) = 1;
+    V_VT(&var) = VT_EMPTY;
+    hres = IDispatch_Invoke(disp, DISPID_IHTMLWINDOW2_SETINTERVAL, &IID_NULL, LOCALE_USER_DEFAULT,
+                            DISPATCH_METHOD, &dp, &var, NULL, &argerr);
+    ok(hres == DISP_E_MEMBERNOTFOUND, "Invoke(DISPID_IHTMLWINDOW2_SETINTERVAL) returned: %08lx\n", hres);
+
+    hres = IDispatch_Invoke(disp, DISPID_IHTMLWINDOW2_SETTIMEOUT, &IID_NULL, LOCALE_USER_DEFAULT,
+                            DISPATCH_METHOD, &dp, &var, NULL, &argerr);
+    ok(hres == DISP_E_MEMBERNOTFOUND, "Invoke(DISPID_IHTMLWINDOW2_SETTIMEOUT) returned: %08lx\n", hres);
+    SysFreeString(V_BSTR(&args[1]));
+    IDispatch_Release(disp);
 
     hres = IHTMLWindow2_QueryInterface(window, &IID_IHTMLWindow3, (void**)&win3);
     ok(hres == S_OK, "Could not get IHTMLWindow3 iface: %08lx\n", hres);
@@ -2549,6 +2984,9 @@ static void test_timeout(IHTMLDocument2 *doc)
     hres = IHTMLWindow3_setTimeout(win3, &expr, 0, &var, &id);
     ok(hres == S_OK, "setTimeout failed: %08lx\n", hres);
     ok(id, "id = 0\n");
+
+    hres = IHTMLWindow2_clearTimeout(window, 0);
+    ok(hres == S_OK, "clearTimeout failed: %08lx\n", hres);
 
     SET_EXPECT(timeout);
     pump_msgs(&called_timeout);
@@ -2576,6 +3014,13 @@ static void test_timeout(IHTMLDocument2 *doc)
     SET_EXPECT(timeout);
     pump_msgs(&called_timeout);
     CHECK_CALLED(timeout);
+
+    SET_EXPECT(timeout);
+    pump_msgs(&called_timeout);
+    CHECK_CALLED(timeout);
+
+    hres = IHTMLWindow2_clearInterval(window, 0);
+    ok(hres == S_OK, "clearInterval failed: %08lx\n", hres);
 
     SET_EXPECT(timeout);
     pump_msgs(&called_timeout);
@@ -2684,6 +3129,162 @@ static void test_iframe_connections(IHTMLDocument2 *doc)
     }
 
     IHTMLDocument2_Release(iframes_doc);
+}
+
+static void test_doc_obj(IHTMLDocument2 *doc)
+{
+    DISPID dispid, import_node_id, has_own_prop_id;
+    int orig_doc_mode = document_mode;
+    IEventTarget *event_target;
+    DISPPARAMS dp = { 0 };
+    IDispatchEx *dispex;
+    IHTMLElement *body;
+    VARIANT res, arg;
+    HRESULT hres;
+    BSTR bstr;
+
+    event_target = (void*)0xdeadbeef;
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IEventTarget, (void**)&event_target);
+    if(document_mode < 9) {
+        ok(hres == E_NOINTERFACE, "hres = %08lx, expected E_NOINTERFACE\n", hres);
+        ok(!event_target, "event_target != NULL\n");
+    }else {
+        IHTMLDocument2 *tmp;
+
+        ok(hres == S_OK, "hres = %08lx, expected S_OK\n", hres);
+        ok(!!event_target, "event_target = NULL\n");
+
+        bstr = SysAllocString(L"click");
+        IEventTarget_addEventListener(event_target, bstr, (IDispatch*)&docobj_onclick_obj, TRUE);
+        ok(hres == S_OK, "addEventListener failed: %08lx\n", hres);
+        SysFreeString(bstr);
+
+        hres = IEventTarget_QueryInterface(event_target, &IID_IHTMLDocument2, (void**)&tmp);
+        ok(hres == S_OK, "Could not get IHTMLDocument2: %08lx\n", hres);
+        IEventTarget_Release(event_target);
+
+        ok(doc == tmp, "IHTMLDocument2 from IEventTarget not same as original\n");
+        IHTMLDocument2_Release(tmp);
+
+        body = doc_get_body(doc);
+        SET_EXPECT(docobj_onclick);
+        hres = IHTMLElement_click(body);
+        ok(hres == S_OK, "click failed: %08lx\n", hres);
+        IHTMLElement_Release(body);
+
+        pump_msgs(&called_docobj_onclick);
+        CHECK_CALLED(docobj_onclick);
+    }
+
+    bstr = NULL;
+    hres = IHTMLDocument2_toString(doc, &bstr);
+    ok(hres == S_OK, "toString failed: %08lx\n", hres);
+    todo_wine_if(document_mode >= 9)
+    ok(!wcscmp(bstr, (document_mode < 9 ? L"[object]" : L"[object Document]")), "toString returned %s\n", wine_dbgstr_w(bstr));
+    SysFreeString(bstr);
+
+    /* IHTMLDocument6 prop */
+    bstr = SysAllocString(L"onstoragecommit");
+    hres = IHTMLDocument2_GetIDsOfNames(doc, &IID_NULL, &bstr, 1, 0, &dispid);
+    ok(hres == S_OK, "GetIDsOfNames(onstoragecommit) returned: %08lx\n", hres);
+    SysFreeString(bstr);
+
+    /* IHTMLDocument7 method */
+    bstr = SysAllocString(L"importNode");
+    hres = IHTMLDocument2_GetIDsOfNames(doc, &IID_NULL, &bstr, 1, 0, &dispid);
+    ok(hres == (document_mode < 9 ? DISP_E_UNKNOWNNAME : S_OK), "GetIDsOfNames(importNode) returned: %08lx\n", hres);
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IDispatchEx, (void**)&dispex);
+    ok(hres == S_OK, "Could not get IDispatchEx: %08lx\n", hres);
+
+    hres = IDispatchEx_GetDispID(dispex, bstr, fdexNameEnsure, &import_node_id);
+    ok(hres == S_OK, "GetDispID(importNode) returned: %08lx\n", hres);
+    if(document_mode >= 9)
+        ok(import_node_id == dispid, "GetDispID(importNode) != GetIDsOfNames(importNode)\n");
+    IDispatchEx_Release(dispex);
+    SysFreeString(bstr);
+
+    /* prop set via script on node */
+    bstr = SysAllocString(L"prop");
+    hres = IHTMLDocument2_GetIDsOfNames(doc, &IID_NULL, &bstr, 1, 0, &dispid);
+    ok(hres == S_OK, "GetIDsOfNames(prop) returned: %08lx\n", hres);
+    SysFreeString(bstr);
+
+    hres = IHTMLDocument2_Invoke(doc, dispid, &IID_NULL, 0, DISPATCH_PROPERTYGET, &dp, &res, NULL, NULL);
+    ok(hres == S_OK, "Invoke(prop) failed: %08lx\n", hres);
+    ok(V_VT(&res) == VT_I4, "VT(prop) = %d\n", V_VT(&res));
+    ok(V_I4(&res) == 137, "prop = %ld\n", V_I4(&res));
+
+    /* jscript prop on prototype chain */
+    bstr = SysAllocString(L"hasOwnProperty");
+    hres = IHTMLDocument2_GetIDsOfNames(doc, &IID_NULL, &bstr, 1, 0, &has_own_prop_id);
+    todo_wine_if(document_mode >= 9)
+    ok(hres == (document_mode < 9 ? DISP_E_UNKNOWNNAME : S_OK), "GetIDsOfNames(hasOwnProperty) returned: %08lx\n", hres);
+    SysFreeString(bstr);
+
+    if(hres == S_OK) {
+        dp.cArgs = 1;
+        dp.rgvarg = &arg;
+        V_VT(&arg) = VT_BSTR;
+        V_BSTR(&arg) = SysAllocString(L"createElement");
+        hres = IHTMLDocument2_Invoke(doc, has_own_prop_id, &IID_NULL, 0, DISPATCH_METHOD, &dp, &res, NULL, NULL);
+        ok(hres == S_OK, "Invoke(hasOwnProperty(\"createElement\")) failed: %08lx\n", hres);
+        ok(V_VT(&res) == VT_BOOL, "VT = %d\n", V_VT(&res));
+        todo_wine
+        ok(V_BOOL(&res) == VARIANT_FALSE, "hasOwnProperty(\"createElement\") = %d\n", V_BOOL(&res));
+
+        hres = IHTMLDocument2_GetIDsOfNames(doc, &IID_NULL, &V_BSTR(&arg), 1, 0, &dispid);
+        ok(hres == S_OK, "GetIDsOfNames(createElement) returned: %08lx\n", hres);
+        SysFreeString(V_BSTR(&arg));
+
+        V_BSTR(&arg) = SysAllocString(L"prop");
+        hres = IHTMLDocument2_Invoke(doc, has_own_prop_id, &IID_NULL, 0, DISPATCH_METHOD, &dp, &res, NULL, NULL);
+        ok(hres == S_OK, "Invoke(hasOwnProperty(\"prop\")) failed: %08lx\n", hres);
+        ok(V_VT(&res) == VT_BOOL, "VT = %d\n", V_VT(&res));
+        ok(V_BOOL(&res) == VARIANT_TRUE, "hasOwnProperty(\"prop\") = %d\n", V_BOOL(&res));
+        SysFreeString(V_BSTR(&arg));
+    }
+
+    /* Navigate to a different document mode page, checking using the same doc obj.
+       Test that it breaks COM rules, since IEventTarget is conditionally exposed.
+       All the events registered on the old doc node are also removed.
+
+       DISPIDs are forwarded to the node, and thus it also breaks Dispatch rules,
+       where the same name will potentially receive a different DISPID. */
+    navigate(doc, document_mode < 9 ? L"doc_with_prop_ie9.html" : L"doc_with_prop.html");
+    ok(document_mode == (orig_doc_mode < 9 ? 9 : 5), "new document_mode = %d\n", document_mode);
+
+    event_target = (void*)0xdeadbeef;
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IEventTarget, (void**)&event_target);
+    if(document_mode < 9) {
+        ok(hres == E_NOINTERFACE, "hres = %08lx, expected E_NOINTERFACE\n", hres);
+        ok(!event_target, "event_target != NULL\n");
+
+        body = doc_get_body(doc);
+        hres = IHTMLElement_click(body);
+        ok(hres == S_OK, "click failed: %08lx\n", hres);
+        IHTMLElement_Release(body);
+        pump_msgs(NULL);
+
+        hres = IHTMLDocument2_QueryInterface(doc, &IID_IDispatchEx, (void**)&dispex);
+        ok(hres == S_OK, "Could not get IDispatchEx: %08lx\n", hres);
+
+        bstr = SysAllocString(L"importNode");
+        hres = IDispatchEx_GetDispID(dispex, bstr, fdexNameEnsure, &dispid);
+        ok(hres == S_OK, "GetDispID(importNode) returned: %08lx\n", hres);
+        ok(dispid != import_node_id, "importNode on new doc node == old importNode\n");
+        IDispatchEx_Release(dispex);
+        SysFreeString(bstr);
+    }else {
+        ok(hres == S_OK, "hres = %08lx, expected S_OK\n", hres);
+        ok(!!event_target, "event_target = NULL\n");
+        IEventTarget_Release(event_target);
+
+        bstr = SysAllocString(L"importNode");
+        hres = IHTMLDocument2_GetIDsOfNames(doc, &IID_NULL, &bstr, 1, 0, &dispid);
+        ok(hres == S_OK, "GetIDsOfNames(importNode) returned: %08lx\n", hres);
+        ok(dispid != import_node_id, "importNode on new doc node == old created importNode\n");
+    }
 }
 
 static void test_create_event(IHTMLDocument2 *doc)
@@ -2808,7 +3409,153 @@ static void test_create_event(IHTMLDocument2 *doc)
     IDocumentEvent_Release(doc_event);
 }
 
+static unsigned onstorage_expect_line;
+static const WCHAR *onstorage_expect_key, *onstorage_expect_old_value, *onstorage_expect_new_value;
+
+#define set_onstorage_expect(a,b,c) _set_onstorage_expect(__LINE__,a,b,c)
+static void _set_onstorage_expect(unsigned line, const WCHAR *key, const WCHAR *old_value, const WCHAR *new_value)
+{
+    onstorage_expect_line = line;
+    onstorage_expect_key = key;
+    onstorage_expect_old_value = old_value;
+    onstorage_expect_new_value = new_value;
+}
+
+static void test_storage_event(DISPPARAMS *params, BOOL doc_onstorage)
+{
+    const WCHAR *expect_key = onstorage_expect_key, *expect_old_value = onstorage_expect_old_value, *expect_new_value = onstorage_expect_new_value;
+    unsigned line = onstorage_expect_line;
+    IHTMLEventObj *event_obj;
+    IDOMStorageEvent *event;
+    IDispatchEx *dispex;
+    HRESULT hres;
+    unsigned i;
+    DISPID id;
+    BSTR bstr;
+
+    if(document_mode < 9) {
+        ok_(__FILE__,line)(params->cArgs == 1, "cArgs = %u\n", params->cArgs);
+        ok_(__FILE__,line)(V_VT(&params->rgvarg[0]) == VT_DISPATCH, "V_VT(this) = %d\n", V_VT(&params->rgvarg[0]));
+        return;
+    }
+
+    ok_(__FILE__,line)(params->cArgs == 2, "cArgs = %u\n", params->cArgs);
+    ok_(__FILE__,line)(V_VT(&params->rgvarg[1]) == VT_DISPATCH, "V_VT(event) = %d\n", V_VT(&params->rgvarg[1]));
+    hres = IDispatch_QueryInterface(V_DISPATCH(&params->rgvarg[1]), &IID_IDispatchEx, (void**)&dispex);
+    ok_(__FILE__,line)(hres == S_OK, "Could not get IDispatchEx: %08lx\n", hres);
+
+    hres = IDispatchEx_QueryInterface(dispex, &IID_IDOMStorageEvent, (void**)&event);
+    if(doc_onstorage) {
+        static const WCHAR *props[] = { L"key", L"oldValue", L"newValue", L"storageArea" };
+        ok_(__FILE__,line)(hres != S_OK, "Got IDOMStorageEvent in document.onstorage handler\n");
+
+        hres = IDispatchEx_QueryInterface(dispex, &IID_IHTMLEventObj, (void**)&event_obj);
+        ok_(__FILE__,line)(hres == S_OK, "Could not get IHTMLEventObj: %08lx\n", hres);
+        IHTMLEventObj_Release(event_obj);
+
+        for(i = 0; i < ARRAY_SIZE(props); i++) {
+            bstr = SysAllocString(props[i]);
+            hres = IDispatchEx_GetDispID(dispex, bstr, 0, &id);
+            ok_(__FILE__,line)(hres == DISP_E_UNKNOWNNAME, "GetDispID(%s) failed: %08lx\n", wine_dbgstr_w(bstr), hres);
+            SysFreeString(bstr);
+        }
+
+        IDispatchEx_Release(dispex);
+        return;
+    }
+
+    ok_(__FILE__,line)(hres == S_OK, "Could not get IDOMStorageEvent: %08lx\n", hres);
+    IDispatchEx_Release(dispex);
+
+    hres = IDOMStorageEvent_get_key(event, &bstr);
+    ok_(__FILE__,line)(hres == S_OK, "get_key failed: %08lx\n", hres);
+    ok_(__FILE__,line)((!bstr || !expect_key) ? (bstr == expect_key) : !wcscmp(bstr, expect_key),
+                       "key = %s\n", wine_dbgstr_w(bstr));
+    SysFreeString(bstr);
+
+    hres = IDOMStorageEvent_get_oldValue(event, &bstr);
+    ok_(__FILE__,line)(hres == S_OK, "get_oldValue failed: %08lx\n", hres);
+    ok_(__FILE__,line)((!bstr || !expect_old_value) ? (bstr == expect_old_value) : !wcscmp(bstr, expect_old_value),
+                       "oldValue = %s\n", wine_dbgstr_w(bstr));
+    SysFreeString(bstr);
+
+    hres = IDOMStorageEvent_get_newValue(event, &bstr);
+    ok_(__FILE__,line)(hres == S_OK, "get_newValue failed: %08lx\n", hres);
+    ok_(__FILE__,line)((!bstr || !expect_new_value) ? (bstr == expect_new_value) : !wcscmp(bstr, expect_new_value),
+                       "newValue = %s\n", wine_dbgstr_w(bstr));
+    SysFreeString(bstr);
+
+    hres = IDOMStorageEvent_get_url(event, &bstr);
+    ok_(__FILE__,line)(hres == S_OK, "get_url failed: %08lx\n", hres);
+    ok_(__FILE__,line)(!wcscmp(bstr, L"http://winetest.example.org/"), "url = %s\n", wine_dbgstr_w(bstr));
+    SysFreeString(bstr);
+
+    IDOMStorageEvent_Release(event);
+}
+
+static HRESULT WINAPI doc1_onstorage(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    CHECK_EXPECT(doc1_onstorage);
+    test_storage_event(pdp, TRUE);
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(doc1_onstorage);
+
+static HRESULT WINAPI doc1_onstoragecommit(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    CHECK_EXPECT(doc1_onstoragecommit);
+    test_storage_event(pdp, FALSE);
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(doc1_onstoragecommit);
+
+static HRESULT WINAPI window1_onstorage(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    CHECK_EXPECT(window1_onstorage);
+    test_storage_event(pdp, FALSE);
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(window1_onstorage);
+
+static HRESULT WINAPI doc2_onstorage(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    CHECK_EXPECT(doc2_onstorage);
+    test_storage_event(pdp, TRUE);
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(doc2_onstorage);
+
+static HRESULT WINAPI doc2_onstoragecommit(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    CHECK_EXPECT(doc2_onstoragecommit);
+    test_storage_event(pdp, FALSE);
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(doc2_onstoragecommit);
+
+static HRESULT WINAPI window2_onstorage(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    CHECK_EXPECT(window2_onstorage);
+    test_storage_event(pdp, FALSE);
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(window2_onstorage);
+
 static HRESULT QueryInterface(REFIID,void**);
+static HRESULT browserservice_qi(REFIID,void**);
+static HRESULT wb_qi(REFIID,void**);
 
 static HRESULT WINAPI InPlaceFrame_QueryInterface(IOleInPlaceFrame *iface, REFIID riid, void **ppv)
 {
@@ -3134,9 +3881,11 @@ static HRESULT WINAPI DocumentSite_ActivateMe(IOleDocumentSite *iface, IOleDocum
     hres = IOleDocumentView_QueryInterface(pViewToActivate, &IID_IOleDocument, (void**)&document);
     ok(hres == S_OK, "could not get IOleDocument: %08lx\n", hres);
 
-    hres = IOleDocument_CreateView(document, &InPlaceSite, NULL, 0, &view);
+    if(!view) {
+        hres = IOleDocument_CreateView(document, &InPlaceSite, NULL, 0, &view);
+        ok(hres == S_OK, "CreateView failed: %08lx\n", hres);
+    }
     IOleDocument_Release(document);
-    ok(hres == S_OK, "CreateView failed: %08lx\n", hres);
 
     hres = IOleDocumentView_SetInPlaceSite(view, &InPlaceSite);
     ok(hres == S_OK, "SetInPlaceSite failed: %08lx\n", hres);
@@ -3162,6 +3911,964 @@ static const IOleDocumentSiteVtbl DocumentSiteVtbl = {
 
 static IOleDocumentSite DocumentSite = { &DocumentSiteVtbl };
 
+static HRESULT WINAPI TravelLog_QueryInterface(ITravelLog *iface, REFIID riid, void **ppv)
+{
+    if(IsEqualGUID(&IID_IUnknown, riid) || IsEqualGUID(&IID_ITravelLog, riid))
+        *ppv = iface;
+    else {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+    return S_OK;
+}
+
+static ULONG WINAPI TravelLog_AddRef(ITravelLog *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI TravelLog_Release(ITravelLog *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI TravelLog_AddEntry(ITravelLog *iface, IUnknown *punk, BOOL fIsLocalAnchor)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_UpdateEntry(ITravelLog *iface, IUnknown *punk, BOOL fIsLocalAnchor)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_UpdateExternal(ITravelLog *iface, IUnknown *punk, IUnknown *punkHLBrowseContext)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_Travel(ITravelLog *iface, IUnknown *punk, int iOffset)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_GetTravelEntry(ITravelLog *iface, IUnknown *punk, int iOffset, ITravelEntry **ppte)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_FindTravelEntry(ITravelLog *iface, IUnknown *punk, LPCITEMIDLIST pidl, ITravelEntry **ppte)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_GetTooltipText(ITravelLog *iface, IUnknown *punk, int iOffset, int idsTemplate, LPWSTR pwzText, DWORD cchText)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_InsertMenuEntries(ITravelLog *iface, IUnknown *punk, HMENU hmenu, int nPos, int idFirst, int idLast, DWORD dwFlags)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_Clone(ITravelLog *iface, ITravelLog **pptl)
+{
+    return E_NOTIMPL;
+}
+
+static DWORD WINAPI TravelLog_CountEntries(ITravelLog *iface, IUnknown *punk)
+{
+    return 0;
+}
+
+static HRESULT WINAPI TravelLog_Revert(ITravelLog *iface)
+{
+    return E_NOTIMPL;
+}
+
+static const ITravelLogVtbl TravelLogVtbl = {
+    TravelLog_QueryInterface,
+    TravelLog_AddRef,
+    TravelLog_Release,
+    TravelLog_AddEntry,
+    TravelLog_UpdateEntry,
+    TravelLog_UpdateExternal,
+    TravelLog_Travel,
+    TravelLog_GetTravelEntry,
+    TravelLog_FindTravelEntry,
+    TravelLog_GetTooltipText,
+    TravelLog_InsertMenuEntries,
+    TravelLog_Clone,
+    TravelLog_CountEntries,
+    TravelLog_Revert
+};
+
+static ITravelLog TravelLog = { &TravelLogVtbl };
+
+static HRESULT WINAPI BrowserService_QueryInterface(IBrowserService *iface, REFIID riid, void **ppv)
+{
+    return browserservice_qi(riid, ppv);
+}
+
+static ULONG WINAPI BrowserService_AddRef(IBrowserService* This)
+{
+    return 2;
+}
+
+static ULONG WINAPI BrowserService_Release(IBrowserService* This)
+{
+    return 1;
+}
+
+static HRESULT WINAPI BrowserService_GetParentSite(IBrowserService* This, IOleInPlaceSite **ppipsite)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_SetTitle(IBrowserService* This, IShellView *psv, LPCWSTR pszName)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_GetTitle(IBrowserService* This, IShellView *psv, LPWSTR pszName, DWORD cchName)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_GetOleObject(IBrowserService* This, IOleObject **ppobjv)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_GetTravelLog(IBrowserService* This, ITravelLog **pptl)
+{
+    *pptl = &TravelLog;
+    return S_OK;
+}
+
+static HRESULT WINAPI BrowserService_ShowControlWindow(IBrowserService* This, UINT id, BOOL fShow)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_IsControlWindowShown(IBrowserService* This, UINT id, BOOL *pfShown)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_IEGetDisplayName(IBrowserService* This, PCIDLIST_ABSOLUTE pidl, LPWSTR pwszName, UINT uFlags)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_IEParseDisplayName(IBrowserService* This, UINT uiCP, LPCWSTR pwszPath, PIDLIST_ABSOLUTE *ppidlOut)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_DisplayParseError(IBrowserService* This, HRESULT hres, LPCWSTR pwszPath)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_NavigateToPidl(IBrowserService* This, PCIDLIST_ABSOLUTE pidl, DWORD grfHLNF)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_SetNavigateState(IBrowserService* This, BNSTATE bnstate)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_GetNavigateState(IBrowserService* This, BNSTATE *pbnstate)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_NotifyRedirect(IBrowserService* This, IShellView *psv, PCIDLIST_ABSOLUTE pidl, BOOL *pfDidBrowse)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_UpdateWindowList(IBrowserService* This)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_UpdateBackForwardState(IBrowserService* This)
+{
+    return S_OK;
+}
+
+static HRESULT WINAPI BrowserService_SetFlags(IBrowserService* This, DWORD dwFlags, DWORD dwFlagMask)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_GetFlags(IBrowserService* This, DWORD *pdwFlags)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_CanNavigateNow(IBrowserService* This)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_GetPidl(IBrowserService* This, PIDLIST_ABSOLUTE *ppidl)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_SetReferrer(IBrowserService* This, PCIDLIST_ABSOLUTE pidl)
+{
+    return E_NOTIMPL;
+}
+
+static DWORD WINAPI BrowserService_GetBrowserIndex(IBrowserService* This)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_GetBrowserByIndex(IBrowserService* This, DWORD dwID, IUnknown **ppunk)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_GetHistoryObject(IBrowserService* This, IOleObject **ppole, IStream **pstm, IBindCtx **ppbc)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_SetHistoryObject(IBrowserService* This, IOleObject *pole, BOOL fIsLocalAnchor)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_CacheOLEServer(IBrowserService* This, IOleObject *pole)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_GetSetCodePage(IBrowserService* This, VARIANT *pvarIn, VARIANT *pvarOut)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_OnHttpEquiv(IBrowserService* This, IShellView *psv, BOOL fDone, VARIANT *pvarargIn, VARIANT *pvarargOut)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_GetPalette(IBrowserService* This, HPALETTE *hpal)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BrowserService_RegisterWindow(IBrowserService* This, BOOL fForceRegister, int swc)
+{
+    return E_NOTIMPL;
+}
+
+static IBrowserServiceVtbl BrowserServiceVtbl = {
+    BrowserService_QueryInterface,
+    BrowserService_AddRef,
+    BrowserService_Release,
+    BrowserService_GetParentSite,
+    BrowserService_SetTitle,
+    BrowserService_GetTitle,
+    BrowserService_GetOleObject,
+    BrowserService_GetTravelLog,
+    BrowserService_ShowControlWindow,
+    BrowserService_IsControlWindowShown,
+    BrowserService_IEGetDisplayName,
+    BrowserService_IEParseDisplayName,
+    BrowserService_DisplayParseError,
+    BrowserService_NavigateToPidl,
+    BrowserService_SetNavigateState,
+    BrowserService_GetNavigateState,
+    BrowserService_NotifyRedirect,
+    BrowserService_UpdateWindowList,
+    BrowserService_UpdateBackForwardState,
+    BrowserService_SetFlags,
+    BrowserService_GetFlags,
+    BrowserService_CanNavigateNow,
+    BrowserService_GetPidl,
+    BrowserService_SetReferrer,
+    BrowserService_GetBrowserIndex,
+    BrowserService_GetBrowserByIndex,
+    BrowserService_GetHistoryObject,
+    BrowserService_SetHistoryObject,
+    BrowserService_CacheOLEServer,
+    BrowserService_GetSetCodePage,
+    BrowserService_OnHttpEquiv,
+    BrowserService_GetPalette,
+    BrowserService_RegisterWindow
+};
+
+static IBrowserService BrowserService = { &BrowserServiceVtbl };
+
+static HRESULT WINAPI ShellBrowser_QueryInterface(IShellBrowser *iface, REFIID riid, void **ppv)
+{
+    return browserservice_qi(riid, ppv);
+}
+
+static ULONG WINAPI ShellBrowser_AddRef(IShellBrowser *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI ShellBrowser_Release(IShellBrowser *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI ShellBrowser_GetWindow(IShellBrowser *iface, HWND *phwnd)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_ContextSensitiveHelp(IShellBrowser *iface, BOOL fEnterMode)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_InsertMenusSB(IShellBrowser *iface, HMENU hmenuShared, LPOLEMENUGROUPWIDTHS lpMenuWidths)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_SetMenuSB(IShellBrowser *iface, HMENU hmenuShared, HOLEMENU holemenuReserved, HWND hwndActiveObject)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_RemoveMenusSB(IShellBrowser *iface, HMENU hmenuShared)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_SetStatusTextSB(IShellBrowser *iface, LPCOLESTR pszStatusText)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_EnableModelessSB(IShellBrowser *iface, BOOL fEnable)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_TranslateAcceleratorSB(IShellBrowser *iface, MSG *pmsg, WORD wID)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_BrowseObject(IShellBrowser *iface, LPCITEMIDLIST pidl, UINT wFlags)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_GetViewStateStream(IShellBrowser *iface, DWORD grfMode, IStream **ppStrm)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_GetControlWindow(IShellBrowser *iface, UINT id, HWND *phwnd)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_SendControlMsg(IShellBrowser *iface, UINT id, UINT uMsg, WPARAM wParam, LPARAM lParam, LRESULT *pret)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_QueryActiveShellView(IShellBrowser *iface, IShellView **ppshv)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_OnViewWindowActive(IShellBrowser* iface, IShellView *pshv)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_SetToolbarItems(IShellBrowser *iface, LPTBBUTTONSB lpButtons, UINT nButtons, UINT uFlags)
+{
+    return E_NOTIMPL;
+}
+
+static const IShellBrowserVtbl ShellBrowserVtbl = {
+    ShellBrowser_QueryInterface,
+    ShellBrowser_AddRef,
+    ShellBrowser_Release,
+    ShellBrowser_GetWindow,
+    ShellBrowser_ContextSensitiveHelp,
+    ShellBrowser_InsertMenusSB,
+    ShellBrowser_SetMenuSB,
+    ShellBrowser_RemoveMenusSB,
+    ShellBrowser_SetStatusTextSB,
+    ShellBrowser_EnableModelessSB,
+    ShellBrowser_TranslateAcceleratorSB,
+    ShellBrowser_BrowseObject,
+    ShellBrowser_GetViewStateStream,
+    ShellBrowser_GetControlWindow,
+    ShellBrowser_SendControlMsg,
+    ShellBrowser_QueryActiveShellView,
+    ShellBrowser_OnViewWindowActive,
+    ShellBrowser_SetToolbarItems
+};
+
+static IShellBrowser ShellBrowser = { &ShellBrowserVtbl };
+
+static HRESULT browserservice_qi(REFIID riid, void **ppv)
+{
+    if(IsEqualGUID(&IID_IShellBrowser, riid))
+        *ppv = &ShellBrowser;
+    else if(IsEqualGUID(&IID_IBrowserService, riid))
+        *ppv = &BrowserService;
+    else {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+    return S_OK;
+}
+
+static HRESULT WINAPI WebBrowser_QueryInterface(IWebBrowser2 *iface, REFIID riid, void **ppv)
+{
+    return wb_qi(riid, ppv);
+}
+
+static ULONG WINAPI WebBrowser_AddRef(IWebBrowser2 *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI WebBrowser_Release(IWebBrowser2 *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI WebBrowser_GetTypeInfoCount(IWebBrowser2 *iface, UINT *pctinfo)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_GetTypeInfo(IWebBrowser2 *iface, UINT iTInfo, LCID lcid, LPTYPEINFO *ppTInfo)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_GetIDsOfNames(IWebBrowser2 *iface, REFIID riid, LPOLESTR *rgszNames, UINT cNames,
+        LCID lcid, DISPID *rgDispId)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_Invoke(IWebBrowser2 *iface, DISPID dispIdMember, REFIID riid, LCID lcid, WORD wFlags,
+        DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExepInfo, UINT *puArgErr)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_GoBack(IWebBrowser2 *iface)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_GoForward(IWebBrowser2 *iface)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_GoHome(IWebBrowser2 *iface)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_GoSearch(IWebBrowser2 *iface)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_Navigate(IWebBrowser2 *iface, BSTR szUrl, VARIANT *Flags, VARIANT *TargetFrameName,
+        VARIANT *PostData, VARIANT *Headers)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_Refresh(IWebBrowser2 *iface)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_Refresh2(IWebBrowser2 *iface, VARIANT *Level)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_Stop(IWebBrowser2 *iface)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Application(IWebBrowser2 *iface, IDispatch **ppDisp)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Parent(IWebBrowser2 *iface, IDispatch **ppDisp)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Container(IWebBrowser2 *iface, IDispatch **ppDisp)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Document(IWebBrowser2 *iface, IDispatch **ppDisp)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_TopLevelContainer(IWebBrowser2 *iface, VARIANT_BOOL *pBool)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Type(IWebBrowser2 *iface, BSTR *Type)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Left(IWebBrowser2 *iface, LONG *pl)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Left(IWebBrowser2 *iface, LONG Left)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Top(IWebBrowser2 *iface, LONG *pl)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Top(IWebBrowser2 *iface, LONG Top)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Width(IWebBrowser2 *iface, LONG *pl)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Width(IWebBrowser2 *iface, LONG Width)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Height(IWebBrowser2 *iface, LONG *pl)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Height(IWebBrowser2 *iface, LONG Height)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_LocationName(IWebBrowser2 *iface, BSTR *LocationName)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_LocationURL(IWebBrowser2 *iface, BSTR *LocationURL)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Busy(IWebBrowser2 *iface, VARIANT_BOOL *pBool)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_Quit(IWebBrowser2 *iface)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_ClientToWindow(IWebBrowser2 *iface, int *pcx, int *pcy)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_PutProperty(IWebBrowser2 *iface, BSTR szProperty, VARIANT vtValue)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_GetProperty(IWebBrowser2 *iface, BSTR szProperty, VARIANT *pvtValue)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Name(IWebBrowser2 *iface, BSTR *Name)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_HWND(IWebBrowser2 *iface, SHANDLE_PTR *pHWND)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_FullName(IWebBrowser2 *iface, BSTR *FullName)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Path(IWebBrowser2 *iface, BSTR *Path)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Visible(IWebBrowser2 *iface, VARIANT_BOOL *pBool)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Visible(IWebBrowser2 *iface, VARIANT_BOOL Value)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_StatusBar(IWebBrowser2 *iface, VARIANT_BOOL *pBool)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_StatusBar(IWebBrowser2 *iface, VARIANT_BOOL Value)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_StatusText(IWebBrowser2 *iface, BSTR *StatusText)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_StatusText(IWebBrowser2 *iface, BSTR StatusText)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_ToolBar(IWebBrowser2 *iface, int *Value)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_ToolBar(IWebBrowser2 *iface, int Value)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_MenuBar(IWebBrowser2 *iface, VARIANT_BOOL *Value)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_MenuBar(IWebBrowser2 *iface, VARIANT_BOOL Value)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_FullScreen(IWebBrowser2 *iface, VARIANT_BOOL *pbFullScreen)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_FullScreen(IWebBrowser2 *iface, VARIANT_BOOL bFullScreen)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_Navigate2(IWebBrowser2 *iface, VARIANT *URL, VARIANT *Flags,
+        VARIANT *TargetFrameName, VARIANT *PostData, VARIANT *Headers)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_QueryStatusWB(IWebBrowser2 *iface, OLECMDID cmdID, OLECMDF *pcmdf)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_ExecWB(IWebBrowser2 *iface, OLECMDID cmdID,
+        OLECMDEXECOPT cmdexecopt, VARIANT *pvaIn, VARIANT *pvaOut)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_ShowBrowserBar(IWebBrowser2 *iface, VARIANT *pvaClsid,
+        VARIANT *pvarShow, VARIANT *pvarSize)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_ReadyState(IWebBrowser2 *iface, READYSTATE *lpReadyState)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Offline(IWebBrowser2 *iface, VARIANT_BOOL *pbOffline)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Offline(IWebBrowser2 *iface, VARIANT_BOOL bOffline)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Silent(IWebBrowser2 *iface, VARIANT_BOOL *pbSilent)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Silent(IWebBrowser2 *iface, VARIANT_BOOL bSilent)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_RegisterAsBrowser(IWebBrowser2 *iface,
+        VARIANT_BOOL *pbRegister)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_RegisterAsBrowser(IWebBrowser2 *iface,
+        VARIANT_BOOL bRegister)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_RegisterAsDropTarget(IWebBrowser2 *iface,
+        VARIANT_BOOL *pbRegister)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_RegisterAsDropTarget(IWebBrowser2 *iface,
+        VARIANT_BOOL bRegister)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_TheaterMode(IWebBrowser2 *iface, VARIANT_BOOL *pbRegister)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_TheaterMode(IWebBrowser2 *iface, VARIANT_BOOL bRegister)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_AddressBar(IWebBrowser2 *iface, VARIANT_BOOL *Value)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_AddressBar(IWebBrowser2 *iface, VARIANT_BOOL Value)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Resizable(IWebBrowser2 *iface, VARIANT_BOOL *Value)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Resizable(IWebBrowser2 *iface, VARIANT_BOOL Value)
+{
+    return E_NOTIMPL;
+}
+
+static const IWebBrowser2Vtbl WebBrowser2Vtbl =
+{
+    WebBrowser_QueryInterface,
+    WebBrowser_AddRef,
+    WebBrowser_Release,
+    WebBrowser_GetTypeInfoCount,
+    WebBrowser_GetTypeInfo,
+    WebBrowser_GetIDsOfNames,
+    WebBrowser_Invoke,
+    WebBrowser_GoBack,
+    WebBrowser_GoForward,
+    WebBrowser_GoHome,
+    WebBrowser_GoSearch,
+    WebBrowser_Navigate,
+    WebBrowser_Refresh,
+    WebBrowser_Refresh2,
+    WebBrowser_Stop,
+    WebBrowser_get_Application,
+    WebBrowser_get_Parent,
+    WebBrowser_get_Container,
+    WebBrowser_get_Document,
+    WebBrowser_get_TopLevelContainer,
+    WebBrowser_get_Type,
+    WebBrowser_get_Left,
+    WebBrowser_put_Left,
+    WebBrowser_get_Top,
+    WebBrowser_put_Top,
+    WebBrowser_get_Width,
+    WebBrowser_put_Width,
+    WebBrowser_get_Height,
+    WebBrowser_put_Height,
+    WebBrowser_get_LocationName,
+    WebBrowser_get_LocationURL,
+    WebBrowser_get_Busy,
+    WebBrowser_Quit,
+    WebBrowser_ClientToWindow,
+    WebBrowser_PutProperty,
+    WebBrowser_GetProperty,
+    WebBrowser_get_Name,
+    WebBrowser_get_HWND,
+    WebBrowser_get_FullName,
+    WebBrowser_get_Path,
+    WebBrowser_get_Visible,
+    WebBrowser_put_Visible,
+    WebBrowser_get_StatusBar,
+    WebBrowser_put_StatusBar,
+    WebBrowser_get_StatusText,
+    WebBrowser_put_StatusText,
+    WebBrowser_get_ToolBar,
+    WebBrowser_put_ToolBar,
+    WebBrowser_get_MenuBar,
+    WebBrowser_put_MenuBar,
+    WebBrowser_get_FullScreen,
+    WebBrowser_put_FullScreen,
+    WebBrowser_Navigate2,
+    WebBrowser_QueryStatusWB,
+    WebBrowser_ExecWB,
+    WebBrowser_ShowBrowserBar,
+    WebBrowser_get_ReadyState,
+    WebBrowser_get_Offline,
+    WebBrowser_put_Offline,
+    WebBrowser_get_Silent,
+    WebBrowser_put_Silent,
+    WebBrowser_get_RegisterAsBrowser,
+    WebBrowser_put_RegisterAsBrowser,
+    WebBrowser_get_RegisterAsDropTarget,
+    WebBrowser_put_RegisterAsDropTarget,
+    WebBrowser_get_TheaterMode,
+    WebBrowser_put_TheaterMode,
+    WebBrowser_get_AddressBar,
+    WebBrowser_put_AddressBar,
+    WebBrowser_get_Resizable,
+    WebBrowser_put_Resizable
+};
+
+static IWebBrowser2 WebBrowser2 = { &WebBrowser2Vtbl };
+
+static HRESULT WINAPI WebBrowserPriv_QueryInterface(IWebBrowserPriv *iface, REFIID riid, void **ppv)
+{
+    return wb_qi(riid, ppv);
+}
+
+static ULONG WINAPI WebBrowserPriv_AddRef(IWebBrowserPriv *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI WebBrowserPriv_Release(IWebBrowserPriv *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI WebBrowserPriv_NavigateWithBindCtx(IWebBrowserPriv *iface, VARIANT *uri, VARIANT *flags,
+        VARIANT *target_frame, VARIANT *post_data, VARIANT *headers, IBindCtx *bind_ctx, LPOLESTR url_fragment)
+{
+    return S_OK;
+}
+
+static HRESULT WINAPI WebBrowserPriv_OnClose(IWebBrowserPriv *iface)
+{
+    return E_NOTIMPL;
+}
+
+static const IWebBrowserPrivVtbl WebBrowserPrivVtbl = {
+    WebBrowserPriv_QueryInterface,
+    WebBrowserPriv_AddRef,
+    WebBrowserPriv_Release,
+    WebBrowserPriv_NavigateWithBindCtx,
+    WebBrowserPriv_OnClose
+};
+
+static IWebBrowserPriv WebBrowserPriv = { &WebBrowserPrivVtbl };
+
+static HRESULT wb_qi(REFIID riid, void **ppv)
+{
+    if(IsEqualGUID(&IID_IUnknown, riid) || IsEqualGUID(&IID_IWebBrowser, riid) ||
+       IsEqualGUID(&IID_IWebBrowserApp, riid) || IsEqualGUID(&IID_IWebBrowser2, riid))
+        *ppv = &WebBrowser2;
+    else if(IsEqualGUID(riid, &IID_IWebBrowserPriv))
+        *ppv = &WebBrowserPriv;
+    else {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+    return S_OK;
+}
+
+static HRESULT WINAPI ServiceProvider_QueryInterface(IServiceProvider *iface, REFIID riid, void **ppv)
+{
+    return QueryInterface(riid, ppv);
+}
+
+static ULONG WINAPI ServiceProvider_AddRef(IServiceProvider *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI ServiceProvider_Release(IServiceProvider *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI ServiceProvider_QueryService(IServiceProvider *iface, REFGUID guidService, REFIID riid, void **ppv)
+{
+    if(IsEqualGUID(&IID_IShellBrowser, guidService)) {
+        ok(IsEqualGUID(&IID_IBrowserService, riid), "unexpected riid\n");
+        *ppv = &BrowserService;
+        return S_OK;
+    }
+
+    if(IsEqualGUID(&IID_IWebBrowserApp, guidService)) {
+        ok(IsEqualGUID(&IID_IWebBrowser2, riid), "unexpected riid\n");
+        *ppv = &WebBrowser2;
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
+}
+
+static const IServiceProviderVtbl ServiceProviderVtbl = {
+    ServiceProvider_QueryInterface,
+    ServiceProvider_AddRef,
+    ServiceProvider_Release,
+    ServiceProvider_QueryService
+};
+
+static IServiceProvider ServiceProvider = { &ServiceProviderVtbl };
+
 static HRESULT QueryInterface(REFIID riid, void **ppv)
 {
     *ppv = NULL;
@@ -3172,6 +4879,8 @@ static HRESULT QueryInterface(REFIID riid, void **ppv)
         *ppv = &DocumentSite;
     else if(IsEqualGUID(&IID_IOleWindow, riid) || IsEqualGUID(&IID_IOleInPlaceSite, riid))
         *ppv = &InPlaceSite;
+    else if(IsEqualGUID(&IID_IServiceProvider, riid))
+        *ppv = &ServiceProvider;
 
     return *ppv ? S_OK : E_NOINTERFACE;
 }
@@ -3235,6 +4944,307 @@ static const IPropertyNotifySinkVtbl PropertyNotifySinkVtbl = {
 
 static IPropertyNotifySink PropertyNotifySink = { &PropertyNotifySinkVtbl };
 
+typedef struct {
+    IInternetProtocolEx IInternetProtocolEx_iface;
+    IWinInetHttpInfo IWinInetHttpInfo_iface;
+
+    LONG ref;
+
+    IInternetProtocolSink *sink;
+    IUri *uri;
+
+    ULONG size;
+    const char *data;
+    const char *ptr;
+} ProtocolHandler;
+
+static DWORD WINAPI async_switch_proc(void *arg)
+{
+    PROTOCOLDATA protocol_data = { PI_FORCE_ASYNC };
+    ProtocolHandler *protocol_handler = arg;
+    IInternetProtocolSink_Switch(protocol_handler->sink, &protocol_data);
+    return 0;
+}
+
+static inline ProtocolHandler *impl_from_IInternetProtocolEx(IInternetProtocolEx *iface)
+{
+    return CONTAINING_RECORD(iface, ProtocolHandler, IInternetProtocolEx_iface);
+}
+
+static HRESULT WINAPI Protocol_QueryInterface(IInternetProtocolEx *iface, REFIID riid, void **ppv)
+{
+    ProtocolHandler *This = impl_from_IInternetProtocolEx(iface);
+
+    if(IsEqualGUID(&IID_IUnknown, riid) || IsEqualGUID(&IID_IInternetProtocol, riid) || IsEqualGUID(&IID_IInternetProtocolEx, riid)) {
+        *ppv = &This->IInternetProtocolEx_iface;
+    }else if(IsEqualGUID(&IID_IWinInetInfo, riid) || IsEqualGUID(&IID_IWinInetHttpInfo, riid)) {
+        *ppv = &This->IWinInetHttpInfo_iface;
+    }else {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI Protocol_AddRef(IInternetProtocolEx *iface)
+{
+    ProtocolHandler *This = impl_from_IInternetProtocolEx(iface);
+    return InterlockedIncrement(&This->ref);
+}
+
+static ULONG WINAPI Protocol_Release(IInternetProtocolEx *iface)
+{
+    ProtocolHandler *This = impl_from_IInternetProtocolEx(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    if(!ref) {
+        if(This->sink)
+            IInternetProtocolSink_Release(This->sink);
+        if(This->uri)
+            IUri_Release(This->uri);
+        free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI Protocol_Start(IInternetProtocolEx *iface, LPCWSTR szUrl, IInternetProtocolSink *pOIProtSink,
+        IInternetBindInfo *pOIBindInfo, DWORD grfPI, HANDLE_PTR dwReserved)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI Protocol_Continue(IInternetProtocolEx *iface, PROTOCOLDATA *pProtocolData)
+{
+    ProtocolHandler *This = impl_from_IInternetProtocolEx(iface);
+    IServiceProvider *service_provider;
+    IHttpNegotiate *http_negotiate;
+    WCHAR *addl_headers = NULL;
+    HRESULT hres;
+    BSTR bstr;
+
+    hres = IInternetProtocolSink_QueryInterface(This->sink, &IID_IServiceProvider, (void**)&service_provider);
+    ok(hres == S_OK, "Could not get IServiceProvider iface: %08lx\n", hres);
+
+    hres = IServiceProvider_QueryService(service_provider, &IID_IHttpNegotiate, &IID_IHttpNegotiate, (void**)&http_negotiate);
+    IServiceProvider_Release(service_provider);
+    ok(hres == S_OK, "Could not get IHttpNegotiate interface: %08lx\n", hres);
+
+    hres = IUri_GetDisplayUri(This->uri, &bstr);
+    ok(hres == S_OK, "Failed to get display uri: %08lx\n", hres);
+    hres = IHttpNegotiate_BeginningTransaction(http_negotiate, bstr, L"", 0, &addl_headers);
+    ok(hres == S_OK, "BeginningTransaction failed: %08lx\n", hres);
+    CoTaskMemFree(addl_headers);
+    SysFreeString(bstr);
+
+    bstr = SysAllocString(L"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n");
+    hres = IHttpNegotiate_OnResponse(http_negotiate, 200, bstr, NULL, NULL);
+    ok(hres == S_OK, "OnResponse failed: %08lx\n", hres);
+    IHttpNegotiate_Release(http_negotiate);
+    SysFreeString(bstr);
+
+    hres = IInternetProtocolSink_ReportData(This->sink, BSCF_FIRSTDATANOTIFICATION | BSCF_LASTDATANOTIFICATION,
+                                            This->size, This->size);
+    ok(hres == S_OK, "ReportData failed: %08lx\n", hres);
+
+    hres = IInternetProtocolSink_ReportResult(This->sink, S_OK, 0, NULL);
+    ok(hres == S_OK || broken(hres == 0x80ef0001), "ReportResult failed: %08lx\n", hres);
+
+    IInternetProtocolEx_Release(&This->IInternetProtocolEx_iface);
+    return S_OK;
+}
+
+static HRESULT WINAPI Protocol_Abort(IInternetProtocolEx *iface, HRESULT hrReason, DWORD dwOptions)
+{
+    trace("Abort(%08lx %lx)\n", hrReason, dwOptions);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI Protocol_Terminate(IInternetProtocolEx *iface, DWORD dwOptions)
+{
+    return S_OK;
+}
+
+static HRESULT WINAPI Protocol_Suspend(IInternetProtocolEx *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI Protocol_Resume(IInternetProtocolEx *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI Protocol_Read(IInternetProtocolEx *iface, void *pv, ULONG cb, ULONG *pcbRead)
+{
+    ProtocolHandler *This = impl_from_IInternetProtocolEx(iface);
+    ULONG read;
+
+    read = This->size - (This->ptr - This->data);
+    if(read > cb)
+        read = cb;
+
+    if(read) {
+        memcpy(pv, This->ptr, read);
+        This->ptr += read;
+    }
+
+    *pcbRead = read;
+    return (This->ptr != This->data + This->size) ? S_OK : S_FALSE;
+}
+
+static HRESULT WINAPI Protocol_Seek(IInternetProtocolEx *iface, LARGE_INTEGER dlibMove, DWORD dwOrigin,
+        ULARGE_INTEGER *plibNewPosition)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI Protocol_LockRequest(IInternetProtocolEx *iface, DWORD dwOptions)
+{
+    return S_OK;
+}
+
+static HRESULT WINAPI Protocol_UnlockRequest(IInternetProtocolEx *iface)
+{
+    return S_OK;
+}
+
+static const char *protocol_doc_str;
+
+static HRESULT WINAPI ProtocolEx_StartEx(IInternetProtocolEx *iface, IUri *uri, IInternetProtocolSink *pOIProtSink,
+        IInternetBindInfo *pOIBindInfo, DWORD grfPI, HANDLE *dwReserved)
+{
+    ProtocolHandler *This = impl_from_IInternetProtocolEx(iface);
+
+    This->data = protocol_doc_str;
+    This->size = strlen(This->data);
+
+    IInternetProtocolSink_AddRef(This->sink = pOIProtSink);
+    IUri_AddRef(This->uri = uri);
+    This->ptr = This->data;
+
+    IInternetProtocolEx_AddRef(&This->IInternetProtocolEx_iface);
+    QueueUserWorkItem(async_switch_proc, This, 0);
+    return E_PENDING;
+}
+
+static const IInternetProtocolExVtbl ProtocolExVtbl = {
+    Protocol_QueryInterface,
+    Protocol_AddRef,
+    Protocol_Release,
+    Protocol_Start,
+    Protocol_Continue,
+    Protocol_Abort,
+    Protocol_Terminate,
+    Protocol_Suspend,
+    Protocol_Resume,
+    Protocol_Read,
+    Protocol_Seek,
+    Protocol_LockRequest,
+    Protocol_UnlockRequest,
+    ProtocolEx_StartEx
+};
+
+static inline ProtocolHandler *impl_from_IWinInetHttpInfo(IWinInetHttpInfo *iface)
+{
+    return CONTAINING_RECORD(iface, ProtocolHandler, IWinInetHttpInfo_iface);
+}
+
+static HRESULT WINAPI HttpInfo_QueryInterface(IWinInetHttpInfo *iface, REFIID riid, void **ppv)
+{
+    ProtocolHandler *This = impl_from_IWinInetHttpInfo(iface);
+    return IInternetProtocolEx_QueryInterface(&This->IInternetProtocolEx_iface, riid, ppv);
+}
+
+static ULONG WINAPI HttpInfo_AddRef(IWinInetHttpInfo *iface)
+{
+    ProtocolHandler *This = impl_from_IWinInetHttpInfo(iface);
+    return IInternetProtocolEx_AddRef(&This->IInternetProtocolEx_iface);
+}
+
+static ULONG WINAPI HttpInfo_Release(IWinInetHttpInfo *iface)
+{
+    ProtocolHandler *This = impl_from_IWinInetHttpInfo(iface);
+    return IInternetProtocolEx_Release(&This->IInternetProtocolEx_iface);
+}
+
+static HRESULT WINAPI HttpInfo_QueryOption(IWinInetHttpInfo *iface, DWORD dwOption, void *pBuffer, DWORD *pcbBuffer)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HttpInfo_QueryInfo(IWinInetHttpInfo *iface, DWORD dwOption, void *pBuffer, DWORD *pcbBuffer,
+        DWORD *pdwFlags, DWORD *pdwReserved)
+{
+    return E_NOTIMPL;
+}
+
+static const IWinInetHttpInfoVtbl WinInetHttpInfoVtbl = {
+    HttpInfo_QueryInterface,
+    HttpInfo_AddRef,
+    HttpInfo_Release,
+    HttpInfo_QueryOption,
+    HttpInfo_QueryInfo
+};
+
+static HRESULT WINAPI ProtocolCF_QueryInterface(IClassFactory *iface, REFIID riid, void **ppv)
+{
+    if(IsEqualGUID(&IID_IUnknown, riid) || IsEqualGUID(&IID_IClassFactory, riid)) {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI ProtocolCF_AddRef(IClassFactory *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI ProtocolCF_Release(IClassFactory *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI ProtocolCF_CreateInstance(IClassFactory *iface, IUnknown *outer, REFIID riid, void **ppv)
+{
+    ProtocolHandler *protocol;
+    HRESULT hres;
+
+    protocol = calloc(1, sizeof(*protocol));
+    protocol->IInternetProtocolEx_iface.lpVtbl = &ProtocolExVtbl;
+    protocol->IWinInetHttpInfo_iface.lpVtbl = &WinInetHttpInfoVtbl;
+    protocol->ref = 1;
+
+    hres = IInternetProtocolEx_QueryInterface(&protocol->IInternetProtocolEx_iface, riid, ppv);
+    IInternetProtocolEx_Release(&protocol->IInternetProtocolEx_iface);
+    return hres;
+}
+
+static HRESULT WINAPI ProtocolCF_LockServer(IClassFactory *iface, BOOL dolock)
+{
+    ok(0, "unexpected call\n");
+    return S_OK;
+}
+
+static const IClassFactoryVtbl ProtocolCFVtbl = {
+    ProtocolCF_QueryInterface,
+    ProtocolCF_AddRef,
+    ProtocolCF_Release,
+    ProtocolCF_CreateInstance,
+    ProtocolCF_LockServer
+};
+
+static IClassFactory protocol_cf = { &ProtocolCFVtbl };
+
 static void doc_load_string(IHTMLDocument2 *doc, const char *str)
 {
     IPersistStreamInit *init;
@@ -3258,6 +5268,51 @@ static void doc_load_string(IHTMLDocument2 *doc, const char *str)
     IPersistStreamInit_Load(init, stream);
     IPersistStreamInit_Release(init);
     IStream_Release(stream);
+}
+
+static void doc_load_res(IHTMLDocument2 *doc, const WCHAR *file)
+{
+    static const WCHAR res[] = { 'r','e','s',':','/','/' };
+    WCHAR url[INTERNET_MAX_URL_LENGTH];
+    IPersistMoniker *persist;
+    IHlinkTarget *hlink;
+    IBindCtx *bind;
+    IMoniker *mon;
+    HRESULT hres;
+    DWORD len;
+    BSTR bstr;
+
+    wcscpy(url, SZ_HTML_CLIENTSITE_OBJECTPARAM);
+    CreateBindCtx(0, &bind);
+    IBindCtx_RegisterObjectParam(bind, url, (IUnknown*)&ClientSite);
+
+    notif_doc = doc;
+    doc_complete = FALSE;
+
+    memcpy(url, res, sizeof(res));
+    len = 6 + GetModuleFileNameW(NULL, url + ARRAY_SIZE(res), ARRAY_SIZE(url) - ARRAY_SIZE(res) - 1);
+    url[len++] = '/';
+    lstrcpynW(url + len, file, ARRAY_SIZE(url) - len);
+
+    bstr = SysAllocString(url);
+    hres = CreateURLMoniker(NULL, bstr, &mon);
+    SysFreeString(bstr);
+    ok(hres == S_OK, "CreateUrlMoniker failed: %08lx\n", hres);
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IPersistMoniker, (void**)&persist);
+    ok(hres == S_OK, "Could not get IPersistMoniker iface: %08lx\n", hres);
+
+    hres = IPersistMoniker_Load(persist, FALSE, mon, bind, 0x12);
+    ok(hres == S_OK, "Load failed: %08lx\n", hres);
+    IPersistMoniker_Release(persist);
+    IBindCtx_Release(bind);
+    IMoniker_Release(mon);
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IHlinkTarget, (void**)&hlink);
+    ok(hres == S_OK, "Could not get IHlinkTarget iface: %08lx\n", hres);
+    hres = IHlinkTarget_Navigate(hlink, 0, NULL);
+    ok(hres == S_OK, "Navigate failed: %08lx\n", hres);
+    IHlinkTarget_Release(hlink);
 }
 
 static void do_advise(IUnknown *unk, REFIID riid, IUnknown *unk_advise)
@@ -3312,6 +5367,51 @@ static void set_client_site(IHTMLDocument2 *doc, BOOL set)
 
     IOleObject_Release(oleobj);
 }
+
+static void navigate(IHTMLDocument2 *doc, const WCHAR *url)
+{
+    IHTMLLocation *location;
+    IHTMLDocument6 *doc6;
+    HRESULT hres;
+    VARIANT res;
+    BSTR bstr;
+    MSG msg;
+
+    location = NULL;
+    hres = IHTMLDocument2_get_location(doc, &location);
+    ok(hres == S_OK, "get_location failed: %08lx\n", hres);
+    ok(location != NULL, "location == NULL\n");
+
+    doc_complete = FALSE;
+    bstr = SysAllocString(url);
+    hres = IHTMLLocation_replace(location, bstr);
+    ok(hres == S_OK, "replace failed: %08lx\n", hres);
+    IHTMLLocation_Release(location);
+    SysFreeString(bstr);
+
+    while(!doc_complete && GetMessageW(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IHTMLDocument6, (void**)&doc6);
+    if(SUCCEEDED(hres)) {
+        hres = IHTMLDocument6_get_documentMode(doc6, &res);
+        ok(hres == S_OK, "get_documentMode failed: %08lx\n", hres);
+        ok(V_VT(&res) == VT_R4, "V_VT(documentMode) = %u\n", V_VT(&res));
+        document_mode = V_R4(&res);
+        IHTMLDocument6_Release(doc6);
+    }else {
+        document_mode = 0;
+    }
+
+    if(window)
+        IHTMLWindow2_Release(window);
+    hres = IHTMLDocument2_get_parentWindow(doc, &window);
+    ok(hres == S_OK, "get_parentWindow failed: %08lx\n", hres);
+    ok(window != NULL, "window == NULL\n");
+}
+
 static IHTMLDocument2 *create_document(void)
 {
     IHTMLDocument2 *doc;
@@ -3326,11 +5426,67 @@ static IHTMLDocument2 *create_document(void)
     return SUCCEEDED(hres) ? doc : NULL;
 }
 
+static IHTMLDocument2 *create_document_with_origin(const char *str)
+{
+    IInternetSession *internet_session;
+    IPersistMoniker *persist;
+    IHTMLDocument2 *doc;
+    IMoniker *mon;
+    HRESULT hres;
+    BSTR url;
+    MSG msg;
+
+    doc = create_document();
+    if(!doc)
+        return NULL;
+
+    if(!protocol_doc_str) {
+        hres = CoInternetGetSession(0, &internet_session, 0);
+        ok(hres == S_OK, "CoInternetGetSession failed: %08lx\n", hres);
+
+        hres = IInternetSession_RegisterNameSpace(internet_session, &protocol_cf, &CLSID_HttpProtocol, L"http", 0, NULL, 0);
+        ok(hres == S_OK, "RegisterNameSpace failed: %08lx\n", hres);
+
+        IInternetSession_Release(internet_session);
+    }
+    protocol_doc_str = str;
+
+    notif_doc = doc;
+    doc_complete = FALSE;
+    set_client_site(doc, TRUE);
+    do_advise((IUnknown*)doc, &IID_IPropertyNotifySink, (IUnknown*)&PropertyNotifySink);
+
+    url = SysAllocString(L"http://winetest.example.org");
+    hres = CreateURLMoniker(NULL, url, &mon);
+    SysFreeString(url);
+    ok(hres == S_OK, "CreateUrlMoniker failed: %08lx\n", hres);
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IPersistMoniker, (void**)&persist);
+    ok(hres == S_OK, "Could not get IPersistMoniker iface: %08lx\n", hres);
+
+    hres = IPersistMoniker_Load(persist, FALSE, mon, NULL, 0);
+    ok(hres == S_OK, "Load failed: %08lx\n", hres);
+    IPersistMoniker_Release(persist);
+    IMoniker_Release(mon);
+
+    while(!doc_complete && GetMessageA(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessageA(&msg);
+    }
+
+    return doc;
+}
+
+static LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    return DefWindowProcA(hwnd, msg, wParam, lParam);
+}
 
 typedef void (*testfunc_t)(IHTMLDocument2*);
 
-static void run_test(const char *str, testfunc_t test)
+static void run_test_impl(const char *str, const WCHAR *res, testfunc_t test)
 {
+    IInternetSession *internet_session;
     IHTMLDocument2 *doc;
     IHTMLElement *body = NULL;
     MSG msg;
@@ -3340,7 +5496,23 @@ static void run_test(const char *str, testfunc_t test)
     if (!doc)
         return;
     set_client_site(doc, TRUE);
-    doc_load_string(doc, str);
+
+    if(protocol_doc_str) {
+        hres = CoInternetGetSession(0, &internet_session, 0);
+        ok(hres == S_OK, "CoInternetGetSession failed: %08lx\n", hres);
+
+        hres = IInternetSession_UnregisterNameSpace(internet_session, &protocol_cf, L"http");
+        ok(hres == S_OK, "RegisterNameSpace failed: %08lx\n", hres);
+
+        IInternetSession_Release(internet_session);
+        protocol_doc_str = NULL;
+    }
+
+    if(res)
+        doc_load_res(doc, res);
+    else
+        doc_load_string(doc, str);
+
     do_advise((IUnknown*)doc, &IID_IPropertyNotifySink, (IUnknown*)&PropertyNotifySink);
 
     while(!doc_complete && GetMessageA(&msg, NULL, 0, 0)) {
@@ -3372,6 +5544,7 @@ static void run_test(const char *str, testfunc_t test)
         ok(hres == S_OK, "get_parentWindow failed: %08lx\n", hres);
         ok(window != NULL, "window == NULL\n");
 
+        ok((WNDPROC)GetWindowLongPtrA(container_hwnd, GWLP_WNDPROC) == wnd_proc, "container_hwnd is subclassed\n");
         test(doc);
 
         IHTMLWindow2_Release(window);
@@ -3384,9 +5557,14 @@ static void run_test(const char *str, testfunc_t test)
     IHTMLDocument2_Release(doc);
 }
 
-static LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+static void run_test(const char *str, testfunc_t test)
 {
-    return DefWindowProcA(hwnd, msg, wParam, lParam);
+    return run_test_impl(str, NULL, test);
+}
+
+static void run_test_from_res(const WCHAR *res, testfunc_t test)
+{
+    return run_test_impl(NULL, res, test);
 }
 
 static HWND create_container_window(void)
@@ -3437,6 +5615,222 @@ static void test_empty_document(void)
     IHTMLDocument2_Release(doc);
 }
 
+static void test_storage_events(const char *doc_str)
+{
+    static struct  {
+        IDispatchEx *onstorage;
+        IDispatchEx *onstoragecommit;
+        IDispatchEx *window_onstorage;
+    } doc_onstorage_handlers[] = {
+        { &doc1_onstorage_obj, &doc1_onstoragecommit_obj, &window1_onstorage_obj },
+        { &doc2_onstorage_obj, &doc2_onstoragecommit_obj, &window2_onstorage_obj },
+    };
+    IHTMLStorage *session_storage[2], *local_storage[2];
+    IHTMLDocument2 *doc[2];
+    IHTMLDocument6 *doc6;
+    BSTR key, value;
+    HRESULT hres;
+    VARIANT var;
+    LONG length;
+    unsigned i;
+
+    for(i = 0; i < ARRAY_SIZE(doc); i++)
+        doc[i] = create_document_with_origin(doc_str);
+
+    document_mode = 0;
+    for(i = 0; i < ARRAY_SIZE(doc); i++) {
+        IHTMLWindow6 *window6;
+        IHTMLWindow7 *window7;
+        IHTMLWindow2 *window;
+
+        hres = IHTMLDocument2_get_parentWindow(doc[i], &window);
+        ok(hres == S_OK, "get_parentWindow[%u] failed: %08lx\n", i, hres);
+        ok(window != NULL, "window[%u] == NULL\n", i);
+
+        hres = IHTMLWindow2_QueryInterface(window, &IID_IHTMLWindow6, (void**)&window6);
+        ok(hres == S_OK, "Could not get IHTMLWindow6: %08lx\n", hres);
+        IHTMLWindow2_Release(window);
+
+        hres = IHTMLWindow6_get_localStorage(window6, &local_storage[i]);
+
+        /* w10pro64 testbot VM sometimes returns this for some reason */
+        if(hres == WININET_E_INTERNAL_ERROR) {
+            win_skip("localStorage is buggy and not available, skipping storage events tests\n");
+            goto done;
+        }
+
+        ok(hres == S_OK, "get_localStorage[%u] failed: %08lx\n", i, hres);
+        ok(local_storage[i] != NULL, "local_storage[%u] == NULL\n", i);
+        hres = IHTMLWindow6_get_sessionStorage(window6, &session_storage[i]);
+        ok(hres == S_OK, "get_sessionStorage[%u] failed: %08lx\n", i, hres);
+        ok(session_storage[i] != NULL, "session_storage[%u] == NULL\n", i);
+
+        hres = IHTMLDocument2_QueryInterface(doc[i], &IID_IHTMLDocument6, (void**)&doc6);
+        if(SUCCEEDED(hres)) {
+            if(i == 0) {
+                hres = IHTMLDocument6_get_documentMode(doc6, &var);
+                ok(hres == S_OK, "get_documentMode failed: %08lx\n", hres);
+                ok(V_VT(&var) == VT_R4, "V_VT(documentMode) = %u\n", V_VT(&var));
+                document_mode = V_R4(&var);
+            }
+            V_VT(&var) = VT_DISPATCH;
+            V_DISPATCH(&var) = (IDispatch*)doc_onstorage_handlers[i].onstorage;
+            hres = IHTMLDocument6_put_onstorage(doc6, var);
+            ok(hres == S_OK, "put_onstorage[%u] failed: %08lx\n", i, hres);
+
+            V_DISPATCH(&var) = (IDispatch*)doc_onstorage_handlers[i].onstoragecommit;
+            hres = IHTMLDocument6_put_onstoragecommit(doc6, var);
+            ok(hres == S_OK, "put_onstoragecommit[%u] failed: %08lx\n", i, hres);
+            IHTMLDocument6_Release(doc6);
+        }
+
+        hres = IHTMLWindow6_QueryInterface(window6, &IID_IHTMLWindow7, (void**)&window7);
+        IHTMLWindow6_Release(window6);
+        if(SUCCEEDED(hres)) {
+            V_VT(&var) = VT_DISPATCH;
+            V_DISPATCH(&var) = (IDispatch*)doc_onstorage_handlers[i].window_onstorage;
+            hres = IHTMLWindow7_put_onstorage(window7, var);
+            ok(hres == S_OK, "put_onstorage[%u] failed: %08lx\n", i, hres);
+            IHTMLWindow7_Release(window7);
+        }
+    }
+
+    /* local storage */
+    for(;;) {
+        hres = IHTMLStorage_get_length(local_storage[0], &length);
+        ok(hres == S_OK, "get_length failed %08lx\n", hres);
+        if(length == 0) break;
+
+        hres = IHTMLStorage_clear(local_storage[0]);
+        ok(hres == S_OK, "clear failed: %08lx\n", hres);
+        SET_EXPECT(doc1_onstoragecommit);
+        set_onstorage_expect(NULL, NULL, NULL);
+        pump_msgs(&called_doc1_onstoragecommit);
+        CHECK_CALLED(doc1_onstoragecommit);
+    }
+
+    key = SysAllocString(L"test");
+    hres = IHTMLStorage_removeItem(local_storage[0], key);
+    ok(hres == S_OK, "removeItem failed: %08lx\n", hres);
+
+    value = SysAllocString(L"WINE");
+    hres = IHTMLStorage_setItem(local_storage[0], key, value);
+    ok(hres == S_OK, "setItem failed: %08lx\n", hres);
+    SysFreeString(value);
+    SET_EXPECT(doc1_onstoragecommit);
+    set_onstorage_expect(NULL, NULL, NULL);
+    pump_msgs(&called_doc1_onstoragecommit);
+    CHECK_CALLED(doc1_onstoragecommit);
+
+    value = SysAllocString(L"wine");
+    hres = IHTMLStorage_setItem(local_storage[1], key, value);
+    ok(hres == S_OK, "setItem failed: %08lx\n", hres);
+    SysFreeString(value);
+    SET_EXPECT(doc1_onstoragecommit);  /* Native sometimes calls this here for some reason */
+    SET_EXPECT(doc2_onstoragecommit);
+    set_onstorage_expect(NULL, NULL, NULL);
+    pump_msgs(&called_doc2_onstoragecommit);
+    CHECK_CALLED(doc2_onstoragecommit);
+    CLEAR_CALLED(doc1_onstoragecommit);
+
+    hres = IHTMLStorage_removeItem(local_storage[0], key);
+    ok(hres == S_OK, "removeItem failed: %08lx\n", hres);
+    SysFreeString(key);
+    SET_EXPECT(doc1_onstoragecommit);
+    set_onstorage_expect(NULL, NULL, NULL);
+    pump_msgs(&called_doc1_onstoragecommit);
+    CHECK_CALLED(doc1_onstoragecommit);
+
+    key = SysAllocString(L"winetest");
+    value = SysAllocString(L"WineTest");
+    hres = IHTMLStorage_setItem(local_storage[1], key, value);
+    ok(hres == S_OK, "setItem failed: %08lx\n", hres);
+    SysFreeString(value);
+    SysFreeString(key);
+    SET_EXPECT(doc2_onstoragecommit);
+    set_onstorage_expect(NULL, NULL, NULL);
+    pump_msgs(&called_doc2_onstoragecommit);
+    CHECK_CALLED(doc2_onstoragecommit);
+
+    hres = IHTMLStorage_clear(local_storage[0]);
+    ok(hres == S_OK, "clear failed: %08lx\n", hres);
+    SET_EXPECT(doc1_onstoragecommit);
+    set_onstorage_expect(NULL, NULL, NULL);
+    pump_msgs(&called_doc1_onstoragecommit);
+    CHECK_CALLED(doc1_onstoragecommit);
+
+    for(i = 0; i < ARRAY_SIZE(local_storage); i++)
+        IHTMLStorage_Release(local_storage[i]);
+
+    /* session storage */
+    key = SysAllocString(L"foobar");
+    hres = IHTMLStorage_removeItem(session_storage[0], key);
+    ok(hres == S_OK, "removeItem failed: %08lx\n", hres);
+
+    value = SysAllocString(L"BarFoo");
+    hres = IHTMLStorage_setItem(session_storage[0], key, value);
+    ok(hres == S_OK, "setItem failed: %08lx\n", hres);
+    SysFreeString(value);
+    if(document_mode >= 9) SET_EXPECT(window1_onstorage);
+    SET_EXPECT(doc1_onstorage);
+    set_onstorage_expect(L"foobar", NULL, L"BarFoo");
+    pump_msgs(&called_doc1_onstorage);
+    CHECK_CALLED(doc1_onstorage);
+    if(document_mode >= 9) CHECK_CALLED(window1_onstorage);
+
+    value = SysAllocString(L"barfoo");
+    hres = IHTMLStorage_setItem(session_storage[1], key, value);
+    ok(hres == S_OK, "setItem failed: %08lx\n", hres);
+    SysFreeString(value);
+    if(document_mode >= 9) SET_EXPECT(window2_onstorage);
+    SET_EXPECT(doc2_onstorage);
+    set_onstorage_expect(L"foobar", L"BarFoo", L"barfoo");
+    pump_msgs(&called_doc2_onstorage);
+    CHECK_CALLED(doc2_onstorage);
+    if(document_mode >= 9) CHECK_CALLED(window2_onstorage);
+
+    hres = IHTMLStorage_removeItem(session_storage[0], key);
+    ok(hres == S_OK, "removeItem failed: %08lx\n", hres);
+    SysFreeString(key);
+    if(document_mode >= 9) SET_EXPECT(window1_onstorage);
+    SET_EXPECT(doc1_onstorage);
+    set_onstorage_expect(L"foobar", L"barfoo", NULL);
+    pump_msgs(&called_doc1_onstorage);
+    CHECK_CALLED(doc1_onstorage);
+    if(document_mode >= 9) CHECK_CALLED(window1_onstorage);
+
+    key = SysAllocString(L"winetest");
+    value = SysAllocString(L"WineTest");
+    hres = IHTMLStorage_setItem(session_storage[1], key, value);
+    ok(hres == S_OK, "setItem failed: %08lx\n", hres);
+    SysFreeString(value);
+    SysFreeString(key);
+    if(document_mode >= 9) SET_EXPECT(window2_onstorage);
+    SET_EXPECT(doc2_onstorage);
+    set_onstorage_expect(L"winetest", NULL, L"WineTest");
+    pump_msgs(&called_doc2_onstorage);
+    CHECK_CALLED(doc2_onstorage);
+    if(document_mode >= 9) CHECK_CALLED(window2_onstorage);
+
+    hres = IHTMLStorage_clear(session_storage[0]);
+    ok(hres == S_OK, "clear failed: %08lx\n", hres);
+    if(document_mode >= 9) SET_EXPECT(window1_onstorage);
+    SET_EXPECT(doc1_onstorage);
+    set_onstorage_expect(NULL, NULL, NULL);
+    pump_msgs(&called_doc1_onstorage);
+    CHECK_CALLED(doc1_onstorage);
+    if(document_mode >= 9) CHECK_CALLED(window1_onstorage);
+
+    for(i = 0; i < ARRAY_SIZE(session_storage); i++)
+        IHTMLStorage_Release(session_storage[i]);
+
+done:
+    set_client_site(doc[0], FALSE);
+    set_client_site(doc[1], FALSE);
+    IHTMLDocument2_Release(doc[0]);
+    IHTMLDocument2_Release(doc[1]);
+}
+
 static BOOL check_ie(void)
 {
     IHTMLDocument2 *doc;
@@ -3480,15 +5874,26 @@ START_TEST(events)
         run_test(readystate_doc_str, test_onreadystatechange);
         run_test(readystate_doc_ie9_str, test_onreadystatechange);
         run_test(img_doc_str, test_imgload);
+        run_test(input_image_doc_str, test_inputload);
         run_test(link_doc_str, test_link_load);
         run_test(input_doc_str, test_focus);
         run_test(empty_doc_str, test_submit);
         run_test(empty_doc_ie9_str, test_submit);
         run_test(iframe_doc_str, test_iframe_connections);
-        if(is_ie9plus)
+        if(is_ie9plus) {
+            run_test_from_res(L"doc_with_prop.html", test_doc_obj);
+            run_test_from_res(L"doc_with_prop_ie9.html", test_doc_obj);
+            run_test_from_res(L"doc_with_prop_ie9.html", test_visibilitychange);
+            run_test_from_res(L"blank_ie10.html", test_visibilitychange);
+            run_test_from_res(L"iframe.html", test_unload_event);
             run_test(empty_doc_ie9_str, test_create_event);
+            run_test(img_doc_ie9_str, test_imgload);
+        }
 
         test_empty_document();
+        test_storage_events(empty_doc_str);
+        if(is_ie9plus)
+            test_storage_events(empty_doc_ie9_str);
 
         DestroyWindow(container_hwnd);
     }else {

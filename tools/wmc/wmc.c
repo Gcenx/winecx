@@ -150,7 +150,7 @@ static void exit_on_signal( int sig )
 static void init_argv0_dir( const char *argv0 )
 {
 #ifndef _WIN32
-    char *dir;
+    char *dir = NULL;
 
 #if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
     dir = realpath( "/proc/self/exe", NULL );
@@ -158,13 +158,11 @@ static void init_argv0_dir( const char *argv0 )
     static int pathname[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
     size_t path_size = PATH_MAX;
     char *path = xmalloc( path_size );
-    if (!sysctl( pathname, sizeof(pathname)/sizeof(pathname[0]), path, &path_size, NULL, 0 ))
+    if (!sysctl( pathname, ARRAY_SIZE(pathname), path, &path_size, NULL, 0 ))
         dir = realpath( path, NULL );
     free( path );
-#else
-    dir = realpath( argv0, NULL );
 #endif
-    if (!dir) return;
+    if (!dir && !(dir = realpath( argv0, NULL ))) return;
     dir = get_dirname( dir );
     if (strendswith( dir, "/tools/wmc" )) nlsdirs[0] = strmake( "%s/../../nls", dir );
     else nlsdirs[0] = strmake( "%s/%s", dir, BIN_TO_NLSDIR );

@@ -19,8 +19,6 @@
 #ifndef _GDIPLUSCOLOR_H
 #define _GDIPLUSCOLOR_H
 
-#include "wine/winheader_enter.h"
-
 enum ColorChannelFlags
 {
     ColorChannelFlagsC,
@@ -49,7 +47,5 @@ typedef struct Color
 typedef enum ColorChannelFlags ColorChannelFlags;
 
 #endif  /* end of c typedefs */
-
-#include "wine/winheader_exit.h"
 
 #endif  /* _GDIPLUSCOLOR_H */

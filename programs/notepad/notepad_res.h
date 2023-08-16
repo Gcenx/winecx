@@ -25,6 +25,7 @@
 #define MAIN_MENU               0x201
 #define DIALOG_PAGESETUP        0x202
 #define ID_ACCEL                0x203
+#define DIALOG_GOTO             0x204
 
 #define IDI_NOTEPAD             0x300
 
@@ -49,9 +50,11 @@
 #define CMD_SEARCH              0x120
 #define CMD_SEARCH_NEXT         0x121
 #define CMD_REPLACE             0x122
+#define CMD_GO_TO               0x192
 
 #define CMD_WRAP                0x119
 #define CMD_FONT                0x140
+#define CMD_SBAR                0x205
 
 #define CMD_HELP_CONTENTS       0x130
 #define CMD_HELP_ABOUT_NOTEPAD  0x134
@@ -63,6 +66,7 @@
 #define IDC_PAGESETUP_RIGHTVALUE  0x14A
 #define IDC_PAGESETUP_TOPVALUE    0x14D
 #define IDC_PAGESETUP_BOTTOMVALUE 0x150
+#define IDC_GOTO_LINEVALUE        0x194
 
 /* Strings */
 #define STRING_PAGESETUP_HEADERVALUE 0x160
@@ -77,6 +81,8 @@
 #define STRING_NOTSAVED 0x17A
 
 #define STRING_NOTFOUND 0x17B
+
+#define STRING_STATUSBAR       0x206
 
 #define STRING_UNICODE_LE      0x180
 #define STRING_UNICODE_BE      0x181

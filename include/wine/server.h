@@ -26,7 +26,6 @@
 #include <winbase.h>
 #include <winternl.h>
 #include <wine/server_protocol.h>
-#include <wine/winheader_enter.h>
 
 /* client communication functions */
 
@@ -58,7 +57,7 @@ extern NTSTATUS CDECL wine_server_handle_to_fd( HANDLE handle, unsigned int acce
 static inline unsigned int wine_server_call_err( void *req_ptr )
 {
     unsigned int res = wine_server_call( req_ptr );
-    if (res) SetLastError( RtlNtStatusToDosError(res) );
+    if (res) RtlSetLastWin32Error( RtlNtStatusToDosError(res) );
     return res;
 }
 
@@ -137,6 +136,5 @@ static inline void *wine_server_get_ptr( client_ptr_t ptr )
         while(0); \
     } while(0)
 
-#include <wine/winheader_exit.h>
 
 #endif  /* __WINE_WINE_SERVER_H */

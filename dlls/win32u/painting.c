@@ -20,6 +20,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
@@ -109,7 +113,7 @@ BOOL CDECL nulldrv_InvertRgn( PHYSDEV dev, HRGN rgn )
     INT prev_rop = dc->attr->rop_mode;
     BOOL ret;
     dc->attr->rop_mode = R2_NOT;
-    ret = NtGdiFillRgn( dev->hdc, rgn, get_stock_object(BLACK_BRUSH) );
+    ret = NtGdiFillRgn( dev->hdc, rgn, GetStockObject(BLACK_BRUSH) );
     dc->attr->rop_mode = prev_rop;
     return ret;
 }
@@ -888,7 +892,7 @@ BOOL WINAPI NtGdiGradientFill( HDC hdc, TRIVERTEX *vert_array, ULONG nvert,
 
     if (!vert_array || !nvert || !grad_array || !ngrad || mode > GRADIENT_FILL_TRIANGLE)
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
     for (i = 0; i < ngrad * (mode == GRADIENT_FILL_TRIANGLE ? 3 : 2); i++)
@@ -907,7 +911,7 @@ BOOL WINAPI NtGdiGradientFill( HDC hdc, TRIVERTEX *vert_array, ULONG nvert,
  */
 BOOL WINAPI NtGdiDrawStream( HDC hdc, ULONG in, void *pvin )
 {
-    FIXME("stub: %p, %d, %p\n", hdc, in, pvin);
+    FIXME("stub: %p, %d, %p\n", hdc, (int)in, pvin);
     return FALSE;
 }
 

@@ -432,27 +432,10 @@ static void test__lcreat( void )
     ok( ret, "DeleteFile failed (%ld)\n", GetLastError(  ) );
 
     filehandle=_lcreat (slashname, 0); /* illegal name */
-    if (HFILE_ERROR==filehandle) {
-      err=GetLastError ();
-      ok (err==ERROR_INVALID_NAME || err==ERROR_PATH_NOT_FOUND,
-          "creating file \"%s\" failed with error %d\n", slashname, err);
-    } else { /* only NT succeeds */
-      _lclose(filehandle);
-      find=FindFirstFileA (slashname, &search_results);
-      if (INVALID_HANDLE_VALUE!=find)
-      {
-        ret = FindClose (find);
-        ok (0 != ret, "FindClose complains (%ld)\n", GetLastError ());
-        slashname[strlen(slashname)-1]=0;
-        ok (!strcmp (slashname, search_results.cFileName),
-            "found unexpected name \"%s\"\n", search_results.cFileName);
-        ok (FILE_ATTRIBUTE_ARCHIVE==search_results.dwFileAttributes,
-            "attributes of file \"%s\" are 0x%04lx\n", search_results.cFileName,
-            search_results.dwFileAttributes);
-      }
-    ret = DeleteFileA( slashname );
-    ok( ret, "DeleteFile failed (%ld)\n", GetLastError(  ) );
-    }
+    ok( filehandle == HFILE_ERROR, "succeeded\n" );
+    err=GetLastError ();
+    ok (err==ERROR_INVALID_NAME || err==ERROR_PATH_NOT_FOUND,
+        "creating file \"%s\" failed with error %d\n", slashname, err);
 
     filehandle=_lcreat (filename, 8); /* illegal attribute */
     if (HFILE_ERROR==filehandle)
@@ -902,12 +885,14 @@ static void test_CopyFileW(void)
     SetLastError(0xdeadbeef);
     ret = CopyFileW(source, dest, FALSE);
     ok(ret, "CopyFileW: error %ld\n", GetLastError());
-    ok(GetLastError() == ERROR_SUCCESS, "Unexpected error %lu.\n", GetLastError());
+    ok(GetLastError() == ERROR_SUCCESS || broken(GetLastError() == ERROR_INVALID_PARAMETER) /* some win8 machines */,
+        "Unexpected error %lu.\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = CopyFileExW(source, dest, NULL, NULL, NULL,  0 );
     ok(ret, "CopyFileExW: error %ld\n", GetLastError());
-    ok(GetLastError() == ERROR_SUCCESS, "Unexpected error %lu.\n", GetLastError());
+    ok(GetLastError() == ERROR_SUCCESS || broken(GetLastError() == ERROR_INVALID_PARAMETER) /* some win8 machines */,
+        "Unexpected error %lu.\n", GetLastError());
 
     ret = DeleteFileW(source);
     ok(ret, "DeleteFileW: error %ld\n", GetLastError());
@@ -2161,7 +2146,7 @@ static void test_MoveFileW(void)
 
     ret = MoveFileW(source, dest);
     ok(!ret && GetLastError() == ERROR_ALREADY_EXISTS,
-       "CopyFileW: unexpected error %ld\n", GetLastError());
+       "MoveFileW: unexpected error %ld\n", GetLastError());
 
     ret = DeleteFileW(source);
     ok(ret, "DeleteFileW: error %ld\n", GetLastError());
@@ -3157,7 +3142,9 @@ static void test_MapFile(void)
 static void test_GetFileType(void)
 {
     DWORD type, type2;
-    HANDLE h = CreateFileA( filename, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
+    HANDLE h, h2;
+    BOOL ret;
+    h = CreateFileA( filename, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
     ok( h != INVALID_HANDLE_VALUE, "open %s failed\n", filename );
     type = GetFileType(h);
     ok( type == FILE_TYPE_DISK, "expected type disk got %ld\n", type );
@@ -3173,6 +3160,73 @@ static void test_GetFileType(void)
     type = GetFileType( (HANDLE)STD_OUTPUT_HANDLE );
     type2 = GetFileType( h );
     ok(type == type2, "expected type %ld for STD_OUTPUT_HANDLE got %ld\n", type2, type);
+
+    ret = CreatePipe( &h, &h2, NULL, 0 );
+    ok( ret, "CreatePipe failed\n" );
+    type = GetFileType( h );
+    ok( type == FILE_TYPE_PIPE, "expected type pipe got %ld\n", type );
+    type = GetFileType( h2 );
+    ok( type == FILE_TYPE_PIPE, "expected type pipe got %ld\n", type );
+    CloseHandle( h2 );
+    CloseHandle( h );
+
+    h = CreateNamedPipeW( L"\\\\.\\pipe\\wine_test", PIPE_ACCESS_DUPLEX, 0, 2, 32, 32, 0, NULL );
+    ok( h != INVALID_HANDLE_VALUE, "CreateNamedPipe failed\n" );
+    type = GetFileType( h );
+    ok( type == FILE_TYPE_PIPE, "expected type pipe got %ld\n", type );
+    CloseHandle( h );
+
+    h = CreateFileA( filename, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
+    ok( h != INVALID_HANDLE_VALUE, "open %s failed\n", filename );
+    h2 = CreateFileMappingW( h, NULL, PAGE_READWRITE, 0, 0x1000, NULL );
+    ok( h2 != NULL, "CreateFileMapping failed\n" );
+    SetLastError( 12345678 );
+    type = GetFileType( h2 );
+    todo_wine
+    ok( type == FILE_TYPE_UNKNOWN, "expected type unknown got %ld\n", type );
+    todo_wine
+    ok( GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE got %lx\n", GetLastError() );
+    CloseHandle( h2 );
+    CloseHandle( h );
+    DeleteFileA( filename );
+
+    h = CreateFileMappingW( INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 0x1000, NULL );
+    ok( h != NULL, "CreateFileMapping failed\n" );
+    SetLastError( 12345678 );
+    type = GetFileType( h );
+    todo_wine
+    ok( type == FILE_TYPE_UNKNOWN, "expected type unknown got %ld\n", type );
+    todo_wine
+    ok( GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE got %lx\n", GetLastError() );
+    CloseHandle( h );
+
+    h = CreateMailslotW( L"\\\\.\\mailslot\\wine_test", 0, 0, NULL );
+    ok( h != INVALID_HANDLE_VALUE, "CreateMailslot failed\n" );
+    SetLastError( 12345678 );
+    type = GetFileType( h );
+    todo_wine
+    ok( type == FILE_TYPE_UNKNOWN, "expected type unknown got %ld\n", type );
+    todo_wine
+    ok( GetLastError() == NO_ERROR, "expected ERROR_NO_ERROR got %lx\n", GetLastError() );
+    CloseHandle( h );
+
+    SetLastError( 12345678 );
+    type = GetFileType( GetCurrentProcess() );
+    ok( type == FILE_TYPE_UNKNOWN, "expected type unknown got %ld\n", type );
+    ok( GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE got %lx\n", GetLastError() );
+
+    SetLastError( 12345678 );
+    type = GetFileType( GetCurrentThread() );
+    ok( type == FILE_TYPE_UNKNOWN, "expected type unknown got %ld\n", type );
+    ok( GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE got %lx\n", GetLastError() );
+
+    h = CreateMutexW( NULL, TRUE, NULL );
+    ok( h != NULL, "CreateMutex failed\n" );
+    SetLastError( 12345678 );
+    type = GetFileType( h );
+    ok( type == FILE_TYPE_UNKNOWN, "expected type unknown got %ld\n", type );
+    ok( GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE got %lx\n", GetLastError() );
+    CloseHandle( h );
 }
 
 static int completion_count;

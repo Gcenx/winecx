@@ -21,8 +21,6 @@
 #ifndef __WINE_DSROLE_H
 #define __WINE_DSROLE_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -90,7 +88,5 @@ DWORD WINAPI DsRoleGetPrimaryDomainInformation(IN LPCWSTR lpServer OPTIONAL, IN 
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_DSROLE_H */

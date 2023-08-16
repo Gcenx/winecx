@@ -464,12 +464,24 @@ HRESULT editor_insert_oleobj(ME_TextEditor *editor, const REOBJECT *reo)
   ME_Cursor *cursor, cursor_from_ofs;
   ME_Style *style;
   HRESULT hr;
+  SIZEL extent;
 
   if (editor->lpOleCallback)
   {
     hr = IRichEditOleCallback_QueryInsertObject(editor->lpOleCallback, (LPCLSID)&reo->clsid, reo->pstg, REO_CP_SELECTION);
     if (hr != S_OK)
       return hr;
+  }
+
+  extent = reo->sizel;
+  if (!extent.cx && !extent.cy && reo->poleobj)
+  {
+    hr = IOleObject_GetExtent( reo->poleobj, DVASPECT_CONTENT, &extent );
+    if (FAILED(hr))
+    {
+      extent.cx = 0;
+      extent.cy = 0;
+    }
   }
 
   if (reo->cp == REO_CP_SELECTION)
@@ -487,6 +499,7 @@ HRESULT editor_insert_oleobj(ME_TextEditor *editor, const REOBJECT *reo)
   run = run_insert( editor, cursor, style, &space, 1, MERF_GRAPHICS );
 
   run->reobj = create_re_object( reo, run );
+  run->reobj->obj.sizel = extent;
 
   prev = run;
   while ((prev = run_prev_all_paras( prev )))
@@ -789,15 +802,18 @@ ME_MoveCursorWords(ME_TextEditor *editor, ME_Cursor *cursor, int nRelOfs)
       }
       else
       {
-        para = para_next( para );
-        if (!para_next( para ))
+        ME_Paragraph *other_para = para_next( para );
+        if (!para_next( other_para ))
         {
           if (cursor->run == run) return FALSE;
           nOffset = 0;
           break;
         }
-        if (para->nFlags & MEPF_ROWSTART) para = para_next( para );
-        if (cursor->run == run) run = para_first_run( para );
+        if (other_para->nFlags & MEPF_ROWSTART) other_para = para_next( other_para );
+        if (cursor->run == run) {
+          para = other_para;
+          run = para_first_run( para );
+        }
         nOffset = 0;
         break;
       }

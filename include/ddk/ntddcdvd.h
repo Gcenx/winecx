@@ -21,8 +21,6 @@
 #ifndef __NTDDCDVD_H
 #define __NTDDCDVD_H
 
-#include "wine/winheader_enter.h"
-
 /* definitions taken from libdvdcss, modified to reflect Windows names and data types in places */
 
 #define IOCTL_DVD_BASE                 FILE_DEVICE_DVD
@@ -196,7 +194,5 @@ typedef struct _DVD_MANUFACTURER_DESCRIPTOR
 #define DVD_SECTOR_PROTECTED            0x00000020
 
 #include <poppack.h>
-
-#include "wine/winheader_exit.h"
 
 #endif /* __NTDDCDVD_H */

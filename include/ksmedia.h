@@ -23,8 +23,6 @@
 #ifndef _KSMEDIA_
 #define _KSMEDIA_
 
-#include "wine/winheader_enter.h"
-
 DEFINE_GUID(KSDATAFORMAT_TYPE_AUDIO, 0x73647561, 0x0000, 0x0010, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71);
 
 DEFINE_GUID(KSDATAFORMAT_SUBTYPE_PCM, 0x00000001, 0x0000, 0x0010, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71);
@@ -145,6 +143,29 @@ typedef struct _tagKSJACK_DESCRIPTION2
 
 typedef struct _tagKSJACK_DESCRIPTION2 *PKSJACK_DESCRIPTION2;
 
-#include "wine/winheader_exit.h"
+typedef struct tagKS_BITMAPINFOHEADER
+{
+    DWORD biSize;
+    LONG biWidth;
+    LONG biHeight;
+    WORD biPlanes;
+    WORD biBitCount;
+    DWORD biCompression;
+    DWORD biSizeImage;
+    LONG biXPelsPerMeter;
+    LONG biYPelsPerMeter;
+    DWORD biClrUsed;
+    DWORD biClrImportant;
+} KS_BITMAPINFOHEADER, *PKS_BITMAPINFOHEADER;
+
+typedef struct tagKS_VIDEOINFOHEADER
+{
+    RECT rcSource;
+    RECT rcTarget;
+    DWORD dwBitRate;
+    DWORD dwBitErrorRate;
+    REFERENCE_TIME AvgTimePerFrame;
+    KS_BITMAPINFOHEADER bmiHeader;
+} KS_VIDEOINFOHEADER, *PKS_VIDEOINFOHEADER;
 
 #endif  /* _KSMEDIA_ */

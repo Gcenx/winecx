@@ -19,8 +19,6 @@
 #ifndef _DDKIMM_H_
 #define _DDKIMM_H_
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -171,7 +169,5 @@ DWORD WINAPI ImeGetImeMenuItems(HIMC, DWORD, DWORD, LPIMEMENUITEMINFOW, LPIMEMEN
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif  /* _DDKIMM_H_ */

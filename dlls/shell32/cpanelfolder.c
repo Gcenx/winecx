@@ -66,6 +66,8 @@ typedef struct {
     int dwAttributes;		/* attributes returned by GetAttributesOf FIXME: use it */
 } ICPanelImpl;
 
+static const WCHAR name_spaceW[] = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ControlPanel\\NameSpace";
+
 static const IShellFolder2Vtbl vt_ShellFolder2;
 static const IPersistFolder2Vtbl vt_PersistFolder2;
 static const IShellExecuteHookWVtbl vt_ShellExecuteHookW;
@@ -355,14 +357,14 @@ static int SHELL_RegisterRegistryCPanelApps(IEnumIDListImpl *list, HKEY hkey_roo
     return cnt;
 }
 
-static int SHELL_RegisterCPanelFolders(IEnumIDListImpl *list, HKEY hkey_root, LPCSTR szRepPath)
+static int SHELL_RegisterCPanelFolders(IEnumIDListImpl *list, HKEY hkey_root, const WCHAR *reg_path)
 {
     char name[MAX_PATH];
     HKEY hkey;
 
     int cnt = 0;
 
-    if (RegOpenKeyA(hkey_root, szRepPath, &hkey) == ERROR_SUCCESS)
+    if (RegOpenKeyW(hkey_root, reg_path, &hkey) == ERROR_SUCCESS)
     {
         int idx = 0;
         for(;; ++idx)
@@ -398,8 +400,7 @@ static BOOL CreateCPanelEnumList(IEnumIDListImpl *list, DWORD dwFlags)
 
     /* enumerate control panel folders */
     if (dwFlags & SHCONTF_FOLDERS)
-        SHELL_RegisterCPanelFolders(list, HKEY_LOCAL_MACHINE,
-                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ControlPanel\\NameSpace");
+        SHELL_RegisterCPanelFolders(list, HKEY_LOCAL_MACHINE, name_spaceW);
 
     /* enumerate the control panel applets */
     if (dwFlags & SHCONTF_NONFOLDERS)
@@ -535,6 +536,34 @@ static HRESULT WINAPI ISF_ControlPanel_fnCreateViewObject(IShellFolder2 *iface, 
     return hr;
 }
 
+static BOOL validate_name_space(const ITEMIDLIST *pidl)
+{
+    HKEY hkey, hitem;
+    WCHAR *guidW;
+    GUID *guid;
+    LSTATUS r;
+
+    if (!_ILIsPidlSimple(pidl))
+        return FALSE;
+
+    guid = _ILGetGUIDPointer(pidl);
+    if (!guid)
+        return FALSE;
+    if (StringFromCLSID(guid, &guidW) != S_OK)
+        return FALSE;
+
+    r = RegOpenKeyW(HKEY_LOCAL_MACHINE, name_spaceW, &hkey);
+    if (r == ERROR_SUCCESS)
+    {
+        r = RegOpenKeyW(hkey, guidW, &hitem);
+        if (r == ERROR_SUCCESS)
+            RegCloseKey(hitem);
+        RegCloseKey(hkey);
+    }
+    CoTaskMemFree(guidW);
+    return r == ERROR_SUCCESS;
+}
+
 /**************************************************************************
 *  ISF_ControlPanel_fnGetAttributesOf
 */
@@ -558,12 +587,17 @@ static HRESULT WINAPI ISF_ControlPanel_fnGetAttributesOf(IShellFolder2 *iface, U
 
     while(cidl > 0 && *apidl) {
 	pdump(*apidl);
-        SHELL32_GetItemAttributes(&This->IShellFolder2_iface, *apidl, rgfInOut);
+
+        /* TODO: panel with GUID can contain sub-items but we don't support it yet */
+        if (!(*rgfInOut & SFGAO_VALIDATE) || _ILGetCPanelPointer(*apidl)
+                || validate_name_space(*apidl))
+            *rgfInOut &= SFGAO_CANLINK;
+        else
+            *rgfInOut &= SFGAO_VALIDATE;
+
 	apidl++;
 	cidl--;
     }
-    /* make sure SFGAO_VALIDATE is cleared, some apps depend on that */
-    *rgfInOut &= ~SFGAO_VALIDATE;
 
     TRACE("-- result=0x%08lx\n", *rgfInOut);
     return hr;

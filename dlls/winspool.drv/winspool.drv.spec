@@ -149,6 +149,8 @@
 @ stdcall IsValidDevmodeW(ptr long)
 @ stdcall OpenPrinterA(str ptr ptr)
 @ stdcall OpenPrinterW(wstr ptr ptr)
+@ stdcall OpenPrinter2A(str ptr ptr ptr)
+@ stdcall OpenPrinter2W(wstr ptr ptr ptr)
 @ stdcall PerfClose()
 @ stdcall PerfCollect(wstr ptr ptr ptr)
 @ stdcall PerfOpen(wstr)
@@ -160,6 +162,7 @@
 @ stdcall ResetPrinterA(long ptr)
 @ stdcall ResetPrinterW(long ptr)
 @ stdcall ScheduleJob(long long)
+@ stdcall SeekPrinter(long int64 ptr long long)
 @ stub SetAllocFailCount
 @ stdcall SetFormA(long str long ptr)
 @ stdcall SetFormW(long wstr long ptr)

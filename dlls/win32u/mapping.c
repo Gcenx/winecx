@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include <stdarg.h>
 
 #include "windef.h"
@@ -429,7 +433,7 @@ BOOL WINAPI NtGdiSetVirtualResolution( HDC hdc, DWORD horz_res, DWORD vert_res,
                                        DWORD horz_size, DWORD vert_size )
 {
     DC * dc;
-    TRACE("(%p %d %d %d %d)\n", hdc, horz_res, vert_res, horz_size, vert_size);
+    TRACE("(%p %d %d %d %d)\n", hdc, (int)horz_res, (int)vert_res, (int)horz_size, (int)vert_size);
 
     if (!horz_res || !vert_res || !horz_size || !vert_size)
     {

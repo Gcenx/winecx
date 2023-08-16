@@ -809,39 +809,102 @@ ULONGLONG WINAPI _aulldiv( ULONGLONG a, ULONGLONG b )
     return udivmod(a, b, NULL);
 }
 
+
+LONGLONG __stdcall __regs__allshl( LONGLONG a, unsigned char b )
+{
+    const LARGE_INTEGER x = { .QuadPart = a };
+    LARGE_INTEGER ret;
+
+    if (b >= 32)
+    {
+        if (b >= 64)
+            ret.HighPart = 0;
+        else
+            ret.HighPart = x.LowPart << (b & 31);
+        ret.LowPart = 0;
+    }
+    else
+    {
+        ret.HighPart = (x.LowPart >> (32 - b)) | (x.HighPart << b);
+        ret.LowPart = x.LowPart << b;
+    }
+    return ret.QuadPart;
+}
+
 /******************************************************************************
  *        _allshl   (NTDLL.@)
- *
- * Shift a 64 bit integer to the left.
- *
- * PARAMS
- *  a [I] Initial number.
- *  b [I] Number to shift a by to the left.
- *
- * RETURNS
- *  The left-shifted value.
  */
-LONGLONG WINAPI _allshl( LONGLONG a, LONG b )
+__ASM_GLOBAL_FUNC( _allshl,
+                   "xchgl (%esp),%ecx\n\t"
+                   "pushl %edx\n\t"
+                   "pushl %eax\n\t"
+                   "pushl %ecx\n\t"
+                   "jmp " __ASM_STDCALL("__regs__allshl", 12) )
+
+
+LONGLONG __stdcall __regs__allshr( LONGLONG a, unsigned char b )
 {
-    return a << b;
+    const LARGE_INTEGER x = { .QuadPart = a };
+    LARGE_INTEGER ret;
+
+    if (b >= 32)
+    {
+        ret.HighPart = x.HighPart >> 31;
+        if (b >= 64)
+            ret.LowPart = x.HighPart >> 31;
+        else
+            ret.LowPart = x.HighPart >> (b & 31);
+    }
+    else
+    {
+        ret.HighPart = x.HighPart >> b;
+        ret.LowPart = (x.HighPart << (32 - b)) | (x.LowPart >> b);
+    }
+    return ret.QuadPart;
 }
 
 /******************************************************************************
  *        _allshr   (NTDLL.@)
- *
- * Shift a 64 bit integer to the right.
- *
- * PARAMS
- *  a [I] Initial number.
- *  b [I] Number to shift a by to the right.
- *
- * RETURNS
- *  The right-shifted value.
  */
-LONGLONG WINAPI _allshr( LONGLONG a, LONG b )
+__ASM_GLOBAL_FUNC( _allshr,
+                   "xchgl (%esp),%ecx\n\t"
+                   "pushl %edx\n\t"
+                   "pushl %eax\n\t"
+                   "pushl %ecx\n\t"
+                   "jmp " __ASM_STDCALL("__regs__allshr", 12) )
+
+
+ULONGLONG __stdcall __regs__aullshr( ULONGLONG a, unsigned char b )
 {
-    return a >> b;
+    const ULARGE_INTEGER x = { .QuadPart = a };
+    ULARGE_INTEGER ret;
+
+    if (b >= 32)
+    {
+        ret.HighPart = 0;
+        if (b >= 64)
+            ret.LowPart = 0;
+        else
+            ret.LowPart = x.HighPart >> (b & 31);
+    }
+    else
+    {
+        ret.HighPart = x.HighPart >> b;
+        ret.LowPart = (x.HighPart << (32 - b)) | (x.LowPart >> b);
+    }
+    return ret.QuadPart;
 }
+
+/******************************************************************************
+ *        _allshr   (NTDLL.@)
+ */
+__ASM_GLOBAL_FUNC( _aullshr,
+                   "xchgl (%esp),%ecx\n\t"
+                   "pushl %edx\n\t"
+                   "pushl %eax\n\t"
+                   "pushl %ecx\n\t"
+                   "jmp " __ASM_STDCALL("__regs__aullshr", 12) )
+
 
 /******************************************************************************
  *        _alldvrm   (NTDLL.@)
@@ -897,23 +960,6 @@ ULONGLONG WINAPI _aullrem( ULONGLONG a, ULONGLONG b )
     ULONGLONG r;
     udivmod(a, b, &r);
     return r;
-}
-
-/******************************************************************************
- *        _aullshr   (NTDLL.@)
- *
- * Shift a 64 bit unsigned integer to the right.
- *
- * PARAMS
- *  a [I] Initial number.
- *  b [I] Number to shift a by to the right.
- *
- * RETURNS
- *  The right-shifted value.
- */
-ULONGLONG WINAPI _aullshr( ULONGLONG a, LONG b )
-{
-    return a >> b;
 }
 
 /******************************************************************************

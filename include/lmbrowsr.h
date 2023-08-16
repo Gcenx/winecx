@@ -21,8 +21,6 @@
 #ifndef __WINE_LMBROWSR_H
 #define __WINE_LMBROWSR_H
 
-#include "wine/winheader_enter.h"
-
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,7 +43,5 @@ NET_API_STATUS WINAPI I_BrowserQueryEmulatedDomains(
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

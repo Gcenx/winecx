@@ -7,8 +7,6 @@
 #ifndef _IME_
 #define _IME_
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -172,6 +170,4 @@ typedef struct tagSTRINGEXSTRUCT {
 #ifdef __cplusplus
 }
 #endif
-#include "wine/winheader_exit.h"
-
 #endif

@@ -18,8 +18,6 @@
 #ifndef __WINE_SSPI_H__
 #define __WINE_SSPI_H__
 
-#include "wine/winheader_enter.h"
-
 /* FIXME: #include <sdkddkver.h> */
 
 #ifdef __cplusplus
@@ -523,7 +521,7 @@ typedef struct _SecPkgContext_StreamSizes
     ULONG cbHeader;
     ULONG cbTrailer;
     ULONG cbMaximumMessage;
-    ULONG cbBuffers;
+    ULONG cBuffers;
     ULONG cbBlockSize;
 } SecPkgContext_StreamSizes, *PSecPkgContext_StreamSizes;
 
@@ -929,7 +927,5 @@ typedef PSecurityFunctionTableW (SEC_ENTRY *INIT_SECURITY_INTERFACE_W)(void);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* ndef __WINE_SSPI_H__ */

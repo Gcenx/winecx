@@ -20,6 +20,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <stdarg.h>
@@ -39,20 +43,20 @@
 
 /* avoid conflict with field names in included win32 headers */
 #undef Status
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winuser.h"
-#include "wine/unicode.h"
 
 #include "x11drv.h"
+#include "wingdi.h"
+#include "winuser.h"
+
 #include "wine/debug.h"
 #include "wine/server.h"
 #include "mwm.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
+WINE_DECLARE_DEBUG_CHANNEL(systray);
 
 #define _NET_WM_MOVERESIZE_SIZE_TOPLEFT      0
 #define _NET_WM_MOVERESIZE_SIZE_TOP          1
@@ -70,8 +74,13 @@ WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 #define _NET_WM_STATE_ADD     1
 #define _NET_WM_STATE_TOGGLE  2
 
+#define SYSTEM_TRAY_REQUEST_DOCK    0
+#define SYSTEM_TRAY_BEGIN_MESSAGE   1
+#define SYSTEM_TRAY_CANCEL_MESSAGE  2
+
 static const unsigned int net_wm_state_atoms[NB_NET_WM_STATES] =
 {
+    XATOM__KDE_NET_WM_STATE_SKIP_SWITCHER,
     XATOM__NET_WM_STATE_FULLSCREEN,
     XATOM__NET_WM_STATE_ABOVE,
     XATOM__NET_WM_STATE_MAXIMIZED_VERT,
@@ -174,7 +183,7 @@ HWND *build_hwnd_list(void)
 {
     NTSTATUS status;
     HWND *list;
-    UINT count = 128;
+    ULONG count = 128;
 
     for (;;)
     {
@@ -213,7 +222,7 @@ static struct x11drv_win_data *alloc_win_data( Display *display, HWND hwnd )
 {
     struct x11drv_win_data *data;
 
-    if ((data = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data))))
+    if ((data = calloc( 1, sizeof(*data) )))
     {
         data->display = display;
         data->vis = default_visual;
@@ -243,14 +252,17 @@ static BOOL is_window_managed( HWND hwnd, UINT swp_flags, const RECT *window_rec
      */
     if (1)
     {
-        char class[80];
-        GetClassNameA(hwnd,class,sizeof class);
+        static const WCHAR launcherW[] = {'d','e','v','c','a','t','_','l','a','u','n','c','h','e','r',0};
+        static const WCHAR netuiW[] = {'N','e','t',' ','U','I',' ','T','o','o','l',' ','W','i','n','d','o','w',0};
+        WCHAR class[80];
+        UNICODE_STRING name = { .Buffer = class, .MaximumLength = sizeof(class) };
+        NtUserGetClassName( hwnd, FALSE, &name );
 
-        if (strcmp(class,"devcat_launcher") == 0)
+        if (wcscmp(class,launcherW) == 0)
             return FALSE;
 
         /* Office 2010 right-click menus, hack for bug 15617. */
-        if (strcmp(class, "Net UI Tool Window") == 0)
+        if (wcscmp(class, netuiW) == 0)
             return FALSE;
     }
 
@@ -270,70 +282,108 @@ static BOOL is_window_managed( HWND hwnd, UINT swp_flags, const RECT *window_rec
      */
     if (1)
     {
-        char class[80], *p;
-        GetClassNameA(hwnd,class,sizeof class);
-        ex_style = GetWindowLongW( hwnd, GWL_EXSTYLE );
+        static const WCHAR menuW[] = {'#','3','2','7','7','0',0};
+        static const WCHAR splashW[] = {'S','p','l','a','s','h','W','n','d',0};
+        static const WCHAR itunesW[] = {'i','T','u','n','e','s',0};
+        static const WCHAR qtplayermainW[] = {'Q','u','i','c','k','T','i','m','e','P','l','a','y','e','r','M','a','i','n',0};
+        static const WCHAR qtplayerW[] = {'Q','u','i','c','k','T','i','m','e','P','l','a','y','e','r','.','e','x','e',0};
+        static const WCHAR psfloatW[] = {'P','S','F','l','o','a','t','C',0};
+        static const WCHAR msosplashW[] = {'M','s','o','S','p','l','a','s','h',0};
+        static const WCHAR ieframeW[] = {'I','E','F','r','a','m','e',0};
+        static const WCHAR tfrmsplashW[] = {'T','f','r','m','S','p','l','a','s','h',0};
+        static const WCHAR ebusetupW[] = {'E','B','U','S','e','t','u','p','W','n','d',0};
+        static const WCHAR wtllineW[] = {'W','T','L','_','L','i','n','e','S','t','y','l','e','C','o','l','o','r','D','D',0};
+        static const WCHAR wtlpatternW[] = {'W','T','L','_','P','a','t','t','e','r','n','C','o','l','o','r','D','D',0};
+        static const WCHAR dlgcacW[] = {'D','l','g','c','a','c','C','l','s','N','a','m','e',0};
+        static const WCHAR popupW[] = {'p','o','p','u','p','s','h','a','d','o','w',0};
+        static const WCHAR relistboxW[] = {'R','E','L','i','s','t','B','o','x','2','0','W',0};
+        static const WCHAR nuidialogW[] = {'N','U','I','D','i','a','l','o','g',0};
+        static const WCHAR sessionW[] = {'S','e','s','s','i','o','n','C','h','a','t','R','o','o','m','D','e','t','a','i','l','W','n','d',0};
+        static const WCHAR net_ui_tool_window_layeredW[] = {'N','e','t',' ','U','I',' ','T','o','o','l',' ','W','i','n','d','o','w',' ','L','a','y','e','r','e','d',0};
+        WCHAR *p, class[80];
+        UNICODE_STRING name = { .Buffer = class, .MaximumLength = sizeof(class) };
+        NtUserGetClassName( hwnd, FALSE, &name );
+
+        ex_style = NtUserGetWindowLongW( hwnd, GWL_EXSTYLE );
         /*
          * In Scientific Word, the startup dialog should be managed.
          * In SAP Netweaver, the tooltips should not (WS_EX_TOPMOST).
          */
-        if ( (strcmp(class,"#32770")==0) &&
+        if ( (wcscmp(class,menuW)==0) &&
             !(ex_style & WS_EX_TOPMOST) )
             return TRUE;
-        if (strcmp(class,"SplashWnd")==0)
+        if (wcscmp(class,splashW)==0)
             return TRUE;
-        if (strcmp(class,"iTunes")==0)
+        if (wcscmp(class,itunesW)==0)
             return TRUE;
-        if (strcmp(class,"QuickTimePlayerMain") == 0)
+        if (wcscmp(class,qtplayermainW) == 0)
             return TRUE; /* QuickTime 7.1 */
-        if ((p = strrchr(class, '\\')) && strcmp(p+1,"QuickTimePlayer.exe") == 0)
+        if ((p = wcsrchr(class, '\\')) && wcscmp(p+1,qtplayerW) == 0)
             return TRUE; /* QuickTime 6.x */
-        if (strcmp(class,"PSFloatC")==0)
+        if (wcscmp(class,psfloatW)==0)
             return TRUE;
         /* the office 97 splash screen is not a toolbar */
-        if (strcmp(class,"MsoSplash") == 0)
+        if (wcscmp(class,msosplashW) == 0)
             return TRUE;
-        if ((strcmp(class,"IEFrame") == 0) && (style & WS_SYSMENU))
+        if ((wcscmp(class,ieframeW) == 0) && (style & WS_SYSMENU))
             return TRUE;
         /* for CRPSClient for WorldVistA */
-        if (strcmp(class,"TfrmSplash") == 0)
+        if (wcscmp(class,tfrmsplashW) == 0)
             return TRUE;
         /* Halo setup window */
-        if (strcmp(class,"EBUSetupWnd") == 0)
+        if (wcscmp(class,ebusetupW) == 0)
             return TRUE;
         /* AWR line style popup */
-        if (strcmp(class,"WTL_LineStyleColorDD") == 0)
+        if (wcscmp(class,wtllineW) == 0)
             return TRUE;
         /* AWR fill style popup */
-        if (strcmp(class,"WTL_PatternColorDD") == 0)
+        if (wcscmp(class,wtlpatternW) == 0)
             return TRUE;
         /* Quickbooks InstallShield window */
-        if (strcmp(class,"DlgcacClsName") == 0)
+        if (wcscmp(class,dlgcacW) == 0)
             return TRUE;
         /* WeChat popup shadow, bug 18028 */
-        if (strcmp(class,"popupshadow") == 0)
+        if (wcscmp(class,popupW) == 0)
+        {
+            WCHAR parent_class[80];
+            UNICODE_STRING parent_name = { .Buffer = parent_class, .MaximumLength = sizeof(parent_class) };
+
+            /* Bug 21523 WeChat chat room detail window doesn't show. */
+            NtUserGetClassName( NtUserGetParent( hwnd ), FALSE, &parent_name );
+            if (wcscmp( parent_class, sessionW ) == 0)
+                return FALSE;
+
             return TRUE;
+        }
 
 #ifdef __APPLE__
+        {
+            static const WCHAR eveW[] = {'e','v','e','S','p','l','a','t','t','e','r',0};
+            static const WCHAR triuiW[] = {'t','r','i','u','i','S','c','r','e','e','n',0};
         /* Macos does not like those windows to be managed, but Linux needs that(handled below in the
          * POPUP | SYSMENU case
          */
         /* EVE online - Does not redraw otherwise*/
-        if(strcmp(class, "eveSplatter") == 0 || strcmp(class, "triuiScreen") == 0)
+        if(wcscmp(class, eveW) == 0 || wcscmp(class, triuiW) == 0)
             return FALSE;
+        }
 #endif
 
         /* for outlook 2003 completion window */
-        if (strcmp(class,"REListBox20W") == 0 && (style & WS_POPUP) &&
+        if (wcscmp(class,relistboxW) == 0 && (style & WS_POPUP) &&
             (style & WS_SYSMENU))
             return FALSE;
 
         /* Outlook 2003 "Toast" window that appears when a new message is
          * received. Should not be managed to prevent it grabbing keyboard
          * focus */
-        if (strcmp(class,"NUIDialog") == 0 &&
+        if (wcscmp(class,nuidialogW) == 0 &&
             (style & (WS_POPUP|WS_SYSMENU)) == (WS_POPUP|WS_SYSMENU))
             return FALSE;
+
+        /* Bug 22140: Office 2010/2016 Right click menu items not functioning */
+        if (wcscmp(class,net_ui_tool_window_layeredW) == 0)
+            return TRUE;
     }
 
     if (style & WS_POPUP)
@@ -495,7 +545,7 @@ static void sync_window_region( struct x11drv_win_data *data, HRGN win_region )
                                      data->window_rect.top - data->whole_rect.top,
                                      (XRectangle *)pRegionData->Buffer,
                                      pRegionData->rdh.nCount, ShapeSet, YXBanded );
-            HeapFree(GetProcessHeap(), 0, pRegionData);
+            free( pRegionData );
             data->shaped = TRUE;
         }
     }
@@ -527,22 +577,23 @@ static void sync_window_opacity( Display *display, Window win,
  */
 static void sync_window_text( Display *display, Window win, const WCHAR *text )
 {
-    UINT count;
+    DWORD count, len;
     char *buffer, *utf8_buffer;
     XTextProperty prop;
 
     /* allocate new buffer for window text */
-    count = WideCharToMultiByte(CP_UNIXCP, 0, text, -1, NULL, 0, NULL, NULL);
-    if (!(buffer = HeapAlloc( GetProcessHeap(), 0, count ))) return;
-    WideCharToMultiByte(CP_UNIXCP, 0, text, -1, buffer, count, NULL, NULL);
+    len = lstrlenW( text );
+    count = len * 3 + 1;
+    if (!(buffer = malloc( count ))) return;
+    ntdll_wcstoumbs( text, len + 1, buffer, count, FALSE );
 
-    count = WideCharToMultiByte(CP_UTF8, 0, text, strlenW(text), NULL, 0, NULL, NULL);
-    if (!(utf8_buffer = HeapAlloc( GetProcessHeap(), 0, count )))
+    RtlUnicodeToUTF8N( NULL, 0, &count, text, len * sizeof(WCHAR) );
+    if (!(utf8_buffer = malloc( count )))
     {
-        HeapFree( GetProcessHeap(), 0, buffer );
+        free( buffer );
         return;
     }
-    WideCharToMultiByte(CP_UTF8, 0, text, strlenW(text), utf8_buffer, count, NULL, NULL);
+    RtlUnicodeToUTF8N( utf8_buffer, count, &count, text, len * sizeof(WCHAR) );
 
     if (XmbTextListToTextProperty( display, &buffer, 1, XStdICCTextStyle, &prop ) == Success)
     {
@@ -558,8 +609,8 @@ static void sync_window_text( Display *display, Window win, const WCHAR *text )
     XChangeProperty( display, win, x11drv_atom(_NET_WM_NAME), x11drv_atom(UTF8_STRING),
                      8, PropModeReplace, (unsigned char *) utf8_buffer, count);
 
-    HeapFree( GetProcessHeap(), 0, utf8_buffer );
-    HeapFree( GetProcessHeap(), 0, buffer );
+    free( utf8_buffer );
+    free( buffer );
 }
 
 
@@ -591,7 +642,7 @@ static unsigned long *get_bitmap_argb( HDC hdc, HBITMAP color, HBITMAP mask, uns
     info->bmiHeader.biClrUsed = 0;
     info->bmiHeader.biClrImportant = 0;
     *size = bm.bmWidth * bm.bmHeight + 2;
-    if (!(bits = HeapAlloc( GetProcessHeap(), 0, *size * sizeof(long) ))) goto failed;
+    if (!(bits = malloc( *size * sizeof(long) ))) goto failed;
     if (!NtGdiGetDIBitsInternal( hdc, color, 0, bm.bmHeight, bits + 2, info, DIB_RGB_COLORS, 0, 0 ))
         goto failed;
 
@@ -607,14 +658,14 @@ static unsigned long *get_bitmap_argb( HDC hdc, HBITMAP color, HBITMAP mask, uns
         /* generate alpha channel from the mask */
         info->bmiHeader.biBitCount = 1;
         info->bmiHeader.biSizeImage = width_bytes * bm.bmHeight;
-        if (!(mask_bits = HeapAlloc( GetProcessHeap(), 0, info->bmiHeader.biSizeImage ))) goto failed;
+        if (!(mask_bits = malloc( info->bmiHeader.biSizeImage ))) goto failed;
         if (!NtGdiGetDIBitsInternal( hdc, mask, 0, bm.bmHeight, mask_bits, info, DIB_RGB_COLORS, 0, 0 ))
             goto failed;
         ptr = bits + 2;
         for (i = 0; i < bm.bmHeight; i++)
             for (j = 0; j < bm.bmWidth; j++, ptr++)
                 if (!((mask_bits[i * width_bytes + j / 8] << (j % 8)) & 0x80)) *ptr |= 0xff000000;
-        HeapFree( GetProcessHeap(), 0, mask_bits );
+        free( mask_bits );
     }
 
     /* convert to array of longs */
@@ -624,8 +675,8 @@ static unsigned long *get_bitmap_argb( HDC hdc, HBITMAP color, HBITMAP mask, uns
     return (unsigned long *)bits;
 
 failed:
-    HeapFree( GetProcessHeap(), 0, bits );
-    HeapFree( GetProcessHeap(), 0, mask_bits );
+    free( bits );
+    free( mask_bits );
     return NULL;
 }
 
@@ -651,12 +702,12 @@ static BOOL create_icon_pixmaps( HDC hdc, const ICONINFO *icon, Pixmap *icon_ret
     info->bmiHeader.biBitCount = 0;
     if (!(lines = NtGdiGetDIBitsInternal( hdc, icon->hbmColor, 0, 0, NULL, info, DIB_RGB_COLORS, 0, 0 )))
         goto failed;
-    if (!(bits.ptr = HeapAlloc( GetProcessHeap(), 0, info->bmiHeader.biSizeImage ))) goto failed;
+    if (!(bits.ptr = malloc( info->bmiHeader.biSizeImage ))) goto failed;
     if (!NtGdiGetDIBitsInternal( hdc, icon->hbmColor, 0, lines, bits.ptr, info, DIB_RGB_COLORS, 0, 0 ))
         goto failed;
 
     color_pixmap = create_pixmap_from_image( hdc, &vis, info, &bits, DIB_RGB_COLORS );
-    HeapFree( GetProcessHeap(), 0, bits.ptr );
+    free( bits.ptr );
     bits.ptr = NULL;
     if (!color_pixmap) goto failed;
 
@@ -664,7 +715,7 @@ static BOOL create_icon_pixmaps( HDC hdc, const ICONINFO *icon, Pixmap *icon_ret
     info->bmiHeader.biBitCount = 0;
     if (!(lines = NtGdiGetDIBitsInternal( hdc, icon->hbmMask, 0, 0, NULL, info, DIB_RGB_COLORS, 0, 0 )))
         goto failed;
-    if (!(bits.ptr = HeapAlloc( GetProcessHeap(), 0, info->bmiHeader.biSizeImage ))) goto failed;
+    if (!(bits.ptr = malloc( info->bmiHeader.biSizeImage ))) goto failed;
     if (!NtGdiGetDIBitsInternal( hdc, icon->hbmMask, 0, lines, bits.ptr, info, DIB_RGB_COLORS, 0, 0 ))
         goto failed;
 
@@ -673,7 +724,7 @@ static BOOL create_icon_pixmaps( HDC hdc, const ICONINFO *icon, Pixmap *icon_ret
 
     vis.depth = 1;
     mask_pixmap = create_pixmap_from_image( hdc, &vis, info, &bits, DIB_RGB_COLORS );
-    HeapFree( GetProcessHeap(), 0, bits.ptr );
+    free( bits.ptr );
     bits.ptr = NULL;
     if (!mask_pixmap) goto failed;
 
@@ -683,10 +734,15 @@ static BOOL create_icon_pixmaps( HDC hdc, const ICONINFO *icon, Pixmap *icon_ret
 
 failed:
     if (color_pixmap) XFreePixmap( gdi_display, color_pixmap );
-    HeapFree( GetProcessHeap(), 0, bits.ptr );
+    free( bits.ptr );
     return FALSE;
 }
 
+
+static HICON get_icon_info( HICON icon, ICONINFO *ii )
+{
+    return icon && NtUserGetIconInfo( icon, ii, NULL, NULL, NULL, 0 ) ? icon : NULL;
+}
 
 /***********************************************************************
  *              fetch_icon_data
@@ -700,23 +756,33 @@ static void fetch_icon_data( HWND hwnd, HICON icon_big, HICON icon_small )
     unsigned long *bits;
     Pixmap icon_pixmap, mask_pixmap;
 
+    icon_big = get_icon_info( icon_big, &ii );
     if (!icon_big)
     {
-        icon_big = (HICON)send_message( hwnd, WM_GETICON, ICON_BIG, 0 );
-        if (!icon_big) icon_big = (HICON)NtUserGetClassLongPtrW( hwnd, GCLP_HICON );
-        if (!icon_big) icon_big = LoadIconW( 0, (LPWSTR)IDI_WINLOGO );
-    }
-    if (!icon_small)
-    {
-        icon_small = (HICON)send_message( hwnd, WM_GETICON, ICON_SMALL, 0 );
-        if (!icon_small) icon_small = (HICON)NtUserGetClassLongPtrW( hwnd, GCLP_HICONSM );
+        icon_big = get_icon_info( (HICON)send_message( hwnd, WM_GETICON, ICON_BIG, 0 ), &ii );
+        if (!icon_big)
+            icon_big = get_icon_info( (HICON)NtUserGetClassLongPtrW( hwnd, GCLP_HICON ), &ii );
+        if (!icon_big)
+        {
+            icon_big = LoadImageW( 0, (const WCHAR *)IDI_WINLOGO, IMAGE_ICON, 0, 0,
+                                   LR_SHARED | LR_DEFAULTSIZE );
+            icon_big = get_icon_info( icon_big, &ii );
+        }
     }
 
-    if (!NtUserGetIconInfo( icon_big, &ii, NULL, NULL, NULL, 0 )) return;
+    icon_small = get_icon_info( icon_small, &ii_small );
+    if (!icon_small)
+    {
+        icon_small = get_icon_info( (HICON)send_message( hwnd, WM_GETICON, ICON_SMALL, 0 ), &ii_small );
+        if (!icon_small)
+            icon_small = get_icon_info( (HICON)NtUserGetClassLongPtrW( hwnd, GCLP_HICONSM ), &ii_small );
+    }
+
+    if (!icon_big) return;
 
     hDC = NtGdiCreateCompatibleDC(0);
     bits = get_bitmap_argb( hDC, ii.hbmColor, ii.hbmMask, &size );
-    if (bits && NtUserGetIconInfo( icon_small, &ii_small, NULL, NULL, NULL, 0 ))
+    if (bits && icon_small)
     {
         unsigned int size_small;
         unsigned long *bits_small, *new;
@@ -724,15 +790,14 @@ static void fetch_icon_data( HWND hwnd, HICON icon_big, HICON icon_small )
         if ((bits_small = get_bitmap_argb( hDC, ii_small.hbmColor, ii_small.hbmMask, &size_small )) &&
             (bits_small[0] != bits[0] || bits_small[1] != bits[1]))  /* size must be different */
         {
-            if ((new = HeapReAlloc( GetProcessHeap(), 0, bits,
-                                    (size + size_small) * sizeof(unsigned long) )))
+            if ((new = realloc( bits, (size + size_small) * sizeof(unsigned long) )))
             {
                 bits = new;
                 memcpy( bits + size, bits_small, size_small * sizeof(unsigned long) );
                 size += size_small;
             }
         }
-        HeapFree( GetProcessHeap(), 0, bits_small );
+        free( bits_small );
         NtGdiDeleteObjectApp( ii_small.hbmColor );
         NtGdiDeleteObjectApp( ii_small.hbmMask );
     }
@@ -747,7 +812,7 @@ static void fetch_icon_data( HWND hwnd, HICON icon_big, HICON icon_small )
     {
         if (data->icon_pixmap) XFreePixmap( gdi_display, data->icon_pixmap );
         if (data->icon_mask) XFreePixmap( gdi_display, data->icon_mask );
-        HeapFree( GetProcessHeap(), 0, data->icon_bits );
+        free( data->icon_bits );
         data->icon_pixmap = icon_pixmap;
         data->icon_mask = mask_pixmap;
         data->icon_bits = bits;
@@ -758,7 +823,7 @@ static void fetch_icon_data( HWND hwnd, HICON icon_big, HICON icon_small )
     {
         if (icon_pixmap) XFreePixmap( gdi_display, icon_pixmap );
         if (mask_pixmap) XFreePixmap( gdi_display, mask_pixmap );
-        HeapFree( GetProcessHeap(), 0, bits );
+        free( bits );
     }
 }
 
@@ -807,7 +872,7 @@ static void set_size_hints( struct x11drv_win_data *data, DWORD style )
 /***********************************************************************
  *              set_mwm_hints
  */
-static void set_mwm_hints( struct x11drv_win_data *data, DWORD style, DWORD ex_style )
+static void set_mwm_hints( struct x11drv_win_data *data, UINT style, UINT ex_style )
 {
     MwmHints mwm_hints;
 
@@ -1044,12 +1109,52 @@ void update_user_time( Time time )
     XUnlockDisplay( gdi_display );
 }
 
+/* Update _NET_WM_FULLSCREEN_MONITORS when _NET_WM_STATE_FULLSCREEN is set to support fullscreen
+ * windows spanning multiple monitors */
+static void update_net_wm_fullscreen_monitors( struct x11drv_win_data *data )
+{
+    long monitors[4];
+    XEvent xev;
+
+    if (!(data->net_wm_state & (1 << NET_WM_STATE_FULLSCREEN)) || is_virtual_desktop())
+        return;
+
+    /* If the current display device handler can not detect dynamic device changes, do not use
+     * _NET_WM_FULLSCREEN_MONITORS because xinerama_get_fullscreen_monitors() may report wrong
+     * indices because of stale xinerama monitor information */
+    if (!X11DRV_DisplayDevices_SupportEventHandlers())
+        return;
+
+    if (!xinerama_get_fullscreen_monitors( &data->whole_rect, monitors ))
+        return;
+
+    if (!data->mapped)
+    {
+        XChangeProperty( data->display, data->whole_window, x11drv_atom(_NET_WM_FULLSCREEN_MONITORS),
+                         XA_CARDINAL, 32, PropModeReplace, (unsigned char *)monitors, 4 );
+    }
+    else
+    {
+        xev.xclient.type = ClientMessage;
+        xev.xclient.window = data->whole_window;
+        xev.xclient.message_type = x11drv_atom(_NET_WM_FULLSCREEN_MONITORS);
+        xev.xclient.serial = 0;
+        xev.xclient.display = data->display;
+        xev.xclient.send_event = True;
+        xev.xclient.format = 32;
+        xev.xclient.data.l[4] = 1;
+        memcpy( xev.xclient.data.l, monitors, sizeof(monitors) );
+        XSendEvent( data->display, root_window, False,
+                    SubstructureRedirectMask | SubstructureNotifyMask, &xev );
+    }
+}
+
 /***********************************************************************
  *     update_net_wm_states
  */
 void update_net_wm_states( struct x11drv_win_data *data )
 {
-    DWORD i, style, ex_style, new_state = 0;
+    UINT i, style, ex_style, new_state = 0;
 
     if (!data->managed) return;
     if (data->whole_window == root_window) return;
@@ -1072,8 +1177,9 @@ void update_net_wm_states( struct x11drv_win_data *data )
         new_state |= (1 << NET_WM_STATE_ABOVE);
     if (!data->add_taskbar)
     {
-        if (data->skip_taskbar || (ex_style & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)))
-            new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR) | (1 << NET_WM_STATE_SKIP_PAGER);
+        if (data->skip_taskbar || (ex_style & WS_EX_NOACTIVATE)
+            || (ex_style & WS_EX_TOOLWINDOW && !(ex_style & WS_EX_APPWINDOW)))
+            new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR) | (1 << NET_WM_STATE_SKIP_PAGER) | (1 << KDE_NET_WM_STATE_SKIP_SWITCHER);
         else if (!(ex_style & WS_EX_APPWINDOW) && NtUserGetWindowRelative( data->hwnd, GW_OWNER ))
             new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR);
     }
@@ -1124,6 +1230,7 @@ void update_net_wm_states( struct x11drv_win_data *data )
         }
     }
     data->net_wm_state = new_state;
+    update_net_wm_fullscreen_monitors( data );
 }
 
 /***********************************************************************
@@ -1216,6 +1323,7 @@ static void map_window( HWND hwnd, DWORD new_style )
 
         data->mapped = TRUE;
         data->iconic = (new_style & WS_MINIMIZE) != 0;
+        update_net_wm_fullscreen_monitors( data );
     }
     release_win_data( data );
 }
@@ -1409,9 +1517,9 @@ static void sync_window_position( struct x11drv_win_data *data,
 #endif
 
     TRACE( "win %p/%lx pos %d,%d,%dx%d after %lx changes=%x serial=%lu\n",
-           data->hwnd, data->whole_window, data->whole_rect.left, data->whole_rect.top,
-           data->whole_rect.right - data->whole_rect.left,
-           data->whole_rect.bottom - data->whole_rect.top,
+           data->hwnd, data->whole_window, (int)data->whole_rect.left, (int)data->whole_rect.top,
+           (int)(data->whole_rect.right - data->whole_rect.left),
+           (int)(data->whole_rect.bottom - data->whole_rect.top),
            changes.sibling, mask, data->configure_serial );
 }
 
@@ -1539,9 +1647,22 @@ Window get_dummy_parent(void)
         attrib.override_redirect = True;
         attrib.border_pixel = 0;
         attrib.colormap = default_colormap;
+
+#ifdef HAVE_LIBXSHAPE
+        {
+            static XRectangle empty_rect;
+            dummy_parent = XCreateWindow( gdi_display, root_window, 0, 0, 1, 1, 0,
+                                          default_visual.depth, InputOutput, default_visual.visual,
+                                          CWColormap | CWBorderPixel | CWOverrideRedirect, &attrib );
+            XShapeCombineRectangles( gdi_display, dummy_parent, ShapeBounding, 0, 0, &empty_rect, 1,
+                                     ShapeSet, YXBanded );
+        }
+#else
         dummy_parent = XCreateWindow( gdi_display, root_window, -1, -1, 1, 1, 0, default_visual.depth,
                                       InputOutput, default_visual.visual,
                                       CWColormap | CWBorderPixel | CWOverrideRedirect, &attrib );
+        WARN("Xshape support is not compiled in. Applications under XWayland may have poor performance.");
+#endif
         XMapWindow( gdi_display, dummy_parent );
     }
     return dummy_parent;
@@ -1845,10 +1966,10 @@ void X11DRV_DestroyWindow( HWND hwnd )
     if (data->icon_pixmap) XFreePixmap( gdi_display, data->icon_pixmap );
     if (data->icon_mask) XFreePixmap( gdi_display, data->icon_mask );
     if (data->client_colormap) XFreeColormap( data->display, data->client_colormap );
-    HeapFree( GetProcessHeap(), 0, data->icon_bits );
+    free( data->icon_bits );
     XDeleteContext( gdi_display, (XID)hwnd, win_data_context );
     release_win_data( data );
-    HeapFree( GetProcessHeap(), 0, data );
+    free( data );
     destroy_gl_drawable( hwnd );
     wine_vk_surface_destroy( hwnd );
 }
@@ -1935,20 +2056,21 @@ BOOL X11DRV_CreateDesktopWindow( HWND hwnd )
 }
 
 
-static WNDPROC desktop_orig_wndproc;
-
 #define WM_WINE_NOTIFY_ACTIVITY WM_USER
 #define WM_WINE_DELETE_TAB      (WM_USER + 1)
 #define WM_WINE_ADD_TAB         (WM_USER + 2)
 
-static LRESULT CALLBACK desktop_wndproc_wrapper( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
+/**********************************************************************
+ *           DesktopWindowProc   (X11DRV.@)
+ */
+LRESULT X11DRV_DesktopWindowProc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
 {
     switch (msg)
     {
     case WM_WINE_NOTIFY_ACTIVITY:
     {
-        static ULONGLONG last = 0;
-        ULONGLONG now = GetTickCount64();
+        static ULONG last = 0;
+        ULONG now = NtGetTickCount();
         /* calling XResetScreenSaver too often can cause performance
          * problems, so throttle it */
         if (now > last + 5000)
@@ -1965,8 +2087,11 @@ static LRESULT CALLBACK desktop_wndproc_wrapper( HWND hwnd, UINT msg, WPARAM wp,
     case WM_WINE_ADD_TAB:
         send_notify_message( (HWND)wp, WM_X11DRV_ADD_TAB, 0, 0 );
         break;
+    case WM_DISPLAYCHANGE:
+        X11DRV_resize_desktop();
+        break;
     }
-    return desktop_orig_wndproc( hwnd, msg, wp, lp );
+    return NtUserMessageCall( hwnd, msg, wp, lp, 0, NtUserDefWindowProc, FALSE );
 }
 
 /**********************************************************************
@@ -1979,9 +2104,6 @@ BOOL X11DRV_CreateWindow( HWND hwnd )
         struct x11drv_thread_data *data = x11drv_init_thread_data();
         XSetWindowAttributes attr;
 
-        desktop_orig_wndproc = (WNDPROC)NtUserSetWindowLongPtr( hwnd, GWLP_WNDPROC,
-                                                                (LONG_PTR)desktop_wndproc_wrapper, FALSE );
-
         /* create the cursor clipping window */
         attr.override_redirect = TRUE;
         attr.event_mask = StructureNotifyMask | FocusChangeMask;
@@ -1990,7 +2112,6 @@ BOOL X11DRV_CreateWindow( HWND hwnd )
                                            CWOverrideRedirect | CWEventMask, &attr );
         XFlush( data->display );
         NtUserSetProp( hwnd, clip_window_prop, (HANDLE)data->clip_window );
-        X11DRV_InitClipboard();
         X11DRV_DisplayDevices_RegisterEventHandlers();
     }
     return TRUE;
@@ -2068,29 +2189,6 @@ static struct x11drv_win_data *X11DRV_create_win_data( HWND hwnd, const RECT *wi
 }
 
 
-/* window procedure for foreign windows */
-static LRESULT WINAPI foreign_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
-{
-    switch(msg)
-    {
-    case WM_WINDOWPOSCHANGED:
-        update_systray_balloon_position();
-        break;
-    case WM_PARENTNOTIFY:
-        if (LOWORD(wparam) == WM_DESTROY)
-        {
-            TRACE( "%p: got parent notify destroy for win %lx\n", hwnd, lparam );
-            NtUserPostMessage( hwnd, WM_CLOSE, 0, 0 );  /* so that we come back here once the child is gone */
-        }
-        return 0;
-    case WM_CLOSE:
-        if (NtUserGetWindowRelative( hwnd, GW_CHILD )) return 0;  /* refuse to die if we still have children */
-        break;
-    }
-    return DefWindowProcW( hwnd, msg, wparam, lparam );
-}
-
-
 /***********************************************************************
  *		create_foreign_window
  *
@@ -2107,17 +2205,21 @@ HWND create_foreign_window( Display *display, Window xwin )
     Window *xchildren;
     unsigned int nchildren;
     XWindowAttributes attr;
-    DWORD style = WS_CLIPCHILDREN;
+    UINT style = WS_CLIPCHILDREN;
+    UNICODE_STRING class_name;
 
     if (!class_registered)
     {
+        UNICODE_STRING version = { 0 };
         WNDCLASSEXW class;
 
         memset( &class, 0, sizeof(class) );
         class.cbSize        = sizeof(class);
-        class.lpfnWndProc   = foreign_window_proc;
+        class.lpfnWndProc   = client_foreign_window_proc;
         class.lpszClassName = classW;
-        if (!RegisterClassExW( &class ) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+        RtlInitUnicodeString( &class_name, classW );
+        if (!NtUserRegisterClassExWOW( &class, &class_name, &version, NULL, 0, 0, NULL ) &&
+            RtlGetLastWin32Error() != ERROR_CLASS_ALREADY_EXISTS)
         {
             ERR( "Could not register foreign window class\n" );
             return FALSE;
@@ -2151,12 +2253,14 @@ HWND create_foreign_window( Display *display, Window xwin )
         pos.y = attr.y;
     }
 
-    hwnd = CreateWindowW( classW, NULL, style, pos.x, pos.y, attr.width, attr.height,
-                          parent, 0, 0, NULL );
+    RtlInitUnicodeString( &class_name, classW );
+    hwnd = NtUserCreateWindowEx( 0, &class_name, &class_name, NULL, style, pos.x, pos.y,
+                                 attr.width, attr.height, parent, 0, NULL, NULL, 0, NULL,
+                                 0, FALSE );
 
     if (!(data = alloc_win_data( display, hwnd )))
     {
-        DestroyWindow( hwnd );
+        NtUserDestroyWindow( hwnd );
         return 0;
     }
     SetRect( &data->window_rect, pos.x, pos.y, pos.x + attr.width, pos.y + attr.height );
@@ -2175,6 +2279,163 @@ HWND create_foreign_window( Display *display, Window xwin )
 
     NtUserShowWindow( hwnd, SW_SHOW );
     return hwnd;
+}
+
+
+NTSTATUS x11drv_systray_init( void *arg )
+{
+    Display *display;
+
+    if (is_virtual_desktop()) return FALSE;
+
+    display = thread_init_display();
+    if (DefaultScreen( display ) == 0)
+        systray_atom = x11drv_atom(_NET_SYSTEM_TRAY_S0);
+    else
+    {
+        char systray_buffer[29]; /* strlen(_NET_SYSTEM_TRAY_S4294967295)+1 */
+        sprintf( systray_buffer, "_NET_SYSTEM_TRAY_S%u", DefaultScreen( display ) );
+        systray_atom = XInternAtom( display, systray_buffer, False );
+    }
+    XSelectInput( display, root_window, StructureNotifyMask );
+
+    return TRUE;
+}
+
+
+NTSTATUS x11drv_systray_clear( void *arg )
+{
+    HWND hwnd = *(HWND*)arg;
+    Window win = X11DRV_get_whole_window( hwnd );
+    if (win) XClearArea( gdi_display, win, 0, 0, 0, 0, True );
+    return 0;
+}
+
+
+NTSTATUS x11drv_systray_hide( void *arg )
+{
+    HWND hwnd = *(HWND*)arg;
+    struct x11drv_win_data *data;
+
+    /* make sure we don't try to unmap it, it confuses some systray docks */
+    if ((data = get_win_data( hwnd )))
+    {
+        if (data->embedded) data->mapped = FALSE;
+        release_win_data( data );
+    }
+
+    return 0;
+}
+
+
+/* find the X11 window owner the system tray selection */
+static Window get_systray_selection_owner( Display *display )
+{
+    return XGetSelectionOwner( display, systray_atom );
+}
+
+
+static void get_systray_visual_info( Display *display, Window systray_window, XVisualInfo *info )
+{
+    XVisualInfo *list, template;
+    VisualID *visual_id;
+    Atom type;
+    int format, num;
+    unsigned long count, remaining;
+
+    *info = default_visual;
+    if (XGetWindowProperty( display, systray_window, x11drv_atom(_NET_SYSTEM_TRAY_VISUAL), 0,
+                            65536/sizeof(CARD32), False, XA_VISUALID, &type, &format, &count,
+                            &remaining, (unsigned char **)&visual_id ))
+        return;
+
+    if (type == XA_VISUALID && format == 32)
+    {
+        template.visualid = visual_id[0];
+        if ((list = XGetVisualInfo( display, VisualIDMask, &template, &num )))
+        {
+            *info = list[0];
+            TRACE_(systray)( "systray window %lx got visual %lx\n", systray_window, info->visualid );
+            XFree( list );
+        }
+    }
+    XFree( visual_id );
+}
+
+
+NTSTATUS x11drv_systray_dock( void *arg )
+{
+    struct systray_dock_params *params = arg;
+    Window systray_window, window;
+    Display *display;
+    XEvent ev;
+    XSetWindowAttributes attr;
+    XVisualInfo visual;
+    struct x11drv_win_data *data;
+    UNICODE_STRING class_name;
+    BOOL layered;
+    HWND hwnd;
+
+    static const WCHAR icon_classname[] =
+        {'_','_','w','i','n','e','x','1','1','_','t','r','a','y','_','i','c','o','n',0};
+
+    if (params->event_handle)
+    {
+        XClientMessageEvent *event = (XClientMessageEvent *)(UINT_PTR)params->event_handle;
+        display = event->display;
+        systray_window = event->data.l[2];
+    }
+    else
+    {
+        display = thread_init_display();
+        if (!(systray_window = get_systray_selection_owner( display ))) return STATUS_UNSUCCESSFUL;
+    }
+
+    get_systray_visual_info( display, systray_window, &visual );
+
+    *params->layered = layered = (visual.depth == 32);
+
+    RtlInitUnicodeString( &class_name, icon_classname );
+    hwnd = NtUserCreateWindowEx( layered ? WS_EX_LAYERED : 0, &class_name, &class_name, NULL,
+                                 WS_CLIPSIBLINGS | WS_POPUP, CW_USEDEFAULT, CW_USEDEFAULT,
+                                 params->cx, params->cy, NULL, 0, NULL, params->icon, 0,
+                                 NULL, 0, FALSE );
+
+    if (!(data = get_win_data( hwnd ))) return STATUS_UNSUCCESSFUL;
+    if (layered) set_window_visual( data, &visual, TRUE );
+    make_window_embedded( data );
+    window = data->whole_window;
+    release_win_data( data );
+
+    NtUserShowWindow( hwnd, SW_SHOWNA );
+
+    TRACE_(systray)( "icon window %p/%lx\n", hwnd, window );
+
+    /* send the docking request message */
+    ev.xclient.type = ClientMessage;
+    ev.xclient.window = systray_window;
+    ev.xclient.message_type = x11drv_atom( _NET_SYSTEM_TRAY_OPCODE );
+    ev.xclient.format = 32;
+    ev.xclient.data.l[0] = CurrentTime;
+    ev.xclient.data.l[1] = SYSTEM_TRAY_REQUEST_DOCK;
+    ev.xclient.data.l[2] = window;
+    ev.xclient.data.l[3] = 0;
+    ev.xclient.data.l[4] = 0;
+    XSendEvent( display, systray_window, False, NoEventMask, &ev );
+
+    if (!layered)
+    {
+        attr.background_pixmap = ParentRelative;
+        attr.bit_gravity = ForgetGravity;
+        XChangeWindowAttributes( display, window, CWBackPixmap | CWBitGravity, &attr );
+    }
+    else
+    {
+        /* force repainig */
+        send_message( hwnd, WM_SIZE, SIZE_RESTORED, MAKELONG( params->cx, params->cy ));
+    }
+
+    return STATUS_SUCCESS;
 }
 
 
@@ -2232,6 +2493,7 @@ void X11DRV_GetDC( HDC hdc, HWND hwnd, HWND top, const RECT *win_rect,
 
     escape.code = X11DRV_SET_DRAWABLE;
     escape.mode = IncludeInferiors;
+    escape.drawable = 0;
 
     escape.dc_rect.left         = win_rect->left - top_rect->left;
     escape.dc_rect.top          = win_rect->top - top_rect->top;
@@ -2396,7 +2658,7 @@ static inline BOOL get_surface_rect( const RECT *visible_rect, RECT *surface_rec
 {
     *surface_rect = NtUserGetVirtualScreenRect();
 
-    if (!IntersectRect( surface_rect, surface_rect, visible_rect )) return FALSE;
+    if (!intersect_rect( surface_rect, surface_rect, visible_rect )) return FALSE;
     OffsetRect( surface_rect, -visible_rect->left, -visible_rect->top );
     surface_rect->left &= ~31;
     surface_rect->top  &= ~31;
@@ -2442,7 +2704,7 @@ BOOL X11DRV_WindowPosChanging( HWND hwnd, HWND insert_after, UINT swp_flags,
     if (data->use_alpha) goto done;
     if (!get_surface_rect( visible_rect, &surface_rect )) goto done;
 
-    GetWindowThreadProcessId(GetAncestor(hwnd, GA_PARENT), &pid);
+    NtUserGetWindowThread(NtUserGetAncestor(hwnd, GA_PARENT), &pid);
     if (!enable_shm_surface || pid == GetCurrentProcessId())
     {
         if (*surface) window_surface_release( *surface );
@@ -2487,7 +2749,7 @@ void X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags,
 {
     struct x11drv_thread_data *thread_data;
     struct x11drv_win_data *data;
-    DWORD new_style = NtUserGetWindowLongW( hwnd, GWL_STYLE );
+    UINT new_style = NtUserGetWindowLongW( hwnd, GWL_STYLE );
     RECT old_window_rect, old_whole_rect, old_client_rect;
     int event_type;
 
@@ -2635,12 +2897,13 @@ void X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags,
 /* check if the window icon should be hidden (i.e. moved off-screen) */
 static BOOL hide_icon( struct x11drv_win_data *data )
 {
-    static const WCHAR trayW[] = {'S','h','e','l','l','_','T','r','a','y','W','n','d',0};
+    static const WCHAR trayW[] = {'S','h','e','l','l','_','T','r','a','y','W','n','d'};
+    UNICODE_STRING str = { sizeof(trayW), sizeof(trayW), (WCHAR *)trayW };
 
     if (data->managed) return TRUE;
     /* hide icons in desktop mode when the taskbar is active */
     if (!is_virtual_desktop()) return FALSE;
-    return NtUserIsWindowVisible( FindWindowW( trayW, NULL ));
+    return NtUserIsWindowVisible( NtUserFindWindowEx( 0, 0, &str, NULL, 0 ));
 }
 
 /***********************************************************************
@@ -2854,7 +3117,7 @@ BOOL X11DRV_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWINDOWINFO *info,
 
     if (info->prcDirty)
     {
-        IntersectRect( &rect, &rect, info->prcDirty );
+        intersect_rect( &rect, &rect, info->prcDirty );
         memcpy( src_bits, dst_bits, bmi->bmiHeader.biSizeImage );
         NtGdiPatBlt( hdc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, BLACKNESS );
     }
@@ -2934,19 +3197,50 @@ LRESULT X11DRV_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
             release_win_data( data );
         }
         return 0;
-    case WM_X11DRV_RESIZE_DESKTOP:
-        X11DRV_resize_desktop( (BOOL)lp );
-        return 0;
-    case WM_X11DRV_SET_CURSOR:
+    case WM_X11DRV_DESKTOP_RESIZED:
         if ((data = get_win_data( hwnd )))
         {
-            Window win = data->whole_window;
+            /* update the full screen state */
+            update_net_wm_states( data );
+
+            if (data->whole_window)
+            {
+                /* sync window position with the new virtual screen rect */
+                POINT old_pos = {.x = data->whole_rect.left - wp, .y = data->whole_rect.top - lp};
+                POINT pos = virtual_screen_to_root( data->whole_rect.left, data->whole_rect.top );
+                XWindowChanges changes = {.x = pos.x, .y = pos.y};
+                UINT mask = 0;
+
+                if (old_pos.x != pos.x) mask |= CWX;
+                if (old_pos.y != pos.y) mask |= CWY;
+
+                if (mask) XReconfigureWMWindow( data->display, data->whole_window, data->vis.screen, mask, &changes );
+            }
+
             release_win_data( data );
-            if (win) set_window_cursor( win, (HCURSOR)lp );
+        }
+        return 0;
+    case WM_X11DRV_SET_CURSOR:
+    {
+        Window win = 0;
+
+        if ((data = get_win_data( hwnd )))
+        {
+            win = data->whole_window;
+            release_win_data( data );
         }
         else if (hwnd == x11drv_thread_data()->clip_hwnd)
-            set_window_cursor( x11drv_thread_data()->clip_window, (HCURSOR)lp );
+            win = x11drv_thread_data()->clip_window;
+
+        if (win)
+        {
+            if (wp == GetCurrentThreadId())
+                set_window_cursor( win, (HCURSOR)lp );
+            else
+                sync_window_cursor( win );
+        }
         return 0;
+    }
     case WM_X11DRV_CLIP_CURSOR_NOTIFY:
         return clip_cursor_notify( hwnd, (HWND)wp, (HWND)lp );
     case WM_X11DRV_CLIP_CURSOR_REQUEST:
@@ -2958,7 +3252,7 @@ LRESULT X11DRV_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
         taskbar_add_tab( hwnd );
         return 0;
     default:
-        FIXME( "got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, wp, lp );
+        FIXME( "got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, (long)wp, lp );
         return 0;
     }
 }
@@ -3061,7 +3355,7 @@ LRESULT X11DRV_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam )
         if ((WCHAR)lparam) goto failed;  /* got an explicit char */
         if (NtUserGetWindowLongPtrW( hwnd, GWLP_ID )) goto failed;  /* window has a real menu */
         if (!(NtUserGetWindowLongW( hwnd, GWL_STYLE ) & WS_SYSMENU)) goto failed;  /* no system menu */
-        TRACE( "ignoring SC_KEYMENU wp %lx lp %lx\n", wparam, lparam );
+        TRACE( "ignoring SC_KEYMENU wp %lx lp %lx\n", (long)wparam, lparam );
         release_win_data( data );
         return 0;
 

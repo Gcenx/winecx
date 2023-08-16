@@ -16,8 +16,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "wine/winheader_enter.h"
-
 #ifndef PID_FIRST_USABLE
 #define PID_FIRST_USABLE 2
 #endif
@@ -73,5 +71,3 @@ inline bool operator!=(REFPROPERTYKEY guidOne, REFPROPERTYKEY guidOther)
 }
 #endif
 #endif
-
-#include "wine/winheader_exit.h"

@@ -23,6 +23,7 @@
  */
 
 #include <stdarg.h>
+#include <stdlib.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -39,38 +40,50 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
 
+typedef struct
+{
+    WORD cbSize;
+    WORD Reserved;
+    HANDLE hPrinter;
+    LPCWSTR pszPrinterName;
+    PDEVMODEW pdmIn;
+    PDEVMODEW pdmOut;
+    DWORD cbOut;
+    DWORD fMode;
+} DOCUMENTPROPERTYHEADERW;
+
 /* convert points to paper size units (10th of a millimeter) */
 static inline int paper_size_from_points( float size )
 {
     return size * 254 / 72;
 }
 
-INPUTSLOT *find_slot( PPD *ppd, const PSDRV_DEVMODE *dm )
+INPUTSLOT *find_slot( PPD *ppd, const DEVMODEW *dm )
 {
     INPUTSLOT *slot;
 
     LIST_FOR_EACH_ENTRY( slot, &ppd->InputSlots, INPUTSLOT, entry )
-        if (slot->WinBin == dm->dmPublic.dmDefaultSource)
+        if (slot->WinBin == dm->dmDefaultSource)
             return slot;
 
     return NULL;
 }
 
-PAGESIZE *find_pagesize( PPD *ppd, const PSDRV_DEVMODE *dm )
+PAGESIZE *find_pagesize( PPD *ppd, const DEVMODEW *dm )
 {
     PAGESIZE *page;
 
     LIST_FOR_EACH_ENTRY( page, &ppd->PageSizes, PAGESIZE, entry )
-        if (page->WinPage == dm->dmPublic.dmPaperSize)
+        if (page->WinPage == dm->dmPaperSize)
             return page;
 
     return NULL;
 }
 
-DUPLEX *find_duplex( PPD *ppd, const PSDRV_DEVMODE *dm )
+DUPLEX *find_duplex( PPD *ppd, const DEVMODEW *dm )
 {
     DUPLEX *duplex;
-    WORD win_duplex = dm->dmPublic.dmFields & DM_DUPLEX ? dm->dmPublic.dmDuplex : 0;
+    WORD win_duplex = dm->dmFields & DM_DUPLEX ? dm->dmDuplex : 0;
 
     if (win_duplex == 0) return NULL; /* Not capable */
 
@@ -88,12 +101,12 @@ DUPLEX *find_duplex( PPD *ppd, const PSDRV_DEVMODE *dm )
  * Updates dm1 with some fields from dm2
  *
  */
-void PSDRV_MergeDevmodes( PSDRV_DEVMODE *dm1, const PSDRV_DEVMODE *dm2, PRINTERINFO *pi )
+void PSDRV_MergeDevmodes( PSDRV_DEVMODE *dm1, const DEVMODEW *dm2, PRINTERINFO *pi )
 {
     /* some sanity checks here on dm2 */
 
-    if(dm2->dmPublic.dmFields & DM_ORIENTATION) {
-        dm1->dmPublic.dmOrientation = dm2->dmPublic.dmOrientation;
+    if(dm2->dmFields & DM_ORIENTATION) {
+        dm1->dmPublic.dmOrientation = dm2->dmOrientation;
 	TRACE("Changing orientation to %d (%s)\n",
 	      dm1->dmPublic.dmOrientation,
 	      dm1->dmPublic.dmOrientation == DMORIENT_PORTRAIT ?
@@ -103,40 +116,40 @@ void PSDRV_MergeDevmodes( PSDRV_DEVMODE *dm1, const PSDRV_DEVMODE *dm2, PRINTERI
     }
 
     /* NB PaperWidth is always < PaperLength */
-    if (dm2->dmPublic.dmFields & DM_PAPERSIZE)
+    if (dm2->dmFields & DM_PAPERSIZE)
     {
         PAGESIZE *page = find_pagesize( pi->ppd, dm2 );
 
         if (page)
         {
-	    dm1->dmPublic.dmPaperSize = dm2->dmPublic.dmPaperSize;
+	    dm1->dmPublic.dmPaperSize = dm2->dmPaperSize;
 	    dm1->dmPublic.dmPaperWidth  = paper_size_from_points( page->PaperDimension->x );
 	    dm1->dmPublic.dmPaperLength = paper_size_from_points( page->PaperDimension->y );
 	    dm1->dmPublic.dmFields |= DM_PAPERSIZE | DM_PAPERWIDTH | DM_PAPERLENGTH;
-	    TRACE("Changing page to %s %d x %d\n", page->FullName,
+	    TRACE("Changing page to %s %d x %d\n", debugstr_w(page->FullName),
 		  dm1->dmPublic.dmPaperWidth,
 		  dm1->dmPublic.dmPaperLength );
 
             if (dm1->dmPublic.dmSize >= FIELD_OFFSET(DEVMODEW, dmFormName) + CCHFORMNAME * sizeof(WCHAR))
             {
-                MultiByteToWideChar(CP_ACP, 0, page->FullName, -1, dm1->dmPublic.dmFormName, CCHFORMNAME);
+                lstrcpynW(dm1->dmPublic.dmFormName, page->FullName, CCHFORMNAME);
                 dm1->dmPublic.dmFields |= DM_FORMNAME;
             }
 	}
         else
-            TRACE("Trying to change to unsupported pagesize %d\n", dm2->dmPublic.dmPaperSize);
+            TRACE("Trying to change to unsupported pagesize %d\n", dm2->dmPaperSize);
     }
 
-    else if((dm2->dmPublic.dmFields & DM_PAPERLENGTH) &&
-       (dm2->dmPublic.dmFields & DM_PAPERWIDTH)) {
-        dm1->dmPublic.dmPaperLength = dm2->dmPublic.dmPaperLength;
-        dm1->dmPublic.dmPaperWidth = dm2->dmPublic.dmPaperWidth;
+    else if((dm2->dmFields & DM_PAPERLENGTH) &&
+       (dm2->dmFields & DM_PAPERWIDTH)) {
+        dm1->dmPublic.dmPaperLength = dm2->dmPaperLength;
+        dm1->dmPublic.dmPaperWidth = dm2->dmPaperWidth;
 	TRACE("Changing PaperLength|Width to %dx%d\n",
-	      dm2->dmPublic.dmPaperLength,
-	      dm2->dmPublic.dmPaperWidth);
+	      dm2->dmPaperLength,
+	      dm2->dmPaperWidth);
 	dm1->dmPublic.dmFields &= ~DM_PAPERSIZE;
 	dm1->dmPublic.dmFields |= (DM_PAPERLENGTH | DM_PAPERWIDTH);
-    } else if(dm2->dmPublic.dmFields & (DM_PAPERLENGTH | DM_PAPERWIDTH)) {
+    } else if(dm2->dmFields & (DM_PAPERLENGTH | DM_PAPERWIDTH)) {
       /* You might think that this would be allowed if dm1 is in custom size
 	 mode, but apparently Windows reverts to standard paper mode even in
 	 this case */
@@ -145,71 +158,71 @@ void PSDRV_MergeDevmodes( PSDRV_DEVMODE *dm1, const PSDRV_DEVMODE *dm2, PRINTERI
 	dm1->dmPublic.dmFields |= DM_PAPERSIZE;
     }
 
-    if(dm2->dmPublic.dmFields & DM_SCALE) {
-        dm1->dmPublic.dmScale = dm2->dmPublic.dmScale;
-        TRACE("Changing Scale to %d\n", dm2->dmPublic.dmScale);
+    if(dm2->dmFields & DM_SCALE) {
+        dm1->dmPublic.dmScale = dm2->dmScale;
+        TRACE("Changing Scale to %d\n", dm2->dmScale);
     }
 
-    if(dm2->dmPublic.dmFields & DM_COPIES) {
-        dm1->dmPublic.dmCopies = dm2->dmPublic.dmCopies;
-        TRACE("Changing Copies to %d\n", dm2->dmPublic.dmCopies);
+    if(dm2->dmFields & DM_COPIES) {
+        dm1->dmPublic.dmCopies = dm2->dmCopies;
+        TRACE("Changing Copies to %d\n", dm2->dmCopies);
     }
 
-    if (dm2->dmPublic.dmFields & DM_DEFAULTSOURCE)
+    if (dm2->dmFields & DM_DEFAULTSOURCE)
     {
         INPUTSLOT *slot = find_slot( pi->ppd, dm2 );
 
         if (slot)
         {
-	    dm1->dmPublic.dmDefaultSource = dm2->dmPublic.dmDefaultSource;
+	    dm1->dmPublic.dmDefaultSource = dm2->dmDefaultSource;
 	    TRACE("Changing bin to '%s'\n", slot->FullName);
 	}
         else
-            TRACE("Trying to change to unsupported bin %d\n", dm2->dmPublic.dmDefaultSource);
+            TRACE("Trying to change to unsupported bin %d\n", dm2->dmDefaultSource);
     }
 
-   if (dm2->dmPublic.dmFields & DM_DEFAULTSOURCE )
-       dm1->dmPublic.dmDefaultSource = dm2->dmPublic.dmDefaultSource;
-   if (dm2->dmPublic.dmFields & DM_PRINTQUALITY )
-       dm1->dmPublic.dmPrintQuality = dm2->dmPublic.dmPrintQuality;
-   if (dm2->dmPublic.dmFields & DM_COLOR )
-       dm1->dmPublic.dmColor = dm2->dmPublic.dmColor;
-   if (dm2->dmPublic.dmFields & DM_DUPLEX && pi->ppd->DefaultDuplex && pi->ppd->DefaultDuplex->WinDuplex != 0)
-       dm1->dmPublic.dmDuplex = dm2->dmPublic.dmDuplex;
-   if (dm2->dmPublic.dmFields & DM_YRESOLUTION )
-       dm1->dmPublic.dmYResolution = dm2->dmPublic.dmYResolution;
-   if (dm2->dmPublic.dmFields & DM_TTOPTION )
-       dm1->dmPublic.dmTTOption = dm2->dmPublic.dmTTOption;
-   if (dm2->dmPublic.dmFields & DM_COLLATE )
-       dm1->dmPublic.dmCollate = dm2->dmPublic.dmCollate;
-   if (dm2->dmPublic.dmFields & DM_FORMNAME )
-       lstrcpynW(dm1->dmPublic.dmFormName, dm2->dmPublic.dmFormName, CCHFORMNAME);
-   if (dm2->dmPublic.dmFields & DM_BITSPERPEL )
-       dm1->dmPublic.dmBitsPerPel = dm2->dmPublic.dmBitsPerPel;
-   if (dm2->dmPublic.dmFields & DM_PELSWIDTH )
-       dm1->dmPublic.dmPelsWidth = dm2->dmPublic.dmPelsWidth;
-   if (dm2->dmPublic.dmFields & DM_PELSHEIGHT )
-       dm1->dmPublic.dmPelsHeight = dm2->dmPublic.dmPelsHeight;
-   if (dm2->dmPublic.dmFields & DM_DISPLAYFLAGS )
-       dm1->dmPublic.dmDisplayFlags = dm2->dmPublic.dmDisplayFlags;
-   if (dm2->dmPublic.dmFields & DM_DISPLAYFREQUENCY )
-       dm1->dmPublic.dmDisplayFrequency = dm2->dmPublic.dmDisplayFrequency;
-   if (dm2->dmPublic.dmFields & DM_POSITION )
-       dm1->dmPublic.dmPosition = dm2->dmPublic.dmPosition;
-   if (dm2->dmPublic.dmFields & DM_LOGPIXELS )
-       dm1->dmPublic.dmLogPixels = dm2->dmPublic.dmLogPixels;
-   if (dm2->dmPublic.dmFields & DM_ICMMETHOD )
-       dm1->dmPublic.dmICMMethod = dm2->dmPublic.dmICMMethod;
-   if (dm2->dmPublic.dmFields & DM_ICMINTENT )
-       dm1->dmPublic.dmICMIntent = dm2->dmPublic.dmICMIntent;
-   if (dm2->dmPublic.dmFields & DM_MEDIATYPE )
-       dm1->dmPublic.dmMediaType = dm2->dmPublic.dmMediaType;
-   if (dm2->dmPublic.dmFields & DM_DITHERTYPE )
-       dm1->dmPublic.dmDitherType = dm2->dmPublic.dmDitherType;
-   if (dm2->dmPublic.dmFields & DM_PANNINGWIDTH )
-       dm1->dmPublic.dmPanningWidth = dm2->dmPublic.dmPanningWidth;
-   if (dm2->dmPublic.dmFields & DM_PANNINGHEIGHT )
-       dm1->dmPublic.dmPanningHeight = dm2->dmPublic.dmPanningHeight;
+   if (dm2->dmFields & DM_DEFAULTSOURCE )
+       dm1->dmPublic.dmDefaultSource = dm2->dmDefaultSource;
+   if (dm2->dmFields & DM_PRINTQUALITY )
+       dm1->dmPublic.dmPrintQuality = dm2->dmPrintQuality;
+   if (dm2->dmFields & DM_COLOR )
+       dm1->dmPublic.dmColor = dm2->dmColor;
+   if (dm2->dmFields & DM_DUPLEX && pi->ppd->DefaultDuplex && pi->ppd->DefaultDuplex->WinDuplex != 0)
+       dm1->dmPublic.dmDuplex = dm2->dmDuplex;
+   if (dm2->dmFields & DM_YRESOLUTION )
+       dm1->dmPublic.dmYResolution = dm2->dmYResolution;
+   if (dm2->dmFields & DM_TTOPTION )
+       dm1->dmPublic.dmTTOption = dm2->dmTTOption;
+   if (dm2->dmFields & DM_COLLATE )
+       dm1->dmPublic.dmCollate = dm2->dmCollate;
+   if (dm2->dmFields & DM_FORMNAME )
+       lstrcpynW(dm1->dmPublic.dmFormName, dm2->dmFormName, CCHFORMNAME);
+   if (dm2->dmFields & DM_BITSPERPEL )
+       dm1->dmPublic.dmBitsPerPel = dm2->dmBitsPerPel;
+   if (dm2->dmFields & DM_PELSWIDTH )
+       dm1->dmPublic.dmPelsWidth = dm2->dmPelsWidth;
+   if (dm2->dmFields & DM_PELSHEIGHT )
+       dm1->dmPublic.dmPelsHeight = dm2->dmPelsHeight;
+   if (dm2->dmFields & DM_DISPLAYFLAGS )
+       dm1->dmPublic.dmDisplayFlags = dm2->dmDisplayFlags;
+   if (dm2->dmFields & DM_DISPLAYFREQUENCY )
+       dm1->dmPublic.dmDisplayFrequency = dm2->dmDisplayFrequency;
+   if (dm2->dmFields & DM_POSITION )
+       dm1->dmPublic.dmPosition = dm2->dmPosition;
+   if (dm2->dmFields & DM_LOGPIXELS )
+       dm1->dmPublic.dmLogPixels = dm2->dmLogPixels;
+   if (dm2->dmFields & DM_ICMMETHOD )
+       dm1->dmPublic.dmICMMethod = dm2->dmICMMethod;
+   if (dm2->dmFields & DM_ICMINTENT )
+       dm1->dmPublic.dmICMIntent = dm2->dmICMIntent;
+   if (dm2->dmFields & DM_MEDIATYPE )
+       dm1->dmPublic.dmMediaType = dm2->dmMediaType;
+   if (dm2->dmFields & DM_DITHERTYPE )
+       dm1->dmPublic.dmDitherType = dm2->dmDitherType;
+   if (dm2->dmFields & DM_PANNINGWIDTH )
+       dm1->dmPublic.dmPanningWidth = dm2->dmPanningWidth;
+   if (dm2->dmFields & DM_PANNINGHEIGHT )
+       dm1->dmPublic.dmPanningHeight = dm2->dmPanningHeight;
 
     return;
 }
@@ -242,8 +255,7 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
 
     i = Cursel = 0;
     LIST_FOR_EACH_ENTRY(ps, &di->pi->ppd->PageSizes, PAGESIZE, entry) {
-      SendDlgItemMessageA(hwnd, IDD_PAPERS, LB_INSERTSTRING, i,
-			  (LPARAM)ps->FullName);
+      SendDlgItemMessageW(hwnd, IDD_PAPERS, LB_INSERTSTRING, i, (LPARAM)ps->FullName);
       if(di->pi->Devmode->dmPublic.dmPaperSize == ps->WinPage)
 	Cursel = i;
       i++;
@@ -338,7 +350,7 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
             i++;
         }
         TRACE("Setting pagesize to item %d, WinPage %d (%s), PaperSize %.2fx%.2f\n", Cursel,
-              ps->WinPage, ps->FullName, ps->PaperDimension->x, ps->PaperDimension->y);
+              ps->WinPage, debugstr_w(ps->FullName), ps->PaperDimension->x, ps->PaperDimension->y);
         di->dlgdm->dmPublic.dmPaperSize = ps->WinPage;
         di->dlgdm->dmPublic.dmFields |= DM_PAPERSIZE;
 
@@ -348,7 +360,7 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
 
         if (di->dlgdm->dmPublic.dmSize >= FIELD_OFFSET(DEVMODEW, dmFormName) + CCHFORMNAME * sizeof(WCHAR))
         {
-            MultiByteToWideChar(CP_ACP, 0, ps->FullName, -1, di->dlgdm->dmPublic.dmFormName, CCHFORMNAME);
+            lstrcpynW(di->dlgdm->dmPublic.dmFormName, ps->FullName, CCHFORMNAME);
             di->dlgdm->dmPublic.dmFields |= DM_FORMNAME;
         }
         SendMessageW(GetParent(hwnd), PSM_CHANGED, 0, 0);
@@ -432,93 +444,92 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
   return TRUE;
 }
 
-
-static HPROPSHEETPAGE (WINAPI *pCreatePropertySheetPage) (LPCPROPSHEETPAGEW);
-static int (WINAPI *pPropertySheet) (LPCPROPSHEETHEADERW);
-
 /******************************************************************************
- *           DrvDocumentProperties    (wineps.drv.@)
- *
- *  Retrieves or modifies device-initialization information for the PostScript
- *  driver, or displays a driver-supplied dialog box for configuring the driver.
- *
- * RETURNS
- *  Returns size of DEVMODE structure if wMode is 0.  Otherwise, IDOK is returned for success
- *  for both dialog and non-dialog operations.  IDCANCEL is returned if the dialog box was cancelled.
- *  A return value less than zero is returned if a non-dialog operation fails.
- *
- * BUGS
- *
- * Just returns default devmode at the moment.  No use of initialization file.
+ *           DrvDocumentPropertySheets (wineps.drv.@)
  */
-INT WINAPI DrvDocumentProperties(HWND hwnd, const WCHAR *device, DEVMODEW *output,
-                                 DEVMODEW *input, DWORD mode)
+LONG WINAPI DrvDocumentPropertySheets(PROPSHEETUI_INFO *info, LPARAM lparam)
 {
-  PRINTERINFO *pi;
+    DOCUMENTPROPERTYHEADERW *dph;
+    PRINTERINFO *pi;
 
-  TRACE("(hwnd=%p, Device='%s', devOut=%p, devIn=%p, Mode=%04lx)\n",
-        hwnd, debugstr_w(device), output, input, mode);
+    TRACE("(info=%p, lparam=%Id)\n", info, lparam);
 
-  if (!(pi = PSDRV_FindPrinterInfo(device))) return -1;
+    dph = (DOCUMENTPROPERTYHEADERW *)(info ? info->lParamInit : lparam);
 
-  /* If mode == 0, return size of DEVMODE structure */
-  if (!mode)
-      return pi->Devmode->dmPublic.dmSize + pi->Devmode->dmPublic.dmDriverExtra;
+    if (!(pi = PSDRV_FindPrinterInfo(dph->pszPrinterName))) return ERR_CPSUI_GETLASTERROR;
 
-  /* If DM_MODIFY is set, change settings in accordance with lpdmInput */
-  if ((mode & DM_MODIFY) && input)
-  {
-    TRACE("DM_MODIFY set. devIn->dmFields = %08lx\n", input->dmFields);
-    PSDRV_MergeDevmodes(pi->Devmode, (PSDRV_DEVMODE *)input, pi);
-  }
+    if (!info || info->Reason == PROPSHEETUI_REASON_INIT)
+    {
+        /* If dph->fMode == 0, return size of DEVMODE structure */
+        if (!dph->fMode || !dph->pdmOut)
+        {
+            dph->cbOut = pi->Devmode->dmPublic.dmSize + pi->Devmode->dmPublic.dmDriverExtra;
+            return dph->cbOut;
+        }
 
-  /* If DM_PROMPT is set, present modal dialog box */
-  if (mode & DM_PROMPT) {
-    HINSTANCE hinstComctl32;
-    HPROPSHEETPAGE hpsp[1];
-    PROPSHEETPAGEW psp;
-    PROPSHEETHEADERW psh;
-    PSDRV_DLGINFO di;
-    PSDRV_DEVMODE dlgdm;
-    WCHAR SetupW[64];
+        /* If DM_MODIFY is set, change settings in accordance with pdmIn */
+        if ((dph->fMode & DM_MODIFY) && dph->pdmIn)
+        {
+            TRACE("DM_MODIFY set. devIn->dmFields = %08lx\n", dph->pdmIn->dmFields);
+            PSDRV_MergeDevmodes(pi->Devmode, dph->pdmIn, pi);
+        }
 
-    LoadStringW(PSDRV_hInstance, IDS_SETUP, SetupW, ARRAY_SIZE(SetupW));
-    hinstComctl32 = LoadLibraryA("comctl32.dll");
-    pCreatePropertySheetPage = (void*)GetProcAddress(hinstComctl32,
-						    "CreatePropertySheetPageW");
-    pPropertySheet = (void*)GetProcAddress(hinstComctl32, "PropertySheetW");
-    memset(&psp,0,sizeof(psp));
-    dlgdm = *pi->Devmode;
-    di.pi = pi;
-    di.dlgdm = &dlgdm;
-    psp.dwSize = sizeof(psp);
-    psp.hInstance = PSDRV_hInstance;
-    psp.pszTemplate = L"PAPER";
-    psp.pszIcon = NULL;
-    psp.pfnDlgProc = PSDRV_PaperDlgProc;
-    psp.lParam = (LPARAM)&di;
-    hpsp[0] = pCreatePropertySheetPage(&psp);
+        /* If DM_PROMPT is set, present modal dialog box */
+        if (dph->fMode & DM_PROMPT)
+        {
+            PROPSHEETPAGEW psp;
+            PSDRV_DLGINFO *di;
 
-    memset(&psh, 0, sizeof(psh));
-    psh.dwSize = sizeof(psh);
-    psh.pszCaption = SetupW;
-    psh.nPages = 1;
-    psh.hwndParent = hwnd;
-    psh.phpage = hpsp;
+            if (!info)
+            {
+                ERR("DM_PROMPT passed with NULL PROPSHEETUI_INFO\n");
+                return ERR_CPSUI_GETLASTERROR;
+            }
 
-    pPropertySheet(&psh);
+            di = malloc(sizeof(*di));
+            if (!di)
+                return ERR_CPSUI_ALLOCMEM_FAILED;
+            info->UserData = (ULONG_PTR)di;
 
-  }
+            di->dlgdm = malloc(sizeof(*di->dlgdm));
+            if (!di->dlgdm)
+                return ERR_CPSUI_ALLOCMEM_FAILED;
 
-  /* If DM_UPDATE is set, should write settings to environment and initialization file */
-  if (mode & DM_UPDATE)
-    FIXME("Mode DM_UPDATE.  Just do the same as DM_COPY\n");
+            memset(&psp, 0, sizeof(psp));
+            di->pi = pi;
+            *di->dlgdm = *pi->Devmode;
+            psp.dwSize = sizeof(psp);
+            psp.hInstance = PSDRV_hInstance;
+            psp.pszTemplate = L"PAPER";
+            psp.pszIcon = NULL;
+            psp.pfnDlgProc = PSDRV_PaperDlgProc;
+            psp.lParam = (LPARAM)di;
 
-  /* If DM_COPY is set, should write settings to lpdmOutput */
-  if (output && (mode & (DM_COPY | DM_UPDATE)))
-    memcpy( output, &pi->Devmode->dmPublic,
-            pi->Devmode->dmPublic.dmSize + pi->Devmode->dmPublic.dmDriverExtra );
-  return IDOK;
+            if (!info->pfnComPropSheet(info->hComPropSheet, CPSFUNC_ADD_PROPSHEETPAGEW, (LPARAM)&psp, 0))
+                return ERR_CPSUI_GETLASTERROR;
+        }
+    }
+
+    if (info && info->Reason == PROPSHEETUI_REASON_DESTROY)
+    {
+        if (info->UserData)
+            free(((PSDRV_DLGINFO *)info->UserData)->dlgdm);
+        free((void *)info->UserData);
+    }
+
+    if (!info || (info->Reason == PROPSHEETUI_REASON_DESTROY && lparam))
+    {
+        /* If DM_UPDATE is set, should write settings to environment and initialization file */
+        if (dph->fMode & DM_UPDATE)
+            FIXME("Mode DM_UPDATE.  Just do the same as DM_COPY\n");
+
+        /* If DM_COPY is set, should write settings to pdmOut */
+        if (dph->pdmOut && (dph->fMode & (DM_COPY | DM_UPDATE)))
+            memcpy(dph->pdmOut, &pi->Devmode->dmPublic,
+                    pi->Devmode->dmPublic.dmSize + pi->Devmode->dmPublic.dmDriverExtra);
+    }
+
+    return CPSUI_OK;
 }
 
 /******************************************************************************
@@ -587,10 +598,10 @@ DWORD WINAPI DrvDeviceCapabilities(HANDLE printer, WCHAR *device_name, WORD capa
 
       LIST_FOR_EACH_ENTRY(ps, &pi->ppd->PageSizes, PAGESIZE, entry)
       {
-        TRACE("DC_PAPERNAMES: %s\n", debugstr_a(ps->FullName));
+        TRACE("DC_PAPERNAMES: %s\n", debugstr_w(ps->FullName));
         i++;
         if (output != NULL) {
-          MultiByteToWideChar(CP_ACP, 0, ps->FullName, -1, cp, 64);
+          lstrcpynW(cp, ps->FullName, 64);
 	  cp += 64;
 	}
       }

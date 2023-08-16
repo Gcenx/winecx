@@ -64,6 +64,7 @@ struct notification
 #define NF_SIGNAL      0x0004  /* signal wait handle when notified */
 #define NF_MAIN_THREAD 0x0008  /* the operation completes synchronously and callback is called from the main thread */
 #define NF_SAVE_BUFFER 0x0010  /* save buffer data when notified */
+#define NF_OTHER_THREAD 0x0020 /* the operation completes asynchronously and callback is called from the other thread */
 
 struct info
 {
@@ -113,13 +114,19 @@ static void CALLBACK check_notification( HINTERNET handle, DWORD_PTR context, DW
 
     status_ok   = (info->test[info->index].status == status);
     function_ok = (info->test[info->index].function == info->function);
+
     ok( status_ok, "%u: expected status %#x got %#lx\n", info->line, info->test[info->index].status, status );
     ok(function_ok, "%u: expected function %u got %u\n", info->line, info->test[info->index].function, info->function);
 
     if (info->test[info->index].flags & NF_MAIN_THREAD)
     {
-        ok(GetCurrentThreadId() == info->main_thread_id, "%u: expected callback to be called from the same thread\n",
-                info->line);
+        ok(GetCurrentThreadId() == info->main_thread_id, "%u: expected callback %#lx to be called from the same thread\n",
+                info->line, status);
+    }
+    else if (info->test[info->index].flags & NF_OTHER_THREAD)
+    {
+        ok(GetCurrentThreadId() != info->main_thread_id, "%u: expected callback %#lx to be called from the other thread\n",
+                info->line, status);
     }
     if (info->test[info->index].flags & NF_SAVE_BUFFER)
     {
@@ -133,30 +140,30 @@ static void CALLBACK check_notification( HINTERNET handle, DWORD_PTR context, DW
     }
 }
 
-static const struct notification cache_test[] =
+static const struct notification cache_test_async[] =
 {
     { winhttp_connect,          WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
     { winhttp_open_request,     WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
-    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_RESOLVING_NAME },
-    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_NAME_RESOLVED },
-    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER },
-    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_RESOLVING_NAME, NF_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_NAME_RESOLVED, NF_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, NF_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, NF_ALLOW },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED },
-    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_CLOSING_CONNECTION, NF_WINE_ALLOW },
-    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_CONNECTION_CLOSED, NF_WINE_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, NF_SIGNAL },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_MAIN_THREAD | NF_SIGNAL },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
     { winhttp_open_request,     WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, NF_WINE_ALLOW },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, NF_WINE_ALLOW },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED },
-    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_CLOSING_CONNECTION, NF_WINE_ALLOW },
-    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_CONNECTION_CLOSED, NF_WINE_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, NF_SIGNAL },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_MAIN_THREAD | NF_SIGNAL },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
@@ -168,20 +175,62 @@ static const struct notification cache_test[] =
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, NF_WINE_ALLOW },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED },
-    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_CLOSING_CONNECTION, NF_WINE_ALLOW },
-    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_CONNECTION_CLOSED, NF_WINE_ALLOW },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
     { winhttp_open_request,     WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, NF_WINE_ALLOW },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, NF_WINE_ALLOW },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED },
-    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_CLOSING_CONNECTION, NF_WINE_ALLOW },
-    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_CONNECTION_CLOSED, NF_WINE_ALLOW },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD },
+    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
+    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
+    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL }
+};
+
+static const struct notification cache_test[] =
+{
+    { winhttp_connect,          WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
+    { winhttp_open_request,     WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_RESOLVING_NAME },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_NAME_RESOLVED },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_REQUEST_SENT, NF_SIGNAL },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD | NF_SIGNAL },
+    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
+    { winhttp_open_request,     WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, NF_WINE_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, NF_WINE_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_REQUEST_SENT, NF_SIGNAL },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD | NF_SIGNAL },
+    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
+    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
+    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
+    { winhttp_connect,          WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
+    { winhttp_open_request,     WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_RESOLVING_NAME, NF_WINE_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_NAME_RESOLVED, NF_WINE_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, NF_WINE_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, NF_WINE_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD },
+    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
+    { winhttp_open_request,     WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, NF_WINE_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, NF_WINE_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL }
@@ -209,19 +258,19 @@ static void end_test( struct info *info, unsigned int line )
                        info->test[info->index].status);
 }
 
-static void test_connection_cache( void )
+static void test_connection_cache( BOOL async )
 {
     HANDLE ses, con, req, event;
     DWORD size, status, err;
     BOOL ret, unload = TRUE;
     struct info info, *context = &info;
 
-    info.test  = cache_test;
-    info.count = ARRAY_SIZE( cache_test );
+    info.test  = async ? cache_test_async : cache_test;
+    info.count = async ? ARRAY_SIZE( cache_test_async ) : ARRAY_SIZE ( cache_test );
     info.index = 0;
     info.wait = CreateEventW( NULL, FALSE, FALSE, NULL );
 
-    ses = WinHttpOpen( L"winetest", 0, NULL, NULL, 0 );
+    ses = WinHttpOpen( L"winetest", 0, NULL, NULL, async ? WINHTTP_FLAG_ASYNC : 0 );
     ok( ses != NULL, "failed to open session %lu\n", GetLastError() );
 
     event = CreateEventW( NULL, FALSE, FALSE, NULL );
@@ -254,10 +303,13 @@ static void test_connection_cache( void )
         goto done;
     }
     ok( ret, "failed to send request %lu\n", GetLastError() );
+    WaitForSingleObject( info.wait, INFINITE );
 
     setup_test( &info, winhttp_receive_response, __LINE__ );
     ret = WinHttpReceiveResponse( req, NULL );
     ok( ret, "failed to receive response %lu\n", GetLastError() );
+
+    WaitForSingleObject( info.wait, INFINITE );
 
     size = sizeof(status);
     ret = WinHttpQueryHeaders( req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL );
@@ -267,6 +319,7 @@ static void test_connection_cache( void )
     ResetEvent( info.wait );
     setup_test( &info, winhttp_close_handle, __LINE__ );
     WinHttpCloseHandle( req );
+
     WaitForSingleObject( info.wait, INFINITE );
 
     setup_test( &info, winhttp_open_request, __LINE__ );
@@ -286,9 +339,13 @@ static void test_connection_cache( void )
     }
     ok( ret, "failed to send request %lu\n", GetLastError() );
 
+    WaitForSingleObject( info.wait, INFINITE );
+
     setup_test( &info, winhttp_receive_response, __LINE__ );
     ret = WinHttpReceiveResponse( req, NULL );
     ok( ret, "failed to receive response %lu\n", GetLastError() );
+
+    WaitForSingleObject( info.wait, INFINITE );
 
     size = sizeof(status);
     ret = WinHttpQueryHeaders( req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL );
@@ -428,39 +485,65 @@ static const struct notification redirect_test[] =
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_NAME_RESOLVED, NF_WINE_ALLOW },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, NF_WINE_ALLOW },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, NF_WINE_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_SENDING_REQUEST, NF_MAIN_THREAD },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_REQUEST_SENT, NF_MAIN_THREAD | NF_SIGNAL },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_REDIRECT, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESOLVING_NAME, NF_ALLOW | NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_NAME_RESOLVED, NF_ALLOW | NF_MAIN_THREAD},
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, NF_ALLOW | NF_MAIN_THREAD},
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, NF_ALLOW | NF_MAIN_THREAD},
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_SENDING_REQUEST, NF_MAIN_THREAD},
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_REQUEST_SENT, NF_MAIN_THREAD},
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD},
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD | NF_SIGNAL},
+    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
+    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
+    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL }
+};
+
+static const struct notification redirect_test_async[] =
+{
+    { winhttp_connect,          WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
+    { winhttp_open_request,     WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_RESOLVING_NAME, NF_WINE_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_NAME_RESOLVED, NF_WINE_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, NF_WINE_ALLOW },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, NF_WINE_ALLOW },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_REDIRECT },
+    { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, NF_SIGNAL | NF_OTHER_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_REDIRECT, NF_MAIN_THREAD },
     { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESOLVING_NAME, NF_ALLOW },
     { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_NAME_RESOLVED, NF_ALLOW },
     { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, NF_ALLOW },
     { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, NF_ALLOW },
     { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
     { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED },
-    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_CLOSING_CONNECTION, NF_WINE_ALLOW },
-    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_CONNECTION_CLOSED, NF_WINE_ALLOW },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_OTHER_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_OTHER_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_OTHER_THREAD | NF_SIGNAL },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL }
 };
 
-static void test_redirect( void )
+static void test_redirect( BOOL async )
 {
     HANDLE ses, con, req;
     DWORD size, status, err;
     BOOL ret;
     struct info info, *context = &info;
 
-    info.test  = redirect_test;
-    info.count = ARRAY_SIZE( redirect_test );
+    info.test  = async ? redirect_test_async : redirect_test;
+    info.count = async ? ARRAY_SIZE( redirect_test_async ) : ARRAY_SIZE( redirect_test );
     info.index = 0;
     info.wait = CreateEventW( NULL, FALSE, FALSE, NULL );
 
-    ses = WinHttpOpen( L"winetest", 0, NULL, NULL, 0 );
+    ses = WinHttpOpen( L"winetest", 0, NULL, NULL, async ? WINHTTP_FLAG_ASYNC : 0 );
     ok( ses != NULL, "failed to open session %lu\n", GetLastError() );
 
     WinHttpSetStatusCallback( ses, check_notification, WINHTTP_CALLBACK_FLAG_ALL_NOTIFICATIONS, 0 );
@@ -485,12 +568,15 @@ static void test_redirect( void )
         goto done;
     }
     ok( ret, "failed to send request %lu\n", GetLastError() );
+    WaitForSingleObject( info.wait, INFINITE );
 
     setup_test( &info, winhttp_receive_response, __LINE__ );
     ret = WinHttpReceiveResponse( req, NULL );
     ok( ret, "failed to receive response %lu\n", GetLastError() );
+    WaitForSingleObject( info.wait, INFINITE );
 
     size = sizeof(status);
+    status = 0xdeadbeef;
     ret = WinHttpQueryHeaders( req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL );
     ok( ret, "failed unexpectedly %lu\n", GetLastError() );
     ok( status == 200, "request failed unexpectedly %lu\n", status );
@@ -516,12 +602,15 @@ static const struct notification async_test[] =
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
     { winhttp_send_request,     WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, NF_SIGNAL },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED },
-    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_SIGNAL },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_MAIN_THREAD },
+    { winhttp_receive_response, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, NF_SIGNAL | NF_MAIN_THREAD },
     { winhttp_query_data,       WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, NF_SIGNAL },
     { winhttp_read_data,        WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_ALLOW },
     { winhttp_read_data,        WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_ALLOW },
+    { winhttp_read_data,        WINHTTP_CALLBACK_STATUS_CLOSING_CONNECTION },
+    { winhttp_read_data,        WINHTTP_CALLBACK_STATUS_CONNECTION_CLOSED },
     { winhttp_read_data,        WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SIGNAL },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
@@ -577,6 +666,10 @@ static void test_async( void )
     ok( req != NULL, "failed to open a request %lu\n", err );
     ok( err == ERROR_SUCCESS, "got %lu\n", err );
 
+    ret = WinHttpAddRequestHeaders( req , L"Connection: close", -1L, WINHTTP_ADDREQ_FLAG_REPLACE | WINHTTP_ADDREQ_FLAG_ADD );
+    err = GetLastError();
+    ok(ret, "WinHttpAddRequestHeaders failed to add new header, got %d with error %lu\n", ret, err);
+
     setup_test( &info, winhttp_send_request, __LINE__ );
     SetLastError( 0xdeadbeef );
     ret = WinHttpSendRequest( req, NULL, 0, NULL, 0, 0, 0 );
@@ -596,6 +689,12 @@ static void test_async( void )
     WaitForSingleObject( info.wait, INFINITE );
 
     setup_test( &info, winhttp_receive_response, __LINE__ );
+    SetLastError( 0xdeadbeef );
+    ret = WinHttpReceiveResponse( req, NULL );
+    err = GetLastError();
+    ok( ret, "failed to receive response %lu\n", err );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+
     SetLastError( 0xdeadbeef );
     ret = WinHttpReceiveResponse( req, NULL );
     err = GetLastError();
@@ -663,6 +762,7 @@ static const struct notification websocket_test[] =
 {
     { winhttp_connect,                    WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
     { winhttp_open_request,               WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, NF_SIGNAL },
     { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_RESOLVING_NAME },
     { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_NAME_RESOLVED },
     { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER },
@@ -670,10 +770,11 @@ static const struct notification websocket_test[] =
     { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
     { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
     { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, NF_SIGNAL },
-    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE },
-    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED },
-    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_SIGNAL },
-    { winhttp_websocket_complete_upgrade, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, NF_SIGNAL },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_MAIN_THREAD | NF_SIGNAL },
+    { winhttp_websocket_complete_upgrade, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
+    { winhttp_websocket_complete_upgrade, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
     { winhttp_websocket_send,             WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE, NF_MAIN_THREAD | NF_SIGNAL },
     { winhttp_websocket_send,             WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE, NF_MAIN_THREAD | NF_SIGNAL },
     { winhttp_websocket_send,             WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE, NF_MAIN_THREAD | NF_SIGNAL },
@@ -682,9 +783,6 @@ static const struct notification websocket_test[] =
     { winhttp_websocket_receive,          WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SAVE_BUFFER | NF_SIGNAL },
     { winhttp_websocket_receive,          WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SAVE_BUFFER | NF_SIGNAL },
     { winhttp_websocket_close,            WINHTTP_CALLBACK_STATUS_CLOSE_COMPLETE, NF_SIGNAL },
-    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
-    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_CLOSING_CONNECTION, NF_WINE_ALLOW },
-    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_CONNECTION_CLOSED, NF_WINE_ALLOW },
     { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
 };
 
@@ -698,16 +796,14 @@ static const struct notification websocket_test2[] =
     { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
     { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
     { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, NF_SIGNAL },
-    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE },
-    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED },
-    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_SIGNAL },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_SIGNAL | NF_MAIN_THREAD},
     { winhttp_websocket_complete_upgrade, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, NF_SIGNAL },
     { winhttp_websocket_receive,          WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SIGNAL },
     { winhttp_websocket_close,            WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, NF_MAIN_THREAD | NF_SAVE_BUFFER},
     { winhttp_websocket_close,            WINHTTP_CALLBACK_STATUS_CLOSE_COMPLETE, NF_SIGNAL },
     { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
-    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_CLOSING_CONNECTION, NF_WINE_ALLOW },
-    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_CONNECTION_CLOSED, NF_WINE_ALLOW },
     { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL }
 };
 
@@ -721,10 +817,55 @@ static const struct notification websocket_test3[] =
     { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
     { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
     { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, NF_SIGNAL },
-    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE },
-    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED },
-    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_SIGNAL },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_SIGNAL | NF_MAIN_THREAD },
     { winhttp_websocket_complete_upgrade, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, NF_SIGNAL },
+    { winhttp_websocket_receive,          WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SIGNAL },
+
+    { winhttp_websocket_close,            WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, NF_MAIN_THREAD },
+    { winhttp_websocket_close,            WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, NF_SAVE_BUFFER },
+    { winhttp_websocket_close,            WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
+
+    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
+};
+
+static struct notification websocket_test4[] =
+{
+    { winhttp_open_request,               WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_RESOLVING_NAME, NF_ALLOW },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_NAME_RESOLVED, NF_ALLOW },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, NF_SIGNAL },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_SIGNAL | NF_MAIN_THREAD },
+    { winhttp_websocket_complete_upgrade, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, NF_SIGNAL },
+    { winhttp_websocket_receive,          WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SIGNAL },
+
+    { winhttp_websocket_close,            WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, NF_SAVE_BUFFER },
+    { winhttp_websocket_close,            WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
+
+    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL },
+};
+
+static const struct notification websocket_test5[] =
+{
+    { winhttp_open_request,               WINHTTP_CALLBACK_STATUS_HANDLE_CREATED },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_RESOLVING_NAME, NF_ALLOW },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_NAME_RESOLVED, NF_ALLOW },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_SENDING_REQUEST },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_REQUEST_SENT },
+    { winhttp_send_request,               WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, NF_SIGNAL },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE, NF_MAIN_THREAD },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_RESPONSE_RECEIVED, NF_MAIN_THREAD },
+    { winhttp_receive_response,           WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, NF_SIGNAL | NF_MAIN_THREAD },
+    { winhttp_websocket_complete_upgrade, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, NF_SIGNAL | NF_MAIN_THREAD },
     { winhttp_websocket_receive,          WINHTTP_CALLBACK_STATUS_READ_COMPLETE, NF_SIGNAL },
 
     { winhttp_websocket_shutdown,         WINHTTP_CALLBACK_STATUS_SHUTDOWN_COMPLETE, NF_MAIN_THREAD },
@@ -732,14 +873,12 @@ static const struct notification websocket_test3[] =
     { winhttp_websocket_close,            WINHTTP_CALLBACK_STATUS_CLOSE_COMPLETE,
                                                                  NF_MAIN_THREAD| NF_SAVE_BUFFER | NF_SIGNAL },
     { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
-    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_CLOSING_CONNECTION, NF_WINE_ALLOW },
-    { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_CONNECTION_CLOSED, NF_WINE_ALLOW },
     { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
     { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
     { winhttp_close_handle,               WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL }
 };
 
-#define BIG_BUFFER_SIZE (32 * 1024)
+#define BIG_BUFFER_SIZE (16 * 1024)
 
 static void test_websocket(BOOL secure)
 {
@@ -747,7 +886,7 @@ static void test_websocket(BOOL secure)
     WINHTTP_WEB_SOCKET_ASYNC_RESULT *result;
     WINHTTP_WEB_SOCKET_STATUS *ws_status;
     WINHTTP_WEB_SOCKET_BUFFER_TYPE type;
-    DWORD size, status, err;
+    DWORD size, status, err, value;
     BOOL ret, unload = TRUE;
     struct info info, *context = &info;
     unsigned char *big_buffer;
@@ -822,6 +961,20 @@ static void test_websocket(BOOL secure)
     ok( ret, "got %lu\n", GetLastError() );
 
     setup_test( &info, winhttp_send_request, __LINE__ );
+
+    value = 15;
+    ret = WinHttpSetOption(request, WINHTTP_OPTION_WEB_SOCKET_SEND_BUFFER_SIZE, &value, sizeof(DWORD));
+    ok(ret, "got %lu\n", GetLastError());
+    ret = WinHttpSendRequest( request, NULL, 0, NULL, 0, 0, 0 );
+    err = GetLastError();
+    ok( ret, "got err %lu.\n", err );
+
+    WaitForSingleObject( info.wait, INFINITE );
+
+    value = 32768;
+    ret = WinHttpSetOption(request, WINHTTP_OPTION_WEB_SOCKET_SEND_BUFFER_SIZE, &value, sizeof(DWORD));
+    ok(ret, "got %lu\n", GetLastError());
+
     SetLastError( 0xdeadbeef );
     ret = WinHttpSendRequest( request, NULL, 0, NULL, 0, 0, 0 );
     err = GetLastError();
@@ -860,6 +1013,9 @@ static void test_websocket(BOOL secure)
     err = GetLastError();
     ok( socket != NULL, "got %lu\n", err );
     ok( err == ERROR_SUCCESS, "got %lu\n", err );
+
+    WinHttpCloseHandle( request );
+
     WaitForSingleObject( info.wait, INFINITE );
 
     /* The send is executed synchronously (even if sending a reasonably big buffer exceeding SSL buffer size).
@@ -978,7 +1134,6 @@ static void test_websocket(BOOL secure)
 
     setup_test( &info, winhttp_close_handle, __LINE__ );
     WinHttpCloseHandle( socket );
-    WinHttpCloseHandle( request );
 
     WaitForSingleObject( info.wait, INFINITE );
     end_test( &info, __LINE__ );
@@ -1065,9 +1220,148 @@ static void test_websocket(BOOL secure)
     WaitForSingleObject( info.wait, INFINITE );
     end_test( &info, __LINE__ );
 
-    /* Test socket shutdown while receive is pending. */
+
+    /* Test socket handle close while web socket close is pending. */
     info.test  = websocket_test3;
     info.count = ARRAY_SIZE( websocket_test3 );
+    info.index = 0;
+
+    setup_test( &info, winhttp_open_request, __LINE__ );
+    request = WinHttpOpenRequest( connection, NULL, L"/", NULL, NULL, NULL, secure ? WINHTTP_FLAG_SECURE : 0);
+    ok( request != NULL, "got %lu\n", err );
+
+    if (secure)
+    {
+        flags = SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID |
+                SECURITY_FLAG_IGNORE_CERT_CN_INVALID;
+        ret = WinHttpSetOption(request, WINHTTP_OPTION_SECURITY_FLAGS, &flags, sizeof(flags));
+        ok( ret, "failed to set security flags %lu\n", GetLastError() );
+    }
+
+    ret = WinHttpSetOption( request, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, NULL, 0 );
+    ok( ret, "got %lu\n", GetLastError() );
+
+    setup_test( &info, winhttp_send_request, __LINE__ );
+    ret = WinHttpSendRequest( request, NULL, 0, NULL, 0, 0, 0 );
+    ok( ret, "got %lu\n", GetLastError() );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    setup_test( &info, winhttp_receive_response, __LINE__ );
+    ret = WinHttpReceiveResponse( request, NULL );
+    ok( ret, "got %lu\n", err );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    size = sizeof(status);
+    ret = WinHttpQueryHeaders( request, WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL );
+    ok( ret, "failed unexpectedly %lu\n", err );
+    ok( status == 101, "got %lu\n", status );
+
+    setup_test( &info, winhttp_websocket_complete_upgrade, __LINE__ );
+    socket = pWinHttpWebSocketCompleteUpgrade( request, (DWORD_PTR)context );
+    ok( socket != NULL, "got %lu\n", err );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    setup_test( &info, winhttp_websocket_receive, __LINE__ );
+    buffer[0] = 0;
+    err = pWinHttpWebSocketReceive( socket, buffer, sizeof(buffer), &size, &type );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+    WaitForSingleObject( info.wait, INFINITE );
+    ok( buffer[0] == 'R', "unexpected data\n" );
+
+    setup_test( &info, winhttp_websocket_close, __LINE__ );
+
+    err = pWinHttpWebSocketReceive( socket, buffer, sizeof(buffer), &size, &type );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+
+    err = pWinHttpWebSocketClose( socket, 1000, (void *)"success", sizeof("success") );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+
+    info.buflen = 0xdeadbeef;
+    WinHttpCloseHandle( socket );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    ok( info.buflen == sizeof(*result), "got %u\n", info.buflen );
+    result = (WINHTTP_WEB_SOCKET_ASYNC_RESULT *)info.buffer;
+    ok( result->Operation == WINHTTP_WEB_SOCKET_CLOSE_OPERATION, "got %u\n", result->Operation );
+    todo_wine ok( !result->AsyncResult.dwResult, "got %Iu\n", result->AsyncResult.dwResult );
+    ok( result->AsyncResult.dwError == ERROR_WINHTTP_OPERATION_CANCELLED, "got %lu\n", result->AsyncResult.dwError );
+
+    setup_test( &info, winhttp_close_handle, __LINE__ );
+    WinHttpCloseHandle( request );
+    WaitForSingleObject( info.wait, INFINITE );
+    end_test( &info, __LINE__ );
+
+    /* Test socket handle close while receive is pending. */
+    info.test  = websocket_test4;
+    info.count = ARRAY_SIZE( websocket_test4 );
+    info.index = 0;
+
+    setup_test( &info, winhttp_open_request, __LINE__ );
+    request = WinHttpOpenRequest( connection, NULL, L"/", NULL, NULL, NULL, secure ? WINHTTP_FLAG_SECURE : 0);
+    ok( request != NULL, "got %lu\n", err );
+
+    if (secure)
+    {
+        flags = SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID |
+                SECURITY_FLAG_IGNORE_CERT_CN_INVALID;
+        ret = WinHttpSetOption(request, WINHTTP_OPTION_SECURITY_FLAGS, &flags, sizeof(flags));
+        ok( ret, "failed to set security flags %lu\n", GetLastError() );
+    }
+
+    ret = WinHttpSetOption( request, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, NULL, 0 );
+    ok( ret, "got %lu\n", GetLastError() );
+
+    setup_test( &info, winhttp_send_request, __LINE__ );
+    ret = WinHttpSendRequest( request, NULL, 0, NULL, 0, 0, 0 );
+    ok( ret, "got %lu\n", GetLastError() );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    setup_test( &info, winhttp_receive_response, __LINE__ );
+    ret = WinHttpReceiveResponse( request, NULL );
+    ok( ret, "got %lu\n", err );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    size = sizeof(status);
+    ret = WinHttpQueryHeaders( request, WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL );
+    ok( ret, "failed unexpectedly %lu\n", err );
+    ok( status == 101, "got %lu\n", status );
+
+    setup_test( &info, winhttp_websocket_complete_upgrade, __LINE__ );
+    socket = pWinHttpWebSocketCompleteUpgrade( request, (DWORD_PTR)context );
+    ok( socket != NULL, "got %lu\n", err );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    setup_test( &info, winhttp_websocket_receive, __LINE__ );
+    buffer[0] = 0;
+    err = pWinHttpWebSocketReceive( socket, buffer, sizeof(buffer), &size, &type );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+    WaitForSingleObject( info.wait, INFINITE );
+    ok( buffer[0] == 'R', "unexpected data\n" );
+
+    setup_test( &info, winhttp_websocket_close, __LINE__ );
+
+    info.buflen = 0xdeadbeef;
+
+    err = pWinHttpWebSocketReceive( socket, buffer, sizeof(buffer), &size, &type );
+    ok( err == ERROR_SUCCESS, "got %lu\n", err );
+
+    WinHttpCloseHandle( socket );
+    WaitForSingleObject( info.wait, INFINITE );
+
+    ok( info.buflen == sizeof(*result), "got %u\n", info.buflen );
+    result = (WINHTTP_WEB_SOCKET_ASYNC_RESULT *)info.buffer;
+    ok( result->Operation == WINHTTP_WEB_SOCKET_RECEIVE_OPERATION, "got %u\n", result->Operation );
+    ok( !result->AsyncResult.dwResult, "got %Iu\n", result->AsyncResult.dwResult );
+    ok( result->AsyncResult.dwError == ERROR_WINHTTP_OPERATION_CANCELLED, "got %lu\n", result->AsyncResult.dwError );
+
+    setup_test( &info, winhttp_close_handle, __LINE__ );
+    WinHttpCloseHandle( request );
+    WaitForSingleObject( info.wait, INFINITE );
+    end_test( &info, __LINE__ );
+
+    /* Test socket shutdown while receive is pending. */
+    info.test  = websocket_test5;
+    info.count = ARRAY_SIZE( websocket_test5 );
     info.index = 0;
 
     setup_test( &info, winhttp_open_request, __LINE__ );
@@ -1197,7 +1491,7 @@ struct server_info
 };
 
 static int server_socket;
-static HANDLE server_socket_available, server_socket_done;
+static HANDLE server_socket_available, server_socket_closed, server_socket_done;
 
 static DWORD CALLBACK server_thread(LPVOID param)
 {
@@ -1232,7 +1526,7 @@ static DWORD CALLBACK server_thread(LPVOID param)
     do
     {
         if (c == -1) c = accept(s, NULL, NULL);
-
+        ResetEvent(server_socket_closed);
         memset(buffer, 0, sizeof buffer);
         for(i = 0; i < sizeof buffer - 1; i++)
         {
@@ -1259,6 +1553,7 @@ static DWORD CALLBACK server_thread(LPVOID param)
         }
         shutdown(c, 2);
         closesocket(c);
+        SetEvent(server_socket_closed);
         c = -1;
     } while (!last_request);
 
@@ -1421,8 +1716,6 @@ static const struct notification close_request_test[] =
 
 static const struct notification close_allow_connection_close_request_test[] =
 {
-    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_CLOSING_CONNECTION, NF_ALLOW },
-    { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_CONNECTION_CLOSED, NF_ALLOW },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING },
     { winhttp_close_handle,     WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, NF_SIGNAL }
@@ -1545,6 +1838,7 @@ static void test_persistent_connection(int port)
 
     SetEvent( server_socket_done );
     CloseHandle( info.wait );
+    WaitForSingleObject( server_socket_closed, INFINITE );
 }
 
 struct test_recursion_context
@@ -1554,6 +1848,12 @@ struct test_recursion_context
     LONG recursion_count, max_recursion_query, max_recursion_read;
     BOOL read_from_callback;
     BOOL have_sync_callback;
+    DWORD call_receive_response_status;
+    DWORD main_thread_id;
+    DWORD receive_response_thread_id;
+    BOOL headers_available;
+    DWORD total_len;
+    BYTE *send_buffer;
 };
 
 /* The limit is 128 before Win7 and 3 on newer Windows. */
@@ -1569,8 +1869,37 @@ static void CALLBACK test_recursion_callback( HINTERNET handle, DWORD_PTR contex
 
     switch (status)
     {
+        case WINHTTP_CALLBACK_STATUS_SENDING_REQUEST:
+        case WINHTTP_CALLBACK_STATUS_REQUEST_SENT:
         case WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE:
+            if (status == context->call_receive_response_status)
+            {
+                if (context->total_len)
+                {
+                    ret = WinHttpWriteData( context->request, context->send_buffer, context->total_len, NULL );
+                    ok(ret, "failed.\n");
+                }
+                else
+                {
+                    context->receive_response_thread_id = GetCurrentThreadId();
+                    ret = WinHttpReceiveResponse( context->request, NULL );
+                    ok( ret, "failed to receive response, GetLastError() %lu\n", GetLastError() );
+                }
+            }
+            break;
+
+        case WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE:
+            trace("WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE thread %04lx.\n", GetCurrentThreadId());
+            context->receive_response_thread_id = GetCurrentThreadId();
+            ret = WinHttpReceiveResponse( context->request, NULL );
+            ok( ret, "failed to receive response, GetLastError() %lu\n", GetLastError() );
+            break;
+
         case WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE:
+            if (context->call_receive_response_status != WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE)
+                ok( GetCurrentThreadId() != context->main_thread_id,
+                    "expected callback to be called from the other thread, got main.\n" );
+            context->headers_available = TRUE;
             SetEvent( context->wait );
             break;
 
@@ -1617,20 +1946,34 @@ static void CALLBACK test_recursion_callback( HINTERNET handle, DWORD_PTR contex
             if (err == ERROR_SUCCESS) context->have_sync_callback = TRUE;
             InterlockedDecrement( &context->recursion_count );
             break;
+        case WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE:
+            if (!context->headers_available
+                && context->call_receive_response_status == WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE)
+                ok( GetCurrentThreadId() == context->receive_response_thread_id,
+                    "expected callback to be called from the same thread, got %lx.\n", GetCurrentThreadId() );
+            break;
     }
 }
 
 static void test_recursion(void)
 {
+    static DWORD request_callback_status_tests[] =
+    {
+        WINHTTP_CALLBACK_STATUS_SENDING_REQUEST,
+        WINHTTP_CALLBACK_STATUS_REQUEST_SENT,
+    };
     struct test_recursion_context context;
     HANDLE session, connection, request;
     DWORD size, status, err;
+    char buffer[1024];
+    unsigned int i;
     BOOL ret;
     BYTE b;
 
     memset( &context, 0, sizeof(context) );
 
     context.wait = CreateEventW( NULL, FALSE, FALSE, NULL );
+    context.main_thread_id = GetCurrentThreadId();
 
     session = WinHttpOpen( L"winetest", 0, NULL, NULL, WINHTTP_FLAG_ASYNC );
     ok( !!session, "failed to open session, GetLastError() %lu\n", GetLastError() );
@@ -1644,7 +1987,15 @@ static void test_recursion(void)
     ok( !!request, "failed to open a request, GetLastError() %lu\n", GetLastError() );
 
     context.request = request;
-    ret = WinHttpSendRequest( request, NULL, 0, NULL, 0, 0, (DWORD_PTR)&context );
+
+    ret = WinHttpReceiveResponse( request, NULL );
+    ok( ret, "failed to receive response, GetLastError() %lu\n", GetLastError() );
+
+    context.call_receive_response_status = WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE;
+    context.total_len = 1;
+    context.send_buffer = &b;
+    b = 0;
+    ret = WinHttpSendRequest( request, NULL, 0, NULL, 0, context.total_len, (DWORD_PTR)&context );
     err = GetLastError();
     if (!ret && (err == ERROR_WINHTTP_CANNOT_CONNECT || err == ERROR_WINHTTP_TIMEOUT))
     {
@@ -1659,11 +2010,8 @@ static void test_recursion(void)
     ok( ret, "failed to send request, GetLastError() %lu\n", GetLastError() );
 
     WaitForSingleObject( context.wait, INFINITE );
-
-    ret = WinHttpReceiveResponse( request, NULL );
-    ok( ret, "failed to receive response, GetLastError() %lu\n", GetLastError() );
-
-    WaitForSingleObject( context.wait, INFINITE );
+    context.total_len = 0;
+    context.send_buffer = NULL;
 
     size = sizeof(status);
     ret = WinHttpQueryHeaders( request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL,
@@ -1687,9 +2035,45 @@ static void test_recursion(void)
     }
     else skip( "no sync callbacks\n");
 
-    WinHttpSetStatusCallback( session, NULL, WINHTTP_CALLBACK_FLAG_ALL_NOTIFICATIONS, 0 );
-
     WinHttpCloseHandle( request );
+
+    for (i = 0; i < ARRAY_SIZE(request_callback_status_tests); ++i)
+    {
+        winetest_push_context( "i %u", i );
+
+        request = WinHttpOpenRequest( connection, NULL, L"/tests/hello.html", NULL, NULL, NULL, 0 );
+        ok( !!request, "failed to open a request, GetLastError() %lu\n", GetLastError() );
+
+        context.request = request;
+        context.call_receive_response_status = request_callback_status_tests[i];
+        context.headers_available = FALSE;
+
+        ret = WinHttpSendRequest( request, NULL, 0, NULL, 0, 0, (DWORD_PTR)&context );
+        err = GetLastError();
+        if (!ret && (err == ERROR_WINHTTP_CANNOT_CONNECT || err == ERROR_WINHTTP_TIMEOUT))
+        {
+            skip("Connection failed, skipping\n");
+            WinHttpSetStatusCallback( session, NULL, WINHTTP_CALLBACK_FLAG_ALL_NOTIFICATIONS, 0 );
+            WinHttpCloseHandle( request );
+            WinHttpCloseHandle( connection );
+            WinHttpCloseHandle( session );
+            CloseHandle( context.wait );
+            winetest_pop_context();
+            return;
+        }
+
+        WaitForSingleObject( context.wait, INFINITE );
+
+        ret = WinHttpReadData( request, buffer, sizeof(buffer), NULL );
+        ok( ret, "failed to read data, GetLastError() %lu\n", GetLastError() );
+
+        WaitForSingleObject( context.wait, INFINITE );
+
+        WinHttpCloseHandle( request );
+        winetest_pop_context();
+    }
+
+    WinHttpSetStatusCallback( session, NULL, WINHTTP_CALLBACK_FLAG_ALL_NOTIFICATIONS, 0 );
     WinHttpCloseHandle( connection );
     WinHttpCloseHandle( session );
     CloseHandle( context.wait );
@@ -1709,8 +2093,12 @@ START_TEST (notification)
     pWinHttpWebSocketSend = (void *)GetProcAddress( mod, "WinHttpWebSocketSend" );
     pWinHttpWebSocketShutdown = (void *)GetProcAddress( mod, "WinHttpWebSocketShutdown" );
 
-    test_connection_cache();
-    test_redirect();
+    test_connection_cache( FALSE );
+    test_redirect( FALSE );
+    winetest_push_context( "async" );
+    test_connection_cache( TRUE );
+    test_redirect( TRUE );
+    winetest_pop_context();
     test_async();
     test_websocket( FALSE );
     winetest_push_context( "secure" );
@@ -1725,6 +2113,7 @@ START_TEST (notification)
     ok( thread != NULL, "failed to create thread %lu\n", GetLastError() );
 
     server_socket_available = CreateEventW( NULL, 0, 0, NULL );
+    server_socket_closed = CreateEventW( NULL, 0, 0, NULL );
     server_socket_done = CreateEventW( NULL, 0, 0, NULL );
 
     ret = WaitForSingleObject( si.event, 10000 );
@@ -1744,4 +2133,5 @@ START_TEST (notification)
     CloseHandle( thread );
     CloseHandle( server_socket_available );
     CloseHandle( server_socket_done );
+    CloseHandle( server_socket_closed );
 }

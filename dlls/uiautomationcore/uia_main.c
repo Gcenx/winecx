@@ -18,13 +18,16 @@
 
 #define COBJMACROS
 
+#include "combaseapi.h"
 #include "initguid.h"
-#include "uiautomation.h"
+#include "uia_private.h"
 
 #include "wine/debug.h"
 #include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(uiautomation);
+
+HMODULE huia_module;
 
 struct uia_object_wrapper
 {
@@ -247,7 +250,7 @@ HRESULT WINAPI hwnd_host_provider_get_HostRawElementProvider(IRawElementProvider
     return S_OK;
 }
 
-IRawElementProviderSimpleVtbl hwnd_host_provider_vtbl = {
+static const IRawElementProviderSimpleVtbl hwnd_host_provider_vtbl = {
     hwnd_host_provider_QueryInterface,
     hwnd_host_provider_AddRef,
     hwnd_host_provider_Release,
@@ -297,25 +300,6 @@ HRESULT WINAPI UiaGetReservedNotSupportedValue(IUnknown **value)
 }
 
 /***********************************************************************
- *          UiaLookupId (uiautomationcore.@)
- */
-int WINAPI UiaLookupId(enum AutomationIdentifierType type, const GUID *guid)
-{
-    FIXME("(%d, %s) stub!\n", type, debugstr_guid(guid));
-    return 1;
-}
-
-/***********************************************************************
- *          UiaReturnRawElementProvider (uiautomationcore.@)
- */
-LRESULT WINAPI UiaReturnRawElementProvider(HWND hwnd, WPARAM wParam,
-        LPARAM lParam, IRawElementProviderSimple *elprov)
-{
-    FIXME("(%p, %Ix, %Ix, %p) stub!\n", hwnd, wParam, lParam, elprov);
-    return 0;
-}
-
-/***********************************************************************
  *          UiaRaiseAutomationEvent (uiautomationcore.@)
  */
 HRESULT WINAPI UiaRaiseAutomationEvent(IRawElementProviderSimple *provider, EVENTID id)
@@ -331,11 +315,6 @@ HRESULT WINAPI UiaRaiseAutomationPropertyChangedEvent(IRawElementProviderSimple 
 {
     FIXME("(%p, %d, %s, %s): stub\n", provider, id, debugstr_variant(&old), debugstr_variant(&new));
     return S_OK;
-}
-
-void WINAPI UiaRegisterProviderCallback(UiaProviderCallback *callback)
-{
-    FIXME("(%p): stub\n", callback);
 }
 
 HRESULT WINAPI UiaHostProviderFromHwnd(HWND hwnd, IRawElementProviderSimple **provider)
@@ -362,8 +341,23 @@ HRESULT WINAPI UiaHostProviderFromHwnd(HWND hwnd, IRawElementProviderSimple **pr
     return S_OK;
 }
 
-HRESULT WINAPI UiaDisconnectProvider(IRawElementProviderSimple *provider)
+/***********************************************************************
+ *          DllMain (uiautomationcore.@)
+ */
+BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, void *reserved)
 {
-    FIXME("(%p): stub\n", provider);
-    return E_NOTIMPL;
+    TRACE("(%p, %ld, %p)\n", hinst, reason, reserved);
+
+    switch (reason)
+    {
+    case DLL_PROCESS_ATTACH:
+        DisableThreadLibraryCalls(hinst);
+        huia_module = hinst;
+        break;
+
+    default:
+        break;
+    }
+
+    return TRUE;
 }

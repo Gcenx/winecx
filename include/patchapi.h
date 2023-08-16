@@ -20,8 +20,6 @@
 #ifndef _PATCHAPI_H_
 #define _PATCHAPI_H_
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -129,7 +127,5 @@ INT WINAPI NormalizeFileForPatchSignature(PVOID, ULONG, ULONG, PATCH_OPTION_DATA
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* _PATCHAPI_H_ */

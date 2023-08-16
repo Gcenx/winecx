@@ -152,7 +152,7 @@ interface ID2D1InkStyle : ID2D1Resource
         [in] D2D1_INK_NIB_SHAPE shape
     );
     D2D1_INK_NIB_SHAPE GetNibShape();
-};
+}
 
 [
     object,
@@ -197,7 +197,7 @@ interface ID2D1Ink : ID2D1Resource
         [in, optional] const D2D1_MATRIX_3X2_F *world_transform,
         [out] D2D1_RECT_F *bounds
     );
-};
+}
 
 [
     object,
@@ -212,7 +212,7 @@ interface ID2D1GradientMesh : ID2D1Resource
         [out] D2D1_GRADIENT_MESH_PATCH *patches,
         [in] UINT32 patch_count
     );
-};
+}
 
 [
     object,
@@ -225,7 +225,7 @@ interface ID2D1ImageSource : ID2D1Image
     HRESULT TryReclaimResources(
         [out] BOOL *resources_discarded
     );
-};
+}
 
 [
     object,
@@ -243,7 +243,7 @@ interface ID2D1ImageSourceFromWic : ID2D1ImageSource
     void GetSource(
         [out] IWICBitmapSource **source
     );
-};
+}
 
 [
     object,
@@ -258,7 +258,7 @@ interface ID2D1TransformedImageSource : ID2D1Image
     void GetProperties(
         [out] D2D1_TRANSFORMED_IMAGE_SOURCE_PROPERTIES *out
     );
-};
+}
 
 [
     object,

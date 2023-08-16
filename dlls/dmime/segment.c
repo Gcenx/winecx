@@ -35,6 +35,8 @@ typedef struct IDirectMusicSegment8Impl {
     struct list Tracks;
 } IDirectMusicSegment8Impl;
 
+IDirectMusicSegment8Impl *create_segment(void);
+
 static inline IDirectMusicSegment8Impl *impl_from_IDirectMusicSegment8(IDirectMusicSegment8 *iface)
 {
   return CONTAINING_RECORD(iface, IDirectMusicSegment8Impl, IDirectMusicSegment8_iface);
@@ -410,12 +412,50 @@ static HRESULT WINAPI IDirectMusicSegment8Impl_SetParam(IDirectMusicSegment8 *if
   return S_OK;
 }
 
-static HRESULT WINAPI IDirectMusicSegment8Impl_Clone(IDirectMusicSegment8 *iface,
-        MUSIC_TIME mtStart, MUSIC_TIME mtEnd, IDirectMusicSegment **ppSegment)
+static HRESULT WINAPI IDirectMusicSegment8Impl_Clone(IDirectMusicSegment8 *iface, MUSIC_TIME start, MUSIC_TIME end,
+        IDirectMusicSegment **segment)
 {
-  IDirectMusicSegment8Impl *This = impl_from_IDirectMusicSegment8(iface);
-  FIXME("(%p, %ld, %ld, %p): stub\n", This, mtStart, mtEnd, ppSegment);
-  return S_OK;
+    IDirectMusicSegment8Impl *This = impl_from_IDirectMusicSegment8(iface);
+    IDirectMusicSegment8Impl *clone;
+    IDirectMusicTrack *track;
+    DMUS_PRIVATE_SEGMENT_TRACK *track_item, *cloned_item;
+    HRESULT hr;
+    BOOL track_clone_fail = FALSE;
+
+    TRACE("(%p, %ld, %ld, %p)\n", This, start, end, segment);
+
+    if (!segment)
+        return E_POINTER;
+
+    if (!(clone = create_segment())) {
+        *segment = NULL;
+        return E_OUTOFMEMORY;
+    }
+
+    clone->header = This->header;
+    clone->pGraph = This->pGraph;
+    if (clone->pGraph)
+        IDirectMusicGraph_AddRef(clone->pGraph);
+
+    LIST_FOR_EACH_ENTRY(track_item, &This->Tracks, DMUS_PRIVATE_SEGMENT_TRACK, entry) {
+        if (SUCCEEDED(hr = IDirectMusicTrack_Clone(track_item->pTrack, start, end, &track))) {
+            if ((cloned_item = HeapAlloc(GetProcessHeap(), 0, sizeof(*cloned_item)))) {
+                cloned_item->dwGroupBits = track_item->dwGroupBits;
+                cloned_item->flags = track_item->flags;
+                cloned_item->pTrack = track;
+                list_add_tail(&clone->Tracks, &cloned_item->entry);
+                continue;
+            } else {
+                IDirectMusicTrack_Release(track);
+            }
+        }
+        WARN("Failed to clone track %p: %#lx\n", track_item->pTrack, hr);
+        track_clone_fail = TRUE;
+    }
+
+    *segment = (IDirectMusicSegment *)&clone->IDirectMusicSegment8_iface;
+
+    return track_clone_fail ? S_FALSE : S_OK;
 }
 
 static HRESULT WINAPI IDirectMusicSegment8Impl_SetStartPoint(IDirectMusicSegment8 *iface,
@@ -826,28 +866,38 @@ static const IPersistStreamVtbl persiststream_vtbl = {
     unimpl_IPersistStream_GetSizeMax
 };
 
-/* for ClassFactory */
-HRESULT WINAPI create_dmsegment(REFIID lpcGUID, void **ppobj)
+IDirectMusicSegment8Impl *create_segment(void)
 {
-  IDirectMusicSegment8Impl* obj;
-  HRESULT hr;
+    IDirectMusicSegment8Impl *obj;
 
-  obj = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectMusicSegment8Impl));
-  if (NULL == obj) {
-    *ppobj = NULL;
-    return E_OUTOFMEMORY;
-  }
-  obj->IDirectMusicSegment8_iface.lpVtbl = &dmsegment8_vtbl;
-  obj->ref = 1;
-  dmobject_init(&obj->dmobj, &CLSID_DirectMusicSegment,
-          (IUnknown *)&obj->IDirectMusicSegment8_iface);
-  obj->dmobj.IDirectMusicObject_iface.lpVtbl = &dmobject_vtbl;
-  obj->dmobj.IPersistStream_iface.lpVtbl = &persiststream_vtbl;
-  list_init (&obj->Tracks);
+    if (!(obj = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*obj))))
+        return NULL;
 
-  DMIME_LockModule();
-  hr = IDirectMusicSegment8_QueryInterface(&obj->IDirectMusicSegment8_iface, lpcGUID, ppobj);
-  IDirectMusicSegment8_Release(&obj->IDirectMusicSegment8_iface);
+    obj->IDirectMusicSegment8_iface.lpVtbl = &dmsegment8_vtbl;
+    obj->ref = 1;
+    dmobject_init(&obj->dmobj, &CLSID_DirectMusicSegment, (IUnknown *)&obj->IDirectMusicSegment8_iface);
+    obj->dmobj.IDirectMusicObject_iface.lpVtbl = &dmobject_vtbl;
+    obj->dmobj.IPersistStream_iface.lpVtbl = &persiststream_vtbl;
+    list_init (&obj->Tracks);
 
-  return hr;
+    DMIME_LockModule();
+
+    return obj;
+}
+
+/* for ClassFactory */
+HRESULT create_dmsegment(REFIID guid, void **ret_iface)
+{
+    IDirectMusicSegment8Impl *obj;
+    HRESULT hr;
+
+    if (!(obj = create_segment())) {
+        *ret_iface = NULL;
+        return E_OUTOFMEMORY;
+    }
+
+    hr = IDirectMusicSegment8_QueryInterface(&obj->IDirectMusicSegment8_iface, guid, ret_iface);
+    IDirectMusicSegment8_Release(&obj->IDirectMusicSegment8_iface);
+
+    return hr;
 }

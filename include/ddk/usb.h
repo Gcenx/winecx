@@ -19,8 +19,6 @@
 #ifndef __DDK_USB_H__
 #define __DDK_USB_H__
 
-#include "wine/winheader_enter.h"
-
 #include <ddk/usb200.h>
 
 #define URB_FUNCTION_SELECT_CONFIGURATION            0x0000
@@ -404,7 +402,5 @@ typedef struct _URB {
     } DUMMYUNIONNAME;
 } URB;
 typedef struct _URB *PURB;
-
-#include "wine/winheader_exit.h"
 
 #endif

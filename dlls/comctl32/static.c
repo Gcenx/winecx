@@ -29,6 +29,7 @@
  */
 
 #include <stdarg.h>
+#include <stdlib.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -37,7 +38,6 @@
 #include "commctrl.h"
 #include "uxtheme.h"
 
-#include "wine/heap.h"
 #include "wine/debug.h"
 
 #include "comctl32.h"
@@ -94,7 +94,7 @@ static struct static_extra_info *get_extra_ptr( HWND hwnd, BOOL force )
     struct static_extra_info *extra = (struct static_extra_info *)GetWindowLongPtrW( hwnd, 0 );
     if (!extra && force)
     {
-        extra = heap_alloc_zero( sizeof(*extra) );
+        extra = Alloc( sizeof(*extra) );
         if (extra)
             SetWindowLongPtrW( hwnd, 0, (ULONG_PTR)extra );
     }
@@ -437,6 +437,7 @@ static BOOL hasTextStyle( DWORD style )
 
 static LRESULT CALLBACK STATIC_WindowProc( HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam )
 {
+    const WCHAR *window_name;
     LRESULT lResult = 0;
     LONG full_style = GetWindowLongW( hwnd, GWL_STYLE );
     LONG style = full_style & SS_TYPEMASK;
@@ -469,7 +470,7 @@ static LRESULT CALLBACK STATIC_WindowProc( HWND hwnd, UINT uMsg, WPARAM wParam, 
             {
                 if (extra->image_has_alpha)
                     DeleteObject( extra->image.hbitmap );
-                heap_free( extra );
+                Free( extra );
             }
 /*
  * FIXME
@@ -549,13 +550,18 @@ static LRESULT CALLBACK STATIC_WindowProc( HWND hwnd, UINT uMsg, WPARAM wParam, 
                 SetWindowPos(hwnd, NULL, 0, 0, rc.right - rc.left, rc.bottom - rc.top, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER);
             }
 
+            if (cs->lpszName && cs->lpszName[0] == 0xffff)
+                window_name = MAKEINTRESOURCEW(cs->lpszName[1]);
+            else
+                window_name = cs->lpszName;
+
             switch (style)
             {
             case SS_ICON:
                 {
                     HICON hIcon;
 
-                    hIcon = STATIC_LoadIconW(cs->hInstance, cs->lpszName, full_style);
+                    hIcon = STATIC_LoadIconW(cs->hInstance, window_name, full_style);
                     STATIC_SetIcon(hwnd, hIcon, full_style);
                 }
                 break;
@@ -563,7 +569,7 @@ static LRESULT CALLBACK STATIC_WindowProc( HWND hwnd, UINT uMsg, WPARAM wParam, 
                 if ((ULONG_PTR)cs->hInstance >> 16)
                 {
                     HBITMAP hBitmap;
-                    hBitmap = LoadBitmapW(cs->hInstance, cs->lpszName);
+                    hBitmap = LoadBitmapW(cs->hInstance, window_name);
                     STATIC_SetBitmap(hwnd, hBitmap, full_style);
                 }
                 break;
@@ -745,13 +751,13 @@ static void STATIC_PaintTextfn( HWND hwnd, HDC hdc, HBRUSH hbrush, DWORD style )
     }
 
     buf_size = 256;
-    if (!(text = HeapAlloc( GetProcessHeap(), 0, buf_size * sizeof(WCHAR) )))
+    if (!(text = Alloc( buf_size * sizeof(WCHAR) )))
         goto no_TextOut;
 
     while ((len = InternalGetWindowText( hwnd, text, buf_size )) == buf_size - 1)
     {
         buf_size *= 2;
-        if (!(text = HeapReAlloc( GetProcessHeap(), 0, text, buf_size * sizeof(WCHAR) )))
+        if (!(text = ReAlloc( text, buf_size * sizeof(WCHAR) )))
             goto no_TextOut;
     }
 
@@ -771,7 +777,7 @@ static void STATIC_PaintTextfn( HWND hwnd, HDC hdc, HBRUSH hbrush, DWORD style )
     }
 
 no_TextOut:
-    HeapFree( GetProcessHeap(), 0, text );
+    Free( text );
 
     if (hFont)
         SelectObject( hdc, hOldFont );
@@ -849,13 +855,16 @@ static void STATIC_PaintBitmapfn(HWND hwnd, HDC hdc, HBRUSH hbrush, DWORD style 
 {
     HDC hMemDC;
     HBITMAP hBitmap, oldbitmap;
+    RECT rcClient;
+
+    GetClientRect( hwnd, &rcClient );
+    FillRect( hdc, &rcClient, hbrush );
 
     if ((hBitmap = STATIC_GetImage( hwnd, IMAGE_BITMAP, style ))
          && (GetObjectType(hBitmap) == OBJ_BITMAP)
          && (hMemDC = CreateCompatibleDC( hdc )))
     {
         BITMAP bm;
-        RECT rcClient;
         LOGBRUSH brush;
         BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
         struct static_extra_info *extra = get_extra_ptr( hwnd, FALSE );
@@ -870,10 +879,8 @@ static void STATIC_PaintBitmapfn(HWND hwnd, HDC hdc, HBRUSH hbrush, DWORD style 
             if (brush.lbStyle == BS_SOLID)
                 SetBkColor(hdc, brush.lbColor);
         }
-        GetClientRect(hwnd, &rcClient);
         if (style & SS_CENTERIMAGE)
         {
-            FillRect( hdc, &rcClient, hbrush );
             rcClient.left = (rcClient.right - rcClient.left)/2 - bm.bmWidth/2;
             rcClient.top = (rcClient.bottom - rcClient.top)/2 - bm.bmHeight/2;
             rcClient.right = rcClient.left + bm.bmWidth;

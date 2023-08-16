@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2021-12-23 14:09+0800\n"
+"PO-Revision-Date: 2022-10-17 16:35+0800\n"
 "Last-Translator: Chilung Chan <eason066@gmail.com>\n"
 "Language-Team: Chinese (Taiwan)\n"
 "Language: zh_TW\n"
@@ -62,8 +62,8 @@ msgstr ""
 msgid "&Support Information"
 msgstr "技術支援資訊(&S)"
 
-#: dlls/appwiz.cpl/appwiz.rc:68 programs/regedit/regedit.rc:133
-#: programs/regedit/regedit.rc:232
+#: dlls/appwiz.cpl/appwiz.rc:68 programs/regedit/regedit.rc:136
+#: programs/regedit/regedit.rc:237
 msgid "&Modify..."
 msgstr "修改(&M)..."
 
@@ -96,22 +96,22 @@ msgstr "技術支援資訊"
 #: dlls/shlwapi/shlwapi.rc:44 dlls/twain_32/twain.rc:32
 #: dlls/user32/user32.rc:83 dlls/user32/user32.rc:98 dlls/wininet/wininet.rc:62
 #: dlls/wininet/wininet.rc:82 dlls/winspool.drv/winspool.rc:42
-#: programs/conhost/conhost.rc:126 programs/net/net.rc:47
-#: programs/notepad/notepad.rc:117 programs/oleview/oleview.rc:161
-#: programs/oleview/oleview.rc:174 programs/progman/progman.rc:106
-#: programs/progman/progman.rc:124 programs/progman/progman.rc:142
-#: programs/progman/progman.rc:158 programs/progman/progman.rc:180
-#: programs/progman/progman.rc:199 programs/progman/progman.rc:216
-#: programs/regedit/regedit.rc:296 programs/regedit/regedit.rc:307
-#: programs/regedit/regedit.rc:320 programs/regedit/regedit.rc:336
-#: programs/regedit/regedit.rc:349 programs/regedit/regedit.rc:362
-#: programs/taskmgr/taskmgr.rc:442 programs/taskmgr/taskmgr.rc:517
-#: programs/winecfg/winecfg.rc:213 programs/winecfg/winecfg.rc:223
-#: programs/winefile/winefile.rc:127 programs/winefile/winefile.rc:150
-#: programs/winefile/winefile.rc:180 programs/winemine/winemine.rc:73
-#: programs/winemine/winemine.rc:84 programs/winemine/winemine.rc:98
-#: programs/wordpad/wordpad.rc:215 programs/wordpad/wordpad.rc:226
-#: programs/wordpad/wordpad.rc:244 programs/wordpad/wordpad.rc:257
+#: programs/net/net.rc:47 programs/notepad/notepad.rc:124
+#: programs/oleview/oleview.rc:161 programs/oleview/oleview.rc:174
+#: programs/progman/progman.rc:106 programs/progman/progman.rc:124
+#: programs/progman/progman.rc:142 programs/progman/progman.rc:158
+#: programs/progman/progman.rc:180 programs/progman/progman.rc:199
+#: programs/progman/progman.rc:216 programs/regedit/regedit.rc:301
+#: programs/regedit/regedit.rc:312 programs/regedit/regedit.rc:325
+#: programs/regedit/regedit.rc:341 programs/regedit/regedit.rc:354
+#: programs/regedit/regedit.rc:367 programs/taskmgr/taskmgr.rc:442
+#: programs/taskmgr/taskmgr.rc:517 programs/winecfg/winecfg.rc:213
+#: programs/winecfg/winecfg.rc:223 programs/winefile/winefile.rc:127
+#: programs/winefile/winefile.rc:150 programs/winefile/winefile.rc:180
+#: programs/winemine/winemine.rc:73 programs/winemine/winemine.rc:84
+#: programs/winemine/winemine.rc:98 programs/wordpad/wordpad.rc:215
+#: programs/wordpad/wordpad.rc:226 programs/wordpad/wordpad.rc:244
+#: programs/wordpad/wordpad.rc:257
 msgid "OK"
 msgstr "確定"
 
@@ -199,15 +199,15 @@ msgstr "安裝(&I)"
 #: dlls/shell32/shell32.rc:340 dlls/shlwapi/shlwapi.rc:45
 #: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:84 dlls/user32/user32.rc:99
 #: dlls/wininet/wininet.rc:63 dlls/wininet/wininet.rc:83
-#: dlls/winspool.drv/winspool.rc:43 programs/conhost/conhost.rc:127
-#: programs/notepad/notepad.rc:118 programs/oleview/oleview.rc:162
+#: dlls/winspool.drv/winspool.rc:43 programs/notepad/notepad.rc:125
+#: programs/notepad/notepad.rc:138 programs/oleview/oleview.rc:162
 #: programs/oleview/oleview.rc:175 programs/progman/progman.rc:107
 #: programs/progman/progman.rc:125 programs/progman/progman.rc:143
 #: programs/progman/progman.rc:159 programs/progman/progman.rc:181
 #: programs/progman/progman.rc:200 programs/progman/progman.rc:217
-#: programs/regedit/regedit.rc:297 programs/regedit/regedit.rc:308
-#: programs/regedit/regedit.rc:321 programs/regedit/regedit.rc:337
-#: programs/regedit/regedit.rc:350 programs/regedit/regedit.rc:363
+#: programs/regedit/regedit.rc:302 programs/regedit/regedit.rc:313
+#: programs/regedit/regedit.rc:326 programs/regedit/regedit.rc:342
+#: programs/regedit/regedit.rc:355 programs/regedit/regedit.rc:368
 #: programs/taskmgr/taskmgr.rc:443 programs/taskmgr/taskmgr.rc:518
 #: programs/wineboot/wineboot.rc:34 programs/winecfg/winecfg.rc:214
 #: programs/winecfg/winecfg.rc:224 programs/winefile/winefile.rc:128
@@ -265,7 +265,7 @@ msgstr "未指定"
 
 #: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:38
 #: dlls/shell32/shell32.rc:144 dlls/shell32/shell32.rc:239
-#: programs/regedit/regedit.rc:147 programs/winefile/winefile.rc:106
+#: programs/regedit/regedit.rc:150 programs/winefile/winefile.rc:106
 msgid "Name"
 msgstr "名稱"
 
@@ -287,8 +287,8 @@ msgstr "程式 (*.exe)"
 
 #: dlls/appwiz.cpl/appwiz.rc:43 dlls/avifil32/avifil32.rc:33
 #: dlls/cryptui/cryptui.rc:83 dlls/shell32/shell32.rc:197
-#: programs/notepad/notepad.rc:76 programs/oleview/oleview.rc:103
-#: programs/progman/progman.rc:82 programs/regedit/regedit.rc:225
+#: programs/notepad/notepad.rc:81 programs/oleview/oleview.rc:103
+#: programs/progman/progman.rc:82 programs/regedit/regedit.rc:230
 #: programs/winedbg/winedbg.rc:43 programs/winhlp32/winhlp32.rc:90
 msgid "All files (*.*)"
 msgstr "所有檔案 (*.*)"
@@ -440,12 +440,12 @@ msgstr "重設(&E)"
 #: dlls/comdlg32/comdlg32.rc:531 dlls/ieframe/ieframe.rc:58
 #: dlls/msacm32/msacm32.rc:52 dlls/oledlg/oledlg.rc:96
 #: dlls/shell32/shell32.rc:128 programs/clock/clock.rc:44
-#: programs/notepad/notepad.rc:60 programs/notepad/notepad.rc:119
+#: programs/notepad/notepad.rc:65 programs/notepad/notepad.rc:126
 #: programs/oleview/oleview.rc:72 programs/progman/progman.rc:55
 #: programs/progman/progman.rc:108 programs/progman/progman.rc:126
 #: programs/progman/progman.rc:144 programs/progman/progman.rc:160
 #: programs/progman/progman.rc:184 programs/progman/progman.rc:202
-#: programs/progman/progman.rc:219 programs/regedit/regedit.rc:77
+#: programs/progman/progman.rc:219 programs/regedit/regedit.rc:78
 #: programs/taskmgr/taskmgr.rc:87 programs/winefile/winefile.rc:82
 #: programs/winemine/winemine.rc:53 programs/winhlp32/winhlp32.rc:57
 #: programs/wordpad/wordpad.rc:102
@@ -508,7 +508,7 @@ msgid "See details"
 msgstr "顯示詳細資訊"
 
 #: dlls/comctl32/comctl32.rc:31 dlls/cryptui/cryptui.rc:235
-#: programs/regedit/regedit.rc:286 programs/taskmgr/taskmgr.rc:434
+#: programs/regedit/regedit.rc:291 programs/taskmgr/taskmgr.rc:434
 #: programs/winedbg/winedbg.rc:61 programs/winedbg/winedbg.rc:76
 #: programs/wordpad/wordpad.rc:180
 msgid "Close"
@@ -574,7 +574,7 @@ msgid "Print range"
 msgstr "列印範圍"
 
 #: dlls/comdlg32/comdlg32.rc:208 dlls/comdlg32/comdlg32.rc:376
-#: programs/regedit/regedit.rc:268
+#: programs/regedit/regedit.rc:273
 msgid "&All"
 msgstr "全部(&A)"
 
@@ -754,8 +754,8 @@ msgctxt "Solid"
 msgid "&o"
 msgstr "&o"
 
-#: dlls/comdlg32/comdlg32.rc:318 programs/regedit/regedit.rc:275
-#: programs/regedit/regedit.rc:285
+#: dlls/comdlg32/comdlg32.rc:318 programs/regedit/regedit.rc:280
+#: programs/regedit/regedit.rc:290
 msgid "Find"
 msgstr "搜尋"
 
@@ -771,7 +771,7 @@ msgstr "全字拼寫須符合(&W)"
 msgid "Match &Case"
 msgstr "大小寫視為相異(&C)"
 
-#: dlls/comdlg32/comdlg32.rc:325 dlls/joy.cpl/joy.rc:76
+#: dlls/comdlg32/comdlg32.rc:325
 msgid "Direction"
 msgstr "方向"
 
@@ -895,7 +895,7 @@ msgstr "縱向(&P)"
 msgid "L&eft:"
 msgstr "左(&E):"
 
-#: dlls/comdlg32/comdlg32.rc:449 programs/notepad/notepad.rc:112
+#: dlls/comdlg32/comdlg32.rc:449 programs/notepad/notepad.rc:119
 msgid "&Right:"
 msgstr "右(&R):"
 
@@ -903,7 +903,7 @@ msgstr "右(&R):"
 msgid "T&op:"
 msgstr "上(&O):"
 
-#: dlls/comdlg32/comdlg32.rc:453 programs/notepad/notepad.rc:114
+#: dlls/comdlg32/comdlg32.rc:453 programs/notepad/notepad.rc:121
 msgid "&Bottom:"
 msgstr "下(&B):"
 
@@ -1310,6 +1310,19 @@ msgstr "頁面邊距 [毫米]"
 msgctxt "unit: millimeters"
 msgid "mm"
 msgstr "毫米"
+
+#: dlls/compstui/compstui.rc:29 dlls/shell32/shell32.rc:74
+msgid "Properties"
+msgstr "內容"
+
+#: dlls/compstui/compstui.rc:30 dlls/hhctrl.ocx/hhctrl.rc:50
+#: programs/conhost/conhost.rc:51 programs/wordpad/wordpad.rc:166
+msgid "Options"
+msgstr "選項"
+
+#: dlls/compstui/compstui.rc:31
+msgid "Default"
+msgstr "預設值"
 
 #: dlls/credui/credui.rc:45
 msgid "&User name:"
@@ -2413,8 +2426,8 @@ msgstr "預定目的(&N):"
 msgid "&Import..."
 msgstr "匯入(&I)..."
 
-#: dlls/cryptui/cryptui.rc:350 programs/regedit/regedit.rc:91
-#: programs/regedit/regedit.rc:112
+#: dlls/cryptui/cryptui.rc:350 programs/regedit/regedit.rc:92
+#: programs/regedit/regedit.rc:114
 msgid "&Export..."
 msgstr "匯出(&E)..."
 
@@ -2428,10 +2441,10 @@ msgstr "憑證預定目的"
 
 #: dlls/cryptui/cryptui.rc:355 dlls/ieframe/ieframe.rc:45
 #: dlls/shell32/shell32.rc:43 dlls/shell32/shell32.rc:120
-#: programs/oleview/oleview.rc:59 programs/oleview/oleview.rc:61
-#: programs/oleview/oleview.rc:85 programs/regedit/regedit.rc:64
-#: programs/taskmgr/taskmgr.rc:52 programs/winefile/winefile.rc:48
-#: programs/wordpad/wordpad.rc:69
+#: programs/notepad/notepad.rc:61 programs/oleview/oleview.rc:59
+#: programs/oleview/oleview.rc:61 programs/oleview/oleview.rc:85
+#: programs/regedit/regedit.rc:65 programs/taskmgr/taskmgr.rc:52
+#: programs/winefile/winefile.rc:48 programs/wordpad/wordpad.rc:69
 msgid "&View"
 msgstr "檢視(&V)"
 
@@ -3370,11 +3383,6 @@ msgstr "首頁"
 msgid "Sync"
 msgstr "同步"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:50 programs/conhost/conhost.rc:51
-#: programs/wordpad/wordpad.rc:166
-msgid "Options"
-msgstr "選項"
-
 #: dlls/hhctrl.ocx/hhctrl.rc:51 dlls/ieframe/ieframe.rc:67
 msgid "Forward"
 msgstr "下一頁"
@@ -3393,7 +3401,7 @@ msgid "&File"
 msgstr "檔案(&F)"
 
 #: dlls/ieframe/ieframe.rc:30 programs/regedit/regedit.rc:45
-#: programs/regedit/regedit.rc:97 programs/regedit/regedit.rc:119
+#: programs/regedit/regedit.rc:98 programs/regedit/regedit.rc:121
 msgid "&New"
 msgstr "新增(&N)"
 
@@ -3435,11 +3443,11 @@ msgstr "標準列(&S)"
 msgid "&Address bar"
 msgstr "位址列(&A)"
 
-#: dlls/ieframe/ieframe.rc:53 programs/regedit/regedit.rc:72
+#: dlls/ieframe/ieframe.rc:53 programs/regedit/regedit.rc:73
 msgid "&Favorites"
 msgstr "我的最愛(&F)"
 
-#: dlls/ieframe/ieframe.rc:55 programs/regedit/regedit.rc:74
+#: dlls/ieframe/ieframe.rc:55 programs/regedit/regedit.rc:75
 msgid "&Add to Favorites..."
 msgstr "新增到我的最愛(&A)..."
 
@@ -3694,28 +3702,91 @@ msgid ""
 msgstr "停用或啟用裝置之後，已連接的搖桿將無法更新，直到您重新啟動這個程式。"
 
 #: dlls/joy.cpl/joy.rc:55
-msgid "Test Joystick"
-msgstr "測試搖桿"
+msgid "DInput"
+msgstr ""
 
 #: dlls/joy.cpl/joy.rc:59
+msgid "Axes"
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:60
+msgid "POVs"
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:61
 msgid "Buttons"
 msgstr "按鈕"
 
-#: dlls/joy.cpl/joy.rc:68
-msgid "Test Force Feedback"
+#: dlls/joy.cpl/joy.rc:62
+#, fuzzy
+#| msgid "Test Force Feedback"
+msgid "Force Feedback Effect"
 msgstr "測試應力回饋"
 
-#: dlls/joy.cpl/joy.rc:72
-msgid "Available Effects"
-msgstr "可用效果"
-
-#: dlls/joy.cpl/joy.rc:74
+#: dlls/joy.cpl/joy.rc:64
 msgid ""
 "Press any button in the controller to activate the chosen effect. The effect "
 "direction can be changed with the controller axis."
 msgstr ""
 "請按下控制器中的任何按鈕以啟用所選的效果。效果的方向可以利用控制器的軸向來變"
 "更。"
+
+#: dlls/joy.cpl/joy.rc:70
+msgid "XInput"
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:73
+#, fuzzy
+#| msgid "User"
+msgid "User #0"
+msgstr "使用者"
+
+#: dlls/joy.cpl/joy.rc:74
+#, fuzzy
+#| msgid "User"
+msgid "User #1"
+msgstr "使用者"
+
+#: dlls/joy.cpl/joy.rc:75
+#, fuzzy
+#| msgid "User"
+msgid "User #2"
+msgstr "使用者"
+
+#: dlls/joy.cpl/joy.rc:76
+#, fuzzy
+#| msgid "User"
+msgid "User #3"
+msgstr "使用者"
+
+#: dlls/joy.cpl/joy.rc:78
+msgid ""
+"No user detected on slot #0, make sure your gamepad is plugged in, and not "
+"overridden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:82
+msgid ""
+"No user detected on slot #1, make sure your gamepad is plugged in, and not "
+"overridden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:86
+msgid ""
+"No user detected on slot #2, make sure your gamepad is plugged in, and not "
+"overridden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:90
+msgid ""
+"No user detected on slot #3, make sure your gamepad is plugged in, and not "
+"overridden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:95 dlls/joy.cpl/joy.rc:96 dlls/joy.cpl/joy.rc:97
+#: dlls/joy.cpl/joy.rc:98
+msgid "Rumble"
+msgstr ""
 
 #: dlls/joy.cpl/joy.rc:31
 msgid "Game Controllers"
@@ -3925,13 +3996,11 @@ msgstr "無法在這個物件更改屬性描述符中的 'writable' 屬性為 't
 
 #: dlls/jscript/jscript.rc:74
 msgid "Cyclic __proto__ value"
-msgstr ""
+msgstr "循環的 __proto__ 值"
 
 #: dlls/jscript/jscript.rc:75
-#, fuzzy
-#| msgid "Cannot define property '|': object is not extensible"
 msgid "Cannot create property for a non-extensible object"
-msgstr "無法定義屬性 '|': 物件不能擴展"
+msgstr "無法為不可擴展的物件建立屬性"
 
 #: dlls/jscript/jscript.rc:76
 msgid "Cannot define property '|': object is not extensible"
@@ -3946,65 +4015,57 @@ msgid "Cannot modify non-writable property '|'"
 msgstr "無法修改不可寫入的屬性 '|'"
 
 #: dlls/jscript/jscript.rc:79
-#, fuzzy
-#| msgid "'this' is not a Map object"
 msgid "'this' is not a | object"
-msgstr "'this' 不是 Map 物件"
+msgstr "'this' 不是一個 | 物件"
 
 #: dlls/jscript/jscript.rc:80
 msgid "Property cannot have both accessors and a value"
 msgstr "屬性不可同時有存取子和值"
 
-#: include/wine/wine_common_ver.rc:129
+#: include/wine/wine_common_ver.rc:133
 msgid "Wine kernel DLL"
 msgstr "Wine 核心 DLL"
 
-#: include/wine/wine_common_ver.rc:134 dlls/winemac.drv/winemac.rc:32
+#: include/wine/wine_common_ver.rc:138 dlls/winemac.drv/winemac.rc:32
 #: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:137
 msgid "Wine"
 msgstr "Wine"
 
 #: dlls/kernelbase/kernelbase.rc:29
 msgid "Western Europe and United States"
-msgstr ""
+msgstr "西歐和美國"
 
 #: dlls/kernelbase/kernelbase.rc:30
-#, fuzzy
-#| msgid "Central European"
 msgid "Central Europe"
 msgstr "中歐語言"
 
 #: dlls/kernelbase/kernelbase.rc:34
-#, fuzzy
-#| msgid "Turkish"
 msgid "Turkic"
-msgstr "土耳其語"
+msgstr "突厥語"
 
 #: dlls/kernelbase/kernelbase.rc:36
 msgid "Korean"
-msgstr ""
+msgstr "韓語"
 
 #: dlls/kernelbase/kernelbase.rc:37
-#, fuzzy
-#| msgid "Operation Ceased"
 msgid "Traditional Chinese"
-msgstr "作業已停止"
+msgstr "繁體中文"
 
 #: dlls/kernelbase/kernelbase.rc:38
 msgid "Simplified Chinese"
-msgstr ""
+msgstr "簡體中文"
 
 #: dlls/kernelbase/kernelbase.rc:43
 msgid "Indic"
-msgstr ""
+msgstr "印度語"
 
 #: dlls/kernelbase/kernelbase.rc:44
 msgid "Georgian"
-msgstr ""
+msgstr "喬治亞語"
 
 #: dlls/kernelbase/kernelbase.rc:45
 msgid "Armenian"
-msgstr ""
+msgstr "亞美尼亞語"
 
 #: dlls/kernelbase/winerror.mc:28
 msgid "Success.\n"
@@ -6963,54 +7024,40 @@ msgid "This network connection does not exist.\n"
 msgstr "這個網路連線不存在。\n"
 
 #: dlls/kernelbase/winerror.mc:3748
-#, fuzzy
-#| msgid "Invalid at interrupt time.\n"
 msgid "Call interrupted.\n"
-msgstr "於插斷時間無效。\n"
+msgstr "呼叫已中斷。\n"
 
 #: dlls/kernelbase/winerror.mc:3753
-#, fuzzy
-#| msgid "Invalid handle.\n"
 msgid "Invalid file handle.\n"
-msgstr "無效的控制代碼。\n"
+msgstr "無效的檔案控制代碼。\n"
 
 #: dlls/kernelbase/winerror.mc:3763
-#, fuzzy
-#| msgid "Invalid network address.\n"
 msgid "Invalid pointer address.\n"
-msgstr "無效的網路位址。\n"
+msgstr "無效的指標位址。\n"
 
 #: dlls/kernelbase/winerror.mc:3768
-#, fuzzy
-#| msgid "Invalid name.\n"
 msgid "Invalid argument.\n"
-msgstr "無效的名稱。\n"
+msgstr "無效的引數。\n"
 
 #: dlls/kernelbase/winerror.mc:3778
 msgid "Connection reset by peer.\n"
 msgstr "連線被同儕節點重設。\n"
 
 #: dlls/kernelbase/winerror.mc:3788
-#, fuzzy
-#| msgid "Point not found.\n"
 msgid "Host not found.\n"
-msgstr "找不到點。\n"
+msgstr "找不到主機。\n"
 
 #: dlls/kernelbase/winerror.mc:3793
-#, fuzzy
-#| msgid "Attribute is not found.\n"
 msgid "Nonauthoritative host not found.\n"
-msgstr "找不到屬性。\n"
+msgstr "找不到未授權的主機。\n"
 
 #: dlls/kernelbase/winerror.mc:3798
-#, fuzzy
-#| msgid "Unrecoverable error occurred.\n"
 msgid "Nonrecoverable error.\n"
-msgstr "發生致命錯誤。\n"
+msgstr "無法復原的錯誤。\n"
 
 #: dlls/kernelbase/winerror.mc:3803
 msgid "Name valid, no data record.\n"
-msgstr ""
+msgstr "名稱有效，無資料記錄。\n"
 
 #: dlls/kernelbase/winerror.mc:3817
 msgid "Not implemented.\n"
@@ -7696,7 +7743,7 @@ msgstr "不支援的狀態轉換。\n"
 
 #: dlls/mferror/mferror.mc:291
 msgid "Unrecoverable error occurred.\n"
-msgstr "發生致命錯誤。\n"
+msgstr "發生無法復原的錯誤。\n"
 
 #: dlls/mferror/mferror.mc:298
 msgid "Sample has too many buffers.\n"
@@ -9346,7 +9393,7 @@ msgstr ""
 msgid "Inserts the contents of the clipboard into your document."
 msgstr "將剪貼簿的內容插入到您的文件。"
 
-#: dlls/oledlg/oledlg.rc:48 programs/regedit/regedit.rc:430
+#: dlls/oledlg/oledlg.rc:48 programs/regedit/regedit.rc:435
 msgid "Unknown Type"
 msgstr "不明類型"
 
@@ -9803,10 +9850,6 @@ msgstr "新增資料夾(&F)"
 msgid "New &Link"
 msgstr "新增連結(&L)"
 
-#: dlls/shell32/shell32.rc:74
-msgid "Properties"
-msgstr "內容"
-
 #: dlls/shell32/shell32.rc:85
 msgctxt "recycle bin"
 msgid "&Restore"
@@ -9953,7 +9996,7 @@ msgstr "上次存取日期:"
 msgid "Size"
 msgstr "大小"
 
-#: dlls/shell32/shell32.rc:139 programs/regedit/regedit.rc:148
+#: dlls/shell32/shell32.rc:139 programs/regedit/regedit.rc:151
 msgid "Type"
 msgstr "類型"
 
@@ -9988,7 +10031,7 @@ msgctxt "display name"
 msgid "Desktop"
 msgstr "桌面"
 
-#: dlls/shell32/shell32.rc:155 programs/regedit/regedit.rc:238
+#: dlls/shell32/shell32.rc:155 programs/regedit/regedit.rc:243
 msgid "My Computer"
 msgstr "我的電腦"
 
@@ -10307,7 +10350,7 @@ msgid "Trash"
 msgstr "回收筒"
 
 #: dlls/shlwapi/shlwapi.rc:38 dlls/user32/user32.rc:71
-#: programs/regedit/regedit.rc:204 programs/winecfg/winecfg.rc:86
+#: programs/regedit/regedit.rc:208 programs/winecfg/winecfg.rc:86
 #: programs/winefile/winefile.rc:97
 msgid "Error"
 msgstr "錯誤"
@@ -10339,1899 +10382,1899 @@ msgstr " 秒"
 msgid "Select Source"
 msgstr "選擇來源"
 
-#: dlls/tzres/tzres.rc:126
+#: dlls/tzres/tzres.rc:108
 msgctxt "maximum 31 characters"
 msgid "China Standard Time"
 msgstr "中國標準時間"
 
-#: dlls/tzres/tzres.rc:127
+#: dlls/tzres/tzres.rc:109
 msgctxt "maximum 31 characters"
 msgid "China Daylight Time"
 msgstr "中國夏令時間"
 
-#: dlls/tzres/tzres.rc:128
+#: dlls/tzres/tzres.rc:110
 msgid "(UTC+08:00) Beijing, Chongqing, Hong Kong, Urumqi"
 msgstr "(UTC+08:00) 北京，重慶，香港，烏魯木齊"
 
-#: dlls/tzres/tzres.rc:267
+#: dlls/tzres/tzres.rc:249
 msgctxt "maximum 31 characters"
 msgid "North Asia Standard Time"
 msgstr "北亞標準時間"
 
-#: dlls/tzres/tzres.rc:268
+#: dlls/tzres/tzres.rc:250
 msgctxt "maximum 31 characters"
 msgid "North Asia Daylight Time"
 msgstr "北亞夏令時間"
 
-#: dlls/tzres/tzres.rc:269
+#: dlls/tzres/tzres.rc:251
 msgid "(UTC+07:00) Krasnoyarsk"
 msgstr "(UTC+07:00) 克拉斯諾雅斯克"
 
-#: dlls/tzres/tzres.rc:168
+#: dlls/tzres/tzres.rc:150
 msgctxt "maximum 31 characters"
 msgid "Georgian Standard Time"
 msgstr "喬治亞標準時間"
 
-#: dlls/tzres/tzres.rc:169
+#: dlls/tzres/tzres.rc:151
 msgctxt "maximum 31 characters"
 msgid "Georgian Daylight Time"
 msgstr "喬治亞夏令時間"
 
-#: dlls/tzres/tzres.rc:170
+#: dlls/tzres/tzres.rc:152
 msgid "(UTC+04:00) Tbilisi"
 msgstr "(UTC+04:00) 提比里斯"
 
-#: dlls/tzres/tzres.rc:393 dlls/tzres/tzres.rc:394
+#: dlls/tzres/tzres.rc:375 dlls/tzres/tzres.rc:376
 msgctxt "maximum 31 characters"
 msgid "UTC+12"
 msgstr "UTC+12"
 
-#: dlls/tzres/tzres.rc:395
+#: dlls/tzres/tzres.rc:377
 msgid "(UTC+12:00) Coordinated Universal Time+12"
 msgstr "(UTC+12:00) 世界協調時間+12"
 
-#: dlls/tzres/tzres.rc:252
+#: dlls/tzres/tzres.rc:234
 msgctxt "maximum 31 characters"
 msgid "Nepal Standard Time"
 msgstr "尼泊爾標準時間"
 
-#: dlls/tzres/tzres.rc:253
+#: dlls/tzres/tzres.rc:235
 msgctxt "maximum 31 characters"
 msgid "Nepal Daylight Time"
 msgstr "尼泊爾夏令時間"
 
-#: dlls/tzres/tzres.rc:254
+#: dlls/tzres/tzres.rc:236
 msgid "(UTC+05:45) Kathmandu"
 msgstr "(UTC+05:45) 加德滿都"
 
-#: dlls/tzres/tzres.rc:90
+#: dlls/tzres/tzres.rc:72
 msgctxt "maximum 31 characters"
 msgid "Cape Verde Standard Time"
 msgstr "維德角標準時間"
 
-#: dlls/tzres/tzres.rc:91
+#: dlls/tzres/tzres.rc:73
 msgctxt "maximum 31 characters"
 msgid "Cape Verde Daylight Time"
 msgstr "維德角夏令時間"
 
-#: dlls/tzres/tzres.rc:92
+#: dlls/tzres/tzres.rc:74
 msgid "(UTC-01:00) Cabo Verde Is."
 msgstr "(UTC-01:00) 維德角群島"
 
-#: dlls/tzres/tzres.rc:183
+#: dlls/tzres/tzres.rc:165
 msgctxt "maximum 31 characters"
 msgid "Haiti Standard Time"
 msgstr "海地標準時間"
 
-#: dlls/tzres/tzres.rc:184
+#: dlls/tzres/tzres.rc:166
 msgctxt "maximum 31 characters"
 msgid "Haiti Daylight Time"
 msgstr "海地夏令時間"
 
-#: dlls/tzres/tzres.rc:185
+#: dlls/tzres/tzres.rc:167
 msgid "(UTC-05:00) Haiti"
 msgstr "(UTC-05:00) 海地"
 
-#: dlls/tzres/tzres.rc:111
+#: dlls/tzres/tzres.rc:93
 msgctxt "maximum 31 characters"
 msgid "Central European Standard Time"
 msgstr "歐洲中部標準時間"
 
-#: dlls/tzres/tzres.rc:112
+#: dlls/tzres/tzres.rc:94
 msgctxt "maximum 31 characters"
 msgid "Central European Daylight Time"
 msgstr "歐洲中部夏令時間"
 
-#: dlls/tzres/tzres.rc:113
+#: dlls/tzres/tzres.rc:95
 msgid "(UTC+01:00) Sarajevo, Skopje, Warsaw, Zagreb"
 msgstr "(UTC+01:00) 賽拉耶佛，斯高彼亞，華沙，札格雷布"
 
-#: dlls/tzres/tzres.rc:234
+#: dlls/tzres/tzres.rc:216
 msgctxt "maximum 31 characters"
 msgid "Morocco Standard Time"
 msgstr "摩洛哥標準時間"
 
-#: dlls/tzres/tzres.rc:235
+#: dlls/tzres/tzres.rc:217
 msgctxt "maximum 31 characters"
 msgid "Morocco Daylight Time"
 msgstr "摩洛哥夏令時間"
 
-#: dlls/tzres/tzres.rc:236
+#: dlls/tzres/tzres.rc:218
 msgid "(UTC+01:00) Casablanca"
 msgstr "(UTC+01:00) 卡薩布蘭卡"
 
-#: dlls/tzres/tzres.rc:402 dlls/tzres/tzres.rc:403
+#: dlls/tzres/tzres.rc:384 dlls/tzres/tzres.rc:385
 msgctxt "maximum 31 characters"
 msgid "UTC-08"
 msgstr "UTC-08"
 
-#: dlls/tzres/tzres.rc:404
+#: dlls/tzres/tzres.rc:386
 msgid "(UTC-08:00) Coordinated Universal Time-08"
 msgstr "(UTC-08:00) 世界協調時間-08"
 
-#: dlls/tzres/tzres.rc:39
+#: dlls/tzres/tzres.rc:21
 msgctxt "maximum 31 characters"
 msgid "Altai Standard Time"
 msgstr "阿爾泰標準時間"
 
-#: dlls/tzres/tzres.rc:40
+#: dlls/tzres/tzres.rc:22
 msgctxt "maximum 31 characters"
 msgid "Altai Daylight Time"
 msgstr "阿爾泰夏令時間"
 
-#: dlls/tzres/tzres.rc:41
+#: dlls/tzres/tzres.rc:23
 msgid "(UTC+07:00) Barnaul, Gorno-Altaysk"
 msgstr "(UTC+07:00) 巴爾瑙爾，戈爾諾-阿爾泰斯克"
 
-#: dlls/tzres/tzres.rc:108
+#: dlls/tzres/tzres.rc:90
 msgctxt "maximum 31 characters"
 msgid "Central Europe Standard Time"
 msgstr "中歐標準時間"
 
-#: dlls/tzres/tzres.rc:109
+#: dlls/tzres/tzres.rc:91
 msgctxt "maximum 31 characters"
 msgid "Central Europe Daylight Time"
 msgstr "中歐夏令時間"
 
-#: dlls/tzres/tzres.rc:110
+#: dlls/tzres/tzres.rc:92
 msgid "(UTC+01:00) Belgrade, Bratislava, Budapest, Ljubljana, Prague"
 msgstr "(UTC+01:00) 貝爾格勒，布拉迪斯拉瓦，布達佩斯，盧布亞那，布拉格"
 
-#: dlls/tzres/tzres.rc:192
+#: dlls/tzres/tzres.rc:174
 msgctxt "maximum 31 characters"
 msgid "Iran Standard Time"
 msgstr "伊朗標準時間"
 
-#: dlls/tzres/tzres.rc:193
+#: dlls/tzres/tzres.rc:175
 msgctxt "maximum 31 characters"
 msgid "Iran Daylight Time"
 msgstr "伊朗夏令時間"
 
-#: dlls/tzres/tzres.rc:194
+#: dlls/tzres/tzres.rc:176
 msgid "(UTC+03:30) Tehran"
 msgstr "(UTC+03:30) 德黑蘭"
 
-#: dlls/tzres/tzres.rc:318
+#: dlls/tzres/tzres.rc:300
 msgctxt "maximum 31 characters"
 msgid "Saint Pierre Standard Time"
 msgstr "聖皮埃標準時間"
 
-#: dlls/tzres/tzres.rc:319
+#: dlls/tzres/tzres.rc:301
 msgctxt "maximum 31 characters"
 msgid "Saint Pierre Daylight Time"
 msgstr "聖皮埃夏令時間"
 
-#: dlls/tzres/tzres.rc:320
+#: dlls/tzres/tzres.rc:302
 msgid "(UTC-03:00) Saint Pierre and Miquelon"
 msgstr "(UTC-03:00) 聖皮埃與密克隆群島"
 
-#: dlls/tzres/tzres.rc:327
+#: dlls/tzres/tzres.rc:309
 msgctxt "maximum 31 characters"
 msgid "Sao Tome Standard Time"
 msgstr "聖多美標準時間"
 
-#: dlls/tzres/tzres.rc:328
+#: dlls/tzres/tzres.rc:310
 msgctxt "maximum 31 characters"
 msgid "Sao Tome Daylight Time"
 msgstr "聖多美夏令時間"
 
-#: dlls/tzres/tzres.rc:329
+#: dlls/tzres/tzres.rc:311
 msgid "(UTC+00:00) Sao Tome"
 msgstr "(UTC+00:00) 聖多美"
 
-#: dlls/tzres/tzres.rc:249
+#: dlls/tzres/tzres.rc:231
 msgctxt "maximum 31 characters"
 msgid "Namibia Standard Time"
 msgstr "納米比亞標準時間"
 
-#: dlls/tzres/tzres.rc:250
+#: dlls/tzres/tzres.rc:232
 msgctxt "maximum 31 characters"
 msgid "Namibia Daylight Time"
 msgstr "納米比亞夏令時間"
 
-#: dlls/tzres/tzres.rc:251
+#: dlls/tzres/tzres.rc:233
 msgid "(UTC+02:00) Windhoek"
 msgstr "(UTC+02:00) 溫荷克"
 
-#: dlls/tzres/tzres.rc:369
+#: dlls/tzres/tzres.rc:351
 msgctxt "maximum 31 characters"
 msgid "Tonga Standard Time"
 msgstr "東加標準時間"
 
-#: dlls/tzres/tzres.rc:370
+#: dlls/tzres/tzres.rc:352
 msgctxt "maximum 31 characters"
 msgid "Tonga Daylight Time"
 msgstr "東加夏令時間"
 
-#: dlls/tzres/tzres.rc:371
+#: dlls/tzres/tzres.rc:353
 msgid "(UTC+13:00) Nuku'alofa"
 msgstr "(UTC+13:00) 努瓜婁發"
 
-#: dlls/tzres/tzres.rc:240
+#: dlls/tzres/tzres.rc:222
 msgctxt "maximum 31 characters"
 msgid "Mountain Standard Time (Mexico)"
 msgstr "山區標準時間 (墨西哥)"
 
-#: dlls/tzres/tzres.rc:241
+#: dlls/tzres/tzres.rc:223
 msgctxt "maximum 31 characters"
 msgid "Mountain Daylight Time (Mexico)"
 msgstr "山區夏令時間 (墨西哥)"
 
-#: dlls/tzres/tzres.rc:242
+#: dlls/tzres/tzres.rc:224
 msgid "(UTC-07:00) Chihuahua, La Paz, Mazatlan"
 msgstr "(UTC-07:00) 契瓦瓦，拉帕茲，馬薩特蘭"
 
-#: dlls/tzres/tzres.rc:171
+#: dlls/tzres/tzres.rc:153
 msgctxt "maximum 31 characters"
 msgid "GMT Standard Time"
 msgstr "GMT 標準時間"
 
-#: dlls/tzres/tzres.rc:172
+#: dlls/tzres/tzres.rc:154
 msgctxt "maximum 31 characters"
 msgid "GMT Daylight Time"
 msgstr "GMT 夏令時間"
 
-#: dlls/tzres/tzres.rc:173
+#: dlls/tzres/tzres.rc:155
 msgid "(UTC+00:00) Dublin, Edinburgh, Lisbon, London"
 msgstr "(UTC+00:00) 都柏林，愛丁堡，里斯本，倫敦"
 
-#: dlls/tzres/tzres.rc:342
+#: dlls/tzres/tzres.rc:324
 msgctxt "maximum 31 characters"
 msgid "South Sudan Standard Time"
 msgstr "南蘇丹標準時間"
 
-#: dlls/tzres/tzres.rc:343
+#: dlls/tzres/tzres.rc:325
 msgctxt "maximum 31 characters"
 msgid "South Sudan Daylight Time"
 msgstr "南蘇丹夏令時間"
 
-#: dlls/tzres/tzres.rc:344
+#: dlls/tzres/tzres.rc:326
 msgid "(UTC+02:00) Juba"
 msgstr "(UTC+02:00) 朱巴"
 
-#: dlls/tzres/tzres.rc:102
+#: dlls/tzres/tzres.rc:84
 msgctxt "maximum 31 characters"
 msgid "Central Asia Standard Time"
 msgstr "中亞標準時間"
 
-#: dlls/tzres/tzres.rc:103
+#: dlls/tzres/tzres.rc:85
 msgctxt "maximum 31 characters"
 msgid "Central Asia Daylight Time"
 msgstr "中亞夏令時間"
 
-#: dlls/tzres/tzres.rc:104
+#: dlls/tzres/tzres.rc:86
 msgid "(UTC+06:00) Astana"
 msgstr "(UTC+06:00) 努爾蘇丹"
 
-#: dlls/tzres/tzres.rc:213
+#: dlls/tzres/tzres.rc:195
 msgctxt "maximum 31 characters"
 msgid "Lord Howe Standard Time"
 msgstr "豪勳爵島標準時間"
 
-#: dlls/tzres/tzres.rc:214
+#: dlls/tzres/tzres.rc:196
 msgctxt "maximum 31 characters"
 msgid "Lord Howe Daylight Time"
 msgstr "豪勳爵島夏令時間"
 
-#: dlls/tzres/tzres.rc:215
+#: dlls/tzres/tzres.rc:197
 msgid "(UTC+10:30) Lord Howe Island"
 msgstr "(UTC+10:30) 豪勳爵島"
 
-#: dlls/tzres/tzres.rc:48
+#: dlls/tzres/tzres.rc:30
 msgctxt "maximum 31 characters"
 msgid "Arabic Standard Time"
 msgstr "伊拉克標準時間"
 
-#: dlls/tzres/tzres.rc:49
+#: dlls/tzres/tzres.rc:31
 msgctxt "maximum 31 characters"
 msgid "Arabic Daylight Time"
 msgstr "伊拉克夏令時間"
 
-#: dlls/tzres/tzres.rc:50
+#: dlls/tzres/tzres.rc:32
 msgid "(UTC+03:00) Baghdad"
 msgstr "(UTC+03:00) 巴格達"
 
-#: dlls/tzres/tzres.rc:396 dlls/tzres/tzres.rc:397
+#: dlls/tzres/tzres.rc:378 dlls/tzres/tzres.rc:379
 msgctxt "maximum 31 characters"
 msgid "UTC+13"
 msgstr "UTC+13"
 
-#: dlls/tzres/tzres.rc:398
+#: dlls/tzres/tzres.rc:380
 msgid "(UTC+13:00) Coordinated Universal Time+13"
 msgstr "(UTC+13:00) 世界協調時間+13"
 
-#: dlls/tzres/tzres.rc:216
+#: dlls/tzres/tzres.rc:198
 msgctxt "maximum 31 characters"
 msgid "Magadan Standard Time"
 msgstr "馬加丹標準時間"
 
-#: dlls/tzres/tzres.rc:217
+#: dlls/tzres/tzres.rc:199
 msgctxt "maximum 31 characters"
 msgid "Magadan Daylight Time"
 msgstr "馬加丹夏令時間"
 
-#: dlls/tzres/tzres.rc:218
+#: dlls/tzres/tzres.rc:200
 msgid "(UTC+11:00) Magadan"
 msgstr "(UTC+11:00) 馬加丹"
 
-#: dlls/tzres/tzres.rc:258
+#: dlls/tzres/tzres.rc:240
 msgctxt "maximum 31 characters"
 msgid "Newfoundland Standard Time"
 msgstr "紐芬蘭標準時間"
 
-#: dlls/tzres/tzres.rc:259
+#: dlls/tzres/tzres.rc:241
 msgctxt "maximum 31 characters"
 msgid "Newfoundland Daylight Time"
 msgstr "紐芬蘭夏令時間"
 
-#: dlls/tzres/tzres.rc:260
+#: dlls/tzres/tzres.rc:242
 msgid "(UTC-03:30) Newfoundland"
 msgstr "(UTC-03:30) 紐芬蘭"
 
-#: dlls/tzres/tzres.rc:348
+#: dlls/tzres/tzres.rc:330
 msgctxt "maximum 31 characters"
 msgid "Sudan Standard Time"
 msgstr "蘇丹標準時間"
 
-#: dlls/tzres/tzres.rc:349
+#: dlls/tzres/tzres.rc:331
 msgctxt "maximum 31 characters"
 msgid "Sudan Daylight Time"
 msgstr "蘇丹夏令時間"
 
-#: dlls/tzres/tzres.rc:350
+#: dlls/tzres/tzres.rc:332
 msgid "(UTC+02:00) Khartoum"
 msgstr "(UTC+02:00) 喀土穆"
 
-#: dlls/tzres/tzres.rc:438
+#: dlls/tzres/tzres.rc:420
 msgctxt "maximum 31 characters"
 msgid "West Pacific Standard Time"
 msgstr "西太平洋標準時間"
 
-#: dlls/tzres/tzres.rc:439
+#: dlls/tzres/tzres.rc:421
 msgctxt "maximum 31 characters"
 msgid "West Pacific Daylight Time"
 msgstr "西太平洋夏令時間"
 
-#: dlls/tzres/tzres.rc:440
+#: dlls/tzres/tzres.rc:422
 msgid "(UTC+10:00) Guam, Port Moresby"
 msgstr "(UTC+10:00) 關島，莫爾斯貝港"
 
-#: dlls/tzres/tzres.rc:279
+#: dlls/tzres/tzres.rc:261
 msgctxt "maximum 31 characters"
 msgid "Pacific Standard Time"
 msgstr "太平洋標準時間"
 
-#: dlls/tzres/tzres.rc:280
+#: dlls/tzres/tzres.rc:262
 msgctxt "maximum 31 characters"
 msgid "Pacific Daylight Time"
 msgstr "太平洋夏令時間"
 
-#: dlls/tzres/tzres.rc:281
+#: dlls/tzres/tzres.rc:263
 msgid "(UTC-08:00) Pacific Time (US & Canada)"
 msgstr "(UTC-08:00) 太平洋時間 (美國和加拿大)"
 
-#: dlls/tzres/tzres.rc:69
+#: dlls/tzres/tzres.rc:51
 msgctxt "maximum 31 characters"
 msgid "Azerbaijan Standard Time"
 msgstr "亞塞拜然標準時間"
 
-#: dlls/tzres/tzres.rc:70
+#: dlls/tzres/tzres.rc:52
 msgctxt "maximum 31 characters"
 msgid "Azerbaijan Daylight Time"
 msgstr "亞塞拜然夏令時間"
 
-#: dlls/tzres/tzres.rc:71
+#: dlls/tzres/tzres.rc:53
 msgid "(UTC+04:00) Baku"
 msgstr "(UTC+04:00) 巴庫"
 
-#: dlls/tzres/tzres.rc:219
+#: dlls/tzres/tzres.rc:201
 msgctxt "maximum 31 characters"
 msgid "Magallanes Standard Time"
 msgstr "麥哲倫標準時間"
 
-#: dlls/tzres/tzres.rc:220
+#: dlls/tzres/tzres.rc:202
 msgctxt "maximum 31 characters"
 msgid "Magallanes Daylight Time"
 msgstr "麥哲倫夏令時間"
 
-#: dlls/tzres/tzres.rc:221
+#: dlls/tzres/tzres.rc:203
 msgid "(UTC-03:00) Punta Arenas"
 msgstr "(UTC-03:00) 旁塔阿雷納斯"
 
-#: dlls/tzres/tzres.rc:324
+#: dlls/tzres/tzres.rc:306
 msgctxt "maximum 31 characters"
 msgid "Samoa Standard Time"
 msgstr "薩摩亞標準時間"
 
-#: dlls/tzres/tzres.rc:325
+#: dlls/tzres/tzres.rc:307
 msgctxt "maximum 31 characters"
 msgid "Samoa Daylight Time"
 msgstr "薩摩亞夏令時間"
 
-#: dlls/tzres/tzres.rc:326
+#: dlls/tzres/tzres.rc:308
 msgid "(UTC+13:00) Samoa"
 msgstr "(UTC+13:00) 薩摩亞"
 
-#: dlls/tzres/tzres.rc:201
+#: dlls/tzres/tzres.rc:183
 msgctxt "maximum 31 characters"
 msgid "Kaliningrad Standard Time"
 msgstr "加里寧格勒標準時間"
 
-#: dlls/tzres/tzres.rc:202
+#: dlls/tzres/tzres.rc:184
 msgctxt "maximum 31 characters"
 msgid "Kaliningrad Daylight Time"
 msgstr "加里寧格勒夏令時間"
 
-#: dlls/tzres/tzres.rc:203
+#: dlls/tzres/tzres.rc:185
 msgid "(UTC+02:00) Kaliningrad"
 msgstr "(UTC+02:00) 加里寧格勒"
 
-#: dlls/tzres/tzres.rc:282
+#: dlls/tzres/tzres.rc:264
 msgctxt "maximum 31 characters"
 msgid "Pacific Standard Time (Mexico)"
 msgstr "太平洋標準時間 (墨西哥)"
 
-#: dlls/tzres/tzres.rc:283
+#: dlls/tzres/tzres.rc:265
 msgctxt "maximum 31 characters"
 msgid "Pacific Daylight Time (Mexico)"
 msgstr "太平洋夏令時間 (墨西哥)"
 
-#: dlls/tzres/tzres.rc:284
+#: dlls/tzres/tzres.rc:266
 msgid "(UTC-08:00) Baja California"
 msgstr "(UTC-08:00) 下加利福尼亞"
 
-#: dlls/tzres/tzres.rc:228
+#: dlls/tzres/tzres.rc:210
 msgctxt "maximum 31 characters"
 msgid "Middle East Standard Time"
 msgstr "中東標準時間"
 
-#: dlls/tzres/tzres.rc:229
+#: dlls/tzres/tzres.rc:211
 msgctxt "maximum 31 characters"
 msgid "Middle East Daylight Time"
 msgstr "中東夏令時間"
 
-#: dlls/tzres/tzres.rc:230
+#: dlls/tzres/tzres.rc:212
 msgid "(UTC+02:00) Beirut"
 msgstr "(UTC+02:00) 貝魯特"
 
-#: dlls/tzres/tzres.rc:363
+#: dlls/tzres/tzres.rc:345
 msgctxt "maximum 31 characters"
 msgid "Tokyo Standard Time"
 msgstr "東京標準時間"
 
-#: dlls/tzres/tzres.rc:364
+#: dlls/tzres/tzres.rc:346
 msgctxt "maximum 31 characters"
 msgid "Tokyo Daylight Time"
 msgstr "東京夏令時間"
 
-#: dlls/tzres/tzres.rc:365
+#: dlls/tzres/tzres.rc:347
 msgid "(UTC+09:00) Osaka, Sapporo, Tokyo"
 msgstr "(UTC+09:00) 大阪，札幌，東京"
 
-#: dlls/tzres/tzres.rc:210
+#: dlls/tzres/tzres.rc:192
 msgctxt "maximum 31 characters"
 msgid "Line Islands Standard Time"
 msgstr "萊恩群島標準時間"
 
-#: dlls/tzres/tzres.rc:211
+#: dlls/tzres/tzres.rc:193
 msgctxt "maximum 31 characters"
 msgid "Line Islands Daylight Time"
 msgstr "萊恩群島夏令時間"
 
-#: dlls/tzres/tzres.rc:212
+#: dlls/tzres/tzres.rc:194
 msgid "(UTC+14:00) Kiritimati Island"
 msgstr "(UTC+14:00) 聖誕島"
 
-#: dlls/tzres/tzres.rc:129
+#: dlls/tzres/tzres.rc:111
 msgctxt "maximum 31 characters"
 msgid "Cuba Standard Time"
 msgstr "古巴標準時間"
 
-#: dlls/tzres/tzres.rc:130
+#: dlls/tzres/tzres.rc:112
 msgctxt "maximum 31 characters"
 msgid "Cuba Daylight Time"
 msgstr "古巴夏令時間"
 
-#: dlls/tzres/tzres.rc:131
+#: dlls/tzres/tzres.rc:113
 msgid "(UTC-05:00) Havana"
 msgstr "(UTC-05:00) 哈瓦那"
 
-#: dlls/tzres/tzres.rc:198
+#: dlls/tzres/tzres.rc:180
 msgctxt "maximum 31 characters"
 msgid "Jordan Standard Time"
 msgstr "約旦標準時間"
 
-#: dlls/tzres/tzres.rc:199
+#: dlls/tzres/tzres.rc:181
 msgctxt "maximum 31 characters"
 msgid "Jordan Daylight Time"
 msgstr "約旦夏令時間"
 
-#: dlls/tzres/tzres.rc:200
+#: dlls/tzres/tzres.rc:182
 msgid "(UTC+02:00) Amman"
 msgstr "(UTC+02:00) 安曼"
 
-#: dlls/tzres/tzres.rc:117
+#: dlls/tzres/tzres.rc:99
 msgctxt "maximum 31 characters"
 msgid "Central Standard Time"
 msgstr "中部標準時間"
 
-#: dlls/tzres/tzres.rc:118
+#: dlls/tzres/tzres.rc:100
 msgctxt "maximum 31 characters"
 msgid "Central Daylight Time"
 msgstr "中部夏令時間"
 
-#: dlls/tzres/tzres.rc:119
+#: dlls/tzres/tzres.rc:101
 msgid "(UTC-06:00) Central Time (US & Canada)"
 msgstr "(UTC-06:00) 中部時間 (美國和加拿大)"
 
-#: dlls/tzres/tzres.rc:303 dlls/tzres/tzres.rc:304
+#: dlls/tzres/tzres.rc:285 dlls/tzres/tzres.rc:286
 msgctxt "maximum 31 characters"
 msgid "Russia Time Zone 3"
 msgstr "俄羅斯時區 3"
 
-#: dlls/tzres/tzres.rc:305
+#: dlls/tzres/tzres.rc:287
 msgid "(UTC+04:00) Izhevsk, Samara"
 msgstr "(UTC+04:00) 伊熱夫斯克，薩馬拉"
 
-#: dlls/tzres/tzres.rc:417
+#: dlls/tzres/tzres.rc:399
 msgctxt "maximum 31 characters"
 msgid "Volgograd Standard Time"
 msgstr "伏爾加格勒標準時間"
 
-#: dlls/tzres/tzres.rc:418
+#: dlls/tzres/tzres.rc:400
 msgctxt "maximum 31 characters"
 msgid "Volgograd Daylight Time"
 msgstr "伏爾加格勒夏令時間"
 
-#: dlls/tzres/tzres.rc:419
+#: dlls/tzres/tzres.rc:401
 msgid "(UTC+04:00) Volgograd"
 msgstr "(UTC+04:00) 伏爾加格勒"
 
-#: dlls/tzres/tzres.rc:72
+#: dlls/tzres/tzres.rc:54
 msgctxt "maximum 31 characters"
 msgid "Azores Standard Time"
 msgstr "亞述標準時間"
 
-#: dlls/tzres/tzres.rc:73
+#: dlls/tzres/tzres.rc:55
 msgctxt "maximum 31 characters"
 msgid "Azores Daylight Time"
 msgstr "亞述夏令時間"
 
-#: dlls/tzres/tzres.rc:74
+#: dlls/tzres/tzres.rc:56
 msgid "(UTC-01:00) Azores"
 msgstr "(UTC-01:00) 亞述群島"
 
-#: dlls/tzres/tzres.rc:264
+#: dlls/tzres/tzres.rc:246
 msgctxt "maximum 31 characters"
 msgid "North Asia East Standard Time"
 msgstr "北亞東部標準時間"
 
-#: dlls/tzres/tzres.rc:265
+#: dlls/tzres/tzres.rc:247
 msgctxt "maximum 31 characters"
 msgid "North Asia East Daylight Time"
 msgstr "北亞東部夏令時間"
 
-#: dlls/tzres/tzres.rc:266
+#: dlls/tzres/tzres.rc:248
 msgid "(UTC+08:00) Irkutsk"
 msgstr "(UTC+08:00) 伊爾庫次克"
 
-#: dlls/tzres/tzres.rc:408 dlls/tzres/tzres.rc:409
+#: dlls/tzres/tzres.rc:390 dlls/tzres/tzres.rc:391
 msgctxt "maximum 31 characters"
 msgid "UTC-11"
 msgstr "UTC-11"
 
-#: dlls/tzres/tzres.rc:410
+#: dlls/tzres/tzres.rc:392
 msgid "(UTC-11:00) Coordinated Universal Time-11"
 msgstr "(UTC-11:00) 世界協調時間-11"
 
-#: dlls/tzres/tzres.rc:51
+#: dlls/tzres/tzres.rc:33
 msgctxt "maximum 31 characters"
 msgid "Argentina Standard Time"
 msgstr "阿根廷標準時間"
 
-#: dlls/tzres/tzres.rc:52
+#: dlls/tzres/tzres.rc:34
 msgctxt "maximum 31 characters"
 msgid "Argentina Daylight Time"
 msgstr "阿根廷夏令時間"
 
-#: dlls/tzres/tzres.rc:53
+#: dlls/tzres/tzres.rc:35
 msgid "(UTC-03:00) City of Buenos Aires"
 msgstr "(UTC-03:00) 布宜諾斯艾利斯"
 
-#: dlls/tzres/tzres.rc:378
+#: dlls/tzres/tzres.rc:360
 msgctxt "maximum 31 characters"
 msgid "Turks And Caicos Standard Time"
 msgstr "土克凱可標準時間"
 
-#: dlls/tzres/tzres.rc:379
+#: dlls/tzres/tzres.rc:361
 msgctxt "maximum 31 characters"
 msgid "Turks And Caicos Daylight Time"
 msgstr "土克凱可夏令時間"
 
-#: dlls/tzres/tzres.rc:380
+#: dlls/tzres/tzres.rc:362
 msgid "(UTC-05:00) Turks and Caicos"
 msgstr "(UTC-05:00) 土克凱可"
 
-#: dlls/tzres/tzres.rc:222
+#: dlls/tzres/tzres.rc:204
 msgctxt "maximum 31 characters"
 msgid "Marquesas Standard Time"
 msgstr "馬克薩斯標準時間"
 
-#: dlls/tzres/tzres.rc:223
+#: dlls/tzres/tzres.rc:205
 msgctxt "maximum 31 characters"
 msgid "Marquesas Daylight Time"
 msgstr "馬克薩斯夏令時間"
 
-#: dlls/tzres/tzres.rc:224
+#: dlls/tzres/tzres.rc:206
 msgid "(UTC-09:30) Marquesas Islands"
 msgstr "(UTC-09:30) 馬克薩斯群島"
 
-#: dlls/tzres/tzres.rc:243
+#: dlls/tzres/tzres.rc:225
 msgctxt "maximum 31 characters"
 msgid "Myanmar Standard Time"
 msgstr "緬甸標準時間"
 
-#: dlls/tzres/tzres.rc:244
+#: dlls/tzres/tzres.rc:226
 msgctxt "maximum 31 characters"
 msgid "Myanmar Daylight Time"
 msgstr "緬甸夏令時間"
 
-#: dlls/tzres/tzres.rc:245
+#: dlls/tzres/tzres.rc:227
 msgid "(UTC+06:30) Yangon (Rangoon)"
 msgstr "(UTC+06:30) 仰光"
 
-#: dlls/tzres/tzres.rc:390 dlls/tzres/tzres.rc:391
+#: dlls/tzres/tzres.rc:372 dlls/tzres/tzres.rc:373
 msgctxt "maximum 31 characters"
 msgid "Coordinated Universal Time"
 msgstr "世界協調時間"
 
-#: dlls/tzres/tzres.rc:392
+#: dlls/tzres/tzres.rc:374
 msgid "(UTC) Coordinated Universal Time"
 msgstr "(UTC) 世界協調時間"
 
-#: dlls/tzres/tzres.rc:189
+#: dlls/tzres/tzres.rc:171
 msgctxt "maximum 31 characters"
 msgid "India Standard Time"
 msgstr "印度標準時間"
 
-#: dlls/tzres/tzres.rc:190
+#: dlls/tzres/tzres.rc:172
 msgctxt "maximum 31 characters"
 msgid "India Daylight Time"
 msgstr "印度夏令時間"
 
-#: dlls/tzres/tzres.rc:191
+#: dlls/tzres/tzres.rc:173
 msgid "(UTC+05:30) Chennai, Kolkata, Mumbai, New Delhi"
 msgstr "(UTC+05:30) 清奈，加爾各答，孟買，新德里"
 
-#: dlls/tzres/tzres.rc:180
+#: dlls/tzres/tzres.rc:162
 msgctxt "maximum 31 characters"
 msgid "GTB Standard Time"
 msgstr "GTB 標準時間"
 
-#: dlls/tzres/tzres.rc:181
+#: dlls/tzres/tzres.rc:163
 msgctxt "maximum 31 characters"
 msgid "GTB Daylight Time"
 msgstr "GTB 夏令時間"
 
-#: dlls/tzres/tzres.rc:182
+#: dlls/tzres/tzres.rc:164
 msgid "(UTC+02:00) Athens, Bucharest"
 msgstr "(UTC+02:00) 雅典，布加勒斯特"
 
-#: dlls/tzres/tzres.rc:375
+#: dlls/tzres/tzres.rc:357
 msgctxt "maximum 31 characters"
 msgid "Turkey Standard Time"
 msgstr "土耳其標準時間"
 
-#: dlls/tzres/tzres.rc:376
+#: dlls/tzres/tzres.rc:358
 msgctxt "maximum 31 characters"
 msgid "Turkey Daylight Time"
 msgstr "土耳其夏令時間"
 
-#: dlls/tzres/tzres.rc:377
+#: dlls/tzres/tzres.rc:359
 msgid "(UTC+03:00) Istanbul"
 msgstr "(UTC+03:00) 伊斯坦堡"
 
-#: dlls/tzres/tzres.rc:54
+#: dlls/tzres/tzres.rc:36
 msgctxt "maximum 31 characters"
 msgid "Astrakhan Standard Time"
 msgstr "阿斯特拉罕標準時間"
 
-#: dlls/tzres/tzres.rc:55
+#: dlls/tzres/tzres.rc:37
 msgctxt "maximum 31 characters"
 msgid "Astrakhan Daylight Time"
 msgstr "阿斯特拉罕夏令時間"
 
-#: dlls/tzres/tzres.rc:56
+#: dlls/tzres/tzres.rc:38
 msgid "(UTC+04:00) Astrakhan, Ulyanovsk"
 msgstr "(UTC+04:00) 阿斯特拉罕，烏里揚諾夫斯克"
 
-#: dlls/tzres/tzres.rc:162
+#: dlls/tzres/tzres.rc:144
 msgctxt "maximum 31 characters"
 msgid "Fiji Standard Time"
 msgstr "斐濟標準時間"
 
-#: dlls/tzres/tzres.rc:163
+#: dlls/tzres/tzres.rc:145
 msgctxt "maximum 31 characters"
 msgid "Fiji Daylight Time"
 msgstr "斐濟夏令時間"
 
-#: dlls/tzres/tzres.rc:164
+#: dlls/tzres/tzres.rc:146
 msgid "(UTC+12:00) Fiji"
 msgstr "(UTC+12:00) 斐濟"
 
-#: dlls/tzres/tzres.rc:87
+#: dlls/tzres/tzres.rc:69
 msgctxt "maximum 31 characters"
 msgid "Canada Central Standard Time"
 msgstr "加拿大中部標準時間"
 
-#: dlls/tzres/tzres.rc:88
+#: dlls/tzres/tzres.rc:70
 msgctxt "maximum 31 characters"
 msgid "Canada Central Daylight Time"
 msgstr "加拿大中部夏令時間"
 
-#: dlls/tzres/tzres.rc:89
+#: dlls/tzres/tzres.rc:71
 msgid "(UTC-06:00) Saskatchewan"
 msgstr "(UTC-06:00) 薩克其萬"
 
-#: dlls/tzres/tzres.rc:444
+#: dlls/tzres/tzres.rc:426
 msgctxt "maximum 31 characters"
 msgid "Yukon Standard Time"
 msgstr "育空標準時間"
 
-#: dlls/tzres/tzres.rc:445
+#: dlls/tzres/tzres.rc:427
 msgctxt "maximum 31 characters"
 msgid "Yukon Daylight Time"
 msgstr "育空夏令時間"
 
-#: dlls/tzres/tzres.rc:446
+#: dlls/tzres/tzres.rc:428
 msgid "(UTC-07:00) Yukon"
 msgstr "(UTC-07:00) 育空"
 
-#: dlls/tzres/tzres.rc:354
+#: dlls/tzres/tzres.rc:336
 msgctxt "maximum 31 characters"
 msgid "Taipei Standard Time"
 msgstr "臺北標準時間"
 
-#: dlls/tzres/tzres.rc:355
+#: dlls/tzres/tzres.rc:337
 msgctxt "maximum 31 characters"
 msgid "Taipei Daylight Time"
 msgstr "臺北夏令時間"
 
-#: dlls/tzres/tzres.rc:356
+#: dlls/tzres/tzres.rc:338
 msgid "(UTC+08:00) Taipei"
 msgstr "(UTC+08:00) 臺北"
 
-#: dlls/tzres/tzres.rc:426
+#: dlls/tzres/tzres.rc:408
 msgctxt "maximum 31 characters"
 msgid "W. Europe Standard Time"
 msgstr "西歐標準時間"
 
-#: dlls/tzres/tzres.rc:427
+#: dlls/tzres/tzres.rc:409
 msgctxt "maximum 31 characters"
 msgid "W. Europe Daylight Time"
 msgstr "西歐夏令時間"
 
-#: dlls/tzres/tzres.rc:428
+#: dlls/tzres/tzres.rc:410
 msgid "(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna"
 msgstr "(UTC+01:00) 阿姆斯特丹，柏林，伯恩，羅馬，斯德哥爾摩，維也納"
 
-#: dlls/tzres/tzres.rc:231
+#: dlls/tzres/tzres.rc:213
 msgctxt "maximum 31 characters"
 msgid "Montevideo Standard Time"
 msgstr "蒙特維多標準時間"
 
-#: dlls/tzres/tzres.rc:232
+#: dlls/tzres/tzres.rc:214
 msgctxt "maximum 31 characters"
 msgid "Montevideo Daylight Time"
 msgstr "蒙特維多夏令時間"
 
-#: dlls/tzres/tzres.rc:233
+#: dlls/tzres/tzres.rc:215
 msgid "(UTC-03:00) Montevideo"
 msgstr "(UTC-03:00) 蒙特維多"
 
-#: dlls/tzres/tzres.rc:285
+#: dlls/tzres/tzres.rc:267
 msgctxt "maximum 31 characters"
 msgid "Pakistan Standard Time"
 msgstr "巴基斯坦標準時間"
 
-#: dlls/tzres/tzres.rc:286
+#: dlls/tzres/tzres.rc:268
 msgctxt "maximum 31 characters"
 msgid "Pakistan Daylight Time"
 msgstr "巴基斯坦夏令時間"
 
-#: dlls/tzres/tzres.rc:287
+#: dlls/tzres/tzres.rc:269
 msgid "(UTC+05:00) Islamabad, Karachi"
 msgstr "(UTC+05:00) 伊斯蘭瑪巴德，卡拉奇"
 
-#: dlls/tzres/tzres.rc:366
+#: dlls/tzres/tzres.rc:348
 msgctxt "maximum 31 characters"
 msgid "Tomsk Standard Time"
 msgstr "托木斯克標準時間"
 
-#: dlls/tzres/tzres.rc:367
+#: dlls/tzres/tzres.rc:349
 msgctxt "maximum 31 characters"
 msgid "Tomsk Daylight Time"
 msgstr "托木斯克夏令時間"
 
-#: dlls/tzres/tzres.rc:368
+#: dlls/tzres/tzres.rc:350
 msgid "(UTC+07:00) Tomsk"
 msgstr "(UTC+07:00) 托木斯克"
 
-#: dlls/tzres/tzres.rc:93
+#: dlls/tzres/tzres.rc:75
 msgctxt "maximum 31 characters"
 msgid "Caucasus Standard Time"
 msgstr "高加索標準時間"
 
-#: dlls/tzres/tzres.rc:94
+#: dlls/tzres/tzres.rc:76
 msgctxt "maximum 31 characters"
 msgid "Caucasus Daylight Time"
 msgstr "高加索夏令時間"
 
-#: dlls/tzres/tzres.rc:95
+#: dlls/tzres/tzres.rc:77
 msgid "(UTC+04:00) Yerevan"
 msgstr "(UTC+04:00) 葉里溫"
 
-#: dlls/tzres/tzres.rc:66
+#: dlls/tzres/tzres.rc:48
 msgctxt "maximum 31 characters"
 msgid "AUS Eastern Standard Time"
 msgstr "澳洲東部標準時間"
 
-#: dlls/tzres/tzres.rc:67
+#: dlls/tzres/tzres.rc:49
 msgctxt "maximum 31 characters"
 msgid "AUS Eastern Daylight Time"
 msgstr "澳洲東部夏令時間"
 
-#: dlls/tzres/tzres.rc:68
+#: dlls/tzres/tzres.rc:50
 msgid "(UTC+10:00) Canberra, Melbourne, Sydney"
 msgstr "(UTC+10:00) 坎培拉，墨爾本，雪梨"
 
-#: dlls/tzres/tzres.rc:246
+#: dlls/tzres/tzres.rc:228
 msgctxt "maximum 31 characters"
 msgid "N. Central Asia Standard Time"
 msgstr "中亞北部標準時間"
 
-#: dlls/tzres/tzres.rc:247
+#: dlls/tzres/tzres.rc:229
 msgctxt "maximum 31 characters"
 msgid "N. Central Asia Daylight Time"
 msgstr "中亞北部夏令時間"
 
-#: dlls/tzres/tzres.rc:248
+#: dlls/tzres/tzres.rc:230
 msgid "(UTC+07:00) Novosibirsk"
 msgstr "(UTC+07:00) 新西伯利亞"
 
-#: dlls/tzres/tzres.rc:150
+#: dlls/tzres/tzres.rc:132
 msgctxt "maximum 31 characters"
 msgid "Eastern Standard Time"
 msgstr "東部標準時間"
 
-#: dlls/tzres/tzres.rc:151
+#: dlls/tzres/tzres.rc:133
 msgctxt "maximum 31 characters"
 msgid "Eastern Daylight Time"
 msgstr "東部夏令時間"
 
-#: dlls/tzres/tzres.rc:152
+#: dlls/tzres/tzres.rc:134
 msgid "(UTC-05:00) Eastern Time (US & Canada)"
 msgstr "(UTC-05:00) 東部時間 (美國和加拿大)"
 
-#: dlls/tzres/tzres.rc:372
+#: dlls/tzres/tzres.rc:354
 msgctxt "maximum 31 characters"
 msgid "Transbaikal Standard Time"
 msgstr "外貝加爾標準時間"
 
-#: dlls/tzres/tzres.rc:373
+#: dlls/tzres/tzres.rc:355
 msgctxt "maximum 31 characters"
 msgid "Transbaikal Daylight Time"
 msgstr "外貝加爾夏令時間"
 
-#: dlls/tzres/tzres.rc:374
+#: dlls/tzres/tzres.rc:356
 msgid "(UTC+09:00) Chita"
 msgstr "(UTC+09:00) 赤塔"
 
-#: dlls/tzres/tzres.rc:141
+#: dlls/tzres/tzres.rc:123
 msgctxt "maximum 31 characters"
 msgid "E. Europe Standard Time"
 msgstr "東歐標準時間"
 
-#: dlls/tzres/tzres.rc:142
+#: dlls/tzres/tzres.rc:124
 msgctxt "maximum 31 characters"
 msgid "E. Europe Daylight Time"
 msgstr "東歐夏令時間"
 
-#: dlls/tzres/tzres.rc:143
+#: dlls/tzres/tzres.rc:125
 msgid "(UTC+02:00) Chisinau"
 msgstr "(UTC+02:00) 基希涅夫"
 
-#: dlls/tzres/tzres.rc:120
+#: dlls/tzres/tzres.rc:102
 msgctxt "maximum 31 characters"
 msgid "Central Standard Time (Mexico)"
 msgstr "中部標準時間 (墨西哥)"
 
-#: dlls/tzres/tzres.rc:121
+#: dlls/tzres/tzres.rc:103
 msgctxt "maximum 31 characters"
 msgid "Central Daylight Time (Mexico)"
 msgstr "中部夏令時間 (墨西哥)"
 
-#: dlls/tzres/tzres.rc:122
+#: dlls/tzres/tzres.rc:104
 msgid "(UTC-06:00) Guadalajara, Mexico City, Monterrey"
 msgstr "(UTC-06:00) 瓜達拉哈拉，墨西哥城，蒙特雷"
 
-#: dlls/tzres/tzres.rc:330
+#: dlls/tzres/tzres.rc:312
 msgctxt "maximum 31 characters"
 msgid "Saratov Standard Time"
 msgstr "薩拉托夫標準時間"
 
-#: dlls/tzres/tzres.rc:331
+#: dlls/tzres/tzres.rc:313
 msgctxt "maximum 31 characters"
 msgid "Saratov Daylight Time"
 msgstr "薩拉托夫夏令時間"
 
-#: dlls/tzres/tzres.rc:332
+#: dlls/tzres/tzres.rc:314
 msgid "(UTC+04:00) Saratov"
 msgstr "(UTC+04:00) 薩拉托夫"
 
-#: dlls/tzres/tzres.rc:57
+#: dlls/tzres/tzres.rc:39
 msgctxt "maximum 31 characters"
 msgid "Atlantic Standard Time"
 msgstr "大西洋標準時間"
 
-#: dlls/tzres/tzres.rc:58
+#: dlls/tzres/tzres.rc:40
 msgctxt "maximum 31 characters"
 msgid "Atlantic Daylight Time"
 msgstr "大西洋夏令時間"
 
-#: dlls/tzres/tzres.rc:59
+#: dlls/tzres/tzres.rc:41
 msgid "(UTC-04:00) Atlantic Time (Canada)"
 msgstr "(UTC-04:00) 大西洋時間 (加拿大)"
 
-#: dlls/tzres/tzres.rc:237
+#: dlls/tzres/tzres.rc:219
 msgctxt "maximum 31 characters"
 msgid "Mountain Standard Time"
 msgstr "山區標準時間"
 
-#: dlls/tzres/tzres.rc:238
+#: dlls/tzres/tzres.rc:220
 msgctxt "maximum 31 characters"
 msgid "Mountain Daylight Time"
 msgstr "山區夏令時間"
 
-#: dlls/tzres/tzres.rc:239
+#: dlls/tzres/tzres.rc:221
 msgid "(UTC-07:00) Mountain Time (US & Canada)"
 msgstr "(UTC-07:00) 山區時間 (美國和加拿大)"
 
-#: dlls/tzres/tzres.rc:384
+#: dlls/tzres/tzres.rc:366
 msgctxt "maximum 31 characters"
 msgid "US Eastern Standard Time"
 msgstr "美國東部標準時間"
 
-#: dlls/tzres/tzres.rc:385
+#: dlls/tzres/tzres.rc:367
 msgctxt "maximum 31 characters"
 msgid "US Eastern Daylight Time"
 msgstr "美國東部夏令時間"
 
-#: dlls/tzres/tzres.rc:386
+#: dlls/tzres/tzres.rc:368
 msgid "(UTC-05:00) Indiana (East)"
 msgstr "(UTC-05:00) 印第安納 (東部)"
 
-#: dlls/tzres/tzres.rc:321
+#: dlls/tzres/tzres.rc:303
 msgctxt "maximum 31 characters"
 msgid "Sakhalin Standard Time"
 msgstr "庫頁島標準時間"
 
-#: dlls/tzres/tzres.rc:322
+#: dlls/tzres/tzres.rc:304
 msgctxt "maximum 31 characters"
 msgid "Sakhalin Daylight Time"
 msgstr "庫頁島夏令時間"
 
-#: dlls/tzres/tzres.rc:323
+#: dlls/tzres/tzres.rc:305
 msgid "(UTC+11:00) Sakhalin"
 msgstr "(UTC+11:00) 庫頁島"
 
-#: dlls/tzres/tzres.rc:270
+#: dlls/tzres/tzres.rc:252
 msgctxt "maximum 31 characters"
 msgid "North Korea Standard Time"
 msgstr "北韓標準時間"
 
-#: dlls/tzres/tzres.rc:271
+#: dlls/tzres/tzres.rc:253
 msgctxt "maximum 31 characters"
 msgid "North Korea Daylight Time"
 msgstr "北韓夏令時間"
 
-#: dlls/tzres/tzres.rc:272
+#: dlls/tzres/tzres.rc:254
 msgid "(UTC+09:00) Pyongyang"
 msgstr "(UTC+09:00) 平壤"
 
-#: dlls/tzres/tzres.rc:357
+#: dlls/tzres/tzres.rc:339
 msgctxt "maximum 31 characters"
 msgid "Tasmania Standard Time"
 msgstr "塔斯馬尼亞標準時間"
 
-#: dlls/tzres/tzres.rc:358
+#: dlls/tzres/tzres.rc:340
 msgctxt "maximum 31 characters"
 msgid "Tasmania Daylight Time"
 msgstr "塔斯馬尼亞夏令時間"
 
-#: dlls/tzres/tzres.rc:359
+#: dlls/tzres/tzres.rc:341
 msgid "(UTC+10:00) Hobart"
 msgstr "(UTC+10:00) 荷巴特"
 
-#: dlls/tzres/tzres.rc:99
+#: dlls/tzres/tzres.rc:81
 msgctxt "maximum 31 characters"
 msgid "Central America Standard Time"
 msgstr "中美洲標準時間"
 
-#: dlls/tzres/tzres.rc:100
+#: dlls/tzres/tzres.rc:82
 msgctxt "maximum 31 characters"
 msgid "Central America Daylight Time"
 msgstr "中美洲夏令時間"
 
-#: dlls/tzres/tzres.rc:101
+#: dlls/tzres/tzres.rc:83
 msgid "(UTC-06:00) Central America"
 msgstr "(UTC-06:00) 中美洲"
 
-#: dlls/tzres/tzres.rc:399 dlls/tzres/tzres.rc:400
+#: dlls/tzres/tzres.rc:381 dlls/tzres/tzres.rc:382
 msgctxt "maximum 31 characters"
 msgid "UTC-02"
 msgstr "UTC-02"
 
-#: dlls/tzres/tzres.rc:401
+#: dlls/tzres/tzres.rc:383
 msgid "(UTC-02:00) Coordinated Universal Time-02"
 msgstr "(UTC-02:00) 世界協調時間-02"
 
-#: dlls/tzres/tzres.rc:387
+#: dlls/tzres/tzres.rc:369
 msgctxt "maximum 31 characters"
 msgid "US Mountain Standard Time"
 msgstr "美國山區標準時間"
 
-#: dlls/tzres/tzres.rc:388
+#: dlls/tzres/tzres.rc:370
 msgctxt "maximum 31 characters"
 msgid "US Mountain Daylight Time"
 msgstr "美國山區夏令時間"
 
-#: dlls/tzres/tzres.rc:389
+#: dlls/tzres/tzres.rc:371
 msgid "(UTC-07:00) Arizona"
 msgstr "(UTC-07:00) 亞利桑那"
 
-#: dlls/tzres/tzres.rc:339
+#: dlls/tzres/tzres.rc:321
 msgctxt "maximum 31 characters"
 msgid "South Africa Standard Time"
 msgstr "南非標準時間"
 
-#: dlls/tzres/tzres.rc:340
+#: dlls/tzres/tzres.rc:322
 msgctxt "maximum 31 characters"
 msgid "South Africa Daylight Time"
 msgstr "南非夏令時間"
 
-#: dlls/tzres/tzres.rc:341
+#: dlls/tzres/tzres.rc:323
 msgid "(UTC+02:00) Harare, Pretoria"
 msgstr "(UTC+02:00) 哈拉雷，普利托利亞"
 
-#: dlls/tzres/tzres.rc:96
+#: dlls/tzres/tzres.rc:78
 msgctxt "maximum 31 characters"
 msgid "Cen. Australia Standard Time"
 msgstr "澳洲中部標準時間"
 
-#: dlls/tzres/tzres.rc:97
+#: dlls/tzres/tzres.rc:79
 msgctxt "maximum 31 characters"
 msgid "Cen. Australia Daylight Time"
 msgstr "澳洲中部夏令時間"
 
-#: dlls/tzres/tzres.rc:98
+#: dlls/tzres/tzres.rc:80
 msgid "(UTC+09:30) Adelaide"
 msgstr "(UTC+09:30) 阿得雷德"
 
-#: dlls/tzres/tzres.rc:405 dlls/tzres/tzres.rc:406
+#: dlls/tzres/tzres.rc:387 dlls/tzres/tzres.rc:388
 msgctxt "maximum 31 characters"
 msgid "UTC-09"
 msgstr "UTC-09"
 
-#: dlls/tzres/tzres.rc:407
+#: dlls/tzres/tzres.rc:389
 msgid "(UTC-09:00) Coordinated Universal Time-09"
 msgstr "(UTC-09:00) 世界協調時間-09"
 
-#: dlls/tzres/tzres.rc:345
+#: dlls/tzres/tzres.rc:327
 msgctxt "maximum 31 characters"
 msgid "Sri Lanka Standard Time"
 msgstr "斯里蘭卡標準時間"
 
-#: dlls/tzres/tzres.rc:346
+#: dlls/tzres/tzres.rc:328
 msgctxt "maximum 31 characters"
 msgid "Sri Lanka Daylight Time"
 msgstr "斯里蘭卡夏令時間"
 
-#: dlls/tzres/tzres.rc:347
+#: dlls/tzres/tzres.rc:329
 msgid "(UTC+05:30) Sri Jayawardenepura"
 msgstr "(UTC+05:30) 斯里賈亞瓦德納普拉科特"
 
-#: dlls/tzres/tzres.rc:30
+#: dlls/tzres/tzres.rc:12
 msgctxt "maximum 31 characters"
 msgid "Afghanistan Standard Time"
 msgstr "阿富汗標準時間"
 
-#: dlls/tzres/tzres.rc:31
+#: dlls/tzres/tzres.rc:13
 msgctxt "maximum 31 characters"
 msgid "Afghanistan Daylight Time"
 msgstr "阿富汗夏令時間"
 
-#: dlls/tzres/tzres.rc:32
+#: dlls/tzres/tzres.rc:14
 msgid "(UTC+04:30) Kabul"
 msgstr "(UTC+04:30) 喀布爾"
 
-#: dlls/tzres/tzres.rc:441
+#: dlls/tzres/tzres.rc:423
 msgctxt "maximum 31 characters"
 msgid "Yakutsk Standard Time"
 msgstr "雅庫次克標準時間"
 
-#: dlls/tzres/tzres.rc:442
+#: dlls/tzres/tzres.rc:424
 msgctxt "maximum 31 characters"
 msgid "Yakutsk Daylight Time"
 msgstr "雅庫次克夏令時間"
 
-#: dlls/tzres/tzres.rc:443
+#: dlls/tzres/tzres.rc:425
 msgid "(UTC+09:00) Yakutsk"
 msgstr "(UTC+09:00) 雅庫次克"
 
-#: dlls/tzres/tzres.rc:309
+#: dlls/tzres/tzres.rc:291
 msgctxt "maximum 31 characters"
 msgid "SA Eastern Standard Time"
 msgstr "南美洲東部標準時間"
 
-#: dlls/tzres/tzres.rc:310
+#: dlls/tzres/tzres.rc:292
 msgctxt "maximum 31 characters"
 msgid "SA Eastern Daylight Time"
 msgstr "南美洲東部夏令時間"
 
-#: dlls/tzres/tzres.rc:311
+#: dlls/tzres/tzres.rc:293
 msgid "(UTC-03:00) Cayenne, Fortaleza"
 msgstr "(UTC-03:00) 開雲，福塔萊薩"
 
-#: dlls/tzres/tzres.rc:42
+#: dlls/tzres/tzres.rc:24
 msgctxt "maximum 31 characters"
 msgid "Arab Standard Time"
 msgstr "沙烏地阿拉伯標準時間"
 
-#: dlls/tzres/tzres.rc:43
+#: dlls/tzres/tzres.rc:25
 msgctxt "maximum 31 characters"
 msgid "Arab Daylight Time"
 msgstr "沙烏地阿拉伯夏令時間"
 
-#: dlls/tzres/tzres.rc:44
+#: dlls/tzres/tzres.rc:26
 msgid "(UTC+03:00) Kuwait, Riyadh"
 msgstr "(UTC+03:00) 科威特，利雅德"
 
-#: dlls/tzres/tzres.rc:45
+#: dlls/tzres/tzres.rc:27
 msgctxt "maximum 31 characters"
 msgid "Arabian Standard Time"
 msgstr "阿拉伯標準時間"
 
-#: dlls/tzres/tzres.rc:46
+#: dlls/tzres/tzres.rc:28
 msgctxt "maximum 31 characters"
 msgid "Arabian Daylight Time"
 msgstr "阿拉伯夏令時間"
 
-#: dlls/tzres/tzres.rc:47
+#: dlls/tzres/tzres.rc:29
 msgid "(UTC+04:00) Abu Dhabi, Muscat"
 msgstr "(UTC+04:00) 阿布達比，馬斯開特"
 
-#: dlls/tzres/tzres.rc:360
+#: dlls/tzres/tzres.rc:342
 msgctxt "maximum 31 characters"
 msgid "Tocantins Standard Time"
 msgstr "托坎廷斯標準時間"
 
-#: dlls/tzres/tzres.rc:361
+#: dlls/tzres/tzres.rc:343
 msgctxt "maximum 31 characters"
 msgid "Tocantins Daylight Time"
 msgstr "托坎廷斯夏令時間"
 
-#: dlls/tzres/tzres.rc:362
+#: dlls/tzres/tzres.rc:344
 msgid "(UTC-03:00) Araguaina"
 msgstr "(UTC-03:00) 阿拉瓜伊納"
 
-#: dlls/tzres/tzres.rc:306
+#: dlls/tzres/tzres.rc:288
 msgctxt "maximum 31 characters"
 msgid "Russian Standard Time"
 msgstr "俄羅斯標準時間"
 
-#: dlls/tzres/tzres.rc:307
+#: dlls/tzres/tzres.rc:289
 msgctxt "maximum 31 characters"
 msgid "Russian Daylight Time"
 msgstr "俄羅斯夏令時間"
 
-#: dlls/tzres/tzres.rc:308
+#: dlls/tzres/tzres.rc:290
 msgid "(UTC+03:00) Moscow, St. Petersburg"
 msgstr "(UTC+03:00) 莫斯科，聖彼得堡"
 
-#: dlls/tzres/tzres.rc:63
+#: dlls/tzres/tzres.rc:45
 msgctxt "maximum 31 characters"
 msgid "Aus Central W. Standard Time"
 msgstr "澳洲中西部標準時間"
 
-#: dlls/tzres/tzres.rc:64
+#: dlls/tzres/tzres.rc:46
 msgctxt "maximum 31 characters"
 msgid "Aus Central W. Daylight Time"
 msgstr "澳洲中西部夏令時間"
 
-#: dlls/tzres/tzres.rc:65
+#: dlls/tzres/tzres.rc:47
 msgid "(UTC+08:45) Eucla"
 msgstr "(UTC+08:45) 尤克拉"
 
-#: dlls/tzres/tzres.rc:294
+#: dlls/tzres/tzres.rc:276
 msgctxt "maximum 31 characters"
 msgid "Romance Standard Time"
 msgstr "羅曼語區標準時間"
 
-#: dlls/tzres/tzres.rc:295
+#: dlls/tzres/tzres.rc:277
 msgctxt "maximum 31 characters"
 msgid "Romance Daylight Time"
 msgstr "羅曼語區夏令時間"
 
-#: dlls/tzres/tzres.rc:296
+#: dlls/tzres/tzres.rc:278
 msgid "(UTC+01:00) Brussels, Copenhagen, Madrid, Paris"
 msgstr "(UTC+01:00) 布魯塞爾，哥本哈根，馬德里，巴黎"
 
-#: dlls/tzres/tzres.rc:159
+#: dlls/tzres/tzres.rc:141
 msgctxt "maximum 31 characters"
 msgid "Ekaterinburg Standard Time"
 msgstr "葉卡捷琳堡標準時間"
 
-#: dlls/tzres/tzres.rc:160
+#: dlls/tzres/tzres.rc:142
 msgctxt "maximum 31 characters"
 msgid "Ekaterinburg Daylight Time"
 msgstr "葉卡捷琳堡夏令時間"
 
-#: dlls/tzres/tzres.rc:161
+#: dlls/tzres/tzres.rc:143
 msgid "(UTC+05:00) Ekaterinburg"
 msgstr "(UTC+05:00) 葉卡捷琳堡"
 
-#: dlls/tzres/tzres.rc:300 dlls/tzres/tzres.rc:301
+#: dlls/tzres/tzres.rc:282 dlls/tzres/tzres.rc:283
 msgctxt "maximum 31 characters"
 msgid "Russia Time Zone 11"
 msgstr "俄羅斯時區 11"
 
-#: dlls/tzres/tzres.rc:302
+#: dlls/tzres/tzres.rc:284
 msgid "(UTC+12:00) Anadyr, Petropavlovsk-Kamchatsky"
 msgstr "(UTC+12:00) 阿納德爾，堪察加彼得巴甫洛夫斯克"
 
-#: dlls/tzres/tzres.rc:435
+#: dlls/tzres/tzres.rc:417
 msgctxt "maximum 31 characters"
 msgid "West Bank Standard Time"
 msgstr "西岸標準時間"
 
-#: dlls/tzres/tzres.rc:436
+#: dlls/tzres/tzres.rc:418
 msgctxt "maximum 31 characters"
 msgid "West Bank Daylight Time"
 msgstr "西岸夏令時間"
 
-#: dlls/tzres/tzres.rc:437
+#: dlls/tzres/tzres.rc:419
 msgid "(UTC+02:00) Gaza, Hebron"
 msgstr "(UTC+02:00) 加薩，希伯侖"
 
-#: dlls/tzres/tzres.rc:351
+#: dlls/tzres/tzres.rc:333
 msgctxt "maximum 31 characters"
 msgid "Syria Standard Time"
 msgstr "敘利亞標準時間"
 
-#: dlls/tzres/tzres.rc:352
+#: dlls/tzres/tzres.rc:334
 msgctxt "maximum 31 characters"
 msgid "Syria Daylight Time"
 msgstr "敘利亞夏令時間"
 
-#: dlls/tzres/tzres.rc:353
+#: dlls/tzres/tzres.rc:335
 msgid "(UTC+02:00) Damascus"
 msgstr "(UTC+02:00) 大馬士革"
 
-#: dlls/tzres/tzres.rc:60
+#: dlls/tzres/tzres.rc:42
 msgctxt "maximum 31 characters"
 msgid "AUS Central Standard Time"
 msgstr "澳洲中部標準時間"
 
-#: dlls/tzres/tzres.rc:61
+#: dlls/tzres/tzres.rc:43
 msgctxt "maximum 31 characters"
 msgid "AUS Central Daylight Time"
 msgstr "澳洲中部夏令時間"
 
-#: dlls/tzres/tzres.rc:62
+#: dlls/tzres/tzres.rc:44
 msgid "(UTC+09:30) Darwin"
 msgstr "(UTC+09:30) 達爾文"
 
-#: dlls/tzres/tzres.rc:177
+#: dlls/tzres/tzres.rc:159
 msgctxt "maximum 31 characters"
 msgid "Greenwich Standard Time"
 msgstr "格林威治標準時間"
 
-#: dlls/tzres/tzres.rc:178
+#: dlls/tzres/tzres.rc:160
 msgctxt "maximum 31 characters"
 msgid "Greenwich Daylight Time"
 msgstr "格林威治夏令時間"
 
-#: dlls/tzres/tzres.rc:179
+#: dlls/tzres/tzres.rc:161
 msgid "(UTC+00:00) Monrovia, Reykjavik"
 msgstr "(UTC+00:00) 蒙羅維亞，雷克雅維克"
 
-#: dlls/tzres/tzres.rc:381
+#: dlls/tzres/tzres.rc:363
 msgctxt "maximum 31 characters"
 msgid "Ulaanbaatar Standard Time"
 msgstr "烏蘭巴托標準時間"
 
-#: dlls/tzres/tzres.rc:382
+#: dlls/tzres/tzres.rc:364
 msgctxt "maximum 31 characters"
 msgid "Ulaanbaatar Daylight Time"
 msgstr "烏蘭巴托夏令時間"
 
-#: dlls/tzres/tzres.rc:383
+#: dlls/tzres/tzres.rc:365
 msgid "(UTC+08:00) Ulaanbaatar"
 msgstr "(UTC+08:00) 烏蘭巴托"
 
-#: dlls/tzres/tzres.rc:261
+#: dlls/tzres/tzres.rc:243
 msgctxt "maximum 31 characters"
 msgid "Norfolk Standard Time"
 msgstr "諾福克標準時間"
 
-#: dlls/tzres/tzres.rc:262
+#: dlls/tzres/tzres.rc:244
 msgctxt "maximum 31 characters"
 msgid "Norfolk Daylight Time"
 msgstr "諾福克夏令時間"
 
-#: dlls/tzres/tzres.rc:263
+#: dlls/tzres/tzres.rc:245
 msgid "(UTC+11:00) Norfolk Island"
 msgstr "(UTC+11:00) 諾福克島"
 
-#: dlls/tzres/tzres.rc:195
+#: dlls/tzres/tzres.rc:177
 msgctxt "maximum 31 characters"
 msgid "Israel Standard Time"
 msgstr "以色列標準時間"
 
-#: dlls/tzres/tzres.rc:196
+#: dlls/tzres/tzres.rc:178
 msgctxt "maximum 31 characters"
 msgid "Israel Daylight Time"
 msgstr "以色列夏令時間"
 
-#: dlls/tzres/tzres.rc:197
+#: dlls/tzres/tzres.rc:179
 msgid "(UTC+02:00) Jerusalem"
 msgstr "(UTC+02:00) 耶路撒冷"
 
-#: dlls/tzres/tzres.rc:78
+#: dlls/tzres/tzres.rc:60
 msgctxt "maximum 31 characters"
 msgid "Bangladesh Standard Time"
 msgstr "孟加拉標準時間"
 
-#: dlls/tzres/tzres.rc:79
+#: dlls/tzres/tzres.rc:61
 msgctxt "maximum 31 characters"
 msgid "Bangladesh Daylight Time"
 msgstr "孟加拉夏令時間"
 
-#: dlls/tzres/tzres.rc:80
+#: dlls/tzres/tzres.rc:62
 msgid "(UTC+06:00) Dhaka"
 msgstr "(UTC+06:00) 達卡"
 
-#: dlls/tzres/tzres.rc:312
+#: dlls/tzres/tzres.rc:294
 msgctxt "maximum 31 characters"
 msgid "SA Pacific Standard Time"
 msgstr "南美洲太平洋標準時間"
 
-#: dlls/tzres/tzres.rc:313
+#: dlls/tzres/tzres.rc:295
 msgctxt "maximum 31 characters"
 msgid "SA Pacific Daylight Time"
 msgstr "南美洲太平洋夏令時間"
 
-#: dlls/tzres/tzres.rc:314
+#: dlls/tzres/tzres.rc:296
 msgid "(UTC-05:00) Bogota, Lima, Quito, Rio Branco"
 msgstr "(UTC-05:00) 波哥大，利馬，基多，里約布蘭科"
 
-#: dlls/tzres/tzres.rc:432
+#: dlls/tzres/tzres.rc:414
 msgctxt "maximum 31 characters"
 msgid "West Asia Standard Time"
 msgstr "西亞標準時間"
 
-#: dlls/tzres/tzres.rc:433
+#: dlls/tzres/tzres.rc:415
 msgctxt "maximum 31 characters"
 msgid "West Asia Daylight Time"
 msgstr "西亞夏令時間"
 
-#: dlls/tzres/tzres.rc:434
+#: dlls/tzres/tzres.rc:416
 msgid "(UTC+05:00) Ashgabat, Tashkent"
 msgstr "(UTC+05:00) 阿什哈巴特，塔什干"
 
-#: dlls/tzres/tzres.rc:33
+#: dlls/tzres/tzres.rc:15
 msgctxt "maximum 31 characters"
 msgid "Alaskan Standard Time"
 msgstr "阿拉斯加標準時間"
 
-#: dlls/tzres/tzres.rc:34
+#: dlls/tzres/tzres.rc:16
 msgctxt "maximum 31 characters"
 msgid "Alaskan Daylight Time"
 msgstr "阿拉斯加夏令時間"
 
-#: dlls/tzres/tzres.rc:35
+#: dlls/tzres/tzres.rc:17
 msgid "(UTC-09:00) Alaska"
 msgstr "(UTC-09:00) 阿拉斯加"
 
-#: dlls/tzres/tzres.rc:288
+#: dlls/tzres/tzres.rc:270
 msgctxt "maximum 31 characters"
 msgid "Paraguay Standard Time"
 msgstr "巴拉圭標準時間"
 
-#: dlls/tzres/tzres.rc:289
+#: dlls/tzres/tzres.rc:271
 msgctxt "maximum 31 characters"
 msgid "Paraguay Daylight Time"
 msgstr "巴拉圭夏令時間"
 
-#: dlls/tzres/tzres.rc:290
+#: dlls/tzres/tzres.rc:272
 msgid "(UTC-04:00) Asuncion"
 msgstr "(UTC-04:00) 亞松森"
 
-#: dlls/tzres/tzres.rc:132
+#: dlls/tzres/tzres.rc:114
 msgctxt "maximum 31 characters"
 msgid "Dateline Standard Time"
 msgstr "換日線標準時間"
 
-#: dlls/tzres/tzres.rc:133
+#: dlls/tzres/tzres.rc:115
 msgctxt "maximum 31 characters"
 msgid "Dateline Daylight Time"
 msgstr "換日線夏令時間"
 
-#: dlls/tzres/tzres.rc:134
+#: dlls/tzres/tzres.rc:116
 msgid "(UTC-12:00) International Date Line West"
 msgstr "(UTC-12:00) 國際換日線以西"
 
-#: dlls/tzres/tzres.rc:207
+#: dlls/tzres/tzres.rc:189
 msgctxt "maximum 31 characters"
 msgid "Libya Standard Time"
 msgstr "利比亞標準時間"
 
-#: dlls/tzres/tzres.rc:208
+#: dlls/tzres/tzres.rc:190
 msgctxt "maximum 31 characters"
 msgid "Libya Daylight Time"
 msgstr "利比亞夏令時間"
 
-#: dlls/tzres/tzres.rc:209
+#: dlls/tzres/tzres.rc:191
 msgid "(UTC+02:00) Tripoli"
 msgstr "(UTC+02:00) 的黎波里"
 
-#: dlls/tzres/tzres.rc:75
+#: dlls/tzres/tzres.rc:57
 msgctxt "maximum 31 characters"
 msgid "Bahia Standard Time"
 msgstr "巴伊亞標準時間"
 
-#: dlls/tzres/tzres.rc:76
+#: dlls/tzres/tzres.rc:58
 msgctxt "maximum 31 characters"
 msgid "Bahia Daylight Time"
 msgstr "巴伊亞夏令時間"
 
-#: dlls/tzres/tzres.rc:77
+#: dlls/tzres/tzres.rc:59
 msgid "(UTC-03:00) Salvador"
 msgstr "(UTC-03:00) 薩爾瓦多"
 
-#: dlls/tzres/tzres.rc:411
+#: dlls/tzres/tzres.rc:393
 msgctxt "maximum 31 characters"
 msgid "Venezuela Standard Time"
 msgstr "委內瑞拉標準時間"
 
-#: dlls/tzres/tzres.rc:412
+#: dlls/tzres/tzres.rc:394
 msgctxt "maximum 31 characters"
 msgid "Venezuela Daylight Time"
 msgstr "委內瑞拉夏令時間"
 
-#: dlls/tzres/tzres.rc:413
+#: dlls/tzres/tzres.rc:395
 msgid "(UTC-04:00) Caracas"
 msgstr "(UTC-04:00) 卡拉卡斯"
 
-#: dlls/tzres/tzres.rc:84
+#: dlls/tzres/tzres.rc:66
 msgctxt "maximum 31 characters"
 msgid "Bougainville Standard Time"
 msgstr "布干維爾標準時間"
 
-#: dlls/tzres/tzres.rc:85
+#: dlls/tzres/tzres.rc:67
 msgctxt "maximum 31 characters"
 msgid "Bougainville Daylight Time"
 msgstr "布干維爾夏令時間"
 
-#: dlls/tzres/tzres.rc:86
+#: dlls/tzres/tzres.rc:68
 msgid "(UTC+11:00) Bougainville Island"
 msgstr "(UTC+11:00) 布干維爾島"
 
-#: dlls/tzres/tzres.rc:186
+#: dlls/tzres/tzres.rc:168
 msgctxt "maximum 31 characters"
 msgid "Hawaiian Standard Time"
 msgstr "夏威夷標準時間"
 
-#: dlls/tzres/tzres.rc:187
+#: dlls/tzres/tzres.rc:169
 msgctxt "maximum 31 characters"
 msgid "Hawaiian Daylight Time"
 msgstr "夏威夷夏令時間"
 
-#: dlls/tzres/tzres.rc:188
+#: dlls/tzres/tzres.rc:170
 msgid "(UTC-10:00) Hawaii"
 msgstr "(UTC-10:00) 夏威夷"
 
-#: dlls/tzres/tzres.rc:333
+#: dlls/tzres/tzres.rc:315
 msgctxt "maximum 31 characters"
 msgid "SE Asia Standard Time"
 msgstr "東南亞標準時間"
 
-#: dlls/tzres/tzres.rc:334
+#: dlls/tzres/tzres.rc:316
 msgctxt "maximum 31 characters"
 msgid "SE Asia Daylight Time"
 msgstr "東南亞夏令時間"
 
-#: dlls/tzres/tzres.rc:335
+#: dlls/tzres/tzres.rc:317
 msgid "(UTC+07:00) Bangkok, Hanoi, Jakarta"
 msgstr "(UTC+07:00) 曼谷，河內，雅加達"
 
-#: dlls/tzres/tzres.rc:291
+#: dlls/tzres/tzres.rc:273
 msgctxt "maximum 31 characters"
 msgid "Qyzylorda Standard Time"
 msgstr "克孜勒奧爾達標準時間"
 
-#: dlls/tzres/tzres.rc:292
+#: dlls/tzres/tzres.rc:274
 msgctxt "maximum 31 characters"
 msgid "Qyzylorda Daylight Time"
 msgstr "克孜勒奧爾達夏令時間"
 
-#: dlls/tzres/tzres.rc:293
+#: dlls/tzres/tzres.rc:275
 msgid "(UTC+05:00) Qyzylorda"
 msgstr "(UTC+05:00) 克孜勒奧爾達"
 
-#: dlls/tzres/tzres.rc:429
+#: dlls/tzres/tzres.rc:411
 msgctxt "maximum 31 characters"
 msgid "W. Mongolia Standard Time"
 msgstr "蒙古西部標準時間"
 
-#: dlls/tzres/tzres.rc:430
+#: dlls/tzres/tzres.rc:412
 msgctxt "maximum 31 characters"
 msgid "W. Mongolia Daylight Time"
 msgstr "蒙古西部夏令時間"
 
-#: dlls/tzres/tzres.rc:431
+#: dlls/tzres/tzres.rc:413
 msgid "(UTC+07:00) Hovd"
 msgstr "(UTC+07:00) 科布多城"
 
-#: dlls/tzres/tzres.rc:255
+#: dlls/tzres/tzres.rc:237
 msgctxt "maximum 31 characters"
 msgid "New Zealand Standard Time"
 msgstr "紐西蘭標準時間"
 
-#: dlls/tzres/tzres.rc:256
+#: dlls/tzres/tzres.rc:238
 msgctxt "maximum 31 characters"
 msgid "New Zealand Daylight Time"
 msgstr "紐西蘭夏令時間"
 
-#: dlls/tzres/tzres.rc:257
+#: dlls/tzres/tzres.rc:239
 msgid "(UTC+12:00) Auckland, Wellington"
 msgstr "(UTC+12:00) 奧克蘭，威靈頓"
 
-#: dlls/tzres/tzres.rc:36
+#: dlls/tzres/tzres.rc:18
 msgctxt "maximum 31 characters"
 msgid "Aleutian Standard Time"
 msgstr "阿留申標準時間"
 
-#: dlls/tzres/tzres.rc:37
+#: dlls/tzres/tzres.rc:19
 msgctxt "maximum 31 characters"
 msgid "Aleutian Daylight Time"
 msgstr "阿留申夏令時間"
 
-#: dlls/tzres/tzres.rc:38
+#: dlls/tzres/tzres.rc:20
 msgid "(UTC-10:00) Aleutian Islands"
 msgstr "(UTC-10:00) 阿留申群島"
 
-#: dlls/tzres/tzres.rc:273
+#: dlls/tzres/tzres.rc:255
 msgctxt "maximum 31 characters"
 msgid "Omsk Standard Time"
 msgstr "鄂木斯克標準時間"
 
-#: dlls/tzres/tzres.rc:274
+#: dlls/tzres/tzres.rc:256
 msgctxt "maximum 31 characters"
 msgid "Omsk Daylight Time"
 msgstr "鄂木斯克夏令時間"
 
-#: dlls/tzres/tzres.rc:275
+#: dlls/tzres/tzres.rc:257
 msgid "(UTC+06:00) Omsk"
 msgstr "(UTC+06:00) 鄂木斯克"
 
-#: dlls/tzres/tzres.rc:105
+#: dlls/tzres/tzres.rc:87
 msgctxt "maximum 31 characters"
 msgid "Central Brazilian Standard Time"
 msgstr "巴西中部標準時間"
 
-#: dlls/tzres/tzres.rc:106
+#: dlls/tzres/tzres.rc:88
 msgctxt "maximum 31 characters"
 msgid "Central Brazilian Daylight Time"
 msgstr "巴西中部夏令時間"
 
-#: dlls/tzres/tzres.rc:107
+#: dlls/tzres/tzres.rc:89
 msgid "(UTC-04:00) Cuiaba"
 msgstr "(UTC-04:00) 庫亞巴"
 
-#: dlls/tzres/tzres.rc:81
+#: dlls/tzres/tzres.rc:63
 msgctxt "maximum 31 characters"
 msgid "Belarus Standard Time"
 msgstr "白俄羅斯標準時間"
 
-#: dlls/tzres/tzres.rc:82
+#: dlls/tzres/tzres.rc:64
 msgctxt "maximum 31 characters"
 msgid "Belarus Daylight Time"
 msgstr "白俄羅斯夏令時間"
 
-#: dlls/tzres/tzres.rc:83
+#: dlls/tzres/tzres.rc:65
 msgid "(UTC+03:00) Minsk"
 msgstr "(UTC+03:00) 明斯克"
 
-#: dlls/tzres/tzres.rc:315
+#: dlls/tzres/tzres.rc:297
 msgctxt "maximum 31 characters"
 msgid "SA Western Standard Time"
 msgstr "南美洲西部標準時間"
 
-#: dlls/tzres/tzres.rc:316
+#: dlls/tzres/tzres.rc:298
 msgctxt "maximum 31 characters"
 msgid "SA Western Daylight Time"
 msgstr "南美洲西部夏令時間"
 
-#: dlls/tzres/tzres.rc:317
+#: dlls/tzres/tzres.rc:299
 msgid "(UTC-04:00) Georgetown, La Paz, Manaus, San Juan"
 msgstr "(UTC-04:00) 喬治敦，拉巴斯，瑪瑙斯，聖胡安"
 
-#: dlls/tzres/tzres.rc:174
+#: dlls/tzres/tzres.rc:156
 msgctxt "maximum 31 characters"
 msgid "Greenland Standard Time"
 msgstr "格陵蘭標準時間"
 
-#: dlls/tzres/tzres.rc:175
+#: dlls/tzres/tzres.rc:157
 msgctxt "maximum 31 characters"
 msgid "Greenland Daylight Time"
 msgstr "格陵蘭夏令時間"
 
-#: dlls/tzres/tzres.rc:176
+#: dlls/tzres/tzres.rc:158
 msgid "(UTC-03:00) Greenland"
 msgstr "(UTC-03:00) 格陵蘭"
 
-#: dlls/tzres/tzres.rc:147
+#: dlls/tzres/tzres.rc:129
 msgctxt "maximum 31 characters"
 msgid "Easter Island Standard Time"
 msgstr "復活節島標準時間"
 
-#: dlls/tzres/tzres.rc:148
+#: dlls/tzres/tzres.rc:130
 msgctxt "maximum 31 characters"
 msgid "Easter Island Daylight Time"
 msgstr "復活節島夏令時間"
 
-#: dlls/tzres/tzres.rc:149
+#: dlls/tzres/tzres.rc:131
 msgid "(UTC-06:00) Easter Island"
 msgstr "(UTC-06:00) 復活節島"
 
-#: dlls/tzres/tzres.rc:297 dlls/tzres/tzres.rc:298
+#: dlls/tzres/tzres.rc:279 dlls/tzres/tzres.rc:280
 msgctxt "maximum 31 characters"
 msgid "Russia Time Zone 10"
 msgstr "俄羅斯時區 10"
 
-#: dlls/tzres/tzres.rc:299
+#: dlls/tzres/tzres.rc:281
 msgid "(UTC+11:00) Chokurdakh"
 msgstr "(UTC+11:00) 喬庫爾達赫"
 
-#: dlls/tzres/tzres.rc:156
+#: dlls/tzres/tzres.rc:138
 msgctxt "maximum 31 characters"
 msgid "Egypt Standard Time"
 msgstr "埃及標準時間"
 
-#: dlls/tzres/tzres.rc:157
+#: dlls/tzres/tzres.rc:139
 msgctxt "maximum 31 characters"
 msgid "Egypt Daylight Time"
 msgstr "埃及夏令時間"
 
-#: dlls/tzres/tzres.rc:158
+#: dlls/tzres/tzres.rc:140
 msgid "(UTC+02:00) Cairo"
 msgstr "(UTC+02:00) 開羅"
 
-#: dlls/tzres/tzres.rc:153
+#: dlls/tzres/tzres.rc:135
 msgctxt "maximum 31 characters"
 msgid "Eastern Standard Time (Mexico)"
 msgstr "東部標準時間 (墨西哥)"
 
-#: dlls/tzres/tzres.rc:154
+#: dlls/tzres/tzres.rc:136
 msgctxt "maximum 31 characters"
 msgid "Eastern Daylight Time (Mexico)"
 msgstr "東部夏令時間 (墨西哥)"
 
-#: dlls/tzres/tzres.rc:155
+#: dlls/tzres/tzres.rc:137
 msgid "(UTC-05:00) Chetumal"
 msgstr "(UTC-05:00) 切圖馬爾"
 
-#: dlls/tzres/tzres.rc:225
+#: dlls/tzres/tzres.rc:207
 msgctxt "maximum 31 characters"
 msgid "Mauritius Standard Time"
 msgstr "模里西斯標準時間"
 
-#: dlls/tzres/tzres.rc:226
+#: dlls/tzres/tzres.rc:208
 msgctxt "maximum 31 characters"
 msgid "Mauritius Daylight Time"
 msgstr "模里西斯夏令時間"
 
-#: dlls/tzres/tzres.rc:227
+#: dlls/tzres/tzres.rc:209
 msgid "(UTC+04:00) Port Louis"
 msgstr "(UTC+04:00) 路易士港"
 
-#: dlls/tzres/tzres.rc:414
+#: dlls/tzres/tzres.rc:396
 msgctxt "maximum 31 characters"
 msgid "Vladivostok Standard Time"
 msgstr "海參崴標準時間"
 
-#: dlls/tzres/tzres.rc:415
+#: dlls/tzres/tzres.rc:397
 msgctxt "maximum 31 characters"
 msgid "Vladivostok Daylight Time"
 msgstr "海參崴夏令時間"
 
-#: dlls/tzres/tzres.rc:416
+#: dlls/tzres/tzres.rc:398
 msgid "(UTC+10:00) Vladivostok"
 msgstr "(UTC+10:00) 海參崴"
 
-#: dlls/tzres/tzres.rc:336
+#: dlls/tzres/tzres.rc:318
 msgctxt "maximum 31 characters"
 msgid "Singapore Standard Time"
 msgstr "新加坡標準時間"
 
-#: dlls/tzres/tzres.rc:337
+#: dlls/tzres/tzres.rc:319
 msgctxt "maximum 31 characters"
 msgid "Singapore Daylight Time"
 msgstr "新加坡夏令時間"
 
-#: dlls/tzres/tzres.rc:338
+#: dlls/tzres/tzres.rc:320
 msgid "(UTC+08:00) Kuala Lumpur, Singapore"
 msgstr "(UTC+08:00) 吉隆坡，新加坡"
 
-#: dlls/tzres/tzres.rc:204
+#: dlls/tzres/tzres.rc:186
 msgctxt "maximum 31 characters"
 msgid "Korea Standard Time"
 msgstr "韓國標準時間"
 
-#: dlls/tzres/tzres.rc:205
+#: dlls/tzres/tzres.rc:187
 msgctxt "maximum 31 characters"
 msgid "Korea Daylight Time"
 msgstr "韓國夏令時間"
 
-#: dlls/tzres/tzres.rc:206
+#: dlls/tzres/tzres.rc:188
 msgid "(UTC+09:00) Seoul"
 msgstr "(UTC+09:00) 首爾"
 
-#: dlls/tzres/tzres.rc:123
+#: dlls/tzres/tzres.rc:105
 msgctxt "maximum 31 characters"
 msgid "Chatham Islands Standard Time"
 msgstr "查塔姆群島標準時間"
 
-#: dlls/tzres/tzres.rc:124
+#: dlls/tzres/tzres.rc:106
 msgctxt "maximum 31 characters"
 msgid "Chatham Islands Daylight Time"
 msgstr "查塔姆群島夏令時間"
 
-#: dlls/tzres/tzres.rc:125
+#: dlls/tzres/tzres.rc:107
 msgid "(UTC+12:45) Chatham Islands"
 msgstr "(UTC+12:45) 查塔姆群島"
 
-#: dlls/tzres/tzres.rc:135
+#: dlls/tzres/tzres.rc:117
 msgctxt "maximum 31 characters"
 msgid "E. Africa Standard Time"
 msgstr "東非標準時間"
 
-#: dlls/tzres/tzres.rc:136
+#: dlls/tzres/tzres.rc:118
 msgctxt "maximum 31 characters"
 msgid "E. Africa Daylight Time"
 msgstr "東非夏令時間"
 
-#: dlls/tzres/tzres.rc:137
+#: dlls/tzres/tzres.rc:119
 msgid "(UTC+03:00) Nairobi"
 msgstr "(UTC+03:00) 奈洛比"
 
-#: dlls/tzres/tzres.rc:165
+#: dlls/tzres/tzres.rc:147
 msgctxt "maximum 31 characters"
 msgid "FLE Standard Time"
 msgstr "FLE 標準時間"
 
-#: dlls/tzres/tzres.rc:166
+#: dlls/tzres/tzres.rc:148
 msgctxt "maximum 31 characters"
 msgid "FLE Daylight Time"
 msgstr "FLE 夏令時間"
 
-#: dlls/tzres/tzres.rc:167
+#: dlls/tzres/tzres.rc:149
 msgid "(UTC+02:00) Helsinki, Kyiv, Riga, Sofia, Tallinn, Vilnius"
 msgstr "(UTC+02:00) 赫爾辛基，基輔，里加，索菲亞，塔林，維爾紐斯"
 
-#: dlls/tzres/tzres.rc:144
+#: dlls/tzres/tzres.rc:126
 msgctxt "maximum 31 characters"
 msgid "E. South America Standard Time"
 msgstr "東南美洲標準時間"
 
-#: dlls/tzres/tzres.rc:145
+#: dlls/tzres/tzres.rc:127
 msgctxt "maximum 31 characters"
 msgid "E. South America Daylight Time"
 msgstr "東南美洲夏令時間"
 
-#: dlls/tzres/tzres.rc:146
+#: dlls/tzres/tzres.rc:128
 msgid "(UTC-03:00) Brasilia"
 msgstr "(UTC-03:00) 巴西利亞"
 
-#: dlls/tzres/tzres.rc:114
+#: dlls/tzres/tzres.rc:96
 msgctxt "maximum 31 characters"
 msgid "Central Pacific Standard Time"
 msgstr "太平洋中部標準時間"
 
-#: dlls/tzres/tzres.rc:115
+#: dlls/tzres/tzres.rc:97
 msgctxt "maximum 31 characters"
 msgid "Central Pacific Daylight Time"
 msgstr "太平洋中部夏令時間"
 
-#: dlls/tzres/tzres.rc:116
+#: dlls/tzres/tzres.rc:98
 msgid "(UTC+11:00) Solomon Is., New Caledonia"
 msgstr "(UTC+11:00) 索羅門群島，新喀里多尼亞群島"
 
-#: dlls/tzres/tzres.rc:423
+#: dlls/tzres/tzres.rc:405
 msgctxt "maximum 31 characters"
 msgid "W. Central Africa Standard Time"
 msgstr "中西非標準時間"
 
-#: dlls/tzres/tzres.rc:424
+#: dlls/tzres/tzres.rc:406
 msgctxt "maximum 31 characters"
 msgid "W. Central Africa Daylight Time"
 msgstr "中西非夏令時間"
 
-#: dlls/tzres/tzres.rc:425
+#: dlls/tzres/tzres.rc:407
 msgid "(UTC+01:00) West Central Africa"
 msgstr "(UTC+01:00) 中西非"
 
-#: dlls/tzres/tzres.rc:276
+#: dlls/tzres/tzres.rc:258
 msgctxt "maximum 31 characters"
 msgid "Pacific SA Standard Time"
 msgstr "太平洋 (南美) 標準時間"
 
-#: dlls/tzres/tzres.rc:277
+#: dlls/tzres/tzres.rc:259
 msgctxt "maximum 31 characters"
 msgid "Pacific SA Daylight Time"
 msgstr "太平洋 (南美) 夏令時間"
 
-#: dlls/tzres/tzres.rc:278
+#: dlls/tzres/tzres.rc:260
 msgid "(UTC-04:00) Santiago"
 msgstr "(UTC-04:00) 聖地牙哥"
 
-#: dlls/tzres/tzres.rc:138
+#: dlls/tzres/tzres.rc:120
 msgctxt "maximum 31 characters"
 msgid "E. Australia Standard Time"
 msgstr "澳洲東部標準時間"
 
-#: dlls/tzres/tzres.rc:139
+#: dlls/tzres/tzres.rc:121
 msgctxt "maximum 31 characters"
 msgid "E. Australia Daylight Time"
 msgstr "澳洲東部夏令時間"
 
-#: dlls/tzres/tzres.rc:140
+#: dlls/tzres/tzres.rc:122
 msgid "(UTC+10:00) Brisbane"
 msgstr "(UTC+10:00) 布里斯本"
 
-#: dlls/tzres/tzres.rc:420
+#: dlls/tzres/tzres.rc:402
 msgctxt "maximum 31 characters"
 msgid "W. Australia Standard Time"
 msgstr "澳洲西部標準時間"
 
-#: dlls/tzres/tzres.rc:421
+#: dlls/tzres/tzres.rc:403
 msgctxt "maximum 31 characters"
 msgid "W. Australia Daylight Time"
 msgstr "澳洲西部夏令時間"
 
-#: dlls/tzres/tzres.rc:422
+#: dlls/tzres/tzres.rc:404
 msgid "(UTC+08:00) Perth"
 msgstr "(UTC+08:00) 伯斯"
 
@@ -12491,10 +12534,6 @@ msgstr "紙張大小(&Z):"
 #: dlls/wineps.drv/wineps.rc:39
 msgid "Duplex:"
 msgstr "雙面:"
-
-#: dlls/wineps.drv/wineps.rc:50
-msgid "Setup"
-msgstr "設定"
 
 #: dlls/wininet/wininet.rc:53 dlls/wininet/wininet.rc:73
 msgid "Realm"
@@ -14427,18 +14466,6 @@ msgstr "關閉主控臺(&C)"
 msgid "Edition"
 msgstr "版本"
 
-#: programs/conhost/conhost.rc:120
-msgid "Console parameters"
-msgstr "主控臺執行參數"
-
-#: programs/conhost/conhost.rc:123
-msgid "Retain these settings for later sessions"
-msgstr "保留目前設定以便下次使用"
-
-#: programs/conhost/conhost.rc:124
-msgid "Modify only current session"
-msgstr "僅修改目前的工作階段"
-
 #: programs/conhost/conhost.rc:32 programs/notepad/notepad.rc:41
 #: programs/regedit/regedit.rc:43 programs/winhlp32/winhlp32.rc:39
 #: programs/wordpad/wordpad.rc:42
@@ -14913,8 +14940,8 @@ msgid "&Paste\tCtrl+V"
 msgstr "貼上(&P)\tCtrl+V"
 
 #: programs/notepad/notepad.rc:47 programs/progman/progman.rc:37
-#: programs/regedit/regedit.rc:56 programs/regedit/regedit.rc:109
-#: programs/regedit/regedit.rc:136 programs/winefile/winefile.rc:32
+#: programs/regedit/regedit.rc:57 programs/regedit/regedit.rc:111
+#: programs/regedit/regedit.rc:139 programs/winefile/winefile.rc:32
 msgid "&Delete\tDel"
 msgstr "刪除(&D)\tDel"
 
@@ -14942,122 +14969,149 @@ msgstr "找下一個(&S)\tF3"
 msgid "&Replace...\tCtrl+H"
 msgstr "取代(&R)...\tCtrl+H"
 
-#: programs/notepad/notepad.rc:61 programs/progman/progman.rc:56
-#: programs/regedit/regedit.rc:79 programs/winefile/winefile.rc:83
+#: programs/notepad/notepad.rc:59
+msgid "&Go To...\tCtrl+G"
+msgstr "移至(&G)...\tCtrl+G"
+
+#: programs/notepad/notepad.rc:63 programs/oleview/oleview.rc:68
+#: programs/oleview/oleview.rc:90 programs/winefile/winefile.rc:67
+#: programs/wordpad/wordpad.rc:74 programs/wordpad/wordpad.rc:275
+msgid "&Status Bar"
+msgstr "狀態列(&S)"
+
+#: programs/notepad/notepad.rc:66 programs/progman/progman.rc:56
+#: programs/regedit/regedit.rc:80 programs/winefile/winefile.rc:83
 msgid "&Contents\tF1"
 msgstr "內容(&C)\tF1"
 
-#: programs/notepad/notepad.rc:62
+#: programs/notepad/notepad.rc:67
 msgid "&About Notepad"
 msgstr "關於記事本(&A)"
 
-#: programs/notepad/notepad.rc:100
+#: programs/notepad/notepad.rc:107
 msgid "Page Setup"
 msgstr "版面設定"
 
-#: programs/notepad/notepad.rc:102
+#: programs/notepad/notepad.rc:109
 msgid "&Header:"
 msgstr "頁首(&H):"
 
-#: programs/notepad/notepad.rc:104
+#: programs/notepad/notepad.rc:111
 msgid "&Footer:"
 msgstr "頁尾(&F):"
 
-#: programs/notepad/notepad.rc:107
+#: programs/notepad/notepad.rc:114
 msgid "Margins (millimeters)"
 msgstr "邊界 (公釐)"
 
-#: programs/notepad/notepad.rc:108
+#: programs/notepad/notepad.rc:115
 msgid "&Left:"
 msgstr "左(&L):"
 
-#: programs/notepad/notepad.rc:110
+#: programs/notepad/notepad.rc:117
 msgid "&Top:"
 msgstr "上(&T):"
 
-#: programs/notepad/notepad.rc:126
+#: programs/notepad/notepad.rc:132
+msgid "Go To Line"
+msgstr "移至行"
+
+#: programs/notepad/notepad.rc:134
+msgid "&Line Number:"
+msgstr "行號(&L):"
+
+#: programs/notepad/notepad.rc:137
+msgid "Go To"
+msgstr "移至"
+
+#: programs/notepad/notepad.rc:145
 msgid "Encoding:"
 msgstr "編碼:"
 
-#: programs/notepad/notepad.rc:132 programs/wordpad/wordpad.rc:289
+#: programs/notepad/notepad.rc:151 programs/wordpad/wordpad.rc:289
 msgctxt "accelerator Select All"
 msgid "A"
 msgstr "A"
 
-#: programs/notepad/notepad.rc:133 programs/wordpad/wordpad.rc:291
+#: programs/notepad/notepad.rc:152 programs/wordpad/wordpad.rc:291
 msgctxt "accelerator Copy"
 msgid "C"
 msgstr "C"
 
-#: programs/notepad/notepad.rc:134 programs/regedit/regedit.rc:372
+#: programs/notepad/notepad.rc:153 programs/regedit/regedit.rc:377
 #: programs/wordpad/wordpad.rc:287
 msgctxt "accelerator Find"
 msgid "F"
 msgstr "F"
 
-#: programs/notepad/notepad.rc:135 programs/wordpad/wordpad.rc:288
+#: programs/notepad/notepad.rc:154 programs/wordpad/wordpad.rc:288
 msgctxt "accelerator Replace"
 msgid "H"
 msgstr "H"
 
-#: programs/notepad/notepad.rc:136 programs/wordpad/wordpad.rc:297
+#: programs/notepad/notepad.rc:155 programs/wordpad/wordpad.rc:297
 msgctxt "accelerator New"
 msgid "N"
 msgstr "N"
 
-#: programs/notepad/notepad.rc:137 programs/wordpad/wordpad.rc:298
+#: programs/notepad/notepad.rc:156 programs/wordpad/wordpad.rc:298
 msgctxt "accelerator Open"
 msgid "O"
 msgstr "O"
 
-#: programs/notepad/notepad.rc:138 programs/regedit/regedit.rc:373
+#: programs/notepad/notepad.rc:157 programs/regedit/regedit.rc:378
 #: programs/wordpad/wordpad.rc:300
 msgctxt "accelerator Print"
 msgid "P"
 msgstr "P"
 
-#: programs/notepad/notepad.rc:139 programs/wordpad/wordpad.rc:299
+#: programs/notepad/notepad.rc:158 programs/wordpad/wordpad.rc:299
 msgctxt "accelerator Save"
 msgid "S"
 msgstr "S"
 
-#: programs/notepad/notepad.rc:140
+#: programs/notepad/notepad.rc:159
 msgctxt "accelerator Paste"
 msgid "V"
 msgstr "V"
 
-#: programs/notepad/notepad.rc:141 programs/wordpad/wordpad.rc:290
+#: programs/notepad/notepad.rc:160 programs/wordpad/wordpad.rc:290
 msgctxt "accelerator Cut"
 msgid "X"
 msgstr "X"
 
-#: programs/notepad/notepad.rc:142 programs/wordpad/wordpad.rc:292
+#: programs/notepad/notepad.rc:161 programs/wordpad/wordpad.rc:292
 msgctxt "accelerator Undo"
 msgid "Z"
 msgstr "Z"
 
-#: programs/notepad/notepad.rc:69
+#: programs/notepad/notepad.rc:162
+msgctxt "accelerator GoTo"
+msgid "G"
+msgstr "G"
+
+#: programs/notepad/notepad.rc:74
 msgid "Page &p"
 msgstr "第 &p 頁"
 
-#: programs/notepad/notepad.rc:71
+#: programs/notepad/notepad.rc:76
 msgid "Notepad"
 msgstr "記事本"
 
-#: programs/notepad/notepad.rc:72 programs/progman/progman.rc:64
+#: programs/notepad/notepad.rc:77 programs/progman/progman.rc:64
 #: programs/winhlp32/winhlp32.rc:82
 msgid "ERROR"
 msgstr "錯誤"
 
-#: programs/notepad/notepad.rc:74
+#: programs/notepad/notepad.rc:79
 msgid "Untitled"
 msgstr "(未命名)"
 
-#: programs/notepad/notepad.rc:77 programs/winedbg/winedbg.rc:42
+#: programs/notepad/notepad.rc:82 programs/winedbg/winedbg.rc:42
 msgid "Text files (*.txt)"
 msgstr "純文字檔案 (*.txt)"
 
-#: programs/notepad/notepad.rc:80
+#: programs/notepad/notepad.rc:85
 msgid ""
 "File '%s' does not exist.\n"
 "\n"
@@ -15067,7 +15121,7 @@ msgstr ""
 "\n"
 "您要建立一個新檔案嗎?"
 
-#: programs/notepad/notepad.rc:82
+#: programs/notepad/notepad.rc:87
 msgid ""
 "File '%s' has been modified.\n"
 "\n"
@@ -15077,23 +15131,23 @@ msgstr ""
 "\n"
 "您要儲存更改嗎?"
 
-#: programs/notepad/notepad.rc:83
+#: programs/notepad/notepad.rc:88
 msgid "'%s' could not be found."
 msgstr "找不到 '%s'。"
 
-#: programs/notepad/notepad.rc:85
+#: programs/notepad/notepad.rc:92
 msgid "Unicode (UTF-16)"
 msgstr "Unicode (UTF-16)"
 
-#: programs/notepad/notepad.rc:86
+#: programs/notepad/notepad.rc:93
 msgid "Unicode (UTF-16 big-endian)"
 msgstr "Unicode (UTF-16 big-endian)"
 
-#: programs/notepad/notepad.rc:87
+#: programs/notepad/notepad.rc:94
 msgid "Unicode (UTF-8)"
 msgstr "Unicode (UTF-8)"
 
-#: programs/notepad/notepad.rc:94
+#: programs/notepad/notepad.rc:101
 msgid ""
 "%1\n"
 "This file contains Unicode characters which will be lost if\n"
@@ -15108,6 +15162,10 @@ msgstr ""
 "要保留這些字元，請按一下 [取消]，\n"
 "然後在 [編碼] 下拉選單中選取一個 Unicode 選項。\n"
 "您要繼續嗎?"
+
+#: programs/notepad/notepad.rc:90
+msgid "Ln %ld, Col %ld"
+msgstr "第 %ld 列，第 %ld 行"
 
 #: programs/oleview/oleview.rc:32
 msgid "&Bind to file..."
@@ -15183,13 +15241,7 @@ msgstr "隱藏元件分類(&H)"
 msgid "&Toolbar"
 msgstr "工具列(&T)"
 
-#: programs/oleview/oleview.rc:68 programs/oleview/oleview.rc:90
-#: programs/winefile/winefile.rc:67 programs/wordpad/wordpad.rc:74
-#: programs/wordpad/wordpad.rc:275
-msgid "&Status Bar"
-msgstr "狀態列(&S)"
-
-#: programs/oleview/oleview.rc:70 programs/regedit/regedit.rc:70
+#: programs/oleview/oleview.rc:70 programs/regedit/regedit.rc:71
 #: programs/winefile/winefile.rc:79
 msgid "&Refresh\tF5"
 msgstr "重新整理(&R)\tF5"
@@ -15689,7 +15741,7 @@ msgstr "reg: 找不到指定的登錄機碼\n"
 msgid "reg: Unable to find the specified registry value\n"
 msgstr "reg: 找不到指定的登錄值\n"
 
-#: programs/reg/reg.rc:132 programs/regedit/regedit.rc:239
+#: programs/reg/reg.rc:132 programs/regedit/regedit.rc:244
 msgid "(Default)"
 msgstr "(預設)"
 
@@ -15753,7 +15805,7 @@ msgid ""
 "     <type> must be one of the following:\n"
 "\n"
 "         REG_SZ    | REG_MULTI_SZ | REG_EXPAND_SZ\n"
-"         REG_DWORD | REG_BINARY   | REG_NONE\n"
+"         REG_DWORD | REG_QWORD    | REG_BINARY   | REG_NONE\n"
 "\n"
 "     If [/t] is not specified, the default data type is REG_SZ.\n"
 "\n"
@@ -15800,7 +15852,7 @@ msgstr ""
 "     <類型> 必須是下列的其中一個:\n"
 "\n"
 "         REG_SZ    | REG_MULTI_SZ | REG_EXPAND_SZ\n"
-"         REG_DWORD | REG_BINARY   | REG_NONE\n"
+"         REG_DWORD | REG_QWORD    | REG_BINARY   | REG_NONE\n"
 "\n"
 "     如果未指定 [/t]，資料類型將預設為 REG_SZ。\n"
 "\n"
@@ -16197,7 +16249,7 @@ msgstr "reg: 無法匯入登錄機碼 '%1'\n"
 msgid "reg: The file '%1' was not found.\n"
 msgstr "reg: 無法找到檔案 '%1'。\n"
 
-#: programs/reg/reg.rc:143 programs/regedit/regedit.rc:240
+#: programs/reg/reg.rc:143 programs/regedit/regedit.rc:245
 msgid "(value not set)"
 msgstr "(沒有設值)"
 
@@ -16217,231 +16269,236 @@ msgstr "匯入登錄檔案(&I)..."
 msgid "&Export Registry File..."
 msgstr "匯出登錄檔案(&E)..."
 
-#: programs/regedit/regedit.rc:47 programs/regedit/regedit.rc:99
-#: programs/regedit/regedit.rc:121
+#: programs/regedit/regedit.rc:47 programs/regedit/regedit.rc:100
+#: programs/regedit/regedit.rc:123
 msgid "&Key"
 msgstr "機碼(&K)"
 
-#: programs/regedit/regedit.rc:49 programs/regedit/regedit.rc:101
-#: programs/regedit/regedit.rc:123
+#: programs/regedit/regedit.rc:49 programs/regedit/regedit.rc:102
+#: programs/regedit/regedit.rc:125
 msgid "&String Value"
 msgstr "字串值(&S)"
 
-#: programs/regedit/regedit.rc:50 programs/regedit/regedit.rc:102
-#: programs/regedit/regedit.rc:124
+#: programs/regedit/regedit.rc:50 programs/regedit/regedit.rc:103
+#: programs/regedit/regedit.rc:126
 msgid "&Binary Value"
 msgstr "二進制值(&B)"
 
-#: programs/regedit/regedit.rc:51 programs/regedit/regedit.rc:103
-#: programs/regedit/regedit.rc:125
+#: programs/regedit/regedit.rc:51 programs/regedit/regedit.rc:104
+#: programs/regedit/regedit.rc:127
 msgid "&DWORD Value"
 msgstr "DWORD 值(&D)"
 
-#: programs/regedit/regedit.rc:52 programs/regedit/regedit.rc:104
-#: programs/regedit/regedit.rc:126
+#: programs/regedit/regedit.rc:52 programs/regedit/regedit.rc:105
+#: programs/regedit/regedit.rc:128
+msgid "&QWORD Value"
+msgstr "QWORD 值(&Q)"
+
+#: programs/regedit/regedit.rc:53 programs/regedit/regedit.rc:106
+#: programs/regedit/regedit.rc:129
 msgid "&Multi-String Value"
 msgstr "多字串值(&M)"
 
-#: programs/regedit/regedit.rc:53 programs/regedit/regedit.rc:105
-#: programs/regedit/regedit.rc:127
+#: programs/regedit/regedit.rc:54 programs/regedit/regedit.rc:107
+#: programs/regedit/regedit.rc:130
 msgid "&Expandable String Value"
 msgstr "可擴充字串值(&E)"
 
-#: programs/regedit/regedit.rc:57 programs/regedit/regedit.rc:110
-#: programs/regedit/regedit.rc:137
+#: programs/regedit/regedit.rc:58 programs/regedit/regedit.rc:112
+#: programs/regedit/regedit.rc:140
 msgid "&Rename\tF2"
 msgstr "重新命名(&R)\tF2"
 
-#: programs/regedit/regedit.rc:59 programs/regedit/regedit.rc:114
+#: programs/regedit/regedit.rc:60 programs/regedit/regedit.rc:116
 msgid "&Copy Key Name"
 msgstr "複製機碼名稱(&C)"
 
-#: programs/regedit/regedit.rc:61 programs/regedit/regedit.rc:107
+#: programs/regedit/regedit.rc:62 programs/regedit/regedit.rc:109
 #: programs/wordpad/wordpad.rc:53
 msgid "&Find...\tCtrl+F"
 msgstr "搜尋(&F)...\tCtrl+F"
 
-#: programs/regedit/regedit.rc:62
+#: programs/regedit/regedit.rc:63
 msgid "Find Ne&xt\tF3"
 msgstr "找下一個(&X)\tF3"
 
-#: programs/regedit/regedit.rc:66
+#: programs/regedit/regedit.rc:67
 msgid "Status &Bar"
 msgstr "狀態列(&B)"
 
-#: programs/regedit/regedit.rc:68 programs/winefile/winefile.rc:49
+#: programs/regedit/regedit.rc:69 programs/winefile/winefile.rc:49
 msgid "Sp&lit"
 msgstr "分割(&L)"
 
-#: programs/regedit/regedit.rc:75
+#: programs/regedit/regedit.rc:76
 msgid "&Remove Favorite..."
 msgstr "移除我的最愛(&R)..."
 
-#: programs/regedit/regedit.rc:80
+#: programs/regedit/regedit.rc:81
 msgid "&About Registry Editor"
 msgstr "關於登錄檔編輯器(&A)"
 
-#: programs/regedit/regedit.rc:89 programs/regedit/regedit.rc:96
-#: programs/regedit/regedit.rc:230
+#: programs/regedit/regedit.rc:90 programs/regedit/regedit.rc:97
+#: programs/regedit/regedit.rc:235
 msgid "Expand"
 msgstr "展開"
 
-#: programs/regedit/regedit.rc:134 programs/regedit/regedit.rc:233
+#: programs/regedit/regedit.rc:137 programs/regedit/regedit.rc:238
 msgid "Modify &Binary Data..."
 msgstr "修改二進位資料(&B)..."
 
-#: programs/regedit/regedit.rc:267
+#: programs/regedit/regedit.rc:272
 msgid "Export registry"
 msgstr "要匯出的登錄"
 
-#: programs/regedit/regedit.rc:269
+#: programs/regedit/regedit.rc:274
 msgid "S&elected branch:"
 msgstr "指定分支(&E):"
 
-#: programs/regedit/regedit.rc:278
+#: programs/regedit/regedit.rc:283
 msgid "Find:"
 msgstr "尋找:"
 
-#: programs/regedit/regedit.rc:280
+#: programs/regedit/regedit.rc:285
 msgid "Find in:"
 msgstr "在這找:"
 
-#: programs/regedit/regedit.rc:281
+#: programs/regedit/regedit.rc:286
 msgid "Keys"
 msgstr "機碼"
 
-#: programs/regedit/regedit.rc:282
+#: programs/regedit/regedit.rc:287
 msgid "Value names"
 msgstr "值名稱"
 
-#: programs/regedit/regedit.rc:283
+#: programs/regedit/regedit.rc:288
 msgid "Value content"
 msgstr "值內容"
 
-#: programs/regedit/regedit.rc:284
+#: programs/regedit/regedit.rc:289
 msgid "Whole string only"
 msgstr "字串須完全相符"
 
-#: programs/regedit/regedit.rc:291
+#: programs/regedit/regedit.rc:296
 msgid "Add Favorite"
 msgstr "加入我的最愛"
 
-#: programs/regedit/regedit.rc:294 programs/regedit/regedit.rc:305
+#: programs/regedit/regedit.rc:299 programs/regedit/regedit.rc:310
 msgid "Name:"
 msgstr "名稱:"
 
-#: programs/regedit/regedit.rc:302
+#: programs/regedit/regedit.rc:307
 msgid "Remove Favorite"
 msgstr "移除我的最愛"
 
-#: programs/regedit/regedit.rc:313
+#: programs/regedit/regedit.rc:318
 msgid "Edit String"
 msgstr "編輯字串"
 
-#: programs/regedit/regedit.rc:316 programs/regedit/regedit.rc:329
-#: programs/regedit/regedit.rc:345 programs/regedit/regedit.rc:358
+#: programs/regedit/regedit.rc:321 programs/regedit/regedit.rc:334
+#: programs/regedit/regedit.rc:350 programs/regedit/regedit.rc:363
 msgid "Value name:"
 msgstr "值名稱:"
 
-#: programs/regedit/regedit.rc:318 programs/regedit/regedit.rc:331
-#: programs/regedit/regedit.rc:347 programs/regedit/regedit.rc:360
+#: programs/regedit/regedit.rc:323 programs/regedit/regedit.rc:336
+#: programs/regedit/regedit.rc:352 programs/regedit/regedit.rc:365
 msgid "Value data:"
 msgstr "值資料:"
 
-#: programs/regedit/regedit.rc:326
+#: programs/regedit/regedit.rc:331
 msgid "Edit DWORD"
 msgstr "編輯 DWORD"
 
-#: programs/regedit/regedit.rc:333
+#: programs/regedit/regedit.rc:338
 msgid "Base"
 msgstr "Base"
 
-#: programs/regedit/regedit.rc:334
+#: programs/regedit/regedit.rc:339
 msgid "Hexadecimal"
 msgstr "十六進位"
 
-#: programs/regedit/regedit.rc:335
+#: programs/regedit/regedit.rc:340
 msgid "Decimal"
 msgstr "十進位"
 
-#: programs/regedit/regedit.rc:342
+#: programs/regedit/regedit.rc:347
 msgid "Edit Binary"
 msgstr "編輯二進位"
 
-#: programs/regedit/regedit.rc:355
+#: programs/regedit/regedit.rc:360
 msgid "Edit Multi-String"
 msgstr "編輯多字串"
 
-#: programs/regedit/regedit.rc:159
+#: programs/regedit/regedit.rc:162
 msgid "Contains commands for working with the whole registry"
 msgstr "包含登錄工作相關的全部命令"
 
-#: programs/regedit/regedit.rc:160
+#: programs/regedit/regedit.rc:163
 msgid "Contains commands for editing values or keys"
 msgstr "包含編輯機碼或值的命令"
 
-#: programs/regedit/regedit.rc:161
+#: programs/regedit/regedit.rc:164
 msgid "Contains commands for customizing the registry window"
 msgstr "包含自訂登錄視窗的命令"
 
-#: programs/regedit/regedit.rc:162
+#: programs/regedit/regedit.rc:165
 msgid "Contains commands for accessing frequently used keys"
 msgstr "包含使用常用的機碼的命令"
 
-#: programs/regedit/regedit.rc:163
+#: programs/regedit/regedit.rc:166
 msgid ""
 "Contains commands for displaying Help and information about Registry Editor"
 msgstr "包含顯示登錄編輯程式說明及資訊的命令"
 
-#: programs/regedit/regedit.rc:164
+#: programs/regedit/regedit.rc:167
 msgid "Contains commands for creating new keys or values"
 msgstr "包含建立新機碼或值的指令"
 
-#: programs/regedit/regedit.rc:149
+#: programs/regedit/regedit.rc:152
 msgid "Data"
 msgstr "資料"
 
-#: programs/regedit/regedit.rc:154
+#: programs/regedit/regedit.rc:157
 msgid "Registry Editor"
 msgstr "登錄檔編輯器"
 
-#: programs/regedit/regedit.rc:221
+#: programs/regedit/regedit.rc:226
 msgid "Import Registry File"
 msgstr "匯入登錄檔案"
 
-#: programs/regedit/regedit.rc:222
+#: programs/regedit/regedit.rc:227
 msgid "Export Registry File"
 msgstr "匯出登錄檔案"
 
-#: programs/regedit/regedit.rc:223
+#: programs/regedit/regedit.rc:228
 msgid "Registry files (*.reg)"
 msgstr "登錄檔案 (*.reg)"
 
-#: programs/regedit/regedit.rc:224
+#: programs/regedit/regedit.rc:229
 msgid "Win9x/NT4 Registry files (REGEDIT4)"
 msgstr "Win9x/NT4 登錄檔案 (REGEDIT4)"
 
-#: programs/regedit/regedit.rc:241
+#: programs/regedit/regedit.rc:246
 msgid "(cannot display value)"
 msgstr "(無法顯示值)"
 
-#: programs/regedit/regedit.rc:242
+#: programs/regedit/regedit.rc:247
 msgid "(unknown %d)"
 msgstr "(不明 %d)"
 
-#: programs/regedit/regedit.rc:247
+#: programs/regedit/regedit.rc:252
 msgid "Unable to modify the selected registry value."
 msgstr "無法編輯選定的登錄值。"
 
-#: programs/regedit/regedit.rc:248
+#: programs/regedit/regedit.rc:253
 msgid "Unable to create a new registry key."
 msgstr "無法建立新的登錄機碼。"
 
-#: programs/regedit/regedit.rc:249
+#: programs/regedit/regedit.rc:254
 msgid "Unable to create a new registry value."
 msgstr "無法建立新的登錄值。"
 
-#: programs/regedit/regedit.rc:250
+#: programs/regedit/regedit.rc:255
 msgid ""
 "Unable to rename the key '%1'.\n"
 "The specified key name already exists."
@@ -16449,7 +16506,7 @@ msgstr ""
 "無法重新命名機碼 '%1'。\n"
 "指定的機碼名稱已經存在。"
 
-#: programs/regedit/regedit.rc:251
+#: programs/regedit/regedit.rc:256
 msgid ""
 "Unable to rename the value '%1'.\n"
 "The specified value name already exists."
@@ -16457,28 +16514,28 @@ msgstr ""
 "無法重新命名值 '%1'。\n"
 "指定的值名稱已經存在。"
 
-#: programs/regedit/regedit.rc:252
+#: programs/regedit/regedit.rc:257
 msgid "Unable to delete the selected registry key."
 msgstr "無法刪除選定的登錄機碼。"
 
-#: programs/regedit/regedit.rc:253
+#: programs/regedit/regedit.rc:258
 msgid "Unable to rename the selected registry key."
 msgstr "無法重新命名選定的登錄機碼。"
 
-#: programs/regedit/regedit.rc:254
+#: programs/regedit/regedit.rc:259
 msgid "Unable to rename the selected registry value."
 msgstr "無法重新命名選定的登錄值"
 
-#: programs/regedit/regedit.rc:255
+#: programs/regedit/regedit.rc:260
 msgid ""
 "The keys and values contained in %1 were successfully added to the registry."
 msgstr "%1 所包含的機碼和值已成功新增至登錄。"
 
-#: programs/regedit/regedit.rc:256
+#: programs/regedit/regedit.rc:261
 msgid "Unable to import %1. The specified file is not a valid registry file."
 msgstr "無法匯入 %1。指定的檔案不是有效的登錄檔案。"
 
-#: programs/regedit/regedit.rc:408
+#: programs/regedit/regedit.rc:413
 msgid ""
 "Usage:\n"
 "  regedit [options] [filename] [reg_key]\n"
@@ -16534,254 +16591,262 @@ msgstr ""
 "  regedit /E \"export.reg\" \"HKEY_CURRENT_USER\\Console\"\n"
 "  regedit /D \"HKEY_LOCAL_MACHINE\\Key\\Path\"\n"
 
-#: programs/regedit/regedit.rc:409
+#: programs/regedit/regedit.rc:414
 msgid "regedit: Invalid or unrecognized switch [%1]\n"
 msgstr "regedit: 無效或無法辨識的切換參數 [%1]\n"
 
-#: programs/regedit/regedit.rc:410
+#: programs/regedit/regedit.rc:415
 msgid "Type \"regedit /?\" for help.\n"
 msgstr "輸入 \"regedit /?\" 以取得說明。\n"
 
-#: programs/regedit/regedit.rc:411
+#: programs/regedit/regedit.rc:416
 msgid "regedit: No filename was specified.\n"
 msgstr "regedit: 未指定檔案名稱。\n"
 
-#: programs/regedit/regedit.rc:412
+#: programs/regedit/regedit.rc:417
 msgid "regedit: No registry key was specified for removal.\n"
 msgstr "regedit: 未指定要移除的登錄機碼。\n"
 
-#: programs/regedit/regedit.rc:413
+#: programs/regedit/regedit.rc:418
 msgid "regedit: The file '%1' was not found.\n"
 msgstr "regedit: 找不到檔案 '%1'。\n"
 
-#: programs/regedit/regedit.rc:414
+#: programs/regedit/regedit.rc:419
 msgid "regedit: Unable to open the file '%1'.\n"
 msgstr "regedit: 無法開啟檔案 '%1'。\n"
 
-#: programs/regedit/regedit.rc:415
+#: programs/regedit/regedit.rc:420
 msgid "regedit: Unhandled action.\n"
 msgstr "regedit: 未處理的操作。\n"
 
-#: programs/regedit/regedit.rc:416
+#: programs/regedit/regedit.rc:421
 msgid "regedit: Out of memory! (%1!S!, line %2!u!)\n"
 msgstr "regedit: 記憶體不足! (%1!S!, line %2!u!)\n"
 
-#: programs/regedit/regedit.rc:417
+#: programs/regedit/regedit.rc:422
 msgid "regedit: Invalid hexadecimal value.\n"
 msgstr "regedit: 錯誤的十六進位值。\n"
 
-#: programs/regedit/regedit.rc:418
+#: programs/regedit/regedit.rc:423
 msgid ""
 "regedit: Unable to convert hexadecimal data. An invalid value was "
 "encountered at '%1'.\n"
 msgstr "regedit: 無法轉換十六進位資料。在 '%1' 遇到錯誤的值。\n"
 
-#: programs/regedit/regedit.rc:419
+#: programs/regedit/regedit.rc:424
 msgid "regedit: Unrecognized escape sequence [\\%1!c!]\n"
 msgstr "regedit: 無法辨識的逸出序列 [\\%1!c!]\n"
 
-#: programs/regedit/regedit.rc:420
+#: programs/regedit/regedit.rc:425
 msgid "regedit: Unsupported registry data type [0x%1!x!]\n"
 msgstr "regedit: 不支援的登錄資料類型 [0x%1!x!]\n"
 
-#: programs/regedit/regedit.rc:421
+#: programs/regedit/regedit.rc:426
 msgid "regedit: Unexpected end of line in '%1'.\n"
 msgstr "regedit: 在 '%1' 發現意外的結尾。\n"
 
-#: programs/regedit/regedit.rc:422
+#: programs/regedit/regedit.rc:427
 msgid "regedit: The line '%1' was not recognized.\n"
 msgstr "regedit: 無法辨識列 '%1'。\n"
 
-#: programs/regedit/regedit.rc:423
+#: programs/regedit/regedit.rc:428
 msgid "regedit: Unable to add the registry value '%1' to '%2'.\n"
 msgstr "regedit: 無法從 '%1' 新增登錄值到 '%2'。\n"
 
-#: programs/regedit/regedit.rc:424
+#: programs/regedit/regedit.rc:429
 msgid "regedit: Unable to open the registry key '%1'.\n"
 msgstr "regedit: 無法開啟登錄機碼 '%1'。\n"
 
-#: programs/regedit/regedit.rc:425
+#: programs/regedit/regedit.rc:430
 msgid ""
 "regedit: Unsupported registry data type [0x%1!x!] encountered in '%2'.\n"
 msgstr "regedit: 在 '%2' 遇到不支援的登錄資料類型 [0x%1!x!]。\n"
 
-#: programs/regedit/regedit.rc:426
+#: programs/regedit/regedit.rc:431
 msgid "regedit: The registry value '%1' will be exported as binary data.\n"
 msgstr "regedit: 登錄值 '%1' 將以二進位資料匯出。\n"
 
-#: programs/regedit/regedit.rc:427
+#: programs/regedit/regedit.rc:432
 msgid "regedit: Invalid system key [%1]\n"
 msgstr "regedit: 錯誤的系統金鑰 [%1]\n"
 
-#: programs/regedit/regedit.rc:428
+#: programs/regedit/regedit.rc:433
 msgid ""
 "regedit: Unable to export '%1'. The specified registry key was not found.\n"
 msgstr "regedit: 無法匯出 '%1'。找不到指定的登錄機碼。\n"
 
-#: programs/regedit/regedit.rc:429
+#: programs/regedit/regedit.rc:434
 msgid "regedit: Unable to delete the registry key '%1'.\n"
 msgstr "regedit: 無法刪除登錄機碼 '%1'。\n"
 
-#: programs/regedit/regedit.rc:431
+#: programs/regedit/regedit.rc:436
 msgid "regedit: The line contains invalid syntax.\n"
 msgstr "regedit: 該列有錯誤的語法。\n"
 
-#: programs/regedit/regedit.rc:187
+#: programs/regedit/regedit.rc:191
 msgid "Quits the Registry Editor"
 msgstr "結束登錄檔編輯器"
 
-#: programs/regedit/regedit.rc:188
+#: programs/regedit/regedit.rc:192
 msgid "Adds keys to the favorites list"
 msgstr "將機碼新增到我的最愛"
 
-#: programs/regedit/regedit.rc:189
+#: programs/regedit/regedit.rc:193
 msgid "Removes keys from the favorites list"
 msgstr "從我的最愛中刪除機碼"
 
-#: programs/regedit/regedit.rc:190
+#: programs/regedit/regedit.rc:194
 msgid "Shows or hides the status bar"
 msgstr "顯示或隱藏狀態列"
 
-#: programs/regedit/regedit.rc:191
+#: programs/regedit/regedit.rc:195
 msgid "Changes the position of the split between two panes"
 msgstr "變更兩個窗格之間的分隔線位置"
 
-#: programs/regedit/regedit.rc:192
+#: programs/regedit/regedit.rc:196
 msgid "Refreshes the window"
 msgstr "重新整理視窗"
 
-#: programs/regedit/regedit.rc:193
+#: programs/regedit/regedit.rc:197
 msgid "Deletes the selection"
 msgstr "刪除已選項目"
 
-#: programs/regedit/regedit.rc:194
+#: programs/regedit/regedit.rc:198
 msgid "Renames the selection"
 msgstr "重新命名已選項目"
 
-#: programs/regedit/regedit.rc:195
+#: programs/regedit/regedit.rc:199
 msgid "Copies the name of the selected key to the clipboard"
 msgstr "將機碼的名稱複製到剪貼簿"
 
-#: programs/regedit/regedit.rc:196
+#: programs/regedit/regedit.rc:200
 msgid "Finds a text string in a key, value or data"
 msgstr "在機碼、值或資料中尋找字串"
 
-#: programs/regedit/regedit.rc:197
+#: programs/regedit/regedit.rc:201
 msgid "Finds next occurrence of text specified in previous search"
 msgstr "搜尋下一個剛找過的字串"
 
-#: programs/regedit/regedit.rc:169
+#: programs/regedit/regedit.rc:172
 msgid "Modifies the value's data"
 msgstr "修改值的資料"
 
-#: programs/regedit/regedit.rc:171
+#: programs/regedit/regedit.rc:174
 msgid "Adds a new key"
 msgstr "新增一個新的機碼"
 
-#: programs/regedit/regedit.rc:172
+#: programs/regedit/regedit.rc:175
 msgid "Adds a new string value"
 msgstr "新增一個新的字串值"
 
-#: programs/regedit/regedit.rc:173
+#: programs/regedit/regedit.rc:176
 msgid "Adds a new binary value"
 msgstr "新增一個新的二進制值"
 
-#: programs/regedit/regedit.rc:174
+#: programs/regedit/regedit.rc:177
 msgid "Adds a new 32-bit value"
 msgstr "新增一個新的 32 位元值"
 
-#: programs/regedit/regedit.rc:177
+#: programs/regedit/regedit.rc:181
 msgid "Imports a text file into the registry"
 msgstr "將純文字檔案匯入登錄"
 
-#: programs/regedit/regedit.rc:179
+#: programs/regedit/regedit.rc:183
 msgid "Exports all or part of the registry to a text file"
 msgstr "將登錄匯出到純文字檔案"
 
-#: programs/regedit/regedit.rc:180
+#: programs/regedit/regedit.rc:184
 msgid "Prints all or part of the registry"
 msgstr "列印登錄的全部或部分"
 
-#: programs/regedit/regedit.rc:181
+#: programs/regedit/regedit.rc:185
 msgid "Opens Registry Editor Help"
 msgstr "開啟登錄檔編輯器的說明"
 
-#: programs/regedit/regedit.rc:182
+#: programs/regedit/regedit.rc:186
 msgid "Displays program information, version number and copyright"
 msgstr "顯示程式資訊、版本號及著作權"
 
-#: programs/regedit/regedit.rc:206
+#: programs/regedit/regedit.rc:210
 msgid "Unable to query the registry value '%1'."
 msgstr "無法查詢登錄值 '%1'。"
 
-#: programs/regedit/regedit.rc:207
+#: programs/regedit/regedit.rc:211
 msgid "Unable to edit registry keys of this type (%1!u!)."
 msgstr "無法編輯這種類型的登錄機碼 (%1!u!)。"
 
-#: programs/regedit/regedit.rc:208
+#: programs/regedit/regedit.rc:212
 msgid "The value is too big (%1!u!)."
 msgstr "登錄值太大 (%1!u!)。"
 
-#: programs/regedit/regedit.rc:209
+#: programs/regedit/regedit.rc:213
 msgid "Confirm Value Delete"
 msgstr "確認刪除登錄值"
 
-#: programs/regedit/regedit.rc:210
+#: programs/regedit/regedit.rc:214
 msgid "Are you sure you want to delete the selected registry value?"
 msgstr "您確認要刪除已選取的登錄值嗎?"
 
-#: programs/regedit/regedit.rc:216
+#: programs/regedit/regedit.rc:220
 msgid "Search complete. The string '%1' was not found."
 msgstr "搜尋完成。找不到字串 '%1'。"
 
-#: programs/regedit/regedit.rc:211
+#: programs/regedit/regedit.rc:215
 msgid "Are you sure you want to delete these values?"
 msgstr "您確認要刪除這些登錄值嗎?"
 
-#: programs/regedit/regedit.rc:214
+#: programs/regedit/regedit.rc:218
 msgid "New Key #%d"
 msgstr "新機碼 #%d"
 
-#: programs/regedit/regedit.rc:215
+#: programs/regedit/regedit.rc:219
 msgid "New Value #%d"
 msgstr "新登錄值 #%d"
 
-#: programs/regedit/regedit.rc:205
+#: programs/regedit/regedit.rc:209
 msgid "Unable to query the registry key '%1'."
 msgstr "無法查詢登錄機碼 '%1'。"
 
-#: programs/regedit/regedit.rc:170
+#: programs/regedit/regedit.rc:173
 msgid "Modifies the value's data in binary form"
 msgstr "以二進位修改登錄值的資料"
 
-#: programs/regedit/regedit.rc:175
+#: programs/regedit/regedit.rc:179
 msgid "Adds a new multi-string value"
 msgstr "新增一個新的多字串值"
 
-#: programs/regedit/regedit.rc:198
+#: programs/regedit/regedit.rc:202
 msgid "Exports the selected branch of the registry to a text file"
 msgstr "匯出註冊表中已選取的分支到文字檔案"
 
-#: programs/regedit/regedit.rc:176
+#: programs/regedit/regedit.rc:180
 msgid "Adds a new expandable string value"
 msgstr "新增一個新的可擴充字串值"
 
-#: programs/regedit/regedit.rc:212
+#: programs/regedit/regedit.rc:216
 msgid "Confirm Key Delete"
 msgstr "確認刪除機碼"
 
-#: programs/regedit/regedit.rc:213
+#: programs/regedit/regedit.rc:217
 msgid ""
 "Are you sure you want to delete this registry key and all of its subkeys?"
 msgstr "您確認要刪除這個登錄機碼及其所有的子機碼嗎?"
 
-#: programs/regedit/regedit.rc:199
+#: programs/regedit/regedit.rc:203
 msgid "Expands or collapses the selected node"
 msgstr "展開或摺疊已選取的節點"
 
-#: programs/regedit/regedit.rc:231
+#: programs/regedit/regedit.rc:236
 msgid "Collapse"
 msgstr "摺疊"
+
+#: programs/regedit/regedit.rc:178
+msgid "Adds a new 64-bit value"
+msgstr "新增一個新的 64 位元值"
+
+#: programs/regedit/regedit.rc:221
+msgid "Edit QWORD"
+msgstr "編輯 QWORD"
 
 #: programs/regsvr32/regsvr32.rc:33
 msgid ""

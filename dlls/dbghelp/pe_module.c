@@ -407,11 +407,11 @@ static BOOL pe_locate_with_coff_symbol_table(struct module* module)
                     sym->u.var.kind == loc_absolute &&
                     !strcmp(sym->hash_elt.name, name))
                 {
-                    TRACE("Changing absolute address for %d.%s: %Ix -> %s\n",
+                    TRACE("Changing absolute address for %d.%s: %Ix -> %I64x\n",
                           isym->SectionNumber, name, sym->u.var.offset,
-                          wine_dbgstr_longlong(module->module.BaseOfImage +
-                                               fmap->u.pe.sect[isym->SectionNumber - 1].shdr.VirtualAddress +
-                                               isym->Value));
+                          module->module.BaseOfImage +
+                          fmap->u.pe.sect[isym->SectionNumber - 1].shdr.VirtualAddress +
+                          isym->Value);
                     sym->u.var.offset = module->module.BaseOfImage +
                         fmap->u.pe.sect[isym->SectionNumber - 1].shdr.VirtualAddress + isym->Value;
                     break;
@@ -470,8 +470,7 @@ static BOOL pe_load_coff_symbol_table(struct module* module)
             if (name[0] == '_') name++;
 
             if (!compiland && lastfilename)
-                compiland = symt_new_compiland(module, 0,
-                                               source_new(module, NULL, lastfilename));
+                compiland = symt_new_compiland(module, source_new(module, NULL, lastfilename));
 
             if (!(dbghelp_options & SYMOPT_NO_PUBLICS))
                 symt_new_public(module, compiland, name, FALSE,

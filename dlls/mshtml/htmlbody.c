@@ -669,12 +669,12 @@ static HRESULT WINAPI HTMLBodyElement_createTextRange(IHTMLBodyElement *iface, I
 
     TRACE("(%p)->(%p)\n", This, range);
 
-    if(!This->element.node.doc->nsdoc) {
-        WARN("No nsdoc\n");
+    if(!This->element.node.doc->dom_document) {
+        WARN("No dom_document\n");
         return E_UNEXPECTED;
     }
 
-    nsres = nsIDOMHTMLDocument_CreateRange(This->element.node.doc->nsdoc, &nsrange);
+    nsres = nsIDOMDocument_CreateRange(This->element.node.doc->dom_document, &nsrange);
     if(NS_SUCCEEDED(nsres)) {
         nsres = nsIDOMRange_SelectNodeContents(nsrange, This->element.node.nsnode);
         if(NS_FAILED(nsres))
@@ -683,7 +683,7 @@ static HRESULT WINAPI HTMLBodyElement_createTextRange(IHTMLBodyElement *iface, I
         ERR("CreateRange failed: %08lx\n", nsres);
     }
 
-    hres = HTMLTxtRange_Create(This->element.node.doc->basedoc.doc_node, nsrange, range);
+    hres = HTMLTxtRange_Create(This->element.node.doc, nsrange, range);
 
     nsIDOMRange_Release(nsrange);
     return hres;
@@ -983,9 +983,11 @@ static const NodeImplVtbl HTMLBodyElementImplVtbl = {
     HTMLElement_destructor,
     HTMLBodyElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col,
     HTMLBodyElement_get_event_prop_target,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -1020,7 +1022,7 @@ HRESULT HTMLBodyElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTM
     HTMLBodyElement *ret;
     nsresult nsres;
 
-    ret = heap_alloc_zero(sizeof(HTMLBodyElement));
+    ret = calloc(1, sizeof(HTMLBodyElement));
     if(!ret)
         return E_OUTOFMEMORY;
 

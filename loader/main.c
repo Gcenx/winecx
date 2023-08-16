@@ -35,10 +35,12 @@
 #endif
 
 #ifdef __APPLE__ /* CrossOver Hack 13438 */
+#include <crt_externs.h>
 #include <mach/mach.h>
 #include <mach/vm_map.h>
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
+#include <mach-o/ldsyms.h>
 #endif
 
 #include "main.h"
@@ -202,16 +204,17 @@ static void apple_override_bundle_name( int argc, char *argv[] )
     const char* p;
     size_t bundle_name_len, max_bundle_name_len;
     vm_address_t start, end;
-    const char* new_bundle_name;
+    const char* new_bundle_name = getenv("WINEPRELOADERAPPNAME");
     size_t new_bundle_name_len;
 
-    if (argc < 2)
+    unsetenv("WINEPRELOADERAPPNAME");
+
+    if (!new_bundle_name && argc < 2)
         return;
 
-    info_plist = getsectdata("__TEXT", "__info_plist", &remaining);
+    info_plist = (char *)getsectiondata(_NSGetMachExecuteHeader(), "__TEXT", "__info_plist", &remaining);
     if (!info_plist || !remaining)
         return;
-    info_plist += _dyld_get_image_vmaddr_slide(0);
 
     bundle_name = strnstr(info_plist, prefix, remaining);
     if (!bundle_name)
@@ -231,16 +234,22 @@ static void apple_override_bundle_name( int argc, char *argv[] )
         !memcmp(bundle_name + bundle_name_len + suffix_len, padding, padding_len))
         max_bundle_name_len += padding_len;
 
-    new_bundle_name = argv[1];
-    if ((p = strrchr(new_bundle_name, '\\'))) new_bundle_name = p + 1;
-    if ((p = strrchr(new_bundle_name, '/'))) new_bundle_name = p + 1;
-    if (strspn(new_bundle_name, "0123456789abcdefABCDEF") == 32 &&
-        new_bundle_name[32] == '.')
-        new_bundle_name += 33;
-    if ((p = strrchr(new_bundle_name, '.')) && p != new_bundle_name)
-        new_bundle_name_len = p - new_bundle_name;
+    if (!new_bundle_name)
+    {
+        new_bundle_name = argv[1];
+        if ((p = strrchr(new_bundle_name, '\\'))) new_bundle_name = p + 1;
+        if ((p = strrchr(new_bundle_name, '/'))) new_bundle_name = p + 1;
+        if (strspn(new_bundle_name, "0123456789abcdefABCDEF") == 32 &&
+            new_bundle_name[32] == '.')
+            new_bundle_name += 33;
+        if ((p = strrchr(new_bundle_name, '.')) && p != new_bundle_name)
+            new_bundle_name_len = p - new_bundle_name;
+        else
+            new_bundle_name_len = strlen(new_bundle_name);
+    }
     else
         new_bundle_name_len = strlen(new_bundle_name);
+
     if (!new_bundle_name_len)
         return;
 

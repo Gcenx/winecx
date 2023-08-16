@@ -42,10 +42,10 @@ char* lexeme_alloc_size(int size)
     if (next_lexeme >= alloc_lexeme)
     {
         alloc_lexeme += 32;
-        local_lexemes = dbg_heap_realloc(local_lexemes, alloc_lexeme * sizeof(local_lexemes[0]));
+        local_lexemes = realloc(local_lexemes, alloc_lexeme * sizeof(local_lexemes[0]));
         assert(local_lexemes);
     }
-    return local_lexemes[next_lexeme++] = HeapAlloc(GetProcessHeap(), 0, size + 1);
+    return local_lexemes[next_lexeme++] = malloc(size + 1);
 }
 
 static char* lexeme_alloc(const char* lexeme)
@@ -54,9 +54,21 @@ static char* lexeme_alloc(const char* lexeme)
     return strcpy(ptr, lexeme);
 }
 
+static char* lexeme_alloc_if(const char* lexeme, unsigned sz)
+{
+    size_t len = strlen(lexeme);
+    char* ptr;
+    if (len <= sz) return NULL;
+    len -= sz;
+    ptr = lexeme_alloc_size(len + 1);
+    memcpy(ptr, lexeme, len);
+    ptr[len] = '\0';
+    return ptr;
+}
+
 void lexeme_flush(void)
 {
-    while (--next_lexeme >= 0) HeapFree(GetProcessHeap(), 0, local_lexemes[next_lexeme]);
+    while (--next_lexeme >= 0) free(local_lexemes[next_lexeme]);
     next_lexeme = 0;
 }
 
@@ -88,6 +100,13 @@ static char* unescape_string(const char* str)
     return ret;
 }
 
+static int resolve_identifier(const char* id, DBG_STYPE* lval)
+{
+    if (types_find_type(id, SymTagTypedef, &lval->type)) return tTYPEDEF;
+    lval->string = lexeme_alloc(id);
+    return tIDENTIFIER;
+}
+
 #define YY_INPUT(buf,result,max_size) \
         (result = input_lex_read_buffer(buf, max_size))
 
@@ -100,7 +119,7 @@ HEXDIGIT   [0-9a-fA-F]
 FORMAT     [ubcdgiswxa]
 IDENTIFIER [_a-zA-Z~?][_a-zA-Z0-9~?@]*
 SCOPED_IDENTIFIER [_a-zA-Z~?][_a-zA-Z0-9~?@]*"::"
-MODULE_IDENTIFIER [_a-zA-Z~?\*][_a-zA-Z0-9~?\*@]*"!"
+MODULE_IDENTIFIER [_a-zA-Z~?\*][_a-zA-Z0-9~?\*@\.]*"!"
 PATHNAME   [\\/_a-zA-Z0-9\.~@][\\/\-_a-zA-Z0-9\.~@]*
 STRING     \"(\\[^\n]|[^\\"\n])*\"
 
@@ -231,20 +250,22 @@ STRING     \"(\\[^\n]|[^\\"\n])*\"
 <INITIAL,SHOW_CMD>directories|directorie|directori|director|directo|direct|direc|direc|dir {
 			                  BEGIN(PATH_EXPECTED); return tDIR; }
 
-char					{ return tCHAR; }
-short					{ return tSHORT; }
-int					{ return tINT; }
-long					{ return tLONG; }
-float					{ return tFLOAT; }
-double					{ return tDOUBLE; }
-unsigned				{ return tUNSIGNED; }
-signed					{ return tSIGNED; }
+{MODULE_IDENTIFIER}?void		{ dbg_lval.string = lexeme_alloc_if(yytext, 5); return tVOID; } /* return modulename if present */
+{MODULE_IDENTIFIER}?char		{ dbg_lval.string = lexeme_alloc_if(yytext, 5); return tCHAR; }
+{MODULE_IDENTIFIER}?WCHAR	        { dbg_lval.string = lexeme_alloc_if(yytext, 6); return tWCHAR; }
+{MODULE_IDENTIFIER}?short		{ dbg_lval.string = lexeme_alloc_if(yytext, 6); return tSHORT; }
+{MODULE_IDENTIFIER}?int			{ dbg_lval.string = lexeme_alloc_if(yytext, 4); return tINT; }
+{MODULE_IDENTIFIER}?long		{ dbg_lval.string = lexeme_alloc_if(yytext, 5); return tLONG; }
+{MODULE_IDENTIFIER}?float		{ dbg_lval.string = lexeme_alloc_if(yytext, 6); return tFLOAT; }
+{MODULE_IDENTIFIER}?double		{ dbg_lval.string = lexeme_alloc_if(yytext, 7); return tDOUBLE; }
+{MODULE_IDENTIFIER}?unsigned		{ dbg_lval.string = lexeme_alloc_if(yytext, 9); return tUNSIGNED; }
+{MODULE_IDENTIFIER}?signed		{ dbg_lval.string = lexeme_alloc_if(yytext, 7); return tSIGNED; }
 struct					{ return tSTRUCT; }
 union					{ return tUNION; }
 enum					{ return tENUM; }
 all                                     { return tALL; }
 
-{MODULE_IDENTIFIER}?{SCOPED_IDENTIFIER}*{IDENTIFIER}	{ dbg_lval.string = lexeme_alloc(yytext); return tIDENTIFIER; }
+{MODULE_IDENTIFIER}?{SCOPED_IDENTIFIER}*{IDENTIFIER} { return resolve_identifier(yytext, &dbg_lval); }
 "$"{IDENTIFIER}				{ dbg_lval.string = lexeme_alloc(yytext+1); return tINTVAR; }
 
 <PATH_EXPECTED,PATH_ACCEPTED>{PATHNAME}	{ dbg_lval.string = lexeme_alloc(yytext); return tPATH; }

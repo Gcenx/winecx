@@ -19,8 +19,6 @@
 #ifndef _CFGMGR32_H_
 #define _CFGMGR32_H_
 
-#include "wine/winheader_enter.h"
-
 /* FIXME: #include <cfg.h> */
 
 #ifndef GUID_DEFINED
@@ -182,6 +180,10 @@ typedef DWORD CONFIGRET;
 #define CM_REGISTRY_USER                0x0100
 #define CM_REGISTRY_CONFIG              0x0200
 
+#define CM_REMOVAL_POLICY_EXPECT_NO_REMOVAL       1
+#define CM_REMOVAL_POLICY_EXPECT_ORDERLY_REMOVAL  2
+#define CM_REMOVAL_POLICY_EXPECT_SURPRISE_REMOVAL 3
+
 typedef DWORD DEVINST, *PDEVINST;
 typedef DWORD DEVNODE, *PDEVNODE;
 typedef HANDLE HMACHINE, *PHMACHINE;
@@ -255,7 +257,5 @@ CMAPI CONFIGRET WINAPI CM_Request_Device_EjectW(DEVINST dev, PPNP_VETO_TYPE type
 #endif
 
 #undef DECL_WINELIB_CFGMGR32_TYPE_AW
-
-#include "wine/winheader_exit.h"
 
 #endif /* _CFGMGR32_H_ */

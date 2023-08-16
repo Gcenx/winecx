@@ -24,9 +24,6 @@
 #ifdef HAVE_MTLDEVICE_REGISTRYID
 #import <Metal/Metal.h>
 #endif
-
-#include "wine/hostaddrspace_enter.h"
-
 #include "macdrv_cocoa.h"
 
 /* CrossOver Hack #20512 */
@@ -290,10 +287,43 @@ static int macdrv_get_gpu_info_from_registry_id(struct macdrv_gpu* gpu, uint64_t
     int ret;
     io_registry_entry_t entry;
 
-    entry = IOServiceGetMatchingService(kIOMasterPortDefault, IORegistryEntryIDMatching(registry_id));
+    entry = IOServiceGetMatchingService(0, IORegistryEntryIDMatching(registry_id));
     ret = macdrv_get_gpu_info_from_entry(gpu, entry);
     IOObjectRelease(entry);
     return ret;
+}
+
+/***********************************************************************
+ *              macdrv_get_gpu_info_from_mtldevice
+ *
+ * Get GPU information from a Metal device that responds to the registryID selector.
+ *
+ * Returns non-zero value on failure.
+ */
+static int macdrv_get_gpu_info_from_mtldevice(struct macdrv_gpu* gpu, id<MTLDevice> device)
+{
+    int ret;
+    if ((ret = macdrv_get_gpu_info_from_registry_id(gpu, [device registryID])))
+        return ret;
+#if defined(MAC_OS_X_VERSION_10_15) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_15
+    /* Apple GPUs aren't PCI devices and therefore have no device ID
+     * Use the Metal GPUFamily as the device ID */
+    if (!gpu->device_id && [device respondsToSelector:@selector(supportsFamily:)] && [device supportsFamily:MTLGPUFamilyApple1])
+    {
+        MTLGPUFamily highest = MTLGPUFamilyApple1;
+        while (1)
+        {
+            /* Apple2, etc are all in order */
+            MTLGPUFamily next = highest + 1;
+            if ([device supportsFamily:next])
+                highest = next;
+            else
+                break;
+        }
+        gpu->device_id = highest;
+    }
+#endif
+    return 0;
 }
 
 /***********************************************************************
@@ -329,7 +359,7 @@ static int macdrv_get_gpus_from_metal(struct macdrv_gpu** new_gpus, int* count)
      * the primary GPU because we need to hide the integrated GPU for an automatic graphic switching pair to avoid apps
      * using the integrated GPU. This is the behavior of Windows on a Mac. */
     primary_device = [MTLCreateSystemDefaultDevice() autorelease];
-    if (macdrv_get_gpu_info_from_registry_id(&primary_gpu, primary_device.registryID))
+    if (macdrv_get_gpu_info_from_mtldevice(&primary_gpu, primary_device))
         goto done;
 
     /* Hide the integrated GPU if the system default device is a dedicated GPU */
@@ -341,7 +371,7 @@ static int macdrv_get_gpus_from_metal(struct macdrv_gpu** new_gpus, int* count)
 
     for (i = 0; i < devices.count; i++)
     {
-        if (macdrv_get_gpu_info_from_registry_id(&gpus[gpu_count], devices[i].registryID))
+        if (macdrv_get_gpu_info_from_mtldevice(&gpus[gpu_count], devices[i]))
             goto done;
 
         if (hide_integrated && devices[i].isLowPower)
@@ -462,7 +492,7 @@ static int macdrv_get_gpus_from_iokit(struct macdrv_gpu** new_gpus, int* count)
     if (!gpus)
         goto done;
 
-    if (IOServiceGetMatchingServices(kIOMasterPortDefault, IOServiceMatching("IOPCIDevice"), &iterator)
+    if (IOServiceGetMatchingServices(0, IOServiceMatching("IOPCIDevice"), &iterator)
         != kIOReturnSuccess)
         goto done;
 

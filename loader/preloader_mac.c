@@ -41,7 +41,6 @@
 #include <dlfcn.h>
 #ifdef HAVE_MACH_O_LOADER_H
 #include <mach/thread_status.h>
-#include <mach/vm_statistics.h>
 #include <mach-o/loader.h>
 #include <mach-o/ldsyms.h>
 #endif
@@ -91,11 +90,13 @@ static struct wine_preload_info preload_info[] =
     { (void *)0x00001000, 0x0000f000 },  /* low 64k */
     { (void *)0x00010000, 0x00100000 },  /* DOS area */
     { (void *)0x00110000, 0x67ef0000 },  /* low memory area */
-    { (void *)0x7f000000, 0x03000000 },  /* top-down allocations + shared heap + virtual heap */
+    { (void *)0x7a000000, 0x02000000 },  /* builtin DLLs (ntdll, kernel32) */
+    { (void *)0x7f000000, 0x03000000 },  /* top-down allocations + shared user data + virtual heap */
 #else  /* __i386__ */
     { (void *)0x000000010000, 0x00100000 },  /* DOS area */
     { (void *)0x000000110000, 0x67ef0000 },  /* low memory area */
-    { (void *)0x00007ff00000, 0x000f0000 },  /* shared user data */
+    { (void *)0x00007a000000, 0x02000000 },  /* 32-bit builtin DLLs (ntdll, kernel32) */
+    { (void *)0x00007f000000, 0x00ff0000 },  /* 32-bit top-down allocations + shared user data */
     { (void *)0x000080000000, 0x80000000 },  /* 2-4GB large-address-aware area */
     { (void *)0x000100000000, 0x14000000 },  /* WINE_4GB_RESERVE section */
     { (void *)0x7ff000000000, 0x01ff0000 },  /* top-down allocations + virtual heap */
@@ -113,6 +114,47 @@ static struct wine_preload_info preload_info[] =
 void *__stack_chk_guard = 0;
 void __stack_chk_fail_local(void) { return; }
 void __stack_chk_fail(void) { return; }
+
+/*
+ * When 'start' is called, stack frame looks like:
+ *
+ *	       :
+ *	| STRING AREA |
+ *	+-------------+
+ *	|      0      |
+ *	+-------------+
+ *	|  exec_path  | extra "apple" parameters start after NULL terminating env array
+ *	+-------------+
+ *	|      0      |
+ *	+-------------+
+ *	|    env[n]   |
+ *	+-------------+
+ *	       :
+ *	       :
+ *	+-------------+
+ *	|    env[0]   |
+ *	+-------------+
+ *	|      0      |
+ *	+-------------+
+ *	| arg[argc-1] |
+ *	+-------------+
+ *	       :
+ *	       :
+ *	+-------------+
+ *	|    arg[0]   |
+ *	+-------------+
+ *	|     argc    | argc is always 4 bytes long, even in 64-bit architectures
+ *	+-------------+ <- sp
+ *
+ *	Where arg[i] and env[i] point into the STRING AREA
+ *
+ *  See also:
+ *  macOS C runtime 'start':
+ *  <https://github.com/apple-oss-distributions/Csu/blob/Csu-88/start.s>
+ *
+ *  macOS dyld '__dyld_start' (pre-dyld4):
+ *  <https://github.com/apple-oss-distributions/dyld/blob/dyld-852.2/src/dyldStartup.s>
+ */
 
 #ifdef __i386__
 
@@ -144,13 +186,14 @@ static const size_t page_mask = 0xfff;
 __ASM_GLOBAL_FUNC( start,
                    __ASM_CFI("\t.cfi_undefined %eip\n")
                    /* The first 16 bytes are used as a function signature on i386 */
-                   "\t.byte 0x6a,0x00\n"            /* pushl $0 */
-                   "\t.byte 0x89,0xe5\n"            /* movl %esp,%ebp */
-                   "\t.byte 0x83,0xe4,0xf0\n"       /* andl $-16,%esp */
-                   "\t.byte 0x83,0xec,0x10\n"       /* subl $16,%esp */
-                   "\t.byte 0x8b,0x5d,0x04\n"       /* movl 4(%ebp),%ebx */
-                   "\t.byte 0x89,0x5c,0x24,0x00\n"  /* movl %ebx,0(%esp) */
+                   "\t.byte 0x6a,0x00\n"            /* pushl $0: push a zero for debugger end of frames marker */
+                   "\t.byte 0x89,0xe5\n"            /* movl %esp,%ebp: pointer to base of kernel frame */
+                   "\t.byte 0x83,0xe4,0xf0\n"       /* andl $-16,%esp: force SSE alignment */
+                   "\t.byte 0x83,0xec,0x10\n"       /* subl $16,%esp: room for new argc, argv, & envp, SSE aligned */
+                   "\t.byte 0x8b,0x5d,0x04\n"       /* movl 4(%ebp),%ebx: pickup argc in %ebx */
+                   "\t.byte 0x89,0x5c,0x24,0x00\n"  /* movl %ebx,0(%esp): argc to reserved stack word */
 
+                   /* call wld_start(stack, &is_unix_thread) */
                    "\tleal 4(%ebp),%eax\n"
                    "\tmovl %eax,0(%esp)\n"          /* stack */
                    "\tleal 8(%esp),%eax\n"
@@ -158,48 +201,34 @@ __ASM_GLOBAL_FUNC( start,
                    "\tmovl $0,(%eax)\n"
                    "\tcall _wld_start\n"
 
-                   "\tmovl 4(%ebp),%edi\n"
-                   "\tdecl %edi\n"                  /* argc */
-                   "\tleal 12(%ebp),%esi\n"         /* argv */
-                   "\tleal 4(%esi,%edi,4),%edx\n"   /* env */
-                   "\tmovl %edx,%ecx\n"             /* apple data */
-                   "1:\tmovl (%ecx),%ebx\n"
-                   "\tadd $4,%ecx\n"
-                   "\torl %ebx,%ebx\n"
-                   "\tjnz 1b\n"
-
+                   /* jmp based on is_unix_thread */
                    "\tcmpl $0,8(%esp)\n"
                    "\tjne 2f\n"
+
+                   "\tmovl 4(%ebp),%edi\n"          /* %edi = argc */
+                   "\tleal 8(%ebp),%esi\n"          /* %esi = argv */
+                   "\tleal 4(%esi,%edi,4),%edx\n"   /* %edx = env */
+                   "\tmovl %edx,%ecx\n"
+                   "1:\tmovl (%ecx),%ebx\n"
+                   "\tadd $4,%ecx\n"
+                   "\torl %ebx,%ebx\n"              /* look for the NULL ending the env[] array */
+                   "\tjnz 1b\n"                     /* %ecx = apple data */
 
                    /* LC_MAIN */
                    "\tmovl %edi,0(%esp)\n"          /* argc */
                    "\tmovl %esi,4(%esp)\n"          /* argv */
                    "\tmovl %edx,8(%esp)\n"          /* env */
                    "\tmovl %ecx,12(%esp)\n"         /* apple data */
-                   "\tcall *%eax\n"
-                   "\tmovl %eax,(%esp)\n"
-                   "\tcall _wld_exit\n"
+                   "\tcall *%eax\n"                 /* call main(argc,argv,env,apple) */
+                   "\tmovl %eax,(%esp)\n"           /* pass result from main() to exit() */
+                   "\tcall _wld_exit\n"             /* need to use call to keep stack aligned */
                    "\thlt\n"
 
                    /* LC_UNIXTHREAD */
-                   "2:\tmovl (%ecx),%ebx\n"
-                   "\tadd $4,%ecx\n"
-                   "\torl %ebx,%ebx\n"
-                   "\tjnz 2b\n"
-
-                   "\tsubl %ebp,%ecx\n"
-                   "\tsubl $8,%ecx\n"
-                   "\tleal 4(%ebp),%esp\n"
-                   "\tsubl %ecx,%esp\n"
-
-                   "\tmovl %edi,(%esp)\n"           /* argc */
-                   "\tleal 4(%esp),%edi\n"
-                   "\tshrl $2,%ecx\n"
-                   "\tcld\n"
-                   "\trep; movsd\n"                 /* argv, ... */
-
-                   "\tmovl $0,%ebp\n"
-                   "\tjmpl *%eax\n" )
+                   "\t2:movl %ebp,%esp\n"           /* restore the unaligned stack pointer */
+                   "\taddl $4,%esp\n"               /* remove the debugger end frame marker */
+                   "\tmovl $0,%ebp\n"               /* restore ebp back to zero */
+                   "\tjmpl *%eax\n" )               /* jump to the entry point */
 
 #elif defined(__x86_64__)
 
@@ -232,55 +261,42 @@ static const size_t page_mask = 0xfff;
 
 __ASM_GLOBAL_FUNC( start,
                    __ASM_CFI("\t.cfi_undefined %rip\n")
-                   "\tpushq $0\n"
-                   "\tmovq %rsp,%rbp\n"
-                   "\tandq $-16,%rsp\n"
-                   "\tsubq $16,%rsp\n"
+                   "\tpushq $0\n"                   /* push a zero for debugger end of frames marker */
+                   "\tmovq %rsp,%rbp\n"             /* pointer to base of kernel frame */
+                   "\tandq $-16,%rsp\n"             /* force SSE alignment */
+                   "\tsubq $16,%rsp\n"              /* room for local variables */
 
+                   /* call wld_start(stack, &is_unix_thread) */
                    "\tleaq 8(%rbp),%rdi\n"          /* stack */
                    "\tmovq %rsp,%rsi\n"             /* &is_unix_thread */
                    "\tmovq $0,(%rsi)\n"
                    "\tcall _wld_start\n"
 
-                   "\tmovq 8(%rbp),%rdi\n"
-                   "\tdec %rdi\n"                   /* argc */
-                   "\tleaq 24(%rbp),%rsi\n"         /* argv */
-                   "\tleaq 8(%rsi,%rdi,8),%rdx\n"   /* env */
-                   "\tmovq %rdx,%rcx\n"             /* apple data */
-                   "1:\tmovq (%rcx),%r8\n"
-                   "\taddq $8,%rcx\n"
-                   "\torq %r8,%r8\n"
-                   "\tjnz 1b\n"
-
+                   /* jmp based on is_unix_thread */
                    "\tcmpl $0,0(%rsp)\n"
                    "\tjne 2f\n"
 
                    /* LC_MAIN */
-                   "\taddq $16,%rsp\n"
-                   "\tcall *%rax\n"
-                   "\tmovq %rax,%rdi\n"
-                   "\tcall _wld_exit\n"
+                   "\tmovq 8(%rbp),%rdi\n"          /* %rdi = argc */
+                   "\tleaq 16(%rbp),%rsi\n"         /* %rsi = argv */
+                   "\tleaq 8(%rsi,%rdi,8),%rdx\n"   /* %rdx = env */
+                   "\tmovq %rdx,%rcx\n"
+                   "1:\tmovq (%rcx),%r8\n"
+                   "\taddq $8,%rcx\n"
+                   "\torq %r8,%r8\n"                /* look for the NULL ending the env[] array */
+                   "\tjnz 1b\n"                     /* %rcx = apple data */
+
+                   "\taddq $16,%rsp\n"              /* remove local variables */
+                   "\tcall *%rax\n"                 /* call main(argc,argv,env,apple) */
+                   "\tmovq %rax,%rdi\n"             /* pass result from main() to exit() */
+                   "\tcall _wld_exit\n"             /* need to use call to keep stack aligned */
                    "\thlt\n"
 
                    /* LC_UNIXTHREAD */
-                   "2:\tmovq (%rcx),%r8\n"
-                   "\taddq $8,%rcx\n"
-                   "\torq %r8,%r8\n"
-                   "\tjnz 2b\n"
-
-                   "\tsubq %rbp,%rcx\n"
-                   "\tsubq $16,%rcx\n"
-                   "\tleaq 8(%rbp),%rsp\n"
-                   "\tsubq %rcx,%rsp\n"
-
-                   "\tmovq %rdi,(%rsp)\n"           /* argc */
-                   "\tleaq 8(%rsp),%rdi\n"
-                   "\tshrq $3,%rcx\n"
-                   "\tcld\n"
-                   "\trep; movsq\n"                 /* argv, ... */
-
-                   "\tmovq $0,%rbp\n"
-                   "\tjmpq *%rax\n" )
+                   "\t2:movq %rbp,%rsp\n"           /* restore the unaligned stack pointer */
+                   "\taddq $8,%rsp\n"               /* remove the debugger end frame marker */
+                   "\tmovq $0,%rbp\n"               /* restore ebp back to zero */
+                   "\tjmpq *%rax\n" )               /* jump to the entry point */
 
 #else
 #error preloader not implemented for this CPU
@@ -299,6 +315,9 @@ void *wld_munmap( void *start, size_t len );
 SYSCALL_FUNC( wld_munmap, 73 /* SYS_munmap */ );
 
 static intptr_t (*p_dyld_get_image_slide)( const struct target_mach_header* mh );
+#ifdef __x86_64__
+static void (*p_dyld_make_delayed_module_initializer_calls)( void );
+#endif
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
 MAKE_FUNCPTR(dlopen);
@@ -344,6 +363,23 @@ static inline const char * wld_strcasestr( const char *haystack, const char *nee
     return NULL;
 }
 #endif
+
+void * memmove( void *dst, const void *src, size_t len )
+{
+    char *d = dst;
+    const char *s = src;
+    if (d < s)
+        while (len--)
+            *d++ = *s++;
+    else
+    {
+        const char *lasts = s + (len-1);
+        char *lastd = d + (len-1);
+        while (len--)
+            *lastd-- = *lasts--;
+    }
+    return dst;
+}
 
 static int wld_strncmp( const char *str1, const char *str2, size_t len )
 {
@@ -587,7 +623,7 @@ static int map_region( struct wine_preload_info *info )
 
     if (!info->addr || is_zerofill( info )) flags |= MAP_FIXED;
 
-    ret = wld_mmap( info->addr, info->size, PROT_NONE, flags, VM_MAKE_TAG(240), 0 );
+    ret = wld_mmap( info->addr, info->size, PROT_NONE, flags, -1, 0 );
     if (ret == info->addr) return 1;
     if (ret != (void *)-1) wld_munmap( ret, info->size );
 
@@ -607,9 +643,57 @@ static inline void get_dyld_func( const char *name, void **func )
 #define LOAD_POSIX_DYLD_FUNC(f) get_dyld_func( "__dyld_" #f, (void **)&p##f )
 #define LOAD_MACHO_DYLD_FUNC(f) get_dyld_func( "_" #f, (void **)&p##f )
 
+static void fixup_stack( void *stack )
+{
+    int *pargc;
+    char **argv, **env_new;
+    static char dummyvar[] = "WINEPRELOADERDUMMYVAR=1";
+
+    pargc = stack;
+    argv = (char **)pargc + 1;
+
+    /* decrement argc, and "remove" argv[0] */
+    *pargc = *pargc - 1;
+    memmove( &argv[0], &argv[1], (*pargc + 1) * sizeof(char *) );
+
+    env_new = &argv[*pargc-1] + 2;
+    /* In the launched binary on some OSes, _NSGetEnviron() returns
+     * the original 'environ' pointer, so env_new[0] would be ignored.
+     * Put a dummy variable in env_new[0], so nothing is lost in this case.
+     */
+    env_new[0] = dummyvar;
+}
+
+static void set_program_vars( void *stack, void *mod )
+{
+    int *pargc;
+    char **argv, **env;
+    int *wine_NXArgc = pdlsym( mod, "NXArgc" );
+    char ***wine_NXArgv = pdlsym( mod, "NXArgv" );
+    char ***wine_environ = pdlsym( mod, "environ" );
+
+    pargc = stack;
+    argv = (char **)pargc + 1;
+    env = &argv[*pargc-1] + 2;
+
+    if (wine_NXArgc)
+        *wine_NXArgc = *pargc;
+    else
+        wld_printf( "preloader: Warning: failed to set NXArgc\n" );
+
+    if (wine_NXArgv)
+        *wine_NXArgv = argv;
+    else
+        wld_printf( "preloader: Warning: failed to set NXArgv\n" );
+
+    if (wine_environ)
+        *wine_environ = env;
+    else
+        wld_printf( "preloader: Warning: failed to set environ\n" );
+}
+
 void *wld_start( void *stack, int *is_unix_thread )
 {
-    struct wine_preload_info builtin_dlls = { (void *)0x7a000000, 0x02000000 };
     struct wine_preload_info **wine_main_preload_info;
     char **argv, **p, *reserve = NULL;
     struct target_mach_header *mh;
@@ -636,6 +720,9 @@ void *wld_start( void *stack, int *is_unix_thread )
     LOAD_POSIX_DYLD_FUNC( dlsym );
     LOAD_POSIX_DYLD_FUNC( dladdr );
     LOAD_MACHO_DYLD_FUNC( _dyld_get_image_slide );
+#ifdef __x86_64__
+    LOAD_MACHO_DYLD_FUNC( _dyld_make_delayed_module_initializer_calls );
+#endif
 
 #ifdef __i386__ /* CrossOver Hack #16371 */
     {
@@ -661,15 +748,14 @@ void *wld_start( void *stack, int *is_unix_thread )
         }
     }
 
-    if (!map_region( &builtin_dlls ))
-        builtin_dlls.size = 0;
+#ifdef __x86_64__
+    /* CW HACK 22327: needed for macOS Sonoma (and also fixes GStreamer) */
+    p_dyld_make_delayed_module_initializer_calls();
+#endif
 
     /* load the main binary */
     if (!(mod = pdlopen( argv[1], RTLD_NOW )))
         fatal_error( "%s: could not load binary\n", argv[1] );
-
-    if (builtin_dlls.size)
-        wld_munmap( builtin_dlls.addr, builtin_dlls.size );
 
     /* store pointer to the preload info into the appropriate main binary variable */
     wine_main_preload_info = pdlsym( mod, "wine_main_preload_info" );
@@ -680,6 +766,18 @@ void *wld_start( void *stack, int *is_unix_thread )
         fatal_error( "%s: could not find mach header\n", argv[1] );
     if (!(entry = get_entry_point( mh, p_dyld_get_image_slide(mh), is_unix_thread )))
         fatal_error( "%s: could not find entry point\n", argv[1] );
+
+    /* decrement argc and "remove" argv[0] */
+    fixup_stack(stack);
+
+    /* Set NXArgc, NXArgv, and environ in the new binary.
+     * On different configurations these were either NULL/0 or still had their
+     * values from this preloader's launch.
+     *
+     * In particular, environ was not being updated, resulting in environ[0] being lost.
+     * And for LC_UNIXTHREAD binaries on Monterey and later, environ was just NULL.
+     */
+    set_program_vars( stack, mod );
 
     return entry;
 }

@@ -19,8 +19,6 @@
 #ifndef _APISETLIBLOADER_
 #define _APISETLIBLOADER_
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -35,7 +33,5 @@ WINBASEAPI INT WINAPI FindStringOrdinal(DWORD, const WCHAR *, INT, const WCHAR *
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif  /* _APISETLIBLOADER_ */

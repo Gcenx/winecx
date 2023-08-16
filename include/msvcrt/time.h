@@ -20,8 +20,6 @@
 #ifndef __WINE_TIME_H
 #define __WINE_TIME_H
 
-#include "wine/winheader_enter.h"
-
 #include <corecrt_wtime.h>
 
 #include <pshpack8.h>
@@ -112,7 +110,5 @@ static inline time_t time(time_t *t) { return _time32(t); }
 #endif
 
 #include <poppack.h>
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_TIME_H */

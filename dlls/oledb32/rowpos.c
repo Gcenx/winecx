@@ -28,7 +28,6 @@
 
 #include "oledb_private.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(oledb);
 
@@ -152,7 +151,7 @@ static ULONG WINAPI rowpos_Release(IRowPosition* iface)
         if (This->rowset) IRowset_Release(This->rowset);
         if (This->chrst) IChapteredRowset_Release(This->chrst);
         rowposchange_cp_destroy(&This->cp);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -380,6 +379,7 @@ static HRESULT WINAPI rowpos_cp_Advise(IConnectionPoint *iface, IUnknown *unksin
 {
     rowpos_cp *This = impl_from_IConnectionPoint(iface);
     IRowPositionChange *sink;
+    IRowPositionChange **new_sinks;
     HRESULT hr;
     DWORD i;
 
@@ -404,14 +404,20 @@ static HRESULT WINAPI rowpos_cp_Advise(IConnectionPoint *iface, IUnknown *unksin
 
         if (i == This->sinks_size)
         {
+            new_sinks = realloc(This->sinks, 2 * This->sinks_size * sizeof(*This->sinks));
+            if (!new_sinks)
+                return E_OUTOFMEMORY;
+            memset(new_sinks + This->sinks_size, 0, This->sinks_size * sizeof(*This->sinks));
+            This->sinks = new_sinks;
             This->sinks_size *= 2;
-            This->sinks = heap_realloc_zero(This->sinks, This->sinks_size*sizeof(*This->sinks));
         }
     }
     else
     {
+        This->sinks = calloc(10, sizeof(*This->sinks));
+        if (!This->sinks)
+            return E_OUTOFMEMORY;
         This->sinks_size = 10;
-        This->sinks = heap_alloc_zero(This->sinks_size*sizeof(*This->sinks));
         i = 0;
     }
 
@@ -471,7 +477,7 @@ void rowposchange_cp_destroy(rowpos_cp *cp)
         if (cp->sinks[i])
             IRowPositionChange_Release(cp->sinks[i]);
     }
-    heap_free(cp->sinks);
+    free(cp->sinks);
 }
 
 HRESULT create_oledb_rowpos(IUnknown *outer, void **obj)
@@ -484,7 +490,7 @@ HRESULT create_oledb_rowpos(IUnknown *outer, void **obj)
 
     if(outer) return CLASS_E_NOAGGREGATION;
 
-    This = heap_alloc(sizeof(*This));
+    This = malloc(sizeof(*This));
     if(!This) return E_OUTOFMEMORY;
 
     This->IRowPosition_iface.lpVtbl = &rowpos_vtbl;

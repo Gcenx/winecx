@@ -522,6 +522,16 @@ static int puts_clbk_console_w(void *ctx, int len, const wchar_t *str)
     return len;
 }
 
+#if _MSVCR_VER<=120
+/*********************************************************************
+ *		_vcprintf_l (MSVCRT.@)
+ */
+int CDECL _vcprintf_l(const char* format, _locale_t locale, va_list valist)
+{
+    return pf_printf_a(puts_clbk_console_a, NULL, format, locale, 0, arg_clbk_valist, NULL, &valist);
+}
+#endif
+
 /*********************************************************************
  *		_vcprintf (MSVCRT.@)
  */
@@ -545,6 +555,13 @@ int WINAPIV _cprintf(const char* format, ...)
   return retval;
 }
 
+/*********************************************************************
+ *		_vcwprintf_l (MSVCRT.@)
+ */
+int CDECL _vcwprintf_l(const wchar_t* format, _locale_t locale, va_list valist)
+{
+    return pf_printf_w(puts_clbk_console_w, NULL, format, locale, 0, arg_clbk_valist, NULL, &valist);
+}
 
 /*********************************************************************
  *		_vcwprintf (MSVCRT.@)

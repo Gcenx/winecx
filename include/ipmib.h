@@ -18,8 +18,6 @@
 #ifndef __WINE_IPMIB_H
 #define __WINE_IPMIB_H
 
-#include "wine/winheader_enter.h"
-
 #include <ifmib.h>
 #include <nldef.h>
 
@@ -249,7 +247,5 @@ typedef struct _MIB_ICMP_EX
   MIBICMPSTATS_EX icmpInStats;
   MIBICMPSTATS_EX icmpOutStats;
 } MIB_ICMP_EX, *PMIB_ICMP_EX;
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_IPMIB_H */

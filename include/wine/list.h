@@ -18,30 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifdef __i386_on_x86_64__
-#if defined(__WINE_SERVER_LIST_H) && defined(WINE_LIST_HOSTADDRSPACE) && defined(WINE_LIST_HOSTADDRSPACE_DISABLED)
-#error "list.h was previously included without WINE_LIST_HOSTADDRSPACE but it's now defined"
-#endif
-
-#if defined(__WINE_SERVER_LIST_H) && !defined(WINE_LIST_HOSTADDRSPACE) && defined(WINE_LIST_HOSTADDRSPACE_ENABLED)
-#error "list.h was previously included with WINE_LIST_HOSTADDRSPACE but it's now not defined"
-#endif
-#endif
-
 #ifndef __WINE_SERVER_LIST_H
 #define __WINE_SERVER_LIST_H
 
 #include <stddef.h>
-#include <stdint.h>
-#include <wine/32on64utils.h>
-
-#ifdef WINE_LIST_HOSTADDRSPACE
-#include <wine/hostaddrspace_enter.h>
-#define WINE_LIST_HOSTADDRSPACE_ENABLED
-#else
-#include <wine/winheader_enter.h>
-#define WINE_LIST_HOSTADDRSPACE_DISABLED
-#endif
 
 struct list
 {
@@ -170,8 +150,8 @@ static inline unsigned int list_count( const struct list *list )
     return count;
 }
 
-/* move all elements from src to the tail of dst */
-static inline void list_move_tail( struct list *dst, struct list *src )
+/* move all elements from src to before the specified element */
+static inline void list_move_before( struct list *dst, struct list *src )
 {
     if (list_empty(src)) return;
 
@@ -182,8 +162,8 @@ static inline void list_move_tail( struct list *dst, struct list *src )
     list_init(src);
 }
 
-/* move all elements from src to the head of dst */
-static inline void list_move_head( struct list *dst, struct list *src )
+/* move all elements from src to after the specified element */
+static inline void list_move_after( struct list *dst, struct list *src )
 {
     if (list_empty(src)) return;
 
@@ -192,6 +172,18 @@ static inline void list_move_head( struct list *dst, struct list *src )
     dst->next = src->next;
     src->next->prev = dst;
     list_init(src);
+}
+
+/* move all elements from src to the head of dst */
+static inline void list_move_head( struct list *dst, struct list *src )
+{
+    list_move_after( dst, src );
+}
+
+/* move all elements from src to the tail of dst */
+static inline void list_move_tail( struct list *dst, struct list *src )
+{
+    list_move_before( dst, src );
 }
 
 /* iterate through the list */
@@ -249,15 +241,6 @@ static inline void list_move_head( struct list *dst, struct list *src )
 /* get pointer to object containing list element */
 #undef LIST_ENTRY
 #define LIST_ENTRY(elem, type, field) \
-    TRUNCCAST(type *, ((uintptr_t)(elem) - offsetof(type, field)))
-
-#ifdef WINE_LIST_HOSTADDRSPACE
-#include <wine/hostaddrspace_exit.h>
-#else
-#include <wine/winheader_exit.h>
-#endif
-
-/* Undef WINE_LIST_HOSTADDRSPACE so we can detect if list.h is included later without it re-defined */
-#undef WINE_LIST_HOSTADDRSPACE
+    ((type *)((char *)(elem) - offsetof(type, field)))
 
 #endif  /* __WINE_SERVER_LIST_H */

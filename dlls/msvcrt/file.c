@@ -681,12 +681,12 @@ BOOL msvcrt_create_io_inherit_block(WORD *size, BYTE **block)
       *handle_ptr = INVALID_HANDLE_VALUE;
     }
     wxflag_ptr++; handle_ptr++;
-  } 
+  }
   return TRUE;
 }
 
-/* INTERNAL: Set up all file descriptors, 
- * as well as default streams (stdin, stderr and stdout) 
+/* INTERNAL: Set up all file descriptors,
+ * as well as default streams (stdin, stderr and stdout)
  */
 void msvcrt_init_io(void)
 {
@@ -1244,6 +1244,7 @@ int CDECL _dup2(int od, int nd)
 
   if (info_nd == &MSVCRT___badioinfo)
   {
+      *_errno() = EBADF;
       ret = -1;
   }
   else if (info_od->wxflag & WX_OPEN)
@@ -1286,7 +1287,7 @@ int CDECL _dup(int od)
 {
   int fd, ret;
   ioinfo *info = get_ioinfo_alloc(&fd);
- 
+
   if (_dup2(od, fd) == 0)
     ret = fd;
   else
@@ -2756,6 +2757,8 @@ static int read_utf8(ioinfo *fdinfo, wchar_t *buf, unsigned int count)
                 return 0;
             }else {
                 msvcrt_set_errno(GetLastError());
+                if (GetLastError() == ERROR_ACCESS_DENIED)
+                    *_errno() = EBADF;
                 return -1;
             }
         }else if(!num_read) {
@@ -2813,6 +2816,8 @@ static int read_utf8(ioinfo *fdinfo, wchar_t *buf, unsigned int count)
             return 0;
         }else {
             msvcrt_set_errno(GetLastError());
+            if (GetLastError() == ERROR_ACCESS_DENIED)
+                *_errno() = EBADF;
             if (readbuf != min_buf) free(readbuf);
             return -1;
         }
@@ -3041,6 +3046,8 @@ static int read_i(int fd, ioinfo *fdinfo, void *buf, unsigned int count)
         {
             TRACE(":failed-last error (%ld)\n", GetLastError());
             msvcrt_set_errno(GetLastError());
+            if (GetLastError() == ERROR_ACCESS_DENIED)
+                *_errno() = EBADF;
             return -1;
         }
     }
@@ -3584,6 +3591,8 @@ int CDECL _write(int fd, const void* buf, unsigned int count)
             TRACE("WriteFile (fd %d, hand %p) failed-last error (%ld)\n", fd,
                     hand, GetLastError());
             msvcrt_set_errno(GetLastError());
+            if (GetLastError() == ERROR_ACCESS_DENIED)
+                *_errno() = EBADF;
             num_written = -1;
         }
 
@@ -3712,6 +3721,8 @@ int CDECL _write(int fd, const void* buf, unsigned int count)
             TRACE("WriteFile/WriteConsoleW (fd %d, hand %p) failed-last error (%ld)\n", fd,
                     hand, GetLastError());
             msvcrt_set_errno(GetLastError());
+            if (GetLastError() == ERROR_ACCESS_DENIED)
+                *_errno() = EBADF;
             release_ioinfo(info);
             return -1;
         }
@@ -4640,7 +4651,7 @@ FILE* CDECL freopen(const char *path, const char *mode, FILE* file)
 /*********************************************************************
  *      freopen_s (MSVCRT.@)
  */
-int CDECL freopen_s(FILE** pFile,
+errno_t CDECL freopen_s(FILE** pFile,
         const char *path, const char *mode, FILE* file)
 {
     if (!MSVCRT_CHECK_PMT(pFile != NULL)) return EINVAL;
@@ -5582,6 +5593,59 @@ int WINAPIV fprintf_s(FILE* file, const char *format, ...)
 }
 
 /*********************************************************************
+ *    _fprintf_l (MSVCRT.@)
+ */
+int WINAPIV _fprintf_l(FILE* file, const char *format, _locale_t locale, ...)
+{
+    va_list valist;
+    int res;
+    va_start(valist, locale);
+    res = _vfprintf_l(file, format, locale, valist);
+    va_end(valist);
+    return res;
+}
+
+
+/*********************************************************************
+ *    _fprintf_p (MSVCRT.@)
+ */
+int WINAPIV _fprintf_p(FILE* file, const char *format, ...)
+{
+    va_list valist;
+    int res;
+    va_start(valist, format);
+    res = _vfprintf_p_l(file, format, NULL, valist);
+    va_end(valist);
+    return res;
+}
+
+/*********************************************************************
+ *    _fprintf_p_l (MSVCRT.@)
+ */
+int WINAPIV _fprintf_p_l(FILE* file, const char *format, _locale_t locale, ...)
+{
+    va_list valist;
+    int res;
+    va_start(valist, locale);
+    res = _vfprintf_p_l(file, format, locale, valist);
+    va_end(valist);
+    return res;
+}
+
+/*********************************************************************
+ *    _fprintf_s_l (MSVCRT.@)
+ */
+int WINAPIV _fprintf_s_l(FILE* file, const char *format, _locale_t locale, ...)
+{
+    va_list valist;
+    int res;
+    va_start(valist, locale);
+    res = _vfprintf_s_l(file, format, locale, valist);
+    va_end(valist);
+    return res;
+}
+
+/*********************************************************************
  *		fwprintf (MSVCRT.@)
  */
 int WINAPIV fwprintf(FILE* file, const wchar_t *format, ...)
@@ -5616,6 +5680,45 @@ int WINAPIV _fwprintf_l(FILE* file, const wchar_t *format, _locale_t locale, ...
     int res;
     va_start(valist, locale);
     res = _vfwprintf_l(file, format, locale, valist);
+    va_end(valist);
+    return res;
+}
+
+/*********************************************************************
+ *              _fwprintf_p (MSVCRT.@)
+ */
+int WINAPIV _fwprintf_p(FILE* file, const wchar_t *format, ...)
+{
+    va_list valist;
+    int res;
+    va_start(valist, format);
+    res = _vfwprintf_p_l(file, format, NULL, valist);
+    va_end(valist);
+    return res;
+}
+
+/*********************************************************************
+ *              _fwprintf_p_l (MSVCRT.@)
+ */
+int WINAPIV _fwprintf_p_l(FILE* file, const wchar_t *format, _locale_t locale, ...)
+{
+    va_list valist;
+    int res;
+    va_start(valist, locale);
+    res = _vfwprintf_p_l(file, format, locale, valist);
+    va_end(valist);
+    return res;
+}
+
+/*********************************************************************
+ *              _fwprintf_s_l (MSVCRT.@)
+ */
+int WINAPIV _fwprintf_s_l(FILE* file, const wchar_t *format, _locale_t locale, ...)
+{
+    va_list valist;
+    int res;
+    va_start(valist, locale);
+    res = _vfwprintf_s_l(file, format, locale, valist);
     va_end(valist);
     return res;
 }

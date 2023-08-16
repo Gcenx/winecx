@@ -22,8 +22,6 @@
 #ifndef __WINE_D3DHAL_H
 #define __WINE_D3DHAL_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -587,7 +585,5 @@ typedef struct _D3DHAL_DP2SETTEXLOD {
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_D3DHAL_H */

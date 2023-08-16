@@ -31,6 +31,8 @@
 #include <richedit.h>
 #include <richole.h>
 #include <tom.h>
+#include <imm.h>
+#include <textserv.h>
 #include <wine/test.h>
 
 #define EXPECT_TODO_WINE 0x80000000UL
@@ -212,9 +214,400 @@ static void olecb_check_QueryInsertObject(struct reolecb_obj *This, int line)
     olecb_expect_QueryInsertObject(This, 0, 0, NULL, NULL, 0, S_OK);
 }
 
+DEFINE_GUID(CLSID_testoleobj, 0x4484082e, 0x6d18, 0x4932, 0xa0, 0x86, 0x5b, 0x4d, 0xcf, 0x36, 0xb3, 0xde);
+
+struct testoleobj {
+    IOleObject IOleObject_iface;
+    LONG ref;
+    int line;
+    int draw_count;
+
+    IOleClientSite *clientsite;
+    IOleAdviseHolder *advise_holder;
+    SIZEL extent;
+
+    IViewObject IViewObject_iface;
+};
+
+static struct testoleobj *impl_from_IOleObject( IOleObject *iface )
+{
+    return CONTAINING_RECORD( iface, struct testoleobj, IOleObject_iface );
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_QueryInterface( IOleObject *iface, REFIID riid, void **obj )
+{
+    struct testoleobj *This = impl_from_IOleObject( iface );
+
+    if (IsEqualGUID( riid, &IID_IUnknown ) || IsEqualGUID( riid, &IID_IOleObject ))
+    {
+        *obj = iface;
+    }
+    else if (IsEqualGUID( riid, &IID_IViewObject ))
+    {
+        *obj = &This->IViewObject_iface;
+    }
+    else
+    {
+        if (!IsEqualGUID( riid, &IID_IOleLink ) &&
+            !IsEqualGUID( riid, &IID_IRunnableObject ) &&
+            !IsEqualGUID( riid, &IID_IMarshal ))
+        {
+            trace( "Unsupported interface: %s\n", debugstr_guid( riid ));
+        }
+        *obj = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef( (IUnknown *)*obj );
+    return S_OK;
+}
+
+static ULONG STDMETHODCALLTYPE testoleobj_AddRef( IOleObject *iface )
+{
+    struct testoleobj *This = impl_from_IOleObject( iface );
+    ULONG ref = InterlockedIncrement( &This->ref );
+    return ref;
+}
+
+static ULONG STDMETHODCALLTYPE testoleobj_Release( IOleObject *iface )
+{
+    struct testoleobj *This = impl_from_IOleObject( iface );
+    ULONG ref = InterlockedDecrement( &This->ref );
+    if (!ref)
+    {
+        if (This->advise_holder)
+        {
+            IOleAdviseHolder_Release( This->advise_holder );
+            This->advise_holder = NULL;
+        }
+        if (This->clientsite)
+        {
+            IOleClientSite_Release( This->clientsite );
+            This->clientsite = NULL;
+        }
+        free( This );
+    }
+    return ref;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_SetClientSite( IOleObject *iface, IOleClientSite *clientsite )
+{
+    struct testoleobj *This = impl_from_IOleObject( iface );
+
+    if (This->clientsite != clientsite)
+    {
+        if (This->clientsite) IOleClientSite_Release( This->clientsite );
+        This->clientsite = clientsite;
+        if (This->clientsite) IOleClientSite_AddRef( This->clientsite );
+    }
+
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_GetClientSite( IOleObject *iface, IOleClientSite **clientsite )
+{
+    struct testoleobj *This = impl_from_IOleObject( iface );
+
+    if (This->clientsite) IOleClientSite_AddRef( This->clientsite );
+    *clientsite = This->clientsite;
+
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_SetHostNames( IOleObject *iface,
+                                                                     LPCOLESTR container_app,
+                                                                     LPCOLESTR container_obj )
+{
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_Close( IOleObject *iface, DWORD save_option )
+{
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_SetMoniker( IOleObject *iface,
+                                                                   DWORD which_moniker, IMoniker *mk )
+{
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_GetMoniker( IOleObject *iface, DWORD assign,
+                                                                   DWORD which_moniker, IMoniker **mk )
+{
+    struct testoleobj *This = impl_from_IOleObject( iface );
+
+    *mk = NULL;
+
+    if (!This->clientsite) return E_UNEXPECTED;
+
+    return IOleClientSite_GetMoniker( This->clientsite, assign, which_moniker, mk );
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_InitFromData( IOleObject *iface, IDataObject *dataobj,
+                                                                     BOOL creation, DWORD reserved )
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_GetClipboardData( IOleObject *iface, DWORD reserved,
+                                                                         IDataObject **dataobj )
+{
+    *dataobj = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_DoVerb( IOleObject *iface, LONG verb, MSG *msg,
+                                                               IOleClientSite *activesite, LONG index,
+                                                               HWND parentwnd, LPCRECT posrect )
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_EnumVerbs( IOleObject *iface, IEnumOLEVERB **enumoleverb )
+{
+    *enumoleverb = NULL;
+    return OLEOBJ_E_NOVERBS;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_Update( IOleObject *iface )
+{
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_IsUpToDate( IOleObject *iface )
+{
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_GetUserClassID( IOleObject *iface, CLSID *clsid )
+{
+    *clsid = CLSID_testoleobj;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_GetUserType( IOleObject *iface, DWORD form_of_type, LPOLESTR *user_type )
+{
+    static const OLECHAR typename[] = L"richole testoleobj";
+
+    *user_type = CoTaskMemAlloc( sizeof(typename) );
+    if (!*user_type) return E_OUTOFMEMORY;
+
+    memcpy( *user_type, typename, sizeof(typename) );
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_SetExtent( IOleObject *iface, DWORD draw_aspect, SIZEL *sizel )
+{
+    struct testoleobj *This = impl_from_IOleObject( iface );
+
+    if (draw_aspect != DVASPECT_CONTENT) return E_FAIL;
+
+    This->extent = *sizel;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_GetExtent( IOleObject *iface, DWORD draw_aspect, SIZEL *sizel )
+{
+    struct testoleobj *This = impl_from_IOleObject( iface );
+
+    if (draw_aspect != DVASPECT_CONTENT) return E_FAIL;
+
+    *sizel = This->extent;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_Advise( IOleObject *iface, IAdviseSink *adv_sink, DWORD *connection )
+{
+    struct testoleobj *This = impl_from_IOleObject( iface );
+    HRESULT hr = S_OK;
+
+    if (!This->advise_holder) hr = CreateOleAdviseHolder( &This->advise_holder );
+    if (SUCCEEDED( hr )) hr = IOleAdviseHolder_Advise( This->advise_holder, adv_sink, connection );
+    return hr;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_Unadvise( IOleObject *iface, DWORD connection )
+{
+    struct testoleobj *This = impl_from_IOleObject( iface );
+
+    if (!This->advise_holder) return OLE_E_NOCONNECTION;
+    return IOleAdviseHolder_Unadvise( This->advise_holder, connection );
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_EnumAdvise( IOleObject *iface, IEnumSTATDATA **enum_advise )
+{
+    struct testoleobj *This = impl_from_IOleObject( iface );
+
+    if (!This->advise_holder)
+    {
+        *enum_advise = NULL;
+        return S_OK;
+    }
+    return IOleAdviseHolder_EnumAdvise( This->advise_holder, enum_advise );
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_GetMiscStatus( IOleObject *iface, DWORD aspect, DWORD *status )
+{
+    *status = 0;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IOleObject_SetColorScheme( IOleObject *iface, LOGPALETTE *palette )
+{
+    return E_NOTIMPL;
+}
+
+static const struct IOleObjectVtbl testoleobj_IOleObject_Vtbl = {
+    testoleobj_QueryInterface,
+    testoleobj_AddRef,
+    testoleobj_Release,
+    testoleobj_IOleObject_SetClientSite,
+    testoleobj_IOleObject_GetClientSite,
+    testoleobj_IOleObject_SetHostNames,
+    testoleobj_IOleObject_Close,
+    testoleobj_IOleObject_SetMoniker,
+    testoleobj_IOleObject_GetMoniker,
+    testoleobj_IOleObject_InitFromData,
+    testoleobj_IOleObject_GetClipboardData,
+    testoleobj_IOleObject_DoVerb,
+    testoleobj_IOleObject_EnumVerbs,
+    testoleobj_IOleObject_Update,
+    testoleobj_IOleObject_IsUpToDate,
+    testoleobj_IOleObject_GetUserClassID,
+    testoleobj_IOleObject_GetUserType,
+    testoleobj_IOleObject_SetExtent,
+    testoleobj_IOleObject_GetExtent,
+    testoleobj_IOleObject_Advise,
+    testoleobj_IOleObject_Unadvise,
+    testoleobj_IOleObject_EnumAdvise,
+    testoleobj_IOleObject_GetMiscStatus,
+    testoleobj_IOleObject_SetColorScheme
+};
+
+static struct testoleobj *impl_from_IViewObject( IViewObject *iface )
+{
+    return CONTAINING_RECORD( iface, struct testoleobj, IViewObject_iface );
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IViewObject_QueryInterface( IViewObject *iface, REFIID riid, void **obj )
+{
+    struct testoleobj *This = impl_from_IViewObject( iface );
+    return IOleObject_QueryInterface( &This->IOleObject_iface, riid, obj );
+}
+
+static ULONG STDMETHODCALLTYPE testoleobj_IViewObject_AddRef( IViewObject *iface )
+{
+    struct testoleobj *This = impl_from_IViewObject( iface );
+    return IOleObject_AddRef( &This->IOleObject_iface );
+}
+
+static ULONG STDMETHODCALLTYPE testoleobj_IViewObject_Release( IViewObject *iface )
+{
+    struct testoleobj *This = impl_from_IViewObject( iface );
+    return IOleObject_Release( &This->IOleObject_iface );
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IViewObject_Draw( IViewObject *iface, DWORD draw_aspect,
+                                                              LONG index, void *aspect, DVTARGETDEVICE *td,
+                                                              HDC hdc_target_dev, HDC hdc_draw,
+                                                              LPCRECTL bounds, LPCRECTL wbounds,
+                                                              BOOL (CALLBACK *fn_continue)(ULONG_PTR),
+                                                              ULONG_PTR arg_continue )
+{
+    struct testoleobj *This = impl_from_IViewObject( iface );
+    SIZEL dpi;
+
+    if (draw_aspect != DVASPECT_CONTENT || index != -1) return E_NOTIMPL;
+
+    ok_(__FILE__,This->line)( td == NULL, "expected td to be NULL, got %p\n", td );
+    ok_(__FILE__,This->line)( hdc_target_dev == NULL, "expected hdc_target_dev to be NULL, got %p\n", hdc_target_dev );
+    ok_(__FILE__,This->line)( wbounds == NULL, "expected wbounds to be NULL, got %p\n", wbounds );
+
+    dpi.cx = GetDeviceCaps(hdc_draw, LOGPIXELSX);
+    dpi.cy = GetDeviceCaps(hdc_draw, LOGPIXELSY);
+
+    ok_(__FILE__,This->line)( bounds->right - bounds->left == MulDiv( This->extent.cx, dpi.cx, 2540 ),
+                              "bounds->right (= %ld) - bounds->left (= %ld) != "
+                              "MulDiv( This->extent.cx (= %ld), dpi.cx (= %ld), 2540 )\n",
+                              bounds->right, bounds->left, This->extent.cx, dpi.cx );
+    ok_(__FILE__,This->line)( bounds->bottom - bounds->top == MulDiv( This->extent.cy, dpi.cy, 2540 ),
+                              "bounds->bottom (= %ld) - bounds->top (= %ld) != "
+                              "MulDiv( This->extent.cy (= %ld), dpi.cy (= %ld), 2540 )\n",
+                              bounds->bottom, bounds->top, This->extent.cy, dpi.cy );
+
+    FillRect( hdc_draw, (const RECT *)bounds, GetStockObject( DKGRAY_BRUSH ));
+    This->draw_count++;
+
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IViewObject_GetColorSet( IViewObject *iface, DWORD draw_aspect,
+                                                                     LONG index, void *aspect, DVTARGETDEVICE *td,
+                                                                     HDC hdc_target_dev, LOGPALETTE **color_set )
+{
+    *color_set = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IViewObject_Freeze( IViewObject *iface, DWORD draw_aspect,
+                                                                LONG index, void *aspect, DWORD *freeze )
+{
+    *freeze = 0;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IViewObject_Unfreeze( IViewObject *iface, DWORD freeze )
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IViewObject_SetAdvise( IViewObject *iface, DWORD aspects,
+                                                                   DWORD advf, IAdviseSink *adv_sink )
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE testoleobj_IViewObject_GetAdvise( IViewObject *iface, DWORD *aspects,
+                                                                   DWORD *advf, IAdviseSink **adv_sink )
+{
+    *aspects = 0;
+    *advf = 0;
+    *adv_sink = NULL;
+    return E_NOTIMPL;
+}
+
+static const struct IViewObjectVtbl testoleobj_IViewObject_Vtbl = {
+    testoleobj_IViewObject_QueryInterface,
+    testoleobj_IViewObject_AddRef,
+    testoleobj_IViewObject_Release,
+    testoleobj_IViewObject_Draw,
+    testoleobj_IViewObject_GetColorSet,
+    testoleobj_IViewObject_Freeze,
+    testoleobj_IViewObject_Unfreeze,
+    testoleobj_IViewObject_SetAdvise,
+    testoleobj_IViewObject_GetAdvise,
+};
+
+static HRESULT testoleobj_Create( struct testoleobj **objptr )
+{
+    struct testoleobj *obj;
+
+    obj = calloc( sizeof(struct testoleobj), 1 );
+    *objptr = obj;
+    if (!obj) return E_OUTOFMEMORY;
+
+    obj->IOleObject_iface.lpVtbl = &testoleobj_IOleObject_Vtbl;
+    obj->ref = 1;
+    obj->IViewObject_iface.lpVtbl = &testoleobj_IViewObject_Vtbl;
+
+    return S_OK;
+}
+
 static HMODULE hmoduleRichEdit;
 
 DEFINE_GUID(GUID_NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+DEFINE_GUID(IID_ITextServices, 0x8d33f740, 0xcf58, 0x11ce, 0xa8, 0x9d, 0x00, 0xaa, 0x00, 0x6c, 0xad, 0xc5);
 
 static const WCHAR sysW[] = {'S','y','s','t','e','m',0};
 
@@ -3189,13 +3582,25 @@ static void test_ITextRange_IsEqual(void)
   ITextSelection_Release(selection);
 }
 
+static int get_scroll_pos_y(HWND hwnd)
+{
+    POINT p = {-1, -1};
+    SendMessageA(hwnd, EM_GETSCROLLPOS, 0, (LPARAM)&p);
+    ok(p.x != -1 && p.y != -1, "p.x:%ld p.y:%ld\n", p.x, p.y);
+    return p.y;
+}
+
 static void test_Select(void)
 {
   static const CHAR test_text1[] = "TestSomeText";
+  static const CHAR test_text2[] = "text\nwith\nbreak\n"
+                                   "lines\ntest\ntest\n";
   IRichEditOle *reOle = NULL;
   ITextDocument *doc = NULL;
   ITextSelection *selection;
   ITextRange *range;
+  int scroll_pos1;
+  int scroll_pos2;
   LONG value;
   HRESULT hr;
   HWND hwnd;
@@ -3207,8 +3612,11 @@ static void test_Select(void)
   hr = ITextDocument_Range(doc, 0, 4, &range);
   ok(hr == S_OK, "got 0x%08lx\n", hr);
 
+  scroll_pos1 = get_scroll_pos_y(hwnd);
   hr = ITextRange_Select(range);
   ok(hr == S_OK, "got 0x%08lx\n", hr);
+  scroll_pos2 = get_scroll_pos_y(hwnd);
+  ok(scroll_pos1 == scroll_pos2, "%d != %d\n", scroll_pos1, scroll_pos2);
 
   value = 1;
   hr = ITextSelection_GetStart(selection, &value);
@@ -3220,6 +3628,16 @@ static void test_Select(void)
 
   hr = ITextSelection_Select(selection);
   ok(hr == S_OK, "got 0x%08lx\n", hr);
+
+  SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)test_text2);
+  SendMessageA(hwnd, EM_SETSEL, 1, 2);
+  hr = ITextDocument_Range(doc, 10, 16, &range);
+  ok(hr == S_OK, "got 0x%08lx\n", hr);
+  scroll_pos1 = get_scroll_pos_y(hwnd);
+  hr = ITextRange_Select(range);
+  ok(hr == S_OK, "got 0x%08lx\n", hr);
+  scroll_pos2 = get_scroll_pos_y(hwnd);
+  ok(scroll_pos1 != scroll_pos2, "%d == %d\n", scroll_pos1, scroll_pos2);
 
   release_interfaces(&hwnd, &reOle, &doc, NULL);
 
@@ -3431,6 +3849,16 @@ static void _insert_reobject(struct reolecb_obj *callback, IRichEditOle *reole,
   olecb_check_QueryInsertObject(callback, line);
 }
 
+static void flush_dispatch_messages(void)
+{
+    MSG msg;
+    while (PeekMessageW( &msg, NULL, 0, 0, PM_REMOVE ))
+    {
+        TranslateMessage( &msg );
+        DispatchMessageW( &msg );
+    }
+}
+
 static void subtest_InsertObject(struct reolecb_obj *callback)
 {
   static CHAR test_text1[] = "abcdefg";
@@ -3453,6 +3881,9 @@ static void subtest_InsertObject(struct reolecb_obj *callback)
   LONG count, result;
   ITextRange *range;
   BSTR bstr;
+  struct testoleobj *testobj;
+  IOleClientSite *clientsite;
+  REOBJECT reobj;
 
   create_interfaces(&hwnd, &reole, &doc, &selection);
   if (callback)
@@ -3486,9 +3917,6 @@ static void subtest_InsertObject(struct reolecb_obj *callback)
 
   if (callback)
   {
-    IOleClientSite *clientsite;
-    REOBJECT reobj;
-
     /* (fail to) insert object1 in (3, 4)*/
     SendMessageA(hwnd, EM_SETSEL, 3, 4);
 
@@ -3764,6 +4192,70 @@ static void subtest_InsertObject(struct reolecb_obj *callback)
   hr = ITextSelection_GetChar(selection, &result);
   ok(hr == S_OK, "Got hr %#lx.\n", hr);
   todo_wine ok(result == 0xfffc, "Got char: %lc\n", (WCHAR)result);
+
+  hr = testoleobj_Create(&testobj);
+  ok(hr == S_OK, "testoleobj_Create got hr %#lx.\n", hr);
+  testobj->extent.cx = 800;
+  testobj->extent.cy = 400;
+
+  SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)"");
+  testobj->draw_count = 0;
+  testobj->line = __LINE__;
+
+  hr = IRichEditOle_GetClientSite(reole, &clientsite);
+  ok(hr == S_OK, "IRichEditOle_GetClientSite got hr %#lx.\n", hr);
+  hr = IOleObject_SetClientSite(&testobj->IOleObject_iface, clientsite);
+  ok(hr == S_OK, "IOleObject_SetClientSite got hr %#lx.\n", hr);
+
+  olecb_expect_QueryInsertObject(callback, __LINE__, 1,
+                                 &CLSID_testoleobj, NULL, REO_CP_SELECTION, S_OK);
+  fill_reobject_struct(&reobj, REO_CP_SELECTION, &testobj->IOleObject_iface, NULL, clientsite, 800, 400, DVASPECT_CONTENT, 0, 0);
+  reobj.clsid = CLSID_testoleobj;
+  hr = IRichEditOle_InsertObject(reole, &reobj);
+  ok(hr == S_OK, "IRichEditOle_InsertObject got hr %#lx.\n", hr);
+  olecb_check_QueryInsertObject(callback, __LINE__);
+
+  IOleClientSite_Release(clientsite);
+
+  testobj->line = __LINE__;
+  UpdateWindow(hwnd);
+  testobj->line = __LINE__;
+  flush_dispatch_messages();
+  ok(testobj->draw_count != 0, "expected draw_count to be nonzero, got %d\n", testobj->draw_count);
+
+  SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)"");
+  testobj->draw_count = 0;
+  testobj->line = __LINE__;
+
+  hr = IRichEditOle_GetClientSite(reole, &clientsite);
+  ok(hr == S_OK, "IRichEditOle_GetClientSite got hr %#lx.\n", hr);
+  hr = IOleObject_SetClientSite(&testobj->IOleObject_iface, clientsite);
+  ok(hr == S_OK, "IOleObject_SetClientSite got hr %#lx.\n", hr);
+
+  olecb_expect_QueryInsertObject(callback, __LINE__, 1,
+                                 &CLSID_testoleobj, NULL, REO_CP_SELECTION, S_OK);
+  fill_reobject_struct(&reobj, REO_CP_SELECTION, &testobj->IOleObject_iface, NULL, clientsite, 0, 0, DVASPECT_CONTENT, 0, 0);
+  reobj.clsid = CLSID_testoleobj;
+  hr = IRichEditOle_InsertObject(reole, &reobj);
+  ok(hr == S_OK, "IRichEditOle_InsertObject got hr %#lx.\n", hr);
+  olecb_check_QueryInsertObject(callback, __LINE__);
+
+  memset(&reobj, 0xcc, sizeof(reobj));
+  reobj.cbStruct = sizeof(reobj);
+  hr = IRichEditOle_GetObject(reole, 0, &reobj, REO_GETOBJ_NO_INTERFACES);
+  ok(hr == S_OK, "IRichEditOle_GetObject got hr %#lx.\n", hr);
+  ok(reobj.sizel.cx == 800, "expected reobj.sizel.cx to be %ld, got %ld\n", 800L, reobj.sizel.cx);
+  ok(reobj.sizel.cy == 400, "expected reobj.sizel.cy to be %ld, got %ld\n", 400L, reobj.sizel.cy);
+  IOleClientSite_Release(clientsite);
+
+  testobj->line = __LINE__;
+  UpdateWindow(hwnd);
+  testobj->line = __LINE__;
+  flush_dispatch_messages();
+  ok(testobj->draw_count != 0, "expected draw_count to be nonzero, got %d\n", testobj->draw_count);
+
+  SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)"");
+  IOleObject_Release(&testobj->IOleObject_iface);
 
   if (callback)
   {
@@ -4476,8 +4968,8 @@ static void test_clipboard(void)
   ok(hr == S_OK, "Cut failed: 0x%08lx\n", hr);
   CLIPBOARD_RANGE_CONTAINS(range, 0, 4, "b\r\n c");
   hr = ITextDocument_Undo(doc, 1, NULL);
-  todo_wine ok(hr == S_OK, "Undo failed: 0x%08lx\n", hr);
-  TODO_CLIPBOARD_RANGE_CONTAINS(range, 0, 5, "ab\r\n c");
+  ok(hr == S_OK, "Undo failed: 0x%08lx\n", hr);
+  CLIPBOARD_RANGE_CONTAINS(range, 0, 5, "ab\r\n c");
 
   /* Cannot cut when read-only */
   SendMessageA(hwnd, EM_SETREADONLY, TRUE, 0);
@@ -4489,6 +4981,536 @@ static void test_clipboard(void)
   release_interfaces(&hwnd, &reole, &doc, NULL);
   ITextSelection_Release(selection);
   ITextRange_Release(range);
+}
+
+static void subtest_undo(const char *dummy_text)
+{
+  static const char *text_seq[] = {
+    "",
+    "1-alpha",
+    "2-beta",
+    "3-gamma",
+    "4-delta",
+    "5-epsilon",
+    "6-zeta",
+    "7-eta",
+  };
+  static LONG seq[] = { -1, -2, -3, -1, 1, 2, 3, 1, -5, 2, -1, 3, 1, 0 };
+  LONG i = 0, stack_pos = 0;
+  IRichEditOle *reole = NULL;
+  ITextDocument *doc = NULL;
+  ITextSelection *selection;
+  char buffer[1024] = "";
+  HRESULT hr;
+  HWND hwnd;
+  LONG count = 0;
+
+  winetest_push_context("(%Iu)", dummy_text ? strlen(dummy_text) : 0);
+
+  create_interfaces(&hwnd, &reole, &doc, &selection);
+
+  for (i = -2; i <= 2; i++)
+  {
+    if (i != tomFalse && i != tomTrue)
+    {
+      hr = ITextDocument_Undo(doc, i, NULL);
+      todo_wine_if(i >= 1)
+      ok(hr == (i >= 1 ? S_OK : S_FALSE), "(%ld@0) Undo: %#lx\n", i, hr);
+
+      count = 0xcccccccc;
+      hr = ITextDocument_Undo(doc, i, &count);
+      todo_wine_if(i >= 1)
+      ok(hr == (i >= 1 ? S_OK : S_FALSE), "(%ld@0) Undo: %#lx\n", i, hr);
+      todo_wine_if(i >= 1)
+      ok(count == (i >= 1 ? i : 0), "(%ld@0) Expected %ld, got %ld\n", i, i >= 0 ? i : 0, count);
+    }
+
+    hr = ITextDocument_Redo(doc, i, NULL);
+    ok(hr == (i == 0 ? S_OK : S_FALSE), "(%ld@0) Redo: %#lx\n", i, hr);
+
+    count = 0xcccccccc;
+    hr = ITextDocument_Redo(doc, i, &count);
+    ok(hr == (i == 0 ? S_OK : S_FALSE), "(%ld@0) Redo: %#lx\n", i, hr);
+    ok(count == 0, "(%ld@0) got %ld\n", i, count);
+  }
+
+  while (stack_pos < ARRAY_SIZE(text_seq) - 1)
+  {
+    stack_pos++;
+    if (dummy_text)
+    {
+      hr = ITextDocument_Undo(doc, tomSuspend, NULL);
+      ok(hr == S_FALSE, "(@%ld) Undo: %#lx\n", stack_pos, hr);
+      if (SUCCEEDED(hr))
+      {
+        SendMessageA(hwnd, EM_SETSEL, 0, 0);
+        SendMessageA(hwnd, EM_REPLACESEL, TRUE, (LPARAM)dummy_text);
+        SendMessageA(hwnd, EM_SETSEL, 0, strlen(dummy_text));
+        SendMessageA(hwnd, EM_REPLACESEL, TRUE, (LPARAM)"");
+        hr = ITextDocument_Undo(doc, tomResume, NULL);
+        ok(hr == S_FALSE, "(@%ld) Undo: %#lx\n", stack_pos, hr);
+      }
+    }
+    SendMessageA(hwnd, EM_SETSEL, 0, -1);
+    SendMessageA(hwnd, EM_REPLACESEL, TRUE, (LPARAM)text_seq[stack_pos]);
+  }
+
+  for (i = 0; i < ARRAY_SIZE(seq); i++)
+  {
+    LONG expect_count;
+
+    memset(buffer, 0, sizeof(buffer));
+    SendMessageA(hwnd, WM_GETTEXT, ARRAY_SIZE(buffer), (LPARAM)buffer);
+    ok(strcmp(buffer, text_seq[stack_pos]) == 0, "Expected %s, got %s\n",
+       wine_dbgstr_a(text_seq[stack_pos]), wine_dbgstr_a(buffer));
+
+    if (!seq[i]) break;
+
+    count = 0xcccccccc;
+    expect_count = labs(stack_pos - min(max(stack_pos + seq[i], 0), (LONG)ARRAY_SIZE(seq) - 1));
+    if (seq[i] < 0)
+    {
+      hr = ITextDocument_Undo(doc, -seq[i], &count);
+      ok(hr == S_OK, "(%ld@%ld) Undo: %#lx\n", i, stack_pos, hr);
+      ok(count == expect_count, "(%ld@%ld) Expected %ld, got %ld\n", i, stack_pos, expect_count, count);
+      stack_pos -= count;
+    }
+    else
+    {
+      hr = ITextDocument_Redo(doc, seq[i], &count);
+      ok(hr == (expect_count ? S_OK : S_FALSE), "(%ld@%ld) Redo: %#lx\n", i, stack_pos, hr);
+      ok(count == expect_count, "(%ld@%ld) Expected %ld, got %ld\n", i, stack_pos, expect_count, count);
+      stack_pos += count;
+    }
+
+    if (FAILED(hr) || count <= 0) break;
+  }
+
+  release_interfaces(&hwnd, &reole, &doc, &selection);
+  winetest_pop_context();
+}
+
+static void test_undo(void)
+{
+  subtest_undo(NULL);
+  subtest_undo("dummy 12345");
+}
+
+#define ok_msg_result(h,m,w,l,r) ok_msg_result_(__LINE__,#m,h,m,w,l,r)
+static void ok_msg_result_(int line, const char *desc, HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam, LRESULT expect)
+{
+  LRESULT lresult = SendMessageA(hwnd, message, wparam, lparam);
+  ok_(__FILE__,line)(lresult == expect, "%s: Expected %Id, got %Id\n", desc, expect, lresult);
+}
+
+enum editorUndoState {
+  firstUndoState = 0,
+  undoStateActive = 0,
+  undoStateSuspended = 1,
+  undoStateDisabled = 2,
+  numUndoStates = 3,
+};
+
+enum editorUndoStateAction {
+  firstUndoAction = 0,
+  undoActionNoOp = 0,
+  undoActionEnable = 1,
+  undoActionDisable = 2,
+  undoActionSuspend = 3,
+  undoActionResume = 4,
+  numUndoActions = 5
+};
+
+enum editorUndoStateTestFlags {
+  undoTestUseWindowMessages = 0x1,
+  undoTestResetUndoLimit = 0x2,
+  undoTestDoFirstUndo = 0x4,
+  undoTestDoFirstRedo = 0x8,
+  undoTestDoSecondUndoAfterEnable = 0x10,
+  undoTestMaxFlag = 0x20,
+};
+
+struct undo_test
+{
+  HWND hwnd;
+  ITextDocument *doc;
+  int test_flags;
+  enum editorUndoState undo_ctl_state;
+  LONG_PTR undo_limit;
+  BOOL last_undo_status;
+  BOOL last_redo_status;
+};
+
+static HRESULT perform_editor_undo_state_action(struct undo_test *inst, enum editorUndoStateAction action, LONG *count)
+{
+  HRESULT hr = S_OK;
+
+  if (count) *count = 0xcccccccc;
+
+  switch (action)
+  {
+    case undoActionNoOp:
+      if (count) *count = 0;
+      break;
+    case undoActionEnable:
+      if (inst->test_flags & undoTestResetUndoLimit)
+      {
+        LONG_PTR cur_undo_limit = SendMessageA(inst->hwnd, EM_SETUNDOLIMIT, inst->undo_limit, 0);
+        ok(cur_undo_limit == inst->undo_limit, "Expected undo limit %Id, got %Id\n",
+           inst->undo_limit, cur_undo_limit);
+        if (count) *count = 0;
+      }
+      else
+      {
+        hr = ITextDocument_Undo(inst->doc, tomTrue, count);
+        ok(hr == S_FALSE, "Undo: %#lx\n", hr);
+      }
+      if (SUCCEEDED(hr))
+      {
+        if (inst->undo_ctl_state == undoStateDisabled)
+        {
+          inst->undo_ctl_state = undoStateActive;
+        }
+        inst->last_undo_status = TRUE;
+      }
+      break;
+    case undoActionDisable:
+      hr = ITextDocument_Undo(inst->doc, tomFalse, count);
+      ok(hr == S_OK, "Undo: %#lx\n", hr);
+      if (SUCCEEDED(hr))
+      {
+        inst->undo_ctl_state = undoStateDisabled;
+        inst->last_undo_status = FALSE;
+        inst->last_redo_status = FALSE;
+      }
+      break;
+    case undoActionSuspend:
+      hr = ITextDocument_Undo(inst->doc, tomSuspend, count);
+      ok(hr == S_FALSE, "Undo: %#lx\n", hr);
+      if (SUCCEEDED(hr) && inst->undo_ctl_state == undoStateActive)
+      {
+        inst->undo_ctl_state = undoStateSuspended;
+      }
+      break;
+    case undoActionResume:
+      hr = ITextDocument_Undo(inst->doc, tomResume, count);
+      ok(hr == S_FALSE, "Undo: %#lx\n", hr);
+      if (SUCCEEDED(hr))
+      {
+        inst->undo_ctl_state = undoStateActive;
+      }
+      break;
+    default:
+      ok(0, "unreachable\n");
+      break;
+  }
+
+  if (count)
+  {
+    ok(*count == 0, "Got %ld\n", *count);
+  }
+  return hr;
+}
+
+static HRESULT set_editor_undo_state(struct undo_test *inst, enum editorUndoState state)
+{
+  HRESULT hr = S_OK;
+  if (inst->undo_ctl_state == state) return hr;
+  switch (state)
+  {
+    case undoStateActive:
+      if (FAILED(hr = perform_editor_undo_state_action(inst, undoActionEnable, NULL))) break;
+      if (FAILED(hr = perform_editor_undo_state_action(inst, undoActionResume, NULL))) break;
+      break;
+    case undoStateSuspended:
+      if (FAILED(hr = perform_editor_undo_state_action(inst, undoActionEnable, NULL))) break;
+      if (FAILED(hr = perform_editor_undo_state_action(inst, undoActionSuspend, NULL))) break;
+      break;
+    case undoStateDisabled:
+      if (FAILED(hr = perform_editor_undo_state_action(inst, undoActionDisable, NULL))) break;
+      break;
+    default:
+      ok(0, "unreachable\n");
+      break;
+  }
+  ok(inst->undo_ctl_state == state, "expected state %d, got %d\n", state, inst->undo_ctl_state);
+  ok(SUCCEEDED(hr), "cannot set state to %d: %#lx\n", undoStateActive, hr);
+  return hr;
+}
+
+#define perform_undo(i,c) perform_undo_(i,c,__LINE__)
+static BOOL perform_undo_(struct undo_test *inst, BOOL can_undo, int line)
+{
+  LONG count;
+  HRESULT hr;
+  BOOL result, expect;
+
+  if (inst->test_flags & undoTestUseWindowMessages)
+  {
+    LRESULT lres = SendMessageA(inst->hwnd, EM_UNDO, 0, 0);
+    ok_(__FILE__, line)(lres == FALSE || lres == TRUE, "unexpected LRESULT %#Ix\n", lres);
+    result = lres;
+  }
+  else
+  {
+    count = 0xcccccccc;
+    hr = ITextDocument_Undo(inst->doc, 1, &count);
+    ok_(__FILE__, line)(SUCCEEDED(hr), "got hr %#lx\n", hr);
+    ok_(__FILE__, line)(count == (hr == S_OK), "expected count %d, got %ld\n", hr == S_OK, count);
+    result = hr == S_OK && count > 0;
+  }
+
+  expect = FALSE;
+  if (inst->undo_ctl_state == undoStateActive)
+  {
+    if (can_undo) inst->last_undo_status = TRUE;
+    expect = inst->last_undo_status;
+  }
+  todo_wine_if(!can_undo && !result && expect)
+  ok_(__FILE__, line)(result == expect, "state %d: expected %d, got %d\n", inst->undo_ctl_state, expect, result);
+
+  return can_undo && result;
+}
+
+#define perform_redo(i,c) perform_redo_(i,c,__LINE__)
+static BOOL perform_redo_(struct undo_test *inst, BOOL can_redo, int line)
+{
+  LONG count;
+  HRESULT hr;
+  BOOL result, expect;
+
+  if (inst->test_flags & undoTestUseWindowMessages)
+  {
+    LRESULT lres = SendMessageA(inst->hwnd, EM_REDO, 0, 0);
+    ok_(__FILE__, line)(lres == FALSE || lres == TRUE, "unexpected LRESULT %#Ix\n", lres);
+    result = lres;
+  }
+  else
+  {
+    count = 0xcccccccc;
+    hr = ITextDocument_Redo(inst->doc, 1, &count);
+    ok_(__FILE__, line)(SUCCEEDED(hr), "got hr %#lx\n", hr);
+    ok_(__FILE__, line)(count == (hr == S_OK), "expected count %d, got %ld\n", hr == S_OK, count);
+    result = hr == S_OK && count > 0;
+  }
+
+  expect = FALSE;
+  if (inst->undo_ctl_state == undoStateActive)
+  {
+    if (can_redo) inst->last_redo_status = TRUE;
+    expect = inst->last_redo_status;
+  }
+  todo_wine_if(!can_redo && !result && expect)
+  ok_(__FILE__, line)(result == expect, "state %d: expected %d, got %d\n", inst->undo_ctl_state, expect, result);
+
+  return can_redo && result;
+}
+
+static HRESULT subtest_undo_control(struct undo_test *inst, enum editorUndoStateAction action)
+{
+  LONG undo_count, redo_count, count;
+  static const char text_foo[] = "foo";
+  static const char text_bar[] = "bar";
+  static const char *last_text, *last_text2;
+  char buffer[1024] = "";
+  HRESULT hr;
+
+  SendMessageA(inst->hwnd, EM_EMPTYUNDOBUFFER, 0, 0);
+  undo_count = redo_count = 0;
+  ok_msg_result(inst->hwnd, EM_CANUNDO, 0, 0, undo_count > 0);
+  ok_msg_result(inst->hwnd, EM_CANREDO, 0, 0, redo_count > 0);
+
+  SendMessageA(inst->hwnd, WM_SETTEXT, 0, (LPARAM)(last_text = ""));
+  SendMessageA(inst->hwnd, WM_GETTEXT, ARRAY_SIZE(buffer), (LPARAM)buffer);
+  last_text = "";
+  ok(strcmp(buffer, last_text) == 0,
+     "Expected %s, got %s\n", wine_dbgstr_a(""), wine_dbgstr_a(buffer));
+
+  SendMessageA(inst->hwnd, EM_SETSEL, 0, -1);
+  SendMessageA(inst->hwnd, EM_REPLACESEL, TRUE, (LPARAM)(last_text = text_foo));
+  if (inst->undo_ctl_state == undoStateActive) undo_count++, redo_count = 0;
+  ok_msg_result(inst->hwnd, EM_CANUNDO, 0, 0, undo_count > 0);
+  ok_msg_result(inst->hwnd, EM_CANREDO, 0, 0, redo_count > 0);
+  SendMessageA(inst->hwnd, WM_GETTEXT, ARRAY_SIZE(buffer), (LPARAM)buffer);
+  ok(strcmp(buffer, last_text) == 0, "Expected %s, got %s\n", wine_dbgstr_a(text_foo), wine_dbgstr_a(buffer));
+
+  hr = perform_editor_undo_state_action(inst, action, &count);
+  ok(SUCCEEDED(hr), "got %#lx\n", hr);
+  if (FAILED(hr)) return hr;
+  if (inst->undo_ctl_state == undoStateDisabled) undo_count = redo_count = 0;
+  ok_msg_result(inst->hwnd, EM_CANUNDO, 0, 0, undo_count > 0);
+  ok_msg_result(inst->hwnd, EM_CANREDO, 0, 0, redo_count > 0);
+
+  if (inst->test_flags & undoTestDoFirstUndo)
+  {
+    if (perform_undo(inst, undo_count > 0)) undo_count--, redo_count++, last_text = "";
+    ok_msg_result(inst->hwnd, EM_CANUNDO, 0, 0, undo_count > 0);
+    ok_msg_result(inst->hwnd, EM_CANREDO, 0, 0, redo_count > 0);
+    SendMessageA(inst->hwnd, WM_GETTEXT, ARRAY_SIZE(buffer), (LPARAM)buffer);
+    ok(strcmp(buffer, last_text) == 0, "Expected %s, got %s\n", wine_dbgstr_a(last_text), wine_dbgstr_a(buffer));
+  }
+
+  if (inst->test_flags & undoTestDoSecondUndoAfterEnable)
+  {
+    hr = perform_editor_undo_state_action(inst, undoActionEnable, &count);
+    ok(SUCCEEDED(hr), "got %#lx\n", hr);
+    if (FAILED(hr)) return hr;
+    ok_msg_result(inst->hwnd, EM_CANUNDO, 0, 0, undo_count > 0);
+    ok_msg_result(inst->hwnd, EM_CANREDO, 0, 0, redo_count > 0);
+
+    if (perform_undo(inst, undo_count > 0)) undo_count--, redo_count++, last_text = "";
+    ok_msg_result(inst->hwnd, EM_CANUNDO, 0, 0, undo_count > 0);
+    ok_msg_result(inst->hwnd, EM_CANREDO, 0, 0, redo_count > 0);
+    SendMessageA(inst->hwnd, WM_GETTEXT, ARRAY_SIZE(buffer), (LPARAM)buffer);
+    ok(strcmp(buffer, last_text) == 0, "Expected %s, got %s\n", wine_dbgstr_a(last_text), wine_dbgstr_a(buffer));
+  }
+
+  if (inst->test_flags & undoTestDoFirstRedo)
+  {
+    if (perform_redo(inst, redo_count > 0)) undo_count++, redo_count--, last_text = text_foo;
+    ok_msg_result(inst->hwnd, EM_CANUNDO, 0, 0, undo_count > 0);
+    ok_msg_result(inst->hwnd, EM_CANREDO, 0, 0, redo_count > 0);
+    SendMessageA(inst->hwnd, WM_GETTEXT, ARRAY_SIZE(buffer), (LPARAM)buffer);
+    ok(strcmp(buffer, last_text) == 0, "Expected %s, got %s\n", wine_dbgstr_a(last_text), wine_dbgstr_a(buffer));
+  }
+
+  SendMessageA(inst->hwnd, EM_SETSEL, 0, -1);
+  SendMessageA(inst->hwnd, EM_REPLACESEL, TRUE, (LPARAM)(last_text2 = text_bar));
+  if (inst->undo_ctl_state == undoStateActive) undo_count++, redo_count = 0;
+  ok_msg_result(inst->hwnd, EM_CANUNDO, 0, 0, undo_count > 0);
+  ok_msg_result(inst->hwnd, EM_CANREDO, 0, 0, redo_count > 0);
+  SendMessageA(inst->hwnd, WM_GETTEXT, ARRAY_SIZE(buffer), (LPARAM)buffer);
+  ok(strcmp(buffer, last_text2) == 0, "Expected %s, got %s\n", wine_dbgstr_a(last_text2), wine_dbgstr_a(buffer));
+
+  if (perform_undo(inst, undo_count > 0)) undo_count--, redo_count++, last_text2 = last_text;
+  ok_msg_result(inst->hwnd, EM_CANUNDO, 0, 0, undo_count > 0);
+  ok_msg_result(inst->hwnd, EM_CANREDO, 0, 0, redo_count > 0);
+  SendMessageA(inst->hwnd, WM_GETTEXT, ARRAY_SIZE(buffer), (LPARAM)buffer);
+  ok(strcmp(buffer, last_text2) == 0, "Expected %s, got %s\n", wine_dbgstr_a(last_text2), wine_dbgstr_a(buffer));
+
+  if (perform_redo(inst, redo_count > 0)) undo_count++, redo_count--, last_text2 = text_bar;
+  ok_msg_result(inst->hwnd, EM_CANUNDO, 0, 0, undo_count > 0);
+  ok_msg_result(inst->hwnd, EM_CANREDO, 0, 0, redo_count > 0);
+  SendMessageA(inst->hwnd, WM_GETTEXT, ARRAY_SIZE(buffer), (LPARAM)buffer);
+  ok(strcmp(buffer, last_text2) == 0, "Expected %s, got %s\n", wine_dbgstr_a(last_text2), wine_dbgstr_a(buffer));
+
+  return S_OK;
+}
+
+static void test_undo_control(void)
+{
+  enum editorUndoState state0;
+  enum editorUndoStateAction action0, action1;
+  IRichEditOle *reole = NULL;
+  ITextSelection *selection;
+  struct undo_test inst = { NULL };
+  HRESULT hr;
+
+  create_interfaces(&inst.hwnd, &reole, &inst.doc, &selection);
+  inst.undo_ctl_state = undoStateActive;
+  inst.last_undo_status = TRUE;
+  inst.last_redo_status = TRUE;
+  inst.undo_limit = SendMessageA(inst.hwnd, EM_SETUNDOLIMIT, 100, 0);
+  ok(inst.undo_limit >= 1, "Message EM_SETUNDOLIMIT returned %#Ix\n", inst.undo_limit);
+
+  if (SUCCEEDED(ITextDocument_Undo(inst.doc, 1, NULL)))
+  {
+    for (inst.test_flags = 0; inst.test_flags < undoTestMaxFlag; inst.test_flags++)
+    {
+      for (state0 = firstUndoState; state0 < numUndoStates; state0++)
+      {
+        for (action0 = firstUndoAction; action0 < numUndoActions; action0++)
+        {
+          for (action1 = firstUndoAction; action1 < numUndoActions; action1++)
+          {
+            winetest_push_context("%x:%d:%d >?:%d", inst.test_flags, state0, action0, action1);
+            hr = set_editor_undo_state(&inst, state0);
+            winetest_pop_context();
+
+            if (FAILED(hr)) continue;
+
+            winetest_push_context("%x:%d:%d+>?:%d", inst.test_flags, state0, action0, action1);
+            hr = subtest_undo_control(&inst, action0);
+            winetest_pop_context();
+
+            if (FAILED(hr)) continue;
+
+            winetest_push_context("%x:%d:%d>%d:%d+", inst.test_flags, state0, action0, inst.undo_ctl_state, action1);
+            subtest_undo_control(&inst, action1);
+            winetest_pop_context();
+          }
+        }
+      }
+    }
+  }
+
+  release_interfaces(&inst.hwnd, &reole, &inst.doc, &selection);
+}
+
+static void test_freeze(void)
+{
+  ITextSelection *selection = NULL;
+  DWORD lasterr, style1, style2;
+  IRichEditOle *reole = NULL;
+  ITextDocument *doc = NULL;
+  HRESULT hr;
+  LONG count;
+  HWND hwnd;
+
+  create_interfaces(&hwnd, &reole, &doc, &selection);
+
+  SetLastError(0xdeadbeef);
+  style1 = GetWindowLongW(hwnd, GWL_STYLE);
+  lasterr = GetLastError();
+  ok(lasterr == 0xdeadbeefUL, "GetLastError() returned %#lx\n", lasterr);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Freeze(doc, &count);
+  ok(hr == S_OK, "ITextDocument_Freeze returned %#lx\n", hr);
+  ok(count == 1, "expected count to be %d, got %ld\n", 1, count);
+
+  style2 = GetWindowLongW(hwnd, GWL_STYLE);
+  ok(style2 == style1, "expected window style to not change from %#lx, got %#lx\n", style1, style2);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Freeze(doc, &count);
+  ok(hr == S_OK, "ITextDocument_Freeze returned %#lx\n", hr);
+  ok(count == 2, "expected count to be %d, got %ld\n", 2, count);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Unfreeze(doc, &count);
+  ok(hr == S_FALSE, "ITextDocument_Unfreeze returned %#lx\n", hr);
+  ok(count == 1, "expected count to be %d, got %ld\n", 1, count);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Unfreeze(doc, &count);
+  ok(hr == S_OK, "ITextDocument_Unfreeze returned %#lx\n", hr);
+  ok(count == 0, "expected count to be %d, got %ld\n", 0, count);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Unfreeze(doc, &count);
+  ok(hr == S_OK, "ITextDocument_Unfreeze returned %#lx\n", hr);
+  ok(count == 0, "expected count to be %d, got %ld\n", 0, count);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Freeze(doc, &count);
+  ok(hr == S_OK, "ITextDocument_Freeze returned %#lx\n", hr);
+  ok(count == 1, "expected count to be %d, got %ld\n", 1, count);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Unfreeze(doc, &count);
+  ok(hr == S_OK, "ITextDocument_Unfreeze returned %#lx\n", hr);
+  ok(count == 0, "expected count to be %d, got %ld\n", 0, count);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Freeze(doc, NULL);
+  ok(hr == S_OK, "ITextDocument_Freeze returned %#lx\n", hr);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Unfreeze(doc, NULL);
+  ok(hr == S_OK, "ITextDocument_Unfreeze returned %#lx\n", hr);
+
+  release_interfaces(&hwnd, &reole, &doc, &selection);
 }
 
 START_TEST(richole)
@@ -4532,4 +5554,7 @@ START_TEST(richole)
   test_MoveEnd_story();
   test_character_movement();
   test_clipboard();
+  test_undo();
+  test_undo_control();
+  test_freeze();
 }

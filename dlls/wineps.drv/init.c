@@ -29,6 +29,9 @@
 #include "winnls.h"
 #include "winuser.h"
 #include "psdrv.h"
+#include "ddk/winddi.h"
+#include "ntf.h"
+#include "unixlib.h"
 #include "winspool.h"
 #include "wine/debug.h"
 
@@ -81,24 +84,197 @@ static const PSDRV_DEVMODE DefaultDevmode =
 /* dmPanningWidth */    0,
 /* dmPanningHeight */   0
   },
-  { /* dmDocPrivate */
-    /* dummy */ 0
-  },
-  { /* dmDrvPrivate */
-    /* numInstalledOptions */ 0
-  }
 };
 
 HINSTANCE PSDRV_hInstance = 0;
 HANDLE PSDRV_Heap = 0;
 
-static HFONT PSDRV_DefaultFont = 0;
-static const LOGFONTA DefaultLogFont = {
-    100, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET, 0, 0,
-    DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, ""
-};
+static BOOL import_ntf_from_reg(void)
+{
+    struct import_ntf_params params;
+    HANDLE hfile, hmap = NULL;
+    WCHAR path[MAX_PATH];
+    LARGE_INTEGER size;
+    char *data = NULL;
+    LSTATUS status;
+    HKEY hkey;
+    DWORD len;
+    BOOL ret;
 
-static const struct gdi_dc_funcs psdrv_funcs;
+    if (RegOpenKeyW(HKEY_CURRENT_USER, L"Software\\Wine\\Fonts", &hkey))
+        return TRUE;
+    status = RegQueryValueExW(hkey, L"NTFFile", NULL, NULL, (BYTE *)path, &len);
+    RegCloseKey(hkey);
+    if (status)
+        return TRUE;
+
+    hfile = CreateFileW(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, 0);
+    if (hfile != INVALID_HANDLE_VALUE)
+    {
+        if (!GetFileSizeEx(hfile, &size))
+            size.QuadPart = 0;
+        hmap = CreateFileMappingW(hfile, NULL, PAGE_READONLY, 0, 0, NULL);
+        CloseHandle(hfile);
+    }
+    if (hmap)
+    {
+        data = MapViewOfFile(hmap, FILE_MAP_READ, 0, 0, 0);
+        CloseHandle(hmap);
+    }
+    if (!data)
+    {
+        WARN("Error loading NTF file: %s\n", debugstr_w(path));
+        return TRUE;
+    }
+
+    params.data = data;
+    params.size = size.QuadPart;
+    ret = WINE_UNIX_CALL(unix_import_ntf, &params);
+    UnmapViewOfFile(data);
+    return ret;
+}
+
+static BOOL convert_afm_to_ntf(void)
+{
+    int i, count, size, off, metrics_size;
+    struct import_ntf_params params;
+    struct width_range *width_range;
+    struct glyph_set *glyph_set;
+    struct ntf_header *header;
+    struct font_mtx *font_mtx;
+    struct list_entry *list;
+    struct code_page *cp;
+    char glyph_set_name[9];
+    char *data, *new_data;
+    AFMLISTENTRY *afmle;
+    IFIMETRICS *metrics;
+    FONTFAMILY *family;
+
+    count = 0;
+    for (family = PSDRV_AFMFontList; family; family = family->next)
+    {
+        for(afmle = family->afmlist; afmle; afmle = afmle->next)
+            count++;
+    }
+    size = sizeof(*header) + sizeof(*list) * count * 2;
+    data = calloc(size, 1);
+
+    if (!data)
+        return FALSE;
+    header = (void *)data;
+    header->glyph_set_count = count;
+    header->glyph_set_off = sizeof(*header);
+    header->font_mtx_count = count;
+    header->font_mtx_off = header->glyph_set_off + sizeof(*list) * count;
+
+    count = 0;
+    off = size;
+    for (family = PSDRV_AFMFontList; family; family = family->next)
+    {
+        for(afmle = family->afmlist; afmle; afmle = afmle->next)
+        {
+            sprintf(glyph_set_name, "%x", count);
+
+            list = (void *)(data + header->glyph_set_off + sizeof(*list) * count);
+            list->name_off = off + sizeof(*glyph_set);
+            list->size = sizeof(*glyph_set) + strlen(glyph_set_name) + 1 + sizeof(*cp) +
+                sizeof(short) * afmle->afm->NumofMetrics;
+            list->off = off;
+            size += list->size;
+            new_data = realloc(data, size);
+            if (!new_data)
+            {
+                free(data);
+                return FALSE;
+            }
+            data = new_data;
+            header = (void *)data;
+            memset(data + off, 0, size - off);
+
+            glyph_set = (void *)(data + off);
+            glyph_set->size = size - off;
+            glyph_set->flags = 1;
+            glyph_set->name_off = sizeof(*glyph_set);
+            glyph_set->glyph_count = afmle->afm->NumofMetrics;
+            glyph_set->cp_count = 1;
+            glyph_set->cp_off = glyph_set->name_off + strlen(glyph_set_name) + 1;
+            glyph_set->glyph_set_off = glyph_set->cp_off + sizeof(*cp);
+            strcpy(data + off + glyph_set->name_off, glyph_set_name);
+            cp = (void *)(data + off + glyph_set->cp_off);
+            cp->cp = 0xffff;
+            for (i = 0; i < afmle->afm->NumofMetrics; i++)
+                *(WCHAR*)(data + off + glyph_set->glyph_set_off + i * sizeof(short)) = afmle->afm->Metrics[i].UV;
+            off = size;
+
+            metrics_size = sizeof(IFIMETRICS) +
+                (wcslen(afmle->afm->FamilyName) + 1) * sizeof(WCHAR);
+            list = (void *)(data + header->font_mtx_off + sizeof(*list) * count);
+            list->name_off = off + sizeof(*font_mtx);
+            list->size = sizeof(*font_mtx) + strlen(afmle->afm->FontName) + 1 +
+                strlen(glyph_set_name) + 1 + metrics_size +
+                (afmle->afm->IsFixedPitch ? 0 : sizeof(*width_range) * afmle->afm->NumofMetrics);
+            list->off = off;
+            size += list->size;
+            new_data = realloc(data, size);
+            if (!new_data)
+            {
+                free(data);
+                return FALSE;
+            }
+            data = new_data;
+            header = (void *)data;
+            memset(data + off, 0, size - off);
+
+            font_mtx = (void *)(data + off);
+            font_mtx->size = size - off;
+            font_mtx->name_off = sizeof(*font_mtx);
+            font_mtx->glyph_set_name_off = font_mtx->name_off + strlen(afmle->afm->FontName) + 1;
+            font_mtx->glyph_count = afmle->afm->NumofMetrics;
+            font_mtx->metrics_off = font_mtx->glyph_set_name_off + strlen(glyph_set_name) + 1;
+            font_mtx->width_count = afmle->afm->IsFixedPitch ? 0 : afmle->afm->NumofMetrics;
+            font_mtx->width_off = font_mtx->metrics_off + metrics_size;
+            font_mtx->def_width = afmle->afm->Metrics[0].WX;
+            strcpy(data + off + font_mtx->name_off, afmle->afm->FontName);
+            strcpy(data + off + font_mtx->glyph_set_name_off, glyph_set_name);
+            metrics = (void *)(data + off + font_mtx->metrics_off);
+            metrics->cjThis = metrics_size;
+            metrics->dpwszFamilyName = sizeof(*metrics);
+            if (afmle->afm->IsFixedPitch)
+                metrics->jWinPitchAndFamily |= FIXED_PITCH;
+            metrics->usWinWeight = afmle->afm->Weight;
+            if (afmle->afm->ItalicAngle != 0.0)
+                metrics->fsSelection |= FM_SEL_ITALIC;
+            if (afmle->afm->Weight == FW_BOLD)
+                metrics->fsSelection |= FM_SEL_BOLD;
+            metrics->fwdUnitsPerEm = afmle->afm->WinMetrics.usUnitsPerEm;
+            metrics->fwdWinAscender = afmle->afm->WinMetrics.usWinAscent;
+            metrics->fwdWinDescender = afmle->afm->WinMetrics.usWinDescent;
+            metrics->fwdMacAscender = afmle->afm->WinMetrics.sAscender;
+            metrics->fwdMacDescender = afmle->afm->WinMetrics.sDescender;
+            metrics->fwdMacLineGap = afmle->afm->WinMetrics.sLineGap;
+            metrics->fwdAveCharWidth = afmle->afm->WinMetrics.sAvgCharWidth;
+            metrics->rclFontBox.left = afmle->afm->FontBBox.llx;
+            metrics->rclFontBox.top = afmle->afm->FontBBox.ury;
+            metrics->rclFontBox.right = afmle->afm->FontBBox.urx;
+            metrics->rclFontBox.bottom = afmle->afm->FontBBox.lly;
+            wcscpy((WCHAR *)((char *)metrics + metrics->dpwszFamilyName), afmle->afm->FamilyName);
+            width_range = (void *)(data + off + font_mtx->width_off);
+            for (i = 0; i < font_mtx->width_count; i++)
+            {
+                width_range[i].first = i;
+                width_range[i].count = 1;
+                width_range[i].width = afmle->afm->Metrics[i].WX;
+            }
+            off = size;
+
+            count++;
+        }
+    }
+
+    params.data = data;
+    params.size = size;
+    return WINE_UNIX_CALL(unix_import_ntf, &params);
+}
 
 /*********************************************************************
  *	     DllMain
@@ -113,8 +289,12 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
     switch(reason) {
 
 	case DLL_PROCESS_ATTACH:
+        {
             PSDRV_hInstance = hinst;
             DisableThreadLibraryCalls(hinst);
+
+            if (__wine_init_unix_call())
+                return FALSE;
 
 	    PSDRV_Heap = HeapCreate(0, 0x10000, 0);
 	    if (PSDRV_Heap == NULL)
@@ -125,16 +305,18 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
 		return FALSE;
 	    }
 
-	    PSDRV_DefaultFont = CreateFontIndirectA(&DefaultLogFont);
-	    if (PSDRV_DefaultFont == NULL) {
-		HeapDestroy(PSDRV_Heap);
-		return FALSE;
-	    }
+            if (!convert_afm_to_ntf() || !import_ntf_from_reg())
+            {
+                WINE_UNIX_CALL(unix_free_printer_info, NULL);
+                HeapDestroy(PSDRV_Heap);
+                return FALSE;
+            }
             break;
+        }
 
 	case DLL_PROCESS_DETACH:
             if (reserved) break;
-	    DeleteObject( PSDRV_DefaultFont );
+            WINE_UNIX_CALL(unix_free_printer_info, NULL);
 	    HeapDestroy( PSDRV_Heap );
             break;
     }
@@ -227,330 +409,194 @@ static void dump_devmode(const DEVMODEW *dm)
     TRACE("dmPelsHeight %lu\n", dm->dmPelsHeight);
 }
 
-static void PSDRV_UpdateDevCaps( PSDRV_PDEVICE *physDev )
+static void PSDRV_UpdateDevCaps( print_ctx *ctx )
 {
     PAGESIZE *page;
     RESOLUTION *res;
     INT width = 0, height = 0, resx = 0, resy = 0;
 
-    dump_devmode(&physDev->Devmode->dmPublic);
+    dump_devmode(&ctx->Devmode->dmPublic);
 
-    if (physDev->Devmode->dmPublic.dmFields & (DM_PRINTQUALITY | DM_YRESOLUTION | DM_LOGPIXELS))
+    if (ctx->Devmode->dmPublic.dmFields & (DM_PRINTQUALITY | DM_YRESOLUTION | DM_LOGPIXELS))
     {
-        if (physDev->Devmode->dmPublic.dmFields & DM_PRINTQUALITY)
-            resx = resy = physDev->Devmode->dmPublic.dmPrintQuality;
+        if (ctx->Devmode->dmPublic.dmFields & DM_PRINTQUALITY)
+            resx = resy = ctx->Devmode->dmPublic.dmPrintQuality;
 
-        if (physDev->Devmode->dmPublic.dmFields & DM_YRESOLUTION)
-            resy = physDev->Devmode->dmPublic.dmYResolution;
+        if (ctx->Devmode->dmPublic.dmFields & DM_YRESOLUTION)
+            resy = ctx->Devmode->dmPublic.dmYResolution;
 
-        if (physDev->Devmode->dmPublic.dmFields & DM_LOGPIXELS)
-            resx = resy = physDev->Devmode->dmPublic.dmLogPixels;
+        if (ctx->Devmode->dmPublic.dmFields & DM_LOGPIXELS)
+            resx = resy = ctx->Devmode->dmPublic.dmLogPixels;
 
-        LIST_FOR_EACH_ENTRY(res, &physDev->pi->ppd->Resolutions, RESOLUTION, entry)
+        LIST_FOR_EACH_ENTRY(res, &ctx->pi->ppd->Resolutions, RESOLUTION, entry)
         {
             if (res->resx == resx && res->resy == resy)
             {
-                physDev->logPixelsX = resx;
-                physDev->logPixelsY = resy;
+                ctx->logPixelsX = resx;
+                ctx->logPixelsY = resy;
                 break;
             }
         }
 
-        if (&res->entry == &physDev->pi->ppd->Resolutions)
+        if (&res->entry == &ctx->pi->ppd->Resolutions)
         {
             WARN("Requested resolution %dx%d is not supported by device\n", resx, resy);
-            physDev->logPixelsX = physDev->pi->ppd->DefaultResolution;
-            physDev->logPixelsY = physDev->logPixelsX;
+            ctx->logPixelsX = ctx->pi->ppd->DefaultResolution;
+            ctx->logPixelsY = ctx->logPixelsX;
         }
     }
     else
     {
-        WARN("Using default device resolution %d\n", physDev->pi->ppd->DefaultResolution);
-        physDev->logPixelsX = physDev->pi->ppd->DefaultResolution;
-        physDev->logPixelsY = physDev->logPixelsX;
+        WARN("Using default device resolution %d\n", ctx->pi->ppd->DefaultResolution);
+        ctx->logPixelsX = ctx->pi->ppd->DefaultResolution;
+        ctx->logPixelsY = ctx->logPixelsX;
     }
 
-    if(physDev->Devmode->dmPublic.dmFields & DM_PAPERSIZE) {
-        LIST_FOR_EACH_ENTRY(page, &physDev->pi->ppd->PageSizes, PAGESIZE, entry) {
-	    if(page->WinPage == physDev->Devmode->dmPublic.dmPaperSize)
+    if(ctx->Devmode->dmPublic.dmFields & DM_PAPERSIZE) {
+        LIST_FOR_EACH_ENTRY(page, &ctx->pi->ppd->PageSizes, PAGESIZE, entry) {
+	    if(page->WinPage == ctx->Devmode->dmPublic.dmPaperSize)
 	        break;
 	}
 
-	if(&page->entry == &physDev->pi->ppd->PageSizes) {
+	if(&page->entry == &ctx->pi->ppd->PageSizes) {
 	    FIXME("Can't find page\n");
-            SetRectEmpty(&physDev->ImageableArea);
-	    physDev->PageSize.cx = 0;
-	    physDev->PageSize.cy = 0;
+            SetRectEmpty(&ctx->ImageableArea);
+	    ctx->PageSize.cx = 0;
+	    ctx->PageSize.cy = 0;
 	} else if(page->ImageableArea) {
-	  /* physDev sizes in device units; ppd sizes in 1/72" */
-            SetRect(&physDev->ImageableArea, page->ImageableArea->llx * physDev->logPixelsX / 72,
-                    page->ImageableArea->ury * physDev->logPixelsY / 72,
-                    page->ImageableArea->urx * physDev->logPixelsX / 72,
-                    page->ImageableArea->lly * physDev->logPixelsY / 72);
-	    physDev->PageSize.cx = page->PaperDimension->x *
-	      physDev->logPixelsX / 72;
-	    physDev->PageSize.cy = page->PaperDimension->y *
-	      physDev->logPixelsY / 72;
+	  /* ctx sizes in device units; ppd sizes in 1/72" */
+            SetRect(&ctx->ImageableArea, page->ImageableArea->llx * ctx->logPixelsX / 72,
+                    page->ImageableArea->ury * ctx->logPixelsY / 72,
+                    page->ImageableArea->urx * ctx->logPixelsX / 72,
+                    page->ImageableArea->lly * ctx->logPixelsY / 72);
+	    ctx->PageSize.cx = page->PaperDimension->x *
+	      ctx->logPixelsX / 72;
+	    ctx->PageSize.cy = page->PaperDimension->y *
+	      ctx->logPixelsY / 72;
 	} else {
-	    physDev->ImageableArea.left = physDev->ImageableArea.bottom = 0;
-	    physDev->ImageableArea.right = physDev->PageSize.cx =
-	      page->PaperDimension->x * physDev->logPixelsX / 72;
-	    physDev->ImageableArea.top = physDev->PageSize.cy =
-	      page->PaperDimension->y * physDev->logPixelsY / 72;
+	    ctx->ImageableArea.left = ctx->ImageableArea.bottom = 0;
+	    ctx->ImageableArea.right = ctx->PageSize.cx =
+	      page->PaperDimension->x * ctx->logPixelsX / 72;
+	    ctx->ImageableArea.top = ctx->PageSize.cy =
+	      page->PaperDimension->y * ctx->logPixelsY / 72;
 	}
-    } else if((physDev->Devmode->dmPublic.dmFields & DM_PAPERLENGTH) &&
-	      (physDev->Devmode->dmPublic.dmFields & DM_PAPERWIDTH)) {
-      /* physDev sizes in device units; Devmode sizes in 1/10 mm */
-        physDev->ImageableArea.left = physDev->ImageableArea.bottom = 0;
-	physDev->ImageableArea.right = physDev->PageSize.cx =
-	  physDev->Devmode->dmPublic.dmPaperWidth * physDev->logPixelsX / 254;
-	physDev->ImageableArea.top = physDev->PageSize.cy =
-	  physDev->Devmode->dmPublic.dmPaperLength * physDev->logPixelsY / 254;
+    } else if((ctx->Devmode->dmPublic.dmFields & DM_PAPERLENGTH) &&
+	      (ctx->Devmode->dmPublic.dmFields & DM_PAPERWIDTH)) {
+      /* ctx sizes in device units; Devmode sizes in 1/10 mm */
+        ctx->ImageableArea.left = ctx->ImageableArea.bottom = 0;
+	ctx->ImageableArea.right = ctx->PageSize.cx =
+	  ctx->Devmode->dmPublic.dmPaperWidth * ctx->logPixelsX / 254;
+	ctx->ImageableArea.top = ctx->PageSize.cy =
+	  ctx->Devmode->dmPublic.dmPaperLength * ctx->logPixelsY / 254;
     } else {
-        FIXME("Odd dmFields %lx\n", physDev->Devmode->dmPublic.dmFields);
-        SetRectEmpty(&physDev->ImageableArea);
-	physDev->PageSize.cx = 0;
-	physDev->PageSize.cy = 0;
+        FIXME("Odd dmFields %lx\n", ctx->Devmode->dmPublic.dmFields);
+        SetRectEmpty(&ctx->ImageableArea);
+	ctx->PageSize.cx = 0;
+	ctx->PageSize.cy = 0;
     }
 
-    TRACE("ImageableArea = %s: PageSize = %ldx%ld\n", wine_dbgstr_rect(&physDev->ImageableArea),
-	  physDev->PageSize.cx, physDev->PageSize.cy);
+    TRACE("ImageableArea = %s: PageSize = %ldx%ld\n", wine_dbgstr_rect(&ctx->ImageableArea),
+	  ctx->PageSize.cx, ctx->PageSize.cy);
 
     /* these are in device units */
-    width = physDev->ImageableArea.right - physDev->ImageableArea.left;
-    height = physDev->ImageableArea.top - physDev->ImageableArea.bottom;
+    width = ctx->ImageableArea.right - ctx->ImageableArea.left;
+    height = ctx->ImageableArea.top - ctx->ImageableArea.bottom;
 
-    if(physDev->Devmode->dmPublic.dmOrientation == DMORIENT_PORTRAIT) {
-        physDev->horzRes = width;
-        physDev->vertRes = height;
+    if(ctx->Devmode->dmPublic.dmOrientation == DMORIENT_PORTRAIT) {
+        ctx->horzRes = width;
+        ctx->vertRes = height;
     } else {
-        physDev->horzRes = height;
-        physDev->vertRes = width;
+        ctx->horzRes = height;
+        ctx->vertRes = width;
     }
 
     /* these are in mm */
-    physDev->horzSize = (physDev->horzRes * 25.4) / physDev->logPixelsX;
-    physDev->vertSize = (physDev->vertRes * 25.4) / physDev->logPixelsY;
+    ctx->horzSize = (ctx->horzRes * 25.4) / ctx->logPixelsX;
+    ctx->vertSize = (ctx->vertRes * 25.4) / ctx->logPixelsY;
 
     TRACE("devcaps: horzSize = %dmm, vertSize = %dmm, "
 	  "horzRes = %d, vertRes = %d\n",
-	  physDev->horzSize, physDev->vertSize,
-	  physDev->horzRes, physDev->vertRes);
+	  ctx->horzSize, ctx->vertSize,
+	  ctx->horzRes, ctx->vertRes);
 }
 
-static PSDRV_PDEVICE *create_psdrv_physdev( PRINTERINFO *pi )
+print_ctx *create_print_ctx( HDC hdc, const WCHAR *device,
+                                     const DEVMODEW *devmode )
 {
-    PSDRV_PDEVICE *physDev;
+    PRINTERINFO *pi = PSDRV_FindPrinterInfo( device );
+    print_ctx *ctx;
 
-    physDev = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*physDev) );
-    if (!physDev) return NULL;
-
-    physDev->Devmode = HeapAlloc( GetProcessHeap(), 0, sizeof(PSDRV_DEVMODE) );
-    if (!physDev->Devmode)
+    if (!pi) return NULL;
+    if (!pi->Fonts)
     {
-        HeapFree( GetProcessHeap(), 0, physDev );
-	return NULL;
-    }
-
-    *physDev->Devmode = *pi->Devmode;
-    physDev->pi = pi;
-    physDev->logPixelsX = pi->ppd->DefaultResolution;
-    physDev->logPixelsY = pi->ppd->DefaultResolution;
-    return physDev;
-}
-
-/**********************************************************************
- *	     PSDRV_CreateDC
- */
-static BOOL CDECL PSDRV_CreateDC( PHYSDEV *pdev, LPCWSTR device, LPCWSTR output,
-                                  const DEVMODEW *initData )
-{
-    PSDRV_PDEVICE *physDev;
-    PRINTERINFO *pi;
-
-    TRACE("(%s %s %p)\n", debugstr_w(device), debugstr_w(output), initData);
-
-    if (!device) return FALSE;
-    pi = PSDRV_FindPrinterInfo( device );
-    if(!pi) return FALSE;
-
-    if(!pi->Fonts) {
         RASTERIZER_STATUS status;
-        if(!GetRasterizerCaps(&status, sizeof(status)) ||
-           !(status.wFlags & TT_AVAILABLE) ||
-           !(status.wFlags & TT_ENABLED)) {
-            MESSAGE("Disabling printer %s since it has no builtin fonts and there are no TrueType fonts available.\n",
-                    debugstr_w(device));
+        if (!GetRasterizerCaps( &status, sizeof(status) ) ||
+                !(status.wFlags & TT_AVAILABLE) ||
+                !(status.wFlags & TT_ENABLED))
+        {
+            MESSAGE( "Disabling printer %s since it has no builtin fonts and "
+                    "there are no TrueType fonts available.\n", debugstr_w(device) );
             return FALSE;
         }
     }
 
-    if (!(physDev = create_psdrv_physdev( pi ))) return FALSE;
+    ctx = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ctx) );
+    if (!ctx) return NULL;
 
-    if (output && *output) physDev->job.output = strdupW( output );
-
-    if(initData)
+    ctx->Devmode = HeapAlloc( GetProcessHeap(), 0,
+            pi->Devmode->dmPublic.dmSize + pi->Devmode->dmPublic.dmDriverExtra );
+    if (!ctx->Devmode)
     {
-        dump_devmode(initData);
-        PSDRV_MergeDevmodes(physDev->Devmode, (const PSDRV_DEVMODE *)initData, pi);
+        HeapFree( GetProcessHeap(), 0, ctx );
+	return NULL;
     }
 
-    PSDRV_UpdateDevCaps(physDev);
-    SelectObject( (*pdev)->hdc, PSDRV_DefaultFont );
-    push_dc_driver( pdev, &physDev->dev, &psdrv_funcs );
-    return TRUE;
+    memcpy( ctx->Devmode, pi->Devmode,
+            pi->Devmode->dmPublic.dmSize + pi->Devmode->dmPublic.dmDriverExtra );
+    ctx->pi = pi;
+    ctx->logPixelsX = pi->ppd->DefaultResolution;
+    ctx->logPixelsY = pi->ppd->DefaultResolution;
+
+    if (devmode)
+    {
+        dump_devmode( devmode );
+        PSDRV_MergeDevmodes( ctx->Devmode, devmode, pi );
+    }
+
+    PSDRV_UpdateDevCaps( ctx );
+    ctx->hdc = hdc;
+    SelectObject( hdc, GetStockObject( DEVICE_DEFAULT_FONT ));
+    return ctx;
 }
-
-
-/**********************************************************************
- *	     PSDRV_CreateCompatibleDC
- */
-static BOOL CDECL PSDRV_CreateCompatibleDC( PHYSDEV orig, PHYSDEV *pdev )
-{
-    HDC hdc = (*pdev)->hdc;
-    PSDRV_PDEVICE *physDev, *orig_dev = get_psdrv_dev( orig );
-    PRINTERINFO *pi = PSDRV_FindPrinterInfo( orig_dev->pi->friendly_name );
-
-    if (!pi) return FALSE;
-    if (!(physDev = create_psdrv_physdev( pi ))) return FALSE;
-    PSDRV_MergeDevmodes( physDev->Devmode, orig_dev->Devmode, pi );
-    PSDRV_UpdateDevCaps(physDev);
-    SelectObject( hdc, PSDRV_DefaultFont );
-    push_dc_driver( pdev, &physDev->dev, &psdrv_funcs );
-    return TRUE;
-}
-
-
-
-/**********************************************************************
- *	     PSDRV_DeleteDC
- */
-static BOOL CDECL PSDRV_DeleteDC( PHYSDEV dev )
-{
-    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
-
-    TRACE("\n");
-
-    HeapFree( GetProcessHeap(), 0, physDev->Devmode );
-    HeapFree( GetProcessHeap(), 0, physDev->job.output );
-    HeapFree( GetProcessHeap(), 0, physDev );
-
-    return TRUE;
-}
-
 
 /**********************************************************************
  *	     ResetDC   (WINEPS.@)
  */
-static BOOL CDECL PSDRV_ResetDC( PHYSDEV dev, const DEVMODEW *lpInitData )
+BOOL CDECL PSDRV_ResetDC( print_ctx *ctx, const DEVMODEW *lpInitData )
 {
-    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
-
     if (lpInitData)
     {
-        PSDRV_MergeDevmodes(physDev->Devmode, (const PSDRV_DEVMODE *)lpInitData, physDev->pi);
-        PSDRV_UpdateDevCaps(physDev);
+        PSDRV_MergeDevmodes(ctx->Devmode, lpInitData, ctx->pi);
+        PSDRV_UpdateDevCaps(ctx);
     }
     return TRUE;
 }
 
-/***********************************************************************
- *           GetDeviceCaps    (WINEPS.@)
- */
-static INT CDECL PSDRV_GetDeviceCaps( PHYSDEV dev, INT cap )
-{
-    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
-
-    TRACE("%p,%d\n", dev->hdc, cap);
-
-    switch(cap)
-    {
-    case DRIVERVERSION:
-        return 0;
-    case TECHNOLOGY:
-        return DT_RASPRINTER;
-    case HORZSIZE:
-        return MulDiv(physDev->horzSize, 100, physDev->Devmode->dmPublic.dmScale);
-    case VERTSIZE:
-        return MulDiv(physDev->vertSize, 100, physDev->Devmode->dmPublic.dmScale);
-    case HORZRES:
-        return physDev->horzRes;
-    case VERTRES:
-        return physDev->vertRes;
-    case BITSPIXEL:
-        /* Although Windows returns 1 for monochrome printers, we want
-           CreateCompatibleBitmap to provide something other than 1 bpp */
-        return 32;
-    case NUMPENS:
-        return 10;
-    case NUMFONTS:
-        return 39;
-    case NUMCOLORS:
-        return -1;
-    case PDEVICESIZE:
-        return sizeof(PSDRV_PDEVICE);
-    case TEXTCAPS:
-        return TC_CR_ANY | TC_VA_ABLE; /* psdrv 0x59f7 */
-    case RASTERCAPS:
-        return (RC_BITBLT | RC_BITMAP64 | RC_GDI20_OUTPUT | RC_DIBTODEV |
-                RC_STRETCHBLT | RC_STRETCHDIB); /* psdrv 0x6e99 */
-    case ASPECTX:
-        return physDev->logPixelsX;
-    case ASPECTY:
-        return physDev->logPixelsY;
-    case LOGPIXELSX:
-        return MulDiv(physDev->logPixelsX, physDev->Devmode->dmPublic.dmScale, 100);
-    case LOGPIXELSY:
-        return MulDiv(physDev->logPixelsY, physDev->Devmode->dmPublic.dmScale, 100);
-    case NUMRESERVED:
-        return 0;
-    case COLORRES:
-        return 0;
-    case PHYSICALWIDTH:
-        return (physDev->Devmode->dmPublic.dmOrientation == DMORIENT_LANDSCAPE) ?
-	  physDev->PageSize.cy : physDev->PageSize.cx;
-    case PHYSICALHEIGHT:
-        return (physDev->Devmode->dmPublic.dmOrientation == DMORIENT_LANDSCAPE) ?
-	  physDev->PageSize.cx : physDev->PageSize.cy;
-    case PHYSICALOFFSETX:
-      if(physDev->Devmode->dmPublic.dmOrientation == DMORIENT_LANDSCAPE) {
-          if(physDev->pi->ppd->LandscapeOrientation == -90)
-	      return physDev->PageSize.cy - physDev->ImageableArea.top;
-	  else
-	      return physDev->ImageableArea.bottom;
-      }
-      return physDev->ImageableArea.left;
-
-    case PHYSICALOFFSETY:
-      if(physDev->Devmode->dmPublic.dmOrientation == DMORIENT_LANDSCAPE) {
-          if(physDev->pi->ppd->LandscapeOrientation == -90)
-	      return physDev->PageSize.cx - physDev->ImageableArea.right;
-	  else
-	      return physDev->ImageableArea.left;
-      }
-      return physDev->PageSize.cy - physDev->ImageableArea.top;
-
-    default:
-        dev = GET_NEXT_PHYSDEV( dev, pGetDeviceCaps );
-        return dev->funcs->pGetDeviceCaps( dev, cap );
-    }
-}
-
-static PRINTER_ENUM_VALUESA *load_font_sub_table( HANDLE printer, DWORD *num_entries )
+static PRINTER_ENUM_VALUESW *load_font_sub_table( HANDLE printer, DWORD *num_entries )
 {
     DWORD res, needed, num;
-    PRINTER_ENUM_VALUESA *table = NULL;
-    static const char fontsubkey[] = "PrinterDriverData\\FontSubTable";
+    PRINTER_ENUM_VALUESW *table = NULL;
+    static const WCHAR fontsubkey[] = L"PrinterDriverData\\FontSubTable";
 
     *num_entries = 0;
 
-    res = EnumPrinterDataExA( printer, fontsubkey, NULL, 0, &needed, &num );
+    res = EnumPrinterDataExW( printer, fontsubkey, NULL, 0, &needed, &num );
     if (res != ERROR_MORE_DATA) return NULL;
 
     table = HeapAlloc( PSDRV_Heap, 0, needed );
     if (!table) return NULL;
 
-    res = EnumPrinterDataExA( printer, fontsubkey, (LPBYTE)table, needed, &needed, &num );
+    res = EnumPrinterDataExW( printer, fontsubkey, (LPBYTE)table, needed, &needed, &num );
     if (res != ERROR_SUCCESS)
     {
         HeapFree( PSDRV_Heap, 0, table );
@@ -561,7 +607,7 @@ static PRINTER_ENUM_VALUESA *load_font_sub_table( HANDLE printer, DWORD *num_ent
     return table;
 }
 
-static PSDRV_DEVMODE *get_printer_devmode( HANDLE printer )
+static PSDRV_DEVMODE *get_printer_devmode( HANDLE printer, int size )
 {
     DWORD needed, dm_size;
     BOOL res;
@@ -571,7 +617,7 @@ static PSDRV_DEVMODE *get_printer_devmode( HANDLE printer )
     GetPrinterW( printer, 9, NULL, 0, &needed );
     if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) return NULL;
 
-    info = HeapAlloc( PSDRV_Heap, 0, needed );
+    info = HeapAlloc( PSDRV_Heap, 0, max(needed, size) );
     res = GetPrinterW( printer, 9, (BYTE *)info, needed, &needed );
     if (!res || !info->pDevMode)
     {
@@ -592,24 +638,25 @@ static PSDRV_DEVMODE *get_printer_devmode( HANDLE printer )
     return dm;
 }
 
-static PSDRV_DEVMODE *get_devmode( HANDLE printer, const WCHAR *name, BOOL *is_default )
+static PSDRV_DEVMODE *get_devmode( HANDLE printer, const WCHAR *name, BOOL *is_default, int size )
 {
-    PSDRV_DEVMODE *dm = get_printer_devmode( printer );
+    PSDRV_DEVMODE *dm = get_printer_devmode( printer, size );
 
     *is_default = FALSE;
 
-    if (dm && dm->dmPublic.dmSize + dm->dmPublic.dmDriverExtra >= sizeof(DefaultDevmode))
+    if (dm && (dm->dmPublic.dmFields & DefaultDevmode.dmPublic.dmFields) ==
+            DefaultDevmode.dmPublic.dmFields)
     {
         TRACE( "Retrieved devmode from winspool\n" );
         return dm;
     }
-    HeapFree( PSDRV_Heap, 0, dm );
 
     TRACE( "Using default devmode\n" );
-    dm = HeapAlloc( PSDRV_Heap, 0, sizeof(DefaultDevmode) );
+    if (!dm)
+        dm = HeapAlloc( PSDRV_Heap, 0, size );
     if (dm)
     {
-        *dm = DefaultDevmode;
+        memcpy( dm, &DefaultDevmode, min(sizeof(DefaultDevmode), size) );
         lstrcpynW( (WCHAR *)dm->dmPublic.dmDeviceName, name, CCHDEVICENAME );
         *is_default = TRUE;
     }
@@ -654,9 +701,17 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCWSTR name)
     WCHAR *ppd_filename = NULL;
     char *nameA = NULL;
     BOOL using_default_devmode = FALSE;
-    int len;
+    int i, len, input_slots, resolutions, page_sizes, font_subs, installed_fonts, size;
+    struct input_slot *dm_slot;
+    struct resolution *dm_res;
+    struct page_size *dm_page;
+    struct font_sub *dm_sub;
+    struct installed_font *dm_font;
+    INPUTSLOT *slot;
+    RESOLUTION *res;
+    PAGESIZE *page;
 
-    TRACE("'%s'\n", debugstr_w(name));
+    TRACE("%s\n", debugstr_w(name));
 
     LIST_FOR_EACH_ENTRY( pi, &printer_list, PRINTERINFO, entry )
     {
@@ -679,9 +734,6 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCWSTR name)
     nameA = HeapAlloc( GetProcessHeap(), 0, len );
     WideCharToMultiByte( CP_ACP, 0, name, -1, nameA, len, NULL, NULL );
 
-    pi->Devmode = get_devmode( hPrinter, name, &using_default_devmode );
-    if (!pi->Devmode) goto fail;
-
     ppd_filename = get_ppd_filename( hPrinter );
     if (!ppd_filename) goto fail;
 
@@ -692,25 +744,109 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCWSTR name)
         goto fail;
     }
 
+    pi->FontSubTable = load_font_sub_table( hPrinter, &pi->FontSubTableSize );
+
+    input_slots = list_count( &pi->ppd->InputSlots );
+    resolutions = list_count( &pi->ppd->Resolutions );
+    page_sizes = list_count( &pi->ppd->PageSizes );
+    font_subs = pi->FontSubTableSize;
+    installed_fonts = list_count( &pi->ppd->InstalledFonts );
+    size = FIELD_OFFSET(PSDRV_DEVMODE, data[
+            input_slots * sizeof(struct input_slot) +
+            resolutions * sizeof(struct resolution) +
+            page_sizes * sizeof(struct page_size) +
+            font_subs * sizeof(struct font_sub) +
+            installed_fonts * sizeof(struct installed_font)]);
+
+    pi->Devmode = get_devmode( hPrinter, name, &using_default_devmode, size );
+    if (!pi->Devmode) goto fail;
+
     if(using_default_devmode) {
         DWORD papersize;
 
 	if(GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_IPAPERSIZE | LOCALE_RETURN_NUMBER,
 			  (LPWSTR)&papersize, sizeof(papersize)/sizeof(WCHAR))) {
-	    PSDRV_DEVMODE dm;
+	    DEVMODEW dm;
 	    memset(&dm, 0, sizeof(dm));
-	    dm.dmPublic.dmFields = DM_PAPERSIZE;
-	    dm.dmPublic.dmPaperSize = papersize;
+	    dm.dmFields = DM_PAPERSIZE;
+	    dm.dmPaperSize = papersize;
 	    PSDRV_MergeDevmodes(pi->Devmode, &dm, pi);
 	}
     }
 
     if(pi->ppd->DefaultPageSize) { /* We'll let the ppd override the devmode */
-        PSDRV_DEVMODE dm;
+        DEVMODEW dm;
         memset(&dm, 0, sizeof(dm));
-        dm.dmPublic.dmFields = DM_PAPERSIZE;
-        dm.dmPublic.dmPaperSize = pi->ppd->DefaultPageSize->WinPage;
+        dm.dmFields = DM_PAPERSIZE;
+        dm.dmPaperSize = pi->ppd->DefaultPageSize->WinPage;
         PSDRV_MergeDevmodes(pi->Devmode, &dm, pi);
+    }
+
+    if (pi->Devmode->dmPublic.dmDriverExtra != size - pi->Devmode->dmPublic.dmSize)
+    {
+        pi->Devmode->dmPublic.dmDriverExtra = size - pi->Devmode->dmPublic.dmSize;
+        pi->Devmode->default_resolution = pi->ppd->DefaultResolution;
+        pi->Devmode->landscape_orientation = pi->ppd->LandscapeOrientation;
+        pi->Devmode->duplex = pi->ppd->DefaultDuplex ? pi->ppd->DefaultDuplex->WinDuplex : 0;
+        pi->Devmode->input_slots = input_slots;
+        pi->Devmode->resolutions = resolutions;
+        pi->Devmode->page_sizes = page_sizes;
+        pi->Devmode->font_subs = font_subs;
+        pi->Devmode->installed_fonts = installed_fonts;
+
+        dm_slot = (struct input_slot *)pi->Devmode->data;
+        LIST_FOR_EACH_ENTRY( slot, &pi->ppd->InputSlots, INPUTSLOT, entry )
+        {
+            dm_slot->win_bin = slot->WinBin;
+            dm_slot++;
+        }
+
+        dm_res = (struct resolution *)dm_slot;
+        LIST_FOR_EACH_ENTRY( res, &pi->ppd->Resolutions, RESOLUTION, entry )
+        {
+            dm_res->x = res->resx;
+            dm_res->y = res->resy;
+            dm_res++;
+        }
+
+        dm_page = (struct page_size *)dm_res;
+        LIST_FOR_EACH_ENTRY( page, &pi->ppd->PageSizes, PAGESIZE, entry )
+        {
+            lstrcpynW(dm_page->name, page->FullName, CCHFORMNAME);
+            if (page->ImageableArea)
+            {
+                dm_page->imageable_area.left = page->ImageableArea->llx;
+                dm_page->imageable_area.bottom = page->ImageableArea->lly;
+                dm_page->imageable_area.right = page->ImageableArea->urx;
+                dm_page->imageable_area.top = page->ImageableArea->ury;
+            }
+            else
+            {
+                dm_page->imageable_area.left = 0;
+                dm_page->imageable_area.bottom = 0;
+                dm_page->imageable_area.right = page->PaperDimension->x;
+                dm_page->imageable_area.top = page->PaperDimension->y;
+            }
+            dm_page->paper_dimension.x = page->PaperDimension->x;
+            dm_page->paper_dimension.y = page->PaperDimension->y;
+            dm_page->win_page = page->WinPage;
+            dm_page++;
+        }
+
+        dm_sub = (struct font_sub *)dm_page;
+        for (i = 0; i < font_subs; i++)
+        {
+            lstrcpynW(dm_sub->name, pi->FontSubTable[i].pValueName, ARRAY_SIZE(dm_sub->name));
+            lstrcpynW(dm_sub->sub, (WCHAR *)pi->FontSubTable[i].pData, ARRAY_SIZE(dm_sub->sub));
+            dm_sub++;
+        }
+
+        dm_font = (struct installed_font *)dm_sub;
+        LIST_FOR_EACH_ENTRY( font, &pi->ppd->InstalledFonts, FONTNAME, entry )
+        {
+            lstrcpynA(dm_font->name, font->Name, ARRAY_SIZE(dm_font->name));
+            dm_font++;
+        }
     }
 
     /* Duplex is indicated by the setting of the DM_DUPLEX bit in dmFields.
@@ -729,14 +865,12 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCWSTR name)
 
     set_devmode( hPrinter, pi->Devmode );
 
-    pi->FontSubTable = load_font_sub_table( hPrinter, &pi->FontSubTableSize );
-
     LIST_FOR_EACH_ENTRY( font, &pi->ppd->InstalledFonts, FONTNAME, entry )
     {
         afm = PSDRV_FindAFMinList(PSDRV_AFMFontList, font->Name);
 	if(!afm) {
 	    TRACE( "Couldn't find AFM file for installed printer font '%s' - "
-	    	    "ignoring\n", font->Name);
+                    "ignoring\n", font->Name);
 	}
 	else {
 	    BOOL added;
@@ -764,113 +898,28 @@ fail:
     return NULL;
 }
 
-
-static const struct gdi_dc_funcs psdrv_funcs =
-{
-    NULL,                               /* pAbortDoc */
-    NULL,                               /* pAbortPath */
-    NULL,                               /* pAlphaBlend */
-    NULL,                               /* pAngleArc */
-    PSDRV_Arc,                          /* pArc */
-    NULL,                               /* pArcTo */
-    NULL,                               /* pBeginPath */
-    NULL,                               /* pBlendImage */
-    PSDRV_Chord,                        /* pChord */
-    NULL,                               /* pCloseFigure */
-    PSDRV_CreateCompatibleDC,           /* pCreateCompatibleDC */
-    PSDRV_CreateDC,                     /* pCreateDC */
-    PSDRV_DeleteDC,                     /* pDeleteDC */
-    NULL,                               /* pDeleteObject */
-    PSDRV_Ellipse,                      /* pEllipse */
-    PSDRV_EndDoc,                       /* pEndDoc */
-    PSDRV_EndPage,                      /* pEndPage */
-    NULL,                               /* pEndPath */
-    PSDRV_EnumFonts,                    /* pEnumFonts */
-    PSDRV_ExtEscape,                    /* pExtEscape */
-    NULL,                               /* pExtFloodFill */
-    PSDRV_ExtTextOut,                   /* pExtTextOut */
-    PSDRV_FillPath,                     /* pFillPath */
-    NULL,                               /* pFillRgn */
-    NULL,                               /* pFontIsLinked */
-    NULL,                               /* pFrameRgn */
-    NULL,                               /* pGetBoundsRect */
-    NULL,                               /* pGetCharABCWidths */
-    NULL,                               /* pGetCharABCWidthsI */
-    PSDRV_GetCharWidth,                 /* pGetCharWidth */
-    NULL,                               /* pGetCharWidthInfo */
-    PSDRV_GetDeviceCaps,                /* pGetDeviceCaps */
-    NULL,                               /* pGetDeviceGammaRamp */
-    NULL,                               /* pGetFontData */
-    NULL,                               /* pGetFontRealizationInfo */
-    NULL,                               /* pGetFontUnicodeRanges */
-    NULL,                               /* pGetGlyphIndices */
-    NULL,                               /* pGetGlyphOutline */
-    NULL,                               /* pGetICMProfile */
-    NULL,                               /* pGetImage */
-    NULL,                               /* pGetKerningPairs */
-    NULL,                               /* pGetNearestColor */
-    NULL,                               /* pGetOutlineTextMetrics */
-    NULL,                               /* pGetPixel */
-    NULL,                               /* pGetSystemPaletteEntries */
-    NULL,                               /* pGetTextCharsetInfo */
-    PSDRV_GetTextExtentExPoint,         /* pGetTextExtentExPoint */
-    NULL,                               /* pGetTextExtentExPointI */
-    NULL,                               /* pGetTextFace */
-    PSDRV_GetTextMetrics,               /* pGetTextMetrics */
-    NULL,                               /* pGradientFill */
-    NULL,                               /* pInvertRgn */
-    PSDRV_LineTo,                       /* pLineTo */
-    NULL,                               /* pMoveTo */
-    PSDRV_PaintRgn,                     /* pPaintRgn */
-    PSDRV_PatBlt,                       /* pPatBlt */
-    PSDRV_Pie,                          /* pPie */
-    PSDRV_PolyBezier,                   /* pPolyBezier */
-    PSDRV_PolyBezierTo,                 /* pPolyBezierTo */
-    NULL,                               /* pPolyDraw */
-    PSDRV_PolyPolygon,                  /* pPolyPolygon */
-    PSDRV_PolyPolyline,                 /* pPolyPolyline */
-    NULL,                               /* pPolylineTo */
-    PSDRV_PutImage,                     /* pPutImage */
-    NULL,                               /* pRealizeDefaultPalette */
-    NULL,                               /* pRealizePalette */
-    PSDRV_Rectangle,                    /* pRectangle */
-    PSDRV_ResetDC,                      /* pResetDC */
-    PSDRV_RoundRect,                    /* pRoundRect */
-    NULL,                               /* pSelectBitmap */
-    PSDRV_SelectBrush,                  /* pSelectBrush */
-    PSDRV_SelectFont,                   /* pSelectFont */
-    PSDRV_SelectPen,                    /* pSelectPen */
-    PSDRV_SetBkColor,                   /* pSetBkColor */
-    NULL,                               /* pSetBoundsRect */
-    PSDRV_SetDCBrushColor,              /* pSetDCBrushColor */
-    PSDRV_SetDCPenColor,                /* pSetDCPenColor */
-    NULL,                               /* pSetDIBitsToDevice */
-    NULL,                               /* pSetDeviceClipping */
-    NULL,                               /* pSetDeviceGammaRamp */
-    PSDRV_SetPixel,                     /* pSetPixel */
-    PSDRV_SetTextColor,                 /* pSetTextColor */
-    PSDRV_StartDoc,                     /* pStartDoc */
-    PSDRV_StartPage,                    /* pStartPage */
-    NULL,                               /* pStretchBlt */
-    NULL,                               /* pStretchDIBits */
-    PSDRV_StrokeAndFillPath,            /* pStrokeAndFillPath */
-    PSDRV_StrokePath,                   /* pStrokePath */
-    NULL,                               /* pUnrealizePalette */
-    NULL,                               /* pD3DKMTCheckVidPnExclusiveOwnership */
-    NULL,                               /* pD3DKMTSetVidPnSourceOwner */
-    GDI_PRIORITY_GRAPHICS_DRV           /* priority */
-};
-
-
 /******************************************************************************
- *      PSDRV_get_gdi_driver
+ *      PSDRV_open_printer_dc
  */
-const struct gdi_dc_funcs * CDECL PSDRV_get_gdi_driver( unsigned int version )
+HDC CDECL PSDRV_open_printer_dc( const WCHAR *device,
+        const DEVMODEW *devmode, const WCHAR *output )
 {
-    if (version != WINE_GDI_DRIVER_VERSION)
-    {
-        ERR( "version mismatch, gdi32 wants %u but wineps has %u\n", version, WINE_GDI_DRIVER_VERSION );
-        return NULL;
-    }
-    return &psdrv_funcs;
+    struct open_dc_params params;
+    PRINTERINFO *pi;
+
+    if (!device)
+        return 0;
+
+    pi = PSDRV_FindPrinterInfo( device );
+    if (!pi)
+        return 0;
+
+    params.device = pi->friendly_name;
+    params.devmode = devmode;
+    params.output = output;
+    params.def_devmode = pi->Devmode;
+    params.hdc = 0;
+    if (!WINE_UNIX_CALL( unix_open_dc, &params ))
+        return 0;
+    return params.hdc;
 }

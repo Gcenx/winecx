@@ -16349,6 +16349,13 @@ static void check_rgba_sint8_(unsigned int line, DWORD data, const struct uvec4 
             data, expected[0], expected[1], x, v->x, v->y, v->z, v->w);
 }
 
+static void clear_uav(ID3D11DeviceContext *context, ID3D11UnorderedAccessView *uav, const struct uvec4 *uv4)
+{
+    /* Cast to (const unsigned int *) instead of passing &uv4->x, since gcc warns about
+     * overreading an unsigned int[4] from an unsigned int otherwise. */
+    ID3D11DeviceContext_ClearUnorderedAccessViewUint(context, uav, (const unsigned int *)uv4);
+}
+
 static void test_clear_buffer_unordered_access_view(void)
 {
     D3D11_UNORDERED_ACCESS_VIEW_DESC uav_desc;
@@ -16464,13 +16471,13 @@ static void test_clear_buffer_unordered_access_view(void)
     for (i = 0; i < ARRAY_SIZE(uvec4_data); ++i)
     {
         uvec4 = uvec4_data[i];
-        ID3D11DeviceContext_ClearUnorderedAccessViewUint(context, uav, &uvec4.x);
+        clear_uav(context, uav, &uvec4);
         get_buffer_readback(buffer, &rb);
         SetRect(&rect, 0, 0, buffer_desc.ByteWidth / sizeof(uvec4.x), 1);
         check_readback_data_color(&rb, &rect, uvec4.x, 0);
         release_resource_readback(&rb);
 
-        ID3D11DeviceContext_ClearUnorderedAccessViewUint(context, uav2, &fe_uvec4.x);
+        clear_uav(context, uav2, &fe_uvec4);
         get_buffer_readback(buffer, &rb);
         SetRect(&rect, 0, 0, U(uav_desc).Buffer.NumElements * buffer_desc.StructureByteStride / sizeof(uvec4.x), 1);
         check_readback_data_color(&rb, &rect, fe_uvec4.x, 0);
@@ -16504,13 +16511,13 @@ static void test_clear_buffer_unordered_access_view(void)
     for (i = 0; i < ARRAY_SIZE(uvec4_data); ++i)
     {
         uvec4 = uvec4_data[i];
-        ID3D11DeviceContext_ClearUnorderedAccessViewUint(context, uav, &uvec4.x);
+        clear_uav(context, uav, &uvec4);
         get_buffer_readback(buffer, &rb);
         SetRect(&rect, 0, 0, buffer_desc.ByteWidth / sizeof(uvec4.x), 1);
         check_readback_data_color(&rb, &rect, uvec4.x, 0);
         release_resource_readback(&rb);
 
-        ID3D11DeviceContext_ClearUnorderedAccessViewUint(context, uav2, &fe_uvec4.x);
+        clear_uav(context, uav2, &fe_uvec4);
         get_buffer_readback(buffer, &rb);
         SetRect(&rect, 0, 0, U(uav_desc).Buffer.FirstElement, 1);
         check_readback_data_color(&rb, &rect, uvec4.x, 0);
@@ -16543,13 +16550,13 @@ static void test_clear_buffer_unordered_access_view(void)
     for (i = 0; i < ARRAY_SIZE(uvec4_data); ++i)
     {
         uvec4 = uvec4_data[i];
-        ID3D11DeviceContext_ClearUnorderedAccessViewUint(context, uav, &uvec4.x);
+        clear_uav(context, uav, &uvec4);
         get_buffer_readback(buffer, &rb);
         SetRect(&rect, 0, 0, buffer_desc.ByteWidth / sizeof(uvec4.x), 1);
         check_readback_data_color(&rb, &rect, uvec4.x, 0);
         release_resource_readback(&rb);
 
-        ID3D11DeviceContext_ClearUnorderedAccessViewUint(context, uav2, &fe_uvec4.x);
+        clear_uav(context, uav2, &fe_uvec4);
         get_buffer_readback(buffer, &rb);
         SetRect(&rect, 0, 0, U(uav_desc).Buffer.FirstElement, 1);
         check_readback_data_color(&rb, &rect, uvec4.x, 0);
@@ -16579,7 +16586,7 @@ static void test_clear_buffer_unordered_access_view(void)
         BOOL all_match;
 
         uvec4 = uvec4_data[i];
-        ID3D11DeviceContext_ClearUnorderedAccessViewUint(context, uav, &uvec4.x);
+        clear_uav(context, uav, &uvec4);
         get_buffer_readback(buffer, &rb);
         for (x = 0, all_match = TRUE; x < buffer_desc.ByteWidth / sizeof(uvec4); ++x)
         {
@@ -16595,7 +16602,7 @@ static void test_clear_buffer_unordered_access_view(void)
                 data->x, data->y, data->z, data->w, uvec4.x, uvec4.y, uvec4.z, uvec4.w, x);
         release_resource_readback(&rb);
 
-        ID3D11DeviceContext_ClearUnorderedAccessViewUint(context, uav2, &fe_uvec4.x);
+        clear_uav(context, uav2, &fe_uvec4);
         get_buffer_readback(buffer, &rb);
         for (x = 0, all_match = TRUE; x < buffer_desc.ByteWidth / sizeof(uvec4); ++x)
         {
@@ -16615,7 +16622,7 @@ static void test_clear_buffer_unordered_access_view(void)
     }
 
     uvec4.x = uvec4.y = uvec4.z = uvec4.w = 0xdeadbeef;
-    ID3D11DeviceContext_ClearUnorderedAccessViewUint(context, uav, &uvec4.x);
+    clear_uav(context, uav, &uvec4);
     ID3D11UnorderedAccessView_Release(uav);
     ID3D11UnorderedAccessView_Release(uav2);
 
@@ -16634,14 +16641,14 @@ static void test_clear_buffer_unordered_access_view(void)
     for (i = 0; i < ARRAY_SIZE(uvec4_data); ++i)
     {
         uvec4 = uvec4_data[i];
-        ID3D11DeviceContext_ClearUnorderedAccessViewUint(context, uav, &uvec4.x);
+        clear_uav(context, uav, &uvec4);
         get_buffer_readback(buffer, &rb);
         todo_wine check_rgba_sint8(get_readback_color(&rb, 0, 0, 0), &uvec4);
         todo_wine check_rgba_sint8(get_readback_color(&rb, 7, 0, 0), &uvec4);
         todo_wine check_rgba_sint8(get_readback_color(&rb, 15, 0, 0), &uvec4);
         release_resource_readback(&rb);
 
-        ID3D11DeviceContext_ClearUnorderedAccessViewUint(context, uav2, &fe_uvec4.x);
+        clear_uav(context, uav2, &fe_uvec4);
         get_buffer_readback(buffer, &rb);
         todo_wine check_rgba_sint8(get_readback_color(&rb, 0, 0, 0), &uvec4);
         todo_wine check_rgba_sint8(get_readback_color(&rb, U(uav_desc).Buffer.FirstElement - 1, 0, 0), &uvec4);
@@ -34348,11 +34355,10 @@ static void test_dynamic_map_synchronization(void)
 {
     static const struct vec4 green = {0.0f, 1.0f, 0.0f, 1.0f};
     static const struct vec4 red = {1.0f, 0.0f, 0.0f, 1.0f};
-    ID3D11DeviceContext *immediate, *deferred;
     struct d3d11_test_context test_context;
     D3D11_BUFFER_DESC buffer_desc = {0};
     D3D11_MAPPED_SUBRESOURCE map_desc;
-    ID3D11CommandList *list;
+    ID3D11DeviceContext *immediate;
     ID3D11Device *device;
     unsigned int x, y;
     HRESULT hr;
@@ -34361,9 +34367,6 @@ static void test_dynamic_map_synchronization(void)
         return;
     device = test_context.device;
     immediate = test_context.immediate_context;
-
-    hr = ID3D11Device_CreateDeferredContext(device, 0, &deferred);
-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     buffer_desc.ByteWidth = 200 * 4 * sizeof(struct vec3);
     buffer_desc.Usage = D3D11_USAGE_DYNAMIC;
@@ -34376,33 +34379,14 @@ static void test_dynamic_map_synchronization(void)
 
     for (y = 0; y < 200; ++y)
     {
-        if (y % 2)
-        {
-            hr = ID3D11DeviceContext_Map(immediate, (ID3D11Resource *)test_context.vb,
-                    0, D3D11_MAP_WRITE_DISCARD, 0, &map_desc);
-            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID3D11DeviceContext_Map(immediate, (ID3D11Resource *)test_context.vb,
+                0, D3D11_MAP_WRITE_DISCARD, 0, &map_desc);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
-            fill_dynamic_vb_quad(&map_desc, 0, y);
+        fill_dynamic_vb_quad(&map_desc, 0, y);
 
-            ID3D11DeviceContext_Unmap(immediate, (ID3D11Resource *)test_context.vb, 0);
-            draw_color_quad(&test_context, &green);
-        }
-        else
-        {
-            hr = ID3D11DeviceContext_Map(deferred, (ID3D11Resource *)test_context.vb,
-                    0, D3D11_MAP_WRITE_DISCARD, 0, &map_desc);
-            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-
-            fill_dynamic_vb_quad(&map_desc, 0, y);
-
-            ID3D11DeviceContext_Unmap(deferred, (ID3D11Resource *)test_context.vb, 0);
-
-            hr = ID3D11DeviceContext_FinishCommandList(deferred, FALSE, &list);
-            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-            ID3D11DeviceContext_ExecuteCommandList(immediate, list, TRUE);
-            ID3D11CommandList_Release(list);
-            draw_color_quad(&test_context, &green);
-        }
+        ID3D11DeviceContext_Unmap(immediate, (ID3D11Resource *)test_context.vb, 0);
+        draw_color_quad(&test_context, &green);
 
         for (x = 1; x < 200; ++x)
         {
@@ -34419,7 +34403,6 @@ static void test_dynamic_map_synchronization(void)
 
     check_texture_color(test_context.backbuffer, 0xff00ff00, 0);
 
-    ID3D11DeviceContext_Release(deferred);
     release_test_context(&test_context);
 }
 

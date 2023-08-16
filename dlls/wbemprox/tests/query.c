@@ -751,6 +751,17 @@ static void test_Win32_ComputerSystem( IWbemServices *services )
         trace( "numlogicalprocessors %ld\n", V_I4( &value ) );
     }
 
+    type = 0xdeadbeef;
+    VariantInit( &value );
+    hr = IWbemClassObject_Get( obj, L"HypervisorPresent", 0, &value, &type, NULL );
+    ok( hr == S_OK || broken(hr == WBEM_E_NOT_FOUND) /* win7 testbot */, "got %#lx\n", hr );
+    if (hr == S_OK)
+    {
+        ok( V_VT( &value ) == VT_BOOL, "unexpected variant type %#x\n", V_VT( &value ) );
+        ok( type == CIM_BOOLEAN, "unexpected type %#lx\n", type );
+        trace( "HypervisorPresent %d\n", V_BOOL( &value ) );
+    }
+
     check_property( obj, L"NumberOfProcessors", VT_I4, CIM_UINT32 );
     check_property( obj, L"SystemType", VT_BSTR, CIM_STRING );
 
@@ -1024,6 +1035,49 @@ static void test_StdRegProv( IWbemServices *services )
     ok( type == CIM_UINT32, "unexpected type %#lx\n", type );
 
     check_property( out, L"sValue", VT_BSTR, CIM_STRING );
+
+    VariantClear( &valuename );
+    VariantClear( &subkey );
+    IWbemClassObject_Release( in );
+    IWbemClassObject_Release( out );
+    IWbemClassObject_Release( sig_in );
+
+    hr = IWbemClassObject_GetMethod( reg, L"GetBinaryValue", 0, &sig_in, NULL );
+    ok( hr == S_OK, "failed to get GetStringValue method %#lx\n", hr );
+
+    hr = IWbemClassObject_SpawnInstance( sig_in, 0, &in );
+    ok( hr == S_OK, "failed to spawn instance %#lx\n", hr );
+
+    V_VT( &defkey ) = VT_I4;
+    V_I4( &defkey ) = 0x80000001;
+    hr = IWbemClassObject_Put( in, L"hDefKey", 0, &defkey, 0 );
+    ok( hr == S_OK, "failed to set root %#lx\n", hr );
+
+    V_VT( &subkey ) = VT_BSTR;
+    V_BSTR( &subkey ) = SysAllocString( L"Control Panel\\Desktop" );
+    hr = IWbemClassObject_Put( in, L"sSubKeyName", 0, &subkey, 0 );
+    ok( hr == S_OK, "failed to set subkey %#lx\n", hr );
+
+    V_VT( &valuename ) = VT_BSTR;
+    V_BSTR( &valuename ) = SysAllocString( L"UserPreferencesMask" );
+    hr = IWbemClassObject_Put( in, L"sValueName", 0, &valuename, 0 );
+    ok( hr == S_OK, "failed to set value name %#lx\n", hr );
+
+    out = NULL;
+    method = SysAllocString( L"GetBinaryValue" );
+    hr = IWbemServices_ExecMethod( services, class, method, 0, NULL, in, &out, NULL );
+    ok( hr == S_OK, "failed to execute method %#lx\n", hr );
+    SysFreeString( method );
+
+    type = 0xdeadbeef;
+    VariantInit( &retval );
+    hr = IWbemClassObject_Get( out, L"ReturnValue", 0, &retval, &type, NULL );
+    ok( hr == S_OK, "failed to get return value %#lx\n", hr );
+    ok( V_VT( &retval ) == VT_I4, "unexpected variant type %#x\n", V_VT( &retval ) );
+    ok( !V_I4( &retval ), "unexpected error %ld\n", V_I4( &retval ) );
+    ok( type == CIM_UINT32, "unexpected type %#lx\n", type );
+
+    check_property( out, L"uValue", VT_UI1|VT_ARRAY, CIM_UINT8|CIM_FLAG_ARRAY );
 
     VariantClear( &valuename );
     VariantClear( &subkey );
@@ -1741,6 +1795,45 @@ static void test_Win32_VideoController( IWbemServices *services )
     SysFreeString( wql );
 }
 
+static void test_Win32_Volume( IWbemServices *services )
+{
+    BSTR wql = SysAllocString( L"wql" ), query = SysAllocString( L"SELECT * FROM Win32_Volume" );
+    IEnumWbemClassObject *result;
+    IWbemClassObject *obj;
+    HRESULT hr;
+    VARIANT val;
+    CIMTYPE type;
+    DWORD count;
+
+    hr = IWbemServices_ExecQuery( services, wql, query, 0, NULL, &result );
+    if (hr != S_OK)
+    {
+        win_skip( "Win32_Volume not available\n" );
+        return;
+    }
+
+    for (;;)
+    {
+        hr = IEnumWbemClassObject_Next( result, 10000, 1, &obj, &count );
+        if (hr != S_OK) break;
+
+        check_property( obj, L"DeviceID", VT_BSTR, CIM_STRING );
+
+        type = 0xdeadbeef;
+        memset( &val, 0, sizeof(val) );
+        hr = IWbemClassObject_Get( obj, L"DriveLetter", 0, &val, &type, NULL );
+        ok( hr == S_OK, "got %#lx\n", hr );
+        ok( V_VT( &val ) == VT_BSTR || V_VT( &val ) == VT_NULL, "unexpected variant type 0x%x\n", V_VT( &val ) );
+        ok( type == CIM_STRING, "unexpected type %#lx\n", type );
+        trace( "driveletter %s\n", wine_dbgstr_w(V_BSTR( &val )) );
+        VariantClear( &val );
+    }
+
+    IEnumWbemClassObject_Release( result );
+    SysFreeString( query );
+    SysFreeString( wql );
+}
+
 static void test_Win32_Printer( IWbemServices *services )
 {
     BSTR wql = SysAllocString( L"wql" ), query = SysAllocString( L"SELECT * FROM Win32_Printer" );
@@ -1998,7 +2091,11 @@ static void test_Win32_QuickFixEngineering( IWbemServices *services )
             "unexpected variant type %#x\n", V_VT( &caption ) );
         ok( type == CIM_STRING, "unexpected type %#lx\n", type );
 
+        check_property( obj, L"Description", VT_BSTR, CIM_STRING );
         check_property( obj, L"HotFixID", VT_BSTR, CIM_STRING );
+        check_property( obj, L"InstalledBy", VT_BSTR, CIM_STRING );
+        check_property( obj, L"InstalledOn", VT_BSTR, CIM_STRING );
+
         IWbemClassObject_Release( obj );
         if (total++ >= 10) break;
     }
@@ -2126,6 +2223,27 @@ static void test_Win32_LogicalDisk( IWbemServices *services )
         IWbemClassObject_Release( obj );
     }
 
+    IEnumWbemClassObject_Release( result );
+    SysFreeString( query );
+
+    query = SysAllocString( L"SELECT * FROM Win32_LogicalDisk WHERE DeviceID > 'b:' AND DeviceID < 'd:'" );
+    hr = IWbemServices_ExecQuery( services, wql, query, 0, NULL, &result );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    count = 0;
+    hr = IEnumWbemClassObject_Next( result, 10000, 1, &obj, &count );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( count == 1, "got %lu\n", count );
+    IWbemClassObject_Release( obj );
+    SysFreeString( query );
+
+    query = SysAllocString( L"SELECT * FROM Win32_LogicalDisk WHERE DeviceID = 'C:'" );
+    hr = IWbemServices_ExecQuery( services, wql, query, 0, NULL, &result );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    count = 0;
+    hr = IEnumWbemClassObject_Next( result, 10000, 1, &obj, &count );
+    ok( hr == S_OK, "got %#lx\n", hr );
+    ok( count == 1, "got %lu\n", count );
+    IWbemClassObject_Release( obj );
     IEnumWbemClassObject_Release( result );
     SysFreeString( query );
     SysFreeString( wql );
@@ -2270,6 +2388,7 @@ START_TEST(query)
     test_Win32_SoundDevice( services );
     test_Win32_SystemEnclosure( services );
     test_Win32_VideoController( services );
+    test_Win32_Volume( services );
     test_Win32_WinSAT( services );
     test_SystemRestore( services );
     test_empty_namespace( locator );

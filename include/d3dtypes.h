@@ -25,8 +25,6 @@
 #ifndef __WINE_D3DTYPES_H
 #define __WINE_D3DTYPES_H
 
-#include "wine/winheader_enter.h"
-
 #include <windows.h>
 #include <float.h>
 #include <ddraw.h>
@@ -1368,7 +1366,5 @@ typedef enum _D3DTEXTURETRANSFORMFLAGS {
 #ifdef __i386__
 #include <poppack.h>
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

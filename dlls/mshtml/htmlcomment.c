@@ -189,6 +189,7 @@ static const NodeImplVtbl HTMLCommentElementImplVtbl = {
     HTMLCommentElement_destructor,
     HTMLElement_cpc,
     HTMLCommentElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col
 };
@@ -210,7 +211,7 @@ HRESULT HTMLCommentElement_Create(HTMLDocumentNode *doc, nsIDOMNode *nsnode, HTM
 {
     HTMLCommentElement *ret;
 
-    ret = heap_alloc_zero(sizeof(*ret));
+    ret = calloc(1, sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 

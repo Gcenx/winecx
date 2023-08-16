@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <sys/types.h>
@@ -170,9 +174,9 @@ static BOOL osmesa_delete_context( struct wgl_context *context )
 /***********************************************************************
  *		osmesa_get_proc_address
  */
-static WINEGLDEF(PROC) osmesa_get_proc_address( const char *proc )
+static PROC osmesa_get_proc_address( const char *proc )
 {
-    return (WINEGLDEF(PROC))pOSMesaGetProcAddress( proc );
+    return (PROC)pOSMesaGetProcAddress( proc );
 }
 
 /***********************************************************************

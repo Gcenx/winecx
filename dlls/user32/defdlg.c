@@ -18,38 +18,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winuser.h"
-#include "controls.h"
-#include "win.h"
 #include "user_private.h"
-#include "wine/debug.h"
+#include "controls.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(dialog);
-
-
-/***********************************************************************
- *           DEFDLG_GetDlgProc
- */
-static DLGPROC DEFDLG_GetDlgProc( HWND hwnd )
-{
-    DLGPROC ret;
-    WND *wndPtr = WIN_GetPtr( hwnd );
-
-    if (!wndPtr) return 0;
-    if (wndPtr == WND_OTHER_PROCESS)
-    {
-        ERR( "cannot get dlg proc %p from other process\n", hwnd );
-        return 0;
-    }
-    ret = *(DLGPROC *)((char *)wndPtr->wExtra + DWLP_DLGPROC);
-    WIN_ReleasePtr( wndPtr );
-    return ret;
-}
 
 /***********************************************************************
  *           DEFDLG_SetFocus
@@ -237,15 +208,11 @@ static LRESULT DEFDLG_Proc( HWND hwnd, UINT msg, WPARAM wParam,
         case WM_NCDESTROY:
             if (dlgInfo)
             {
-                WND *wndPtr;
-
                 if (dlgInfo->hUserFont) DeleteObject( dlgInfo->hUserFont );
                 if (dlgInfo->hMenu) NtUserDestroyMenu( dlgInfo->hMenu );
                 HeapFree( GetProcessHeap(), 0, dlgInfo );
 
-                wndPtr = WIN_GetPtr( hwnd );
-                wndPtr->dlgInfo = NULL;
-                WIN_ReleasePtr( wndPtr );
+                NtUserSetDialogInfo( hwnd, NULL );
             }
               /* Window clean-up */
             return DefWindowProcA( hwnd, msg, wParam, lParam );
@@ -323,22 +290,14 @@ static LRESULT DEFDLG_Proc( HWND hwnd, UINT msg, WPARAM wParam,
 */
 DIALOGINFO *DIALOG_get_info( HWND hwnd, BOOL create )
 {
-    WND* wndPtr;
     DIALOGINFO* dlgInfo;
 
-    wndPtr = WIN_GetPtr( hwnd );
-    if (!wndPtr || wndPtr == WND_OTHER_PROCESS || wndPtr == WND_DESKTOP)
-    {
-        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        return NULL;
-    }
-
-    dlgInfo = wndPtr->dlgInfo;
+    dlgInfo = NtUserGetDialogInfo( hwnd );
 
     if (!dlgInfo && create)
     {
         if (!(dlgInfo = HeapAlloc( GetProcessHeap(), 0, sizeof(*dlgInfo) )))
-            goto out;
+            return NULL;
         dlgInfo->hwndFocus   = 0;
         dlgInfo->hUserFont   = 0;
         dlgInfo->hMenu       = 0;
@@ -346,27 +305,23 @@ DIALOGINFO *DIALOG_get_info( HWND hwnd, BOOL create )
         dlgInfo->yBaseUnit   = 0;
         dlgInfo->idResult    = IDOK;
         dlgInfo->flags       = 0;
-        wndPtr->dlgInfo = dlgInfo;
+        NtUserSetDialogInfo( hwnd, dlgInfo );
     }
 
-out:
-    WIN_ReleasePtr( wndPtr );
     return dlgInfo;
 }
 
 static LRESULT USER_DefDlgProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
 {
     DIALOGINFO *dlgInfo;
-    DLGPROC dlgproc;
-    LRESULT result = 0;
+    LRESULT result;
 
     /* Perform DIALOGINFO initialization if not done */
     if(!(dlgInfo = DIALOG_get_info( hwnd, TRUE ))) return 0;
 
     SetWindowLongPtrW( hwnd, DWLP_MSGRESULT, 0 );
 
-    if ((dlgproc = DEFDLG_GetDlgProc( hwnd ))) /* Call dialog procedure */
-        result = WINPROC_CallDlgProcA( dlgproc, hwnd, msg, wParam, lParam );
+    result = WINPROC_CallDlgProcA( hwnd, msg, wParam, lParam );
 
     if (!result && IsWindow(hwnd))
     {
@@ -411,16 +366,13 @@ static LRESULT USER_DefDlgProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 static LRESULT USER_DefDlgProcW( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
 {
     DIALOGINFO *dlgInfo;
-    DLGPROC dlgproc;
-    LRESULT result = 0;
+    LRESULT result;
 
     /* Perform DIALOGINFO initialization if not done */
     if(!(dlgInfo = DIALOG_get_info( hwnd, TRUE ))) return 0;
 
     SetWindowLongPtrW( hwnd, DWLP_MSGRESULT, 0 );
-
-    if ((dlgproc = DEFDLG_GetDlgProc( hwnd ))) /* Call dialog procedure */
-        result = WINPROC_CallDlgProcW( dlgproc, hwnd, msg, wParam, lParam );
+    result = WINPROC_CallDlgProcW( hwnd, msg, wParam, lParam );
 
     if (!result && IsWindow(hwnd))
     {

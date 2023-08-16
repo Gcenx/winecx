@@ -20,8 +20,6 @@
 #ifndef __WINE_MBCTYPE_H
 #define __WINE_MBCTYPE_H
 
-#include "wine/winheader_enter.h"
-
 #include <corecrt.h>
 
 #ifdef __cplusplus
@@ -79,7 +77,5 @@ _ACRTIMP int __cdecl _ismbstrail(const unsigned char*,const unsigned char*);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_MBCTYPE_H */

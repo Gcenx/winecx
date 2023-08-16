@@ -19,8 +19,6 @@
 #ifndef __ATLTHUNK_H__
 #define __ATLTHUNK_H__
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -35,7 +33,5 @@ void WINAPI AtlThunk_InitData(AtlThunkData_t*,void*,SIZE_T);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __ATLTHUNK_H__ */

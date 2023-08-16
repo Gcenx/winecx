@@ -21,8 +21,6 @@
 #ifndef __D3DRMDEFS_H__
 #define __D3DRMDEFS_H__
 
-#include "wine/winheader_enter.h"
-
 #include <stddef.h>
 #include <d3dtypes.h>
 
@@ -464,7 +462,5 @@ D3DVALUE WINAPI D3DRMColorGetRed(D3DCOLOR);
 #if defined(__cplusplus)
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

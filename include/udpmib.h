@@ -18,8 +18,6 @@
 #ifndef __WINE_UDPMIB_H
 #define __WINE_UDPMIB_H
 
-#include "wine/winheader_enter.h"
-
 #define TCPIP_OWNING_MODULE_SIZE 16
 
 
@@ -134,7 +132,5 @@ typedef struct _MIB_UDPSTATS
     DWORD dwOutDatagrams;
     DWORD dwNumAddrs;
 } MIB_UDPSTATS, *PMIB_UDPSTATS;
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_UDPMIB_H */

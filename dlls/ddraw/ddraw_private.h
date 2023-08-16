@@ -66,7 +66,7 @@ struct FvfToDecl
 #define DDRAW_WINED3D_FLAGS     (WINED3D_LEGACY_DEPTH_BIAS | WINED3D_VIDMEM_ACCOUNTING \
         | WINED3D_RESTORE_MODE_ON_ACTIVATE | WINED3D_FOCUS_MESSAGES | WINED3D_PIXEL_CENTER_INTEGER \
         | WINED3D_LEGACY_UNBOUND_RESOURCE_COLOR | WINED3D_NO_PRIMITIVE_RESTART \
-        | WINED3D_LEGACY_CUBEMAP_FILTERING)
+        | WINED3D_LEGACY_CUBEMAP_FILTERING | WINED3D_NO_DRAW_INDIRECT)
 
 #define DDRAW_MAX_ACTIVE_LIGHTS 32
 #define DDRAW_MAX_TEXTURES 8
@@ -331,6 +331,7 @@ struct d3d_device
     LONG ref;
     UINT version;
     BOOL hardware_device;
+    BOOL have_draw_textures;
 
     IUnknown *outer_unknown;
     struct wined3d_device *wined3d_device;
@@ -338,13 +339,7 @@ struct d3d_device
     struct ddraw *ddraw;
     IUnknown *rt_iface;
 
-    struct wined3d_buffer *index_buffer;
-    UINT index_buffer_size;
-    UINT index_buffer_pos;
-
-    struct wined3d_buffer *vertex_buffer;
-    UINT vertex_buffer_size;
-    UINT vertex_buffer_pos;
+    struct wined3d_streaming_buffer vertex_buffer, index_buffer;
 
     /* Viewport management */
     struct list viewport_list;

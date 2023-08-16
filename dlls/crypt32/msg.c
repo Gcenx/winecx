@@ -43,6 +43,24 @@ typedef BOOL (*CryptMsgUpdateFunc)(HCRYPTMSG hCryptMsg, const BYTE *pbData,
 typedef BOOL (*CryptMsgControlFunc)(HCRYPTMSG hCryptMsg, DWORD dwFlags,
  DWORD dwCtrlType, const void *pvCtrlPara);
 
+static BOOL extract_hash(HCRYPTHASH hash, BYTE **data, DWORD *size)
+{
+    DWORD sz;
+
+    *data = NULL;
+    sz = sizeof(*size);
+    if (!CryptGetHashParam(hash, HP_HASHSIZE, (BYTE *)size, &sz, 0)) return FALSE;
+    if (!(*data = CryptMemAlloc(*size)))
+    {
+        ERR("No memory.\n");
+        return FALSE;
+    }
+    if (CryptGetHashParam(hash, HP_HASHVAL, *data, size, 0)) return TRUE;
+    CryptMemFree(*data);
+    *data = NULL;
+    return FALSE;
+}
+
 static BOOL CRYPT_DefaultMsgControl(HCRYPTMSG hCryptMsg, DWORD dwFlags,
  DWORD dwCtrlType, const void *pvCtrlPara)
 {
@@ -412,18 +430,7 @@ static BOOL CRYPT_EncodePKCSDigestedData(CHashEncodeMsg *msg, void *pvData,
              &digestedData.ContentInfo.Content.cbData);
         }
         if (msg->base.state == MsgStateFinalized)
-        {
-            size = sizeof(DWORD);
-            ret = CryptGetHashParam(msg->hash, HP_HASHSIZE,
-             (LPBYTE)&digestedData.hash.cbData, &size, 0);
-            if (ret)
-            {
-                digestedData.hash.pbData = CryptMemAlloc(
-                 digestedData.hash.cbData);
-                ret = CryptGetHashParam(msg->hash, HP_HASHVAL,
-                 digestedData.hash.pbData, &digestedData.hash.cbData, 0);
-            }
-        }
+            ret = extract_hash(msg->hash, &digestedData.hash.pbData, &digestedData.hash.cbData);
         if (ret)
             ret = CRYPT_AsnEncodePKCSDigestedData(&digestedData, pvData,
              pcbData);
@@ -1025,35 +1032,23 @@ static BOOL CSignedMsgData_AppendMessageDigestAttribute(
  CSignedMsgData *msg_data, DWORD signerIndex)
 {
     BOOL ret;
-    DWORD size;
     CRYPT_HASH_BLOB hash = { 0, NULL }, encodedHash = { 0, NULL };
     char messageDigest[] = szOID_RSA_messageDigest;
     CRYPT_ATTRIBUTE messageDigestAttr = { messageDigest, 1, &encodedHash };
 
-    size = sizeof(DWORD);
-    ret = CryptGetHashParam(
-     msg_data->signerHandles[signerIndex].contentHash, HP_HASHSIZE,
-     (LPBYTE)&hash.cbData, &size, 0);
+    if (!(ret = extract_hash(msg_data->signerHandles[signerIndex].contentHash, &hash.pbData, &hash.cbData)))
+        return FALSE;
+
+    ret = CRYPT_AsnEncodeOctets(0, NULL, &hash, CRYPT_ENCODE_ALLOC_FLAG, NULL, (LPBYTE)&encodedHash.pbData,
+            &encodedHash.cbData);
     if (ret)
     {
-        hash.pbData = CryptMemAlloc(hash.cbData);
-        ret = CryptGetHashParam(
-         msg_data->signerHandles[signerIndex].contentHash, HP_HASHVAL,
-         hash.pbData, &hash.cbData, 0);
-        if (ret)
-        {
-            ret = CRYPT_AsnEncodeOctets(0, NULL, &hash, CRYPT_ENCODE_ALLOC_FLAG,
-             NULL, (LPBYTE)&encodedHash.pbData, &encodedHash.cbData);
-            if (ret)
-            {
-                ret = CRYPT_AppendAttribute(
-                 &msg_data->info->rgSignerInfo[signerIndex].AuthAttrs,
-                 &messageDigestAttr);
-                LocalFree(encodedHash.pbData);
-            }
-        }
-        CryptMemFree(hash.pbData);
+        ret = CRYPT_AppendAttribute(
+         &msg_data->info->rgSignerInfo[signerIndex].AuthAttrs,
+         &messageDigestAttr);
+        LocalFree(encodedHash.pbData);
     }
+    CryptMemFree(hash.pbData);
     return ret;
 }
 
@@ -3321,24 +3316,56 @@ static BOOL CDecodeHashMsg_VerifyHash(CDecodeMsg *msg)
     return ret;
 }
 
+static BOOL cng_verify_msg_signature(CMSG_CMS_SIGNER_INFO *signer, HCRYPTHASH hash, CERT_PUBLIC_KEY_INFO *key_info)
+{
+    BYTE *hash_value, *sig_value = NULL;
+    DWORD hash_len, sig_len;
+    BCRYPT_KEY_HANDLE key;
+    BOOL ret = FALSE;
+    NTSTATUS status;
+
+    if (!CryptImportPublicKeyInfoEx2(X509_ASN_ENCODING, key_info, 0, NULL, &key)) return FALSE;
+    if (!extract_hash(hash, &hash_value, &hash_len)) goto done;
+    if (!cng_prepare_signature(key_info->Algorithm.pszObjId, signer->EncryptedHash.pbData,
+            signer->EncryptedHash.cbData, &sig_value, &sig_len)) goto done;
+    status = BCryptVerifySignature(key, NULL, hash_value, hash_len, sig_value, sig_len, 0);
+    if (status)
+    {
+        FIXME("Failed to verify signature: %08lx.\n", status);
+        SetLastError(RtlNtStatusToDosError(status));
+    }
+    ret = !status;
+done:
+    CryptMemFree(sig_value);
+    CryptMemFree(hash_value);
+    BCryptDestroyKey(key);
+    return ret;
+}
+
 static BOOL CDecodeSignedMsg_VerifySignatureWithKey(CDecodeMsg *msg,
  HCRYPTPROV prov, DWORD signerIndex, PCERT_PUBLIC_KEY_INFO keyInfo)
 {
+    HCRYPTHASH hash;
     HCRYPTKEY key;
     BOOL ret;
+    ALG_ID alg_id = 0;
+
+    if (msg->u.signed_data.info->rgSignerInfo[signerIndex].AuthAttrs.cAttr)
+        hash = msg->u.signed_data.signerHandles[signerIndex].authAttrHash;
+    else
+        hash = msg->u.signed_data.signerHandles[signerIndex].contentHash;
+
+    if (keyInfo->Algorithm.pszObjId) alg_id = CertOIDToAlgId(keyInfo->Algorithm.pszObjId);
+    if (alg_id == CALG_OID_INFO_PARAMETERS || alg_id == CALG_OID_INFO_CNG_ONLY)
+        return cng_verify_msg_signature(&msg->u.signed_data.info->rgSignerInfo[signerIndex], hash, keyInfo);
 
     if (!prov)
         prov = msg->crypt_prov;
     ret = CryptImportPublicKeyInfo(prov, X509_ASN_ENCODING, keyInfo, &key);
     if (ret)
     {
-        HCRYPTHASH hash;
         CRYPT_HASH_BLOB reversedHash;
 
-        if (msg->u.signed_data.info->rgSignerInfo[signerIndex].AuthAttrs.cAttr)
-            hash = msg->u.signed_data.signerHandles[signerIndex].authAttrHash;
-        else
-            hash = msg->u.signed_data.signerHandles[signerIndex].contentHash;
         ret = CRYPT_ConstructBlob(&reversedHash,
          &msg->u.signed_data.info->rgSignerInfo[signerIndex].EncryptedHash);
         if (ret)

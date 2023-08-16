@@ -38,7 +38,7 @@
 @ stub SymAddSourceStreamW
 @ stdcall SymAddSymbol(ptr int64 str int64 long long)
 @ stdcall SymAddSymbolW(ptr int64 wstr int64 long long)
-@ stub SymAddrIncludeInlineTrace
+@ stdcall SymAddrIncludeInlineTrace(long int64)
 @ stdcall SymCleanup(long)
 @ stub SymCompareInlineTrace
 @ stub SymDeleteSymbol
@@ -153,7 +153,7 @@
 @ stub SymNextW
 @ stub SymPrev
 @ stub SymPrevW
-@ stub SymQueryInlineTrace
+@ stdcall SymQueryInlineTrace(long int64 long int64 int64 ptr ptr)
 @ stdcall SymRefreshModuleList(long)
 @ stdcall SymRegisterCallback(long ptr ptr)
 @ stdcall SymRegisterCallback64(long ptr int64)
@@ -175,7 +175,7 @@
 @ stdcall SymSetSearchPathW(long wstr)
 @ stub SymSrvDeltaName
 @ stub SymSrvDeltaNameW
-@ stub SymSrvGetFileIndexInfo
+@ stdcall SymSrvGetFileIndexInfo(str ptr long)
 @ stub SymSrvGetFileIndexInfoW
 @ stub SymSrvGetFileIndexString
 @ stub SymSrvGetFileIndexStringW

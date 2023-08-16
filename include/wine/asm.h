@@ -21,13 +21,19 @@
 #ifndef __WINE_WINE_ASM_H
 #define __WINE_WINE_ASM_H
 
-#if defined(__APPLE__) || (defined(__WINE_PE_BUILD) && (defined(__i386__) || defined(__i386_on_x86_64__)))
+#if defined(__APPLE__) || (defined(__WINE_PE_BUILD) && defined(__i386__))
 # define __ASM_NAME(name) "_" name
 #else
 # define __ASM_NAME(name) name
 #endif
 
-#if defined(__WINE_PE_BUILD) && (defined(__i386__) || defined(__i386_on_x86_64__))
+#if defined(__APPLE__)
+# define __ASM_LOCAL_LABEL(label) "L" label
+#else
+# define __ASM_LOCAL_LABEL(label) ".L" label
+#endif
+
+#if defined(__WINE_PE_BUILD) && defined(__i386__)
 # define __ASM_STDCALL(name,args)  "_" name "@" #args
 # define __ASM_FASTCALL(name,args) "@" name "@" #args
 #else
@@ -39,6 +45,12 @@
 # define __ASM_CFI(str) str
 #else
 # define __ASM_CFI(str)
+#endif
+
+#if defined(__arm__) && defined(__ELF__) && defined(__GNUC__) && !defined(__SEH__) && !defined(__ARM_DWARF_EH__)
+# define __ASM_EHABI(str) str
+#else
+# define __ASM_EHABI(str)
 #endif
 
 #if defined(__SEH__) || (defined(_MSC_VER) && defined(__clang__) && (defined(__x86_64__) || defined(__aarch64__)))
@@ -86,7 +98,7 @@
 #define __ASM_DEFINE_FUNC(name,code)  \
     __ASM_BLOCK_BEGIN(__LINE__) \
     asm(".text\n\t.align 4\n\t.globl " name "\n\t" __ASM_FUNC_TYPE(name) __ASM_SEH("\n\t.seh_proc " name) "\n" name ":\n\t" \
-        __ASM_CFI(".cfi_startproc\n\t") code __ASM_CFI("\n\t.cfi_endproc") __ASM_SEH("\n\t.seh_endproc") __ASM_FUNC_SIZE(name)); \
+        __ASM_CFI(".cfi_startproc\n\t") __ASM_EHABI(".fnstart\n\t") code __ASM_CFI("\n\t.cfi_endproc") __ASM_EHABI("\n\t.fnend") __ASM_SEH("\n\t.seh_endproc") __ASM_FUNC_SIZE(name)); \
     __ASM_BLOCK_END
 
 #define __ASM_GLOBAL_FUNC(name,code) __ASM_DEFINE_FUNC(__ASM_NAME(#name),code)

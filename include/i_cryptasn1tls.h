@@ -19,8 +19,6 @@
 #ifndef __WINE_I_CRYPTASN1TLS_H
 #define __WINE_I_CRYPTASN1TLS_H
 
-#include "wine/winheader_enter.h"
-
 typedef void *ASN1decoding_t;
 typedef void *ASN1encoding_t;
 typedef void *ASN1module_t;
@@ -39,7 +37,5 @@ BOOL        WINAPI I_CryptUninstallAsn1Module(HCRYPTASN1MODULE);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_I_CRYPTASN1TLS_H */

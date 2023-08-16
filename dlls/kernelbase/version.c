@@ -775,7 +775,7 @@ DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD r
     if (flags & ~FILE_VER_GET_LOCALISED)
         FIXME("flags 0x%lx ignored\n", flags & ~FILE_VER_GET_LOCALISED);
 
-    if ((hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_DATAFILE )))
+    if ((hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_IMAGE_RESOURCE )))
     {
         HRSRC hRsrc = NULL;
         if (!(flags & FILE_VER_GET_LOCALISED))
@@ -794,8 +794,7 @@ DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD r
         }
         FreeLibrary( hModule );
     }
-
-    if (magic == 1)
+    else
     {
         HANDLE handle = CreateFileW( filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
                                      NULL, OPEN_EXISTING, 0, 0 );
@@ -881,7 +880,7 @@ BOOL WINAPI GetFileVersionInfoExW( DWORD flags, LPCWSTR filename, DWORD ignored,
     if (flags & ~FILE_VER_GET_LOCALISED)
         FIXME("flags 0x%lx ignored\n", flags & ~FILE_VER_GET_LOCALISED);
 
-    if ((hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_DATAFILE )))
+    if ((hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_IMAGE_RESOURCE )))
     {
         HRSRC hRsrc = NULL;
         if (!(flags & FILE_VER_GET_LOCALISED))
@@ -903,8 +902,7 @@ BOOL WINAPI GetFileVersionInfoExW( DWORD flags, LPCWSTR filename, DWORD ignored,
         }
         FreeLibrary( hModule );
     }
-
-    if (magic == 1)
+    else
     {
         HANDLE handle = CreateFileW( filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
                                      NULL, OPEN_EXISTING, 0, 0 );
@@ -1445,6 +1443,96 @@ DWORD WINAPI VerFindFileW( DWORD flags, LPCWSTR filename, LPCWSTR win_dir, LPCWS
     return retval;
 }
 
+/* Begin CX HACK 21549 */
+static void *get_version_info_from_hmodule(HMODULE hmod)
+{
+    /* The equivalent of GetFileVersionInfo, just for an already
+       loaded module. */
+
+    HGLOBAL loaded_rsrc;
+    HRSRC hrsrc = FindResourceW(hmod, (LPCWSTR)MAKEINTRESOURCEW(VS_VERSION_INFO), (LPCWSTR)RT_VERSION);
+    if (!hrsrc) return NULL;
+
+    loaded_rsrc = LoadResource(hmod, hrsrc);
+    if (!loaded_rsrc) return NULL;
+
+    return LockResource(loaded_rsrc);
+}
+
+struct lang_and_codepage
+{
+    LANGID lang;
+    WORD codepage;
+};
+
+static BOOL get_ver_translation(void *ver_buffer, LANGID lang, struct lang_and_codepage *translation)
+{
+    struct lang_and_codepage *translations;
+    UINT len;
+    int i;
+
+    BOOL res = VerQueryValueW(ver_buffer, L"\\VarFileInfo\\Translation", (void**)&translations, &len);
+    if (!res || !len) return FALSE;
+
+    for (i = 0; i < len / sizeof(struct lang_and_codepage); i++)
+    {
+        if (translations[i].lang == lang)
+        {
+            *translation = translations[i];
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+static WCHAR *get_translated_ver_string(void *ver_buffer, struct lang_and_codepage *translation, const WCHAR *property)
+{
+    WCHAR *value, subblock[256];
+    UINT len = 0;
+    BOOL res;
+
+    swprintf(subblock, ARRAY_SIZE(subblock), L"\\StringFileInfo\\%04x%04x\\%s", translation->lang, translation->codepage, property);
+    res = VerQueryValueW(ver_buffer, subblock, (void **)&value, &len);
+    return (res && len) ? value : NULL;
+}
+
+static BOOL is_vc_2010_redist(void)
+{
+    static int ret = -1;
+    WCHAR *str;
+    HMODULE hmod;
+    void *rsrc_buf;
+    LANGID english = MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT);
+    struct lang_and_codepage translation;
+
+    if (ret != -1) return ret;
+    ret = 0;
+
+    hmod = GetModuleHandleW(NULL);
+    rsrc_buf = get_version_info_from_hmodule(hmod);
+    if (!rsrc_buf) goto done;
+
+    if (!get_ver_translation(rsrc_buf, english, &translation)) goto done;
+
+    str = get_translated_ver_string(rsrc_buf, &translation, L"ProductName");
+    if (!str || wcscmp(str, L"Microsoft® .NET Framework")) goto done;
+
+    str = get_translated_ver_string(rsrc_buf, &translation, L"InternalName");
+    if (!str || wcscmp(str, L"Setup.exe")) goto done;
+
+    str = get_translated_ver_string(rsrc_buf, &translation, L"ProductVersion");
+    if (!str || wcsncmp(str, L"10.0.", 5)) goto done;
+
+    ret = 1;
+
+done:
+    if (ret) FIXME("hacking product type for VC 2010 redist\n");
+    return ret;
+}
+
+/* End CX HACK 21549 */
+
 
 /***********************************************************************
  *         GetProductInfo   (kernelbase.@)
@@ -1452,6 +1540,13 @@ DWORD WINAPI VerFindFileW( DWORD flags, LPCWSTR filename, LPCWSTR win_dir, LPCWS
 BOOL WINAPI DECLSPEC_HOTPATCH GetProductInfo( DWORD os_major, DWORD os_minor,
                                               DWORD sp_major, DWORD sp_minor, DWORD *type )
 {
+    if (is_vc_2010_redist())
+    {
+        /* CX HACK 21549 */
+        *type = PRODUCT_ULTIMATE;
+        return TRUE;
+    }
+
     return RtlGetProductInfo( os_major, os_minor, sp_major, sp_minor, type );
 }
 

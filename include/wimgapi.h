@@ -19,8 +19,6 @@
 #ifndef _WIMGAPI_H_
 #define _WIMGAPI_H_
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -36,7 +34,5 @@ typedef struct _WIM_MOUNT_LIST
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* _WIMGAPI_H_ */

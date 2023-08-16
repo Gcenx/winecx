@@ -19,8 +19,6 @@
 #ifndef __D3DRMWIN_H__
 #define __D3DRMWIN_H__
 
-#include "wine/winheader_enter.h"
-
 #include <d3drm.h>
 #include <ddraw.h>
 #include <d3d.h>
@@ -101,7 +99,5 @@ DECLARE_INTERFACE_(IDirect3DRMWinDevice,IDirect3DRMObject)
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __D3DRMWIN_H__ */

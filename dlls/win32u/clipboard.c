@@ -23,6 +23,10 @@
  *
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include <pthread.h>
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -33,13 +37,6 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(clipboard);
-
-#ifdef __i386_on_x86_64__
-#undef free
-#define heapfree(x) HeapFree(GetProcessHeap(), 0, x)
-#else
-#define heapfree(x) free(x)
-#endif
 
 static pthread_mutex_t clipboard_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -59,9 +56,9 @@ static struct list formats_to_free = LIST_INIT( formats_to_free );
 static const char *debugstr_format( UINT id )
 {
     WCHAR buffer[256];
-    DWORD le = GetLastError();
+    DWORD le = RtlGetLastWin32Error();
     BOOL r = NtUserGetClipboardFormatName( id, buffer, ARRAYSIZE(buffer) );
-    SetLastError(le);
+    RtlSetLastWin32Error(le);
 
     if (r)
         return wine_dbg_sprintf( "%04x %s", id, debugstr_w(buffer) );
@@ -129,7 +126,7 @@ static void free_cached_data( struct cached_format *cache )
                             &ret_ptr, &ret_len );
         break;
     }
-    heapfree( cache );
+    free( cache );
 }
 
 /* free all the data in the cache */
@@ -235,8 +232,8 @@ BOOL WINAPI NtUserEmptyClipboard(void)
 
     TRACE( "owner %p\n", owner );
 
-    if (owner) send_message_timeout( owner, WM_DESTROYCLIPBOARD, 0, 0, SMTO_ABORTIFHUNG,
-                                     5000, NULL, FALSE );
+    if (owner)
+        send_message_timeout( owner, WM_DESTROYCLIPBOARD, 0, 0, SMTO_ABORTIFHUNG, 5000, FALSE );
 
     pthread_mutex_lock( &clipboard_mutex );
 
@@ -307,7 +304,7 @@ BOOL WINAPI NtUserGetUpdatedClipboardFormats( UINT *formats, UINT size, UINT *ou
 
     if (!out_size)
     {
-        SetLastError( ERROR_NOACCESS );
+        RtlSetLastWin32Error( ERROR_NOACCESS );
         return FALSE;
     }
 
@@ -322,7 +319,7 @@ BOOL WINAPI NtUserGetUpdatedClipboardFormats( UINT *formats, UINT size, UINT *ou
     SERVER_END_REQ;
 
     TRACE( "%p %u returning %u formats, ret %u\n", formats, size, *out_size, ret );
-    if (!ret && !formats && *out_size) SetLastError( ERROR_NOACCESS );
+    if (!ret && !formats && *out_size) RtlSetLastWin32Error( ERROR_NOACCESS );
     return ret;
 }
 
@@ -357,7 +354,7 @@ INT WINAPI NtUserGetClipboardFormatName( UINT format, WCHAR *buffer, INT maxlen 
     if (format < MAXINTATOM || format > 0xffff) return 0;
     if (maxlen <= 0)
     {
-        SetLastError( ERROR_MORE_DATA );
+        RtlSetLastWin32Error( ERROR_MORE_DATA );
         return 0;
     }
     if (!set_ntstatus( NtQueryInformationAtom( format, AtomBasicInformation,
@@ -452,7 +449,7 @@ BOOL WINAPI NtUserChangeClipboardChain( HWND hwnd, HWND next )
     if (status == STATUS_PENDING)
         return !send_message( viewer, WM_CHANGECBCHAIN, (WPARAM)hwnd, (LPARAM)next );
 
-    if (status) SetLastError( RtlNtStatusToDosError( status ));
+    if (status) RtlSetLastWin32Error( RtlNtStatusToDosError( status ));
     return !status;
 }
 
@@ -478,7 +475,7 @@ HWND WINAPI NtUserGetOpenClipboardWindow(void)
  */
 DWORD WINAPI NtUserGetClipboardSequenceNumber(void)
 {
-    DWORD seqno = 0;
+    unsigned int seqno = 0;
 
     SERVER_START_REQ( get_clipboard_info )
     {
@@ -501,7 +498,7 @@ UINT enum_clipboard_formats( UINT format )
         if (!wine_server_call_err( req ))
         {
             ret = reply->format;
-            SetLastError( ERROR_SUCCESS );
+            RtlSetLastWin32Error( ERROR_SUCCESS );
         }
     }
     SERVER_END_REQ;
@@ -573,6 +570,7 @@ void release_clipboard_owner( HWND hwnd )
 NTSTATUS WINAPI NtUserSetClipboardData( UINT format, HANDLE data, struct set_clipboard_params *params )
 {
     struct cached_format *cache = NULL, *prev = NULL;
+    LCID lcid;
     void *ptr = NULL;
     data_size_t size = 0;
     NTSTATUS status = STATUS_SUCCESS;
@@ -592,7 +590,7 @@ NTSTATUS WINAPI NtUserSetClipboardData( UINT format, HANDLE data, struct set_cli
 
     if (params->data)
     {
-        ptr = ULongToPtr(params->data);
+        ptr = params->data;
         size = params->size;
         if (data)
         {
@@ -606,13 +604,14 @@ NTSTATUS WINAPI NtUserSetClipboardData( UINT format, HANDLE data, struct set_cli
             make_gdi_object_system( cache->handle, TRUE );
         }
     }
+    NtQueryDefaultLocale( TRUE, &lcid );
 
     pthread_mutex_lock( &clipboard_mutex );
 
     SERVER_START_REQ( set_clipboard_data )
     {
         req->format = format;
-        NtQueryDefaultLocale( TRUE, &req->lcid );
+        req->lcid = lcid;
         wine_server_add_data( req, ptr, size );
         if (!(status = wine_server_call( req )))
         {
@@ -627,7 +626,7 @@ NTSTATUS WINAPI NtUserSetClipboardData( UINT format, HANDLE data, struct set_cli
         if ((prev = get_cached_format( format ))) list_remove( &prev->entry );
         if (cache) list_add_tail( &cached_formats, &cache->entry );
     }
-    else heapfree( cache );
+    else free( cache );
 
     pthread_mutex_unlock( &clipboard_mutex );
     if (prev) free_cached_data( prev );
@@ -641,8 +640,8 @@ done:
  */
 HANDLE WINAPI NtUserGetClipboardData( UINT format, struct get_clipboard_params *params )
 {
-    struct cached_format *cache;
-    NTSTATUS status;
+    struct cached_format *cache = NULL;
+    unsigned int status;
     UINT from, data_seqno;
     size_t size;
     HWND owner;
@@ -652,7 +651,7 @@ HANDLE WINAPI NtUserGetClipboardData( UINT format, struct get_clipboard_params *
     {
         pthread_mutex_lock( &clipboard_mutex );
 
-        cache = get_cached_format( format );
+        if (!params->data_only) cache = get_cached_format( format );
 
         SERVER_START_REQ( get_clipboard_data )
         {
@@ -663,7 +662,7 @@ HANDLE WINAPI NtUserGetClipboardData( UINT format, struct get_clipboard_params *
                 req->cached = 1;
                 req->seqno = cache->seqno;
             }
-            wine_server_set_reply( req, ULongToPtr(params->data), params->size );
+            wine_server_set_reply( req, params->data, params->size );
             status = wine_server_call( req );
             from = reply->from;
             size = reply->total;
@@ -671,6 +670,8 @@ HANDLE WINAPI NtUserGetClipboardData( UINT format, struct get_clipboard_params *
             owner = wine_server_ptr_handle( reply->owner );
         }
         SERVER_END_REQ;
+
+        params->size = size;
 
         if (!status && size)
         {
@@ -689,8 +690,18 @@ HANDLE WINAPI NtUserGetClipboardData( UINT format, struct get_clipboard_params *
                 list_add_tail( &formats_to_free, &cache->entry );
             }
 
+            if (params->data_only)
+            {
+                pthread_mutex_unlock( &clipboard_mutex );
+                return params->data;
+            }
+
             /* allocate new cache entry */
-            if (!(cache = malloc( sizeof(*cache) ))) return 0;
+            if (!(cache = malloc( sizeof(*cache) )))
+            {
+                pthread_mutex_unlock( &clipboard_mutex );
+                return 0;
+            }
 
             cache->format = format;
             cache->seqno  = data_seqno;
@@ -700,7 +711,6 @@ HANDLE WINAPI NtUserGetClipboardData( UINT format, struct get_clipboard_params *
             pthread_mutex_unlock( &clipboard_mutex );
             TRACE( "%s needs unmarshaling\n", debugstr_format( format ) );
             params->data_size = ~0;
-            params->size = size;
             return 0;
         }
         pthread_mutex_unlock( &clipboard_mutex );
@@ -713,7 +723,7 @@ HANDLE WINAPI NtUserGetClipboardData( UINT format, struct get_clipboard_params *
         if (status == STATUS_OBJECT_NAME_NOT_FOUND) return 0; /* no such format */
         if (status)
         {
-            SetLastError( RtlNtStatusToDosError( status ));
+            RtlSetLastWin32Error( RtlNtStatusToDosError( status ));
             TRACE( "%s error %08x\n", debugstr_format( format ), status );
             return 0;
         }

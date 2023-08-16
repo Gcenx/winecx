@@ -270,7 +270,7 @@ void WCMD_choice (const WCHAR * args) {
     have_console = GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &oldmode);
     errorlevel = 0;
 
-    my_command = heap_strdupW(WCMD_skip_leading_spaces((WCHAR*) args));
+    my_command = xstrdupW(WCMD_skip_leading_spaces((WCHAR*)args));
 
     ptr = WCMD_skip_leading_spaces(my_command);
     while (*ptr == '/') {
@@ -283,7 +283,7 @@ void WCMD_choice (const WCHAR * args) {
 
                 if (!*ptr || iswspace(*ptr)) {
                     WINE_FIXME("bad parameter %s for /C\n", wine_dbgstr_w(ptr));
-                    heap_free(my_command);
+                    free(my_command);
                     return;
                 }
 
@@ -320,7 +320,7 @@ void WCMD_choice (const WCHAR * args) {
 
                 if (!opt_default || (*ptr != ',')) {
                     WINE_FIXME("bad option %s for /T\n", opt_default ? wine_dbgstr_w(ptr) : "");
-                    heap_free(my_command);
+                    free(my_command);
                     return;
                 }
                 ptr++;
@@ -339,7 +339,7 @@ void WCMD_choice (const WCHAR * args) {
 
             default:
                 WINE_FIXME("bad parameter: %s\n", wine_dbgstr_w(ptr));
-                heap_free(my_command);
+                free(my_command);
                 return;
         }
     }
@@ -386,7 +386,7 @@ void WCMD_choice (const WCHAR * args) {
         answer[1] = 0; /* terminate single character string */
         if (!WCMD_ReadFile(GetStdHandle(STD_INPUT_HANDLE), answer, 1, &count))
         {
-            heap_free(my_command);
+            free(my_command);
             errorlevel = 0;
             return;
         }
@@ -403,7 +403,7 @@ void WCMD_choice (const WCHAR * args) {
 
             errorlevel = (ptr - opt_c) + 1;
             WINE_TRACE("answer: %ld\n", errorlevel);
-            heap_free(my_command);
+            free(my_command);
             return;
         }
         else
@@ -706,7 +706,7 @@ void WCMD_copy(WCHAR * args) {
     }
 
     /* We have found something to process - build a COPY_FILE block to store it */
-    thiscopy = heap_xalloc(sizeof(COPY_FILES));
+    thiscopy = xalloc(sizeof(COPY_FILES));
 
     WINE_TRACE("Not a switch, but probably a filename/list %s\n", wine_dbgstr_w(thisparam));
     thiscopy->concatenate = concatnextfilename;
@@ -717,7 +717,7 @@ void WCMD_copy(WCHAR * args) {
        leave space to append \* to the end) , then copy in character by character. Strip off
        quotes if we find them.                                                               */
     len = lstrlenW(thisparam) + (sizeof(WCHAR) * 5);  /* 5 spare characters, null + \*.*      */
-    thiscopy->name = heap_xalloc(len*sizeof(WCHAR));
+    thiscopy->name = xalloc(len * sizeof(WCHAR));
     memset(thiscopy->name, 0x00, len);
 
     pos1 = thisparam;
@@ -796,7 +796,7 @@ void WCMD_copy(WCHAR * args) {
     lstrcpyW(destname, L".");
     lstrcatW(destname, L"\\");
 
-    destination = heap_xalloc(sizeof(COPY_FILES));
+    destination = xalloc(sizeof(COPY_FILES));
     if (destination == NULL) goto exitreturn;
     destination->concatenate = FALSE;           /* Not used for destination */
     destination->binarycopy  = binarymode;
@@ -856,8 +856,8 @@ void WCMD_copy(WCHAR * args) {
   }
 
   /* Save away the destination name*/
-  heap_free(destination->name);
-  destination->name = heap_strdupW(destname);
+  free(destination->name);
+  destination->name = xstrdupW(destname);
   WINE_TRACE("Resolved destination is '%s' (calc later %d)\n",
              wine_dbgstr_w(destname), appendfirstsource);
 
@@ -984,8 +984,8 @@ void WCMD_copy(WCHAR * args) {
 
           /* If we needed to save away the first filename, do it */
           if (appendfirstsource && overwrite) {
-            heap_free(destination->name);
-            destination->name = heap_strdupW(outname);
+            free(destination->name);
+            destination->name = xstrdupW(outname);
             WINE_TRACE("Final resolved destination name : '%s'\n", wine_dbgstr_w(outname));
             appendfirstsource = FALSE;
             destisdirectory = FALSE;
@@ -1059,14 +1059,14 @@ exitreturn:
     prevcopy = thiscopy;
     /* Free up this block*/
     thiscopy = thiscopy -> next;
-    heap_free(prevcopy->name);
-    heap_free(prevcopy);
+    free(prevcopy->name);
+    free(prevcopy);
   }
 
   /* Free up the destination memory */
   if (destination) {
-    heap_free(destination->name);
-    heap_free(destination);
+    free(destination->name);
+    free(destination);
   }
 
   return;
@@ -1371,12 +1371,12 @@ static BOOL WCMD_delete_one (const WCHAR *thisArg) {
             WINE_TRACE("Recursive, Adding to search list '%s'\n", wine_dbgstr_w(subParm));
 
             /* Allocate memory, add to list */
-            nextDir = heap_xalloc(sizeof(DIRECTORY_STACK));
+            nextDir = xalloc(sizeof(DIRECTORY_STACK));
             if (allDirs == NULL) allDirs = nextDir;
             if (lastEntry != NULL) lastEntry->next = nextDir;
             lastEntry = nextDir;
             nextDir->next = NULL;
-            nextDir->dirName = heap_strdupW(subParm);
+            nextDir->dirName = xstrdupW(subParm);
           }
         } while (FindNextFileW(hff, &fd) != 0);
         FindClose (hff);
@@ -1388,8 +1388,8 @@ static BOOL WCMD_delete_one (const WCHAR *thisArg) {
           tempDir = allDirs->next;
           found |= WCMD_delete_one (allDirs->dirName);
 
-          heap_free(allDirs->dirName);
-          heap_free(allDirs);
+          free(allDirs->dirName);
+          free(allDirs);
           allDirs = tempDir;
         }
       }
@@ -1457,7 +1457,7 @@ static WCHAR *WCMD_strtrim(const WCHAR *s)
     const WCHAR *start = s;
     WCHAR* result;
 
-    result = heap_xalloc((len + 1) * sizeof(WCHAR));
+    result = xalloc((len + 1) * sizeof(WCHAR));
 
     while (iswspace(*start)) start++;
     if (*start) {
@@ -1497,7 +1497,7 @@ void WCMD_echo (const WCHAR *args)
                  && origcommand[0]!=';' && origcommand[0]!='/') {
     if (echo_mode) WCMD_output(WCMD_LoadMessage(WCMD_ECHOPROMPT), L"ON");
     else WCMD_output (WCMD_LoadMessage(WCMD_ECHOPROMPT), L"OFF");
-    heap_free(trimmed);
+    free(trimmed);
     return;
   }
 
@@ -1509,7 +1509,7 @@ void WCMD_echo (const WCHAR *args)
     WCMD_output_asis (args);
     WCMD_output_asis(L"\r\n");
   }
-  heap_free(trimmed);
+  free(trimmed);
 }
 
 /*****************************************************************************
@@ -1533,9 +1533,9 @@ static void WCMD_part_execute(CMD_LIST **cmdList, const WCHAR *firstcmd,
 
   /* Process the first command, if there is one */
   if (executecmds && firstcmd && *firstcmd) {
-    WCHAR *command = heap_strdupW(firstcmd);
+    WCHAR *command = xstrdupW(firstcmd);
     WCMD_execute (firstcmd, (*cmdList)->redirects, cmdList, FALSE);
-    heap_free(command);
+    free(command);
   }
 
 
@@ -1775,12 +1775,12 @@ static void WCMD_add_dirstowalk(DIRECTORY_STACK *dirsToWalk) {
                        debugstr_w(dirsToWalk->dirName), debugstr_w(fd.cFileName));
             continue;
         }
-        toWalk = heap_xalloc(sizeof(DIRECTORY_STACK));
+        toWalk = xalloc(sizeof(DIRECTORY_STACK));
         WINE_TRACE("(%p->%p)\n", remainingDirs, remainingDirs->next);
         toWalk->next = remainingDirs->next;
         remainingDirs->next = toWalk;
         remainingDirs = toWalk;
-        toWalk->dirName = heap_xalloc(sizeof(WCHAR) * (lstrlenW(dirsToWalk->dirName) + 2 + lstrlenW(fd.cFileName)));
+        toWalk->dirName = xalloc(sizeof(WCHAR) * (wcslen(dirsToWalk->dirName) + 2 + wcslen(fd.cFileName)));
         lstrcpyW(toWalk->dirName, dirsToWalk->dirName);
         lstrcatW(toWalk->dirName, L"\\");
         lstrcatW(toWalk->dirName, fd.cFileName);
@@ -2003,7 +2003,7 @@ static void WCMD_parse_line(CMD_LIST    *cmdStart,
     WINE_TRACE("Parsed token %d(%d) as parameter %s\n", nexttoken,
                varidx + varoffset, wine_dbgstr_w(parm));
     if (varidx >=0) {
-      if (parm) forloopcontext.variable[varidx + varoffset] = heap_strdupW(parm);
+      if (parm) forloopcontext.variable[varidx + varoffset] = xstrdupW(parm);
       varoffset++;
       if (((varidx%26)+varoffset) >= 26) break;
     }
@@ -2021,11 +2021,11 @@ static void WCMD_parse_line(CMD_LIST    *cmdStart,
     WCMD_parameter_with_delims(buffer, (nexttoken-1), &parm, FALSE, FALSE, forf_delims);
     WINE_TRACE("Parsed allremaining tokens (%d) as parameter %s\n",
                varidx + varoffset, wine_dbgstr_w(parm));
-    if (parm) forloopcontext.variable[varidx + varoffset] = heap_strdupW(parm);
+    if (parm) forloopcontext.variable[varidx + varoffset] = xstrdupW(parm);
   }
 
   /* Execute the body of the foor loop with these values */
-  if (forloopcontext.variable[varidx] && forloopcontext.variable[varidx][0] != forf_eol) {
+  if (varidx >= 0 && forloopcontext.variable[varidx] && forloopcontext.variable[varidx][0] != forf_eol) {
     CMD_LIST *thisCmdStart = cmdStart;
     *doExecuted = TRUE;
     WCMD_part_execute(&thisCmdStart, firstCmd, FALSE, TRUE);
@@ -2038,7 +2038,7 @@ static void WCMD_parse_line(CMD_LIST    *cmdStart,
     for (i=varidx; i<MAX_FOR_VARIABLES; i++) {
       if ((forloopcontext.variable[i] != oldcontext.variable[i]) &&
           (forloopcontext.variable[i] != emptyW)) {
-        heap_free(forloopcontext.variable[i]);
+        free(forloopcontext.variable[i]);
       }
     }
   }
@@ -2048,9 +2048,9 @@ static void WCMD_parse_line(CMD_LIST    *cmdStart,
 }
 
 /**************************************************************************
- * WCMD_forf_getinputhandle
+ * WCMD_forf_getinput
  *
- * Return a file handle which can be used for reading the input lines,
+ * Return a FILE* which can be used for reading the input lines,
  * either to a specific file (which may be quote delimited as we have to
  * read the parameters in raw mode) or to a command which we need to
  * execute. The command being executed runs in its own shell and stores
@@ -2064,12 +2064,12 @@ static void WCMD_parse_line(CMD_LIST    *cmdStart,
  *
  * Returns a file handle which can be used to read the input lines from.
  */
-static HANDLE WCMD_forf_getinputhandle(BOOL usebackq, WCHAR *itemstr, BOOL iscmd) {
+static FILE* WCMD_forf_getinput(BOOL usebackq, WCHAR *itemstr, BOOL iscmd) {
   WCHAR  temp_str[MAX_PATH];
   WCHAR  temp_file[MAX_PATH];
   WCHAR  temp_cmd[MAXSTRING];
   WCHAR *trimmed = NULL;
-  HANDLE hinput = INVALID_HANDLE_VALUE;
+  FILE*  ret;
 
   /* Remove leading and trailing character (but there may be trailing whitespace too) */
   if ((iscmd && (itemstr[0] == '`' && usebackq)) ||
@@ -2097,17 +2097,14 @@ static HANDLE WCMD_forf_getinputhandle(BOOL usebackq, WCHAR *itemstr, BOOL iscmd
     WCMD_execute (temp_cmd, temp_str, NULL, FALSE);
 
     /* Open the file, read line by line and process */
-    hinput = CreateFileW(temp_file, GENERIC_READ, FILE_SHARE_READ,
-                        NULL, OPEN_EXISTING, FILE_FLAG_DELETE_ON_CLOSE, NULL);
-
+    ret = _wfopen(temp_file, L"rt,ccs=unicode");
   } else {
     /* Open the file, read line by line and process */
     WINE_TRACE("Reading input to parse from '%s'\n", wine_dbgstr_w(itemstr));
-    hinput = CreateFileW(itemstr, GENERIC_READ, FILE_SHARE_READ,
-                        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    ret = _wfopen(itemstr, L"rt,ccs=unicode");
   }
-  heap_free(trimmed);
-  return hinput;
+  free(trimmed);
+  return ret;
 }
 
 /**************************************************************************
@@ -2212,9 +2209,9 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
   /* Set up the list of directories to recurse if we are going to */
   } else if (doRecurse) {
        /* Allocate memory, add to list */
-       dirsToWalk = heap_xalloc(sizeof(DIRECTORY_STACK));
+       dirsToWalk = xalloc(sizeof(DIRECTORY_STACK));
        dirsToWalk->next = NULL;
-       dirsToWalk->dirName = heap_strdupW(optionsRoot);
+       dirsToWalk->dirName = xstrdupW(optionsRoot);
        WINE_TRACE("Starting with root directory %s\n", wine_dbgstr_w(dirsToWalk->dirName));
   }
 
@@ -2389,7 +2386,7 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
         } else if (doFileset && ((!forf_usebackq && *itemStart != '"') ||
                                  (forf_usebackq && *itemStart != '\''))) {
 
-            HANDLE input;
+            FILE *input;
             WCHAR *itemparm;
 
             WINE_TRACE("Processing for filespec from item %d '%s'\n", itemNum,
@@ -2407,10 +2404,10 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
               /* Use item because the file to process is just the first item in the set */
               itemparm = item;
             }
-            input = WCMD_forf_getinputhandle(forf_usebackq, itemparm, (itemparm==itemStart));
+            input = WCMD_forf_getinput(forf_usebackq, itemparm, (itemparm==itemStart));
 
             /* Process the input file */
-            if (input == INVALID_HANDLE_VALUE) {
+            if (!input) {
               WCMD_print_error ();
               WCMD_output_stderr(WCMD_LoadMessage(WCMD_READFAIL), item);
               errorlevel = 1;
@@ -2419,12 +2416,20 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
             } else {
 
               /* Read line by line until end of file */
-              while (WCMD_fgets(buffer, ARRAY_SIZE(buffer), input)) {
+              while (fgetws(buffer, ARRAY_SIZE(buffer), input)) {
+                size_t len = wcslen(buffer);
+                /* Either our buffer isn't large enough to fit a full line, or there's a stray
+                 * '\0' in the buffer.
+                 */
+                if (!feof(input) && (len == 0 || (buffer[len - 1] != '\n' && buffer[len - 1] != '\r')))
+                    break;
+                while (len && (buffer[len - 1] == '\n' || buffer[len - 1] == '\r'))
+                    buffer[--len] = L'\0';
                 WCMD_parse_line(cmdStart, firstCmd, &cmdEnd, variable[1], buffer, &doExecuted,
                                 &forf_skip, forf_eol, forf_delims, forf_tokens);
                 buffer[0] = 0;
               }
-              CloseHandle (input);
+              fclose (input);
             }
 
             /* When we have processed the item as a whole command, abort future set processing */
@@ -2495,8 +2500,8 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
     /* If we are walking directories, move on to any which remain */
     if (dirsToWalk != NULL) {
       DIRECTORY_STACK *nextDir = dirsToWalk->next;
-      heap_free(dirsToWalk->dirName);
-      heap_free(dirsToWalk);
+      free(dirsToWalk->dirName);
+      free(dirsToWalk);
       dirsToWalk = nextDir;
       if (dirsToWalk) WINE_TRACE("Moving to next directory to iterate: %s\n",
                                  wine_dbgstr_w(dirsToWalk->dirName));
@@ -3661,7 +3666,7 @@ static int WCMD_getprecedence(const WCHAR in)
  * stack
  */
 static void WCMD_pushnumber(WCHAR *var, int num, VARSTACK **varstack) {
-  VARSTACK *thisstack = heap_xalloc(sizeof(VARSTACK));
+  VARSTACK *thisstack = xalloc(sizeof(VARSTACK));
   thisstack->isnum = (var == NULL);
   if (var) {
     thisstack->variable = var;
@@ -3711,9 +3716,9 @@ static int WCMD_popnumber(VARSTACK **varstack) {
   if (varstack) {
     thisvar = *varstack;
     result = WCMD_peeknumber(varstack);
-    if (!thisvar->isnum) heap_free(thisvar->variable);
+    if (!thisvar->isnum) free(thisvar->variable);
     *varstack = thisvar->next;
-    heap_free(thisvar);
+    free(thisvar);
   }
   WINE_TRACE("Popped number %d\n", result);
   return result;
@@ -3724,7 +3729,7 @@ static int WCMD_popnumber(VARSTACK **varstack) {
  * Push an operator onto the supplied stack
  */
 static void WCMD_pushoperator(WCHAR op, int precedence, OPSTACK **opstack) {
-  OPSTACK *thisstack = heap_xalloc(sizeof(OPSTACK));
+  OPSTACK *thisstack = xalloc(sizeof(OPSTACK));
   thisstack->precedence = precedence;
   thisstack->op = op;
   thisstack->next = *opstack;
@@ -3745,7 +3750,7 @@ static WCHAR WCMD_popoperator(OPSTACK **opstack) {
     thisop = *opstack;
     result = thisop->op;
     *opstack = thisop->next;
-    heap_free(thisop);
+    free(thisop);
   }
   WINE_TRACE("Popped operator %c\n", result);
   return result;
@@ -3949,7 +3954,7 @@ static int WCMD_handleExpression(WCHAR **expr, int *ret, int depth)
 
         /* For a variable - just push it onto the stack */
         parm = WCMD_parameter_with_delims(pos, 0, &parmstart, FALSE, FALSE, mathDelims);
-        dupparm = heap_strdupW(parm);
+        dupparm = xstrdupW(parm);
         WCMD_pushnumber(dupparm, 0, &varstackhead);
         pos = parmstart + lstrlenW(dupparm);
       }
@@ -4059,7 +4064,7 @@ static int WCMD_handleExpression(WCHAR **expr, int *ret, int depth)
                  }
                  prevresult = WCMD_popnumber(&varstackhead);
                  WINE_TRACE("Expression resolved to %d\n", prevresult);
-                 heap_free(varstackhead);
+                 free(varstackhead);
                  varstackhead = NULL;
                  pos++;
                  break;
@@ -4189,7 +4194,7 @@ void WCMD_setshow_env (WCHAR *s) {
     WCHAR *src,*dst;
 
     /* Remove all quotes before doing any calculations */
-    thisexpr = heap_xalloc((lstrlenW(s+2)+1) * sizeof(WCHAR));
+    thisexpr = xalloc((wcslen(s + 2) + 1) * sizeof(WCHAR));
     src = s+2;
     dst = thisexpr;
     while (*src) {
@@ -4201,7 +4206,7 @@ void WCMD_setshow_env (WCHAR *s) {
     /* Now calculate the results of the expression */
     src = thisexpr;
     rc = WCMD_handleExpression(&src, &result, 0);
-    heap_free(thisexpr);
+    free(thisexpr);
 
     /* If parsing failed, issue the error message */
     if (rc > 0) {
@@ -4380,7 +4385,7 @@ void WCMD_start(WCHAR *args)
 
     GetSystemDirectoryW( file, MAX_PATH );
     lstrcatW(file, L"\\start.exe");
-    cmdline = heap_xalloc( (lstrlenW(file) + lstrlenW(args) + 8) * sizeof(WCHAR) );
+    cmdline = xalloc( (wcslen(file) + wcslen(args) + 8) * sizeof(WCHAR) );
     lstrcpyW( cmdline, file );
     lstrcatW(cmdline, L" ");
     cmdline_params = cmdline + lstrlenW(cmdline);
@@ -4483,7 +4488,7 @@ void WCMD_start(WCHAR *args)
         WCMD_print_error ();
         errorlevel = 9009;
     }
-    heap_free(cmdline);
+    free(cmdline);
 }
 
 /****************************************************************************

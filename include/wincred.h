@@ -19,16 +19,16 @@
 #ifndef _WINCRED_H_
 #define _WINCRED_H_
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#ifndef WINADVAPI
 #ifdef _ADVAPI32_
 #define WINADVAPI
 #else
-#define WINADVAPI DECLSPEC_HIDDEN
+#define WINADVAPI DECLSPEC_IMPORT
+#endif
 #endif
 
 #ifndef __SECHANDLE_DEFINED__
@@ -297,7 +297,5 @@ DWORD WINAPI CredUIReadSSOCredW(PCWSTR,PWSTR*);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* _WINCRED_H_ */

@@ -29,6 +29,20 @@
 coclass AviSplitter {}
 
 [
+    helpstring("MPEG Audio Decoder"),
+    threading(both),
+    uuid(4a2286e0-7bef-11ce-9bd9-0000e202599c)
+]
+coclass CMpegAudioCodec {}
+
+[
+    helpstring("MPEG Layer-3 Decoder"),
+    threading(both),
+    uuid(38be3000-dbf4-11d0-860e-00a024cfef6d)
+]
+coclass mpeg_layer3_decoder {}
+
+[
     helpstring("MPEG-I Stream Splitter"),
     threading(both),
     uuid(336475d0-942a-11ce-a870-00aa002feab5)
@@ -64,18 +78,36 @@ coclass GStreamerByteStreamHandler {}
 
 [
     threading(both),
-    uuid(6a170414-aad9-4693-b806-3a0c47c570d6)
-]
-coclass WINEAudioConverter { }
-
-[
-    threading(both),
     uuid(2eeb4adf-4578-4d10-bca7-bb955f56320a)
 ]
 coclass CWMADecMediaObject {};
 
 [
     threading(both),
+    uuid(32d186a7-218f-4c75-8876-dd77273a8999)
+]
+coclass CMSAACDecMFT {}
+
+[
+    threading(both),
+    uuid(82d353df-90bd-4382-8bc2-3f6192b76e34)
+]
+coclass CWMVDecMediaObject {}
+
+[
+    threading(both),
     uuid(62ce7e72-4c71-4d20-b15d-452831a87d9d)
 ]
 coclass CMSH264DecoderMFT {}
+
+[
+    threading(both),
+    uuid(f447b69e-1884-4a7e-8055-346f74d6edb3)
+]
+coclass CResamplerMediaObject {}
+
+[
+    threading(both),
+    uuid(98230571-0087-4204-b020-3282538e57d3)
+]
+coclass CColorConvertDMO {}

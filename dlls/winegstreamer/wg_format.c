@@ -177,7 +177,7 @@ static void wg_format_from_video_info(struct wg_format *format, const GstVideoIn
     format->u.video.fps_d = GST_VIDEO_INFO_FPS_D(info);
 }
 
-static void wg_format_from_caps_audio_mpeg(struct wg_format *format, const GstCaps *caps)
+static void wg_format_from_caps_audio_mpeg1(struct wg_format *format, const GstCaps *caps)
 {
     const GstStructure *structure = gst_caps_get_structure(caps, 0);
     gint layer, channels, rate;
@@ -198,17 +198,10 @@ static void wg_format_from_caps_audio_mpeg(struct wg_format *format, const GstCa
         return;
     }
 
-    format->major_type = WG_MAJOR_TYPE_AUDIO;
-
-    if (layer == 1)
-        format->u.audio.format = WG_AUDIO_FORMAT_MPEG1_LAYER1;
-    else if (layer == 2)
-        format->u.audio.format = WG_AUDIO_FORMAT_MPEG1_LAYER2;
-    else if (layer == 3)
-        format->u.audio.format = WG_AUDIO_FORMAT_MPEG1_LAYER3;
-
-    format->u.audio.channels = channels;
-    format->u.audio.rate = rate;
+    format->major_type = WG_MAJOR_TYPE_AUDIO_MPEG1;
+    format->u.audio_mpeg1.layer = layer;
+    format->u.audio_mpeg1.channels = channels;
+    format->u.audio_mpeg1.rate = rate;
 }
 
 static void wg_format_from_caps_video_cinepak(struct wg_format *format, const GstCaps *caps)
@@ -232,12 +225,11 @@ static void wg_format_from_caps_video_cinepak(struct wg_format *format, const Gs
         fps_d = 1;
     }
 
-    format->major_type = WG_MAJOR_TYPE_VIDEO;
-    format->u.video.format = WG_VIDEO_FORMAT_CINEPAK;
-    format->u.video.width = width;
-    format->u.video.height = height;
-    format->u.video.fps_n = fps_n;
-    format->u.video.fps_d = fps_d;
+    format->major_type = WG_MAJOR_TYPE_VIDEO_CINEPAK;
+    format->u.video_cinepak.width = width;
+    format->u.video_cinepak.height = height;
+    format->u.video_cinepak.fps_n = fps_n;
+    format->u.video_cinepak.fps_d = fps_d;
 }
 
 void wg_format_from_caps(struct wg_format *format, const GstCaps *caps)
@@ -263,7 +255,7 @@ void wg_format_from_caps(struct wg_format *format, const GstCaps *caps)
     }
     else if (!strcmp(name, "audio/mpeg"))
     {
-        wg_format_from_caps_audio_mpeg(format, caps);
+        wg_format_from_caps_audio_mpeg1(format, caps);
     }
     else if (!strcmp(name, "video/x-cinepak"))
     {
@@ -338,6 +330,53 @@ static void wg_channel_mask_to_gst(GstAudioChannelPosition *positions, uint32_t 
     }
 }
 
+static GstCaps *wg_format_to_caps_audio_mpeg1(const struct wg_format *format)
+{
+    GstCaps *caps;
+
+    if (!(caps = gst_caps_new_empty_simple("audio/mpeg")))
+        return NULL;
+
+    gst_caps_set_simple(caps, "mpegversion", G_TYPE_INT, 1, NULL);
+    gst_caps_set_simple(caps, "layer", G_TYPE_INT, format->u.audio_mpeg1.layer, NULL);
+    gst_caps_set_simple(caps, "rate", G_TYPE_INT, format->u.audio_mpeg1.rate, NULL);
+    gst_caps_set_simple(caps, "channels", G_TYPE_INT, format->u.audio_mpeg1.channels, NULL);
+    gst_caps_set_simple(caps, "parsed", G_TYPE_BOOLEAN, TRUE, NULL);
+
+    return caps;
+}
+
+static GstCaps *wg_format_to_caps_audio_mpeg4(const struct wg_format *format)
+{
+    GstBuffer *buffer;
+    GstCaps *caps;
+
+    if (!(caps = gst_caps_new_empty_simple("audio/mpeg")))
+        return NULL;
+
+    gst_caps_set_simple(caps, "mpegversion", G_TYPE_INT, 4, NULL);
+
+    switch (format->u.audio_mpeg4.payload_type)
+    {
+        case 0: gst_caps_set_simple(caps, "stream-format", G_TYPE_STRING, "raw", NULL); break;
+        case 1: gst_caps_set_simple(caps, "stream-format", G_TYPE_STRING, "adts", NULL); break;
+        case 2: gst_caps_set_simple(caps, "stream-format", G_TYPE_STRING, "adif", NULL); break;
+        case 3: gst_caps_set_simple(caps, "stream-format", G_TYPE_STRING, "loas", NULL); break;
+    }
+
+    /* FIXME: Use gst_codec_utils_aac_caps_set_level_and_profile from GStreamer pbutils library */
+
+    if (format->u.audio_mpeg4.codec_data_len)
+    {
+        buffer = gst_buffer_new_and_alloc(format->u.audio_mpeg4.codec_data_len);
+        gst_buffer_fill(buffer, 0, format->u.audio_mpeg4.codec_data, format->u.audio_mpeg4.codec_data_len);
+        gst_caps_set_simple(caps, "codec_data", GST_TYPE_BUFFER, buffer, NULL);
+        gst_buffer_unref(buffer);
+    }
+
+    return caps;
+}
+
 static GstCaps *wg_format_to_caps_audio(const struct wg_format *format)
 {
     GstAudioChannelPosition positions[32];
@@ -385,46 +424,66 @@ static GstCaps *wg_format_to_caps_video(const struct wg_format *format)
     gst_video_info_set_format(&info, video_format, format->u.video.width, abs(format->u.video.height));
     if ((caps = gst_video_info_to_caps(&info)))
     {
-        /* Clear some fields that shouldn't prevent us from connecting. */
         for (i = 0; i < gst_caps_get_size(caps); ++i)
         {
-            gst_structure_remove_fields(gst_caps_get_structure(caps, i),
-                    "framerate", "pixel-aspect-ratio", "colorimetry", "chroma-site", NULL);
+            if (!format->u.video.width)
+                gst_structure_remove_fields(gst_caps_get_structure(caps, i), "width", NULL);
+            if (!format->u.video.height)
+                gst_structure_remove_fields(gst_caps_get_structure(caps, i), "height", NULL);
+            if (!format->u.video.fps_d && !format->u.video.fps_n)
+                gst_structure_remove_fields(gst_caps_get_structure(caps, i), "framerate", NULL);
         }
     }
     return caps;
 }
 
-static GstCaps *wg_format_to_caps_wma(const struct wg_format *format)
+static GstCaps *wg_format_to_caps_video_cinepak(const struct wg_format *format)
+{
+    GstCaps *caps;
+
+    if (!(caps = gst_caps_new_empty_simple("video/x-cinepak")))
+        return NULL;
+
+    if (format->u.video_cinepak.width)
+        gst_caps_set_simple(caps, "width", G_TYPE_INT, format->u.video_cinepak.width, NULL);
+    if (format->u.video_cinepak.height)
+        gst_caps_set_simple(caps, "height", G_TYPE_INT, format->u.video_cinepak.height, NULL);
+    if (format->u.video_cinepak.fps_d || format->u.video_cinepak.fps_n)
+        gst_caps_set_simple(caps, "framerate", GST_TYPE_FRACTION, format->u.video_cinepak.fps_n, format->u.video_cinepak.fps_d, NULL);
+
+    return caps;
+}
+
+static GstCaps *wg_format_to_caps_audio_wma(const struct wg_format *format)
 {
     GstBuffer *buffer;
     GstCaps *caps;
 
     if (!(caps = gst_caps_new_empty_simple("audio/x-wma")))
         return NULL;
-    if (format->u.wma.version)
-        gst_caps_set_simple(caps, "wmaversion", G_TYPE_INT, format->u.wma.version, NULL);
+    if (format->u.audio_wma.version)
+        gst_caps_set_simple(caps, "wmaversion", G_TYPE_INT, format->u.audio_wma.version, NULL);
 
-    if (format->u.wma.bitrate)
-        gst_caps_set_simple(caps, "bitrate", G_TYPE_INT, format->u.wma.bitrate, NULL);
-    if (format->u.wma.rate)
-        gst_caps_set_simple(caps, "rate", G_TYPE_INT, format->u.wma.rate, NULL);
-    if (format->u.wma.depth)
-        gst_caps_set_simple(caps, "depth", G_TYPE_INT, format->u.wma.depth, NULL);
-    if (format->u.wma.channels)
-        gst_caps_set_simple(caps, "channels", G_TYPE_INT, format->u.wma.channels, NULL);
-    if (format->u.wma.block_align)
-        gst_caps_set_simple(caps, "block_align", G_TYPE_INT, format->u.wma.block_align, NULL);
+    if (format->u.audio_wma.bitrate)
+        gst_caps_set_simple(caps, "bitrate", G_TYPE_INT, format->u.audio_wma.bitrate, NULL);
+    if (format->u.audio_wma.rate)
+        gst_caps_set_simple(caps, "rate", G_TYPE_INT, format->u.audio_wma.rate, NULL);
+    if (format->u.audio_wma.depth)
+        gst_caps_set_simple(caps, "depth", G_TYPE_INT, format->u.audio_wma.depth, NULL);
+    if (format->u.audio_wma.channels)
+        gst_caps_set_simple(caps, "channels", G_TYPE_INT, format->u.audio_wma.channels, NULL);
+    if (format->u.audio_wma.block_align)
+        gst_caps_set_simple(caps, "block_align", G_TYPE_INT, format->u.audio_wma.block_align, NULL);
 
-    if (format->u.wma.codec_data_len)
+    if (format->u.audio_wma.codec_data_len)
     {
-        if (!(buffer = gst_buffer_new_and_alloc(format->u.wma.codec_data_len)))
+        if (!(buffer = gst_buffer_new_and_alloc(format->u.audio_wma.codec_data_len)))
         {
             gst_caps_unref(caps);
             return NULL;
         }
 
-        gst_buffer_fill(buffer, 0, format->u.wma.codec_data, format->u.wma.codec_data_len);
+        gst_buffer_fill(buffer, 0, format->u.audio_wma.codec_data, format->u.audio_wma.codec_data_len);
         gst_caps_set_simple(caps, "codec_data", GST_TYPE_BUFFER, buffer, NULL);
         gst_buffer_unref(buffer);
     }
@@ -432,36 +491,39 @@ static GstCaps *wg_format_to_caps_wma(const struct wg_format *format)
     return caps;
 }
 
-static GstCaps *wg_format_to_caps_h264(const struct wg_format *format)
+static GstCaps *wg_format_to_caps_video_h264(const struct wg_format *format)
 {
     const char *profile, *level;
     GstCaps *caps;
 
-    caps = gst_caps_new_empty_simple("video/x-h264");
+    if (!(caps = gst_caps_new_empty_simple("video/x-h264")))
+        return NULL;
     gst_caps_set_simple(caps, "stream-format", G_TYPE_STRING, "byte-stream", NULL);
     gst_caps_set_simple(caps, "alignment", G_TYPE_STRING, "au", NULL);
 
-    if (format->u.h264.width)
-        gst_caps_set_simple(caps, "width", G_TYPE_INT, format->u.h264.width, NULL);
-    if (format->u.h264.height)
-        gst_caps_set_simple(caps, "height", G_TYPE_INT, format->u.h264.height, NULL);
-    if (format->u.h264.fps_n || format->u.h264.fps_d)
-        gst_caps_set_simple(caps, "framerate", GST_TYPE_FRACTION, format->u.h264.fps_n, format->u.h264.fps_d, NULL);
+    if (format->u.video_h264.width)
+        gst_caps_set_simple(caps, "width", G_TYPE_INT, format->u.video_h264.width, NULL);
+    if (format->u.video_h264.height)
+        gst_caps_set_simple(caps, "height", G_TYPE_INT, format->u.video_h264.height, NULL);
+    if (format->u.video_h264.fps_n || format->u.video_h264.fps_d)
+        gst_caps_set_simple(caps, "framerate", GST_TYPE_FRACTION, format->u.video_h264.fps_n, format->u.video_h264.fps_d, NULL);
 
-    switch (format->u.h264.profile)
+    switch (format->u.video_h264.profile)
     {
         case eAVEncH264VProfile_Main: profile = "main"; break;
         case eAVEncH264VProfile_High: profile = "high"; break;
         case eAVEncH264VProfile_444:  profile = "high-4:4:4"; break;
         default:
-            GST_FIXME("H264 profile attribute %u not implemented.", format->u.h264.profile);
+            GST_FIXME("H264 profile attribute %u not implemented.", format->u.video_h264.profile);
+            /* fallthrough */
+        case eAVEncH264VProfile_unknown:
             profile = NULL;
             break;
     }
     if (profile)
         gst_caps_set_simple(caps, "profile", G_TYPE_STRING, profile, NULL);
 
-    switch (format->u.h264.level)
+    switch (format->u.video_h264.level)
     {
         case eAVEncH264VLevel1:   level = "1";   break;
         case eAVEncH264VLevel1_1: level = "1.1"; break;
@@ -480,12 +542,33 @@ static GstCaps *wg_format_to_caps_h264(const struct wg_format *format)
         case eAVEncH264VLevel5_1: level = "5.1"; break;
         case eAVEncH264VLevel5_2: level = "5.2"; break;
         default:
-            GST_FIXME("H264 level attribute %u not implemented.", format->u.h264.level);
+            GST_FIXME("H264 level attribute %u not implemented.", format->u.video_h264.level);
+            /* fallthrough */
+        case 0:
             level = NULL;
             break;
     }
     if (level)
         gst_caps_set_simple(caps, "level", G_TYPE_STRING, level, NULL);
+
+    return caps;
+}
+
+static GstCaps *wg_format_to_caps_video_wmv(const struct wg_format *format)
+{
+    GstCaps *caps;
+
+    if (!(caps = gst_caps_new_empty_simple("video/x-wmv")))
+        return NULL;
+
+    if (format->u.video_wmv.width)
+        gst_caps_set_simple(caps, "width", G_TYPE_INT, format->u.video_wmv.width, NULL);
+    if (format->u.video_wmv.height)
+        gst_caps_set_simple(caps, "height", G_TYPE_INT, format->u.video_wmv.height, NULL);
+    if (format->u.video_wmv.fps_d || format->u.video_wmv.fps_n)
+        gst_caps_set_simple(caps, "framerate", GST_TYPE_FRACTION, format->u.video_wmv.fps_n, format->u.video_wmv.fps_d, NULL);
+    if (format->u.video_wmv.version)
+        gst_caps_set_simple(caps, "wmvversion", G_TYPE_INT, format->u.video_wmv.version, NULL);
 
     return caps;
 }
@@ -496,14 +579,22 @@ GstCaps *wg_format_to_caps(const struct wg_format *format)
     {
         case WG_MAJOR_TYPE_UNKNOWN:
             return gst_caps_new_any();
-        case WG_MAJOR_TYPE_WMA:
-            return wg_format_to_caps_wma(format);
-        case WG_MAJOR_TYPE_H264:
-            return wg_format_to_caps_h264(format);
         case WG_MAJOR_TYPE_AUDIO:
             return wg_format_to_caps_audio(format);
+        case WG_MAJOR_TYPE_AUDIO_MPEG1:
+            return wg_format_to_caps_audio_mpeg1(format);
+        case WG_MAJOR_TYPE_AUDIO_MPEG4:
+            return wg_format_to_caps_audio_mpeg4(format);
+        case WG_MAJOR_TYPE_AUDIO_WMA:
+            return wg_format_to_caps_audio_wma(format);
         case WG_MAJOR_TYPE_VIDEO:
             return wg_format_to_caps_video(format);
+        case WG_MAJOR_TYPE_VIDEO_CINEPAK:
+            return wg_format_to_caps_video_cinepak(format);
+        case WG_MAJOR_TYPE_VIDEO_H264:
+            return wg_format_to_caps_video_h264(format);
+        case WG_MAJOR_TYPE_VIDEO_WMV:
+            return wg_format_to_caps_video_wmv(format);
     }
     assert(0);
     return NULL;
@@ -516,8 +607,11 @@ bool wg_format_compare(const struct wg_format *a, const struct wg_format *b)
 
     switch (a->major_type)
     {
-        case WG_MAJOR_TYPE_WMA:
-        case WG_MAJOR_TYPE_H264:
+        case WG_MAJOR_TYPE_AUDIO_MPEG1:
+        case WG_MAJOR_TYPE_AUDIO_MPEG4:
+        case WG_MAJOR_TYPE_AUDIO_WMA:
+        case WG_MAJOR_TYPE_VIDEO_H264:
+        case WG_MAJOR_TYPE_VIDEO_WMV:
             GST_FIXME("Format %u not implemented!", a->major_type);
             /* fallthrough */
         case WG_MAJOR_TYPE_UNKNOWN:
@@ -532,7 +626,13 @@ bool wg_format_compare(const struct wg_format *a, const struct wg_format *b)
             /* Do not compare FPS. */
             return a->u.video.format == b->u.video.format
                     && a->u.video.width == b->u.video.width
-                    && abs(a->u.video.height) == abs(b->u.video.height);
+                    && abs(a->u.video.height) == abs(b->u.video.height)
+                    && EqualRect( &a->u.video.padding, &b->u.video.padding );
+
+        case WG_MAJOR_TYPE_VIDEO_CINEPAK:
+            /* Do not compare FPS. */
+            return a->u.video_cinepak.width == b->u.video_cinepak.width
+                    && a->u.video_cinepak.height == b->u.video_cinepak.height;
     }
 
     assert(0);

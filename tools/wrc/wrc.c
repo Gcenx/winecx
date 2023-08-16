@@ -135,6 +135,7 @@ static char *output_name;	/* The name given by the -o option */
 const char *input_name = NULL;	/* The name given on the command-line */
 static char *temp_name = NULL;	/* Temporary file for preprocess pipe */
 static struct strarray input_files;
+const char *temp_dir = NULL;
 
 static int stdinc = 1;
 static int po_mode;
@@ -294,7 +295,7 @@ static int load_file( const char *input_name, const char *output_name )
 static void init_argv0_dir( const char *argv0 )
 {
 #ifndef _WIN32
-    char *dir;
+    char *dir = NULL;
 
 #if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
     dir = realpath( "/proc/self/exe", NULL );
@@ -302,13 +303,11 @@ static void init_argv0_dir( const char *argv0 )
     static int pathname[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
     size_t path_size = PATH_MAX;
     char *path = xmalloc( path_size );
-    if (!sysctl( pathname, sizeof(pathname)/sizeof(pathname[0]), path, &path_size, NULL, 0 ))
+    if (!sysctl( pathname, ARRAY_SIZE(pathname), path, &path_size, NULL, 0 ))
         dir = realpath( path, NULL );
     free( path );
-#else
-    dir = realpath( argv0, NULL );
 #endif
-    if (!dir) return;
+    if (!dir && !(dir = realpath( argv0, NULL ))) return;
     dir = get_dirname( dir );
     includedir = strmake( "%s/%s", dir, BIN_TO_INCLUDEDIR );
     if (strendswith( dir, "/tools/wrc" )) nlsdirs[0] = strmake( "%s/../../nls", dir );
@@ -519,4 +518,5 @@ static void cleanup_files(void)
 {
 	if (output_name) unlink(output_name);
 	if (temp_name) unlink(temp_name);
+        if (temp_dir) rmdir(temp_dir);
 }

@@ -40,9 +40,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 
-static unixlib_handle_t gnutls_handle;
-
-#define GNUTLS_CALL( func, params ) __wine_unix_call( gnutls_handle, unix_ ## func, params )
+#define GNUTLS_CALL( func, params ) WINE_UNIX_CALL( unix_ ## func, params )
 
 #define SCHAN_INVALID_HANDLE ~0UL
 
@@ -65,6 +63,7 @@ struct schan_context
     ULONG req_ctx_attr;
     const CERT_CONTEXT *cert;
     SIZE_T header_size;
+    BOOL shutdown_requested;
 };
 
 static struct schan_handle *schan_handle_table;
@@ -747,6 +746,29 @@ static inline BOOL is_dtls_context(const struct schan_context *ctx)
     return ctx->header_size == HEADER_SIZE_DTLS;
 }
 
+static void fill_missing_sec_buffer(SecBufferDesc *input, DWORD size)
+{
+    int idx = schan_find_sec_buffer_idx(input, 0, SECBUFFER_EMPTY);
+    if (idx == -1) WARN("no empty buffer\n");
+    else
+    {
+        SecBuffer *buffer = &input->pBuffers[idx];
+        buffer->BufferType = SECBUFFER_MISSING;
+        buffer->cbBuffer = size;
+    }
+}
+
+static BOOL validate_input_buffers(SecBufferDesc *desc)
+{
+    int i;
+    for (i = 0; i < desc->cBuffers; i++)
+    {
+        SecBuffer *buffer = &desc->pBuffers[i];
+        if (buffer->BufferType == SECBUFFER_EMPTY && buffer->cbBuffer) return FALSE;
+    }
+    return TRUE;
+}
+
 /***********************************************************************
  *              InitializeSecurityContextW
  */
@@ -878,16 +900,25 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
         unsigned char *ptr;
 
         if (!(ctx = schan_get_object(phContext->dwLower, SCHAN_HANDLE_CTX))) return SEC_E_INVALID_HANDLE;
-        if (!pInput && !is_dtls_context(ctx)) return SEC_E_INCOMPLETE_MESSAGE;
+        if (!pInput && !ctx->shutdown_requested && !is_dtls_context(ctx)) return SEC_E_INCOMPLETE_MESSAGE;
 
-        if (pInput)
+        if (!ctx->shutdown_requested && pInput)
         {
+            if (!validate_input_buffers(pInput)) return SEC_E_INVALID_TOKEN;
             if ((idx = schan_find_sec_buffer_idx(pInput, 0, SECBUFFER_TOKEN)) == -1) return SEC_E_INCOMPLETE_MESSAGE;
 
             buffer = &pInput->pBuffers[idx];
             ptr = buffer->pvBuffer;
 
-            while (buffer->cbBuffer > expected_size + ctx->header_size)
+            if (buffer->cbBuffer < ctx->header_size)
+            {
+                TRACE("Expected at least %Iu bytes, but buffer only contains %lu bytes.\n",
+                      ctx->header_size, buffer->cbBuffer);
+                fill_missing_sec_buffer(pInput, ctx->header_size - buffer->cbBuffer);
+                return SEC_E_INCOMPLETE_MESSAGE;
+            }
+
+            while (buffer->cbBuffer >= expected_size + ctx->header_size)
             {
                 record_size = ctx->header_size + read_record_size(ptr, ctx->header_size);
 
@@ -899,7 +930,8 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
             if (!expected_size)
             {
                 TRACE("Expected at least %Iu bytes, but buffer only contains %lu bytes.\n",
-                      max(ctx->header_size + 1, record_size), buffer->cbBuffer);
+                      max(ctx->header_size, record_size), buffer->cbBuffer);
+                fill_missing_sec_buffer(pInput, record_size - buffer->cbBuffer);
                 return SEC_E_INCOMPLETE_MESSAGE;
             }
 
@@ -912,13 +944,6 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
     ctx->req_ctx_attr = fContextReq;
 
     /* Perform the TLS handshake */
-    if (fContextReq & ISC_REQ_ALLOCATE_MEMORY)
-    {
-        alloc_buffer.cbBuffer = extra_size;
-        alloc_buffer.BufferType = SECBUFFER_TOKEN;
-        alloc_buffer.pvBuffer = RtlAllocateHeap( GetProcessHeap(), 0, extra_size );
-    }
-
     memset(&input_desc, 0, sizeof(input_desc));
     if (pInput && (idx = schan_find_sec_buffer_idx(pInput, 0, SECBUFFER_TOKEN)) != -1)
     {
@@ -934,8 +959,13 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
     {
         output_desc.cBuffers = 1;
         output_desc.pBuffers = &pOutput->pBuffers[idx];
-        if (!output_desc.pBuffers->pvBuffer)
+        if (!output_desc.pBuffers->pvBuffer || (fContextReq & ISC_REQ_ALLOCATE_MEMORY))
+        {
+            alloc_buffer.cbBuffer = extra_size;
+            alloc_buffer.BufferType = SECBUFFER_TOKEN;
+            alloc_buffer.pvBuffer = RtlAllocateHeap( GetProcessHeap(), 0, extra_size );
             output_desc.pBuffers = &alloc_buffer;
+        }
     }
 
     params.session = ctx->session;
@@ -945,6 +975,8 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
     params.input_offset = &input_offset;
     params.output_buffer_idx = &output_buffer_idx;
     params.output_offset = &output_offset;
+    params.control_token = ctx->shutdown_requested ? control_token_shutdown : control_token_none;
+    ctx->shutdown_requested = FALSE;
     ret = GNUTLS_CALL( handshake, &params );
 
     if (output_buffer_idx != -1)
@@ -1131,7 +1163,7 @@ static SECURITY_STATUS SEC_ENTRY schan_QueryContextAttributesW(
                 stream_sizes->cbHeader = ctx->header_size;
                 stream_sizes->cbTrailer = mac_size + 256; /* Max 255 bytes padding + 1 for padding size */
                 stream_sizes->cbMaximumMessage = message_size;
-                stream_sizes->cbBuffers = 4;
+                stream_sizes->cBuffers = 4;
                 stream_sizes->cbBlockSize = block_size;
             }
 
@@ -1244,6 +1276,12 @@ static SECURITY_STATUS SEC_ENTRY schan_QueryContextAttributesW(
             struct get_application_protocol_params params = { ctx->session, protocol };
             return GNUTLS_CALL( get_application_protocol, &params );
         }
+        case SECPKG_ATTR_CIPHER_INFO:
+        {
+            SecPkgContext_CipherInfo *info = buffer;
+            struct get_cipher_info_params params = { ctx->session, info };
+            return GNUTLS_CALL( get_cipher_info, &params );
+        }
 
         default:
             FIXME("Unhandled attribute %#lx\n", attribute);
@@ -1281,6 +1319,8 @@ static SECURITY_STATUS SEC_ENTRY schan_QueryContextAttributesA(
         case SECPKG_ATTR_UNIQUE_BINDINGS:
             return schan_QueryContextAttributesW(context_handle, attribute, buffer);
         case SECPKG_ATTR_APPLICATION_PROTOCOL:
+            return schan_QueryContextAttributesW(context_handle, attribute, buffer);
+        case SECPKG_ATTR_CIPHER_INFO:
             return schan_QueryContextAttributesW(context_handle, attribute, buffer);
 
         default:
@@ -1534,6 +1574,28 @@ static SECURITY_STATUS SEC_ENTRY schan_DeleteSecurityContext(PCtxtHandle context
     return SEC_E_OK;
 }
 
+static SECURITY_STATUS SEC_ENTRY schan_ApplyControlToken(PCtxtHandle context_handle, PSecBufferDesc input)
+{
+    struct schan_context *ctx;
+
+    TRACE("%p %p\n", context_handle, input);
+
+    dump_buffer_desc(input);
+
+    if (!context_handle) return SEC_E_INVALID_HANDLE;
+    if (!input) return SEC_E_INTERNAL_ERROR;
+
+    if (input->cBuffers != 1) return SEC_E_INVALID_TOKEN;
+    if (input->pBuffers[0].BufferType != SECBUFFER_TOKEN) return SEC_E_INVALID_TOKEN;
+    if (input->pBuffers[0].cbBuffer < sizeof(DWORD)) return SEC_E_UNSUPPORTED_FUNCTION;
+    if (*(DWORD *)input->pBuffers[0].pvBuffer != SCHANNEL_SHUTDOWN) return SEC_E_UNSUPPORTED_FUNCTION;
+
+    ctx = schan_get_object(context_handle->dwLower, SCHAN_HANDLE_CTX);
+    ctx->shutdown_requested = TRUE;
+
+    return SEC_E_OK;
+}
+
 static const SecurityFunctionTableA schanTableA = {
     1,
     NULL, /* EnumerateSecurityPackagesA */
@@ -1545,7 +1607,7 @@ static const SecurityFunctionTableA schanTableA = {
     NULL, /* AcceptSecurityContext */
     NULL, /* CompleteAuthToken */
     schan_DeleteSecurityContext,
-    NULL, /* ApplyControlToken */
+    schan_ApplyControlToken, /* ApplyControlToken */
     schan_QueryContextAttributesA,
     NULL, /* ImpersonateSecurityContext */
     NULL, /* RevertSecurityContext */
@@ -1576,7 +1638,7 @@ static const SecurityFunctionTableW schanTableW = {
     NULL, /* AcceptSecurityContext */
     NULL, /* CompleteAuthToken */
     schan_DeleteSecurityContext,
-    NULL, /* ApplyControlToken */
+    schan_ApplyControlToken, /* ApplyControlToken */
     schan_QueryContextAttributesW,
     NULL, /* ImpersonateSecurityContext */
     NULL, /* RevertSecurityContext */
@@ -1621,15 +1683,10 @@ void SECUR32_initSchannelSP(void)
     };
     SecureProvider *provider;
 
-    if (!gnutls_handle)
+    if (__wine_init_unix_call() || GNUTLS_CALL( process_attach, NULL ))
     {
-        if (NtQueryVirtualMemory( GetCurrentProcess(), hsecur32, MemoryWineUnixFuncs,
-                                  &gnutls_handle, sizeof(gnutls_handle), NULL ) ||
-            GNUTLS_CALL( process_attach, NULL ))
-        {
-            ERR( "no schannel support, expect problems\n" );
-            return;
-        }
+        ERR( "no schannel support, expect problems\n" );
+        return;
     }
 
     schan_handle_table = malloc(64 * sizeof(*schan_handle_table));
@@ -1687,5 +1744,4 @@ void SECUR32_deinitSchannelSP(void)
     }
     free(schan_handle_table);
     GNUTLS_CALL( process_detach, NULL );
-    gnutls_handle = 0;
 }

@@ -23,6 +23,10 @@
  * Information in the "Undocumented Windows" is incorrect.
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "ntgdi_private.h"
 #include "ntuser_private.h"
 #include "wine/debug.h"
@@ -192,7 +196,7 @@ static UINT set_palette_entries( HPALETTE hpalette, UINT start, UINT count,
 
     TRACE("hpal=%p,start=%i,count=%i\n",hpalette,start,count );
 
-    if (hpalette == get_stock_object(DEFAULT_PALETTE)) return 0;
+    if (hpalette == GetStockObject(DEFAULT_PALETTE)) return 0;
     palPtr = GDI_GetObjPtr( hpalette, NTGDI_OBJ_PAL );
     if (!palPtr) return 0;
 
@@ -245,7 +249,7 @@ static BOOL animate_palette( HPALETTE hPal, UINT StartIndex, UINT NumEntries,
 {
     TRACE("%p (%i - %i)\n", hPal, StartIndex,StartIndex+NumEntries);
 
-    if( hPal != get_stock_object(DEFAULT_PALETTE) )
+    if( hPal != GetStockObject(DEFAULT_PALETTE) )
     {
         PALETTEOBJ * palPtr;
         UINT pal_entries;
@@ -380,7 +384,7 @@ UINT WINAPI NtGdiGetNearestPaletteIndex( HPALETTE hpalette, COLORREF color )
         }
         GDI_ReleaseObj( hpalette );
     }
-    TRACE("(%p,%06x): returning %d\n", hpalette, color, index );
+    TRACE("(%p,%s): returning %d\n", hpalette, debugstr_color(color), index );
     return index;
 }
 
@@ -401,7 +405,7 @@ COLORREF CDECL nulldrv_GetNearestColor( PHYSDEV dev, COLORREF color )
         PALETTEENTRY entry;
         HPALETTE hpal = dc->hPalette;
 
-        if (!hpal) hpal = get_stock_object( DEFAULT_PALETTE );
+        if (!hpal) hpal = GetStockObject( DEFAULT_PALETTE );
         if (spec_type == 2) /* PALETTERGB */
             index = NtGdiGetNearestPaletteIndex( hpal, color );
         else  /* PALETTEINDEX */
@@ -409,7 +413,7 @@ COLORREF CDECL nulldrv_GetNearestColor( PHYSDEV dev, COLORREF color )
 
         if (!get_palette_entries( hpal, index, 1, &entry ))
         {
-            WARN("RGB(%x) : idx %d is out of bounds, assuming NULL\n", color, index );
+            WARN("%s: idx %d is out of bounds, assuming NULL\n", debugstr_color(color), index );
             if (!get_palette_entries( hpal, 0, 1, &entry )) return CLR_INVALID;
         }
         color = RGB( entry.peRed, entry.peGreen, entry.peBlue );
@@ -510,7 +514,7 @@ HPALETTE WINAPI NtUserSelectPalette( HDC hdc, HPALETTE hpal, WORD bkg )
 
     TRACE("%p %p\n", hdc, hpal );
 
-    if (!bkg && hpal != get_stock_object( DEFAULT_PALETTE ))
+    if (!bkg && hpal != GetStockObject( DEFAULT_PALETTE ))
     {
         HWND hwnd = NtUserWindowFromDC( hdc );
         if (hwnd)
@@ -551,7 +555,7 @@ UINT realize_palette( HDC hdc )
 
     /* FIXME: move primary palette handling from user32 */
 
-    if( dc->hPalette == get_stock_object( DEFAULT_PALETTE ))
+    if( dc->hPalette == GetStockObject( DEFAULT_PALETTE ))
     {
         PHYSDEV physdev = GET_DC_PHYSDEV( dc, pRealizeDefaultPalette );
         realized = physdev->funcs->pRealizeDefaultPalette( physdev );
@@ -580,7 +584,7 @@ UINT realize_palette( HDC hdc )
         /* send palette change notification */
         HWND hwnd = NtUserWindowFromDC( hdc );
         if (hwnd) send_message_timeout( HWND_BROADCAST, WM_PALETTECHANGED, HandleToUlong(hwnd), 0,
-                                        SMTO_ABORTIFHUNG, 2000, NULL, FALSE );
+                                        SMTO_ABORTIFHUNG, 2000, FALSE );
     }
     return realized;
 }
@@ -612,7 +616,7 @@ BOOL WINAPI NtGdiUpdateColors( HDC hDC )
  */
 BOOL WINAPI NtGdiSetMagicColors( HDC hdc, DWORD magic, ULONG index )
 {
-    FIXME( "(%p 0x%08x 0x%08x): stub\n", hdc, magic, index );
+    FIXME( "(%p 0x%08x 0x%08x): stub\n", hdc, (int)magic, (int)index );
     return TRUE;
 }
 
@@ -637,7 +641,7 @@ LONG WINAPI NtGdiDoPalette( HGDIOBJ handle, WORD start, WORD count, void *entrie
     case NtGdiGetDIBColorTable:
         return get_dib_dc_color_table( handle, start, count, entries );
     default:
-        WARN( "invalid func %u\n", func );
+        WARN( "invalid func %u\n", (int)func );
         return 0;
     }
 }

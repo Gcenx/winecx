@@ -21,8 +21,6 @@
 #ifndef _WINNT_
 #define _WINNT_
 
-#include "wine/winheader_enter.h"
-
 #include <basetsd.h>
 #include <guiddef.h>
 #include <winapifamily.h>
@@ -201,9 +199,21 @@ extern "C" {
 #endif
 
 #if defined(__GNUC__) && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 3)))
-#define __WINE_ALLOC_SIZE(x) __attribute__((__alloc_size__(x)))
+#define __WINE_ALLOC_SIZE(...) __attribute__((__alloc_size__(__VA_ARGS__)))
 #else
-#define __WINE_ALLOC_SIZE(x)
+#define __WINE_ALLOC_SIZE(...)
+#endif
+
+#if defined(__GNUC__) && (__GNUC__ > 10)
+#define __WINE_DEALLOC(...) __attribute__((malloc (__VA_ARGS__)))
+#else
+#define __WINE_DEALLOC(...)
+#endif
+
+#if defined(__GNUC__) && (__GNUC__ > 2)
+#define __WINE_MALLOC __attribute__((malloc))
+#else
+#define __WINE_MALLOC
 #endif
 
 /* Anonymous union/struct handling */
@@ -405,7 +415,11 @@ extern "C" {
 
 /* Compile time assertion */
 
+#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
+#define C_ASSERT(e) _Static_assert(e, #e)
+#else
 #define C_ASSERT(e) extern void __C_ASSERT__(int [(e)?1:-1])
+#endif
 
 /* Eliminate Microsoft C/C++ compiler warning 4715 */
 #if defined(_MSC_VER) && (_MSC_VER > 1200)
@@ -749,6 +763,13 @@ typedef struct _MEMORY_BASIC_INFORMATION
     DWORD    Type;
 } MEMORY_BASIC_INFORMATION, *PMEMORY_BASIC_INFORMATION;
 
+typedef struct _MEM_ADDRESS_REQUIREMENTS
+{
+  void      *LowestStartingAddress;
+  void      *HighestEndingAddress;
+  SIZE_T     Alignment;
+} MEM_ADDRESS_REQUIREMENTS, *PMEM_ADDRESS_REQUIREMENTS;
+
 #define MEM_EXTENDED_PARAMETER_TYPE_BITS 8
 
 typedef enum MEM_EXTENDED_PARAMETER_TYPE {
@@ -778,12 +799,6 @@ typedef struct DECLSPEC_ALIGN(8) MEM_EXTENDED_PARAMETER {
     } DUMMYUNIONNAME;
 } MEM_EXTENDED_PARAMETER, *PMEM_EXTENDED_PARAMETER;
 
-typedef struct _WIN32_MEMORY_RANGE_ENTRY
-{
-    PVOID  VirtualAddress;
-    SIZE_T NumberOfBytes;
-} WIN32_MEMORY_RANGE_ENTRY, *PWIN32_MEMORY_RANGE_ENTRY;
-
 #define	PAGE_NOACCESS		0x01
 #define	PAGE_READONLY		0x02
 #define	PAGE_READWRITE		0x04
@@ -796,18 +811,25 @@ typedef struct _WIN32_MEMORY_RANGE_ENTRY
 #define	PAGE_NOCACHE		0x200
 #define	PAGE_WRITECOMBINE	0x400
 
-#define MEM_COMMIT              0x00001000
-#define MEM_RESERVE             0x00002000
-#define MEM_DECOMMIT            0x00004000
-#define MEM_RELEASE             0x00008000
+#define MEM_COMMIT               0x00001000
+#define MEM_RESERVE              0x00002000
+#define MEM_REPLACE_PLACEHOLDER  0x00004000
+#define MEM_RESERVE_PLACEHOLDER  0x00040000
+#define MEM_RESET                0x00080000
+#define MEM_TOP_DOWN             0x00100000
+#define MEM_PHYSICAL             0x00400000
+#define MEM_RESET_UNDO           0x10000000
+#define MEM_LARGE_PAGES          0x20000000
+
+#define MEM_COALESCE_PLACEHOLDERS 0x00000001
+#define MEM_PRESERVE_PLACEHOLDER  0x00000002
+#define MEM_DECOMMIT              0x00004000
+#define MEM_RELEASE               0x00008000
+
 #define MEM_FREE                0x00010000
 #define MEM_PRIVATE             0x00020000
 #define MEM_MAPPED              0x00040000
-#define MEM_RESET               0x00080000
-#define MEM_TOP_DOWN            0x00100000
 #define MEM_WRITE_WATCH         0x00200000
-#define MEM_PHYSICAL            0x00400000
-#define MEM_LARGE_PAGES         0x20000000
 #define MEM_4MB_PAGES           0x80000000
 
 #define SEC_FILE                0x00800000
@@ -916,6 +938,78 @@ NTSYSAPI PSLIST_ENTRY WINAPI RtlInterlockedPopEntrySList(PSLIST_HEADER);
 NTSYSAPI PSLIST_ENTRY WINAPI RtlInterlockedPushEntrySList(PSLIST_HEADER, PSLIST_ENTRY);
 NTSYSAPI WORD         WINAPI RtlQueryDepthSList(PSLIST_HEADER);
 
+
+/* Fast fail (__fastfail) codes */
+
+#define FAST_FAIL_LEGACY_GS_VIOLATION               0
+#define FAST_FAIL_VTGUARD_CHECK_FAILURE             1
+#define FAST_FAIL_STACK_COOKIE_CHECK_FAILURE        2
+#define FAST_FAIL_CORRUPT_LIST_ENTRY                3
+#define FAST_FAIL_INCORRECT_STACK                   4
+#define FAST_FAIL_INVALID_ARG                       5
+#define FAST_FAIL_GS_COOKIE_INIT                    6
+#define FAST_FAIL_FATAL_APP_EXIT                    7
+#define FAST_FAIL_RANGE_CHECK_FAILURE               8
+#define FAST_FAIL_UNSAFE_REGISTRY_ACCESS            9
+#define FAST_FAIL_GUARD_ICALL_CHECK_FAILURE         10
+#define FAST_FAIL_GUARD_WRITE_CHECK_FAILURE         11
+#define FAST_FAIL_INVALID_FIBER_SWITCH              12
+#define FAST_FAIL_INVALID_SET_OF_CONTEXT            13
+#define FAST_FAIL_INVALID_REFERENCE_COUNT           14
+#define FAST_FAIL_INVALID_JUMP_BUFFER               18
+#define FAST_FAIL_MRDATA_MODIFIED                   19
+#define FAST_FAIL_CERTIFICATION_FAILURE             20
+#define FAST_FAIL_INVALID_EXCEPTION_CHAIN           21
+#define FAST_FAIL_CRYPTO_LIBRARY                    22
+#define FAST_FAIL_INVALID_CALL_IN_DLL_CALLOUT       23
+#define FAST_FAIL_INVALID_IMAGE_BASE                24
+#define FAST_FAIL_DLOAD_PROTECTION_FAILURE          25
+#define FAST_FAIL_UNSAFE_EXTENSION_CALL             26
+#define FAST_FAIL_DEPRECATED_SERVICE_INVOKED        27
+#define FAST_FAIL_INVALID_BUFFER_ACCESS             28
+#define FAST_FAIL_INVALID_BALANCED_TREE             29
+#define FAST_FAIL_INVALID_NEXT_THREAD               30
+#define FAST_FAIL_GUARD_ICALL_CHECK_SUPPRESSED      31
+#define FAST_FAIL_APCS_DISABLED                     32
+#define FAST_FAIL_INVALID_IDLE_STATE                33
+#define FAST_FAIL_MRDATA_PROTECTION_FAILURE         34
+#define FAST_FAIL_UNEXPECTED_HEAP_EXCEPTION         35
+#define FAST_FAIL_INVALID_LOCK_STATE                36
+#define FAST_FAIL_GUARD_JUMPTABLE                   37
+#define FAST_FAIL_INVALID_LONGJUMP_TARGET           38
+#define FAST_FAIL_INVALID_DISPATCH_CONTEXT          39
+#define FAST_FAIL_INVALID_THREAD                    40
+#define FAST_FAIL_INVALID_SYSCALL_NUMBER            41
+#define FAST_FAIL_INVALID_FILE_OPERATION            42
+#define FAST_FAIL_LPAC_ACCESS_DENIED                43
+#define FAST_FAIL_GUARD_SS_FAILURE                  44
+#define FAST_FAIL_LOADER_CONTINUITY_FAILURE         45
+#define FAST_FAIL_GUARD_EXPORT_SUPPRESSION_FAILURE  46
+#define FAST_FAIL_INVALID_CONTROL_STACK             47
+#define FAST_FAIL_SET_CONTEXT_DENIED                48
+#define FAST_FAIL_INVALID_IAT                       49
+#define FAST_FAIL_HEAP_METADATA_CORRUPTION          50
+#define FAST_FAIL_PAYLOAD_RESTRICTION_VIOLATION     51
+#define FAST_FAIL_LOW_LABEL_ACCESS_DENIED           52
+#define FAST_FAIL_ENCLAVE_CALL_FAILURE              53
+#define FAST_FAIL_UNHANDLED_LSS_EXCEPTON            54
+#define FAST_FAIL_ADMINLESS_ACCESS_DENIED           55
+#define FAST_FAIL_UNEXPECTED_CALL                   56
+#define FAST_FAIL_CONTROL_INVALID_RETURN_ADDRESS    57
+#define FAST_FAIL_UNEXPECTED_HOST_BEHAVIOR          58
+#define FAST_FAIL_FLAGS_CORRUPTION                  59
+#define FAST_FAIL_VEH_CORRUPTION                    60
+#define FAST_FAIL_ETW_CORRUPTION                    61
+#define FAST_FAIL_RIO_ABORT                         62
+#define FAST_FAIL_INVALID_PFN                       63
+#define FAST_FAIL_GUARD_ICALL_CHECK_FAILURE_XFG     64
+#define FAST_FAIL_CAST_GUARD                        65
+#define FAST_FAIL_HOST_VISIBILITY_CHANGE            66
+#define FAST_FAIL_KERNEL_CET_SHADOW_STACK_ASSIST    67
+#define FAST_FAIL_PATCH_CALLBACK_FAILED             68
+#define FAST_FAIL_NTDLL_PATCH_FAILED                69
+#define FAST_FAIL_INVALID_FLS_DATA                  70
+#define FAST_FAIL_INVALID_FAST_FAIL_CODE            0xFFFFFFFF
 
 /* Heap flags */
 
@@ -2140,14 +2234,14 @@ typedef struct _NT_TIB
 
 struct _TEB;
 
-#if (defined(__i386__) || defined(__i386_on_x86_64__))  && defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 2)))
+#if defined(__i386__) && defined(__GNUC__) && !defined(WINE_UNIX_LIB)
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
     struct _TEB *teb;
     __asm__(".byte 0x64\n\tmovl (0x18),%0" : "=r" (teb));
     return teb;
 }
-#elif defined(__i386__) && defined(_MSC_VER)
+#elif defined(__i386__) && defined(_MSC_VER) && !defined(WINE_UNIX_LIB)
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
   struct _TEB *teb;
@@ -2155,33 +2249,35 @@ static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
   __asm mov teb, eax;
   return teb;
 }
-#elif defined(__x86_64__) && defined(__GNUC__)
+#elif defined(__x86_64__) && defined(__GNUC__) && !defined(WINE_UNIX_LIB)
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
     struct _TEB *teb;
     __asm__(".byte 0x65\n\tmovq (0x30),%0" : "=r" (teb));
     return teb;
 }
-#elif defined(__x86_64__) && defined(_MSC_VER)
+#elif defined(__x86_64__) && defined(_MSC_VER) && !defined(WINE_UNIX_LIB)
 unsigned __int64 __readgsqword(unsigned long);
 #pragma intrinsic(__readgsqword)
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
     return (struct _TEB *)__readgsqword(FIELD_OFFSET(NT_TIB, Self));
 }
-#elif defined(__arm__) && defined(__GNUC__)
+#elif defined(__arm__) && defined(__GNUC__) && !defined(WINE_UNIX_LIB)
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
     struct _TEB *teb;
     __asm__("mrc p15, 0, %0, c13, c0, 2" : "=r" (teb));
     return teb;
 }
-#elif defined(__arm__) && defined(_MSC_VER)
+#elif defined(__arm__) && defined(_MSC_VER) && !defined(WINE_UNIX_LIB)
 #pragma intrinsic(_MoveFromCoprocessor)
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
     return (struct _TEB *)(ULONG_PTR)_MoveFromCoprocessor(15, 0, 13, 0, 2);
 }
+#elif defined(__GNUC__)
+extern struct _TEB * WINAPI NtCurrentTeb(void) __attribute__((pure));
 #else
 extern struct _TEB * WINAPI NtCurrentTeb(void);
 #endif
@@ -5434,6 +5530,8 @@ typedef struct _TAPE_GET_MEDIA_PARAMETERS {
 #define REG_REFRESH_HIVE        0x00000002
 #define REG_NO_LAZY_FLUSH       0x00000004
 #define REG_FORCE_RESTORE       0x00000008
+#define REG_APP_HIVE            0x00000010
+#define REG_PROCESS_PRIVATE     0x00000020
 
 #define KEY_READ	      ((STANDARD_RIGHTS_READ|  \
 				KEY_QUERY_VALUE|  \
@@ -5981,6 +6079,9 @@ typedef enum _LOGICAL_PROCESSOR_RELATIONSHIP
     RelationCache            = 2,
     RelationProcessorPackage = 3,
     RelationGroup            = 4,
+    RelationProcessorDie     = 5,
+    RelationNumaNodeEx       = 6,
+    RelationProcessorModule  = 7,
     RelationAll              = 0xffff
 } LOGICAL_PROCESSOR_RELATIONSHIP;
 
@@ -6306,6 +6407,7 @@ typedef enum _PROCESS_MITIGATION_POLICY
 #pragma intrinsic(_InterlockedDecrement16)
 #pragma intrinsic(_InterlockedOr)
 #pragma intrinsic(_InterlockedXor)
+#pragma intrinsic(__fastfail)
 
 BOOLEAN   _BitScanForward(unsigned long*,unsigned long);
 BOOLEAN   _BitScanReverse(unsigned long*,unsigned long);
@@ -6320,6 +6422,7 @@ long      _InterlockedIncrement(long volatile*);
 short     _InterlockedIncrement16(short volatile*);
 long      _InterlockedOr(long volatile *,long);
 long      _InterlockedXor(long volatile *,long);
+DECLSPEC_NORETURN void __fastfail(unsigned int);
 
 #ifndef __i386__
 
@@ -6437,6 +6540,61 @@ static FORCEINLINE void MemoryBarrier(void)
 
 #endif /* __i386__ */
 
+/* Since Visual Studio 2012, volatile accesses do not always imply acquire and
+ * release semantics.  We explicitly use ISO volatile semantics, manually
+ * placing barriers as appropriate.
+ */
+#if _MSC_VER >= 1700
+#pragma intrinsic(__iso_volatile_load32)
+#pragma intrinsic(__iso_volatile_store32)
+#define __WINE_LOAD32_NO_FENCE(src) (__iso_volatile_load32(src))
+#define __WINE_STORE32_NO_FENCE(dest, value) (__iso_volatile_store32(dest, value))
+#else  /* _MSC_VER >= 1700 */
+#define __WINE_LOAD32_NO_FENCE(src) (*(src))
+#define __WINE_STORE32_NO_FENCE(dest, value) ((void)(*(dest) = (value)))
+#endif  /* _MSC_VER >= 1700 */
+
+#if defined(__i386__) || defined(__x86_64__)
+#pragma intrinsic(_ReadWriteBarrier)
+void _ReadWriteBarrier(void);
+#endif  /* defined(__i386__) || defined(__x86_64__) */
+
+static void __wine_memory_barrier_acq_rel(void)
+{
+#if defined(__i386__) || defined(__x86_64__)
+#pragma warning(suppress:4996)
+    _ReadWriteBarrier();
+#elif defined(__arm__)
+    __dmb(_ARM_BARRIER_ISH);
+#elif defined(__aarch64__)
+    __dmb(_ARM64_BARRIER_ISH);
+#endif  /* defined(__i386__) || defined(__x86_64__) */
+}
+
+static FORCEINLINE LONG ReadAcquire( LONG const volatile *src )
+{
+    LONG value = __WINE_LOAD32_NO_FENCE( (int const volatile *)src );
+    __wine_memory_barrier_acq_rel();
+    return value;
+}
+
+static FORCEINLINE LONG ReadNoFence( LONG const volatile *src )
+{
+    LONG value = __WINE_LOAD32_NO_FENCE( (int const volatile *)src );
+    return value;
+}
+
+static FORCEINLINE void WriteRelease( LONG volatile *dest, LONG value )
+{
+    __wine_memory_barrier_acq_rel();
+    __WINE_STORE32_NO_FENCE( (int volatile *)dest, value );
+}
+
+static FORCEINLINE void WriteNoFence( LONG volatile *dest, LONG value )
+{
+    __WINE_STORE32_NO_FENCE( (int volatile *)dest, value );
+}
+
 #elif defined(__GNUC__)
 
 static FORCEINLINE BOOLEAN WINAPI BitScanForward(DWORD *index, DWORD mask)
@@ -6510,7 +6668,7 @@ static FORCEINLINE LONGLONG WINAPI InterlockedExchangeAdd64( LONGLONG volatile *
     return __sync_fetch_and_add( dest, incr );
 }
 
-static FORCEINLINE LONG WINAPI InterlockedIncrement( LONG volatile * HOSTPTR dest )
+static FORCEINLINE LONG WINAPI InterlockedIncrement( LONG volatile *dest )
 {
     return __sync_add_and_fetch( dest, 1 );
 }
@@ -6525,7 +6683,7 @@ static FORCEINLINE LONGLONG WINAPI InterlockedIncrement64( LONGLONG volatile *de
     return __sync_add_and_fetch( dest, 1 );
 }
 
-static FORCEINLINE LONG WINAPI InterlockedDecrement( LONG volatile * HOSTPTR dest )
+static FORCEINLINE LONG WINAPI InterlockedDecrement( LONG volatile *dest )
 {
     return __sync_add_and_fetch( dest, -1 );
 }
@@ -6545,8 +6703,6 @@ static FORCEINLINE void * WINAPI InterlockedExchangePointer( void *volatile *des
     void *ret;
 #if (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 7))
     ret = __atomic_exchange_n( dest, val, __ATOMIC_SEQ_CST );
-#elif defined(__i386_on_x86_64__)
-    __asm__ __volatile__( "lock; xchgl %0,(%1)" : "=r" (ret) :"r" (dest), "0" (val) : "memory" );
 #elif defined(__x86_64__)
     __asm__ __volatile__( "lock; xchgq %0,(%1)" : "=r" (ret) :"r" (dest), "0" (val) : "memory" );
 #elif defined(__i386__)
@@ -6580,6 +6736,56 @@ static FORCEINLINE LONGLONG WINAPI InterlockedXor64( LONGLONG volatile *dest, LO
 static FORCEINLINE void MemoryBarrier(void)
 {
     __sync_synchronize();
+}
+
+#if defined(__x86_64__) || defined(__i386__)
+/* On x86, Support old GCC with either no or buggy (GCC BZ#81316) __atomic_* support */
+#define __WINE_ATOMIC_LOAD_ACQUIRE(ptr, ret) do { *(ret) = *(ptr); __asm__ __volatile__( "" ::: "memory" ); } while (0)
+#define __WINE_ATOMIC_LOAD_RELAXED(ptr, ret) do { *(ret) = *(ptr); } while (0)
+#define __WINE_ATOMIC_STORE_RELEASE(ptr, val) do { __asm__ __volatile__( "" ::: "memory" ); *(ptr) = *(val); } while (0)
+#define __WINE_ATOMIC_STORE_RELAXED(ptr, val) do { *(ptr) = *(val); } while (0)
+#else
+#define __WINE_ATOMIC_LOAD_ACQUIRE(ptr, ret) __atomic_load(ptr, ret, __ATOMIC_ACQUIRE)
+#define __WINE_ATOMIC_LOAD_RELAXED(ptr, ret) __atomic_load(ptr, ret, __ATOMIC_RELAXED)
+#define __WINE_ATOMIC_STORE_RELEASE(ptr, val) __atomic_store(ptr, val, __ATOMIC_RELEASE)
+#define __WINE_ATOMIC_STORE_RELAXED(ptr, val) __atomic_store(ptr, val, __ATOMIC_RELAXED)
+#endif  /* defined(__x86_64__) || defined(__i386__) */
+
+static FORCEINLINE LONG ReadAcquire( LONG const volatile *src )
+{
+    LONG value;
+    __WINE_ATOMIC_LOAD_ACQUIRE( src, &value );
+    return value;
+}
+
+static FORCEINLINE LONG ReadNoFence( LONG const volatile *src )
+{
+    LONG value;
+    __WINE_ATOMIC_LOAD_RELAXED( src, &value );
+    return value;
+}
+
+static FORCEINLINE void WriteRelease( LONG volatile *dest, LONG value )
+{
+    __WINE_ATOMIC_STORE_RELEASE( dest, &value );
+}
+
+static FORCEINLINE void WriteNoFence( LONG volatile *dest, LONG value )
+{
+    __WINE_ATOMIC_STORE_RELAXED( dest, &value );
+}
+
+static FORCEINLINE DECLSPEC_NORETURN void __fastfail(unsigned int code)
+{
+#if defined(__x86_64__) || defined(__i386__)
+    for (;;) __asm__ __volatile__( "int $0x29" :: "c" ((ULONG_PTR)code) : "memory" );
+#elif defined(__aarch64__)
+    register ULONG_PTR val __asm__("x0") = code;
+    for (;;) __asm__ __volatile__( "brk #0xf003" :: "r" (val) : "memory" );
+#elif defined(__arm__)
+    register ULONG_PTR val __asm__("r0") = code;
+    for (;;) __asm__ __volatile__( "udf #0xfb" :: "r" (val) : "memory" );
+#endif
 }
 
 #endif  /* __GNUC__ */
@@ -6640,7 +6846,5 @@ static FORCEINLINE void YieldProcessor(void)
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif  /* _WINNT_ */

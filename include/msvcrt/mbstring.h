@@ -20,8 +20,6 @@
 #ifndef __WINE_MBSTRING_H
 #define __WINE_MBSTRING_H
 
-#include "wine/winheader_enter.h"
-
 #include <corecrt.h>
 
 #include <pshpack8.h>
@@ -45,6 +43,7 @@ _ACRTIMP int            __cdecl _ismbcl0(unsigned int);
 _ACRTIMP int            __cdecl _ismbcl1(unsigned int);
 _ACRTIMP int            __cdecl _ismbcl2(unsigned int);
 _ACRTIMP int            __cdecl _ismbclegal(unsigned int);
+_ACRTIMP int            __cdecl _ismbclegal_l(unsigned int, _locale_t);
 _ACRTIMP int            __cdecl _ismbclower(unsigned int);
 _ACRTIMP int            __cdecl _ismbcprint(unsigned int);
 _ACRTIMP int            __cdecl _ismbcpunct(unsigned int);
@@ -126,7 +125,5 @@ _ACRTIMP int __cdecl _ismbstrail(const unsigned char*,const unsigned char*);
 #endif
 
 #include <poppack.h>
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_MBSTRING_H */

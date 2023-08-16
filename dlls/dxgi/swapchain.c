@@ -2925,6 +2925,17 @@ static HRESULT d3d12_swapchain_init(struct d3d12_swapchain *swapchain, IWineDXGI
         return hr;
     }
 
+    if (!swapchain->desc.Width || !swapchain->desc.Height)
+    {
+        RECT r;
+
+        GetClientRect(window, &r);
+        if (!swapchain->desc.Width)
+            swapchain->desc.Width = r.right ? r.right : 8;
+        if (!swapchain->desc.Height)
+            swapchain->desc.Height = r.bottom ? r.bottom : 8;
+    }
+
     hr = wined3d_swapchain_desc_from_dxgi(&wined3d_desc, output, window, swapchain_desc,
             fullscreen_desc);
     if (FAILED(hr))

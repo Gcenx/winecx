@@ -158,6 +158,17 @@ typedef struct
 
 typedef struct
 {
+    ULONG AllocationBase;
+    ULONG AllocationProtect;
+    ULONG RegionType;
+    ULONG RegionSize;
+    ULONG CommitSize;
+    ULONG PartitionId;
+    ULONG NodePreference;
+} MEMORY_REGION_INFORMATION32;
+
+typedef struct
+{
     UNICODE_STRING32 SectionFileName;
 } MEMORY_SECTION_NAME32;
 
@@ -650,6 +661,12 @@ typedef struct
     ULONG                       Reserved4;
 } SYSTEM_EXTENDED_THREAD_INFORMATION32;
 
+typedef struct
+{
+    ULONG VirtualAddress;
+    ULONG NumberOfBytes;
+} MEMORY_RANGE_ENTRY32;
+
 struct __server_iovec32
 {
     ULONG        ptr;
@@ -667,5 +684,12 @@ struct __server_request_info32
     ULONG                   reply_data;
     struct __server_iovec32 data[__SERVER_MAX_DATA];
 };
+
+typedef struct
+{
+  ULONG LowestStartingAddress;
+  ULONG HighestEndingAddress;
+  ULONG Alignment;
+} MEM_ADDRESS_REQUIREMENTS32;
 
 #endif /* __WOW64_STRUCT32_H */

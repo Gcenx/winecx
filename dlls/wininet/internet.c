@@ -101,7 +101,7 @@ void *alloc_object(object_header_t *parent, const object_vtbl_t *vtbl, size_t si
     object_header_t **p;
     BOOL res = TRUE;
 
-    ret = heap_alloc_zero(size);
+    ret = calloc(1, size);
     if(!ret)
         return NULL;
 
@@ -111,7 +111,7 @@ void *alloc_object(object_header_t *parent, const object_vtbl_t *vtbl, size_t si
 
     if(!handle_table_size) {
         num = 16;
-        p = heap_alloc_zero(sizeof(handle_table[0]) * num);
+        p = calloc(num, sizeof(handle_table[0]));
         if(p) {
             handle_table = p;
             handle_table_size = num;
@@ -121,8 +121,9 @@ void *alloc_object(object_header_t *parent, const object_vtbl_t *vtbl, size_t si
         }
     }else if(next_handle == handle_table_size) {
         num = handle_table_size * 2;
-        p = heap_realloc_zero(handle_table, sizeof(handle_table[0]) * num);
+        p = realloc(handle_table, sizeof(handle_table[0]) * num);
         if(p) {
+            memset(p + handle_table_size, 0, sizeof(handle_table[0]) * handle_table_size);
             handle_table = p;
             handle_table_size = num;
         }else {
@@ -144,7 +145,7 @@ void *alloc_object(object_header_t *parent, const object_vtbl_t *vtbl, size_t si
     LeaveCriticalSection( &WININET_cs );
 
     if(!res) {
-        heap_free(ret);
+        free(ret);
         return NULL;
     }
 
@@ -239,7 +240,7 @@ BOOL WININET_Release( object_header_t *info )
             LeaveCriticalSection( &WININET_cs );
         }
 
-        heap_free(info);
+        free(info);
     }
     return TRUE;
 }
@@ -284,7 +285,7 @@ BOOL WINAPI DllMain (HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
         case DLL_THREAD_DETACH:
             if (g_dwTlsErrIndex != TLS_OUT_OF_INDEXES)
             {
-                heap_free(TlsGetValue(g_dwTlsErrIndex));
+                free(TlsGetValue(g_dwTlsErrIndex));
             }
             break;
 
@@ -297,7 +298,7 @@ BOOL WINAPI DllMain (HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 
             if (g_dwTlsErrIndex != TLS_OUT_OF_INDEXES)
             {
-                heap_free(TlsGetValue(g_dwTlsErrIndex));
+                free(TlsGetValue(g_dwTlsErrIndex));
                 TlsFree(g_dwTlsErrIndex);
             }
             break;
@@ -393,7 +394,7 @@ WCHAR *INTERNET_FindProxyForProtocol(LPCWSTR szProxy, LPCWSTR proto)
              equal - ptr == lstrlenW(proto) &&
              !wcsnicmp(proto, ptr, lstrlenW(proto)))
         {
-            ret = heap_strndupW(equal + 1, end - equal - 1);
+            ret = strndupW(equal + 1, end - equal - 1);
             TRACE("found proxy for %s: %s\n", debugstr_w(proto), debugstr_w(ret));
             return ret;
         }
@@ -412,7 +413,7 @@ WCHAR *INTERNET_FindProxyForProtocol(LPCWSTR szProxy, LPCWSTR proto)
             end = ptr + lstrlenW(ptr);
         if (!wcschr(ptr, '='))
         {
-            ret = heap_strndupW(ptr, end - ptr);
+            ret = strndupW(ptr, end - ptr);
             TRACE("found proxy for %s: %s\n", debugstr_w(proto), debugstr_w(ret));
             return ret;
         }
@@ -463,10 +464,10 @@ BOOL WINAPI DetectAutoProxyUrl(LPSTR lpszAutoProxyUrl,
 
 static void FreeProxyInfo( proxyinfo_t *lpwpi )
 {
-    heap_free(lpwpi->proxy);
-    heap_free(lpwpi->proxyBypass);
-    heap_free(lpwpi->proxyUsername);
-    heap_free(lpwpi->proxyPassword);
+    free(lpwpi->proxy);
+    free(lpwpi->proxyBypass);
+    free(lpwpi->proxyUsername);
+    free(lpwpi->proxyPassword);
 }
 
 static proxyinfo_t *global_proxy;
@@ -477,7 +478,7 @@ static void free_global_proxy( void )
     if (global_proxy)
     {
         FreeProxyInfo( global_proxy );
-        heap_free( global_proxy );
+        free( global_proxy );
     }
     LeaveCriticalSection( &WININET_cs );
 }
@@ -493,25 +494,25 @@ static BOOL parse_proxy_url( proxyinfo_t *info, const WCHAR *url )
     if (!InternetCrackUrlW( url, 0, 0, &uc )) return FALSE;
     if (!uc.dwHostNameLength)
     {
-        if (!(info->proxy = heap_strdupW( url ))) return FALSE;
+        if (!(info->proxy = wcsdup( url ))) return FALSE;
         info->proxyUsername = NULL;
         info->proxyPassword = NULL;
         return TRUE;
     }
-    if (!(info->proxy = heap_alloc( (uc.dwHostNameLength + 12) * sizeof(WCHAR) ))) return FALSE;
+    if (!(info->proxy = malloc( (uc.dwHostNameLength + 12) * sizeof(WCHAR) ))) return FALSE;
     swprintf( info->proxy, uc.dwHostNameLength + 12, L"%.*s:%u", uc.dwHostNameLength, uc.lpszHostName, uc.nPort );
 
     if (!uc.dwUserNameLength) info->proxyUsername = NULL;
-    else if (!(info->proxyUsername = heap_strndupW( uc.lpszUserName, uc.dwUserNameLength )))
+    else if (!(info->proxyUsername = strndupW( uc.lpszUserName, uc.dwUserNameLength )))
     {
-        heap_free( info->proxy );
+        free( info->proxy );
         return FALSE;
     }
     if (!uc.dwPasswordLength) info->proxyPassword = NULL;
-    else if (!(info->proxyPassword = heap_strndupW( uc.lpszPassword, uc.dwPasswordLength )))
+    else if (!(info->proxyPassword = strndupW( uc.lpszPassword, uc.dwPasswordLength )))
     {
-        heap_free( info->proxyUsername );
-        heap_free( info->proxy );
+        free( info->proxyUsername );
+        free( info->proxy );
         return FALSE;
     }
     return TRUE;
@@ -542,8 +543,8 @@ static LONG INTERNET_LoadProxySettings( proxyinfo_t *lpwpi )
     if (global_proxy)
     {
         lpwpi->proxyEnabled = global_proxy->proxyEnabled;
-        lpwpi->proxy = heap_strdupW( global_proxy->proxy );
-        lpwpi->proxyBypass = heap_strdupW( global_proxy->proxyBypass );
+        lpwpi->proxy = wcsdup( global_proxy->proxy );
+        lpwpi->proxyBypass = wcsdup( global_proxy->proxyBypass );
     }
     LeaveCriticalSection( &WININET_cs );
 
@@ -572,7 +573,7 @@ static LONG INTERNET_LoadProxySettings( proxyinfo_t *lpwpi )
         {
             LPWSTR szProxy, p;
 
-            if (!(szProxy = heap_alloc(len)))
+            if (!(szProxy = malloc( len )))
             {
                 RegCloseKey( key );
                 FreeProxyInfo( lpwpi );
@@ -633,21 +634,21 @@ static LONG INTERNET_LoadProxySettings( proxyinfo_t *lpwpi )
             {
                 LPWSTR szProxy;
 
-                if (!(szProxy = heap_alloc(len)))
+                if (!(szProxy = malloc( len )))
                 {
                     RegCloseKey( key );
                     return ERROR_OUTOFMEMORY;
                 }
                 RegQueryValueExW( key, L"ProxyOverride", NULL, &type, (BYTE*)szProxy, &len );
 
-                heap_free( lpwpi->proxyBypass );
+                free( lpwpi->proxyBypass );
                 lpwpi->proxyBypass = szProxy;
 
                 TRACE("http proxy bypass (from registry) = %s\n", debugstr_w(lpwpi->proxyBypass));
             }
             else
             {
-                heap_free( lpwpi->proxyBypass );
+                free( lpwpi->proxyBypass );
                 lpwpi->proxyBypass = NULL;
 
                 TRACE("No proxy bypass server settings in registry.\n");
@@ -657,14 +658,14 @@ static LONG INTERNET_LoadProxySettings( proxyinfo_t *lpwpi )
         {
             WCHAR *envproxyW;
 
-            if (!(envproxyW = heap_alloc(lstrlenW(envproxy) * sizeof(WCHAR))))
+            if (!(envproxyW = malloc( wcslen(envproxy) * sizeof(WCHAR) )))
             {
                 RegCloseKey( key );
                 return ERROR_OUTOFMEMORY;
             }
             lstrcpyW( envproxyW, envproxy );
 
-            heap_free( lpwpi->proxyBypass );
+            free( lpwpi->proxyBypass );
             lpwpi->proxyBypass = envproxyW;
 
             TRACE("http proxy bypass (from environment) = %s\n", debugstr_w(lpwpi->proxyBypass));
@@ -772,11 +773,11 @@ static VOID APPINFO_Destroy(object_header_t *hdr)
 
     TRACE("%p\n",lpwai);
 
-    heap_free(lpwai->agent);
-    heap_free(lpwai->proxy);
-    heap_free(lpwai->proxyBypass);
-    heap_free(lpwai->proxyUsername);
-    heap_free(lpwai->proxyPassword);
+    free(lpwai->agent);
+    free(lpwai->proxy);
+    free(lpwai->proxyBypass);
+    free(lpwai->proxyUsername);
+    free(lpwai->proxyPassword);
 }
 
 static DWORD APPINFO_QueryOption(object_header_t *hdr, DWORD option, void *buffer, DWORD *size, BOOL unicode)
@@ -938,8 +939,8 @@ static DWORD APPINFO_SetOption(object_header_t *hdr, DWORD option, void *buf, DW
         ai->connect_timeout = *(ULONG*)buf;
         return ERROR_SUCCESS;
     case INTERNET_OPTION_USER_AGENT:
-        heap_free(ai->agent);
-        if (!(ai->agent = heap_strdupW(buf))) return ERROR_OUTOFMEMORY;
+        free(ai->agent);
+        if (!(ai->agent = wcsdup(buf))) return ERROR_OUTOFMEMORY;
         return ERROR_SUCCESS;
     case INTERNET_OPTION_REFRESH:
         FIXME("INTERNET_OPTION_REFRESH\n");
@@ -1021,12 +1022,12 @@ HINTERNET WINAPI InternetOpenW(LPCWSTR lpszAgent, DWORD dwAccessType,
     lpwai->proxyPassword = NULL;
     lpwai->connect_timeout = connect_timeout;
 
-    lpwai->agent = heap_strdupW(lpszAgent);
+    lpwai->agent = wcsdup(lpszAgent);
     if(dwAccessType == INTERNET_OPEN_TYPE_PRECONFIG)
         INTERNET_ConfigureProxy( lpwai );
     else if(dwAccessType == INTERNET_OPEN_TYPE_PROXY) {
-        lpwai->proxy = heap_strdupW(lpszProxy);
-        lpwai->proxyBypass = heap_strdupW(lpszProxyBypass);
+        lpwai->proxy = wcsdup(lpszProxy);
+        lpwai->proxyBypass = wcsdup(lpszProxyBypass);
     }
 
     TRACE("returning %p\n", lpwai);
@@ -1054,15 +1055,15 @@ HINTERNET WINAPI InternetOpenA(LPCSTR lpszAgent, DWORD dwAccessType,
     TRACE("(%s, 0x%08lx, %s, %s, 0x%08lx)\n", debugstr_a(lpszAgent),
        dwAccessType, debugstr_a(lpszProxy), debugstr_a(lpszProxyBypass), dwFlags);
 
-    szAgent = heap_strdupAtoW(lpszAgent);
-    szProxy = heap_strdupAtoW(lpszProxy);
-    szBypass = heap_strdupAtoW(lpszProxyBypass);
+    szAgent = strdupAtoW(lpszAgent);
+    szProxy = strdupAtoW(lpszProxy);
+    szBypass = strdupAtoW(lpszProxyBypass);
 
     rc = InternetOpenW(szAgent, dwAccessType, szProxy, szBypass, dwFlags);
 
-    heap_free(szAgent);
-    heap_free(szProxy);
-    heap_free(szBypass);
+    free(szAgent);
+    free(szProxy);
+    free(szBypass);
     return rc;
 }
 
@@ -1206,24 +1207,73 @@ BOOL WINAPI InternetGetConnectedState(LPDWORD lpdwStatus, DWORD dwReserved)
 BOOL WINAPI InternetGetConnectedStateExW(LPDWORD lpdwStatus, LPWSTR lpszConnectionName,
                                          DWORD dwNameLen, DWORD dwReserved)
 {
+    IP_ADAPTER_ADDRESSES *buf = NULL, *aa;
+    ULONG size = 0;
+    DWORD status;
+
     TRACE("(%p, %p, %ld, 0x%08lx)\n", lpdwStatus, lpszConnectionName, dwNameLen, dwReserved);
 
     /* Must be zero */
     if(dwReserved)
         return FALSE;
 
-    if (lpdwStatus) {
-        WARN("always returning LAN connection.\n");
-        *lpdwStatus = INTERNET_CONNECTION_LAN;
+    for (;;)
+    {
+        ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER |
+                      GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_ALL_GATEWAYS;
+        ULONG errcode = GetAdaptersAddresses(AF_UNSPEC, flags, NULL, buf, &size);
+
+        if (errcode == ERROR_SUCCESS)
+            break;
+        free(buf);
+        if (errcode == ERROR_BUFFER_OVERFLOW && !(buf = malloc(size)))
+            errcode = ERROR_NOT_ENOUGH_MEMORY;
+        if (errcode != ERROR_BUFFER_OVERFLOW)
+        {
+            if (errcode != ERROR_NO_DATA)
+            {
+                SetLastError(errcode);
+                return FALSE;
+            }
+            buf = NULL;
+            break;
+        }
     }
+
+    status = INTERNET_RAS_INSTALLED;
+    for (aa = buf; aa; aa = aa->Next)
+    {
+        /* Connected, but not necessarily to internet */
+        if (aa->FirstUnicastAddress)
+            status |= INTERNET_CONNECTION_OFFLINE;
+
+        /* Connected to internet */
+        if (aa->FirstGatewayAddress)
+        {
+            WARN("always returning LAN connection.\n");
+            status &= ~INTERNET_CONNECTION_OFFLINE;
+            status |= INTERNET_CONNECTION_LAN;
+            break;
+        }
+    }
+    free(buf);
+
+    if (lpdwStatus) *lpdwStatus = status;
 
     /* When the buffer size is zero LoadStringW fills the buffer with a pointer to
      * the resource, avoid it as we must not change the buffer in this case */
-    if(lpszConnectionName && dwNameLen) {
+    if (lpszConnectionName && dwNameLen)
+    {
         *lpszConnectionName = '\0';
-        LoadStringW(WININET_hModule, IDS_LANCONNECTION, lpszConnectionName, dwNameLen);
+        if (status & INTERNET_CONNECTION_LAN)
+            LoadStringW(WININET_hModule, IDS_LANCONNECTION, lpszConnectionName, dwNameLen);
     }
 
+    if (!(status & (INTERNET_CONNECTION_LAN | INTERNET_CONNECTION_MODEM | INTERNET_CONNECTION_PROXY)))
+    {
+        SetLastError(ERROR_SUCCESS);
+        return FALSE;
+    }
     return TRUE;
 }
 
@@ -1240,7 +1290,7 @@ BOOL WINAPI InternetGetConnectedStateExA(LPDWORD lpdwStatus, LPSTR lpszConnectio
     TRACE("(%p, %p, %ld, 0x%08lx)\n", lpdwStatus, lpszConnectionName, dwNameLen, dwReserved);
 
     if (lpszConnectionName && dwNameLen > 0)
-        lpwszConnectionName = heap_alloc(dwNameLen * sizeof(WCHAR));
+        lpwszConnectionName = malloc(dwNameLen * sizeof(WCHAR));
 
     rc = InternetGetConnectedStateExW(lpdwStatus,lpwszConnectionName, dwNameLen,
                                       dwReserved);
@@ -1248,7 +1298,7 @@ BOOL WINAPI InternetGetConnectedStateExA(LPDWORD lpdwStatus, LPSTR lpszConnectio
         WideCharToMultiByte(CP_ACP,0,lpwszConnectionName,-1,lpszConnectionName,
                             dwNameLen, NULL, NULL);
 
-    heap_free(lpwszConnectionName);
+    free(lpwszConnectionName);
     return rc;
 }
 
@@ -1336,16 +1386,16 @@ HINTERNET WINAPI InternetConnectA(HINTERNET hInternet,
     LPWSTR szUserName;
     LPWSTR szPassword;
 
-    szServerName = heap_strdupAtoW(lpszServerName);
-    szUserName = heap_strdupAtoW(lpszUserName);
-    szPassword = heap_strdupAtoW(lpszPassword);
+    szServerName = strdupAtoW(lpszServerName);
+    szUserName = strdupAtoW(lpszUserName);
+    szPassword = strdupAtoW(lpszPassword);
 
     rc = InternetConnectW(hInternet, szServerName, nServerPort,
         szUserName, szPassword, dwService, dwFlags, dwContext);
 
-    heap_free(szServerName);
-    heap_free(szUserName);
-    heap_free(szPassword);
+    free(szServerName);
+    free(szUserName);
+    free(szPassword);
     return rc;
 }
 
@@ -1498,7 +1548,7 @@ static BOOL set_url_component_AtoW(const char *comp_a, DWORD len_a, WCHAR **comp
         return TRUE;
     }
 
-    if(!(*comp_w = *buf = heap_alloc(len_a*sizeof(WCHAR)))) {
+    if(!(*comp_w = *buf = malloc(len_a * sizeof(WCHAR)))) {
         SetLastError(ERROR_OUTOFMEMORY);
         return FALSE;
     }
@@ -1540,7 +1590,7 @@ BOOL WINAPI InternetCrackUrlA(const char *url, DWORD url_length, DWORD flags, UR
         && set_url_component_AtoW(ret_comp->lpszExtraInfo, ret_comp->dwExtraInfoLength,
                                   &comp.lpszExtraInfo, &comp.dwExtraInfoLength, &extra);
 
-    if(ret && !(url_w = heap_strndupAtoW(url, url_length ? url_length : -1, &url_length))) {
+    if(ret && !(url_w = strndupAtoW(url, url_length ? url_length : -1, &url_length))) {
         SetLastError(ERROR_OUTOFMEMORY);
         ret = FALSE;
     }
@@ -1570,13 +1620,13 @@ BOOL WINAPI InternetCrackUrlA(const char *url, DWORD url_length, DWORD flags, UR
                   debugstr_an(ret_comp->lpszExtraInfo, ret_comp->dwExtraInfoLength));
     }
 
-    heap_free(host);
-    heap_free(user);
-    heap_free(pass);
-    heap_free(path);
-    heap_free(scheme);
-    heap_free(extra);
-    heap_free(url_w);
+    free(host);
+    free(user);
+    free(pass);
+    free(path);
+    free(scheme);
+    free(extra);
+    free(url_w);
     return ret;
 }
 
@@ -1665,7 +1715,7 @@ BOOL WINAPI InternetCrackUrlW(const WCHAR *lpszUrl, DWORD dwUrlLength, DWORD dwF
         DWORD len = dwUrlLength + 1;
         BOOL ret;
 
-        if (!(url_tmp = heap_strndupW(lpszUrl, dwUrlLength)))
+        if (!(url_tmp = strndupW(lpszUrl, dwUrlLength)))
         {
             SetLastError(ERROR_OUTOFMEMORY);
             return FALSE;
@@ -1675,11 +1725,11 @@ BOOL WINAPI InternetCrackUrlW(const WCHAR *lpszUrl, DWORD dwUrlLength, DWORD dwF
         ret = InternetCanonicalizeUrlW(url_tmp, buffer, &len, ICU_DECODE | ICU_NO_ENCODE);
         if (!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
         {
-            buffer = heap_alloc(len * sizeof(WCHAR));
+            buffer = malloc(len * sizeof(WCHAR));
             if (!buffer)
             {
                 SetLastError(ERROR_OUTOFMEMORY);
-                heap_free(url_tmp);
+                free(url_tmp);
                 return FALSE;
             }
             ret = InternetCanonicalizeUrlW(url_tmp, buffer, &len, ICU_DECODE | ICU_NO_ENCODE);
@@ -1687,8 +1737,8 @@ BOOL WINAPI InternetCrackUrlW(const WCHAR *lpszUrl, DWORD dwUrlLength, DWORD dwF
         if (ret)
             ret = InternetCrackUrlW(buffer, len, dwFlags & ~ICU_DECODE, lpUC);
 
-        if (buffer != url_tmp) heap_free(buffer);
-        heap_free(url_tmp);
+        if (buffer != url_tmp) free(buffer);
+        free(url_tmp);
         return ret;
     }
     lpszap = lpszUrl;
@@ -2298,16 +2348,16 @@ static IP_ADAPTER_ADDRESSES *get_adapters(void)
                                     GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_SKIP_FRIENDLY_NAME;
     IP_ADAPTER_ADDRESSES *tmp, *ret;
 
-    if (!(ret = heap_alloc( size ))) return NULL;
+    if (!(ret = malloc( size ))) return NULL;
     err = GetAdaptersAddresses( AF_UNSPEC, flags, NULL, ret, &size );
     while (err == ERROR_BUFFER_OVERFLOW)
     {
-        if (!(tmp = heap_realloc( ret, size ))) break;
+        if (!(tmp = realloc( ret, size ))) break;
         ret = tmp;
         err = GetAdaptersAddresses( AF_UNSPEC, flags, NULL, ret, &size );
     }
     if (err == ERROR_SUCCESS) return ret;
-    heap_free( ret );
+    free( ret );
     return NULL;
 }
 
@@ -2337,12 +2387,12 @@ static WCHAR *detect_proxy_autoconfig_url_dhcp(void)
         /* FIXME: also skip adapters where DHCP is disabled */
 
         size = 256;
-        if (!(buf = heap_alloc( size ))) goto done;
+        if (!(buf = malloc( size ))) goto done;
         err = DhcpRequestParams( DHCPCAPI_REQUEST_SYNCHRONOUS, NULL, name, NULL, send_params, recv_params,
                                  buf, &size, NULL );
         while (err == ERROR_MORE_DATA)
         {
-            if (!(tmp = heap_realloc( buf, size ))) goto done;
+            if (!(tmp = realloc( buf, size ))) goto done;
             buf = tmp;
             err = DhcpRequestParams( DHCPCAPI_REQUEST_SYNCHRONOUS, NULL, name, NULL, send_params, recv_params,
                                      buf, &size, NULL );
@@ -2350,7 +2400,7 @@ static WCHAR *detect_proxy_autoconfig_url_dhcp(void)
         if (err == ERROR_SUCCESS && param.nBytesData)
         {
             int len = MultiByteToWideChar( CP_ACP, 0, (const char *)param.Data, param.nBytesData, NULL, 0 );
-            if ((ret = heap_alloc( (len + 1) * sizeof(WCHAR) )))
+            if ((ret = malloc( (len + 1) * sizeof(WCHAR) )))
             {
                 MultiByteToWideChar( CP_ACP, 0,  (const char *)param.Data, param.nBytesData, ret, len );
                 ret[len] = 0;
@@ -2361,8 +2411,8 @@ static WCHAR *detect_proxy_autoconfig_url_dhcp(void)
     }
 
 done:
-    heap_free( buf );
-    heap_free( adapters );
+    free( buf );
+    free( adapters );
     return ret;
 }
 
@@ -2373,10 +2423,10 @@ static char *get_computer_name( COMPUTER_NAME_FORMAT format )
 
     GetComputerNameExA( format, NULL, &size );
     if (GetLastError() != ERROR_MORE_DATA) return NULL;
-    if (!(ret = heap_alloc( size ))) return NULL;
+    if (!(ret = malloc( size ))) return NULL;
     if (!GetComputerNameExA( format, ret, &size ))
     {
-        heap_free( ret );
+        free( ret );
         return NULL;
     }
     return ret;
@@ -2424,7 +2474,7 @@ static WCHAR *detect_proxy_autoconfig_url_dns(void)
     if (!(fqdn = get_computer_name( ComputerNamePhysicalDnsFullyQualified ))) return NULL;
     if (!(domain = get_computer_name( ComputerNamePhysicalDnsDomain )))
     {
-        heap_free( fqdn );
+        free( fqdn );
         return NULL;
     }
     p = fqdn;
@@ -2434,10 +2484,10 @@ static WCHAR *detect_proxy_autoconfig_url_dns(void)
         struct addrinfo *ai, hints;
         int res;
 
-        if (!(name = heap_alloc( sizeof("wpad") + strlen(p) )))
+        if (!(name = malloc( sizeof("wpad") + strlen(p) )))
         {
-            heap_free( fqdn );
-            heap_free( domain );
+            free( fqdn );
+            free( domain );
             return NULL;
         }
         strcpy( name, "wpad" );
@@ -2453,15 +2503,15 @@ static WCHAR *detect_proxy_autoconfig_url_dns(void)
             if (ret)
             {
                 TRACE("returning %s\n", debugstr_w(ret));
-                heap_free( name );
+                free( name );
                 break;
             }
         }
-       heap_free( name );
+       free( name );
        p++;
     }
-    heap_free( domain );
-    heap_free( fqdn );
+    free( domain );
+    free( fqdn );
     return ret;
 }
 
@@ -2470,6 +2520,37 @@ static WCHAR *get_proxy_autoconfig_url(void)
     WCHAR *ret = detect_proxy_autoconfig_url_dhcp();
     if (!ret) ret = detect_proxy_autoconfig_url_dns();
     return ret;
+}
+
+static WCHAR *copy_optionW(WCHAR *value)
+{
+    DWORD len;
+    void *tmp;
+
+    if (!value)
+        return NULL;
+
+    len = (wcslen(value) + 1) * sizeof(WCHAR);
+    if (!(tmp = HeapAlloc(GetProcessHeap(), 0, len)))
+        return NULL;
+
+    return memcpy(tmp, value, len);
+}
+
+static char *copy_optionA(WCHAR *value)
+{
+    DWORD len;
+    void *tmp;
+
+    if (!value)
+        return NULL;
+
+    len = wcslen(value) * 3 + 1;
+    if (!(tmp = HeapAlloc(GetProcessHeap(), 0, len)))
+        return NULL;
+
+    WideCharToMultiByte(CP_ACP, 0, value, -1, tmp, len, NULL, NULL);
+    return tmp;
 }
 
 static DWORD query_global_option(DWORD option, void *buffer, DWORD *size, BOOL unicode)
@@ -2592,25 +2673,25 @@ static DWORD query_global_option(DWORD option, void *buffer, DWORD *size, BOOL u
 
             case INTERNET_PER_CONN_PROXY_SERVER:
                 if (unicode)
-                    optionW->Value.pszValue = heap_strdupW(pi.proxy);
+                    optionW->Value.pszValue = copy_optionW(pi.proxy);
                 else
-                    optionA->Value.pszValue = heap_strdupWtoA(pi.proxy);
+                    optionA->Value.pszValue = copy_optionA(pi.proxy);
                 break;
 
             case INTERNET_PER_CONN_PROXY_BYPASS:
                 if (unicode)
-                    optionW->Value.pszValue = heap_strdupW(pi.proxyBypass);
+                    optionW->Value.pszValue = copy_optionW(pi.proxyBypass);
                 else
-                    optionA->Value.pszValue = heap_strdupWtoA(pi.proxyBypass);
+                    optionA->Value.pszValue = copy_optionA(pi.proxyBypass);
                 break;
 
             case INTERNET_PER_CONN_AUTOCONFIG_URL:
                 if (!url)
                     optionW->Value.pszValue = NULL;
                 else if (unicode)
-                    optionW->Value.pszValue = heap_strdupW(url);
+                    optionW->Value.pszValue = copy_optionW(url);
                 else
-                    optionA->Value.pszValue = heap_strdupWtoA(url);
+                    optionA->Value.pszValue = copy_optionA(url);
                 break;
 
             case INTERNET_PER_CONN_AUTODISCOVERY_FLAGS:
@@ -2631,7 +2712,7 @@ static DWORD query_global_option(DWORD option, void *buffer, DWORD *size, BOOL u
                 break;
             }
         }
-        heap_free(url);
+        free(url);
         FreeProxyInfo(&pi);
 
         return res;
@@ -2906,14 +2987,14 @@ BOOL WINAPI InternetSetOptionW(HINTERNET hInternet, DWORD dwOption,
         {
             EnterCriticalSection( &WININET_cs );
             free_global_proxy();
-            global_proxy = heap_alloc( sizeof(proxyinfo_t) );
+            global_proxy = malloc(sizeof(proxyinfo_t));
             if (global_proxy)
             {
                 if (info->dwAccessType == INTERNET_OPEN_TYPE_PROXY)
                 {
                     global_proxy->proxyEnabled = 1;
-                    global_proxy->proxy = heap_strdupW( info->lpszProxy );
-                    global_proxy->proxyBypass = heap_strdupW( info->lpszProxyBypass );
+                    global_proxy->proxy = wcsdup(info->lpszProxy);
+                    global_proxy->proxyBypass = wcsdup(info->lpszProxyBypass);
                 }
                 else
                 {
@@ -3068,8 +3149,8 @@ BOOL WINAPI InternetSetOptionW(HINTERNET hInternet, DWORD dwOption,
 
             switch (option->dwOption) {
             case INTERNET_PER_CONN_PROXY_SERVER:
-                heap_free(pi.proxy);
-                pi.proxy = heap_strdupW(option->Value.pszValue);
+                free(pi.proxy);
+                pi.proxy = wcsdup(option->Value.pszValue);
                 break;
 
             case INTERNET_PER_CONN_FLAGS:
@@ -3084,8 +3165,8 @@ BOOL WINAPI InternetSetOptionW(HINTERNET hInternet, DWORD dwOption,
                 break;
 
             case INTERNET_PER_CONN_PROXY_BYPASS:
-                heap_free(pi.proxyBypass);
-                pi.proxyBypass = heap_strdupW(option->Value.pszValue);
+                free(pi.proxyBypass);
+                pi.proxyBypass = wcsdup(option->Value.pszValue);
                 break;
 
             case INTERNET_PER_CONN_AUTOCONFIG_URL:
@@ -3155,7 +3236,7 @@ BOOL WINAPI InternetSetOptionA(HINTERNET hInternet, DWORD dwOption,
         proxlen = MultiByteToWideChar( CP_ACP, 0, pi->lpszProxy, -1, NULL, 0);
         prbylen= MultiByteToWideChar( CP_ACP, 0, pi->lpszProxyBypass, -1, NULL, 0);
         wlen = sizeof(*piw) + proxlen + prbylen;
-        wbuffer = heap_alloc(wlen*sizeof(WCHAR) );
+        wbuffer = malloc( wlen * sizeof(WCHAR) );
         piw = (LPINTERNET_PROXY_INFOW) wbuffer;
         piw->dwAccessType = pi->dwAccessType;
         prox = (LPWSTR) &piw[1];
@@ -3172,7 +3253,7 @@ BOOL WINAPI InternetSetOptionA(HINTERNET hInternet, DWORD dwOption,
     case INTERNET_OPTION_PROXY_USERNAME:
     case INTERNET_OPTION_PROXY_PASSWORD:
         wlen = MultiByteToWideChar( CP_ACP, 0, lpBuffer, -1, NULL, 0 );
-        if (!(wbuffer = heap_alloc( wlen * sizeof(WCHAR) ))) return ERROR_OUTOFMEMORY;
+        if (!(wbuffer = malloc( wlen * sizeof(WCHAR) ))) return ERROR_OUTOFMEMORY;
         MultiByteToWideChar( CP_ACP, 0, lpBuffer, -1, wbuffer, wlen );
         break;
     case INTERNET_OPTION_PER_CONNECTION_OPTION: {
@@ -3180,21 +3261,21 @@ BOOL WINAPI InternetSetOptionA(HINTERNET hInternet, DWORD dwOption,
         INTERNET_PER_CONN_OPTION_LISTW *listW;
         INTERNET_PER_CONN_OPTION_LISTA *listA = lpBuffer;
         wlen = sizeof(INTERNET_PER_CONN_OPTION_LISTW);
-        wbuffer = heap_alloc(wlen);
+        wbuffer = malloc( wlen );
         listW = wbuffer;
 
         listW->dwSize = sizeof(INTERNET_PER_CONN_OPTION_LISTW);
         if (listA->pszConnection)
         {
             wlen = MultiByteToWideChar( CP_ACP, 0, listA->pszConnection, -1, NULL, 0 );
-            listW->pszConnection = heap_alloc(wlen*sizeof(WCHAR));
+            listW->pszConnection = malloc( wlen * sizeof(WCHAR) );
             MultiByteToWideChar( CP_ACP, 0, listA->pszConnection, -1, listW->pszConnection, wlen );
         }
         else
             listW->pszConnection = NULL;
         listW->dwOptionCount = listA->dwOptionCount;
         listW->dwOptionError = listA->dwOptionError;
-        listW->pOptions = heap_alloc(sizeof(INTERNET_PER_CONN_OPTIONW) * listA->dwOptionCount);
+        listW->pOptions = malloc( sizeof(INTERNET_PER_CONN_OPTIONW) * listA->dwOptionCount );
 
         for (i = 0; i < listA->dwOptionCount; ++i) {
             INTERNET_PER_CONN_OPTIONA *optA = listA->pOptions + i;
@@ -3211,7 +3292,7 @@ BOOL WINAPI InternetSetOptionA(HINTERNET hInternet, DWORD dwOption,
                 if (optA->Value.pszValue)
                 {
                     wlen = MultiByteToWideChar( CP_ACP, 0, optA->Value.pszValue, -1, NULL, 0 );
-                    optW->Value.pszValue = heap_alloc(wlen*sizeof(WCHAR));
+                    optW->Value.pszValue = malloc( wlen * sizeof(WCHAR) );
                     MultiByteToWideChar( CP_ACP, 0, optA->Value.pszValue, -1, optW->Value.pszValue, wlen );
                 }
                 else
@@ -3254,15 +3335,15 @@ BOOL WINAPI InternetSetOptionA(HINTERNET hInternet, DWORD dwOption,
                 case INTERNET_PER_CONN_PROXY_SERVER:
                 case INTERNET_PER_CONN_AUTOCONFIG_SECONDARY_URL:
                 case INTERNET_PER_CONN_AUTOCONFIG_LAST_DETECT_URL:
-                    heap_free( opt->Value.pszValue );
+                    free( opt->Value.pszValue );
                     break;
                 default:
                     break;
                 }
             }
-            heap_free( list->pOptions );
+            free( list->pOptions );
         }
-        heap_free( wbuffer );
+        free( wbuffer );
     }
 
     return r;
@@ -3376,11 +3457,11 @@ BOOL WINAPI InternetTimeToSystemTimeA( LPCSTR string, SYSTEMTIME* time, DWORD re
 
     TRACE( "%s %p 0x%08lx\n", debugstr_a(string), time, reserved );
 
-    stringW = heap_strdupAtoW(string);
+    stringW = strdupAtoW( string );
     if (stringW)
     {
         ret = InternetTimeToSystemTimeW( stringW, time, reserved );
-        heap_free( stringW );
+        free( stringW );
     }
     return ret;
 }
@@ -3545,12 +3626,12 @@ BOOL WINAPI InternetCheckConnectionW( LPCWSTR lpszUrl, DWORD dwFlags, DWORD dwRe
       int fd;
       BOOL b;
 
-      host_z = heap_strndupW(host, host_len);
+      host_z = strndupW(host, host_len);
       if (!host_z)
           return FALSE;
 
       b = GetAddress(host_z, port, (struct sockaddr *)&saddr, &sa_len, NULL);
-      heap_free(host_z);
+      free(host_z);
       if(!b)
           goto End;
       init_winsock();
@@ -3570,7 +3651,7 @@ BOOL WINAPI InternetCheckConnectionW( LPCWSTR lpszUrl, DWORD dwFlags, DWORD dwRe
       char *command;
 
       len = WideCharToMultiByte(CP_UNIXCP, 0, host, host_len, NULL, 0, NULL, NULL);
-      command = heap_alloc(strlen(ping)+len+strlen(redirect)+1);
+      command = malloc(strlen(ping) + len + strlen(redirect) + 1);
       strcpy(command, ping);
       WideCharToMultiByte(CP_UNIXCP, 0, host, host_len, command+sizeof(ping)-1, len, NULL, NULL);
       strcpy(command+sizeof(ping)-1+len, redirect);
@@ -3578,7 +3659,7 @@ BOOL WINAPI InternetCheckConnectionW( LPCWSTR lpszUrl, DWORD dwFlags, DWORD dwRe
       TRACE("Ping command is : %s\n",command);
 
       status = system(command);
-      heap_free( command );
+      free(command);
 
       TRACE("Ping returned a code of %i\n",status);
 
@@ -3611,14 +3692,14 @@ BOOL WINAPI InternetCheckConnectionA(LPCSTR lpszUrl, DWORD dwFlags, DWORD dwRese
     BOOL rc;
 
     if(lpszUrl) {
-        url = heap_strdupAtoW(lpszUrl);
+        url = strdupAtoW(lpszUrl);
         if(!url)
             return FALSE;
     }
 
     rc = InternetCheckConnectionW(url, dwFlags, dwReserved);
 
-    heap_free(url);
+    free(url);
     return rc;
 }
 
@@ -3657,12 +3738,12 @@ static HINTERNET INTERNET_InternetOpenUrlW(appinfo_t *hIC, LPCWSTR lpszUrl,
         urlComponents.dwUrlPathLength += urlComponents.dwExtraInfoLength;
     }
 
-    host = heap_strndupW(urlComponents.lpszHostName, urlComponents.dwHostNameLength);
-    path = heap_strndupW(urlComponents.lpszUrlPath, urlComponents.dwUrlPathLength);
+    host = strndupW(urlComponents.lpszHostName, urlComponents.dwHostNameLength);
+    path = strndupW(urlComponents.lpszUrlPath, urlComponents.dwUrlPathLength);
     if(urlComponents.dwUserNameLength)
-        user = heap_strndupW(urlComponents.lpszUserName, urlComponents.dwUserNameLength);
+        user = strndupW(urlComponents.lpszUserName, urlComponents.dwUserNameLength);
     if(urlComponents.dwPasswordLength)
-        pass = heap_strndupW(urlComponents.lpszPassword, urlComponents.dwPasswordLength);
+        pass = strndupW(urlComponents.lpszPassword, urlComponents.dwPasswordLength);
 
     switch(urlComponents.nScheme) {
     case INTERNET_SCHEME_FTP:
@@ -3714,10 +3795,10 @@ static HINTERNET INTERNET_InternetOpenUrlW(appinfo_t *hIC, LPCWSTR lpszUrl,
 
     TRACE(" %p <--\n", client1);
 
-    heap_free(host);
-    heap_free(path);
-    heap_free(user);
-    heap_free(pass);
+    free(host);
+    free(path);
+    free(user);
+    free(pass);
     return client1;
 }
 
@@ -3746,8 +3827,8 @@ static void AsyncInternetOpenUrlProc(task_header_t *hdr)
 
     INTERNET_InternetOpenUrlW((appinfo_t*)task->hdr.hdr, task->url, task->headers,
             task->headers_len, task->flags, task->context);
-    heap_free(task->url);
-    heap_free(task->headers);
+    free(task->url);
+    free(task->headers);
 }
 
 HINTERNET WINAPI InternetOpenUrlW(HINTERNET hInternet, LPCWSTR lpszUrl,
@@ -3779,8 +3860,8 @@ HINTERNET WINAPI InternetOpenUrlW(HINTERNET hInternet, LPCWSTR lpszUrl,
 	open_url_task_t *task;
 
         task = alloc_async_task(&hIC->hdr, AsyncInternetOpenUrlProc, sizeof(*task));
-        task->url = heap_strdupW(lpszUrl);
-        task->headers = heap_strdupW(lpszHeaders);
+        task->url = wcsdup(lpszUrl);
+        task->headers = wcsdup(lpszHeaders);
         task->headers_len = dwHeadersLength;
         task->flags = dwFlags;
         task->context = dwContext;
@@ -3817,30 +3898,30 @@ HINTERNET WINAPI InternetOpenUrlA(HINTERNET hInternet, LPCSTR lpszUrl,
     TRACE("\n");
 
     if(lpszUrl) {
-        szUrl = heap_strdupAtoW(lpszUrl);
+        szUrl = strdupAtoW(lpszUrl);
         if(!szUrl)
             return NULL;
     }
 
     if(lpszHeaders) {
-        headers = heap_strndupAtoW(lpszHeaders, dwHeadersLength, &dwHeadersLength);
+        headers = strndupAtoW(lpszHeaders, dwHeadersLength, &dwHeadersLength);
         if(!headers) {
-            heap_free(szUrl);
+            free(szUrl);
             return NULL;
         }
     }
     
     rc = InternetOpenUrlW(hInternet, szUrl, headers, dwHeadersLength, dwFlags, dwContext);
 
-    heap_free(szUrl);
-    heap_free(headers);
+    free(szUrl);
+    free(headers);
     return rc;
 }
 
 
 static LPWITHREADERROR INTERNET_AllocThreadError(void)
 {
-    LPWITHREADERROR lpwite = heap_alloc(sizeof(*lpwite));
+    WITHREADERROR *lpwite = malloc(sizeof(*lpwite));
 
     if (lpwite)
     {
@@ -3850,7 +3931,7 @@ static LPWITHREADERROR INTERNET_AllocThreadError(void)
 
     if (!TlsSetValue(g_dwTlsErrIndex, lpwite))
     {
-        heap_free(lpwite);
+        free(lpwite);
         return NULL;
     }
     return lpwite;
@@ -3912,11 +3993,11 @@ static DWORD CALLBACK INTERNET_WorkerThreadFunc(LPVOID lpvParam)
 
     task->proc(task);
     WININET_Release(task->hdr);
-    heap_free(task);
+    free(task);
 
     if (g_dwTlsErrIndex != TLS_OUT_OF_INDEXES)
     {
-        heap_free(TlsGetValue(g_dwTlsErrIndex));
+        free(TlsGetValue(g_dwTlsErrIndex));
         TlsSetValue(g_dwTlsErrIndex, NULL);
     }
     return TRUE;
@@ -3926,7 +4007,7 @@ void *alloc_async_task(object_header_t *hdr, async_task_proc_t proc, size_t size
 {
     task_header_t *task;
 
-    task = heap_alloc(size);
+    task = malloc(size);
     if(!task)
         return NULL;
 
@@ -3952,7 +4033,7 @@ DWORD INTERNET_AsyncCall(task_header_t *task)
     bSuccess = QueueUserWorkItem(INTERNET_WorkerThreadFunc, task, WT_EXECUTELONGFUNCTION);
     if (!bSuccess)
     {
-        heap_free(task);
+        free(task);
         return ERROR_INTERNET_ASYNC_THREAD_FAILED;
     }
     return ERROR_SUCCESS;
@@ -4020,15 +4101,15 @@ DWORD create_req_file(const WCHAR *file_name, req_file_t **ret)
 {
     req_file_t *req_file;
 
-    req_file = heap_alloc_zero(sizeof(*req_file));
+    req_file = calloc(1, sizeof(*req_file));
     if(!req_file)
         return ERROR_NOT_ENOUGH_MEMORY;
 
     req_file->ref = 1;
 
-    req_file->file_name = heap_strdupW(file_name);
+    req_file->file_name = wcsdup(file_name);
     if(!req_file->file_name) {
-        heap_free(req_file);
+        free(req_file);
         return ERROR_NOT_ENOUGH_MEMORY;
     }
 
@@ -4052,9 +4133,9 @@ void req_file_release(req_file_t *req_file)
         DeleteFileW(req_file->file_name);
     if(req_file->file_handle && req_file->file_handle != INVALID_HANDLE_VALUE)
         CloseHandle(req_file->file_handle);
-    heap_free(req_file->file_name);
-    heap_free(req_file->url);
-    heap_free(req_file);
+    free(req_file->file_name);
+    free(req_file->url);
+    free(req_file);
 }
 
 /***********************************************************************
@@ -4338,7 +4419,7 @@ static void convert_urlcomp_atow(LPURL_COMPONENTSA lpUrlComponents, LPURL_COMPON
     if (lpUrlComponents->lpszScheme)
     {
         len = URL_GET_COMP_LENGTHA(lpUrlComponents, Scheme) + 1;
-        urlCompW->lpszScheme = heap_alloc(len * sizeof(WCHAR));
+        urlCompW->lpszScheme = malloc(len * sizeof(WCHAR));
         MultiByteToWideChar(CP_ACP, 0, lpUrlComponents->lpszScheme,
                             -1, urlCompW->lpszScheme, len);
     }
@@ -4346,7 +4427,7 @@ static void convert_urlcomp_atow(LPURL_COMPONENTSA lpUrlComponents, LPURL_COMPON
     if (lpUrlComponents->lpszHostName)
     {
         len = URL_GET_COMP_LENGTHA(lpUrlComponents, HostName) + 1;
-        urlCompW->lpszHostName = heap_alloc(len * sizeof(WCHAR));
+        urlCompW->lpszHostName = malloc(len * sizeof(WCHAR));
         MultiByteToWideChar(CP_ACP, 0, lpUrlComponents->lpszHostName,
                             -1, urlCompW->lpszHostName, len);
     }
@@ -4354,7 +4435,7 @@ static void convert_urlcomp_atow(LPURL_COMPONENTSA lpUrlComponents, LPURL_COMPON
     if (lpUrlComponents->lpszUserName)
     {
         len = URL_GET_COMP_LENGTHA(lpUrlComponents, UserName) + 1;
-        urlCompW->lpszUserName = heap_alloc(len * sizeof(WCHAR));
+        urlCompW->lpszUserName = malloc(len * sizeof(WCHAR));
         MultiByteToWideChar(CP_ACP, 0, lpUrlComponents->lpszUserName,
                             -1, urlCompW->lpszUserName, len);
     }
@@ -4362,7 +4443,7 @@ static void convert_urlcomp_atow(LPURL_COMPONENTSA lpUrlComponents, LPURL_COMPON
     if (lpUrlComponents->lpszPassword)
     {
         len = URL_GET_COMP_LENGTHA(lpUrlComponents, Password) + 1;
-        urlCompW->lpszPassword = heap_alloc(len * sizeof(WCHAR));
+        urlCompW->lpszPassword = malloc(len * sizeof(WCHAR));
         MultiByteToWideChar(CP_ACP, 0, lpUrlComponents->lpszPassword,
                             -1, urlCompW->lpszPassword, len);
     }
@@ -4370,7 +4451,7 @@ static void convert_urlcomp_atow(LPURL_COMPONENTSA lpUrlComponents, LPURL_COMPON
     if (lpUrlComponents->lpszUrlPath)
     {
         len = URL_GET_COMP_LENGTHA(lpUrlComponents, UrlPath) + 1;
-        urlCompW->lpszUrlPath = heap_alloc(len * sizeof(WCHAR));
+        urlCompW->lpszUrlPath = malloc(len * sizeof(WCHAR));
         MultiByteToWideChar(CP_ACP, 0, lpUrlComponents->lpszUrlPath,
                             -1, urlCompW->lpszUrlPath, len);
     }
@@ -4378,7 +4459,7 @@ static void convert_urlcomp_atow(LPURL_COMPONENTSA lpUrlComponents, LPURL_COMPON
     if (lpUrlComponents->lpszExtraInfo)
     {
         len = URL_GET_COMP_LENGTHA(lpUrlComponents, ExtraInfo) + 1;
-        urlCompW->lpszExtraInfo = heap_alloc(len * sizeof(WCHAR));
+        urlCompW->lpszExtraInfo = malloc(len * sizeof(WCHAR));
         MultiByteToWideChar(CP_ACP, 0, lpUrlComponents->lpszExtraInfo,
                             -1, urlCompW->lpszExtraInfo, len);
     }
@@ -4407,7 +4488,7 @@ BOOL WINAPI InternetCreateUrlA(LPURL_COMPONENTSA lpUrlComponents, DWORD dwFlags,
     convert_urlcomp_atow(lpUrlComponents, &urlCompW);
 
     if (lpszUrl)
-        urlW = heap_alloc(*lpdwUrlLength * sizeof(WCHAR));
+        urlW = malloc(*lpdwUrlLength * sizeof(WCHAR));
 
     ret = InternetCreateUrlW(&urlCompW, dwFlags, urlW, lpdwUrlLength);
 
@@ -4420,13 +4501,13 @@ BOOL WINAPI InternetCreateUrlA(LPURL_COMPONENTSA lpUrlComponents, DWORD dwFlags,
     if (ret)
         WideCharToMultiByte(CP_ACP, 0, urlW, -1, lpszUrl, *lpdwUrlLength + 1, NULL, NULL);
 
-    heap_free(urlCompW.lpszScheme);
-    heap_free(urlCompW.lpszHostName);
-    heap_free(urlCompW.lpszUserName);
-    heap_free(urlCompW.lpszPassword);
-    heap_free(urlCompW.lpszUrlPath);
-    heap_free(urlCompW.lpszExtraInfo);
-    heap_free(urlW);
+    free(urlCompW.lpszScheme);
+    free(urlCompW.lpszHostName);
+    free(urlCompW.lpszUserName);
+    free(urlCompW.lpszPassword);
+    free(urlCompW.lpszUrlPath);
+    free(urlCompW.lpszExtraInfo);
+    free(urlW);
     return ret;
 }
 
@@ -4631,12 +4712,12 @@ BOOL WINAPI InternetGetSecurityInfoByURLA(LPSTR lpszURL, PCCERT_CHAIN_CONTEXT *p
 
     TRACE("(%s %p %p)\n", debugstr_a(lpszURL), ppCertChain, pdwSecureFlags);
 
-    url = heap_strdupAtoW(lpszURL);
+    url = strdupAtoW(lpszURL);
     if(!url)
         return FALSE;
 
     res = InternetGetSecurityInfoByURLW(url, ppCertChain, pdwSecureFlags);
-    heap_free(url);
+    free(url);
     return res;
 }
 

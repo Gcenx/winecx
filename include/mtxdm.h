@@ -18,8 +18,6 @@
 #ifndef __MTXDM_H__
 #define __MTXDM_H__
 
-#include "wine/winheader_enter.h"
-
 #include "comsvcs.h"
 
 #ifdef __cplusplus
@@ -32,7 +30,5 @@ HRESULT CDECL GetDispenserManager(IDispenserManager**);
 }
 #endif
 
-
-#include "wine/winheader_exit.h"
 
 #endif

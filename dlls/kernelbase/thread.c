@@ -248,11 +248,9 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetThreadId( HANDLE thread )
 /***********************************************************************
  *           GetThreadIdealProcessorEx   (kernelbase.@)
  */
-BOOL WINAPI /* DECLSPEC_HOTPATCH */ GetThreadIdealProcessorEx( HANDLE thread, PROCESSOR_NUMBER *ideal )
+BOOL WINAPI DECLSPEC_HOTPATCH GetThreadIdealProcessorEx( HANDLE thread, PROCESSOR_NUMBER *ideal )
 {
-    FIXME( "(%p %p): stub\n", thread, ideal );
-    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
-    return FALSE;
+    return set_ntstatus( NtQueryInformationThread( thread, ThreadIdealProcessorEx, ideal, sizeof(*ideal), NULL));
 }
 
 
@@ -286,8 +284,7 @@ INT WINAPI DECLSPEC_HOTPATCH GetThreadPriority( HANDLE thread )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetThreadPriorityBoost( HANDLE thread, BOOL *state )
 {
-    if (state) *state = FALSE;
-    return TRUE;
+    return set_ntstatus( NtQueryInformationThread( thread, ThreadPriorityBoost, state, sizeof(*state), NULL ));
 }
 
 
@@ -512,13 +509,13 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetThreadGroupAffinity( HANDLE thread, const GROUP
  */
 DWORD WINAPI DECLSPEC_HOTPATCH SetThreadIdealProcessor( HANDLE thread, DWORD proc )
 {
-    FIXME( "(%p %lu): stub\n", thread, proc );
-    if (proc > MAXIMUM_PROCESSORS)
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return ~0u;
-    }
-    return 0;
+    NTSTATUS status;
+
+    status = NtSetInformationThread( thread, ThreadIdealProcessor, &proc, sizeof(proc) );
+    if (NT_SUCCESS(status)) return status;
+
+    SetLastError( RtlNtStatusToDosError( status ));
+    return ~0u;
 }
 
 
@@ -568,7 +565,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetThreadPriority( HANDLE thread, INT priority )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH SetThreadPriorityBoost( HANDLE thread, BOOL disable )
 {
-    return TRUE;
+    return set_ntstatus( NtSetInformationThread( thread, ThreadPriorityBoost, &disable, sizeof(disable) ));
 }
 
 
@@ -603,6 +600,25 @@ LANGID WINAPI DECLSPEC_HOTPATCH SetThreadUILanguage( LANGID langid )
 
     if (!langid) langid = GetThreadUILanguage();
     return langid;
+}
+
+
+/**********************************************************************
+ *            SetThreadInformation   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH SetThreadInformation( HANDLE thread, THREAD_INFORMATION_CLASS info_class,
+        VOID *info, DWORD size )
+{
+    switch (info_class)
+    {
+        case ThreadMemoryPriority:
+            return set_ntstatus( NtSetInformationThread( thread, ThreadPagePriority, info, size ));
+        case ThreadPowerThrottling:
+            return set_ntstatus( NtSetInformationThread( thread, ThreadPowerThrottlingState, info, size ));
+        default:
+            FIXME("Unsupported class %u.\n", info_class);
+            return FALSE;
+    }
 }
 
 

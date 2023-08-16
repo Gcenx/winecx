@@ -1,14 +1,13 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
-MODULE  = wineandroid.drv
-IMPORTS = uuid ole32 user32 gdi32 advapi32 ntoskrnl win32u
-
-EXTRADLLFLAGS = -mcygwin
+MODULE    = wineandroid.drv
+UNIXLIB   = wineandroid.so
+IMPORTS   = ntoskrnl
+UNIX_LIBS = -lwin32u $(PTHREAD_LIBS)
 
 C_SRCS = \
 	device.c \
+	dllmain.c \
 	init.c \
 	keyboard.c \
-	mmdevdrv.c \
 	opengl.c \
 	window.c
 

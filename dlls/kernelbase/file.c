@@ -148,7 +148,9 @@ static BOOL add_boot_rename_entry( LPCWSTR source, LPCWSTR dest, DWORD flags )
     static const int info_size = FIELD_OFFSET( KEY_VALUE_PARTIAL_INFORMATION, Data );
 
     OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING nameW, source_name, dest_name;
+    UNICODE_STRING session_manager = RTL_CONSTANT_STRING( L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Session Manager" );
+    UNICODE_STRING pending_file_rename_operations = RTL_CONSTANT_STRING( L"PendingFileRenameOperations" );
+    UNICODE_STRING source_name, dest_name;
     KEY_VALUE_PARTIAL_INFORMATION *info;
     BOOL rc = FALSE;
     HANDLE key = 0;
@@ -172,11 +174,10 @@ static BOOL add_boot_rename_entry( LPCWSTR source, LPCWSTR dest, DWORD flags )
 
     attr.Length = sizeof(attr);
     attr.RootDirectory = 0;
-    attr.ObjectName = &nameW;
+    attr.ObjectName = &session_manager;
     attr.Attributes = 0;
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
-    RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Session Manager" );
 
     if (NtCreateKey( &key, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL ) != STATUS_SUCCESS)
     {
@@ -194,14 +195,12 @@ static BOOL add_boot_rename_entry( LPCWSTR source, LPCWSTR dest, DWORD flags )
     }
     else len2 = sizeof(WCHAR); /* minimum is the 0 characters for the empty second string */
 
-    RtlInitUnicodeString( &nameW, L"PendingFileRenameOperations" );
-
     /* First we check if the key exists and if so how many bytes it already contains. */
-    if (NtQueryValueKey( key, &nameW, KeyValuePartialInformation,
+    if (NtQueryValueKey( key, &pending_file_rename_operations, KeyValuePartialInformation,
                          NULL, 0, &size ) == STATUS_BUFFER_TOO_SMALL)
     {
         if (!(buffer = HeapAlloc( GetProcessHeap(), 0, size + len1 + len2 + sizeof(WCHAR) ))) goto done;
-        if (NtQueryValueKey( key, &nameW, KeyValuePartialInformation, buffer, size, &size )) goto done;
+        if (NtQueryValueKey( key, &pending_file_rename_operations, KeyValuePartialInformation, buffer, size, &size )) goto done;
         info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
         if (info->Type != REG_MULTI_SZ) goto done;
         if (size > sizeof(info)) size -= sizeof(WCHAR);  /* remove terminating null (will be added back later) */
@@ -231,7 +230,7 @@ static BOOL add_boot_rename_entry( LPCWSTR source, LPCWSTR dest, DWORD flags )
     p = (WCHAR *)(buffer + size);
     *p = 0;
     size += sizeof(WCHAR);
-    rc = !NtSetValueKey( key, &nameW, 0, REG_MULTI_SZ, buffer + info_size, size - info_size );
+    rc = !NtSetValueKey( key, &pending_file_rename_operations, 0, REG_MULTI_SZ, buffer + info_size, size - info_size );
 
  done:
     RtlFreeUnicodeString( &source_name );
@@ -2913,9 +2912,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH CancelIoEx( HANDLE handle, LPOVERLAPPED overlapped
  */
 BOOL WINAPI DECLSPEC_HOTPATCH CancelSynchronousIo( HANDLE thread )
 {
-    FIXME( "(%p): stub\n", thread );
-    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
-    return FALSE;
+    IO_STATUS_BLOCK io;
+
+    return set_ntstatus( NtCancelSynchronousIoFile( thread, NULL, &io ));
 }
 
 
@@ -2977,18 +2976,27 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetFileInformationByHandleEx( HANDLE handle, FILE_
 
     switch (class)
     {
-    case FileStreamInfo:
-    case FileCompressionInfo:
     case FileRemoteProtocolInfo:
-    case FileFullDirectoryInfo:
-    case FileFullDirectoryRestartInfo:
     case FileStorageInfo:
-    case FileAlignmentInfo:
-    case FileIdExtdDirectoryInfo:
-    case FileIdExtdDirectoryRestartInfo:
+    case FileDispositionInfoEx:
+    case FileRenameInfoEx:
+    case FileCaseSensitiveInfo:
+    case FileNormalizedNameInfo:
         FIXME( "%p, %u, %p, %lu\n", handle, class, info, size );
         SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
         return FALSE;
+
+    case FileStreamInfo:
+        status = NtQueryInformationFile( handle, &io, info, size, FileStreamInformation );
+        break;
+
+    case FileCompressionInfo:
+        status = NtQueryInformationFile( handle, &io, info, size, FileCompressionInformation );
+        break;
+
+    case FileAlignmentInfo:
+        status = NtQueryInformationFile( handle, &io, info, size, FileAlignmentInformation );
+        break;
 
     case FileAttributeTagInfo:
         status = NtQueryInformationFile( handle, &io, info, size, FileAttributeTagInformation );
@@ -3015,6 +3023,20 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetFileInformationByHandleEx( HANDLE handle, FILE_
         status = NtQueryDirectoryFile( handle, NULL, NULL, NULL, &io, info, size,
                                        FileIdBothDirectoryInformation, FALSE, NULL,
                                        (class == FileIdBothDirectoryRestartInfo) );
+        break;
+
+    case FileFullDirectoryInfo:
+    case FileFullDirectoryRestartInfo:
+        status = NtQueryDirectoryFile( handle, NULL, NULL, NULL, &io, info, size,
+                                       FileFullDirectoryInformation, FALSE, NULL,
+                                       (class == FileFullDirectoryRestartInfo) );
+        break;
+
+    case FileIdExtdDirectoryInfo:
+    case FileIdExtdDirectoryRestartInfo:
+        status = NtQueryDirectoryFile( handle, NULL, NULL, NULL, &io, info, size,
+                                       FileIdExtdDirectoryInformation, FALSE, NULL,
+                                       (class == FileIdExtdDirectoryRestartInfo) );
         break;
 
     case FileRenameInfo:
@@ -3146,7 +3168,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetOverlappedResultEx( HANDLE file, OVERLAPPED *ov
 
     TRACE( "(%p %p %p %lu %d)\n", file, overlapped, result, timeout, alertable );
 
-    status = overlapped->Internal;
+    /* Paired with the write-release in set_async_iosb() in ntdll; see the
+     * latter for details. */
+    status = ReadAcquire( (LONG *)&overlapped->Internal );
     if (status == STATUS_PENDING)
     {
         if (!timeout)
@@ -3163,6 +3187,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetOverlappedResultEx( HANDLE file, OVERLAPPED *ov
             return FALSE;
         }
 
+        /* We don't need to give this load acquire semantics; the wait above
+         * already guarantees that the IOSB and output buffer are filled. */
         status = overlapped->Internal;
         if (status == STATUS_PENDING) status = STATUS_SUCCESS;
     }
@@ -3312,7 +3338,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH ReOpenFile( HANDLE handle, DWORD access, DWORD s
 static void WINAPI invoke_completion( void *context, IO_STATUS_BLOCK *io, ULONG res )
 {
     LPOVERLAPPED_COMPLETION_ROUTINE completion = context;
-    completion( io->u.Status, io->Information, (LPOVERLAPPED)io );
+    completion( RtlNtStatusToDosError( io->u.Status ), io->Information, (LPOVERLAPPED)io );
 }
 
 /****************************************************************************

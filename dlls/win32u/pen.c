@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,7 +59,7 @@ HPEN create_pen( INT style, INT width, COLORREF color )
     PENOBJ *penPtr;
     HPEN hpen;
 
-    TRACE( "%d %d %06x\n", style, width, color );
+    TRACE( "%d %d %s\n", style, width, debugstr_color(color) );
 
     switch (style)
     {
@@ -92,7 +96,7 @@ HPEN create_pen( INT style, INT width, COLORREF color )
 HPEN WINAPI NtGdiCreatePen( INT style, INT width, COLORREF color, HBRUSH brush )
 {
     if (brush) FIXME( "brush not supported\n" );
-    if (style == PS_NULL) return get_stock_object( NULL_PEN );
+    if (style == PS_NULL) return GetStockObject( NULL_PEN );
     return create_pen( style, width, color );
 }
 
@@ -152,7 +156,7 @@ HPEN WINAPI NtGdiExtCreatePen( DWORD style, DWORD width, ULONG brush_style, ULON
         break;
 
     default:
-        SetLastError(ERROR_INVALID_PARAMETER);
+        RtlSetLastWin32Error(ERROR_INVALID_PARAMETER);
         return 0;
     }
 
@@ -192,7 +196,7 @@ HPEN WINAPI NtGdiExtCreatePen( DWORD style, DWORD width, ULONG brush_style, ULON
 
 invalid:
     free( penPtr );
-    SetLastError( ERROR_INVALID_PARAMETER );
+    RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
     return 0;
 }
 

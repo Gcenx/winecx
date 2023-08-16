@@ -304,8 +304,8 @@ static void test_VarFormat(void)
   VARFMT(VT_BSTR,V_BSTR,bstrin,"<&>&",S_OK,"testing");
   SysFreeString(bstrin);
   bstrin = SysAllocString(L"39697.11");
-  todo_wine VARFMT(VT_BSTR,V_BSTR,bstrin,"hh:mm",S_OK,"02:38");
-  todo_wine VARFMT(VT_BSTR,V_BSTR,bstrin,"mm-dd-yy",S_OK,"09-06-08");
+  VARFMT(VT_BSTR,V_BSTR,bstrin,"hh:mm",S_OK,"02:38");
+  VARFMT(VT_BSTR,V_BSTR,bstrin,"mm-dd-yy",S_OK,"09-06-08");
   SysFreeString(bstrin);
   /* Numeric values are converted to strings then output */
   VARFMT(VT_I1,V_I1,1,"<&>&",S_OK,"1");
@@ -659,6 +659,19 @@ static void test_VarFormatCurrency(void)
     VariantClear(&in);
 }
 
+static void test_VarFormatDateTime(void)
+{
+    VARIANT in;
+    HRESULT hr;
+    BSTR str;
+
+    V_VT(&in) = VT_NULL;
+    str = (void *)0xdeadbeef;
+    hr = VarFormatDateTime(&in, 0, 0, &str);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(!str, "Unexpected out string %p.\n", str);
+}
+
 START_TEST(varformat)
 {
     test_VarFormatNumber();
@@ -667,4 +680,5 @@ START_TEST(varformat)
     test_VarFormatFromTokens();
     test_GetAltMonthNames();
     test_VarFormatCurrency();
+    test_VarFormatDateTime();
 }

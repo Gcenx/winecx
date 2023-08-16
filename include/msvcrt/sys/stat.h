@@ -8,8 +8,6 @@
 #ifndef __WINE_SYS_STAT_H
 #define __WINE_SYS_STAT_H
 
-#include "wine/winheader_enter.h"
-
 #include <corecrt.h>
 #include <sys/types.h>
 
@@ -198,6 +196,8 @@ extern "C" {
 # endif
 #endif
 
+#define __stat64 _stat64
+
 _ACRTIMP int __cdecl _fstat32(int, struct _stat32*);
 _ACRTIMP int __cdecl _fstat32i64(int, struct _stat32i64*);
 _ACRTIMP int __cdecl _fstat64(int,struct _stat64*);
@@ -233,7 +233,5 @@ static inline int umask(int fd) { return _umask(fd); }
 #endif
 
 #include <poppack.h>
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_SYS_STAT_H */

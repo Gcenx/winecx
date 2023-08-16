@@ -19,8 +19,6 @@
 #ifndef MAPIX_H
 #define MAPIX_H
 
-#include "wine/winheader_enter.h"
-
 #include <mapidefs.h>
 #include <mapicode.h>
 #include <mapiguid.h>
@@ -188,7 +186,5 @@ DECLARE_INTERFACE_(IMAPISession,IUnknown)
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* MAPIX_H */

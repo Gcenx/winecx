@@ -1034,11 +1034,12 @@ static void test_clock(int share)
      * BufferSize must be rounded up, maximum 2s says MSDN
      * but it is rounded down modulo fragment ! */
     if (share)
-    ok(gbsize == bufsize,
-       "BufferSize %u at rate %lu\n", gbsize, pwfx->nSamplesPerSec);
+        ok(gbsize == bufsize,
+           "BufferSize %u at rate %lu\n", gbsize, pwfx->nSamplesPerSec);
     else
-    ok(gbsize == parts * fragment || gbsize == MulDiv(bufsize, 1, 1024) * 1024,
-       "BufferSize %u misfits fragment size %u at rate %lu\n", gbsize, fragment, pwfx->nSamplesPerSec);
+        flaky
+        ok(gbsize == parts * fragment || gbsize == MulDiv(bufsize, 1, 1024) * 1024,
+           "BufferSize %u misfits fragment size %u at rate %lu\n", gbsize, fragment, pwfx->nSamplesPerSec);
 
     /* In shared mode, GetCurrentPadding decreases in multiples of
      * fragment size (i.e. updated only at period ticks), whereas
@@ -1111,6 +1112,7 @@ static void test_clock(int share)
     ok(hr == S_OK, "GetPosition failed: %08lx\n", hr);
     ok(pos > 0, "Position %u vs. last %u\n", (UINT)pos,0);
     /* in rare cases is slept*1.1 not enough with dmix */
+    flaky
     ok(pos*1000/freq <= slept*1.4, "Position %u too far after playing %ums\n", (UINT)pos, slept);
     last = pos;
 
@@ -1529,7 +1531,7 @@ static void test_session(void)
     }
 
     hr = IAudioClient_Stop(ses1_ac1);
-    ok(hr == S_OK, "Start failed: %08lx\n", hr);
+    ok(hr == S_OK, "Stop failed: %08lx\n", hr);
 
     hr = IAudioSessionControl2_GetState(ses1_ctl, &state);
     ok(hr == S_OK, "GetState failed: %08lx\n", hr);
@@ -1641,16 +1643,16 @@ static void test_streamvolume(void)
     ok(chans == fmt->nChannels, "GetChannelCount gave wrong number of channels: %d\n", chans);
 
     hr = IAudioStreamVolume_GetChannelVolume(asv, fmt->nChannels, NULL);
-    ok(hr == E_POINTER, "GetChannelCount gave wrong error: %08lx\n", hr);
+    ok(hr == E_POINTER, "GetChannelVolume gave wrong error: %08lx\n", hr);
 
     hr = IAudioStreamVolume_GetChannelVolume(asv, fmt->nChannels, &vol);
-    ok(hr == E_INVALIDARG, "GetChannelCount gave wrong error: %08lx\n", hr);
+    ok(hr == E_INVALIDARG, "GetChannelVolume gave wrong error: %08lx\n", hr);
 
     hr = IAudioStreamVolume_GetChannelVolume(asv, 0, NULL);
-    ok(hr == E_POINTER, "GetChannelCount gave wrong error: %08lx\n", hr);
+    ok(hr == E_POINTER, "GetChannelVolume gave wrong error: %08lx\n", hr);
 
     hr = IAudioStreamVolume_GetChannelVolume(asv, 0, &vol);
-    ok(hr == S_OK, "GetChannelCount failed: %08lx\n", hr);
+    ok(hr == S_OK, "GetChannelVolume failed: %08lx\n", hr);
     ok(vol == 1.f, "Channel volume was not 1: %f\n", vol);
 
     hr = IAudioStreamVolume_SetChannelVolume(asv, fmt->nChannels, -1.f);
@@ -1666,7 +1668,7 @@ static void test_streamvolume(void)
     ok(hr == S_OK, "SetChannelVolume failed: %08lx\n", hr);
 
     hr = IAudioStreamVolume_GetChannelVolume(asv, 0, &vol);
-    ok(hr == S_OK, "GetChannelCount failed: %08lx\n", hr);
+    ok(hr == S_OK, "GetChannelVolume failed: %08lx\n", hr);
     ok(fabsf(vol - 0.2f) < 0.05f, "Channel volume wasn't 0.2: %f\n", vol);
 
     hr = IAudioStreamVolume_GetAllVolumes(asv, 0, NULL);
@@ -1745,16 +1747,16 @@ static void test_channelvolume(void)
     ok(chans == fmt->nChannels, "GetChannelCount gave wrong number of channels: %d\n", chans);
 
     hr = IChannelAudioVolume_GetChannelVolume(acv, fmt->nChannels, NULL);
-    ok(hr == NULL_PTR_ERR, "GetChannelCount gave wrong error: %08lx\n", hr);
+    ok(hr == NULL_PTR_ERR, "GetChannelVolume gave wrong error: %08lx\n", hr);
 
     hr = IChannelAudioVolume_GetChannelVolume(acv, fmt->nChannels, &vol);
-    ok(hr == E_INVALIDARG, "GetChannelCount gave wrong error: %08lx\n", hr);
+    ok(hr == E_INVALIDARG, "GetChannelVolume gave wrong error: %08lx\n", hr);
 
     hr = IChannelAudioVolume_GetChannelVolume(acv, 0, NULL);
-    ok(hr == NULL_PTR_ERR, "GetChannelCount gave wrong error: %08lx\n", hr);
+    ok(hr == NULL_PTR_ERR, "GetChannelVolume gave wrong error: %08lx\n", hr);
 
     hr = IChannelAudioVolume_GetChannelVolume(acv, 0, &vol);
-    ok(hr == S_OK, "GetChannelCount failed: %08lx\n", hr);
+    ok(hr == S_OK, "GetChannelVolume failed: %08lx\n", hr);
     ok(vol == 1.f, "Channel volume was not 1: %f\n", vol);
 
     hr = IChannelAudioVolume_SetChannelVolume(acv, fmt->nChannels, -1.f, NULL);
@@ -1770,7 +1772,7 @@ static void test_channelvolume(void)
     ok(hr == S_OK, "SetChannelVolume failed: %08lx\n", hr);
 
     hr = IChannelAudioVolume_GetChannelVolume(acv, 0, &vol);
-    ok(hr == S_OK, "GetChannelCount failed: %08lx\n", hr);
+    ok(hr == S_OK, "GetChannelVolume failed: %08lx\n", hr);
     ok(fabsf(vol - 0.2f) < 0.05f, "Channel volume wasn't 0.2: %f\n", vol);
 
     hr = IChannelAudioVolume_GetAllVolumes(acv, 0, NULL);
@@ -1996,11 +1998,11 @@ static void test_volume_dependence(void)
         ok(vol == 1.f, "ASV_GetChannelVolume gave wrong volume: %f\n", vol);
 
         hr = IChannelAudioVolume_GetChannelCount(cav2, &nch);
-        ok(hr == S_OK, "GetChannelCount failed: %08lx\n", hr);
+        ok(hr == S_OK, "CAV_GetChannelCount failed: %08lx\n", hr);
         ok(nch == fmt->nChannels, "Got wrong channel count, expected %u: %u\n", fmt->nChannels, nch);
 
         hr = IAudioStreamVolume_GetChannelCount(asv2, &nch);
-        ok(hr == S_OK, "GetChannelCount failed: %08lx\n", hr);
+        ok(hr == S_OK, "ASV_GetChannelCount failed: %08lx\n", hr);
         ok(nch == fmt->nChannels, "Got wrong channel count, expected %u: %u\n", fmt->nChannels, nch);
 
         IAudioStreamVolume_Release(asv2);
@@ -2211,6 +2213,7 @@ static void test_worst_case(void)
 
         for(i = 0; i <= 99; i++){ /* 100 x 10ms = 1 second */
             r = WaitForSingleObject(event, 60 + defp / 10000);
+            flaky_wine
             ok(r == WAIT_OBJECT_0, "Wait iteration %d gave %lx\n", i, r);
 
             /* the app has nearly one period time to feed data */

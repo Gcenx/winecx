@@ -528,12 +528,13 @@ out:
 
 static void wait_on_sample(struct media_stream *stream, IUnknown *token)
 {
+    struct media_source *source = stream->parent_source;
     PROPVARIANT empty_var = {.vt = VT_EMPTY};
     struct wg_parser_buffer buffer;
 
     TRACE("%p, %p\n", stream, token);
 
-    if (wg_parser_stream_get_buffer(stream->wg_stream, &buffer))
+    if (wg_parser_stream_get_buffer(source->wg_parser, stream->wg_stream, &buffer))
     {
         send_buffer(stream, &buffer, token);
     }
@@ -879,6 +880,12 @@ static HRESULT media_stream_init_desc(struct media_stream *stream)
         IMFMediaType *base_type = mf_media_type_from_wg_format(&format);
         GUID base_subtype;
 
+        if (!base_type)
+        {
+            hr = MF_E_INVALIDMEDIATYPE;
+            goto done;
+        }
+
         IMFMediaType_GetGUID(base_type, &MF_MT_SUBTYPE, &base_subtype);
 
         stream_types[0] = base_type;
@@ -911,8 +918,8 @@ static HRESULT media_stream_init_desc(struct media_stream *stream)
             WG_AUDIO_FORMAT_F32LE,
         };
 
-        stream_types[0] = mf_media_type_from_wg_format(&format);
-        type_count = 1;
+        if ((stream_types[0] = mf_media_type_from_wg_format(&format)))
+            type_count = 1;
 
         for (i = 0; i < ARRAY_SIZE(audio_types); i++)
         {
@@ -921,7 +928,8 @@ static HRESULT media_stream_init_desc(struct media_stream *stream)
                 continue;
             new_format = format;
             new_format.u.audio.format = audio_types[i];
-            stream_types[type_count++] = mf_media_type_from_wg_format(&new_format);
+            if ((stream_types[type_count] = mf_media_type_from_wg_format(&new_format)))
+                type_count++;
         }
     }
     else
@@ -1473,7 +1481,38 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_
     descriptors = malloc(object->stream_count * sizeof(IMFStreamDescriptor *));
     for (i = 0; i < object->stream_count; i++)
     {
+        static const struct
+        {
+            enum wg_parser_tag tag;
+            const GUID *mf_attr;
+        }
+        tags[] =
+        {
+            {WG_PARSER_TAG_LANGUAGE, &MF_SD_LANGUAGE},
+            {WG_PARSER_TAG_NAME, &MF_SD_STREAM_NAME},
+        };
+        unsigned int j;
+        WCHAR *strW;
+        DWORD len;
+        char *str;
+
         IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, &descriptors[i]);
+
+        for (j = 0; j < ARRAY_SIZE(tags); ++j)
+        {
+            if (!(str = wg_parser_stream_get_tag(object->streams[i]->wg_stream, tags[j].tag)))
+                continue;
+            if (!(len = MultiByteToWideChar(CP_UTF8, 0, str, -1, NULL, 0)))
+            {
+                free(str);
+                continue;
+            }
+            strW = malloc(len * sizeof(*strW));
+            if (MultiByteToWideChar(CP_UTF8, 0, str, -1, strW, len))
+                IMFStreamDescriptor_SetString(descriptors[i], tags[j].mf_attr, strW);
+            free(strW);
+            free(str);
+        }
     }
 
     if (FAILED(hr = MFCreatePresentationDescriptor(object->stream_count, descriptors, &object->pres_desc)))

@@ -19,8 +19,6 @@
 #ifndef __NCRYPT_H__
 #define __NCRYPT_H__
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -112,9 +110,12 @@ typedef ULONG_PTR NCRYPT_SECRET_HANDLE;
 #define NCRYPT_SCARD_PIN_ID                     L"SmartCardPinId"
 #define NCRYPT_SCARD_PIN_INFO                   L"SmartCardPinInfo"
 
-SECURITY_STATUS WINAPI NCryptCreatePersistedKey(NCRYPT_PROV_HANDLE, NCRYPT_KEY_HANDLE *, const WCHAR *, const WCHAR *, DWORD, DWORD);
+SECURITY_STATUS WINAPI NCryptCreatePersistedKey(NCRYPT_PROV_HANDLE, NCRYPT_KEY_HANDLE *, const WCHAR *, const WCHAR *,
+                                                DWORD, DWORD);
 SECURITY_STATUS WINAPI NCryptDecrypt(NCRYPT_KEY_HANDLE, BYTE *, DWORD, void *, BYTE *, DWORD, DWORD *, DWORD);
 SECURITY_STATUS WINAPI NCryptEncrypt(NCRYPT_KEY_HANDLE, BYTE *, DWORD, void *, BYTE *, DWORD, DWORD *, DWORD);
+SECURITY_STATUS WINAPI NCryptExportKey(NCRYPT_KEY_HANDLE, NCRYPT_KEY_HANDLE, const WCHAR *, NCryptBufferDesc *, BYTE *,
+                                       DWORD, DWORD *, DWORD);
 SECURITY_STATUS WINAPI NCryptFinalizeKey(NCRYPT_KEY_HANDLE, DWORD);
 SECURITY_STATUS WINAPI NCryptFreeObject(NCRYPT_HANDLE);
 SECURITY_STATUS WINAPI NCryptGetProperty(NCRYPT_HANDLE, const WCHAR *, BYTE *, DWORD, DWORD *, DWORD);
@@ -124,12 +125,11 @@ SECURITY_STATUS WINAPI NCryptIsAlgSupported(NCRYPT_PROV_HANDLE, const WCHAR *, D
 SECURITY_STATUS WINAPI NCryptOpenKey(NCRYPT_PROV_HANDLE, NCRYPT_KEY_HANDLE *, const WCHAR *, DWORD, DWORD);
 SECURITY_STATUS WINAPI NCryptOpenStorageProvider(NCRYPT_PROV_HANDLE *, const WCHAR *, DWORD);
 SECURITY_STATUS WINAPI NCryptSetProperty(NCRYPT_HANDLE, const WCHAR *, BYTE *, DWORD, DWORD);
+SECURITY_STATUS WINAPI NCryptSignHash(NCRYPT_KEY_HANDLE, void *, BYTE *, DWORD, BYTE *, DWORD, DWORD *, DWORD);
 SECURITY_STATUS WINAPI NCryptVerifySignature(NCRYPT_KEY_HANDLE, void *, BYTE *, DWORD, BYTE *, DWORD, DWORD);
 
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __NCRYPT_H__ */

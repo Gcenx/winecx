@@ -84,6 +84,7 @@ static NTSTATUS (WINAPI *pNtQueryDirectoryFile)(HANDLE,HANDLE,PIO_APC_ROUTINE,PV
 static NTSTATUS (WINAPI *pNtQueryVolumeInformationFile)(HANDLE,PIO_STATUS_BLOCK,PVOID,ULONG,FS_INFORMATION_CLASS);
 static NTSTATUS (WINAPI *pNtQueryFullAttributesFile)(const OBJECT_ATTRIBUTES*, FILE_NETWORK_OPEN_INFORMATION*);
 static NTSTATUS (WINAPI *pNtFlushBuffersFile)(HANDLE, IO_STATUS_BLOCK*);
+static NTSTATUS (WINAPI *pNtQueryEaFile)(HANDLE,PIO_STATUS_BLOCK,PVOID,ULONG,BOOLEAN,PVOID,ULONG,PULONG,BOOLEAN);
 
 static WCHAR fooW[] = {'f','o','o',0};
 
@@ -417,11 +418,9 @@ static void open_file_test(void)
     pRtlDosPathNameToNtPathName_U( path, &nameW, NULL, NULL );
     status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
                           FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_DIRECTORY_FILE );
-    todo_wine
     ok( status == STATUS_OBJECT_PATH_NOT_FOUND, "open %s failed %lx\n", wine_dbgstr_w(nameW.Buffer), status );
     status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
                           FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_NON_DIRECTORY_FILE );
-    todo_wine
     ok( status == STATUS_OBJECT_PATH_NOT_FOUND, "open %s failed %lx\n", wine_dbgstr_w(nameW.Buffer), status );
     pRtlFreeUnicodeString( &nameW );
 
@@ -1289,7 +1288,7 @@ static void test_file_full_size_information(void)
 
     /* Assume No Quota Settings configured on Wine Testbot */
     res = pNtQueryVolumeInformationFile(h, &io, &ffsi, sizeof ffsi, FileFsFullSizeInformation);
-    todo_wine ok(res == STATUS_SUCCESS, "cannot get attributes, res %lx\n", res);
+    ok(res == STATUS_SUCCESS, "cannot get attributes, res %lx\n", res);
     res = pNtQueryVolumeInformationFile(h, &io, &fsi, sizeof fsi, FileFsSizeInformation);
     ok(res == STATUS_SUCCESS, "cannot get attributes, res %lx\n", res);
 
@@ -1305,8 +1304,6 @@ static void test_file_full_size_information(void)
     ok(fsi.BytesPerSector == 512, "[fsi] BytesPerSector expected 512, got %ld\n",fsi.BytesPerSector);
     ok(fsi.SectorsPerAllocationUnit == 8, "[fsi] SectorsPerAllocationUnit expected 8, got %ld\n",fsi.SectorsPerAllocationUnit);
 
-    todo_wine
-    {
     ok(ffsi.TotalAllocationUnits.QuadPart > 0,
         "[ffsi] TotalAllocationUnits expected positive, got negative value 0x%s\n",
         wine_dbgstr_longlong(ffsi.TotalAllocationUnits.QuadPart));
@@ -1324,14 +1321,10 @@ static void test_file_full_size_information(void)
         "[ffsi] CallerAvailableAllocationUnits error fsi:0x%s, ffsi: 0x%s\n",
         wine_dbgstr_longlong(fsi.AvailableAllocationUnits.QuadPart),
         wine_dbgstr_longlong(ffsi.CallerAvailableAllocationUnits.QuadPart));
-    }
 
     /* Assume file system is NTFS */
-    todo_wine
-    {
     ok(ffsi.BytesPerSector == 512, "[ffsi] BytesPerSector expected 512, got %ld\n",ffsi.BytesPerSector);
     ok(ffsi.SectorsPerAllocationUnit == 8, "[ffsi] SectorsPerAllocationUnit expected 8, got %ld\n",ffsi.SectorsPerAllocationUnit);
-    }
 
     CloseHandle( h );
 }
@@ -1400,7 +1393,7 @@ static void test_file_basic_information(void)
     memset(&fbi, 0, sizeof(fbi));
     res = pNtQueryInformationFile(h, &io, &fbi, sizeof fbi, FileBasicInformation);
     ok ( res == STATUS_SUCCESS, "can't get attributes\n");
-    todo_wine ok ( (fbi.FileAttributes & attrib_mask) == FILE_ATTRIBUTE_SYSTEM, "attribute %lx not FILE_ATTRIBUTE_SYSTEM\n", fbi.FileAttributes );
+    ok ( (fbi.FileAttributes & attrib_mask) == FILE_ATTRIBUTE_SYSTEM, "attribute %lx not FILE_ATTRIBUTE_SYSTEM\n", fbi.FileAttributes );
 
     /* Then HIDDEN */
     memset(&fbi, 0, sizeof(fbi));
@@ -1413,7 +1406,7 @@ static void test_file_basic_information(void)
     memset(&fbi, 0, sizeof(fbi));
     res = pNtQueryInformationFile(h, &io, &fbi, sizeof fbi, FileBasicInformation);
     ok ( res == STATUS_SUCCESS, "can't get attributes\n");
-    todo_wine ok ( (fbi.FileAttributes & attrib_mask) == FILE_ATTRIBUTE_HIDDEN, "attribute %lx not FILE_ATTRIBUTE_HIDDEN\n", fbi.FileAttributes );
+    ok ( (fbi.FileAttributes & attrib_mask) == FILE_ATTRIBUTE_HIDDEN, "attribute %lx not FILE_ATTRIBUTE_HIDDEN\n", fbi.FileAttributes );
 
     /* Check NORMAL last of all (to make sure we can clear attributes) */
     memset(&fbi, 0, sizeof(fbi));
@@ -1470,7 +1463,7 @@ static void test_file_all_information(void)
     memset(&fai_buf.fai, 0, sizeof(fai_buf.fai));
     res = pNtQueryInformationFile(h, &io, &fai_buf.fai, sizeof fai_buf, FileAllInformation);
     ok ( res == STATUS_SUCCESS, "can't get attributes, res %x\n", res);
-    todo_wine ok ( (fai_buf.fai.BasicInformation.FileAttributes & attrib_mask) == FILE_ATTRIBUTE_SYSTEM, "attribute %lx not FILE_ATTRIBUTE_SYSTEM\n", fai_buf.fai.BasicInformation.FileAttributes );
+    ok ( (fai_buf.fai.BasicInformation.FileAttributes & attrib_mask) == FILE_ATTRIBUTE_SYSTEM, "attribute %lx not FILE_ATTRIBUTE_SYSTEM\n", fai_buf.fai.BasicInformation.FileAttributes );
 
     /* Then HIDDEN */
     memset(&fai_buf.fai.BasicInformation, 0, sizeof(fai_buf.fai.BasicInformation));
@@ -1483,7 +1476,7 @@ static void test_file_all_information(void)
     memset(&fai_buf.fai, 0, sizeof(fai_buf.fai));
     res = pNtQueryInformationFile(h, &io, &fai_buf.fai, sizeof fai_buf, FileAllInformation);
     ok ( res == STATUS_SUCCESS, "can't get attributes\n");
-    todo_wine ok ( (fai_buf.fai.BasicInformation.FileAttributes & attrib_mask) == FILE_ATTRIBUTE_HIDDEN, "attribute %lx not FILE_ATTRIBUTE_HIDDEN\n", fai_buf.fai.BasicInformation.FileAttributes );
+    ok ( (fai_buf.fai.BasicInformation.FileAttributes & attrib_mask) == FILE_ATTRIBUTE_HIDDEN, "attribute %lx not FILE_ATTRIBUTE_HIDDEN\n", fai_buf.fai.BasicInformation.FileAttributes );
 
     /* Check NORMAL last of all (to make sure we can clear attributes) */
     memset(&fai_buf.fai.BasicInformation, 0, sizeof(fai_buf.fai.BasicInformation));
@@ -2964,6 +2957,7 @@ static void test_file_disposition_information(void)
     NTSTATUS res;
     IO_STATUS_BLOCK io;
     FILE_DISPOSITION_INFORMATION fdi;
+    FILE_STANDARD_INFORMATION fsi;
     BOOL fileDeleted;
     DWORD fdi2, size;
     void *view;
@@ -3006,6 +3000,10 @@ static void test_file_disposition_information(void)
     fdi.DoDeleteFile = TRUE;
     res = pNtSetInformationFile( handle, &io, &fdi, sizeof fdi, FileDispositionInformation );
     ok( res == STATUS_SUCCESS, "unexpected FileDispositionInformation result (expected STATUS_SUCCESS, got %lx)\n", res );
+    res = NtQueryInformationFile(handle, &io, &fsi, sizeof(fsi), FileStandardInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    todo_wine
+    ok(fsi.DeletePending, "Handle should be marked for deletion\n");
     CloseHandle( handle );
     fileDeleted = GetFileAttributesA( buffer ) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND;
     ok( fileDeleted, "File should have been deleted\n" );
@@ -3148,18 +3146,26 @@ static void test_file_disposition_information(void)
     GetTempFileNameA( tmp_path, "dis", 0, buffer );
     handle = CreateFileA(buffer, GENERIC_WRITE | DELETE, FILE_SHARE_DELETE, NULL, CREATE_ALWAYS, 0, 0);
     ok( handle != INVALID_HANDLE_VALUE, "failed to create temp file\n" );
+    res = NtQueryInformationFile(handle, &io, &fsi, sizeof(fsi), FileStandardInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    ok(!fsi.DeletePending, "Handle shouldn't be marked for deletion\n");
     fileDeleted = DeleteFileA( buffer );
     ok( fileDeleted, "File should have been deleted\n" );
-    fileDeleted = GetFileAttributesA( buffer ) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND;
-    ok( !fileDeleted, "File shouldn't have been deleted\n" );
+    res = NtQueryInformationFile(handle, &io, &fsi, sizeof(fsi), FileStandardInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    todo_wine
+    ok(fsi.DeletePending, "Handle should be marked for deletion\n");
     res = nt_get_file_attrs( buffer, &fdi2 );
     todo_wine
-    ok( res == STATUS_DELETE_PENDING, "got %#lx\n", res );
+    ok( res == STATUS_OBJECT_NAME_NOT_FOUND || broken(res == STATUS_DELETE_PENDING), "got %#lx\n", res );
     /* can't open the deleted file */
-    handle2 = CreateFileA(buffer, DELETE, FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, 0);
+    handle2 = CreateFileA(buffer, DELETE, FILE_SHARE_DELETE | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0);
+    todo_wine
     ok( handle2 == INVALID_HANDLE_VALUE, "CreateFile should fail\n" );
     todo_wine
-    ok(GetLastError() == ERROR_ACCESS_DENIED, "got %lu\n", GetLastError());
+    ok( GetLastError() == ERROR_FILE_NOT_FOUND || broken(GetLastError() == ERROR_ACCESS_DENIED), "got %lu\n", GetLastError());
+    if (handle2 != INVALID_HANDLE_VALUE)
+        CloseHandle( handle2);
     CloseHandle( handle );
     fileDeleted = GetFileAttributesA( buffer ) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND;
     ok( fileDeleted, "File should have been deleted\n" );
@@ -3197,19 +3203,24 @@ static void test_file_disposition_information(void)
     ok( CreateDirectoryA( buffer, NULL ), "CreateDirectory failed\n" );
     handle = CreateFileA(buffer, DELETE, FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
     ok( handle != INVALID_HANDLE_VALUE, "failed to open a directory\n" );
+    res = NtQueryInformationFile(handle, &io, &fsi, sizeof(fsi), FileStandardInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    ok(!fsi.DeletePending, "Handle shouldn't be marked for deletion\n");
     fileDeleted = RemoveDirectoryA( buffer );
     ok( fileDeleted, "Directory should have been deleted\n" );
-    fileDeleted = GetFileAttributesA( buffer ) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND;
-    ok( !fileDeleted, "Directory shouldn't have been deleted\n" );
+    res = NtQueryInformationFile(handle, &io, &fsi, sizeof(fsi), FileStandardInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    todo_wine
+    ok(fsi.DeletePending, "Handle should be marked for deletion\n");
     res = nt_get_file_attrs( buffer, &fdi2 );
     todo_wine
-    ok( res == STATUS_DELETE_PENDING, "got %#lx\n", res );
+    ok( res == STATUS_OBJECT_NAME_NOT_FOUND || broken(res == STATUS_DELETE_PENDING), "got %#lx\n", res );
     /* can't open the deleted directory */
     handle2 = CreateFileA(buffer, DELETE, FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
     todo_wine
     ok( handle2 == INVALID_HANDLE_VALUE, "CreateFile should fail\n" );
     todo_wine
-    ok(GetLastError() == ERROR_ACCESS_DENIED, "got %lu\n", GetLastError());
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND || broken(GetLastError() == ERROR_ACCESS_DENIED), "got %lu\n", GetLastError());
     if (handle2 != INVALID_HANDLE_VALUE) CloseHandle( handle2 );
     CloseHandle( handle );
     fileDeleted = GetFileAttributesA( buffer ) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND;
@@ -3401,6 +3412,68 @@ static void test_file_disposition_information(void)
     res = DeleteFileA( buffer );
     ok( !res, "expected failure\n" );
     ok( GetLastError() == ERROR_FILE_NOT_FOUND, "got error %lu\n", GetLastError() );
+
+    /* pending delete flag is shared across handles */
+    GetTempFileNameA( tmp_path, "dis", 0, buffer );
+    handle = CreateFileA(buffer, GENERIC_WRITE | DELETE, FILE_SHARE_DELETE, NULL, CREATE_ALWAYS, 0, 0);
+    ok( handle != INVALID_HANDLE_VALUE, "failed to create temp file\n" );
+    res = NtQueryInformationFile(handle, &io, &fsi, sizeof(fsi), FileStandardInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    ok(!fsi.DeletePending, "Handle shouldn't be marked for deletion\n");
+    handle2 = CreateFileA(buffer, DELETE, FILE_SHARE_DELETE | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0);
+    ok( handle2 != INVALID_HANDLE_VALUE, "failed to create temp file\n" );
+    res = NtQueryInformationFile(handle2, &io, &fsi, sizeof(fsi), FileStandardInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    ok(!fsi.DeletePending, "Handle shouldn't be marked for deletion\n");
+    fdi.DoDeleteFile = TRUE;
+    res = NtSetInformationFile(handle, &io, &fdi, sizeof(fdi), FileDispositionInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    res = NtQueryInformationFile(handle2, &io, &fsi, sizeof(fsi), FileStandardInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    todo_wine
+    ok(fsi.DeletePending, "Handle should be marked for deletion\n");
+    fdi.DoDeleteFile = FALSE;
+    res = NtSetInformationFile(handle2, &io, &fdi, sizeof(fdi), FileDispositionInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    res = NtQueryInformationFile(handle, &io, &fsi, sizeof(fsi), FileStandardInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    ok(!fsi.DeletePending, "Handle shouldn't be marked for deletion\n");
+    CloseHandle(handle);
+    CloseHandle(handle2);
+    res = GetFileAttributesA( buffer );
+    todo_wine
+    ok( res != INVALID_FILE_ATTRIBUTES, "expected file to exist\n" );
+
+    /* pending delete flag is shared across handles (even after closing) */
+    GetTempFileNameA( tmp_path, "dis", 0, buffer );
+    handle = CreateFileA(buffer, GENERIC_WRITE | DELETE, FILE_SHARE_DELETE, NULL, CREATE_ALWAYS, 0, 0);
+    ok( handle != INVALID_HANDLE_VALUE, "failed to create temp file\n" );
+    res = NtQueryInformationFile(handle, &io, &fsi, sizeof(fsi), FileStandardInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    ok(!fsi.DeletePending, "Handle shouldn't be marked for deletion\n");
+    handle2 = CreateFileA(buffer, DELETE, FILE_SHARE_DELETE | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0);
+    ok( handle2 != INVALID_HANDLE_VALUE, "failed to create temp file\n" );
+    res = NtQueryInformationFile(handle2, &io, &fsi, sizeof(fsi), FileStandardInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    ok(!fsi.DeletePending, "Handle shouldn't be marked for deletion\n");
+    fdi.DoDeleteFile = TRUE;
+    res = NtSetInformationFile(handle, &io, &fdi, sizeof(fdi), FileDispositionInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    res = NtQueryInformationFile(handle2, &io, &fsi, sizeof(fsi), FileStandardInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    todo_wine
+    ok(fsi.DeletePending, "Handle should be marked for deletion\n");
+    fdi.DoDeleteFile = FALSE;
+    res = NtSetInformationFile(handle2, &io, &fdi, sizeof(fdi), FileDispositionInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    CloseHandle(handle2);
+    res = NtQueryInformationFile(handle, &io, &fsi, sizeof(fsi), FileStandardInformation);
+    ok(res == STATUS_SUCCESS, "NtQueryInformationFile failed %lx\n", res);
+    ok(!fsi.DeletePending, "Handle shouldn't be marked for deletion\n");
+    CloseHandle(handle);
+    res = GetFileAttributesA( buffer );
+    todo_wine
+    ok( res != INVALID_FILE_ATTRIBUTES, "expected file to exist\n" );
 }
 
 static void test_file_name_information(void)
@@ -3978,6 +4051,97 @@ static void test_file_attribute_tag_information(void)
     CloseHandle( h );
 }
 
+static void rename_file( HANDLE h, const WCHAR *filename )
+{
+    FILE_RENAME_INFORMATION *fri;
+    UNICODE_STRING ntpath;
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+    BOOLEAN ret;
+    ULONG size;
+
+    ret = pRtlDosPathNameToNtPathName_U( filename, &ntpath, NULL, NULL );
+    ok( ret, "RtlDosPathNameToNtPathName_U failed\n" );
+
+    size = offsetof( FILE_RENAME_INFORMATION, FileName ) + ntpath.Length;
+    fri = HeapAlloc( GetProcessHeap(), 0, size );
+    ok( fri != NULL, "HeapAlloc failed\n" );
+    fri->ReplaceIfExists = TRUE;
+    fri->RootDirectory = NULL;
+    fri->FileNameLength = ntpath.Length;
+    memcpy( fri->FileName, ntpath.Buffer, ntpath.Length );
+    pRtlFreeUnicodeString( &ntpath );
+
+    status = pNtSetInformationFile( h, &io, fri, size, FileRenameInformation );
+    HeapFree( GetProcessHeap(), 0, fri );
+    ok( status == STATUS_SUCCESS, "got %#lx\n", status );
+}
+
+static void test_dotfile_file_attributes(void)
+{
+    char temppath[MAX_PATH], filename[MAX_PATH];
+    WCHAR temppathW[MAX_PATH], filenameW[MAX_PATH];
+    FILE_BASIC_INFORMATION info = {};
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+    DWORD attrs;
+    HANDLE h;
+
+    GetTempPathA( MAX_PATH, temppath );
+    GetTempFileNameA( temppath, ".foo", 0, filename );
+    h = CreateFileA( filename, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, 0 );
+    ok( h != INVALID_HANDLE_VALUE, "failed to create temp file\n" );
+
+    status = nt_get_file_attrs(filename, &attrs);
+    ok( status == STATUS_SUCCESS, "got %#lx\n", status );
+    ok( !(attrs & FILE_ATTRIBUTE_HIDDEN), "got attributes %#lx\n", attrs );
+
+    status = pNtQueryInformationFile( h, &io, &info, sizeof(info), FileBasicInformation );
+    ok( status == STATUS_SUCCESS, "got %#lx\n", status );
+    ok( !(info.FileAttributes & FILE_ATTRIBUTE_HIDDEN), "got attributes %#lx\n", info.FileAttributes );
+
+    info.FileAttributes = FILE_ATTRIBUTE_SYSTEM;
+    status = pNtSetInformationFile( h, &io, &info, sizeof(info), FileBasicInformation );
+    ok( status == STATUS_SUCCESS, "got %#lx\n", status );
+
+    status = nt_get_file_attrs(filename, &attrs);
+    ok( status == STATUS_SUCCESS, "got %#lx\n", status );
+    ok( attrs & FILE_ATTRIBUTE_SYSTEM, "got attributes %#lx\n", attrs );
+    ok( !(attrs & FILE_ATTRIBUTE_HIDDEN), "got attributes %#lx\n", attrs );
+
+    status = pNtQueryInformationFile( h, &io, &info, sizeof(info), FileBasicInformation );
+    ok( status == STATUS_SUCCESS, "got %#lx\n", status );
+    ok( info.FileAttributes & FILE_ATTRIBUTE_SYSTEM, "got attributes %#lx\n", info.FileAttributes );
+    ok( !(info.FileAttributes & FILE_ATTRIBUTE_HIDDEN), "got attributes %#lx\n", info.FileAttributes );
+
+    CloseHandle( h );
+
+    GetTempPathW( MAX_PATH, temppathW );
+    GetTempFileNameW( temppathW, L"foo", 0, filenameW );
+    h = CreateFileW( filenameW, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, 0 );
+    ok( h != INVALID_HANDLE_VALUE, "failed to create temp file\n" );
+
+    GetTempFileNameW( temppathW, L".foo", 0, filenameW );
+    winetest_push_context("foo -> .foo");
+    rename_file( h, filenameW );
+    winetest_pop_context();
+
+    status = pNtQueryInformationFile( h, &io, &info, sizeof(info), FileBasicInformation );
+    ok( status == STATUS_SUCCESS, "got %#lx\n", status );
+    ok( !(info.FileAttributes & FILE_ATTRIBUTE_HIDDEN), "got attributes %#lx\n", info.FileAttributes );
+
+    GetTempFileNameW( temppathW, L"foo", 0, filenameW );
+    winetest_push_context(".foo -> foo");
+    rename_file( h, filenameW );
+    winetest_pop_context();
+
+    status = pNtQueryInformationFile( h, &io, &info, sizeof(info), FileBasicInformation );
+    ok( status == STATUS_SUCCESS, "got %#lx\n", status );
+    ok( !(info.FileAttributes & FILE_ATTRIBUTE_HIDDEN), "got attributes %#lx\n", info.FileAttributes );
+
+    CloseHandle( h );
+}
+
 static void test_file_mode(void)
 {
     UNICODE_STRING file_name, pipe_dev_name, mountmgr_dev_name, mailslot_dev_name;
@@ -4251,6 +4415,18 @@ static void test_NtCreateFile(void)
     pRtlFreeUnicodeString( &nameW );
     SetFileAttributesW(path, FILE_ATTRIBUTE_ARCHIVE);
     DeleteFileW( path );
+
+    wcscat( path, L"\\" );
+    pRtlDosPathNameToNtPathName_U(path, &nameW, NULL, NULL);
+
+    status = pNtCreateFile( &handle, GENERIC_READ, &attr, &io, NULL,
+                            0, FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_CREATE, 0, NULL, 0);
+    ok( status == STATUS_OBJECT_NAME_INVALID, "failed %s %lx\n", debugstr_w(nameW.Buffer), status );
+    status = pNtCreateFile( &handle, GENERIC_READ, &attr, &io, NULL,
+                            0, FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_CREATE,
+                            FILE_DIRECTORY_FILE, NULL, 0);
+    ok( !status, "failed %s %lx\n", debugstr_w(nameW.Buffer), status );
+    RemoveDirectoryW( path );
 }
 
 static void test_read_write(void)
@@ -5108,6 +5284,86 @@ static void test_flush_buffers_file(void)
     DeleteFileA(buffer);
 }
 
+static void test_query_ea(void)
+{
+#define EA_BUFFER_SIZE 4097
+    unsigned char data[EA_BUFFER_SIZE + 8];
+    unsigned char *buffer = (void *)(((DWORD_PTR)data + 7) & ~7);
+    DWORD buffer_len, i;
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+    HANDLE handle;
+
+    if (!(handle = create_temp_file(0))) return;
+
+    /* test with INVALID_HANDLE_VALUE */
+    U(io).Status = 0xdeadbeef;
+    io.Information = 0xdeadbeef;
+    memset(buffer, 0xcc, EA_BUFFER_SIZE);
+    buffer_len = EA_BUFFER_SIZE - 1;
+    status = pNtQueryEaFile(INVALID_HANDLE_VALUE, &io, buffer, buffer_len, TRUE, NULL, 0, NULL, FALSE);
+    ok(status == STATUS_OBJECT_TYPE_MISMATCH, "expected STATUS_OBJECT_TYPE_MISMATCH, got %#lx\n", status);
+    ok(U(io).Status == 0xdeadbeef, "expected 0xdeadbeef, got %#lx\n", U(io).Status);
+    ok(io.Information == 0xdeadbeef, "expected 0xdeadbeef, got %#Ix\n", io.Information);
+    ok(buffer[0] == 0xcc, "data at position 0 overwritten\n");
+
+    /* test with 0xdeadbeef */
+    U(io).Status = 0xdeadbeef;
+    io.Information = 0xdeadbeef;
+    memset(buffer, 0xcc, EA_BUFFER_SIZE);
+    buffer_len = EA_BUFFER_SIZE - 1;
+    status = pNtQueryEaFile((void *)0xdeadbeef, &io, buffer, buffer_len, TRUE, NULL, 0, NULL, FALSE);
+    ok(status == STATUS_INVALID_HANDLE, "expected STATUS_INVALID_HANDLE, got %#lx\n", status);
+    ok(U(io).Status == 0xdeadbeef, "expected 0xdeadbeef, got %#lx\n", U(io).Status);
+    ok(io.Information == 0xdeadbeef, "expected 0xdeadbeef, got %#Ix\n", io.Information);
+    ok(buffer[0] == 0xcc, "data at position 0 overwritten\n");
+
+    /* test without buffer */
+    U(io).Status = 0xdeadbeef;
+    io.Information = 0xdeadbeef;
+    status = pNtQueryEaFile(handle, &io, NULL, 0, TRUE, NULL, 0, NULL, FALSE);
+    ok(status == STATUS_NO_EAS_ON_FILE, "expected STATUS_NO_EAS_ON_FILE, got %#lx\n", status);
+    ok(U(io).Status == 0xdeadbeef, "expected 0xdeadbeef, got %#lx\n", U(io).Status);
+    ok(io.Information == 0xdeadbeef, "expected 0xdeadbeef, got %#Ix\n", io.Information);
+
+    /* test with zero buffer */
+    U(io).Status = 0xdeadbeef;
+    io.Information = 0xdeadbeef;
+    status = pNtQueryEaFile(handle, &io, buffer, 0, TRUE, NULL, 0, NULL, FALSE);
+    ok(status == STATUS_NO_EAS_ON_FILE, "expected STATUS_NO_EAS_ON_FILE, got %#lx\n", status);
+    ok(U(io).Status == 0xdeadbeef, "expected 0xdeadbeef, got %#lx\n", U(io).Status);
+    ok(io.Information == 0xdeadbeef, "expected 0xdeadbeef, got %#Ix\n", io.Information);
+
+    /* test with very small buffer */
+    U(io).Status = 0xdeadbeef;
+    io.Information = 0xdeadbeef;
+    memset(buffer, 0xcc, EA_BUFFER_SIZE);
+    buffer_len = 4;
+    status = pNtQueryEaFile(handle, &io, buffer, buffer_len, TRUE, NULL, 0, NULL, FALSE);
+    ok(status == STATUS_NO_EAS_ON_FILE, "expected STATUS_NO_EAS_ON_FILE, got %#lx\n", status);
+    ok(U(io).Status == 0xdeadbeef, "expected 0xdeadbeef, got %#lx\n", U(io).Status);
+    ok(io.Information == 0xdeadbeef, "expected 0xdeadbeef, got %#Ix\n", io.Information);
+    for (i = 0; i < buffer_len && !buffer[i]; i++);
+    ok(i == buffer_len,  "expected %lu bytes filled with 0x00, got %lu bytes\n", buffer_len, i);
+    ok(buffer[i] == 0xcc, "data at position %u overwritten\n", buffer[i]);
+
+    /* test with very big buffer */
+    U(io).Status = 0xdeadbeef;
+    io.Information = 0xdeadbeef;
+    memset(buffer, 0xcc, EA_BUFFER_SIZE);
+    buffer_len = EA_BUFFER_SIZE - 1;
+    status = pNtQueryEaFile(handle, &io, buffer, buffer_len, TRUE, NULL, 0, NULL, FALSE);
+    ok(status == STATUS_NO_EAS_ON_FILE, "expected STATUS_NO_EAS_ON_FILE, got %#lx\n", status);
+    ok(U(io).Status == 0xdeadbeef, "expected 0xdeadbeef, got %#lx\n", U(io).Status);
+    ok(io.Information == 0xdeadbeef, "expected 0xdeadbeef, got %#Ix\n", io.Information);
+    for (i = 0; i < buffer_len && !buffer[i]; i++);
+    ok(i == buffer_len,  "expected %lu bytes filled with 0x00, got %lu bytes\n", buffer_len, i);
+    ok(buffer[i] == 0xcc, "data at position %u overwritten\n", buffer[i]);
+
+    CloseHandle(handle);
+#undef EA_BUFFER_SIZE
+}
+
 static void test_file_readonly_access(void)
 {
     static const DWORD default_sharing = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
@@ -5241,6 +5497,34 @@ static void test_mailslot_name(void)
     CloseHandle( device );
 }
 
+static void test_reparse_points(void)
+{
+    OBJECT_ATTRIBUTES attr;
+    HANDLE handle;
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+    UNICODE_STRING nameW;
+    unsigned char reparse_data[1];
+
+    pRtlInitUnicodeString( &nameW, L"\\??\\C:\\" );
+    InitializeObjectAttributes( &attr, &nameW, 0, NULL, NULL );
+
+    status = pNtOpenFile( &handle, READ_CONTROL, &attr, &io, 0, 0 );
+    ok( !status, "open %s failed %#lx\n", wine_dbgstr_w(nameW.Buffer), status );
+
+    status = pNtFsControlFile( handle, NULL, NULL, NULL, &io, FSCTL_GET_REPARSE_POINT, NULL, 0, NULL, 0 );
+    ok( status == STATUS_INVALID_USER_BUFFER, "expected %#lx, got %#lx\n", STATUS_INVALID_USER_BUFFER, status );
+
+    status = pNtFsControlFile( handle, NULL, NULL, NULL, &io, FSCTL_GET_REPARSE_POINT, NULL, 0, reparse_data, 0 );
+    ok( status == STATUS_INVALID_USER_BUFFER, "expected %#lx, got %#lx\n", STATUS_INVALID_USER_BUFFER, status );
+
+    /* a volume cannot be a reparse point by definition */
+    status = pNtFsControlFile( handle, NULL, NULL, NULL, &io, FSCTL_GET_REPARSE_POINT, NULL, 0, reparse_data, 1 );
+    ok( status == STATUS_NOT_A_REPARSE_POINT, "expected %#lx, got %#lx\n", STATUS_NOT_A_REPARSE_POINT, status );
+
+    CloseHandle( handle );
+}
+
 START_TEST(file)
 {
     HMODULE hkernel32 = GetModuleHandleA("kernel32.dll");
@@ -5281,6 +5565,7 @@ START_TEST(file)
     pNtQueryVolumeInformationFile = (void *)GetProcAddress(hntdll, "NtQueryVolumeInformationFile");
     pNtQueryFullAttributesFile = (void *)GetProcAddress(hntdll, "NtQueryFullAttributesFile");
     pNtFlushBuffersFile = (void *)GetProcAddress(hntdll, "NtFlushBuffersFile");
+    pNtQueryEaFile          = (void *)GetProcAddress(hntdll, "NtQueryEaFile");
 
     test_read_write();
     test_NtCreateFile();
@@ -5305,11 +5590,14 @@ START_TEST(file)
     test_file_id_information();
     test_file_access_information();
     test_file_attribute_tag_information();
+    test_dotfile_file_attributes();
     test_file_mode();
     test_file_readonly_access();
     test_query_volume_information_file();
     test_query_attribute_information_file();
     test_ioctl();
+    test_query_ea();
     test_flush_buffers_file();
     test_mailslot_name();
+    test_reparse_points();
 }

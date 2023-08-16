@@ -647,6 +647,9 @@ static void textrange_set_font(ITextRange *range, ITextFont *font)
         cursor_from_char_ofs( services->editor, start, &from );
         cursor_from_char_ofs( services->editor, end, &to );
         ME_SetCharFormat( services->editor, &from, &to, &fmt );
+        ME_CommitUndo( services->editor );
+        ME_WrapMarkedParagraphs( services->editor );
+        ME_UpdateScrollBar( services->editor );
     }
 }
 
@@ -805,6 +808,9 @@ static HRESULT set_textfont_prop(ITextFontImpl *font, enum textfont_prop_id prop
     cursor_from_char_ofs( services->editor, start, &from );
     cursor_from_char_ofs( services->editor, end, &to );
     ME_SetCharFormat( services->editor, &from, &to, &fmt );
+    ME_CommitUndo( services->editor );
+    ME_WrapMarkedParagraphs( services->editor );
+    ME_UpdateScrollBar( services->editor );
 
     return S_OK;
 }
@@ -4211,15 +4217,22 @@ static HRESULT WINAPI ITextDocument2Old_fnSave(ITextDocument2Old *iface, VARIANT
 static HRESULT WINAPI ITextDocument2Old_fnFreeze(ITextDocument2Old *iface, LONG *pCount)
 {
     struct text_services *services = impl_from_ITextDocument2Old(iface);
-    FIXME("stub %p\n", services);
-    return E_NOTIMPL;
+
+    if (services->editor->freeze_count < LONG_MAX) services->editor->freeze_count++;
+
+    if (pCount) *pCount = services->editor->freeze_count;
+    return services->editor->freeze_count != 0 ? S_OK : S_FALSE;
 }
 
 static HRESULT WINAPI ITextDocument2Old_fnUnfreeze(ITextDocument2Old *iface, LONG *pCount)
 {
     struct text_services *services = impl_from_ITextDocument2Old(iface);
-    FIXME("stub %p\n", services);
-    return E_NOTIMPL;
+
+    if (services->editor->freeze_count && !--services->editor->freeze_count)
+        ME_RewrapRepaint(services->editor);
+
+    if (pCount) *pCount = services->editor->freeze_count;
+    return services->editor->freeze_count == 0 ? S_OK : S_FALSE;
 }
 
 static HRESULT WINAPI ITextDocument2Old_fnBeginEditCollection(ITextDocument2Old *iface)
@@ -4239,15 +4252,55 @@ static HRESULT WINAPI ITextDocument2Old_fnEndEditCollection(ITextDocument2Old *i
 static HRESULT WINAPI ITextDocument2Old_fnUndo(ITextDocument2Old *iface, LONG Count, LONG *prop)
 {
     struct text_services *services = impl_from_ITextDocument2Old(iface);
-    FIXME("stub %p\n", services);
-    return E_NOTIMPL;
+    LONG actual_undo_count;
+
+    if (prop) *prop = 0;
+
+    switch (Count)
+    {
+    case tomFalse:
+        editor_disable_undo(services->editor);
+        return S_OK;
+    default:
+        if (Count > 0) break;
+        /* fallthrough */
+    case tomTrue:
+        editor_enable_undo(services->editor);
+        return S_FALSE;
+    case tomSuspend:
+        if (services->editor->undo_ctl_state == undoActive)
+        {
+            services->editor->undo_ctl_state = undoSuspended;
+        }
+        return S_FALSE;
+    case tomResume:
+        services->editor->undo_ctl_state = undoActive;
+        return S_FALSE;
+    }
+
+    for (actual_undo_count = 0; actual_undo_count < Count; actual_undo_count++)
+    {
+        if (!ME_Undo(services->editor)) break;
+    }
+
+    if (prop) *prop = actual_undo_count;
+    return actual_undo_count == Count ? S_OK : S_FALSE;
 }
 
 static HRESULT WINAPI ITextDocument2Old_fnRedo(ITextDocument2Old *iface, LONG Count, LONG *prop)
 {
     struct text_services *services = impl_from_ITextDocument2Old(iface);
-    FIXME("stub %p\n", services);
-    return E_NOTIMPL;
+    LONG actual_redo_count;
+
+    if (prop) *prop = 0;
+
+    for (actual_redo_count = 0; actual_redo_count < Count; actual_redo_count++)
+    {
+        if (!ME_Redo(services->editor)) break;
+    }
+
+    if (prop) *prop = actual_redo_count;
+    return actual_redo_count == Count ? S_OK : S_FALSE;
 }
 
 static HRESULT CreateITextRange(struct text_services *services, LONG start, LONG end, ITextRange** ppRange)
@@ -5733,6 +5786,7 @@ void ME_GetOLEObjectSize(const ME_Context *c, ME_Run *run, SIZE *pSize)
 void draw_ole( ME_Context *c, int x, int y, ME_Run *run, BOOL selected )
 {
   IDataObject*  ido;
+  IViewObject*  ivo;
   FORMATETC     fmt;
   STGMEDIUM     stgm;
   DIBSECTION    dibsect;
@@ -5745,6 +5799,34 @@ void draw_ole( ME_Context *c, int x, int y, ME_Run *run, BOOL selected )
 
   assert(run->nFlags & MERF_GRAPHICS);
   assert(run->reobj);
+
+  if (SUCCEEDED(IOleObject_QueryInterface(run->reobj->obj.poleobj, &IID_IViewObject, (void**)&ivo)))
+  {
+    HRESULT hr;
+    RECTL bounds;
+
+    convert_sizel(c, &run->reobj->obj.sizel, &sz);
+    if (c->editor->nZoomNumerator != 0)
+    {
+      sz.cx = MulDiv(sz.cx, c->editor->nZoomNumerator, c->editor->nZoomDenominator);
+      sz.cy = MulDiv(sz.cy, c->editor->nZoomNumerator, c->editor->nZoomDenominator);
+    }
+
+    bounds.left = x;
+    bounds.top = y - sz.cy;
+    bounds.right = x + sz.cx;
+    bounds.bottom = y;
+
+    hr = IViewObject_Draw(ivo, DVASPECT_CONTENT, -1, 0, 0, 0, c->hDC, &bounds, NULL, NULL, 0);
+    if (FAILED(hr))
+    {
+      WARN("failed to draw object: %#08lx\n", hr);
+    }
+
+    IViewObject_Release(ivo);
+    return;
+  }
+
   if (IOleObject_QueryInterface(run->reobj->obj.poleobj, &IID_IDataObject, (void**)&ido) != S_OK)
   {
     FIXME("Couldn't get interface\n");

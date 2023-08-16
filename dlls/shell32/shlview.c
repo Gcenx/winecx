@@ -358,7 +358,7 @@ static BOOL ShellView_CreateList (IShellViewImpl * This)
 	TRACE("%p\n",This);
 
 	dwStyle = WS_TABSTOP | WS_VISIBLE | WS_CHILDWINDOW | WS_CLIPSIBLINGS | WS_CLIPCHILDREN |
-		  LVS_SHAREIMAGELISTS | LVS_EDITLABELS | LVS_ALIGNLEFT | LVS_AUTOARRANGE;
+		  LVS_SHAREIMAGELISTS | LVS_EDITLABELS | LVS_ALIGNLEFT | LVS_AUTOARRANGE | LVS_SHOWSELALWAYS;
         dwExStyle = WS_EX_CLIENTEDGE;
 
         dwStyle |= ViewModeToListStyle(This->FolderSettings.ViewMode);
@@ -2869,11 +2869,14 @@ static HRESULT WINAPI FolderView_SelectItem(IFolderView2 *iface, int item, DWORD
         lvItem.state |= LVIS_SELECTED;
 
     if (flags & SVSI_FOCUSED)
+    {
         lvItem.stateMask |= LVIS_FOCUSED;
+        lvItem.state |= LVIS_FOCUSED;
+    }
 
     SendMessageW(This->hWndList, LVM_SETITEMSTATE, item, (LPARAM)&lvItem);
 
-    if (flags & SVSI_EDIT)
+    if ((flags & SVSI_EDIT) == SVSI_EDIT)
         SendMessageW(This->hWndList, LVM_EDITLABELW, item, 0);
 
     return S_OK;

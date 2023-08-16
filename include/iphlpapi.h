@@ -18,8 +18,6 @@
 #ifndef WINE_IPHLPAPI_H__
 #define WINE_IPHLPAPI_H__
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -216,7 +214,5 @@ typedef struct NET_ADDRESS_INFO_
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* WINE_IPHLPAPI_H__ */

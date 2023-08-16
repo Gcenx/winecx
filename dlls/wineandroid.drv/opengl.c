@@ -24,6 +24,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <assert.h>
@@ -105,14 +109,7 @@ static struct list gl_drawables = LIST_INIT( gl_drawables );
 static void (*pglFinish)(void);
 static void (*pglFlush)(void);
 
-static CRITICAL_SECTION drawable_section;
-static CRITICAL_SECTION_DEBUG critsect_debug =
-{
-    0, 0, &drawable_section,
-    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": drawable_section") }
-};
-static CRITICAL_SECTION drawable_section = { &critsect_debug, -1, 0, 0, 0, 0 };
+pthread_mutex_t drawable_mutex;
 
 static inline BOOL is_onscreen_pixel_format( int format )
 {
@@ -122,7 +119,7 @@ static inline BOOL is_onscreen_pixel_format( int format )
 static struct gl_drawable *create_gl_drawable( HWND hwnd, HDC hdc, int format )
 {
     static const int attribs[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
-    struct gl_drawable *gl = HeapAlloc( GetProcessHeap(), 0, sizeof(*gl) );
+    struct gl_drawable *gl = malloc( sizeof(*gl) );
 
     gl->hwnd   = hwnd;
     gl->hdc    = hdc;
@@ -130,7 +127,7 @@ static struct gl_drawable *create_gl_drawable( HWND hwnd, HDC hdc, int format )
     gl->window = create_ioctl_window( hwnd, TRUE, 1.0f );
     gl->surface = 0;
     gl->pbuffer = p_eglCreatePbufferSurface( display, pixel_formats[gl->format - 1].config, attribs );
-    EnterCriticalSection( &drawable_section );
+    pthread_mutex_lock( &drawable_mutex );
     list_add_head( &gl_drawables, &gl->entry );
     return gl;
 }
@@ -139,26 +136,26 @@ static struct gl_drawable *get_gl_drawable( HWND hwnd, HDC hdc )
 {
     struct gl_drawable *gl;
 
-    EnterCriticalSection( &drawable_section );
+    pthread_mutex_lock( &drawable_mutex );
     LIST_FOR_EACH_ENTRY( gl, &gl_drawables, struct gl_drawable, entry )
     {
         if (hwnd && gl->hwnd == hwnd) return gl;
         if (hdc && gl->hdc == hdc) return gl;
     }
-    LeaveCriticalSection( &drawable_section );
+    pthread_mutex_unlock( &drawable_mutex );
     return NULL;
 }
 
 static void release_gl_drawable( struct gl_drawable *gl )
 {
-    if (gl) LeaveCriticalSection( &drawable_section );
+    if (gl) pthread_mutex_unlock( &drawable_mutex );
 }
 
 void destroy_gl_drawable( HWND hwnd )
 {
     struct gl_drawable *gl;
 
-    EnterCriticalSection( &drawable_section );
+    pthread_mutex_lock( &drawable_mutex );
     LIST_FOR_EACH_ENTRY( gl, &gl_drawables, struct gl_drawable, entry )
     {
         if (gl->hwnd != hwnd) continue;
@@ -166,10 +163,10 @@ void destroy_gl_drawable( HWND hwnd )
         if (gl->surface) p_eglDestroySurface( display, gl->surface );
         if (gl->pbuffer) p_eglDestroySurface( display, gl->pbuffer );
         release_ioctl_window( gl->window );
-        HeapFree( GetProcessHeap(), 0, gl );
+        free( gl );
         break;
     }
-    LeaveCriticalSection( &drawable_section );
+    pthread_mutex_unlock( &drawable_mutex );
 }
 
 static BOOL refresh_context( struct wgl_context *ctx )
@@ -180,7 +177,7 @@ static BOOL refresh_context( struct wgl_context *ctx )
     {
         TRACE( "refreshing hwnd %p context %p surface %p\n", ctx->hwnd, ctx->context, ctx->surface );
         p_eglMakeCurrent( display, ctx->surface, ctx->surface, ctx->context );
-        RedrawWindow( ctx->hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE );
+        NtUserRedrawWindow( ctx->hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE );
     }
     return ret;
 }
@@ -207,17 +204,17 @@ void update_gl_drawable( HWND hwnd )
             }
         }
         release_gl_drawable( gl );
-        RedrawWindow( hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE );
+        NtUserRedrawWindow( hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE );
     }
 }
 
 static BOOL set_pixel_format( HDC hdc, int format, BOOL allow_change )
 {
     struct gl_drawable *gl;
-    HWND hwnd = WindowFromDC( hdc );
+    HWND hwnd = NtUserWindowFromDC( hdc );
     int prev = 0;
 
-    if (!hwnd || hwnd == GetDesktopWindow())
+    if (!hwnd || hwnd == NtUserGetDesktopWindow())
     {
         WARN( "not a proper window DC %p/%p\n", hdc, hwnd );
         return FALSE;
@@ -255,9 +252,9 @@ static struct wgl_context *create_context( HDC hdc, struct wgl_context *share, c
     struct gl_drawable *gl;
     struct wgl_context *ctx;
 
-    if (!(gl = get_gl_drawable( WindowFromDC( hdc ), hdc ))) return NULL;
+    if (!(gl = get_gl_drawable( NtUserWindowFromDC( hdc ), hdc ))) return NULL;
 
-    ctx = HeapAlloc( GetProcessHeap(), 0, sizeof(*ctx) );
+    ctx = malloc( sizeof(*ctx) );
 
     ctx->config  = pixel_formats[gl->format - 1].config;
     ctx->surface = 0;
@@ -348,10 +345,10 @@ static BOOL android_wglMakeContextCurrentARB( HDC draw_hdc, HDC read_hdc, struct
         return TRUE;
     }
 
-    draw_hwnd = WindowFromDC( draw_hdc );
+    draw_hwnd = NtUserWindowFromDC( draw_hdc );
     if ((draw_gl = get_gl_drawable( draw_hwnd, draw_hdc )))
     {
-        read_gl = get_gl_drawable( WindowFromDC( read_hdc ), read_hdc );
+        read_gl = get_gl_drawable( NtUserWindowFromDC( read_hdc ), read_hdc );
         draw_surface = draw_gl->surface ? draw_gl->surface : draw_gl->pbuffer;
         read_surface = read_gl->surface ? read_gl->surface : read_gl->pbuffer;
         TRACE( "%p/%p context %p surface %p/%p\n",
@@ -366,7 +363,7 @@ static BOOL android_wglMakeContextCurrentARB( HDC draw_hdc, HDC read_hdc, struct
             goto done;
         }
     }
-    SetLastError( ERROR_INVALID_HANDLE );
+    RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
 
 done:
     release_gl_drawable( read_gl );
@@ -385,7 +382,7 @@ static BOOL android_wglSwapIntervalEXT( int interval )
 
     if (interval < 0)
     {
-        SetLastError(ERROR_INVALID_DATA);
+        RtlSetLastWin32Error( ERROR_INVALID_DATA );
         return FALSE;
     }
 
@@ -394,7 +391,7 @@ static BOOL android_wglSwapIntervalEXT( int interval )
     if (ret)
         swap_interval = interval;
     else
-        SetLastError( ERROR_DC_NOT_FOUND );
+        RtlSetLastWin32Error( ERROR_DC_NOT_FOUND );
 
     return ret;
 }
@@ -418,7 +415,7 @@ static BOOL android_wglSetPixelFormatWINE( HDC hdc, int format )
 /***********************************************************************
  *		android_wglCopyContext
  */
-static BOOL WINAPI android_wglCopyContext( struct wgl_context *src, struct wgl_context *dst, UINT mask )
+static BOOL android_wglCopyContext( struct wgl_context *src, struct wgl_context *dst, UINT mask )
 {
     FIXME( "%p -> %p mask %#x unsupported\n", src, dst, mask );
     return FALSE;
@@ -427,7 +424,7 @@ static BOOL WINAPI android_wglCopyContext( struct wgl_context *src, struct wgl_c
 /***********************************************************************
  *		android_wglCreateContext
  */
-static struct wgl_context * WINAPI android_wglCreateContext( HDC hdc )
+static struct wgl_context *android_wglCreateContext( HDC hdc )
 {
     int egl_attribs[3] = { EGL_CONTEXT_CLIENT_VERSION, egl_client_version, EGL_NONE };
 
@@ -437,19 +434,20 @@ static struct wgl_context * WINAPI android_wglCreateContext( HDC hdc )
 /***********************************************************************
  *		android_wglDeleteContext
  */
-static BOOL WINAPI android_wglDeleteContext( struct wgl_context *ctx )
+static BOOL android_wglDeleteContext( struct wgl_context *ctx )
 {
-    EnterCriticalSection( &drawable_section );
+    pthread_mutex_lock( &drawable_mutex );
     list_remove( &ctx->entry );
-    LeaveCriticalSection( &drawable_section );
+    pthread_mutex_unlock( &drawable_mutex );
     p_eglDestroyContext( display, ctx->context );
-    return HeapFree( GetProcessHeap(), 0, ctx );
+    free( ctx );
+    return TRUE;
 }
 
 /***********************************************************************
  *		android_wglDescribePixelFormat
  */
-static int WINAPI android_wglDescribePixelFormat( HDC hdc, int fmt, UINT size, PIXELFORMATDESCRIPTOR *pfd )
+static int android_wglDescribePixelFormat( HDC hdc, int fmt, UINT size, PIXELFORMATDESCRIPTOR *pfd )
 {
     EGLint val;
     EGLConfig config;
@@ -495,12 +493,12 @@ static int WINAPI android_wglDescribePixelFormat( HDC hdc, int fmt, UINT size, P
 /***********************************************************************
  *		android_wglGetPixelFormat
  */
-static int WINAPI android_wglGetPixelFormat( HDC hdc )
+static int android_wglGetPixelFormat( HDC hdc )
 {
     struct gl_drawable *gl;
     int ret = 0;
 
-    if ((gl = get_gl_drawable( WindowFromDC( hdc ), hdc )))
+    if ((gl = get_gl_drawable( NtUserWindowFromDC( hdc ), hdc )))
     {
         ret = gl->format;
         /* offscreen formats can't be used with traditional WGL calls */
@@ -513,7 +511,7 @@ static int WINAPI android_wglGetPixelFormat( HDC hdc )
 /***********************************************************************
  *		android_wglGetProcAddress
  */
-static PROC WINAPI android_wglGetProcAddress( LPCSTR name )
+static PROC android_wglGetProcAddress( LPCSTR name )
 {
     PROC ret;
     if (!strncmp( name, "wgl", 3 )) return NULL;
@@ -525,7 +523,7 @@ static PROC WINAPI android_wglGetProcAddress( LPCSTR name )
 /***********************************************************************
  *		android_wglMakeCurrent
  */
-static BOOL WINAPI android_wglMakeCurrent( HDC hdc, struct wgl_context *ctx )
+static BOOL android_wglMakeCurrent( HDC hdc, struct wgl_context *ctx )
 {
     BOOL ret = FALSE;
     struct gl_drawable *gl;
@@ -540,7 +538,7 @@ static BOOL WINAPI android_wglMakeCurrent( HDC hdc, struct wgl_context *ctx )
         return TRUE;
     }
 
-    hwnd = WindowFromDC( hdc );
+    hwnd = NtUserWindowFromDC( hdc );
     if ((gl = get_gl_drawable( hwnd, hdc )))
     {
         EGLSurface surface = gl->surface ? gl->surface : gl->pbuffer;
@@ -555,7 +553,7 @@ static BOOL WINAPI android_wglMakeCurrent( HDC hdc, struct wgl_context *ctx )
             goto done;
         }
     }
-    SetLastError( ERROR_INVALID_HANDLE );
+    RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
 
 done:
     release_gl_drawable( gl );
@@ -565,7 +563,7 @@ done:
 /***********************************************************************
  *		android_wglSetPixelFormat
  */
-static BOOL WINAPI android_wglSetPixelFormat( HDC hdc, int format, const PIXELFORMATDESCRIPTOR *pfd )
+static BOOL android_wglSetPixelFormat( HDC hdc, int format, const PIXELFORMATDESCRIPTOR *pfd )
 {
     return set_pixel_format( hdc, format, FALSE );
 }
@@ -573,7 +571,7 @@ static BOOL WINAPI android_wglSetPixelFormat( HDC hdc, int format, const PIXELFO
 /***********************************************************************
  *		android_wglShareLists
  */
-static BOOL WINAPI android_wglShareLists( struct wgl_context *org, struct wgl_context *dest )
+static BOOL android_wglShareLists( struct wgl_context *org, struct wgl_context *dest )
 {
     FIXME( "%p %p\n", org, dest );
     return FALSE;
@@ -582,7 +580,7 @@ static BOOL WINAPI android_wglShareLists( struct wgl_context *org, struct wgl_co
 /***********************************************************************
  *		android_wglSwapBuffers
  */
-static BOOL WINAPI android_wglSwapBuffers( HDC hdc )
+static BOOL android_wglSwapBuffers( HDC hdc )
 {
     struct wgl_context *ctx = NtCurrentTeb()->glContext;
 
@@ -987,13 +985,13 @@ static BOOL egl_init(void)
     TRACE( "display %p version %u.%u\n", display, major, minor );
 
     p_eglGetConfigs( display, NULL, 0, &count );
-    configs = HeapAlloc( GetProcessHeap(), 0, count * sizeof(*configs) );
-    pixel_formats = HeapAlloc( GetProcessHeap(), 0, count * sizeof(*pixel_formats) );
+    configs = malloc( count * sizeof(*configs) );
+    pixel_formats = malloc( count * sizeof(*pixel_formats) );
     p_eglGetConfigs( display, configs, count, &count );
     if (!count || !configs || !pixel_formats)
     {
-        HeapFree( GetProcessHeap(), 0, configs );
-        HeapFree( GetProcessHeap(), 0, pixel_formats );
+        free( configs );
+        free( pixel_formats );
         ERR( "eglGetConfigs returned no configs\n" );
         return 0;
     }

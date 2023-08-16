@@ -53,7 +53,7 @@ static inline DWORD gdi_handle_type( HGDIOBJ obj )
 #define MFVERSION 0x300
 
 /* Undocumented value for DIB's iUsage: Indicates a mono DIB w/o pal entries */
-#define DIB_PAL_MONO 2
+#define DIB_PAL_INDICES 2
 
 /* Format of comment record added by GetWinMetaFileBits */
 #include <pshpack2.h>
@@ -187,6 +187,8 @@ extern BOOL EMFDC_Ellipse( DC_ATTR *dc_attr, INT left, INT top, INT right,
 extern BOOL EMFDC_EndPath( DC_ATTR *dc_attr ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_ExcludeClipRect( DC_ATTR *dc_attr, INT left, INT top, INT right,
                                    INT bottom ) DECLSPEC_HIDDEN;
+extern INT  EMFDC_ExtEscape( DC_ATTR *dc_attr, INT escape, INT input_size, const char *input,
+                             INT output_size, char *output) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_ExtFloodFill( DC_ATTR *dc_attr, INT x, INT y, COLORREF color,
                                 UINT fill_type ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_ExtSelectClipRgn( DC_ATTR *dc_attr, HRGN hrgn, INT mode ) DECLSPEC_HIDDEN;
@@ -225,6 +227,7 @@ extern BOOL EMFDC_PolyPolygon( DC_ATTR *dc_attr, const POINT *points, const INT 
 extern BOOL EMFDC_Polygon( DC_ATTR *dc_attr, const POINT *points, INT count ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_Polyline( DC_ATTR *dc_attr, const POINT *points, INT count) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_PolylineTo( DC_ATTR *dc_attr, const POINT *points, INT count ) DECLSPEC_HIDDEN;
+extern BOOL EMFDC_RealizePalette( DC_ATTR *dc_attr ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_Rectangle( DC_ATTR *dc_attr, INT left, INT top, INT right,
                              INT bottom) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_RestoreDC( DC_ATTR *dc_attr, INT level ) DECLSPEC_HIDDEN;
@@ -278,6 +281,16 @@ extern BOOL EMFDC_WidenPath( DC_ATTR *dc_attr ) DECLSPEC_HIDDEN;
 
 extern HENHMETAFILE EMF_Create_HENHMETAFILE( ENHMETAHEADER *emh, DWORD filesize,
                                              BOOL on_disk ) DECLSPEC_HIDDEN;
+
+extern BOOL spool_start_doc( DC_ATTR *dc_attr, HANDLE hspool,
+                             const DOCINFOW *doc_info ) DECLSPEC_HIDDEN;
+extern int spool_start_page( DC_ATTR *dc_attr, HANDLE hspool ) DECLSPEC_HIDDEN;
+extern int spool_end_page( DC_ATTR *dc_attr, HANDLE hspool, const DEVMODEW *devmode,
+                           BOOL write_devmode ) DECLSPEC_HIDDEN;
+extern int spool_end_doc( DC_ATTR *dc_attr, HANDLE hspool ) DECLSPEC_HIDDEN;
+extern int spool_abort_doc( DC_ATTR *dc_attr, HANDLE hspool ) DECLSPEC_HIDDEN;
+
+extern void print_call_start_page( DC_ATTR *dc_attr ) DECLSPEC_HIDDEN;
 
 static inline int get_dib_stride( int width, int bpp )
 {

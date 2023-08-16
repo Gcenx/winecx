@@ -751,7 +751,11 @@ static HRESULT WINAPI CompositeMonikerImpl_CommonPrefixWith(IMoniker *iface, IMo
         heap_free(components);
         heap_free(other_components);
 
-        if (!prefix_len) return MK_E_NOPREFIX;
+        if (!prefix_len)
+        {
+            heap_free(prefix_components);
+            return MK_E_NOPREFIX;
+        }
 
         last = prefix_components[0];
         for (i = 1; i < prefix_len; ++i)
@@ -1623,6 +1627,7 @@ static HRESULT composite_get_rightmost(CompositeMonikerImpl *composite, IMoniker
     if (!(node = moniker_tree_get_rightmost(root)))
     {
         WARN("Couldn't get right most component.\n");
+        moniker_tree_release(root);
         return E_FAIL;
     }
 
@@ -1658,7 +1663,8 @@ static HRESULT composite_get_leftmost(CompositeMonikerImpl *composite, IMoniker 
 
     if (!(node = moniker_tree_get_leftmost(root)))
     {
-        WARN("Couldn't get right most component.\n");
+        WARN("Couldn't get left most component.\n");
+        moniker_tree_release(root);
         return E_FAIL;
     }
 

@@ -18,8 +18,6 @@
 #ifndef __BTHSDPDEF_H__
 #define __BTHSDPDEF_H__
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -90,7 +88,5 @@ typedef struct _SdpQueryUuid {
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __BTHSDPDEF_H__ */

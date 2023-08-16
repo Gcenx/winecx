@@ -34,20 +34,6 @@ static SIZE bitmapSize;
 static BOOL fTileWallPaper;
 
 
-/*********************************************************************
- * desktop class descriptor
- */
-const struct builtin_class_descr DESKTOP_builtin_class =
-{
-    (LPCWSTR)DESKTOP_CLASS_ATOM, /* name */
-    CS_DBLCLKS,           /* style */
-    WINPROC_DESKTOP,      /* proc */
-    0,                    /* extra */
-    0,                    /* cursor */
-    (HBRUSH)(COLOR_BACKGROUND+1)    /* brush */
-};
-
-
 /***********************************************************************
  *           DESKTOP_LoadBitmap
  */
@@ -95,30 +81,15 @@ LRESULT WINAPI DesktopWndProc( HWND hwnd, UINT message, WPARAM wParam, LPARAM lP
     switch (message)
     {
     case WM_NCCREATE:
-    {
-        CREATESTRUCTW *cs = (CREATESTRUCTW *)lParam;
-        const GUID *guid = cs->lpCreateParams;
-
-        if (guid)
-        {
-            ATOM atom;
-            WCHAR buffer[37];
-
-            if (NtUserGetAncestor( hwnd, GA_PARENT )) return FALSE;  /* refuse to create non-desktop window */
-
-            swprintf( buffer, ARRAY_SIZE(buffer), L"%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-                      guid->Data1, guid->Data2, guid->Data3,
-                      guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
-                      guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7] );
-            atom = GlobalAddAtomW( buffer );
-            SetPropW( hwnd, L"__wine_display_device_guid", ULongToHandle( atom ) );
-        }
-        return TRUE;
-    }
     case WM_NCCALCSIZE:
-        return 0;
+    case WM_PARENTNOTIFY:
+    case WM_DISPLAYCHANGE:
+        return NtUserMessageCall( hwnd, message, wParam, lParam, 0, NtUserDesktopWindowProc, FALSE );
+
     default:
-        return DefWindowProcW( hwnd, message, wParam, lParam );
+        if (message < WM_USER)
+            return DefWindowProcW( hwnd, message, wParam, lParam );
+        return NtUserMessageCall( hwnd, message, wParam, lParam, 0, NtUserDesktopWindowProc, FALSE );
     }
 }
 

@@ -134,11 +134,9 @@ struct wined3d_settings wined3d_settings =
 struct cxgames_hacks cxgames_hacks =
 {
     FALSE,                      /* safe_vs_consts */
-    WINED3D_MAPBUF_NEVER_NV,    /* Don't use glMapBuffer on dynamic buffers with NV threading */
-    FALSE,                      /* Don't force success when creating transform feedback buffers */
 };
 
-struct wined3d * CDECL wined3d_create(DWORD flags)
+struct wined3d * CDECL wined3d_create(uint32_t flags)
 {
     struct wined3d *object;
     HRESULT hr;
@@ -154,7 +152,7 @@ struct wined3d * CDECL wined3d_create(DWORD flags)
 
     if (FAILED(hr = wined3d_init(object, flags)))
     {
-        WARN("Failed to initialize wined3d object, hr %#x.\n", hr);
+        WARN("Failed to initialize wined3d object, hr %#lx.\n", hr);
         heap_free(object);
         return NULL;
     }
@@ -212,7 +210,7 @@ static DWORD get_config_key(HKEY defkey, HKEY appkey, const char *env, const cha
     return ERROR_FILE_NOT_FOUND;
 }
 
-static DWORD get_config_key_dword(HKEY defkey, HKEY appkey, const char *env, const char *name, DWORD *value)
+static DWORD get_config_key_dword(HKEY defkey, HKEY appkey, const char *env, const char *name, unsigned int *value)
 {
     DWORD type, data, size;
     const char *env_value;
@@ -277,13 +275,13 @@ static BOOL wined3d_dll_init(HINSTANCE hInstDLL)
     const char *env;
     HKEY hkey = 0;
     HKEY appkey = 0;
-    DWORD tmpvalue;
+    unsigned int tmpvalue;
     WNDCLASSA wc;
 
     wined3d_context_tls_idx = TlsAlloc();
     if (wined3d_context_tls_idx == TLS_OUT_OF_INDEXES)
     {
-        DWORD err = GetLastError();
+        unsigned int err = GetLastError();
         ERR("Failed to allocate context TLS index, err %#x.\n", err);
         return FALSE;
     }
@@ -308,7 +306,7 @@ static BOOL wined3d_dll_init(HINSTANCE hInstDLL)
         ERR("Failed to register window class 'WineD3D_OpenGL'!\n");
         if (!TlsFree(wined3d_context_tls_idx))
         {
-            DWORD err = GetLastError();
+            unsigned int err = GetLastError();
             ERR("Failed to free context TLS index, err %#x.\n", err);
         }
         return FALSE;
@@ -507,28 +505,10 @@ static BOOL wined3d_dll_init(HINSTANCE hInstDLL)
                 wined3d_settings.renderer = WINED3D_RENDERER_NO3D;
             }
         }
-        if (!get_config_key(hkey, appkey, env, "AllowGlMapBuffer", buffer, size))
-        {
-            if (!strcmp(buffer, "always"))
-            {
-                TRACE("Always using glMapBuffer if possible.\n");
-                cxgames_hacks.allow_glmapbuffer = WINED3D_MAPBUF_ALWAYS;
-            }
-            else if (!strcmp(buffer, "never") || !strcmp(buffer, "static"))
-            {
-                TRACE("Never using glMapBuffer.\n");
-                cxgames_hacks.allow_glmapbuffer = WINED3D_MAPBUF_NEVER;
-            }
-        }
         if (!get_config_key_dword(hkey, appkey, env, "cb_access_map_w", &tmpvalue) && tmpvalue)
         {
             TRACE("Forcing all constant buffers to be write-mappable.\n");
             wined3d_settings.cb_access_map_w = TRUE;
-        }
-        if (!get_config_key_dword(hkey, appkey, env, "force_transform_feedback", &tmpvalue) && tmpvalue)
-        {
-            TRACE("Forcing success on transform feedback buffer creation.\n");
-            cxgames_hacks.force_transform_feedback = TRUE;
         }
     }
 
@@ -564,7 +544,7 @@ static BOOL wined3d_dll_destroy(HINSTANCE hInstDLL)
 
     if (!TlsFree(wined3d_context_tls_idx))
     {
-        DWORD err = GetLastError();
+        unsigned int err = GetLastError();
         ERR("Failed to free context TLS index, err %#x.\n", err);
     }
 
@@ -632,7 +612,7 @@ static struct wined3d_output * wined3d_get_output_from_window(const struct wined
     monitor_info.cbSize = sizeof(monitor_info);
     if (!GetMonitorInfoW(monitor, (MONITORINFO *)&monitor_info))
     {
-        ERR("GetMonitorInfoW failed, error %#x.\n", GetLastError());
+        ERR("GetMonitorInfoW failed, error %#lx.\n", GetLastError());
         return NULL;
     }
 

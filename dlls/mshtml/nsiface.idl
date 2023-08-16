@@ -25,7 +25,7 @@
 
 #pragma makedep header
 
-cpp_quote("#define GECKO_VERSION \"2.47.2\"")
+cpp_quote("#define GECKO_VERSION \"2.47.3\"")
 cpp_quote("#define GECKO_VERSION_STRING \"Wine Gecko \" GECKO_VERSION")
 
 import "wtypes.idl";
@@ -496,6 +496,16 @@ interface nsIStandardURL : nsIMutable
 ]
 interface nsIRequest : nsISupports
 {
+    const UINT LOAD_NORMAL                  = 0;
+    const UINT LOAD_BACKGROUND              = 1 << 1;
+    const UINT INHIBIT_CACHING              = 1 << 7;
+    const UINT INHIBIT_PERSISTENT_CACHING   = 1 << 8;
+    const UINT LOAD_BYPASS_CACHE            = 1 << 9;
+    const UINT LOAD_FROM_CACHE              = 1 << 10;
+    const UINT VALIDATE_ALWAYS              = 1 << 11;
+    const UINT VALIDATE_NEVER               = 1 << 12;
+    const UINT VALIDATE_ONCE_PER_SESSION    = 1 << 13;
+
     nsresult GetName(nsACString *aName);
     nsresult IsPending(bool *_retval);
     nsresult GetStatus(nsresult *aStatus);
@@ -773,6 +783,17 @@ interface nsIChannelEventSink : nsISupports
 
 [
     object,
+    uuid(87d55fba-cb7e-4f38-84c1-5c6c2b2a55e9),
+    local
+]
+interface nsIProgressEventSink : nsISupports
+{
+    nsresult OnProgress(nsIRequest *aRequest, nsISupports *aContext, int64_t aProgress, int64_t aProgressMax);
+    nsresult OnStatus(nsIRequest *aRequest, nsISupports *aContext, nsresult aStatus, const char16_t *aStatusArg);
+}
+
+[
+    object,
     uuid(79de76e5-994e-4f6b-81aa-42d9adb6e67e),
     local
 ]
@@ -887,6 +908,17 @@ interface nsIDOMStyleSheetList : nsISupports
 {
     nsresult GetLength(uint32_t *aLength);
     nsresult Item(uint32_t index, nsIDOMStyleSheet **_retval);
+}
+
+[
+    object,
+    uuid(e0e49c52-915b-40f9-9cba-6026305cdf3e),
+    local
+]
+interface nsIDOMMediaQueryList : nsISupports
+{
+    nsresult GetMedia(nsAString *aMedia);
+    nsresult GetMatches(bool *_retval);
 }
 
 [
@@ -3306,6 +3338,20 @@ interface nsIDOMKeyEvent : nsIDOMUIEvent
 
 [
     object,
+    uuid(e0682338-4c3f-4d3a-9487-d7492ea76335),
+    local
+]
+interface nsIDOMProgressEvent : nsISupports
+{
+    nsresult GetLengthComputable(bool *aLengthComputable);
+    nsresult GetLoaded(uint64_t *aLoaded);
+    nsresult GetTotal(uint64_t *aTotal);
+    nsresult InitProgressEvent(const nsAString *typeArg, bool canBubbleArg, bool cancelableArg,
+             bool lengthComputableArg, uint64_t loadedArg, uint64_t totalArg);
+}
+
+[
+    object,
     uuid(5be16b03-36f9-4ca8-b2c5-0daadf3cd1b3),
     local
 ]
@@ -3900,6 +3946,11 @@ interface nsIDocShellLoadInfo : nsISupports
 ]
 interface nsIDocShell : nsIDocShellTreeItem
 {
+    const UINT LOAD_CMD_NORMAL    = 1;
+    const UINT LOAD_CMD_RELOAD    = 2;
+    const UINT LOAD_CMD_HISTORY   = 4;
+    const UINT LOAD_CMD_PUSHSTATE = 8;
+
     nsresult LoadURI(nsIURI *uri, nsIDocShellLoadInfo *loadInfo, uint32_t aLoadFlags, bool firstParty);
     nsresult LoadStream(nsIInputStream *aStream, nsIURI *aURI, const nsACString *aContentType,
             const nsACString *aContentCharset, nsIDocShellLoadInfo *aLoadInfo);
@@ -4287,6 +4338,7 @@ interface nsIXMLHttpRequest : nsISupports
     nsresult SetOnreadystatechange(JSContext*cx, int /*JS::HandleValue*/ aOnreadystatechange);
     nsresult GetMozAnon(bool *aMozAnon);
     nsresult GetMozSystem(bool *aMozSystem);
+    nsresult GetResponseBuffer(void *buffer, uint32_t buffer_size, uint32_t *_retval);
 }
 
 cpp_quote("DEFINE_GUID(IID_nsCycleCollectionISupports, 0xc61eac14,0x5f7a,0x4481,0x96,0x5e,0x7e,0xaa,0x6e,0xff,0xa8,0x5f);")

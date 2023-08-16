@@ -451,7 +451,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH DefineDosDeviceW( DWORD flags, const WCHAR *device
  */
 DWORD WINAPI QueryDosDeviceW( LPCWSTR devname, LPWSTR target, DWORD bufsize )
 {
-    UNICODE_STRING nt_name;
     NTSTATUS status;
 
     if (!bufsize)
@@ -489,12 +488,11 @@ DWORD WINAPI QueryDosDeviceW( LPCWSTR devname, LPWSTR target, DWORD bufsize )
     }
     else  /* return a list of all devices */
     {
+        UNICODE_STRING nt_name = RTL_CONSTANT_STRING( L"\\DosDevices" );
         OBJECT_ATTRIBUTES attr;
         HANDLE handle;
         WCHAR *p = target;
 
-        RtlInitUnicodeString( &nt_name, L"\\DosDevices\\" );
-        nt_name.Length -= sizeof(WCHAR);  /* without trailing slash */
         attr.Length = sizeof(attr);
         attr.RootDirectory = 0;
         attr.ObjectName = &nt_name;
@@ -535,12 +533,11 @@ DWORD WINAPI QueryDosDeviceW( LPCWSTR devname, LPWSTR target, DWORD bufsize )
 DWORD WINAPI DECLSPEC_HOTPATCH GetLogicalDrives(void)
 {
     OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING nt_name;
+    UNICODE_STRING nt_name = RTL_CONSTANT_STRING( L"\\DosDevices\\" );
     DWORD bitmask = 0;
     NTSTATUS status;
     HANDLE handle;
 
-    RtlInitUnicodeString( &nt_name, L"\\DosDevices\\" );
     nt_name.Length -= sizeof(WCHAR);  /* without trailing slash */
     attr.Length = sizeof(attr);
     attr.RootDirectory = 0;

@@ -34,6 +34,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 #define VB_MAXFULLCONVERSIONS 5       /* Number of full conversions before we stop converting */
 #define VB_RESETFULLCONVS     20      /* Reset full conversion counts after that number of draws */
 
+#define SB_MIN_SIZE (512 * 1024)    /* Minimum size of an allocated streaming buffer. */
+
 struct wined3d_buffer_ops
 {
     BOOL (*buffer_prepare_location)(struct wined3d_buffer *buffer,
@@ -129,7 +131,7 @@ static void wined3d_buffer_invalidate_range(struct wined3d_buffer *buffer, DWORD
         ERR("Buffer %p does not have any up to date location.\n", buffer);
 }
 
-void wined3d_buffer_invalidate_location(struct wined3d_buffer *buffer, DWORD location)
+void wined3d_buffer_invalidate_location(struct wined3d_buffer *buffer, uint32_t location)
 {
     wined3d_buffer_invalidate_range(buffer, location, 0, 0);
 }
@@ -139,7 +141,11 @@ GLenum wined3d_buffer_gl_binding_from_bind_flags(const struct wined3d_gl_info *g
     if (!bind_flags)
         return GL_PIXEL_UNPACK_BUFFER;
 
-    if (bind_flags == WINED3D_BIND_INDEX_BUFFER)
+    /* We must always return GL_ELEMENT_ARRAY_BUFFER here;
+     * wined3d_device_gl_create_bo() checks the GL binding to see whether we
+     * can suballocate, and we cannot suballocate if this BO might be used for
+     * an index buffer. */
+    if (bind_flags & WINED3D_BIND_INDEX_BUFFER)
         return GL_ELEMENT_ARRAY_BUFFER;
 
     if (bind_flags & (WINED3D_BIND_SHADER_RESOURCE | WINED3D_BIND_UNORDERED_ACCESS)
@@ -222,11 +228,6 @@ static BOOL wined3d_buffer_gl_create_buffer_object(struct wined3d_buffer_gl *buf
         coherent = false;
     }
 
-    if (cxgames_hacks.allow_glmapbuffer == WINED3D_MAPBUF_NEVER)
-    {
-        buffer_gl->b.resource.pin_sysmem = 1;
-    }
-
     gl_storage_flags = wined3d_resource_gl_storage_flags(&buffer_gl->b.resource);
     if (!wined3d_device_gl_create_bo(device_gl, context_gl, size, binding, usage, coherent, gl_storage_flags, bo))
     {
@@ -246,7 +247,7 @@ static BOOL wined3d_buffer_gl_create_buffer_object(struct wined3d_buffer_gl *buf
 
 static BOOL buffer_process_converted_attribute(struct wined3d_buffer *buffer,
         const enum wined3d_buffer_conversion_type conversion_type,
-        const struct wined3d_stream_info_element *attrib, DWORD *stride_this_run)
+        const struct wined3d_stream_info_element *attrib, UINT *stride_this_run)
 {
     const struct wined3d_format *format = attrib->format;
     BOOL ret = FALSE;
@@ -303,7 +304,7 @@ static BOOL buffer_process_converted_attribute(struct wined3d_buffer *buffer,
 #define WINED3D_BUFFER_FIXUP_XYZRHW     0x02
 
 static BOOL buffer_check_attribute(struct wined3d_buffer *This, const struct wined3d_stream_info *si,
-        const struct wined3d_state *state, UINT attrib_idx, DWORD fixup_flags, DWORD *stride_this_run)
+        const struct wined3d_state *state, UINT attrib_idx, DWORD fixup_flags, UINT *stride_this_run)
 {
     const struct wined3d_stream_info_element *attrib = &si->elements[attrib_idx];
     enum wined3d_format_id format;
@@ -499,7 +500,7 @@ static inline unsigned int fixup_transformed_pos(struct wined3d_vec4 *p)
 
 ULONG CDECL wined3d_buffer_incref(struct wined3d_buffer *buffer)
 {
-    ULONG refcount = InterlockedIncrement(&buffer->resource.ref);
+    unsigned int refcount = InterlockedIncrement(&buffer->resource.ref);
 
     TRACE("%p increasing refcount to %u.\n", buffer, refcount);
 
@@ -580,7 +581,7 @@ static void wined3d_buffer_unload_location(struct wined3d_buffer *buffer,
 }
 
 BOOL wined3d_buffer_load_location(struct wined3d_buffer *buffer,
-        struct wined3d_context *context, DWORD location)
+        struct wined3d_context *context, uint32_t location)
 {
     struct wined3d_bo_address src, dst;
     struct wined3d_range range;
@@ -771,7 +772,7 @@ void wined3d_buffer_cleanup(struct wined3d_buffer *buffer)
 
 ULONG CDECL wined3d_buffer_decref(struct wined3d_buffer *buffer)
 {
-    ULONG refcount = InterlockedDecrement(&buffer->resource.ref);
+    unsigned int refcount = InterlockedDecrement(&buffer->resource.ref);
 
     TRACE("%p decreasing refcount to %u.\n", buffer, refcount);
 
@@ -1292,7 +1293,7 @@ static HRESULT wined3d_buffer_init(struct wined3d_buffer *buffer, struct wined3d
             WINED3D_MULTISAMPLE_NONE, 0, desc->usage, desc->bind_flags, access,
             desc->byte_width, 1, 1, desc->byte_width, parent, parent_ops, &buffer_resource_ops)))
     {
-        WARN("Failed to initialize resource, hr %#x.\n", hr);
+        WARN("Failed to initialize resource, hr %#lx.\n", hr);
         return hr;
     }
     buffer->buffer_ops = buffer_ops;
@@ -1488,22 +1489,13 @@ static BOOL wined3d_buffer_vk_create_buffer_object(struct wined3d_buffer_vk *buf
         struct wined3d_context_vk *context_vk)
 {
     struct wined3d_resource *resource = &buffer_vk->b.resource;
-    const struct wined3d_vk_info *vk_info = &wined3d_adapter_vk(resource->device->adapter)->vk_info;
     struct wined3d_bo_vk *bo_vk;
-    VkBufferUsageFlags usage;
 
     if (!(bo_vk = heap_alloc(sizeof(*bo_vk))))
         return FALSE;
 
-    usage = vk_buffer_usage_from_bind_flags(resource->bind_flags);
-    if (usage & VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT
-            && !vk_info->supported[WINED3D_VK_EXT_TRANSFORM_FEEDBACK])
-    {
-        WARN("Dropping unsupported VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT.\n");
-        usage &= ~VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT;
-    }
     if (!(wined3d_context_vk_create_bo(context_vk, resource->size,
-            usage,
+            vk_buffer_usage_from_bind_flags(resource->bind_flags),
             vk_memory_type_from_access_flags(resource->access, resource->usage), bo_vk)))
     {
         WARN("Failed to create Vulkan buffer.\n");
@@ -1597,10 +1589,7 @@ HRESULT wined3d_buffer_vk_init(struct wined3d_buffer_vk *buffer_vk, struct wined
             && !vk_info->supported[WINED3D_VK_EXT_TRANSFORM_FEEDBACK])
     {
         WARN("The Vulkan implementation does not support transform feedback.\n");
-        if (cxgames_hacks.force_transform_feedback)
-            WARN("HACK, allowing buffer creation.\n");
-        else
-            return WINED3DERR_INVALIDCALL;
+        return WINED3DERR_INVALIDCALL;
     }
 
     if (desc->access & WINED3D_RESOURCE_ACCESS_GPU)
@@ -1684,7 +1673,7 @@ static HRESULT wined3d_streaming_buffer_prepare(struct wined3d_device *device,
             return S_OK;
     }
 
-    size = max(old_size * 2, min_size);
+    size = max(SB_MIN_SIZE, max(old_size * 2, min_size));
     TRACE("Growing buffer to %u bytes.\n", size);
 
     desc.byte_width = size;
@@ -1704,8 +1693,9 @@ static HRESULT wined3d_streaming_buffer_prepare(struct wined3d_device *device,
     return hr;
 }
 
-HRESULT CDECL wined3d_streaming_buffer_upload(struct wined3d_device *device, struct wined3d_streaming_buffer *buffer,
-        const void *data, unsigned int size, unsigned int stride, unsigned int *ret_pos)
+HRESULT CDECL wined3d_streaming_buffer_map(struct wined3d_device *device,
+        struct wined3d_streaming_buffer *buffer, unsigned int size, unsigned int stride,
+        unsigned int *ret_pos, void **ret_data)
 {
     unsigned int map_flags = WINED3D_MAP_WRITE;
     struct wined3d_resource *resource;
@@ -1714,8 +1704,8 @@ HRESULT CDECL wined3d_streaming_buffer_upload(struct wined3d_device *device, str
     struct wined3d_box box;
     HRESULT hr;
 
-    TRACE("device %p, buffer %p, data %p, size %u, stride %u, ret_pos %p.\n",
-            device, buffer, data, size, stride, ret_pos);
+    TRACE("device %p, buffer %p, size %u, stride %u, ret_pos %p, ret_data %p.\n",
+            device, buffer, size, stride, ret_pos, ret_data);
 
     if (FAILED(hr = wined3d_streaming_buffer_prepare(device, buffer, size)))
         return hr;
@@ -1738,10 +1728,28 @@ HRESULT CDECL wined3d_streaming_buffer_upload(struct wined3d_device *device, str
     wined3d_box_set(&box, pos, 0, pos + size, 1, 0, 1);
     if (SUCCEEDED(hr = wined3d_resource_map(resource, 0, &map_desc, &box, map_flags)))
     {
-        memcpy(map_desc.data, data, size);
-        wined3d_resource_unmap(resource, 0);
         *ret_pos = pos;
+        *ret_data = map_desc.data;
         buffer->pos = pos + size;
+    }
+    return hr;
+}
+
+void CDECL wined3d_streaming_buffer_unmap(struct wined3d_streaming_buffer *buffer)
+{
+    wined3d_resource_unmap(&buffer->buffer->resource, 0);
+}
+
+HRESULT CDECL wined3d_streaming_buffer_upload(struct wined3d_device *device, struct wined3d_streaming_buffer *buffer,
+        const void *data, unsigned int size, unsigned int stride, unsigned int *ret_pos)
+{
+    void *dst_data;
+    HRESULT hr;
+
+    if (SUCCEEDED(hr = wined3d_streaming_buffer_map(device, buffer, size, stride, ret_pos, &dst_data)))
+    {
+        memcpy(dst_data, data, size);
+        wined3d_streaming_buffer_unmap(buffer);
     }
     return hr;
 }

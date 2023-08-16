@@ -20,8 +20,6 @@
 #ifndef __WINE_WCTYPE_H
 #define __WINE_WCTYPE_H
 
-#include "wine/winheader_enter.h"
-
 #include <corecrt.h>
 
 #include <pshpack8.h>
@@ -66,8 +64,8 @@ _ACRTIMP int __cdecl iswpunct(wint_t);
 _ACRTIMP int __cdecl iswspace(wint_t);
 _ACRTIMP int __cdecl iswupper(wint_t);
 _ACRTIMP int __cdecl iswxdigit(wint_t);
-_ACRTIMP wchar_t __cdecl towlower(wchar_t);
-_ACRTIMP wchar_t __cdecl towupper(wchar_t);
+_ACRTIMP wint_t __cdecl towlower(wint_t);
+_ACRTIMP wint_t __cdecl towupper(wint_t);
 #endif /* _WCTYPE_DEFINED */
 
 typedef wchar_t wctrans_t;
@@ -80,7 +78,5 @@ wctype_t __cdecl wctype(const char *);
 #endif
 
 #include <poppack.h>
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_WCTYPE_H */

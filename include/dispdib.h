@@ -21,8 +21,6 @@
 #ifndef __WINE_DISPDIB_H
 #define __WINE_DISPDIB_H
 
-#include "wine/winheader_enter.h"
-
 /* error codes */
 #define DISPLAYDIB_NOERROR        0x0000
 #define DISPLAYDIB_NOTSUPPORTED   0x0001
@@ -42,7 +40,5 @@
 #define DISPLAYDIB_MODE_320x240x8 0x0005
 
 WORD WINAPI DisplayDib( LPBITMAPINFO lpbi, LPSTR lpBits, WORD wFlags );
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_DISPDIB_H */

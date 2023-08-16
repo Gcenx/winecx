@@ -493,6 +493,7 @@ enum apc_type
     APC_USER,
     APC_ASYNC_IO,
     APC_VIRTUAL_ALLOC,
+    APC_VIRTUAL_ALLOC_EX,
     APC_VIRTUAL_FREE,
     APC_VIRTUAL_QUERY,
     APC_VIRTUAL_PROTECT,
@@ -534,6 +535,16 @@ typedef union
         mem_size_t       zero_bits;    /* number of zero high bits */
         unsigned int     prot;         /* memory protection flags */
     } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;         /* APC_VIRTUAL_ALLOC */
+        unsigned int     op_type;      /* type of operation */
+        client_ptr_t     addr;         /* requested address */
+        mem_size_t       size;         /* allocation size */
+        mem_size_t       limit;        /* allocation address limit */
+        mem_size_t       align;        /* allocation alignment */
+        unsigned int     prot;         /* memory protection flags */
+    } virtual_alloc_ex;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_FREE */
@@ -629,6 +640,13 @@ typedef union
         client_ptr_t     addr;      /* resulting address */
         mem_size_t       size;      /* resulting size */
     } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_ALLOC */
+        unsigned int     status;    /* status returned by call */
+        client_ptr_t     addr;      /* resulting address */
+        mem_size_t       size;      /* resulting size */
+    } virtual_alloc_ex;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_FREE */
@@ -1471,6 +1489,24 @@ enum server_fd_type
 @END
 
 
+/* Store ICMP id for ICMP over datagram fixup */
+@REQ(socket_send_icmp_id)
+    obj_handle_t   handle;        /* socket handle */
+    unsigned short icmp_id;       /* ICMP packet id */
+    unsigned short icmp_seq;      /* ICMP packed sequence */
+@REPLY
+@END
+
+
+/* Get ICMP id for ICMP over datagram fixup */
+@REQ(socket_get_icmp_id)
+    obj_handle_t   handle;        /* socket handle */
+    unsigned short icmp_seq;      /* ICMP packed sequence */
+@REPLY
+    unsigned short icmp_id;       /* ICMP packet id */
+@END
+
+
 /* Retrieve the next pending console ioctl request */
 @REQ(get_next_console_request)
     obj_handle_t handle;        /* console server handle */
@@ -1719,7 +1755,6 @@ struct process_info
     VARARG(class,unicode_str);         /* class name */
 @REPLY
     obj_handle_t hkey;         /* handle to the created key */
-    int          created;      /* has it been newly created? */
 @END
 
 /* Open a registry key */
@@ -1835,6 +1870,13 @@ struct process_info
     obj_handle_t event;        /* event to set */
     int          subtree;      /* should we watch the whole subtree? */
     unsigned int filter;       /* things to watch */
+@END
+
+
+/* Rename a registry key */
+@REQ(rename_key)
+    obj_handle_t hkey;         /* handle to the key to be renamed */
+    VARARG(name,unicode_str);  /* new name */
 @END
 
 
@@ -2137,6 +2179,11 @@ enum message_type
 #define SERIALINFO_PENDING_WRITE 0x04
 #define SERIALINFO_PENDING_WAIT  0x08
 
+/* Cancel all sync io on a thread */
+@REQ(cancel_sync)
+    obj_handle_t handle;        /* thread handle on which to cancel io */
+    client_ptr_t iosb;          /* I/O status block (NULL=all) */
+@END
 
 /* Create an async I/O */
 @REQ(register_async)
@@ -3202,6 +3249,7 @@ enum caret_state
 
 @REQ(get_token_groups)
     obj_handle_t    handle;       /* handle to the token */
+    unsigned int    attr_mask;    /* mask for wanted attributes */
 @REPLY
     data_size_t     attr_len;     /* length needed to store attrs */
     data_size_t     sid_len;      /* length needed to store sids */
@@ -3674,13 +3722,6 @@ struct handle_info
 
 /* Modify the list of registered rawinput devices */
 @REQ(update_rawinput_devices)
-    VARARG(devices,rawinput_devices);
-@END
-
-/* Retrieve the list of registered rawinput devices */
-@REQ(get_rawinput_devices)
-@REPLY
-    unsigned int device_count;
     VARARG(devices,rawinput_devices);
 @END
 

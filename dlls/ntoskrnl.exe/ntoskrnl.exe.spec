@@ -67,9 +67,9 @@
 @ stdcall -fastcall ObfDereferenceObject(ptr)
 @ stdcall -fastcall ObfReferenceObject(ptr)
 @ stub RtlPrefetchMemoryNonTemporal
-@ cdecl -i386 -norelay RtlUlongByteSwap()
-@ cdecl -ret64 RtlUlonglongByteSwap(int64)
-@ cdecl -i386 -norelay RtlUshortByteSwap()
+@ stdcall -fastcall -arch=i386 -norelay RtlUlongByteSwap(long)
+@ stdcall -fastcall -arch=i386 -norelay RtlUlonglongByteSwap(int64)
+@ stdcall -fastcall -arch=i386 -norelay RtlUshortByteSwap(long)
 @ stub WmiGetClock
 @ stub Kei386EoiHelper
 @ stub Kii386SpinOnSpinLock
@@ -175,7 +175,7 @@
 @ stdcall ExIsResourceAcquiredExclusiveLite(ptr)
 @ stdcall ExIsResourceAcquiredSharedLite(ptr)
 @ stdcall ExLocalTimeToSystemTime(ptr ptr) RtlLocalTimeToSystemTime
-@ stub ExNotifyCallback
+@ stdcall ExNotifyCallback(ptr ptr ptr)
 @ stub ExQueryPoolBlockSize
 @ stub ExQueueWorkItem
 @ stub ExRaiseAccessViolation
@@ -357,6 +357,7 @@
 @ stdcall IoCreateDeviceSecure(ptr long ptr long long long ptr ptr ptr)
 @ stub IoCreateDisk
 @ stdcall IoCreateDriver(ptr ptr)
+@ stdcall IoCreateFileEx(ptr long ptr ptr ptr long long long long ptr long long ptr long ptr)
 @ stdcall IoCreateFile(ptr long ptr ptr ptr long long long long ptr long long ptr long)
 @ stub IoCreateFileSpecifyDeviceObjectHint
 @ stdcall IoCreateNotificationEvent(ptr ptr)
@@ -532,6 +533,7 @@
 @ stdcall -arch=!i386 KeAcquireSpinLockRaiseToDpc(ptr)
 @ stub KeAddSystemServiceTable
 @ stdcall KeAlertThread(ptr long)
+@ stdcall KeAreAllApcsDisabled()
 @ stdcall KeAreApcsDisabled()
 @ stub KeAttachProcess
 @ stdcall KeBugCheck(long)
@@ -553,6 +555,7 @@
 @ stub KeFlushEntireTb
 @ stdcall KeFlushQueuedDpcs()
 @ stdcall KeGetCurrentProcessorNumber() NtGetCurrentProcessorNumber
+@ stdcall KeGetCurrentProcessorNumberEx(ptr)
 @ stdcall KeGetCurrentThread()
 @ stub KeGetPreviousMode
 @ stub KeGetRecommendedSharedDataAlignment
@@ -574,6 +577,7 @@
 @ stub KeInitializeInterrupt
 @ stub KeInitializeMutant
 @ stdcall KeInitializeMutex(ptr long)
+@ stdcall KeInitializeGuardedMutex(ptr)
 @ stub KeInitializeQueue
 @ stdcall KeInitializeSemaphore(ptr long long)
 @ stdcall KeInitializeSpinLock(ptr) NTOSKRNL_KeInitializeSpinLock
@@ -584,23 +588,29 @@
 @ stub KeInsertHeadQueue
 @ stdcall KeInsertQueue(ptr ptr)
 @ stub KeInsertQueueApc
-@ stub KeInsertQueueDpc
+@ stdcall KeInsertQueueDpc(ptr ptr ptr)
 @ stub KeIsAttachedProcess
 @ stub KeIsExecutingDpc
 @ stdcall KeLeaveCriticalRegion()
 @ stub KeLoaderBlock
+@ stdcall -arch=x86_64 KeLowerIrql(long)
 @ stub KeNumberProcessors
 @ stub KeProfileInterrupt
 @ stub KeProfileInterruptWithSource
 @ stub KePulseEvent
 @ stdcall KeQueryActiveProcessors()
 @ stdcall KeQueryActiveProcessorCountEx(long)
+@ stdcall KeQueryActiveProcessorCount(ptr)
+@ stdcall KeQueryActiveGroupCount() GetActiveProcessorGroupCount
 @ stdcall KeQueryInterruptTime()
-@ stub KeQueryPriorityThread
+@ stdcall KeQueryPriorityThread(ptr)
 @ stub KeQueryRuntimeThread
 @ stdcall KeQuerySystemTime(ptr)
 @ stdcall KeQueryTickCount(ptr)
 @ stdcall KeQueryTimeIncrement()
+@ stdcall KeQueryMaximumGroupCount() GetMaximumProcessorGroupCount
+@ stdcall KeQueryMaximumProcessorCountEx(long)
+@ stdcall KeQueryMaximumProcessorCount()
 @ stub KeRaiseUserException
 @ stdcall KeReadStateEvent(ptr)
 @ stub KeReadStateMutant
@@ -644,6 +654,7 @@
 @ stdcall KeSetSystemAffinityThread(long)
 @ stdcall KeSetSystemAffinityThreadEx(long)
 @ stdcall KeSetTargetProcessorDpc(ptr long)
+@ stdcall KeSetTargetProcessorDpcEx(ptr ptr)
 @ stub KeSetTimeIncrement
 @ stdcall KeSetTimer(ptr int64 ptr)
 @ stdcall KeSetTimerEx(ptr int64 long ptr)
@@ -659,6 +670,7 @@
 @ stdcall KeWaitForMultipleObjects(long ptr long long long long ptr ptr)
 @ stdcall KeWaitForMutexObject(ptr long long long ptr)
 @ stdcall KeWaitForSingleObject(ptr long long long ptr)
+@ stdcall -arch=x86_64 KfRaiseIrql(long ptr)
 @ stub KiBugCheckData
 @ stub KiCoprocessorError
 @ stub KiDeliverApc
@@ -1538,12 +1550,12 @@
 @ cdecl -arch=i386 -norelay -ret64 _allmul(int64 int64)
 @ cdecl -arch=i386 -norelay _alloca_probe()
 @ cdecl -arch=i386 -norelay -ret64 _allrem(int64 int64)
-@ stdcall -arch=i386 -ret64 _allshl(int64 long)
-@ stdcall -arch=i386 -ret64 _allshr(int64 long)
+@ cdecl -arch=i386 -norelay -ret64 _allshl(int64 long)
+@ cdecl -arch=i386 -norelay -ret64 _allshr(int64 long)
 @ cdecl -arch=i386 -norelay -ret64 _aulldiv(int64 int64)
 @ cdecl -arch=i386 -norelay _aulldvrm(int64 int64)
 @ cdecl -arch=i386 -norelay -ret64 _aullrem(int64 int64)
-@ stdcall -arch=i386 -ret64 _aullshr(int64 long)
+@ cdecl -arch=i386 -norelay -ret64 _aullshr(int64 long)
 @ cdecl -arch=i386 -norelay _chkstk()
 @ cdecl -arch=i386 _except_handler2(ptr ptr ptr ptr)
 @ cdecl -arch=i386 _except_handler3(ptr ptr ptr ptr)

@@ -24,11 +24,14 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include "macdrv.h"
 #include "winuser.h"
-#include "wine/unicode.h"
 #include "wine/server.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(keyboard);
@@ -176,9 +179,7 @@ enum {
     kVK_UpArrow             = 0x7E,
 };
 
-#include "wine/hostaddrspace_enter.h"
 extern const CFStringRef kTISTypeKeyboardLayout;
-#include "wine/hostaddrspace_exit.h"
 
 /* Indexed by Mac virtual keycode values defined above. */
 static const struct {
@@ -401,7 +402,7 @@ static BOOL char_matches_string(WCHAR wchar, UniChar *string, BOOL ignore_diacri
 {
     BOOL ret;
     CFStringRef s1 = CFStringCreateWithCharactersNoCopy(NULL, (UniChar*)&wchar, 1, kCFAllocatorNull);
-    CFStringRef s2 = CFStringCreateWithCharactersNoCopy(NULL, string, strlenW(string), kCFAllocatorNull);
+    CFStringRef s2 = CFStringCreateWithCharactersNoCopy(NULL, string, wcslen(string), kCFAllocatorNull);
     CFStringCompareFlags flags = kCFCompareCaseInsensitive | kCFCompareNonliteral | kCFCompareWidthInsensitive;
     if (ignore_diacritics)
         flags |= kCFCompareDiacriticInsensitive;
@@ -439,27 +440,98 @@ struct layout
     BOOL enabled; /* is the input source enabled - ie displayed in the input source selector UI */
 };
 
-static CRITICAL_SECTION layout_list_section;
-static CRITICAL_SECTION_DEBUG critsect_debug =
-{
-    0, 0, &layout_list_section,
-    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
-    0, 0, { (DWORD_PTR)(__FILE__ ": layout_list_section") }
-};
-static CRITICAL_SECTION layout_list_section = { &critsect_debug, -1, 0, 0, 0, 0 };
+static pthread_mutex_t layout_list_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int macdrv_layout_list_needs_update = TRUE;
 
+static const NLS_LOCALE_HEADER *locale_table;
+
+static int compare_locale_names(const WCHAR *n1, const WCHAR *n2)
+{
+    for (;;)
+    {
+        WCHAR ch1 = *n1++;
+        WCHAR ch2 = *n2++;
+        if (ch1 >= 'a' && ch1 <= 'z') ch1 -= 'a' - 'A';
+        else if (ch1 == '_') ch1 = '-';
+        if (ch2 >= 'a' && ch2 <= 'z') ch2 -= 'a' - 'A';
+        else if (ch2 == '_') ch2 = '-';
+        if (!ch1 || ch1 != ch2) return ch1 - ch2;
+    }
+}
+
+
+static const NLS_LOCALE_LCNAME_INDEX *find_lcname_entry(const WCHAR *name)
+{
+    const NLS_LOCALE_LCNAME_INDEX *lcnames_index;
+    const WCHAR *locale_strings;
+    int min = 0, max = locale_table->nb_lcnames - 1;
+
+    locale_strings = (const WCHAR *)((char *)locale_table + locale_table->strings_offset);
+    lcnames_index = (const NLS_LOCALE_LCNAME_INDEX *)((char *)locale_table + locale_table->lcnames_offset);
+
+    while (min <= max)
+    {
+        int res, pos = (min + max) / 2;
+        const WCHAR *str = locale_strings + lcnames_index[pos].name;
+        res = compare_locale_names(name, str + 1);
+        if (res < 0) max = pos - 1;
+        else if (res > 0) min = pos + 1;
+        else return &lcnames_index[pos];
+    }
+    return NULL;
+}
+
+
 static DWORD get_lcid(CFStringRef lang)
 {
+    const NLS_LOCALE_LCNAME_INDEX *entry;
+    const NLS_LOCALE_DATA *locale;
     CFRange range;
     WCHAR str[10];
+    ULONG offset;
+
+    if (!locale_table)
+    {
+        struct
+        {
+            UINT ctypes;
+            UINT unknown1;
+            UINT unknown2;
+            UINT unknown3;
+            UINT locales;
+            UINT charmaps;
+            UINT geoids;
+            UINT scripts;
+        } *header;
+        LCID system_lcid;
+        LARGE_INTEGER size;
+
+        if (NtInitializeNlsFiles((void **)&header, &system_lcid, &size))
+        {
+            ERR("NtInitializeNlsFiles failed\n");
+            return 0;
+        }
+
+        if (InterlockedCompareExchangePointer((void **)&locale_table,
+                                              (char *)header + header->locales, NULL))
+            NtUnmapViewOfSection(GetCurrentProcess(), header);
+    }
 
     range.location = 0;
     range.length = min(CFStringGetLength(lang), ARRAY_SIZE(str) - 1);
     CFStringGetCharacters(lang, range, str);
     str[range.length] = 0;
-    return LocaleNameToLCID(str, 0);
+
+    if (!(entry = find_lcname_entry(str)))
+    {
+        ERR("%s not found\n", debugstr_w(str));
+        return 0;
+    }
+
+    offset = locale_table->locales_offset + entry->idx * locale_table->locale_size;
+    locale = (const NLS_LOCALE_DATA *)((const char *)locale_table + offset);
+    return locale->inotneutral ? entry->id : locale->idefaultlanguage;
 }
 
 static HKL get_hkl(CFStringRef lang, CFStringRef type)
@@ -488,7 +560,7 @@ static HKL get_hkl(CFStringRef lang, CFStringRef type)
 /******************************************************************
  *                get_layout_from_source
  *
- * Must be called while holding the layout_list_section.
+ * Must be called while holding the layout_list_mutex.
  * Note, returned layout may not currently be enabled.
  */
 static struct layout *get_layout_from_source(TISInputSourceRef input)
@@ -509,7 +581,7 @@ static struct layout *get_layout_from_source(TISInputSourceRef input)
 /***********************************************************************
  *            update_layout_list
  *
- * Must be called while holding the layout_list_section
+ * Must be called while holding the layout_list_mutex
  *
  * If an input source has been disabled (ie. removed from the UI) its
  * entry remains in the layout list but is marked as such and is not
@@ -522,7 +594,7 @@ static void update_layout_list(void)
     struct layout *layout;
     int i;
 
-    if (!InterlockedExchange(&macdrv_layout_list_needs_update, FALSE)) return;
+    if (!InterlockedExchange((LONG *)&macdrv_layout_list_needs_update, FALSE)) return;
 
     sources = macdrv_create_input_source_list();
 
@@ -539,7 +611,7 @@ static void update_layout_list(void)
             CFStringRef type = CFDictionaryGetValue(dict, macdrv_input_source_type_key);
             CFStringRef lang = CFDictionaryGetValue(dict, macdrv_input_source_lang_key);
 
-            layout = HeapAlloc(GetProcessHeap(), 0, sizeof(*layout));
+            layout = malloc(sizeof(*layout));
             layout->input_source = (TISInputSourceRef)CFRetain(input);
             layout->hkl = get_hkl(lang, type);
 
@@ -565,13 +637,13 @@ HKL macdrv_get_hkl_from_source(TISInputSourceRef input)
     struct layout *layout;
     HKL ret = 0;
 
-    EnterCriticalSection(&layout_list_section);
+    pthread_mutex_lock(&layout_list_mutex);
 
     update_layout_list();
     layout = get_layout_from_source(input);
     if (layout) ret = layout->hkl;
 
-    LeaveCriticalSection(&layout_list_section);
+    pthread_mutex_unlock(&layout_list_mutex);
 
     return ret;
 }
@@ -826,7 +898,7 @@ void macdrv_compute_keyboard_layout(struct macdrv_thread_data *thread_data)
        from the default map, if it's still available. */
     for (keyc = 0; keyc < ARRAY_SIZE(default_map); keyc++)
     {
-        DWORD vkey = default_map[keyc].vkey;
+        unsigned int vkey = default_map[keyc].vkey;
 
         if (!thread_data->keyc2scan[keyc]) continue; /* not a known Mac key code */
         if (thread_data->keyc2vkey[keyc]) continue; /* already assigned */
@@ -916,7 +988,7 @@ void macdrv_compute_keyboard_layout(struct macdrv_thread_data *thread_data)
 /***********************************************************************
  *              macdrv_send_keyboard_input
  */
-static void macdrv_send_keyboard_input(HWND hwnd, WORD vkey, WORD scan, DWORD flags, DWORD time)
+static void macdrv_send_keyboard_input(HWND hwnd, WORD vkey, WORD scan, unsigned int flags, unsigned int time)
 {
     INPUT input;
 
@@ -1054,9 +1126,9 @@ void macdrv_keyboard_changed(const macdrv_event *event)
 
     macdrv_compute_keyboard_layout(thread_data);
 
-    ActivateKeyboardLayout(thread_data->active_keyboard_layout, 0);
+    NtUserActivateKeyboardLayout(thread_data->active_keyboard_layout, 0);
 
-    SendMessageW(GetActiveWindow(), WM_CANCELMODE, 0, 0);
+    send_message(get_active_window(), WM_CANCELMODE, 0, 0);
 }
 
 
@@ -1111,10 +1183,10 @@ void macdrv_edit_menu_command(const macdrv_event *event)
         }
         key_scan = vkey_to_scan(key_vkey);
 
-        left_alt_down = (GetAsyncKeyState(VK_LMENU) & 0x8000) != 0;
-        right_alt_down = (GetAsyncKeyState(VK_RMENU) & 0x8000) != 0;
+        left_alt_down = (NtUserGetAsyncKeyState(VK_LMENU) & 0x8000) != 0;
+        right_alt_down = (NtUserGetAsyncKeyState(VK_RMENU) & 0x8000) != 0;
         if (need_control)
-            control_down = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+            control_down = (NtUserGetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
 
         if (left_alt_down)
             left_alt_scan = vkey_to_scan(VK_LMENU);
@@ -1223,9 +1295,9 @@ void macdrv_edit_menu_command(const macdrv_event *event)
                 return;
         }
 
-        focus = GetFocus();
-        if (focus == hwnd || IsChild(hwnd, focus))
-            PostMessageW(focus, msg, 0, lparam);
+        focus = get_focus();
+        if (focus == hwnd || NtUserIsChild(hwnd, focus))
+            NtUserPostMessage(focus, msg, 0, lparam);
     }
 }
 
@@ -1288,13 +1360,16 @@ void macdrv_hotkey_press(const macdrv_event *event)
 /***********************************************************************
  *              macdrv_process_text_input
  */
-void macdrv_process_text_input(UINT vkey, UINT scan, UINT repeat, const BYTE *key_state, void *himc, int* done)
+NTSTATUS macdrv_ime_process_text_input(void *arg)
 {
+    struct process_text_input_params *params = arg;
     struct macdrv_thread_data *thread_data = macdrv_thread_data();
+    const BYTE *key_state = params->key_state;
     unsigned int flags;
     int keyc;
 
-    TRACE("vkey 0x%04x scan 0x%04x repeat %u himc %p\n", vkey, scan, repeat, himc);
+    TRACE("vkey 0x%04x scan 0x%04x repeat %u himc %p\n", params->vkey, params->scan,
+          params->repeat, params->himc);
 
     flags = thread_data->last_modifiers;
     if (key_state[VK_SHIFT] & 0x80)
@@ -1316,17 +1391,19 @@ void macdrv_process_text_input(UINT vkey, UINT scan, UINT repeat, const BYTE *ke
 
     /* Find the Mac keycode corresponding to the scan code */
     for (keyc = 0; keyc < ARRAY_SIZE(thread_data->keyc2vkey); keyc++)
-        if (thread_data->keyc2vkey[keyc] == vkey) break;
+        if (thread_data->keyc2vkey[keyc] == params->vkey) break;
 
     if (keyc >= ARRAY_SIZE(thread_data->keyc2vkey))
     {
-        *done = -1;
-        return;
+        *params->done = -1;
+        return 0;
     }
 
     TRACE("flags 0x%08x keyc 0x%04x\n", flags, keyc);
 
-    macdrv_send_text_input_event(((scan & 0x8000) == 0), flags, repeat, keyc, himc, done);
+    macdrv_send_text_input_event(((params->scan & 0x8000) == 0), flags, params->repeat, keyc,
+                                 params->himc, params->done);
+    return 0;
 }
 
 
@@ -1344,7 +1421,7 @@ BOOL macdrv_ActivateKeyboardLayout(HKL hkl, UINT flags)
     if (hkl == thread_data->active_keyboard_layout)
         return TRUE;
 
-    EnterCriticalSection(&layout_list_section);
+    pthread_mutex_lock(&layout_list_mutex);
     update_layout_list();
 
     LIST_FOR_EACH_ENTRY(layout, &layout_list, struct layout, entry)
@@ -1367,7 +1444,7 @@ BOOL macdrv_ActivateKeyboardLayout(HKL hkl, UINT flags)
             break;
         }
     }
-    LeaveCriticalSection(&layout_list_section);
+    pthread_mutex_unlock(&layout_list_mutex);
 
     return ret;
 }
@@ -1400,7 +1477,7 @@ INT macdrv_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size)
             UInt32 deadKeyState = 0;
             UniCharCount len;
             OSStatus status;
-            DWORD vkey;
+            unsigned int vkey;
             int i;
 
             uchr = (const UCKeyboardLayout*)CFDataGetBytePtr(thread_data->keyboard_layout_uchr);
@@ -1436,17 +1513,20 @@ INT macdrv_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size)
             {
                 if (vkey_names[i].vkey == vkey)
                 {
-                    len = MultiByteToWideChar(CP_UTF8, 0, vkey_names[i].name, -1, buffer, size);
-                    if (len) len--;
+                    len = min(strlen(vkey_names[i].name) + 1, size);
+                    ascii_to_unicode(buffer, vkey_names[i].name, len);
+                    if (len) buffer[--len] = 0;
                     break;
                 }
             }
 
             if (!len)
             {
-                static const WCHAR format[] = {'K','e','y',' ','0','x','%','0','2','x',0};
-                snprintfW(buffer, size, format, vkey);
-                len = strlenW(buffer);
+                char name[16];
+                len = sprintf(name, "Key 0x%02x", vkey);
+                len = min(len + 1, size);
+                ascii_to_unicode(buffer, name, len);
+                if (len) buffer[--len] = 0;
             }
 
             if (!len)
@@ -1455,15 +1535,15 @@ INT macdrv_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size)
             if (status == noErr && deadKeyState)
             {
                 lstrcpynW(buffer + len, dead, size - len);
-                len = strlenW(buffer);
+                len = wcslen(buffer);
             }
 
-            TRACE("lparam 0x%08x -> %s\n", lparam, debugstr_w(buffer));
+            TRACE("lparam 0x%08x -> %s\n", (unsigned int)lparam, debugstr_w(buffer));
             return len;
         }
     }
 
-    WARN("found no name for lparam 0x%08x\n", lparam);
+    WARN("found no name for lparam 0x%08x\n", (unsigned int)lparam);
     return 0;
 }
 
@@ -1478,7 +1558,7 @@ UINT macdrv_GetKeyboardLayoutList(INT size, HKL *list)
 
     TRACE("%d, %p\n", size, list);
 
-    EnterCriticalSection(&layout_list_section);
+    pthread_mutex_lock(&layout_list_mutex);
 
     update_layout_list();
 
@@ -1493,7 +1573,7 @@ UINT macdrv_GetKeyboardLayoutList(INT size, HKL *list)
         }
         count++;
     }
-    LeaveCriticalSection(&layout_list_section);
+    pthread_mutex_unlock(&layout_list_mutex);
 
     TRACE("returning %d\n", count);
     return count;
@@ -1615,7 +1695,7 @@ UINT macdrv_MapVirtualKeyEx(UINT wCode, UINT wMapType, HKL hkl)
             }
 
             if (status == noErr && len)
-                ret = toupperW(s[0]) | (deadKey ? 0x80000000 : 0);
+                ret = RtlUpcaseUnicodeChar(s[0]) | (deadKey ? 0x80000000 : 0);
 
             break;
         }
@@ -1663,9 +1743,9 @@ BOOL macdrv_RegisterHotKey(HWND hwnd, UINT mod_flags, UINT vkey)
     TRACE_(key)("keyc 0x%04x modifiers 0x%08x -> %d\n", keyc, modifiers, ret);
 
     if (ret == MACDRV_HOTKEY_ALREADY_REGISTERED)
-        SetLastError(ERROR_HOTKEY_ALREADY_REGISTERED);
+        RtlSetLastWin32Error(ERROR_HOTKEY_ALREADY_REGISTERED);
     else if (ret != MACDRV_HOTKEY_SUCCESS)
-        SetLastError(ERROR_GEN_FAILURE);
+        RtlSetLastWin32Error(ERROR_GEN_FAILURE);
 
     return ret == MACDRV_HOTKEY_SUCCESS;
 }

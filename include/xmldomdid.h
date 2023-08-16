@@ -19,8 +19,6 @@
 #ifndef __XMLDOMDID_H__
 #define __XMLDOMDID_H__
 
-#include "wine/winheader_enter.h"
-
 #define DISPID_DOM_BASE                     0x00000001
 #define DISPID_DOM_COLLECTION_BASE          0x000f4240
 #define DISPID_DOM_COLLECTION_MAX           0x002dc6bf
@@ -216,7 +214,5 @@
 #define  DISPID_XMLDOMEVENT_ONREADYSTATECHANGE DISPID_READYSTATECHANGE
 #define  DISPID_XMLDOMEVENT_ONDATAAVAILABLE    0x000000c5
 #define  DISPID_XMLDOMEVENT__TOP               0x000000c6
-
-#include "wine/winheader_exit.h"
 
 #endif /* __XMLDOMDID_H__ */

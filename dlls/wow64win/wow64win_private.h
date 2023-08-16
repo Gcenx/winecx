@@ -27,7 +27,12 @@
 ALL_WIN32_SYSCALLS
 #undef SYSCALL_ENTRY
 
+typedef NTSTATUS (WINAPI *user_callback)( void *params, ULONG size );
+extern user_callback user_callbacks[] DECLSPEC_HIDDEN;
+
 void * WINAPI Wow64AllocateTemp( SIZE_T size );
+NTSTATUS WINAPI Wow64KiUserCallbackDispatcher( ULONG id, void *args, ULONG len,
+                                               void **ret_ptr, ULONG *ret_len );
 
 struct object_attr64
 {
@@ -49,6 +54,7 @@ typedef struct
 static inline ULONG get_ulong( UINT **args ) { return *(*args)++; }
 static inline HANDLE get_handle( UINT **args ) { return LongToHandle( *(*args)++ ); }
 static inline void *get_ptr( UINT **args ) { return ULongToPtr( *(*args)++ ); }
+static inline float get_float( UINT **args ) { return *(*(float **)args)++; }
 
 static inline void **addr_32to64( void **addr, ULONG *addr32 )
 {
@@ -122,6 +128,13 @@ static inline OBJECT_ATTRIBUTES *objattr_32to64( struct object_attr64 *out, cons
     out->attr.SecurityQualityOfService = ULongToPtr( in->SecurityQualityOfService );
     out->attr.SecurityDescriptor = secdesc_32to64( &out->sd, ULongToPtr( in->SecurityDescriptor ));
     return &out->attr;
+}
+
+static inline void set_last_error32( DWORD err )
+{
+    TEB *teb = NtCurrentTeb();
+    TEB32 *teb32 = (TEB32 *)((char *)teb + teb->WowTebOffset);
+    teb32->LastErrorValue = err;
 }
 
 #endif /* __WOW64WIN_PRIVATE_H */

@@ -31,10 +31,8 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
-#ifdef HAVE_DISKARBITRATION_DISKARBITRATION_H
+#ifdef __APPLE__
 #include <DiskArbitration/DiskArbitration.h>
-#endif
-#if defined(HAVE_SYSTEMCONFIGURATION_SCDYNAMICSTORECOPYDHCPINFO_H) && defined(HAVE_SYSTEMCONFIGURATION_SCNETWORKCONFIGURATION_H)
 #include <SystemConfiguration/SCDynamicStoreCopyDHCPInfo.h>
 #include <SystemConfiguration/SCNetworkConfiguration.h>
 #endif
@@ -50,7 +48,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mountmgr);
 
-#ifdef HAVE_DISKARBITRATION_DISKARBITRATION_H
+#ifdef __APPLE__
 
 typedef struct
 {
@@ -218,16 +216,16 @@ void run_diskarbitration_loop(void)
     CFRelease( session );
 }
 
-#else  /*  HAVE_DISKARBITRATION_DISKARBITRATION_H */
+#else  /* __APPLE__ */
 
 void run_diskarbitration_loop(void)
 {
     TRACE( "Skipping, Disk Arbitration support not compiled in\n" );
 }
 
-#endif  /* HAVE_DISKARBITRATION_DISKARBITRATION_H */
+#endif  /* __APPLE__ */
 
-#if defined(HAVE_SYSTEMCONFIGURATION_SCDYNAMICSTORECOPYDHCPINFO_H) && defined(HAVE_SYSTEMCONFIGURATION_SCNETWORKCONFIGURATION_H)
+#if defined(__APPLE__)
 
 static UInt8 map_option( unsigned int option )
 {

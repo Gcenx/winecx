@@ -89,7 +89,8 @@ static void release_typelib(void)
         if (typeinfos[i])
             ITypeInfo_Release(typeinfos[i]);
 
-    ITypeLib_Release(typelib);
+    if (typelib)
+        ITypeLib_Release(typelib);
 }
 
 static HRESULT WINAPI ClassFactory_QueryInterface(IClassFactory *iface, REFIID riid, void **ppv)

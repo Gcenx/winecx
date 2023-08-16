@@ -152,9 +152,25 @@ static BOOL WININET_GetSetPassword( HWND hdlg, LPCWSTR szServer,
     p = wcschr( szUserPass, ':' );
     if( p )
     {
+        struct WININET_ErrorDlgParams *params;
+        HWND hwnd;
+
+        params = (struct WININET_ErrorDlgParams*)
+                 GetWindowLongPtrW( hdlg, GWLP_USERDATA );
+
         *p = 0;
         SetWindowTextW( hUserItem, szUserPass );
-        SetWindowTextW( hPassItem, p+1 );
+
+        if (!params->req->clear_auth)
+        {
+            SetWindowTextW( hPassItem, p+1 );
+
+            hwnd = GetDlgItem( hdlg, IDC_SAVEPASSWORD );
+            if (hwnd)
+                SendMessageW(hwnd, BM_SETCHECK, BST_CHECKED, 0);
+        }
+        else
+            WININET_GetSetPassword( hdlg, szServer, szRealm, TRUE );
     }
 
     return TRUE;
@@ -169,14 +185,14 @@ static BOOL WININET_SetAuthorization( http_request_t *request, LPWSTR username,
     http_session_t *session = request->session;
     LPWSTR p, q;
 
-    p = heap_strdupW(username);
+    p = wcsdup(username);
     if( !p )
         return FALSE;
 
-    q = heap_strdupW(password);
+    q = wcsdup(password);
     if( !q )
     {
-        heap_free(p);
+        free(p);
         return FALSE;
     }
 
@@ -184,18 +200,18 @@ static BOOL WININET_SetAuthorization( http_request_t *request, LPWSTR username,
     {
         appinfo_t *hIC = session->appInfo;
 
-        heap_free(hIC->proxyUsername);
+        free(hIC->proxyUsername);
         hIC->proxyUsername = p;
 
-        heap_free(hIC->proxyPassword);
+        free(hIC->proxyPassword);
         hIC->proxyPassword = q;
     }
     else
     {
-        heap_free(session->userName);
+        free(session->userName);
         session->userName = p;
 
-        heap_free(session->password);
+        free(session->password);
         session->password = q;
     }
 
@@ -263,6 +279,8 @@ static INT_PTR WINAPI WININET_ProxyPasswordDialog(
                                       szRealm, ARRAY_SIZE( szRealm ), TRUE) )
                 WININET_GetSetPassword( hdlg, params->req->session->appInfo->proxy, szRealm, TRUE );
             WININET_SetAuthorization( params->req, username, password, TRUE );
+
+            params->req->clear_auth = TRUE;
 
             EndDialog( hdlg, ERROR_INTERNET_FORCE_RETRY );
             return TRUE;
@@ -340,6 +358,7 @@ static INT_PTR WINAPI WININET_PasswordDialog(
                 WININET_GetSetPassword( hdlg, params->req->session->hostName, szRealm, TRUE );
             }
             WININET_SetAuthorization( params->req, username, password, FALSE );
+            params->req->clear_auth = TRUE;
 
             EndDialog( hdlg, ERROR_INTERNET_FORCE_RETRY );
             return TRUE;
@@ -508,6 +527,9 @@ DWORD WINAPI InternetErrorDlg(HWND hWnd, HINTERNET hRequest,
         case HTTP_STATUS_DENIED:
             res = DialogBoxParamW( WININET_hModule, MAKEINTRESOURCEW( IDD_AUTHDLG ),
                                     hWnd, WININET_PasswordDialog, (LPARAM) &params );
+            break;
+        case HTTP_STATUS_OK:
+            req->clear_auth = FALSE;
             break;
         default:
             WARN("unhandled status %lu\n", req->status_code);

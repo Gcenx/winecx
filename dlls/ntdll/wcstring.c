@@ -21,6 +21,8 @@
  */
 
 #include <ctype.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
@@ -107,14 +109,26 @@ int __cdecl _wcsicmp( LPCWSTR str1, LPCWSTR str2 )
 LPWSTR __cdecl _wcslwr( LPWSTR str )
 {
     WCHAR *ret = str;
-
-    while (*str)
-    {
-        WCHAR ch = *str;
-        if (ch >= 'A' && ch <= 'Z') ch += 32;
-        *str++ = ch;
-    }
+    for ( ; *str; str++) if (*str >= 'A' && *str <= 'Z') *str += 'a' - 'A';
     return ret;
+}
+
+
+/*********************************************************************
+ *           _wcslwr_s    (NTDLL.@)
+ */
+errno_t __cdecl _wcslwr_s( wchar_t *str, size_t len )
+{
+    if (!str) return EINVAL;
+
+    if (wcsnlen( str, len ) == len)
+    {
+        *str = 0;
+        return EINVAL;
+    }
+
+    _wcslwr( str );
+    return 0;
 }
 
 
@@ -141,13 +155,26 @@ LPWSTR __cdecl _wcsupr( LPWSTR str )
 {
     WCHAR *ret = str;
 
-    while (*str)
-    {
-        WCHAR ch = *str;
-        if (ch >= 'a' && ch <= 'z') ch -= 32;
-        *str++ = ch;
-    }
+    for ( ; *str; str++) if (*str >= 'a' && *str <= 'z') *str += 'A' - 'a';
     return ret;
+}
+
+
+/*********************************************************************
+ *           _wcsupr_s    (NTDLL.@)
+ */
+errno_t __cdecl _wcsupr_s( wchar_t *str, size_t len )
+{
+    if (!str) return EINVAL;
+
+    if (wcsnlen( str, len ) == len)
+    {
+        *str = 0;
+        return EINVAL;
+    }
+
+    _wcsupr( str );
+    return 0;
 }
 
 
@@ -159,6 +186,26 @@ LPWSTR __cdecl wcscpy( LPWSTR dst, LPCWSTR src )
     WCHAR *p = dst;
     while ((*p++ = *src++));
     return dst;
+}
+
+
+/*********************************************************************
+ *           wcscpy_s    (NTDLL.@)
+ */
+errno_t __cdecl wcscpy_s( wchar_t *dst, size_t len, const wchar_t *src )
+{
+    size_t i;
+
+    if (!dst || !len) return EINVAL;
+    if (!src)
+    {
+        *dst = 0;
+        return EINVAL;
+    }
+
+    for (i = 0; i < len; i++) if (!(dst[i] = src[i])) return 0;
+    *dst = 0;
+    return ERANGE;
 }
 
 
@@ -180,6 +227,26 @@ LPWSTR __cdecl wcscat( LPWSTR dst, LPCWSTR src )
 {
     wcscpy( dst + wcslen(dst), src );
     return dst;
+}
+
+
+/*********************************************************************
+ *           wcscat_s    (NTDLL.@)
+ */
+errno_t __cdecl wcscat_s( wchar_t *dst, size_t len, const wchar_t *src )
+{
+    size_t i, j;
+
+    if (!dst || !len) return EINVAL;
+    if (!src)
+    {
+        *dst = 0;
+        return EINVAL;
+    }
+    for (i = 0; i < len; i++) if (!dst[i]) break;
+    for (j = 0; (j + i) < len; j++) if (!(dst[j + i] = src[j])) return 0;
+    *dst = 0;
+    return ERANGE;
 }
 
 
@@ -228,6 +295,47 @@ LPWSTR __cdecl wcsncat( LPWSTR s1, LPCWSTR s2, size_t n )
 
 
 /*********************************************************************
+ *           wcsncat_s    (NTDLL.@)
+ */
+errno_t __cdecl wcsncat_s( wchar_t *dst, size_t len, const wchar_t *src, size_t count )
+{
+    size_t i, j;
+
+    if (!dst || !len) return EINVAL;
+    if (!count) return 0;
+    if (!src)
+    {
+        *dst = 0;
+        return EINVAL;
+    }
+
+    for (i = 0; i < len; i++) if (!dst[i]) break;
+
+    if (i == len)
+    {
+        *dst = 0;
+        return EINVAL;
+    }
+
+    for (j = 0; (j + i) < len; j++)
+    {
+        if (count == _TRUNCATE && j + i == len - 1)
+        {
+            dst[j + i] = 0;
+            return STRUNCATE;
+        }
+        if (j == count || !(dst[j + i] = src[j]))
+        {
+            dst[j + i] = 0;
+            return 0;
+        }
+    }
+    *dst = 0;
+    return ERANGE;
+}
+
+
+/*********************************************************************
  *           wcsncmp    (NTDLL.@)
  */
 int __cdecl wcsncmp( LPCWSTR str1, LPCWSTR str2, size_t n )
@@ -252,11 +360,53 @@ LPWSTR __cdecl wcsncpy( LPWSTR s1, LPCWSTR s2, size_t n )
 
 
 /*********************************************************************
+ *           wcsncpy_s    (NTDLL.@)
+ */
+errno_t __cdecl wcsncpy_s( wchar_t *dst, size_t len, const wchar_t *src, size_t count )
+{
+    size_t i, end;
+
+    if (!count)
+    {
+        if (dst && len) *dst = 0;
+        return 0;
+    }
+    if (!dst || !len) return EINVAL;
+    if (!src)
+    {
+        *dst = 0;
+        return EINVAL;
+    }
+
+    if (count != _TRUNCATE && count < len)
+        end = count;
+    else
+        end = len - 1;
+
+    for (i = 0; i < end; i++)
+        if (!(dst[i] = src[i])) return 0;
+
+    if (count == _TRUNCATE)
+    {
+        dst[i] = 0;
+        return STRUNCATE;
+    }
+    if (end == count)
+    {
+        dst[i] = 0;
+        return 0;
+    }
+    dst[0] = 0;
+    return ERANGE;
+}
+
+
+/*********************************************************************
  *           wcsnlen    (NTDLL.@)
  */
 size_t __cdecl wcsnlen( const WCHAR *str, size_t len )
 {
-    const WCHAR *s = str;
+    const WCHAR *s;
     for (s = str; len && *s; s++, len--) ;
     return s - str;
 }
@@ -332,6 +482,33 @@ LPWSTR __cdecl wcstok( LPWSTR str, LPCWSTR delim )
 
 
 /*********************************************************************
+ *                  wcstok_s   (NTDLL.@)
+ */
+wchar_t * __cdecl wcstok_s( wchar_t *str, const wchar_t *delim, wchar_t **ctx )
+{
+    wchar_t *next;
+
+    if (!delim || !ctx) return NULL;
+    if (!str)
+    {
+        str = *ctx;
+        if (!str) return NULL;
+    }
+    while (*str && wcschr( delim, *str )) str++;
+    if (!*str)
+    {
+        *ctx = str;
+        return NULL;
+    }
+    next = str + 1;
+    while (*next && !wcschr( delim, *next )) next++;
+    if (*next) *next++ = 0;
+    *ctx = next;
+    return str;
+}
+
+
+/*********************************************************************
  *           wcstombs    (NTDLL.@)
  */
 size_t __cdecl wcstombs( char *dst, const WCHAR *src, size_t n )
@@ -385,76 +562,83 @@ INT __cdecl iswctype( WCHAR wc, unsigned short type )
 
 
 /*********************************************************************
+ *           iswalnum    (NTDLL.@)
+ */
+INT __cdecl iswalnum( WCHAR wc )
+{
+    return iswctype( wc, C1_ALPHA | C1_UPPER | C1_LOWER | C1_DIGIT );
+}
+
+
+/*********************************************************************
  *           iswalpha    (NTDLL.@)
  */
 INT __cdecl iswalpha( WCHAR wc )
 {
-    if (wc >= 256) return 0;
-    return wctypes[wc] & (C1_ALPHA | C1_UPPER | C1_LOWER);
+    return iswctype( wc, C1_ALPHA | C1_UPPER | C1_LOWER );
 }
 
 
 /*********************************************************************
- *		iswdigit (NTDLL.@)
- *
- * Checks if a unicode char wc is a digit
- *
- * RETURNS
- *  TRUE: The unicode char wc is a digit.
- *  FALSE: Otherwise
+ *           iswascii    (NTDLL.@)
+ */
+INT __cdecl iswascii( WCHAR wc )
+{
+    return wc < 0x80;
+}
+
+
+/*********************************************************************
+ *           iswdigit (NTDLL.@)
  */
 INT __cdecl iswdigit( WCHAR wc )
 {
-    if (wc >= 256) return 0;
-    return wctypes[wc] & C1_DIGIT;
+    return iswctype( wc, C1_DIGIT );
 }
 
 
 /*********************************************************************
- *		iswlower (NTDLL.@)
- *
- * Checks if a unicode char wc is a lower case letter
- *
- * RETURNS
- *  TRUE: The unicode char wc is a lower case letter.
- *  FALSE: Otherwise
+ *           iswgraph    (NTDLL.@)
+ */
+INT __cdecl iswgraph( WCHAR wc )
+{
+    return iswctype( wc, C1_ALPHA | C1_UPPER | C1_LOWER | C1_DIGIT | C1_PUNCT );
+}
+
+
+/*********************************************************************
+ *           iswlower (NTDLL.@)
  */
 INT __cdecl iswlower( WCHAR wc )
 {
-    if (wc >= 256) return 0;
-    return wctypes[wc] & C1_LOWER;
+    return iswctype( wc, C1_LOWER );
 }
 
 
 /*********************************************************************
- *		iswspace (NTDLL.@)
- *
- * Checks if a unicode char wc is a white space character
- *
- * RETURNS
- *  TRUE: The unicode char wc is a white space character.
- *  FALSE: Otherwise
+ *           iswprint    (NTDLL.@)
+ */
+INT __cdecl iswprint( WCHAR wc )
+{
+    return iswctype( wc, C1_ALPHA | C1_UPPER | C1_LOWER | C1_DIGIT | C1_PUNCT | C1_BLANK );
+}
+
+
+/*********************************************************************
+ *           iswspace (NTDLL.@)
  */
 INT __cdecl iswspace( WCHAR wc )
 {
-    if (wc >= 256) return 0;
-    return wctypes[wc] & C1_SPACE;
+    return iswctype( wc, C1_SPACE );
 }
 
 
 /*********************************************************************
- *		iswxdigit (NTDLL.@)
- *
- * Checks if a unicode char wc is an extended digit
- *
- * RETURNS
- *  TRUE: The unicode char wc is an extended digit.
- *  FALSE: Otherwise
+ *           iswxdigit (NTDLL.@)
  */
 INT __cdecl iswxdigit( WCHAR wc )
 {
-    if (wc >= 256) return 0;
-    return wctypes[wc] & C1_XDIGIT;
+    return iswctype( wc, C1_XDIGIT );
 }
 
 
@@ -565,6 +749,97 @@ __msvcrt_ulong __cdecl wcstoul(LPCWSTR s, LPWSTR *end, INT base)
     }
 
     if (end && !empty) *end = (WCHAR *)s;
+    return negative ? -ret : ret;
+}
+
+
+/*********************************************************************
+ *                  _wcstoi64  (NTDLL.@)
+ */
+__int64 __cdecl _wcstoi64( const wchar_t *s, wchar_t **end, int base )
+{
+    BOOL negative = FALSE, empty = TRUE;
+    __int64 ret = 0;
+
+    if (base < 0 || base == 1 || base > 36) return 0;
+    if (end) *end = (wchar_t *)s;
+    while (iswspace(*s)) s++;
+
+    if (*s == '-')
+    {
+        negative = TRUE;
+        s++;
+    }
+    else if (*s == '+') s++;
+
+    if ((base == 0 || base == 16) && !wctoint( *s ) && (s[1] == 'x' || s[1] == 'X'))
+    {
+        base = 16;
+        s += 2;
+    }
+    if (base == 0) base = wctoint( *s ) ? 10 : 8;
+
+    while (*s)
+    {
+        int v = wctoint( *s );
+        if (v < 0 || v >= base) break;
+        if (negative) v = -v;
+        s++;
+        empty = FALSE;
+
+        if (!negative && (ret > I64_MAX / base || ret * base > I64_MAX - v))
+            ret = I64_MAX;
+        else if (negative && (ret < I64_MIN / base || ret * base < I64_MIN - v))
+            ret = I64_MIN;
+        else
+            ret = ret * base + v;
+    }
+
+    if (end && !empty) *end = (wchar_t *)s;
+    return ret;
+}
+
+
+/*********************************************************************
+ *                  _wcstoui64  (NTDLL.@)
+ */
+unsigned __int64 __cdecl _wcstoui64( const wchar_t *s, wchar_t **end, int base )
+{
+    BOOL negative = FALSE, empty = TRUE;
+    unsigned __int64 ret = 0;
+
+    if (base < 0 || base == 1 || base > 36) return 0;
+    if (end) *end = (wchar_t *)s;
+    while (iswspace(*s)) s++;
+
+    if (*s == '-')
+    {
+        negative = TRUE;
+        s++;
+    }
+    else if (*s == '+') s++;
+
+    if ((base == 0 || base == 16) && !wctoint( *s ) && (s[1] == 'x' || s[1] == 'X'))
+    {
+        base = 16;
+        s += 2;
+    }
+    if (base == 0) base = wctoint( *s ) ? 10 : 8;
+
+    while (*s)
+    {
+        int v = wctoint( *s );
+        if (v < 0 || v >= base) break;
+        s++;
+        empty = FALSE;
+
+        if (ret > UI64_MAX / base || ret * base > UI64_MAX - v)
+            ret = UI64_MAX;
+        else
+            ret = ret * base + v;
+    }
+
+    if (end && !empty) *end = (wchar_t *)s;
     return negative ? -ret : ret;
 }
 
@@ -808,6 +1083,125 @@ LPWSTR __cdecl _i64tow(
 
 
 /*********************************************************************
+ *      _ui64tow_s  (NTDLL.@)
+ */
+errno_t __cdecl _ui64tow_s( unsigned __int64 value, wchar_t *str, size_t size, int radix )
+{
+    wchar_t buffer[65], *pos;
+
+    if (!str || !size) return EINVAL;
+    if (radix < 2 || radix > 36)
+    {
+        str[0] = 0;
+        return EINVAL;
+    }
+
+    pos = buffer + 64;
+    *pos = 0;
+
+    do {
+	int digit = value % radix;
+	value = value / radix;
+	if (digit < 10)
+	    *--pos = '0' + digit;
+	else
+	    *--pos = 'a' + digit - 10;
+    } while (value != 0);
+
+    if (buffer - pos + 65 > size)
+    {
+        str[0] = 0;
+        return ERANGE;
+    }
+    memcpy( str, pos, (buffer - pos + 65) * sizeof(wchar_t) );
+    return 0;
+}
+
+
+/*********************************************************************
+ *      _ultow_s  (NTDLL.@)
+ */
+errno_t __cdecl _ultow_s( __msvcrt_ulong value, wchar_t *str, size_t size, int radix )
+{
+    return _ui64tow_s( value, str, size, radix );
+}
+
+
+/*********************************************************************
+ *      _i64tow_s  (NTDLL.@)
+ */
+errno_t __cdecl _i64tow_s( __int64 value, wchar_t *str, size_t size, int radix )
+{
+    unsigned __int64 val;
+    BOOL is_negative;
+    wchar_t buffer[65], *pos;
+
+    if (!str || !size) return EINVAL;
+    if (radix < 2 || radix > 36)
+    {
+        str[0] = 0;
+        return EINVAL;
+    }
+
+    if (value < 0 && radix == 10)
+    {
+        is_negative = TRUE;
+        val = -value;
+    }
+    else
+    {
+        is_negative = FALSE;
+        val = value;
+    }
+
+    pos = buffer + 64;
+    *pos = 0;
+
+    do
+    {
+        unsigned int digit = val % radix;
+        val /= radix;
+
+        if (digit < 10)
+            *--pos = '0' + digit;
+        else
+            *--pos = 'a' + digit - 10;
+    }
+    while (val != 0);
+
+    if (is_negative) *--pos = '-';
+
+    if (buffer - pos + 65 > size)
+    {
+        str[0] = 0;
+        return ERANGE;
+    }
+    memcpy( str, pos, (buffer - pos + 65) * sizeof(wchar_t) );
+    return 0;
+}
+
+
+/*********************************************************************
+ *      _ltow_s  (NTDLL.@)
+ */
+errno_t __cdecl _ltow_s( __msvcrt_long value, wchar_t *str, size_t size, int radix )
+{
+    if (value < 0 && radix == 10) return _i64tow_s( value, str, size, radix );
+    return _ui64tow_s( (__msvcrt_ulong)value, str, size, radix );
+}
+
+
+/*********************************************************************
+ *      _itow_s  (NTDLL.@)
+ */
+errno_t __cdecl _itow_s( int value, wchar_t *str, size_t size, int radix )
+{
+    if (value < 0 && radix == 10) return _i64tow_s( value, str, size, radix );
+    return _ui64tow_s( (unsigned int)value, str, size, radix );
+}
+
+
+/*********************************************************************
  *      _wtol    (NTDLL.@)
  *
  * Converts a unicode string to a long integer.
@@ -904,4 +1298,157 @@ LONGLONG  __cdecl _wtoi64( LPCWSTR str )
     } /* while */
 
     return bMinus ? -RunningTotal : RunningTotal;
+}
+
+
+/******************************************************************
+ *      _wsplitpath_s   (NTDLL.@)
+ */
+errno_t __cdecl _wsplitpath_s( const wchar_t *inpath, wchar_t *drive, size_t sz_drive,
+                               wchar_t *dir, size_t sz_dir, wchar_t *fname, size_t sz_fname,
+                               wchar_t *ext, size_t sz_ext )
+{
+    const wchar_t *p, *end;
+
+    if (!inpath || (!drive && sz_drive) ||
+        (drive && !sz_drive) ||
+        (!dir && sz_dir) ||
+        (dir && !sz_dir) ||
+        (!fname && sz_fname) ||
+        (fname && !sz_fname) ||
+        (!ext && sz_ext) ||
+        (ext && !sz_ext))
+        return EINVAL;
+
+    if (inpath[0] && inpath[1] == ':')
+    {
+        if (drive)
+        {
+            if (sz_drive <= 2) goto error;
+            drive[0] = inpath[0];
+            drive[1] = inpath[1];
+            drive[2] = 0;
+        }
+        inpath += 2;
+    }
+    else if (drive) drive[0] = '\0';
+
+    /* look for end of directory part */
+    end = NULL;
+    for (p = inpath; *p; p++) if (*p == '/' || *p == '\\') end = p + 1;
+
+    if (end)  /* got a directory */
+    {
+        if (dir)
+        {
+            if (sz_dir <= end - inpath) goto error;
+            memcpy( dir, inpath, (end - inpath) * sizeof(wchar_t) );
+            dir[end - inpath] = 0;
+        }
+        inpath = end;
+    }
+    else if (dir) dir[0] = 0;
+
+    /* look for extension: what's after the last dot */
+    end = NULL;
+    for (p = inpath; *p; p++) if (*p == '.') end = p;
+
+    if (!end) end = p; /* there's no extension */
+
+    if (fname)
+    {
+        if (sz_fname <= end - inpath) goto error;
+        memcpy( fname, inpath, (end - inpath) * sizeof(wchar_t) );
+        fname[end - inpath] = 0;
+    }
+    if (ext)
+    {
+        if (sz_ext <= wcslen(end)) goto error;
+        wcscpy( ext, end );
+    }
+    return 0;
+
+error:
+    if (drive) drive[0] = 0;
+    if (dir) dir[0] = 0;
+    if (fname) fname[0]= 0;
+    if (ext) ext[0]= 0;
+    return ERANGE;
+}
+
+
+/*********************************************************************
+ *      _wmakepath_s   (NTDLL.@)
+ */
+errno_t __cdecl _wmakepath_s( wchar_t *path, size_t size, const wchar_t *drive,
+                              const wchar_t *directory, const wchar_t *filename,
+                              const wchar_t *extension )
+{
+    wchar_t *p = path;
+
+    if (!path || !size) return EINVAL;
+
+    if (drive && drive[0])
+    {
+        if (size <= 2) goto range;
+        *p++ = drive[0];
+        *p++ = ':';
+        size -= 2;
+    }
+
+    if (directory && directory[0])
+    {
+        unsigned int len = wcslen(directory);
+        unsigned int needs_separator = directory[len - 1] != '/' && directory[len - 1] != '\\';
+        unsigned int copylen = min(size - 1, len);
+
+        if (size < 2) goto range;
+        memmove(p, directory, copylen * sizeof(wchar_t));
+        if (size <= len) goto range;
+        p += copylen;
+        size -= copylen;
+        if (needs_separator)
+        {
+            if (size < 2) goto range;
+            *p++ = '\\';
+            size -= 1;
+        }
+    }
+
+    if (filename && filename[0])
+    {
+        unsigned int len = wcslen(filename);
+        unsigned int copylen = min(size - 1, len);
+
+        if (size < 2) goto range;
+        memmove(p, filename, copylen * sizeof(wchar_t));
+        if (size <= len) goto range;
+        p += len;
+        size -= len;
+    }
+
+    if (extension && extension[0])
+    {
+        unsigned int len = wcslen(extension);
+        unsigned int needs_period = extension[0] != '.';
+        unsigned int copylen;
+
+        if (size < 2) goto range;
+        if (needs_period)
+        {
+            *p++ = '.';
+            size -= 1;
+        }
+        copylen = min(size - 1, len);
+        memcpy(p, extension, copylen * sizeof(wchar_t));
+        if (size <= len) goto range;
+        p += copylen;
+    }
+
+    *p = 0;
+    return 0;
+
+range:
+    path[0] = 0;
+    return ERANGE;
 }

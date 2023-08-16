@@ -18,8 +18,6 @@
 #ifndef _LMMSG_
 #define _LMMSG_
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -49,7 +47,5 @@ NET_API_STATUS NET_API_FUNCTION NetMessageNameGetInfo(LPCWSTR,LPCWSTR,DWORD,PBYT
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

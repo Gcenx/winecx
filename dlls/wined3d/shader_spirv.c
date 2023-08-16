@@ -613,7 +613,7 @@ static bool shader_spirv_resource_bindings_init(struct shader_spirv_resource_bin
         struct wined3d_shader_resource_bindings *wined3d_bindings,
         const struct wined3d_state *state, uint32_t shader_mask)
 {
-    struct vkd3d_shader_scan_descriptor_info *descriptor_info;
+    const struct vkd3d_shader_scan_descriptor_info *descriptor_info;
     enum wined3d_shader_descriptor_type wined3d_type;
     enum vkd3d_shader_visibility shader_visibility;
     enum wined3d_shader_type shader_type;
@@ -652,7 +652,7 @@ static bool shader_spirv_resource_bindings_init(struct shader_spirv_resource_bin
 
         for (i = 0; i < descriptor_info->descriptor_count; ++i)
         {
-            struct vkd3d_shader_descriptor_info *d = &descriptor_info->descriptors[i];
+            const struct vkd3d_shader_descriptor_info *d = &descriptor_info->descriptors[i];
             uint32_t flags;
 
             if (d->register_space)
@@ -1118,7 +1118,7 @@ static void spirv_vertex_pipe_vk_vp_get_caps(const struct wined3d_adapter *adapt
     caps->ffp_generic_attributes = TRUE;
 }
 
-static uint32_t spirv_vertex_pipe_vk_vp_get_emul_mask(const struct wined3d_gl_info *gl_info)
+static unsigned int spirv_vertex_pipe_vk_vp_get_emul_mask(const struct wined3d_gl_info *gl_info)
 {
     return 0;
 }
@@ -1194,7 +1194,7 @@ static void spirv_fragment_pipe_vk_fp_get_caps(const struct wined3d_adapter *ada
     memset(caps, 0, sizeof(*caps));
 }
 
-static uint32_t spirv_fragment_pipe_vk_fp_get_emul_mask(const struct wined3d_gl_info *gl_info)
+static unsigned int spirv_fragment_pipe_vk_fp_get_emul_mask(const struct wined3d_gl_info *gl_info)
 {
     return 0;
 }

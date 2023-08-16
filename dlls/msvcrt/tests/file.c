@@ -258,8 +258,21 @@ static void test_readmode( BOOL ascii_mode )
         write (fd, &padbuffer[i], 1);
     write (fd, nlbuffer, strlen(nlbuffer));
     write (fd, outbuffer, sizeof (outbuffer));
+
+    errno = 0xdeadbeef;
+    _doserrno = 0xdeadbeef;
+    ok(read(fd, buffer, 1) == -1, "read succeeded on write-only file\n");
+    ok(errno == EBADF, "errno = %d\n", errno);
+    ok(_doserrno == ERROR_ACCESS_DENIED, "doserrno = %ld\n", _doserrno);
+
     close (fd);
     
+    fd = open ("fdopen.tst", O_RDONLY, _S_IREAD |_S_IWRITE);
+    errno = 0xdeadbeef;
+    ok(dup2(fd, -1) == -1, "dup2(fd, -1) succeeded\n");
+    ok(errno == EBADF, "errno = %d\n", errno);
+    close (fd);
+
     if (ascii_mode) {
         /* Open file in ascii mode */
         fd = open ("fdopen.tst", O_RDONLY);
@@ -304,6 +317,12 @@ static void test_readmode( BOOL ascii_mode )
     ok(l == pl+fp,"line 2 ftell got %ld should be %d in %s\n", l, pl+fp, IOMODE);
     ok(lstrlenA(buffer) == 2+ao,"line 2 fgets got size %d should be %d in %s\n",
      lstrlenA(buffer), 2+ao, IOMODE);
+
+    errno = 0xdeadbeef;
+    _doserrno = 0xdeadbeef;
+    ok(write(fd, buffer, 1) == -1, "read succeeded on write-only file\n");
+    ok(errno == EBADF, "errno = %d\n", errno);
+    ok(_doserrno == ERROR_ACCESS_DENIED, "doserrno = %ld\n", _doserrno);
     
     /* test fread across buffer boundary */
     rewind(file);
@@ -1935,7 +1954,7 @@ static void test_fopen_fclose_fcloseall( void )
     ok(errno == 0xdeadbeef, "errno = %d\n", errno);
     ret = fclose(NULL);
     ok(ret == EOF, "Closing NULL file returned %d\n", ret);
-    ok(errno = EINVAL, "errno = %d\n", errno);
+    ok(errno == EINVAL, "errno = %d\n", errno);
 
     /* testing fcloseall() */
     numclosed = _fcloseall();

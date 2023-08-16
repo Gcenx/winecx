@@ -19,8 +19,6 @@
 #ifndef __WS2IPDEF__
 #define __WS2IPDEF__
 
-#include "wine/winheader_enter.h"
-
 #include <in6addr.h>
 
 #ifdef USE_WS_PREFIX
@@ -339,13 +337,43 @@ typedef struct WS(in6_pktinfo) {
 #ifndef USE_WS_PREFIX
 #define INET_ADDRSTRLEN         22
 #define INET6_ADDRSTRLEN        65
-#define IN6ADDR_ANY_INIT        { 0 }
-#define IN6ADDR_LOOPBACK_INIT   { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1 }
+#define IN6ADDR_6BONETESTPREFIX_INIT                    { 0x3f,0xfe,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define IN6ADDR_6TO4PREFIX_INIT                         { 0x20,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define IN6ADDR_ALLMLDV2ROUTERSONLINK_INIT              { 0xff,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0x16 }
+#define IN6ADDR_ALLNODESONLINK_INIT                     { 0xff,2,0,0,0,0,0,0,0,0,0,0,0,0,0,1 }
+#define IN6ADDR_ALLNODESONNODE_INIT                     { 0xff,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1 }
+#define IN6ADDR_ALLROUTERSONLINK_INIT                   { 0xff,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2 }
+#define IN6ADDR_ANY_INIT                                { 0 }
+#define IN6ADDR_LINKLOCALPREFIX_INIT                    { 0xfe,0x80,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define IN6ADDR_LOOPBACK_INIT                           { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1 }
+#define IN6ADDR_MULTICASTPREFIX_INIT                    { 0xff,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define IN6ADDR_SITELOCALPREFIX_INIT                    { 0xfe,0xc0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define IN6ADDR_SOLICITEDNODEMULTICASTPREFIX_INIT       { 0xff,2,0,0,0,0,0,0,0,0,0,0x01,0xff,0,0,0 }
+#define IN6ADDR_TEREDOINITIALLINKLOCALADDRESS_INIT      { 0xfe,0x80,0,0,0,0,0,0,0,0,0xff,0xff,0xff,0xff,0xff,0xfe }
+#define IN6ADDR_TEREDOPREFIX_INIT                       { 0x20,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define IN6ADDR_TEREDOPREFIX_INIT_OLD                   { 0x3f,0xfe,0x83,0x1f,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define IN6ADDR_ULAPREFIX_INIT                          { 0xfc,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define IN6ADDR_V4MAPPEDPREFIX_INIT                     { 0,0,0,0,0,0,0,0,0,0,0xff,0xff,0,0,0,0 }
 #else
 #define WS_INET_ADDRSTRLEN      22
 #define WS_INET6_ADDRSTRLEN     65
-#define WS_IN6ADDR_ANY_INIT     { 0 }
-#define WS_IN6ADDR_LOOPBACK_INIT { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1 }
+#define WS_IN6ADDR_6BONETESTPREFIX_INIT                 { 0x3f,0xfe,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define WS_IN6ADDR_6TO4PREFIX_INIT                      { 0x20,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define WS_IN6ADDR_ALLMLDV2ROUTERSONLINK_INIT           { 0xff,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0x16 }
+#define WS_IN6ADDR_ALLNODESONLINK_INIT                  { 0xff,2,0,0,0,0,0,0,0,0,0,0,0,0,0,1 }
+#define WS_IN6ADDR_ALLNODESONNODE_INIT                  { 0xff,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1 }
+#define WS_IN6ADDR_ALLROUTERSONLINK_INIT                { 0xff,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2 }
+#define WS_IN6ADDR_ANY_INIT                             { 0 }
+#define WS_IN6ADDR_LINKLOCALPREFIX_INIT                 { 0xfe,0x80,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define WS_IN6ADDR_LOOPBACK_INIT                        { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1 }
+#define WS_IN6ADDR_MULTICASTPREFIX_INIT                 { 0xff,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define WS_IN6ADDR_SITELOCALPREFIX_INIT                 { 0xfe,0xc0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define WS_IN6ADDR_SOLICITEDNODEMULTICASTPREFIX_INIT    { 0xff,2,0,0,0,0,0,0,0,0,0,0x01,0xff,0,0,0 }
+#define WS_IN6ADDR_TEREDOINITIALLINKLOCALADDRESS_INIT   { 0xfe,0x80,0,0,0,0,0,0,0,0,0xff,0xff,0xff,0xff,0xff,0xfe }
+#define WS_IN6ADDR_TEREDOPREFIX_INIT                    { 0x20,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define WS_IN6ADDR_TEREDOPREFIX_INIT_OLD                { 0x3f,0xfe,0x83,0x1f,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define WS_IN6ADDR_ULAPREFIX_INIT                       { 0xfc,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }
+#define WS_IN6ADDR_V4MAPPEDPREFIX_INIT                  { 0,0,0,0,0,0,0,0,0,0,0xff,0xff,0,0,0,0 }
 #endif /* USE_WS_PREFIX */
 
 #define SS_PORT(ssp) (((PSOCKADDR_IN)(ssp))->sin_port)
@@ -356,6 +384,32 @@ typedef struct WS(in6_pktinfo) {
 #else
 #define WS_SIO_IDEAL_SEND_BACKLOG_CHANGE WS__IO ('t', 122)
 #define WS_SIO_IDEAL_SEND_BACKLOG_QUERY  WS__IOR('t', 123, ULONG)
+#endif
+
+#ifndef USE_WS_PREFIX
+extern const IN_ADDR in4addr_alligmpv3routersonlink;
+extern const IN_ADDR in4addr_allnodesonlink;
+extern const IN_ADDR in4addr_allroutersonlink;
+extern const IN_ADDR in4addr_allteredohostsonlink;
+extern const IN_ADDR in4addr_any;
+extern const IN_ADDR in4addr_broadcast;
+extern const IN_ADDR in4addr_linklocalprefix;
+extern const IN_ADDR in4addr_loopback;
+extern const IN_ADDR in4addr_multicastprefix;
+extern const IN6_ADDR in6addr_6to4prefix;
+extern const IN6_ADDR in6addr_allmldv2routersonlink;
+extern const IN6_ADDR in6addr_allnodesonlink;
+extern const IN6_ADDR in6addr_allnodesonnode;
+extern const IN6_ADDR in6addr_allroutersonlink;
+extern const IN6_ADDR in6addr_any;
+extern const IN6_ADDR in6addr_linklocalprefix;
+extern const IN6_ADDR in6addr_loopback;
+extern const IN6_ADDR in6addr_multicastprefix;
+extern const IN6_ADDR in6addr_solicitednodemulticastprefix;
+extern const IN6_ADDR in6addr_teredoinitiallinklocaladdress;
+extern const IN6_ADDR in6addr_teredoprefix;
+extern const IN6_ADDR in6addr_teredoprefix_old;
+extern const IN6_ADDR in6addr_v4mappedprefix;
 #endif
 
 #ifdef __cplusplus
@@ -404,7 +458,5 @@ static inline BOOLEAN WS(IN6_IS_ADDR_SITELOCAL) ( const IN6_ADDR *a )
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WS2IPDEF__ */

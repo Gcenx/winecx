@@ -42,6 +42,7 @@ static HPROPSHEETPAGE (WINAPI *pCreatePropertySheetPageA)(const PROPSHEETPAGEA *
 static HPROPSHEETPAGE (WINAPI *pCreatePropertySheetPageW)(const PROPSHEETPAGEW *desc);
 static BOOL (WINAPI *pDestroyPropertySheetPage)(HPROPSHEETPAGE proppage);
 static INT_PTR (WINAPI *pPropertySheetA)(const PROPSHEETHEADERA *header);
+static INT_PTR (WINAPI *pPropertySheetW)(const PROPSHEETHEADERW *header);
 
 static BOOL (WINAPI *pIsThemeActive)(void);
 static BOOL (WINAPI *pIsThemeDialogTextureEnabled)(HWND);
@@ -112,10 +113,18 @@ static INT_PTR CALLBACK page_dlg_proc(HWND hwnd, UINT msg, WPARAM wparam,
     {
     case WM_INITDIALOG:
       {
+        PROPSHEETPAGEA *psp = (PROPSHEETPAGEA *)lparam;
         HWND sheet = GetParent(hwnd);
         char caption[256];
+
         GetWindowTextA(sheet, caption, sizeof(caption));
         ok(!strcmp(caption,"test caption"), "caption: %s\n", caption);
+
+        if (psp->dwFlags & PSP_USETITLE)
+        {
+            ok(!strcmp(psp->pszTitle, "page title"), "psp->pszTitle = %s\n",
+                    wine_dbgstr_a(psp->pszTitle));
+        }
         return TRUE;
       }
 
@@ -149,8 +158,9 @@ static void test_title(void)
 
     memset(&psp, 0, sizeof(psp));
     psp.dwSize = sizeof(psp);
-    psp.dwFlags = 0;
+    psp.dwFlags = PSP_USETITLE;
     psp.hInstance = GetModuleHandleA(NULL);
+    psp.pszTitle = "page title";
     U(psp).pszTemplate = "prop_page1";
     U2(psp).pszIcon = NULL;
     psp.pfnDlgProc = page_dlg_proc;
@@ -1026,6 +1036,7 @@ struct custom_proppage
         PROPSHEETPAGEA pageA;
         PROPSHEETPAGEW pageW;
     } u;
+    DWORD extra_data;
     unsigned int addref_called;
     unsigned int release_called;
 };
@@ -1039,8 +1050,17 @@ static UINT CALLBACK proppage_callback_a(HWND hwnd, UINT msg, PROPSHEETPAGEA *ps
 
     ok(psp->lParam && psp->lParam != (LPARAM)psp, "Expected newly allocated page description, got %Ix, %p\n",
             psp->lParam, psp);
-    ok(psp_orig->pszTitle == psp->pszTitle, "Expected same page title pointer\n");
+    if (psp->dwFlags & PSP_USETITLE)
+        ok(psp_orig->pszTitle != psp->pszTitle, "Expected different page title pointer\n");
+    else
+        ok(psp_orig->pszTitle == psp->pszTitle, "Expected same page title pointer\n");
     ok(!lstrcmpA(psp_orig->pszTitle, psp->pszTitle), "Expected same page title string\n");
+    if (psp->dwSize >= FIELD_OFFSET(struct custom_proppage, addref_called))
+    {
+        struct custom_proppage *extra_data = (struct custom_proppage *)psp;
+        ok(extra_data->extra_data == 0x1234, "Expected extra_data to be preserved, got %lx\n",
+                extra_data->extra_data);
+    }
 
     switch (msg)
     {
@@ -1069,6 +1089,12 @@ static UINT CALLBACK proppage_callback_w(HWND hwnd, UINT msg, PROPSHEETPAGEW *ps
             psp->lParam, psp);
     ok(psp_orig->pszTitle == psp->pszTitle, "Expected same page title pointer\n");
     ok(!lstrcmpW(psp_orig->pszTitle, psp->pszTitle), "Expected same page title string\n");
+    if (psp->dwSize >= FIELD_OFFSET(struct custom_proppage, addref_called))
+    {
+        struct custom_proppage *extra_data = (struct custom_proppage *)psp;
+        ok(extra_data->extra_data == 0x4321, "Expected extra_data to be preserved, got %lx\n",
+                extra_data->extra_data);
+    }
 
     switch (msg)
     {
@@ -1101,8 +1127,11 @@ static void test_CreatePropertySheetPage(void)
     page.u.pageA.pszTitle = "Title";
 
     /* Only minimal size validation is performed */
-    for (page.u.pageA.dwSize = PROPSHEETPAGEA_V1_SIZE - 1; page.u.pageA.dwSize <= PROPSHEETPAGEA_V4_SIZE + 1; page.u.pageA.dwSize++)
+    for (page.u.pageA.dwSize = PROPSHEETPAGEA_V1_SIZE - 1;
+            page.u.pageA.dwSize <= FIELD_OFFSET(struct custom_proppage, addref_called);
+            page.u.pageA.dwSize++)
     {
+        page.extra_data = 0x1234;
         page.addref_called = 0;
         hpsp = pCreatePropertySheetPageA(&page.u.pageA);
 
@@ -1123,6 +1152,17 @@ static void test_CreatePropertySheetPage(void)
         }
     }
 
+    page.u.pageA.dwSize = sizeof(PROPSHEETPAGEA);
+    page.u.pageA.dwFlags |= PSP_USETITLE;
+    page.addref_called = 0;
+    hpsp = pCreatePropertySheetPageA(&page.u.pageA);
+    ok(hpsp != NULL, "Failed to create a page, size %lu\n", page.u.pageA.dwSize);
+    ok(page.addref_called == 1, "Expected ADDREF callback message\n");
+    page.release_called = 0;
+    ret = pDestroyPropertySheetPage(hpsp);
+    ok(ret, "Failed to destroy a page\n");
+    ok(page.release_called == 1, "Expected RELEASE callback message\n");
+
     memset(&page.u.pageW, 0, sizeof(page.u.pageW));
     page.u.pageW.dwFlags = PSP_USECALLBACK;
     page.u.pageW.pfnDlgProc = page_dlg_proc_messages;
@@ -1130,8 +1170,11 @@ static void test_CreatePropertySheetPage(void)
     page.u.pageW.lParam = (LPARAM)&page;
     page.u.pageW.pszTitle = L"Title";
 
-    for (page.u.pageW.dwSize = PROPSHEETPAGEW_V1_SIZE - 1; page.u.pageW.dwSize <= PROPSHEETPAGEW_V4_SIZE + 1; page.u.pageW.dwSize++)
+    for (page.u.pageW.dwSize = PROPSHEETPAGEW_V1_SIZE - 1;
+            page.u.pageW.dwSize <= FIELD_OFFSET(struct custom_proppage, addref_called);
+            page.u.pageW.dwSize++)
     {
+        page.extra_data = 0x4321;
         page.addref_called = 0;
         hpsp = pCreatePropertySheetPageW(&page.u.pageW);
 
@@ -1259,6 +1302,92 @@ static void test_page_dialog_texture(void)
     DestroyWindow(hdlg);
 }
 
+static void test_invalid_hpropsheetpage(void)
+{
+    BYTE buf_pspW[sizeof(ULONG_PTR) + sizeof(PROPSHEETPAGEW)];
+    BYTE buf_psp[sizeof(ULONG_PTR) + sizeof(PROPSHEETPAGEA)];
+    HPROPSHEETPAGE hpsp[1];
+    PROPSHEETHEADERW pshW;
+    PROPSHEETHEADERA psh;
+    PROPSHEETPAGEW *pspW;
+    PROPSHEETPAGEA *psp;
+    LRESULT ret;
+    HWND hdlg;
+
+    /* LocalSize throws exception on misaligned pointers (x86_64). */
+    psp = (PROPSHEETPAGEA *)((ULONG_PTR)buf_psp & 0xf ? buf_psp : buf_psp + sizeof(ULONG_PTR));
+    pspW = (PROPSHEETPAGEW *)((ULONG_PTR)buf_pspW & 0xf ? buf_pspW : buf_pspW + sizeof(ULONG_PTR));
+
+    memset(psp, 0, sizeof(*psp));
+    psp->dwSize = sizeof(*psp);
+    psp->hInstance = GetModuleHandleA(NULL);
+    U(psp)->pszTemplate = "prop_page1";
+    U2(psp)->pszIcon = NULL;
+    psp->pfnDlgProc = page_dlg_proc;
+    psp->lParam = 0;
+
+    /* Pass PROPSHEETPAGEA* instead of HPROPSHEETPAGE */
+    hpsp[0] = (HPROPSHEETPAGE)psp;
+
+    memset(&psh, 0, sizeof(psh));
+    psh.dwSize = sizeof(psh);
+    psh.dwFlags = PSH_MODELESS | PSH_USECALLBACK;
+    psh.pszCaption = "test caption";
+    psh.nPages = 1;
+    psh.hwndParent = GetDesktopWindow();
+    U3(psh).phpage = hpsp;
+    psh.pfnCallback = sheet_callback;
+
+    hdlg = (HWND)pPropertySheetA(&psh);
+    ok(hdlg != INVALID_HANDLE_VALUE, "got invalid handle value %p\n", hdlg);
+
+    ret = SendMessageA(hdlg, PSM_INDEXTOPAGE, 0, 0);
+    ok(ret, "page was not created\n");
+    ok((HPROPSHEETPAGE)ret != hpsp[0], "invalid HPROPSHEETPAGE was preserved\n");
+    DestroyWindow(hdlg);
+
+    memset(pspW, 0, sizeof(*pspW));
+    pspW->dwSize = sizeof(*pspW);
+    pspW->hInstance = GetModuleHandleA(NULL);
+    U(pspW)->pszTemplate = L"prop_page1";
+    U2(pspW)->pszIcon = NULL;
+    pspW->pfnDlgProc = page_dlg_proc;
+    pspW->lParam = 0;
+
+    /* Pass PROPSHEETPAGEW* instead of HPROPSHEETPAGE */
+    hpsp[0] = (HPROPSHEETPAGE)pspW;
+
+    hdlg = (HWND)pPropertySheetA(&psh);
+    ok(hdlg != INVALID_HANDLE_VALUE, "got invalid handle value %p\n", hdlg);
+
+    ok(!SendMessageA(hdlg, PSM_INDEXTOPAGE, 0, 0), "there should be no pages\n");
+    /* Pass PROPSHEETPAGE[AW]* instead of HPROPSHEETPAGE */
+    ok(!SendMessageW(hdlg, PSM_ADDPAGE, 0, (LPARAM)pspW), "PSM_ADDPAGE succeeded\n");
+    ok(SendMessageW(hdlg, PSM_ADDPAGE, 0, (LPARAM)psp), "PSM_ADDPAGE failed\n");
+    ok(SendMessageA(hdlg, PSM_INDEXTOPAGE, 0, 0), "no pages after PSM_ADDPAGE\n");
+    DestroyWindow(hdlg);
+
+    /* Pass PROPSHEETPAGEW* instead of HPROPSHEETPAGE */
+    hpsp[0] = (HPROPSHEETPAGE)pspW;
+
+    memset(&pshW, 0, sizeof(pshW));
+    pshW.dwSize = sizeof(pshW);
+    pshW.dwFlags = PSH_MODELESS | PSH_USECALLBACK;
+    pshW.pszCaption = L"test caption";
+    pshW.nPages = 1;
+    pshW.hwndParent = GetDesktopWindow();
+    U3(pshW).phpage = hpsp;
+    pshW.pfnCallback = sheet_callback;
+
+    hdlg = (HWND)pPropertySheetW(&pshW);
+    ok(hdlg != INVALID_HANDLE_VALUE, "got invalid handle value %p\n", hdlg);
+
+    ret = SendMessageA(hdlg, PSM_INDEXTOPAGE, 0, 0);
+    ok(ret, "page was not created\n");
+    ok((HPROPSHEETPAGE)ret != hpsp[0], "invalid HPROPSHEETPAGE was preserved\n");
+    DestroyWindow(hdlg);
+}
+
 static void init_comctl32_functions(void)
 {
     HMODULE hComCtl32 = LoadLibraryA("comctl32.dll");
@@ -1268,6 +1397,7 @@ static void init_comctl32_functions(void)
     X(CreatePropertySheetPageW);
     X(DestroyPropertySheetPage);
     X(PropertySheetA);
+    X(PropertySheetW);
 #undef X
 }
 
@@ -1311,6 +1441,7 @@ START_TEST(propsheet)
     test_PSM_INSERTPAGE();
     test_CreatePropertySheetPage();
     test_page_dialog_texture();
+    test_invalid_hpropsheetpage();
 
     if (!load_v6_module(&ctx_cookie, &ctx))
         return;

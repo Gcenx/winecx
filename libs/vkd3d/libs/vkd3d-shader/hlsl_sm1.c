@@ -159,8 +159,7 @@ static D3DXPARAMETER_CLASS sm1_class(const struct hlsl_type *type)
             return D3DXPC_VECTOR;
         default:
             ERR("Invalid class %#x.\n", type->type);
-            assert(0);
-            return 0;
+            vkd3d_unreachable();
     }
 }
 
@@ -193,6 +192,7 @@ static D3DXPARAMETER_TYPE sm1_base_type(const struct hlsl_type *type)
                     return D3DXPT_SAMPLER;
                 default:
                     ERR("Invalid dimension %#x.\n", type->sampler_dim);
+                    vkd3d_unreachable();
             }
             break;
         case HLSL_TYPE_STRING:
@@ -212,6 +212,7 @@ static D3DXPARAMETER_TYPE sm1_base_type(const struct hlsl_type *type)
                     return D3DXPT_TEXTURE;
                 default:
                     ERR("Invalid dimension %#x.\n", type->sampler_dim);
+                    vkd3d_unreachable();
             }
             break;
         case HLSL_TYPE_VERTEXSHADER:
@@ -219,10 +220,8 @@ static D3DXPARAMETER_TYPE sm1_base_type(const struct hlsl_type *type)
         case HLSL_TYPE_VOID:
             return D3DXPT_VOID;
         default:
-            assert(0);
+            vkd3d_unreachable();
     }
-    assert(0);
-    return 0;
 }
 
 static const struct hlsl_type *get_array_type(const struct hlsl_type *type)
@@ -243,32 +242,37 @@ static void write_sm1_type(struct vkd3d_bytecode_buffer *buffer, struct hlsl_typ
 {
     const struct hlsl_type *array_type = get_array_type(type);
     unsigned int array_size = get_array_size(type);
-    struct hlsl_struct_field *field;
     unsigned int field_count = 0;
     size_t fields_offset = 0;
+    size_t i;
 
     if (type->bytecode_offset)
         return;
 
     if (array_type->type == HLSL_CLASS_STRUCT)
     {
-        LIST_FOR_EACH_ENTRY(field, array_type->e.elements, struct hlsl_struct_field, entry)
+        field_count = array_type->e.record.field_count;
+
+        for (i = 0; i < field_count; ++i)
         {
+            struct hlsl_struct_field *field = &array_type->e.record.fields[i];
+
             field->name_bytecode_offset = put_string(buffer, field->name);
             write_sm1_type(buffer, field->type, ctab_start);
         }
 
         fields_offset = bytecode_get_size(buffer) - ctab_start;
 
-        LIST_FOR_EACH_ENTRY(field, array_type->e.elements, struct hlsl_struct_field, entry)
+        for (i = 0; i < field_count; ++i)
         {
+            struct hlsl_struct_field *field = &array_type->e.record.fields[i];
+
             put_u32(buffer, field->name_bytecode_offset - ctab_start);
             put_u32(buffer, field->type->bytecode_offset - ctab_start);
-            ++field_count;
         }
     }
 
-    type->bytecode_offset = put_u32(buffer, vkd3d_make_u32(sm1_class(type), sm1_base_type(type)));
+    type->bytecode_offset = put_u32(buffer, vkd3d_make_u32(sm1_class(type), sm1_base_type(array_type)));
     put_u32(buffer, vkd3d_make_u32(type->dimy, type->dimx));
     put_u32(buffer, vkd3d_make_u32(array_size, field_count));
     put_u32(buffer, fields_offset);

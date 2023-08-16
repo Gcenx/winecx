@@ -96,6 +96,7 @@ static const WCHAR Capabilities[] = {'C','a','p','a','b','i','l','i','t','i','e'
 static const WCHAR UINumber[] = {'U','I','N','u','m','b','e','r',0};
 static const WCHAR UpperFilters[] = {'U','p','p','e','r','F','i','l','t','e','r','s',0};
 static const WCHAR LowerFilters[] = {'L','o','w','e','r','F','i','l','t','e','r','s',0};
+static const WCHAR ContainerId[] = {'C','o','n','t','a','i','n','e','r','I','d',0};
 static const WCHAR Phantom[] = {'P','h','a','n','t','o','m',0};
 static const WCHAR SymbolicLink[] = {'S','y','m','b','o','l','i','c','L','i','n','k',0};
 static const WCHAR Control[] = {'C','o','n','t','r','o','l',0};
@@ -654,6 +655,7 @@ static const struct PropertyMapEntry PropertyMap[] = {
     { REG_DWORD, "UINumber", UINumber },
     { REG_MULTI_SZ, "UpperFilters", UpperFilters },
     { REG_MULTI_SZ, "LowerFilters", LowerFilters },
+    [SPDRP_BASE_CONTAINERID] = { REG_SZ, "ContainerId", ContainerId },
 };
 
 static BOOL SETUPDI_SetDeviceRegistryPropertyW(struct device *device,
@@ -2974,15 +2976,15 @@ BOOL WINAPI SetupDiDestroyDeviceInfoList(HDEVINFO devinfo)
  */
 BOOL WINAPI SetupDiGetDeviceInterfaceDetailA(HDEVINFO devinfo, SP_DEVICE_INTERFACE_DATA *iface_data,
         SP_DEVICE_INTERFACE_DETAIL_DATA_A *DeviceInterfaceDetailData,
-        DWORD DeviceInterfaceDetailDataSize, DWORD *RequiredSize, SP_DEVINFO_DATA *device_data)
+        DWORD DeviceInterfaceDetailDataSize, DWORD *ret_size, SP_DEVINFO_DATA *device_data)
 {
     struct device_iface *iface;
     DWORD bytesNeeded = FIELD_OFFSET(SP_DEVICE_INTERFACE_DETAIL_DATA_A, DevicePath[1]);
     BOOL ret = FALSE;
 
-    TRACE("devinfo %p, iface_data %p, detail_data %p, size %ld, needed %p, device_data %p.\n",
+    TRACE("devinfo %p, iface_data %p, detail_data %p, size %ld, ret_size %p, device_data %p.\n",
             devinfo, iface_data, DeviceInterfaceDetailData, DeviceInterfaceDetailDataSize,
-            RequiredSize, device_data);
+            ret_size, device_data);
 
     if (!(iface = get_device_iface(devinfo, iface_data)))
         return FALSE;
@@ -3001,7 +3003,11 @@ BOOL WINAPI SetupDiGetDeviceInterfaceDetailA(HDEVINFO devinfo, SP_DEVICE_INTERFA
 
     if (iface->symlink)
         bytesNeeded += WideCharToMultiByte(CP_ACP, 0, iface->symlink, -1,
-                NULL, 0, NULL, NULL);
+                NULL, 0, NULL, NULL) - 1;
+
+    if (ret_size)
+        *ret_size = bytesNeeded;
+
     if (DeviceInterfaceDetailDataSize >= bytesNeeded)
     {
         if (iface->symlink)
@@ -3017,8 +3023,6 @@ BOOL WINAPI SetupDiGetDeviceInterfaceDetailA(HDEVINFO devinfo, SP_DEVICE_INTERFA
     }
     else
     {
-        if (RequiredSize)
-            *RequiredSize = bytesNeeded;
         SetLastError(ERROR_INSUFFICIENT_BUFFER);
     }
 
@@ -3033,16 +3037,16 @@ BOOL WINAPI SetupDiGetDeviceInterfaceDetailA(HDEVINFO devinfo, SP_DEVICE_INTERFA
  */
 BOOL WINAPI SetupDiGetDeviceInterfaceDetailW(HDEVINFO devinfo, SP_DEVICE_INTERFACE_DATA *iface_data,
         SP_DEVICE_INTERFACE_DETAIL_DATA_W *DeviceInterfaceDetailData,
-        DWORD DeviceInterfaceDetailDataSize, DWORD *RequiredSize, SP_DEVINFO_DATA *device_data)
+        DWORD DeviceInterfaceDetailDataSize, DWORD *ret_size, SP_DEVINFO_DATA *device_data)
 {
     struct device_iface *iface;
     DWORD bytesNeeded = offsetof(SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath)
         + sizeof(WCHAR); /* include NULL terminator */
     BOOL ret = FALSE;
 
-    TRACE("devinfo %p, iface_data %p, detail_data %p, size %ld, needed %p, device_data %p.\n",
+    TRACE("devinfo %p, iface_data %p, detail_data %p, size %ld, ret_size %p, device_data %p.\n",
             devinfo, iface_data, DeviceInterfaceDetailData, DeviceInterfaceDetailDataSize,
-            RequiredSize, device_data);
+            ret_size, device_data);
 
     if (!(iface = get_device_iface(devinfo, iface_data)))
         return FALSE;
@@ -3062,6 +3066,10 @@ BOOL WINAPI SetupDiGetDeviceInterfaceDetailW(HDEVINFO devinfo, SP_DEVICE_INTERFA
 
     if (iface->symlink)
         bytesNeeded += sizeof(WCHAR) * lstrlenW(iface->symlink);
+
+    if (ret_size)
+        *ret_size = bytesNeeded;
+
     if (DeviceInterfaceDetailDataSize >= bytesNeeded)
     {
         if (iface->symlink)
@@ -3073,8 +3081,6 @@ BOOL WINAPI SetupDiGetDeviceInterfaceDetailW(HDEVINFO devinfo, SP_DEVICE_INTERFA
     }
     else
     {
-        if (RequiredSize)
-            *RequiredSize = bytesNeeded;
         SetLastError(ERROR_INSUFFICIENT_BUFFER);
     }
 
@@ -5157,6 +5163,7 @@ BOOL WINAPI SetupDiInstallDevice(HDEVINFO devinfo, SP_DEVINFO_DATA *device_data)
     static const WCHAR addserviceW[] = {'A','d','d','S','e','r','v','i','c','e',0};
     static const WCHAR rootW[] = {'r','o','o','t','\\',0};
     WCHAR section_ext[LINE_LEN], subsection[LINE_LEN], inf_path[MAX_PATH], *extptr, *filepart;
+    static const DWORD config_flags = 0;
     UINT install_flags = SPINST_ALL;
     HKEY driver_key, device_key;
     SC_HANDLE manager, service;
@@ -5203,6 +5210,10 @@ BOOL WINAPI SetupDiInstallDevice(HDEVINFO devinfo, SP_DEVINFO_DATA *device_data)
         SetupCloseInfFile(hinf);
         return FALSE;
     }
+
+    if (!SETUPDI_SetDeviceRegistryPropertyW(device, SPDRP_CONFIGFLAGS,
+            (BYTE *)&config_flags, sizeof(config_flags)))
+        ERR("Failed to set config flags, error %#lx.\n", GetLastError());
 
     if (device->params.Flags & DI_NOFILECOPY)
         install_flags &= ~SPINST_FILES;

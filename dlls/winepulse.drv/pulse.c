@@ -2,6 +2,7 @@
  * Copyright 2011-2012 Maarten Lankhorst
  * Copyright 2010-2011 Maarten Lankhorst for CodeWeavers
  * Copyright 2011 Andrew Eikum for CodeWeavers
+ * Copyright 2022 Huw Davies
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -37,11 +38,19 @@
 #include "initguid.h"
 #include "audioclient.h"
 
-#include "unixlib.h"
-
 #include "wine/debug.h"
+#include "wine/list.h"
+#include "wine/unixlib.h"
+
+#include "../mmdevapi/unixlib.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(pulse);
+
+enum phys_device_bus_type {
+    phys_device_bus_invalid = -1,
+    phys_device_bus_pci,
+    phys_device_bus_usb
+};
 
 struct pulse_stream
 {
@@ -56,6 +65,8 @@ struct pulse_stream
     AUDCLNT_SHAREMODE share;
     HANDLE event;
     float vol[PA_CHANNELS_MAX];
+
+    REFERENCE_TIME def_period;
 
     INT32 locked;
     BOOL started;
@@ -87,17 +98,15 @@ typedef struct _PhysDevice {
     enum phys_device_bus_type bus_type;
     USHORT vendor_id, product_id;
     EndpointFormFactor form;
-    DWORD channel_mask;
+    UINT channel_mask;
     UINT index;
+    REFERENCE_TIME min_period, def_period;
+    WAVEFORMATEXTENSIBLE fmt;
     char pulse_name[0];
 } PhysDevice;
 
 static pa_context *pulse_ctx;
 static pa_mainloop *pulse_ml;
-
-/* Mixer format + period times */
-static WAVEFORMATEXTENSIBLE pulse_fmt[2];
-static REFERENCE_TIME pulse_min_period[2], pulse_def_period[2];
 
 static struct list g_phys_speakers = LIST_INIT(g_phys_speakers);
 static struct list g_phys_sources = LIST_INIT(g_phys_sources);
@@ -252,7 +261,7 @@ static NTSTATUS pulse_get_endpoint_ids(void *args)
     struct get_endpoint_ids_params *params = args;
     struct list *list = (params->flow == eRender) ? &g_phys_speakers : &g_phys_sources;
     struct endpoint *endpoint = params->endpoints;
-    DWORD len, name_len, needed;
+    size_t len, name_len, needed;
     unsigned int offset;
     PhysDevice *dev;
 
@@ -268,7 +277,7 @@ static NTSTATUS pulse_get_endpoint_ids(void *args)
             endpoint->name = offset;
             memcpy((char *)params->endpoints + offset, dev->name, name_len * sizeof(WCHAR));
             offset += name_len * sizeof(WCHAR);
-            endpoint->pulse_name = offset;
+            endpoint->device = offset;
             memcpy((char *)params->endpoints + offset, dev->pulse_name, len);
             offset += (len + 1) & ~1;
             endpoint++;
@@ -354,6 +363,8 @@ static BOOL pulse_stream_valid(struct pulse_stream *stream)
 
 static HRESULT pulse_connect(const char *name)
 {
+    pa_context_state_t state;
+
     if (pulse_ctx && PA_CONTEXT_IS_GOOD(pa_context_get_state(pulse_ctx)))
         return S_OK;
     if (pulse_ctx)
@@ -372,15 +383,12 @@ static HRESULT pulse_connect(const char *name)
         goto fail;
 
     /* Wait for connection */
-    while (pulse_cond_wait()) {
-        pa_context_state_t state = pa_context_get_state(pulse_ctx);
+    while ((state = pa_context_get_state(pulse_ctx)) != PA_CONTEXT_READY &&
+           state != PA_CONTEXT_FAILED && state != PA_CONTEXT_TERMINATED)
+        pulse_cond_wait();
 
-        if (state == PA_CONTEXT_FAILED || state == PA_CONTEXT_TERMINATED)
-            goto fail;
-
-        if (state == PA_CONTEXT_READY)
-            break;
-    }
+    if (state != PA_CONTEXT_READY)
+        goto fail;
 
     TRACE("Connected to server %s with protocol version: %i.\n",
         pa_context_get_server(pulse_ctx),
@@ -393,10 +401,10 @@ fail:
     return E_FAIL;
 }
 
-static DWORD pulse_channel_map_to_channel_mask(const pa_channel_map *map)
+static UINT pulse_channel_map_to_channel_mask(const pa_channel_map *map)
 {
     int i;
-    DWORD mask = 0;
+    UINT mask = 0;
 
     for (i = 0; i < map->channels; ++i) {
         switch (map->map[i]) {
@@ -426,6 +434,81 @@ static DWORD pulse_channel_map_to_channel_mask(const pa_channel_map *map)
     return mask;
 }
 
+#define MAX_DEVICE_NAME_LEN 62
+
+static WCHAR *get_device_name(const char *desc, pa_proplist *proplist)
+{
+    /*
+       Some broken apps (e.g. Split/Second with fmodex) can't handle names that
+       are too long and crash even on native. If the device desc is too long,
+       we'll attempt to incrementally build it to try to stay under the limit.
+       ( + 1 is to check against truncated buffer after ntdll_umbstowcs )
+    */
+    WCHAR buf[MAX_DEVICE_NAME_LEN + 1];
+
+    /* For monitors of sinks; this does not seem to be localized in PA either */
+    static const WCHAR monitor_of[] = {'M','o','n','i','t','o','r',' ','o','f',' '};
+
+    size_t len = strlen(desc);
+    WCHAR *name, *tmp;
+
+    if (!(name = malloc((len + 1) * sizeof(WCHAR))))
+        return NULL;
+    if (!(len = ntdll_umbstowcs(desc, len, name, len))) {
+        free(name);
+        return NULL;
+    }
+
+    if (len > MAX_DEVICE_NAME_LEN && proplist) {
+        const char *prop = pa_proplist_gets(proplist, PA_PROP_DEVICE_CLASS);
+        unsigned prop_len, rem = ARRAY_SIZE(buf);
+        BOOL monitor = FALSE;
+
+        if (prop && !strcmp(prop, "monitor")) {
+            rem -= ARRAY_SIZE(monitor_of);
+            monitor = TRUE;
+        }
+
+        prop = pa_proplist_gets(proplist, PA_PROP_DEVICE_PRODUCT_NAME);
+        if (!prop || !prop[0] ||
+            !(prop_len = ntdll_umbstowcs(prop, strlen(prop), buf, rem)) || prop_len == rem) {
+            prop = pa_proplist_gets(proplist, "alsa.card_name");
+            if (!prop || !prop[0] ||
+                !(prop_len = ntdll_umbstowcs(prop, strlen(prop), buf, rem)) || prop_len == rem)
+                prop = NULL;
+        }
+
+        if (prop) {
+            /* We know we have a name that fits within the limit now */
+            WCHAR *p = name;
+
+            if (monitor) {
+                memcpy(p, monitor_of, sizeof(monitor_of));
+                p += ARRAY_SIZE(monitor_of);
+            }
+            len = ntdll_umbstowcs(prop, strlen(prop), p, rem);
+            rem -= len;
+            p += len;
+
+            if (rem > 2) {
+                rem--;  /* space */
+
+                prop = pa_proplist_gets(proplist, PA_PROP_DEVICE_PROFILE_DESCRIPTION);
+                if (prop && prop[0] && (len = ntdll_umbstowcs(prop, strlen(prop), p + 1, rem)) && len != rem) {
+                    *p++ = ' ';
+                    p += len;
+                }
+            }
+            len = p - name;
+        }
+    }
+    name[len] = '\0';
+
+    if ((tmp = realloc(name, (len + 1) * sizeof(WCHAR))))
+        name = tmp;
+    return name;
+}
+
 static void fill_device_info(PhysDevice *dev, pa_proplist *p)
 {
     const char *buffer;
@@ -452,40 +535,35 @@ static void fill_device_info(PhysDevice *dev, pa_proplist *p)
 }
 
 static void pulse_add_device(struct list *list, pa_proplist *proplist, int index, EndpointFormFactor form,
-        DWORD channel_mask, const char *pulse_name, const char *name)
+                             UINT channel_mask, const char *pulse_name, const char *desc)
 {
-    DWORD len = strlen(pulse_name), name_len = strlen(name);
+    size_t len = strlen(pulse_name);
     PhysDevice *dev = malloc(FIELD_OFFSET(PhysDevice, pulse_name[len + 1]));
-    WCHAR *wname;
 
     if (!dev)
         return;
 
-    if (!(wname = malloc((name_len + 1) * sizeof(WCHAR)))) {
+    if (!(dev->name = get_device_name(desc, proplist))) {
         free(dev);
         return;
     }
-
-    if (!(name_len = ntdll_umbstowcs(name, name_len, wname, name_len)) ||
-        !(dev->name = realloc(wname, (name_len + 1) * sizeof(WCHAR)))) {
-        free(wname);
-        free(dev);
-        return;
-    }
-    dev->name[name_len] = 0;
     dev->form = form;
     dev->index = index;
     dev->channel_mask = channel_mask;
+    dev->def_period = 0;
+    dev->min_period = 0;
     fill_device_info(dev, proplist);
     memcpy(dev->pulse_name, pulse_name, len + 1);
 
     list_add_tail(list, &dev->entry);
+
+    TRACE("%s\n", debugstr_w(dev->name));
 }
 
 static void pulse_phys_speakers_cb(pa_context *c, const pa_sink_info *i, int eol, void *userdata)
 {
     struct list *speaker;
-    DWORD channel_mask;
+    UINT channel_mask;
 
     if (!i || !i->name || !i->name[0])
         return;
@@ -516,7 +594,7 @@ static void pulse_phys_sources_cb(pa_context *c, const pa_source_info *i, int eo
  * would report for a given channel layout. */
 static void convert_channel_map(const pa_channel_map *pa_map, WAVEFORMATEXTENSIBLE *fmt)
 {
-    DWORD pa_mask = pulse_channel_map_to_channel_mask(pa_map);
+    UINT pa_mask = pulse_channel_map_to_channel_mask(pa_map);
 
     TRACE("got mask for PA: 0x%x\n", pa_mask);
 
@@ -591,7 +669,8 @@ static void convert_channel_map(const pa_channel_map *pa_map, WAVEFORMATEXTENSIB
     fmt->dwChannelMask = pa_mask;
 }
 
-static void pulse_probe_settings(int render, WAVEFORMATEXTENSIBLE *fmt) {
+static void pulse_probe_settings(int render, const char *pulse_name, WAVEFORMATEXTENSIBLE *fmt, REFERENCE_TIME *def_period, REFERENCE_TIME *min_period)
+{
     WAVEFORMATEX *wfx = &fmt->Format;
     pa_stream *stream;
     pa_channel_map map;
@@ -599,6 +678,9 @@ static void pulse_probe_settings(int render, WAVEFORMATEXTENSIBLE *fmt) {
     pa_buffer_attr attr;
     int ret;
     unsigned int length = 0;
+
+    if (pulse_name && !pulse_name[0])
+        pulse_name = NULL;
 
     pa_channel_map_init_auto(&map, 2, PA_CHANNEL_MAP_ALSA);
     ss.rate = 48000;
@@ -616,10 +698,10 @@ static void pulse_probe_settings(int render, WAVEFORMATEXTENSIBLE *fmt) {
     if (!stream)
         ret = -1;
     else if (render)
-        ret = pa_stream_connect_playback(stream, NULL, &attr,
+        ret = pa_stream_connect_playback(stream, pulse_name, &attr,
         PA_STREAM_START_CORKED|PA_STREAM_FIX_RATE|PA_STREAM_FIX_CHANNELS|PA_STREAM_EARLY_REQUESTS, NULL, NULL);
     else
-        ret = pa_stream_connect_record(stream, NULL, &attr, PA_STREAM_START_CORKED|PA_STREAM_FIX_RATE|PA_STREAM_FIX_CHANNELS|PA_STREAM_EARLY_REQUESTS);
+        ret = pa_stream_connect_record(stream, pulse_name, &attr, PA_STREAM_START_CORKED|PA_STREAM_FIX_RATE|PA_STREAM_FIX_CHANNELS|PA_STREAM_EARLY_REQUESTS);
     if (ret >= 0) {
         while (pa_mainloop_iterate(pulse_ml, 1, &ret) >= 0 &&
                 pa_stream_get_state(stream) == PA_STREAM_CREATING)
@@ -642,13 +724,13 @@ static void pulse_probe_settings(int render, WAVEFORMATEXTENSIBLE *fmt) {
         pa_stream_unref(stream);
 
     if (length)
-        pulse_def_period[!render] = pulse_min_period[!render] = pa_bytes_to_usec(10 * length, &ss);
+        *def_period = *min_period = pa_bytes_to_usec(10 * length, &ss);
 
-    if (pulse_min_period[!render] < MinimumPeriod)
-        pulse_min_period[!render] = MinimumPeriod;
+    if (*min_period < MinimumPeriod)
+        *min_period = MinimumPeriod;
 
-    if (pulse_def_period[!render] < DefaultPeriod)
-        pulse_def_period[!render] = DefaultPeriod;
+    if (*def_period < DefaultPeriod)
+        *def_period = DefaultPeriod;
 
     wfx->wFormatTag = WAVE_FORMAT_EXTENSIBLE;
     wfx->cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
@@ -676,7 +758,7 @@ static void pulse_probe_settings(int render, WAVEFORMATEXTENSIBLE *fmt) {
 static NTSTATUS pulse_test_connect(void *args)
 {
     struct test_connect_params *params = args;
-    struct pulse_config *config = params->config;
+    PhysDevice *dev;
     pa_operation *o;
     int ret;
 
@@ -691,7 +773,7 @@ static NTSTATUS pulse_test_connect(void *args)
         pa_mainloop_free(pulse_ml);
         pulse_ml = NULL;
         pulse_unlock();
-        params->result = E_FAIL;
+        params->priority = Priority_Unavailable;
         return STATUS_SUCCESS;
     }
 
@@ -719,9 +801,6 @@ static NTSTATUS pulse_test_connect(void *args)
         pa_context_get_server(pulse_ctx),
         pa_context_get_server_protocol_version(pulse_ctx));
 
-    pulse_probe_settings(1, &pulse_fmt[0]);
-    pulse_probe_settings(0, &pulse_fmt[1]);
-
     free_phys_device_lists();
     list_init(&g_phys_speakers);
     list_init(&g_phys_sources);
@@ -745,21 +824,22 @@ static NTSTATUS pulse_test_connect(void *args)
         pa_operation_unref(o);
     }
 
+    LIST_FOR_EACH_ENTRY(dev, &g_phys_speakers, PhysDevice, entry) {
+        pulse_probe_settings(1, dev->pulse_name, &dev->fmt, &dev->def_period, &dev->min_period);
+    }
+
+    LIST_FOR_EACH_ENTRY(dev, &g_phys_sources, PhysDevice, entry) {
+        pulse_probe_settings(0, dev->pulse_name, &dev->fmt, &dev->def_period, &dev->min_period);
+    }
+
     pa_context_unref(pulse_ctx);
     pulse_ctx = NULL;
     pa_mainloop_free(pulse_ml);
     pulse_ml = NULL;
 
-    config->modes[0].format = pulse_fmt[0];
-    config->modes[0].def_period = pulse_def_period[0];
-    config->modes[0].min_period = pulse_min_period[0];
-    config->modes[1].format = pulse_fmt[1];
-    config->modes[1].def_period = pulse_def_period[1];
-    config->modes[1].min_period = pulse_min_period[1];
-
     pulse_unlock();
 
-    params->result = S_OK;
+    params->priority = Priority_Preferred;
     return STATUS_SUCCESS;
 
 fail:
@@ -768,11 +848,11 @@ fail:
     pa_mainloop_free(pulse_ml);
     pulse_ml = NULL;
     pulse_unlock();
-    params->result = E_FAIL;
+    params->priority = Priority_Unavailable;
     return STATUS_SUCCESS;
 }
 
-static DWORD get_channel_mask(unsigned int channels)
+static UINT get_channel_mask(unsigned int channels)
 {
     switch(channels) {
     case 0:
@@ -845,8 +925,8 @@ static HRESULT pulse_spec_from_waveformat(struct pulse_stream *stream, const WAV
         break;
     case WAVE_FORMAT_EXTENSIBLE: {
         WAVEFORMATEXTENSIBLE *wfe = (WAVEFORMATEXTENSIBLE*)fmt;
-        DWORD mask = wfe->dwChannelMask;
-        DWORD i = 0, j;
+        UINT mask = wfe->dwChannelMask;
+        unsigned i = 0, j;
         if (fmt->cbSize != (sizeof(*wfe) - sizeof(*fmt)) && fmt->cbSize != sizeof(*wfe))
             break;
         if (IsEqualGUID(&wfe->SubFormat, &KSDATAFORMAT_SUBTYPE_IEEE_FLOAT) &&
@@ -896,7 +976,7 @@ static HRESULT pulse_spec_from_waveformat(struct pulse_stream *stream, const WAV
 
         if (i < fmt->nChannels || (mask & SPEAKER_RESERVED)) {
             stream->map.channels = 0;
-            ERR("Invalid channel mask: %i/%i and %x(%x)\n", i, fmt->nChannels, mask, wfe->dwChannelMask);
+            ERR("Invalid channel mask: %i/%i and %x(%x)\n", i, fmt->nChannels, mask, (unsigned)wfe->dwChannelMask);
             break;
         }
         break;
@@ -990,6 +1070,29 @@ static ULONG_PTR zero_bits(void)
 #endif
 }
 
+static HRESULT get_device_period_helper(EDataFlow flow, const char *pulse_name, REFERENCE_TIME *def, REFERENCE_TIME *min)
+{
+    struct list *list = (flow == eRender) ? &g_phys_speakers : &g_phys_sources;
+    PhysDevice *dev;
+
+    if (!def && !min) {
+        return E_POINTER;
+    }
+
+    LIST_FOR_EACH_ENTRY(dev, list, PhysDevice, entry) {
+        if (strcmp(pulse_name, dev->pulse_name))
+            continue;
+
+        if (def)
+            *def = dev->def_period;
+        if (min)
+            *min = dev->min_period;
+        return S_OK;
+    }
+
+    return E_FAIL;
+}
+
 static NTSTATUS pulse_create_stream(void *args)
 {
     struct create_stream_params *params = args;
@@ -1013,19 +1116,25 @@ static NTSTATUS pulse_create_stream(void *args)
         return STATUS_SUCCESS;
     }
 
-    stream->dataflow = params->dataflow;
+    stream->dataflow = params->flow;
     for (i = 0; i < ARRAY_SIZE(stream->vol); ++i)
         stream->vol[i] = 1.f;
 
     hr = pulse_spec_from_waveformat(stream, params->fmt);
-    TRACE("Obtaining format returns %08x\n", hr);
+    TRACE("Obtaining format returns %08x\n", (unsigned)hr);
 
     if (FAILED(hr))
         goto exit;
 
-    period = pulse_def_period[stream->dataflow == eCapture];
+    period = 0;
+    hr = get_device_period_helper(params->flow, params->device, &period, NULL);
+    if (FAILED(hr))
+        goto exit;
+
     if (duration < 3 * period)
         duration = 3 * period;
+
+    stream->def_period = period;
 
     stream->period_bytes = pa_frame_size(&stream->ss) * muldiv(period, stream->ss.rate, 10000000);
 
@@ -1033,9 +1142,9 @@ static NTSTATUS pulse_create_stream(void *args)
     bufsize_bytes = stream->bufsize_frames * pa_frame_size(&stream->ss);
     stream->mmdev_period_usec = period / 10;
 
-    stream->share = params->mode;
+    stream->share = params->share;
     stream->flags = params->flags;
-    hr = pulse_stream_connect(stream, params->pulse_name, stream->period_bytes);
+    hr = pulse_stream_connect(stream, params->device, stream->period_bytes);
     if (SUCCEEDED(hr)) {
         UINT32 unalign;
         const pa_buffer_attr *attr = pa_stream_get_buffer_attr(stream->stream);
@@ -1088,8 +1197,8 @@ exit:
         if (stream->stream) {
             pa_stream_disconnect(stream->stream);
             pa_stream_unref(stream->stream);
-            free(stream);
         }
+        free(stream);
     }
 
     pulse_unlock();
@@ -1102,10 +1211,10 @@ static NTSTATUS pulse_release_stream(void *args)
     struct pulse_stream *stream = handle_get_stream(params->stream);
     SIZE_T size;
 
-    if(params->timer) {
+    if(params->timer_thread) {
         stream->please_quit = TRUE;
-        NtWaitForSingleObject(params->timer, FALSE, NULL);
-        NtClose(params->timer);
+        NtWaitForSingleObject(params->timer_thread, FALSE, NULL);
+        NtClose(params->timer_thread);
     }
 
     pulse_lock();
@@ -1947,6 +2056,34 @@ static NTSTATUS pulse_release_capture_buffer(void *args)
     return STATUS_SUCCESS;
 }
 
+static NTSTATUS pulse_get_mix_format(void *args)
+{
+    struct get_mix_format_params *params = args;
+    struct list *list = (params->flow == eRender) ? &g_phys_speakers : &g_phys_sources;
+    PhysDevice *dev;
+
+    LIST_FOR_EACH_ENTRY(dev, list, PhysDevice, entry) {
+        if (strcmp(params->device, dev->pulse_name))
+            continue;
+
+        *params->fmt = dev->fmt;
+        params->result = S_OK;
+
+        return STATUS_SUCCESS;
+    }
+
+    params->result = E_FAIL;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS pulse_get_device_period(void *args)
+{
+    struct get_device_period_params *params = args;
+
+    params->result = get_device_period_helper(params->flow, params->device, params->def_period, params->min_period);
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS pulse_get_buffer_size(void *args)
 {
     struct get_buffer_size_params *params = args;
@@ -1958,7 +2095,7 @@ static NTSTATUS pulse_get_buffer_size(void *args)
     if (!pulse_stream_valid(stream))
         params->result = AUDCLNT_E_DEVICE_INVALIDATED;
     else
-        *params->size = stream->bufsize_frames;
+        *params->frames = stream->bufsize_frames;
     pulse_unlock();
 
     return STATUS_SUCCESS;
@@ -1982,9 +2119,9 @@ static NTSTATUS pulse_get_latency(void *args)
         lat = attr->minreq / pa_frame_size(&stream->ss);
     else
         lat = attr->fragsize / pa_frame_size(&stream->ss);
-    *params->latency = (lat * 10000000) / stream->ss.rate + pulse_def_period[0];
+    *params->latency = (lat * 10000000) / stream->ss.rate + stream->def_period;
     pulse_unlock();
-    TRACE("Latency: %u ms\n", (DWORD)(*params->latency / 10000));
+    TRACE("Latency: %u ms\n", (unsigned)(*params->latency / 10000));
     params->result = S_OK;
     return STATUS_SUCCESS;
 }
@@ -2129,7 +2266,7 @@ static NTSTATUS pulse_is_started(void *args)
     struct pulse_stream *stream = handle_get_stream(params->stream);
 
     pulse_lock();
-    params->started = pulse_stream_valid(stream) && stream->started;
+    params->result = pulse_stream_valid(stream) && stream->started ? S_OK : S_FALSE;
     pulse_unlock();
 
     return STATUS_SUCCESS;
@@ -2138,31 +2275,41 @@ static NTSTATUS pulse_is_started(void *args)
 static BOOL get_device_path(PhysDevice *dev, struct get_prop_value_params *params)
 {
     const GUID *guid = params->guid;
+    PROPVARIANT *out = params->value;
     UINT serial_number;
-    const char *fmt;
     char path[128];
     int len;
-
-    switch (dev->bus_type) {
-    case phys_device_bus_pci:
-        fmt = "{1}.HDAUDIO\\FUNC_01&VEN_%04X&DEV_%04X\\%u&%08X";
-        break;
-    case phys_device_bus_usb:
-        fmt = "{1}.USB\\VID_%04X&PID_%04X\\%u&%08X";
-        break;
-    default:
-        return FALSE;
-    }
 
     /* As hardly any audio devices have serial numbers, Windows instead
        appears to use a persistent random number. We emulate this here
        by instead using the last 8 hex digits of the GUID. */
     serial_number = (guid->Data4[4] << 24) | (guid->Data4[5] << 16) | (guid->Data4[6] << 8) | guid->Data4[7];
 
-    len = sprintf(path, fmt, dev->vendor_id, dev->product_id, dev->index, serial_number);
-    ntdll_umbstowcs(path, len + 1, params->wstr, ARRAY_SIZE(params->wstr));
+    switch (dev->bus_type) {
+    case phys_device_bus_pci:
+        len = sprintf(path, "{1}.HDAUDIO\\FUNC_01&VEN_%04X&DEV_%04X\\%u&%08X", dev->vendor_id, dev->product_id, dev->index, serial_number);
+        break;
+    case phys_device_bus_usb:
+        len = sprintf(path, "{1}.USB\\VID_%04X&PID_%04X\\%u&%08X", dev->vendor_id, dev->product_id, dev->index, serial_number);
+        break;
+    default:
+        len = sprintf(path, "{1}.ROOT\\MEDIA\\%04u", dev->index);
+        break;
+    }
 
-    params->vt = VT_LPWSTR;
+    if (*params->buffer_size < ++len * sizeof(WCHAR)) {
+        params->result = E_NOT_SUFFICIENT_BUFFER;
+        *params->buffer_size = len * sizeof(WCHAR);
+        return FALSE;
+    }
+
+    out->vt = VT_LPWSTR;
+    out->pwszVal = params->buffer;
+
+    ntdll_umbstowcs(path, len, out->pwszVal, len);
+
+    params->result = S_OK;
+
     return TRUE;
 }
 
@@ -2180,7 +2327,7 @@ static NTSTATUS pulse_get_prop_value(void *args)
 
     params->result = S_OK;
     LIST_FOR_EACH_ENTRY(dev, list, PhysDevice, entry) {
-        if (strcmp(params->pulse_name, dev->pulse_name))
+        if (strcmp(params->device, dev->pulse_name))
             continue;
         if (IsEqualPropertyKey(*params->prop, devicepath_key)) {
             if (!get_device_path(dev, params))
@@ -2189,20 +2336,20 @@ static NTSTATUS pulse_get_prop_value(void *args)
         } else if (IsEqualGUID(&params->prop->fmtid, &PKEY_AudioEndpoint_GUID)) {
             switch (params->prop->pid) {
             case 0:   /* FormFactor */
-                params->vt = VT_UI4;
-                params->ulVal = dev->form;
+                params->value->vt = VT_UI4;
+                params->value->ulVal = dev->form;
                 return STATUS_SUCCESS;
             case 3:   /* PhysicalSpeakers */
                 if (!dev->channel_mask)
                     goto fail;
-                params->vt = VT_UI4;
-                params->ulVal = dev->channel_mask;
+                params->value->vt = VT_UI4;
+                params->value->ulVal = dev->channel_mask;
                 return STATUS_SUCCESS;
             default:
-                break;
+                params->result = E_NOTIMPL;
             }
         }
-        params->result = E_NOTIMPL;
+
         return STATUS_SUCCESS;
     }
 
@@ -2227,6 +2374,9 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     pulse_release_render_buffer,
     pulse_get_capture_buffer,
     pulse_release_capture_buffer,
+    NULL,
+    pulse_get_mix_format,
+    pulse_get_device_period,
     pulse_get_buffer_size,
     pulse_get_latency,
     pulse_get_current_padding,
@@ -2238,6 +2388,12 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     pulse_test_connect,
     pulse_is_started,
     pulse_get_prop_value,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
 };
 
 #ifdef _WIN64
@@ -2287,11 +2443,12 @@ static NTSTATUS pulse_wow64_create_stream(void *args)
     struct
     {
         PTR32 name;
-        PTR32 pulse_name;
-        EDataFlow dataflow;
-        AUDCLNT_SHAREMODE mode;
+        PTR32 device;
+        EDataFlow flow;
+        AUDCLNT_SHAREMODE share;
         DWORD flags;
         REFERENCE_TIME duration;
+        REFERENCE_TIME period;
         PTR32 fmt;
         HRESULT result;
         PTR32 channel_count;
@@ -2300,11 +2457,12 @@ static NTSTATUS pulse_wow64_create_stream(void *args)
     struct create_stream_params params =
     {
         .name = ULongToPtr(params32->name),
-        .pulse_name = ULongToPtr(params32->pulse_name),
-        .dataflow = params32->dataflow,
-        .mode = params32->mode,
+        .device = ULongToPtr(params32->device),
+        .flow = params32->flow,
+        .share = params32->share,
         .flags = params32->flags,
         .duration = params32->duration,
+        .period = params32->period,
         .fmt = ULongToPtr(params32->fmt),
         .channel_count = ULongToPtr(params32->channel_count),
         .stream = ULongToPtr(params32->stream)
@@ -2319,13 +2477,13 @@ static NTSTATUS pulse_wow64_release_stream(void *args)
     struct
     {
         stream_handle stream;
-        PTR32 timer;
+        PTR32 timer_thread;
         HRESULT result;
     } *params32 = args;
     struct release_stream_params params =
     {
         .stream = params32->stream,
-        .timer = ULongToHandle(params32->timer)
+        .timer_thread = ULongToHandle(params32->timer_thread)
     };
     pulse_release_stream(&params);
     params32->result = params.result;
@@ -2382,18 +2540,60 @@ static NTSTATUS pulse_wow64_get_capture_buffer(void *args)
     return STATUS_SUCCESS;
 };
 
+static NTSTATUS pulse_wow64_get_mix_format(void *args)
+{
+    struct
+    {
+        PTR32 device;
+        EDataFlow flow;
+        PTR32 fmt;
+        HRESULT result;
+    } *params32 = args;
+    struct get_mix_format_params params =
+    {
+        .device = ULongToPtr(params32->device),
+        .flow = params32->flow,
+        .fmt = ULongToPtr(params32->fmt),
+    };
+    pulse_get_mix_format(&params);
+    params32->result = params.result;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS pulse_wow64_get_device_period(void *args)
+{
+    struct
+    {
+        PTR32 device;
+        EDataFlow flow;
+        HRESULT result;
+        PTR32 def_period;
+        PTR32 min_period;
+    } *params32 = args;
+    struct get_device_period_params params =
+    {
+        .device = ULongToPtr(params32->device),
+        .flow = params32->flow,
+        .def_period = ULongToPtr(params32->def_period),
+        .min_period = ULongToPtr(params32->min_period),
+    };
+    pulse_get_device_period(&params);
+    params32->result = params.result;
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS pulse_wow64_get_buffer_size(void *args)
 {
     struct
     {
         stream_handle stream;
         HRESULT result;
-        PTR32 size;
+        PTR32 frames;
     } *params32 = args;
     struct get_buffer_size_params params =
     {
         .stream = params32->stream,
-        .size = ULongToPtr(params32->size)
+        .frames = ULongToPtr(params32->frames)
     };
     pulse_get_buffer_size(&params);
     params32->result = params.result;
@@ -2502,13 +2702,15 @@ static NTSTATUS pulse_wow64_set_volumes(void *args)
         float master_volume;
         PTR32 volumes;
         PTR32 session_volumes;
+        int channel;
     } *params32 = args;
     struct set_volumes_params params =
     {
         .stream = params32->stream,
         .master_volume = params32->master_volume,
         .volumes = ULongToPtr(params32->volumes),
-        .session_volumes = ULongToPtr(params32->session_volumes)
+        .session_volumes = ULongToPtr(params32->session_volumes),
+        .channel = params32->channel
     };
     return pulse_set_volumes(&params);
 }
@@ -2536,57 +2738,68 @@ static NTSTATUS pulse_wow64_test_connect(void *args)
     struct
     {
         PTR32 name;
-        HRESULT result;
-        PTR32 config;
+        enum driver_priority priority;
     } *params32 = args;
     struct test_connect_params params =
     {
         .name = ULongToPtr(params32->name),
-        .config = ULongToPtr(params32->config), /* struct pulse_config is identical */
     };
     pulse_test_connect(&params);
-    params32->result = params.result;
+    params32->priority = params.priority;
     return STATUS_SUCCESS;
 }
 
 static NTSTATUS pulse_wow64_get_prop_value(void *args)
 {
-    struct
+    struct propvariant32
     {
-        PTR32 pulse_name;
-        PTR32 guid;
-        PTR32 prop;
-        EDataFlow flow;
-        HRESULT result;
-        VARTYPE vt;
+        WORD vt;
+        WORD pad1, pad2, pad3;
         union
         {
-            WCHAR wstr[128];
             ULONG ulVal;
+            PTR32 ptr;
+            ULARGE_INTEGER uhVal;
         };
+    } *value32;
+    struct
+    {
+        PTR32 device;
+        EDataFlow flow;
+        PTR32 guid;
+        PTR32 prop;
+        HRESULT result;
+        PTR32 value;
+        PTR32 buffer; /* caller allocated buffer to hold value's strings */
+        PTR32 buffer_size;
     } *params32 = args;
+    PROPVARIANT value;
     struct get_prop_value_params params =
     {
-        .pulse_name = ULongToPtr(params32->pulse_name),
+        .device = ULongToPtr(params32->device),
+        .flow = params32->flow,
         .guid = ULongToPtr(params32->guid),
         .prop = ULongToPtr(params32->prop),
-        .flow = params32->flow,
+        .value = &value,
+        .buffer = ULongToPtr(params32->buffer),
+        .buffer_size = ULongToPtr(params32->buffer_size)
     };
     pulse_get_prop_value(&params);
     params32->result = params.result;
-    params32->vt = params.vt;
     if (SUCCEEDED(params.result))
     {
-        switch (params.vt)
+        value32 = UlongToPtr(params32->value);
+        value32->vt = value.vt;
+        switch (value.vt)
         {
         case VT_UI4:
-            params32->ulVal = params.ulVal;
+            value32->ulVal = value.ulVal;
             break;
         case VT_LPWSTR:
-            wcscpy(params32->wstr, params.wstr);
+            value32->ptr = params32->buffer;
             break;
         default:
-            FIXME("Unhandled vt %04x\n", params.vt);
+            FIXME("Unhandled vt %04x\n", value.vt);
         }
     }
     return STATUS_SUCCESS;
@@ -2608,6 +2821,9 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     pulse_release_render_buffer,
     pulse_wow64_get_capture_buffer,
     pulse_release_capture_buffer,
+    NULL,
+    pulse_wow64_get_mix_format,
+    pulse_wow64_get_device_period,
     pulse_wow64_get_buffer_size,
     pulse_wow64_get_latency,
     pulse_wow64_get_current_padding,
@@ -2619,6 +2835,12 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     pulse_wow64_test_connect,
     pulse_is_started,
     pulse_wow64_get_prop_value,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
 };
 
 #endif /* _WIN64 */

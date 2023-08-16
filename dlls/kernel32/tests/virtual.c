@@ -37,6 +37,7 @@
 
 static HINSTANCE hkernel32, hkernelbase, hntdll;
 static SYSTEM_INFO si;
+static BOOL is_wow64;
 static UINT   (WINAPI *pGetWriteWatch)(DWORD,LPVOID,SIZE_T,LPVOID*,ULONG_PTR*,ULONG*);
 static UINT   (WINAPI *pResetWriteWatch)(LPVOID,SIZE_T);
 static NTSTATUS (WINAPI *pNtAreMappedFilesTheSame)(PVOID,PVOID);
@@ -50,7 +51,7 @@ static ULONG  (WINAPI *pRtlRemoveVectoredExceptionHandler)(PVOID);
 static BOOL   (WINAPI *pGetProcessDEPPolicy)(HANDLE, LPDWORD, PBOOL);
 static BOOL   (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
 static NTSTATUS (WINAPI *pNtProtectVirtualMemory)(HANDLE, PVOID *, SIZE_T *, ULONG, ULONG *);
-static PVOID (WINAPI *pVirtualAllocFromApp)(PVOID, SIZE_T, DWORD, DWORD);
+static BOOL  (WINAPI *pPrefetchVirtualMemory)(HANDLE, ULONG_PTR, PWIN32_MEMORY_RANGE_ENTRY, ULONG);
 
 /* ############################### */
 
@@ -78,10 +79,20 @@ static void test_VirtualAllocEx(void)
     char *src, *dst;
     SIZE_T bytes_written = 0, bytes_read = 0, i;
     void *addr1, *addr2;
-    BOOL b;
+    BOOL b, ret;
     DWORD old_prot;
     MEMORY_BASIC_INFORMATION info;
     HANDLE hProcess;
+
+    /* Same process */
+    addr1 = VirtualAllocEx(GetCurrentProcess(), NULL, alloc_size, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+    ok(!!addr1, "Failed to allocated, error %lu.\n", GetLastError());
+    ret = VirtualFreeEx(NULL, addr1, 0, MEM_RELEASE);
+    ok(!ret && GetLastError() == ERROR_INVALID_HANDLE, "Unexpected value %d, error %lu.\n", ret, GetLastError());
+    addr2 = VirtualAllocEx(NULL, NULL, alloc_size, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+    ok(!addr2 && GetLastError() == ERROR_INVALID_HANDLE, "Unexpected value %p, error %lu.\n", addr2, GetLastError());
+    ret = VirtualFreeEx(GetCurrentProcess(), addr1, 0, MEM_RELEASE);
+    ok(ret, "Unexpected value %d, error %lu.\n", ret, GetLastError());
 
     hProcess = create_target_process("sleep");
     ok(hProcess != NULL, "Can't start process\n");
@@ -442,39 +453,6 @@ static void test_VirtualAlloc(void)
     ok(GetLastError() == ERROR_INVALID_PARAMETER, "got %ld, expected ERROR_INVALID_PARAMETER\n", GetLastError());
 
     ok(VirtualFree(addr1, 0, MEM_RELEASE), "VirtualFree failed\n");
-}
-
-static void test_VirtualAllocFromApp(void)
-{
-    void *p;
-    BOOL ret;
-    if (!pVirtualAllocFromApp)
-    {
-        win_skip("VirtualAllocFromApp is not available.\n");
-        return;
-    }
-
-    p = GetProcAddress(hkernel32, "VirtualAllocFromApp");
-    ok(!p, "Found VirtualAllocFromApp in kernel32.dll.\n");
-
-    SetLastError(0xdeadbeef);
-    p = pVirtualAllocFromApp(NULL, 0x1000, MEM_RESERVE, PAGE_READWRITE);
-    ok(p && GetLastError() == 0xdeadbeef, "Got unexpected mem %p, GetLastError() %lu.\n", p, GetLastError());
-    ret = VirtualFree(p, 0, MEM_RELEASE);
-    ok(ret, "Got unexpected ret %#x, GetLastError() %lu.\n", ret, GetLastError());
-
-    SetLastError(0xdeadbeef);
-    p = pVirtualAllocFromApp(NULL, 0x1000, MEM_RESERVE, PAGE_EXECUTE);
-    ok(!p && GetLastError() == ERROR_INVALID_PARAMETER, "Got unexpected mem %p, GetLastError() %lu.\n",
-            p, GetLastError());
-    SetLastError(0xdeadbeef);
-    p = pVirtualAllocFromApp(NULL, 0x1000, MEM_RESERVE, PAGE_EXECUTE_READ);
-    ok(!p && GetLastError() == ERROR_INVALID_PARAMETER, "Got unexpected mem %p, GetLastError() %lu.\n",
-            p, GetLastError());
-    SetLastError(0xdeadbeef);
-    p = pVirtualAllocFromApp(NULL, 0x1000, MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    ok(!p && GetLastError() == ERROR_INVALID_PARAMETER, "Got unexpected mem %p, GetLastError() %lu.\n",
-            p, GetLastError());
 }
 
 static void test_MapViewOfFile(void)
@@ -2291,7 +2269,7 @@ static void test_guard_page(void)
     ok( ret, "VirtualQuery failed %lu\n", GetLastError());
     ok( info.BaseAddress == base, "BaseAddress %p instead of %p\n", info.BaseAddress, base );
     ok( info.AllocationProtect == (PAGE_READWRITE | PAGE_GUARD), "wrong AllocationProtect %lx\n", info.AllocationProtect );
-    ok( info.RegionSize == size, "wrong RegionSize 0x%lx\n", info.RegionSize );
+    ok( info.RegionSize == size, "wrong RegionSize 0x%Ix\n", info.RegionSize );
     ok( info.State == MEM_COMMIT, "wrong State 0x%lx\n", info.State );
     ok( info.Protect == (PAGE_READWRITE | PAGE_GUARD), "wrong Protect 0x%lx\n", info.Protect );
     ok( info.Type == MEM_PRIVATE, "wrong Type 0x%lx\n", info.Type );
@@ -2330,7 +2308,7 @@ static void test_guard_page(void)
     ok( ret, "VirtualQuery failed %lu\n", GetLastError());
     ok( info.BaseAddress == base, "BaseAddress %p instead of %p\n", info.BaseAddress, base );
     ok( info.AllocationProtect == (PAGE_READWRITE | PAGE_GUARD), "wrong AllocationProtect %lx\n", info.AllocationProtect );
-    ok( info.RegionSize == size, "wrong RegionSize 0x%lx\n", info.RegionSize );
+    ok( info.RegionSize == size, "wrong RegionSize 0x%Ix\n", info.RegionSize );
     ok( info.State == MEM_COMMIT, "wrong State 0x%lx\n", info.State );
     todo_wine
     ok( info.Protect == PAGE_READWRITE, "wrong Protect 0x%lx\n", info.Protect );
@@ -2407,7 +2385,7 @@ static void test_guard_page(void)
     ok( ret, "VirtualQuery failed %lu\n", GetLastError() );
     ok( info.BaseAddress == base, "BaseAddress %p instead of %p\n", info.BaseAddress, base );
     ok( info.AllocationProtect == (PAGE_READWRITE | PAGE_GUARD), "wrong AllocationProtect %lx\n", info.AllocationProtect );
-    ok( info.RegionSize == size, "wrong RegionSize 0x%lx\n", info.RegionSize );
+    ok( info.RegionSize == size, "wrong RegionSize 0x%Ix\n", info.RegionSize );
     ok( info.State == MEM_COMMIT, "wrong State 0x%lx\n", info.State );
     ok( info.Protect == (PAGE_READWRITE | PAGE_GUARD), "wrong Protect 0x%lx\n", info.Protect );
     ok( info.Type == MEM_PRIVATE, "wrong Type 0x%lx\n", info.Type );
@@ -2415,7 +2393,7 @@ static void test_guard_page(void)
     count = 64;
     ret = pGetWriteWatch( 0, base, size, results, &count, &pagesize );
     ok( !ret, "GetWriteWatch failed %lu\n", GetLastError() );
-    ok( count == 0, "wrong count %lu\n", count );
+    ok( count == 0, "wrong count %Iu\n", count );
 
     /* writing to a page should trigger should trigger guard page, even if write watch is set */
     frame.Handler = guard_page_handler;
@@ -2432,7 +2410,7 @@ static void test_guard_page(void)
     count = 64;
     ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
     ok( !ret, "GetWriteWatch failed %lu\n", GetLastError() );
-    ok( count == 1, "wrong count %lu\n", count );
+    ok( count == 1, "wrong count %Iu\n", count );
     ok( results[0] == base, "wrong result %p\n", results[0] );
 
     success = VirtualProtect( base, size, PAGE_READWRITE | PAGE_GUARD, &old_prot );
@@ -2454,7 +2432,7 @@ static void test_guard_page(void)
     count = 64;
     ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
     ok( !ret, "GetWriteWatch failed %lu\n", GetLastError() );
-    ok( count == 1, "wrong count %lu\n", count );
+    ok( count == 1, "wrong count %Iu\n", count );
     ok( results[0] == base, "wrong result %p\n", results[0] );
 
     success = VirtualProtect( base, size, PAGE_READWRITE | PAGE_GUARD, &old_prot );
@@ -2470,7 +2448,7 @@ static void test_guard_page(void)
     count = 64;
     ret = pGetWriteWatch( 0, base, size, results, &count, &pagesize );
     ok( !ret, "GetWriteWatch failed %lu\n", GetLastError() );
-    ok( count == 0, "wrong count %lu\n", count );
+    ok( count == 0, "wrong count %Iu\n", count );
 
     success = VirtualLock( base, size );
     todo_wine
@@ -2487,7 +2465,7 @@ static void test_guard_page(void)
     ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
     ok( !ret, "GetWriteWatch failed %lu\n", GetLastError() );
     todo_wine
-    ok( count == 1 || broken(count == 0) /* Windows 8 */, "wrong count %lu\n", count );
+    ok( count == 1 || broken(count == 0) /* Windows 8 */, "wrong count %Iu\n", count );
     todo_wine
     ok( results[0] == base || broken(results[0] == (void *)0xdeadbeef) /* Windows 8 */, "wrong result %p\n", results[0] );
 
@@ -2502,7 +2480,7 @@ static DWORD execute_fault_seh_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTR
     ULONG flags = MEM_EXECUTE_OPTION_ENABLE;
     DWORD err;
 
-    trace( "exception: %08lx flags:%lx addr:%p info[0]:%ld info[1]:%p\n",
+    trace( "exception: %08lx flags:%lx addr:%p info[0]:%Id info[1]:%p\n",
            rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
            rec->ExceptionInformation[0], (void *)rec->ExceptionInformation[1] );
 
@@ -2546,7 +2524,7 @@ static LONG CALLBACK execute_fault_vec_handler( EXCEPTION_POINTERS *ExceptionInf
     DWORD old_prot;
     BOOL success;
 
-    trace( "exception: %08lx flags:%lx addr:%p info[0]:%ld info[1]:%p\n",
+    trace( "exception: %08lx flags:%lx addr:%p info[0]:%Id info[1]:%p\n",
            rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
            rec->ExceptionInformation[0], (void *)rec->ExceptionInformation[1] );
 
@@ -2938,7 +2916,7 @@ static void test_atl_thunk_emulation( ULONG dep_flags )
     count = 64;
     ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
     ok( !ret, "GetWriteWatch failed %lu\n", GetLastError() );
-    ok( count == 0, "wrong count %lu\n", count );
+    ok( count == 0, "wrong count %Iu\n", count );
 
     memcpy( base, code_jmp, sizeof(code_jmp) );
     *(DWORD *)(base + 1) = (DWORD_PTR)jmp_test_func - (DWORD_PTR)(base + 5);
@@ -2946,7 +2924,7 @@ static void test_atl_thunk_emulation( ULONG dep_flags )
     count = 64;
     ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
     ok( !ret, "GetWriteWatch failed %lu\n", GetLastError() );
-    ok( count == 1, "wrong count %lu\n", count );
+    ok( count == 1, "wrong count %Iu\n", count );
     ok( results[0] == base, "wrong result %p\n", results[0] );
 
     /* Create a new window class and associated Window (see above) */
@@ -2974,7 +2952,7 @@ static void test_atl_thunk_emulation( ULONG dep_flags )
     count = 64;
     ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
     ok( !ret, "GetWriteWatch failed %lu\n", GetLastError() );
-    ok( count == 0, "wrong count %lu\n", count );
+    ok( count == 0, "wrong count %Iu\n", count );
 
     /* At first try with an instruction which is not recognized as proper ATL thunk
      * by the Windows ATL Thunk Emulator. Removing execute permissions will lead to
@@ -2994,7 +2972,7 @@ static void test_atl_thunk_emulation( ULONG dep_flags )
     count = 64;
     ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
     ok( !ret, "GetWriteWatch failed %lu\n", GetLastError() );
-    ok( count == 0, "wrong count %lu\n", count );
+    ok( count == 0, "wrong count %Iu\n", count );
 
     ret = send_message_excpt( hWnd, WM_USER, 0, 0 );
     ok( ret == 42, "call returned wrong result, expected 42, got %ld\n", ret );
@@ -3023,7 +3001,7 @@ static void test_atl_thunk_emulation( ULONG dep_flags )
     count = 64;
     ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
     ok( !ret, "GetWriteWatch failed %lu\n", GetLastError() );
-    ok( count == 0 || broken(count == 1) /* Windows 8 */, "wrong count %lu\n", count );
+    ok( count == 0 || broken(count == 1) /* Windows 8 */, "wrong count %Iu\n", count );
 
     /* Now test with a proper ATL thunk instruction. */
 
@@ -3033,7 +3011,7 @@ static void test_atl_thunk_emulation( ULONG dep_flags )
     count = 64;
     ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
     ok( !ret, "GetWriteWatch failed %lu\n", GetLastError() );
-    ok( count == 1, "wrong count %lu\n", count );
+    ok( count == 1, "wrong count %Iu\n", count );
     ok( results[0] == base, "wrong result %p\n", results[0] );
 
     success = VirtualProtect( base, size, PAGE_EXECUTE_READWRITE, &old_prot );
@@ -3058,7 +3036,7 @@ static void test_atl_thunk_emulation( ULONG dep_flags )
     count = 64;
     ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
     ok( !ret, "GetWriteWatch failed %lu\n", GetLastError() );
-    ok( count == 0, "wrong count %lu\n", count );
+    ok( count == 0, "wrong count %Iu\n", count );
 
     ret = send_message_excpt( hWnd, WM_USER, 0, 0 );
     ok( ret == 43, "call returned wrong result, expected 43, got %ld\n", ret );
@@ -3088,7 +3066,7 @@ static void test_atl_thunk_emulation( ULONG dep_flags )
     count = 64;
     ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
     ok( !ret, "GetWriteWatch failed %lu\n", GetLastError() );
-    ok( count == 0 || broken(count == 1) /* Windows 8 */, "wrong count %lu\n", count );
+    ok( count == 0 || broken(count == 1) /* Windows 8 */, "wrong count %Iu\n", count );
 
     /* Restore the JMP instruction, set to executable, and then destroy the Window */
 
@@ -3098,7 +3076,7 @@ static void test_atl_thunk_emulation( ULONG dep_flags )
     count = 64;
     ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
     ok( !ret, "GetWriteWatch failed %lu\n", GetLastError() );
-    ok( count == 1, "wrong count %lu\n", count );
+    ok( count == 1, "wrong count %Iu\n", count );
     ok( results[0] == base, "wrong result %p\n", results[0] );
 
     success = VirtualProtect( base, size, PAGE_EXECUTE_READWRITE, &old_prot );
@@ -4240,6 +4218,50 @@ static void test_shared_memory_ro(BOOL is_child, DWORD child_access)
     CloseHandle(mapping);
 }
 
+static void test_PrefetchVirtualMemory(void)
+{
+    WIN32_MEMORY_RANGE_ENTRY entries[2];
+    char stackmem[] = "Test stack mem";
+    static char testmem[] = "Test memory range data";
+    unsigned int page_size = si.dwPageSize;
+    BOOL ret;
+
+    if (!pPrefetchVirtualMemory)
+    {
+        skip("no PrefetchVirtualMemory in kernelbase\n");
+        return;
+    }
+
+    ok( !pPrefetchVirtualMemory( GetCurrentProcess(), 0, NULL, 0 ),
+        "PrefetchVirtualMemory unexpected success on 0 entries\n" );
+
+    entries[0].VirtualAddress = ULongToPtr(PtrToUlong(testmem) & -(ULONG_PTR)page_size);
+    entries[0].NumberOfBytes = page_size;
+    ret = pPrefetchVirtualMemory( GetCurrentProcess(), 1, entries, 0 );
+    ok( ret || broken( is_wow64 && GetLastError() == ERROR_INVALID_PARAMETER ) /* win10 1507 */,
+        "PrefetchVirtualMemory unexpected status on 1 page-aligned entry: %ld\n", GetLastError() );
+
+    entries[0].VirtualAddress = testmem;
+    entries[0].NumberOfBytes = sizeof(testmem);
+    ret = pPrefetchVirtualMemory( GetCurrentProcess(), 1, entries, 0 );
+    ok( ret || broken( is_wow64 && GetLastError() == ERROR_INVALID_PARAMETER ) /* win10 1507 */,
+        "PrefetchVirtualMemory unexpected status on 1 entry: %ld\n", GetLastError() );
+
+    entries[0].VirtualAddress = NULL;
+    entries[0].NumberOfBytes = page_size;
+    ret = pPrefetchVirtualMemory( GetCurrentProcess(), 1, entries, 0 );
+    ok( ret ||broken( is_wow64 && GetLastError() == ERROR_INVALID_PARAMETER ) /* win10 1507 */,
+        "PrefetchVirtualMemory unexpected status on 1 unmapped entry: %ld\n", GetLastError() );
+
+    entries[0].VirtualAddress = ULongToPtr(PtrToUlong(testmem) & -(ULONG_PTR)page_size);
+    entries[0].NumberOfBytes = page_size;
+    entries[1].VirtualAddress = ULongToPtr(PtrToUlong(stackmem) & -(ULONG_PTR)page_size);
+    entries[1].NumberOfBytes = page_size;
+    ret = pPrefetchVirtualMemory( GetCurrentProcess(), 2, entries, 0 );
+    ok( ret ||broken( is_wow64 && GetLastError() == ERROR_INVALID_PARAMETER ) /* win10 1507 */,
+        "PrefetchVirtualMemory unexpected status on 2 page-aligned entries: %ld\n", GetLastError() );
+}
+
 START_TEST(virtual)
 {
     int argc;
@@ -4294,10 +4316,12 @@ START_TEST(virtual)
     pRtlAddVectoredExceptionHandler = (void *)GetProcAddress( hntdll, "RtlAddVectoredExceptionHandler" );
     pRtlRemoveVectoredExceptionHandler = (void *)GetProcAddress( hntdll, "RtlRemoveVectoredExceptionHandler" );
     pNtProtectVirtualMemory = (void *)GetProcAddress( hntdll, "NtProtectVirtualMemory" );
-    pVirtualAllocFromApp = (void *)GetProcAddress( hkernelbase, "VirtualAllocFromApp" );
+    pPrefetchVirtualMemory = (void *)GetProcAddress( hkernelbase, "PrefetchVirtualMemory" );
 
     GetSystemInfo(&si);
     trace("system page size %#lx\n", si.dwPageSize);
+
+    if (!pIsWow64Process || !pIsWow64Process( GetCurrentProcess(), &is_wow64 )) is_wow64 = FALSE;
 
     test_shared_memory(FALSE);
     test_shared_memory_ro(FALSE, FILE_MAP_READ|FILE_MAP_WRITE);
@@ -4309,7 +4333,6 @@ START_TEST(virtual)
     test_VirtualProtect();
     test_VirtualAllocEx();
     test_VirtualAlloc();
-    test_VirtualAllocFromApp();
     test_MapViewOfFile();
     test_NtAreMappedFilesTheSame();
     test_CreateFileMapping();
@@ -4317,6 +4340,7 @@ START_TEST(virtual)
     test_IsBadWritePtr();
     test_IsBadCodePtr();
     test_write_watch();
+    test_PrefetchVirtualMemory();
 #if defined(__i386__) || defined(__x86_64__)
     test_stack_commit();
 #endif

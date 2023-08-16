@@ -8,10 +8,7 @@
 #ifndef __WINE_STDIO_H
 #define __WINE_STDIO_H
 
-#include "wine/winheader_enter.h"
-
 #include <corecrt_wstdio.h>
-#include "wine/asm.h"
 
 /* file._flag flags */
 #define _IOREAD          0x0001
@@ -124,6 +121,7 @@ _ACRTIMP int    __cdecl fputs(const char*,FILE*);
 _ACRTIMP size_t __cdecl fread(void*,size_t,size_t,FILE*);
 _ACRTIMP size_t __cdecl fread_s(void*,size_t,size_t,size_t,FILE*);
 _ACRTIMP FILE*  __cdecl freopen(const char*,const char*,FILE*);
+_ACRTIMP errno_t __cdecl freopen_s(FILE**,const char*,const char*,FILE*);
 _ACRTIMP int    __cdecl fseek(FILE*,__msvcrt_long,int);
 _ACRTIMP int    __cdecl _fseeki64(FILE*,__int64,int);
 _ACRTIMP int    __cdecl fsetpos(FILE*,fpos_t*);
@@ -442,21 +440,9 @@ _ACRTIMP int __cdecl vsprintf(char*,const char*,va_list) __WINE_CRT_PRINTF_ATTR(
 _ACRTIMP int __cdecl vsprintf_s(char*,size_t,const char*,va_list) __WINE_CRT_PRINTF_ATTR(3, 0);
 
 _ACRTIMP int __cdecl _vsnprintf(char*,size_t,const char*,va_list) __WINE_CRT_PRINTF_ATTR(3, 0);
-#ifdef __i386_on_x86_64__
-_ACRTIMP int __cdecl _vsnprintf(char* HOSTPTR,size_t,const char* HOSTPTR,va_list) __attribute__((overloadable)) asm(__ASM_NAME("wine__vsnprintf_HOSTPTR"));
-#endif
-
 static inline int vsnprintf(char *buffer, size_t size, const char *format, va_list args) __WINE_CRT_PRINTF_ATTR(3, 0);
 static inline int vsnprintf(char *buffer, size_t size, const char *format, va_list args)
 { return _vsnprintf(buffer,size,format,args); }
-
-/* 32on64 FIXME: Did I put this in the right place? */
-#ifdef __i386_on_x86_64__
-static inline int vsnprintf(char * HOSTPTR buffer, size_t size, const char * HOSTPTR format, va_list args) __attribute__((overloadable))
-{
-    return _vsnprintf(buffer,size,format,args);
-}
-#endif
 
 _ACRTIMP int WINAPIV _snscanf_l(const char*,size_t,const char*,_locale_t,...) __WINE_CRT_SCANF_ATTR(3, 5);
 _ACRTIMP int WINAPIV _sscanf_l(const char *,const char*,_locale_t,...) __WINE_CRT_SCANF_ATTR(2, 4);
@@ -539,7 +525,5 @@ static inline wint_t fputwchar(wint_t wc) { return _fputwchar(wc); }
 static inline int getw(FILE* file) { return _getw(file); }
 static inline int putw(int val, FILE* file) { return _putw(val, file); }
 static inline FILE* wpopen(const wchar_t* command,const wchar_t* mode) { return _wpopen(command, mode); }
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_STDIO_H */

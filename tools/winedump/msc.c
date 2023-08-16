@@ -30,7 +30,6 @@
 #include "winbase.h"
 #include "winedump.h"
 #include "cvconst.h"
-#include "wine/mscvpdb.h"
 
 #define PSTRING(adr, ofs) \
     ((const struct p_string*)((const char*)(adr) + (ofs)))
@@ -227,28 +226,28 @@ static const char* get_attr(unsigned attr)
     return tmp;
 }
 
-static const char* get_property(unsigned prop)
+static const char* get_property(cv_property_t prop)
 {
     static char tmp[1024];
     unsigned    pos = 0;
 
-    if (!prop) return "none";
 #define X(s) {if (pos) tmp[pos++] = ';'; strcpy(tmp + pos, s); pos += strlen(s);}
-    if (prop & 0x0001) X("packed");
-    if (prop & 0x0002) X("w/{cd}tor");
-    if (prop & 0x0004) X("w/overloaded-ops");
-    if (prop & 0x0008) X("nested-class");
-    if (prop & 0x0010) X("has-nested-classes");
-    if (prop & 0x0020) X("w/overloaded-assign");
-    if (prop & 0x0040) X("w/casting-methods");
-    if (prop & 0x0080) X("forward");
-    if (prop & 0x0100) X("scoped");
-    if (prop & 0x0200) X("decorated-name");
-    if (prop & 0x0400) X("sealed-name");
-    if (prop & 0x1800) pos += sprintf(tmp, "hfa%x", (prop >> 11) & 3);
-    if (prop & 0x2000) X("intrinsic");
-    if (prop & 0xC000) pos += sprintf(tmp, "mocom%x", prop >> 14);
+    if (prop.is_packed)                 X("packed");
+    if (prop.has_ctor)                  X("w/{cd}tor");
+    if (prop.has_overloaded_operator)   X("w/overloaded-ops");
+    if (prop.is_nested)                 X("nested-class");
+    if (prop.has_nested)                X("has-nested-classes");
+    if (prop.has_overloaded_assign)     X("w/overloaded-assign");
+    if (prop.has_operator_cast)         X("w/casting-methods");
+    if (prop.is_forward_defn)           X("forward");
+    if (prop.is_scoped)                 X("scoped");
+    if (prop.has_decorated_name)        X("decorated-name");
+    if (prop.is_sealed)                 X("sealed");
+    if (prop.hfa)                       pos += sprintf(tmp, "hfa%x", prop.hfa);
+    if (prop.is_intrinsic)              X("intrinsic");
+    if (prop.mocom)                     pos += sprintf(tmp, "mocom%x", prop.mocom);
 #undef X
+    if (!pos) return "none";
 
     tmp[pos] = '\0';
     assert(pos < sizeof(tmp));
@@ -275,27 +274,27 @@ static const char* get_funcattr(unsigned attr)
     return tmp;
 }
 
-static const char* get_varflags(unsigned flags)
+static const char* get_varflags(struct cv_local_varflag flags)
 {
     static char tmp[1024];
     unsigned    pos = 0;
 
-    if (!flags) return "none";
 #define X(s) {if (pos) tmp[pos++] = ';'; strcpy(tmp + pos, s); pos += strlen(s);}
-    if (flags & 0x0001) X("param");
-    if (flags & 0x0002) X("addr-taken");
-    if (flags & 0x0004) X("compiler-gen");
-    if (flags & 0x0008) X("aggregated");
-    if (flags & 0x0010) X("in-aggregate");
-    if (flags & 0x0020) X("aliased");
-    if (flags & 0x0040) X("alias");
-    if (flags & 0x0080) X("retval");
-    if (flags & 0x0100) X("optimized-out");
-    if (flags & 0x0200) X("enreg-global");
-    if (flags & 0x0400) X("enreg-static");
-    if (flags & 0xf800) pos += sprintf(tmp, "unk:%x", flags & 0xf800);
+    if (flags.is_param)        X("param");
+    if (flags.address_taken)   X("addr-taken");
+    if (flags.from_compiler)   X("compiler-gen");
+    if (flags.is_aggregate)    X("aggregated");
+    if (flags.from_aggregate)  X("in-aggregate");
+    if (flags.is_aliased)      X("aliased");
+    if (flags.from_alias)      X("alias");
+    if (flags.is_return_value) X("retval");
+    if (flags.optimized_out)   X("optimized-out");
+    if (flags.enreg_global)    X("enreg-global");
+    if (flags.enreg_static)    X("enreg-static");
+    if (flags.unused)          pos += sprintf(tmp, "unk:%x", flags.unused);
 #undef X
 
+    if (!pos) return "none";
     tmp[pos] = '\0';
     assert(pos < sizeof(tmp));
 
@@ -902,7 +901,7 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
                str, type->struct_v3.n_element, get_property(type->struct_v3.property),
                type->struct_v3.fieldlist, type->struct_v3.derived,
                type->struct_v3.vshape, value);
-        if (type->union_v3.property & 0x200)
+        if (type->union_v3.property.has_decorated_name)
             printf("\t\tDecorated name:%s\n", str + strlen(str) + 1);
         break;
 
@@ -929,7 +928,7 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
                curr_type, str, type->union_v3.count,
                get_property(type->union_v3.property),
                type->union_v3.fieldlist, value);
-        if (type->union_v3.property & 0x200)
+        if (type->union_v3.property.has_decorated_name)
             printf("\t\tDecorated name:%s\n", str + strlen(str) + 1);
         break;
 
@@ -958,7 +957,7 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
                type->enumeration_v3.fieldlist,
                type->enumeration_v3.count,
                get_property(type->enumeration_v3.property));
-        if (type->union_v3.property & 0x200)
+        if (type->union_v3.property.has_decorated_name)
             printf("\t\tDecorated name:%s\n", type->enumeration_v3.name + strlen(type->enumeration_v3.name) + 1);
         break;
 
@@ -1285,7 +1284,7 @@ static void dump_binannot(const unsigned char* ba, const char* last, unsigned in
         case BA_OP_ChangeCodeOffsetAndLineOffset:
             {
                 unsigned p1 = binannot_uncompress(&ba);
-                printf("%*s  | ChangeCodeOffsetAndLineOffset %u %u (0x%x)\n", indent, "", p1 & 0xf, binannot_getsigned(p1 >> 4), p1);
+                printf("%*s  | ChangeCodeOffsetAndLineOffset %u %d (0x%x)\n", indent, "", p1 & 0xf, binannot_getsigned(p1 >> 4), p1);
             }
             break;
         case BA_OP_ChangeCodeLengthAndCodeOffset:
@@ -2017,7 +2016,7 @@ void codeview_dump_linetab(const char* linetab, BOOL pascal_str, const char* pfx
     }
 }
 
-void codeview_dump_linetab2(const char* linetab, DWORD size, const char* strimage, DWORD strsize, const char* pfx)
+void codeview_dump_linetab2(const char* linetab, DWORD size, const PDB_STRING_TABLE* strimage, const char* pfx)
 {
     unsigned    i;
     const struct CV_DebugSSubsectionHeader_t*     hdr;
@@ -2094,7 +2093,7 @@ void codeview_dump_linetab2(const char* linetab, DWORD size, const char* strimag
                 const char* meth[] = {"None", "MD5", "SHA1", "SHA256"};
                 printf("%s  %d] name=%s size=%u method=%s checksum=[",
                        pfx, (unsigned)((const char*)chksms - (const char*)(hdr + 1)),
-                       strimage ? strimage + chksms->strOffset : "--none--",
+                       pdb_get_string_table_entry(strimage, chksms->strOffset),
                        chksms->size, chksms->method < ARRAY_SIZE(meth) ? meth[chksms->method] : "<<unknown>>");
                 for (i = 0; i < chksms->size; ++i) printf("%02x", chksms->checksum[i]);
                 printf("]\n");

@@ -19,6 +19,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include <assert.h>
 #include <pthread.h>
 #include "ntstatus.h"
@@ -36,7 +40,7 @@ struct dce
     HDC         hdc;
     HWND        hwnd;
     HRGN        clip_rgn;
-    DWORD       flags;
+    UINT        flags;
     LONG        count;         /* usage count; 0 or 1 for cache DCEs, always 1 for window DCEs,
                                   always >= 1 for class DCEs */
 };
@@ -360,7 +364,7 @@ BOOL create_dib_surface( HDC hdc, const BITMAPINFO *info )
     memcpy( &surface->info, info, surface->info_size );
 
     TRACE( "created %p %ux%u for info %p bits %p\n",
-           surface, rect.right, rect.bottom, info, surface->bits );
+           surface, (int)rect.right, (int)rect.bottom, info, surface->bits );
 
     region = NtGdiCreateRectRgn( rect.left, rect.top, rect.right, rect.bottom );
     set_visible_region( hdc, region, &rect, &rect, &surface->header );
@@ -806,7 +810,7 @@ void invalidate_dce( WND *win, const RECT *extra_rect )
 
     if (!win->parent) return;
 
-    context = set_thread_dpi_awareness_context( get_window_dpi_awareness_context( win->obj.handle ));
+    context = SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( win->obj.handle ));
     get_window_rect( win->obj.handle, &window_rect, get_thread_dpi() );
 
     TRACE("%p parent %p %s (%s)\n",
@@ -841,7 +845,7 @@ void invalidate_dce( WND *win, const RECT *extra_rect )
                 make_dc_dirty( dce );
         }
     }
-    set_thread_dpi_awareness_context( context );
+    SetThreadDpiAwarenessContext( context );
 }
 
 /***********************************************************************
@@ -886,7 +890,7 @@ HDC WINAPI NtUserGetDCEx( HWND hwnd, HRGN clip_rgn, DWORD flags )
     if (!hwnd) hwnd = get_desktop_window();
     else hwnd = get_full_window_handle( hwnd );
 
-    TRACE( "hwnd %p, clip_rgn %p, flags %08x\n", hwnd, clip_rgn, flags );
+    TRACE( "hwnd %p, clip_rgn %p, flags %08x\n", hwnd, clip_rgn, (int)flags );
 
     if (!is_window(hwnd)) return 0;
 
@@ -1012,7 +1016,7 @@ HDC WINAPI NtUserGetDCEx( HWND hwnd, HRGN clip_rgn, DWORD flags )
 
     if (update_vis_rgn) update_visible_region( dce );
 
-    TRACE( "(%p,%p,0x%x): returning %p%s\n", hwnd, clip_rgn, flags, dce->hdc,
+    TRACE( "(%p,%p,0x%x): returning %p%s\n", hwnd, clip_rgn, (int)flags, dce->hdc,
            update_vis_rgn ? " (updated)" : "" );
     return dce->hdc;
 }
@@ -1023,6 +1027,23 @@ HDC WINAPI NtUserGetDCEx( HWND hwnd, HRGN clip_rgn, DWORD flags )
 INT WINAPI NtUserReleaseDC( HWND hwnd, HDC hdc )
 {
     return release_dc( hwnd, hdc, FALSE );
+}
+
+/***********************************************************************
+ *           NtUserGetDC (win32u.@)
+ */
+HDC WINAPI NtUserGetDC( HWND hwnd )
+{
+    if (!hwnd) return NtUserGetDCEx( 0, 0, DCX_CACHE | DCX_WINDOW );
+    return NtUserGetDCEx( hwnd, 0, DCX_USESTYLE );
+}
+
+/***********************************************************************
+ *           NtUserGetWindowDC (win32u.@)
+ */
+HDC WINAPI NtUserGetWindowDC( HWND hwnd )
+{
+    return NtUserGetDCEx( hwnd, 0, DCX_USESTYLE | DCX_WINDOW );
 }
 
 /**********************************************************************
@@ -1056,7 +1077,7 @@ static HRGN get_update_region( HWND hwnd, UINT *flags, HWND *child )
     {
         if (!(data = malloc( sizeof(*data) + size - 1 )))
         {
-            SetLastError( ERROR_OUTOFMEMORY );
+            RtlSetLastWin32Error( ERROR_OUTOFMEMORY );
             return 0;
         }
 
@@ -1083,7 +1104,7 @@ static HRGN get_update_region( HWND hwnd, UINT *flags, HWND *child )
         free( data );
     } while (status == STATUS_BUFFER_OVERFLOW);
 
-    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    if (status) RtlSetLastWin32Error( RtlNtStatusToDosError(status) );
     return hrgn;
 }
 
@@ -1156,7 +1177,7 @@ static HRGN send_ncpaint( HWND hwnd, HWND *child, UINT *flags )
         RECT client, window, update;
         INT type;
 
-        context = set_thread_dpi_awareness_context( get_window_dpi_awareness_context( hwnd ));
+        context = SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( hwnd ));
 
         /* check if update rgn overlaps with nonclient area */
         type = NtGdiGetRgnBox( whole_rgn, &update );
@@ -1184,20 +1205,20 @@ static HRGN send_ncpaint( HWND hwnd, HWND *child, UINT *flags )
 
         if (whole_rgn) /* NOTE: WM_NCPAINT allows wParam to be 1 */
         {
-            if ((*flags & UPDATE_NONCLIENT) && user_callbacks)
+            if (*flags & UPDATE_NONCLIENT)
             {
                 /* Mark standard scroll bars as not painted before sending WM_NCPAINT */
                 style = get_window_long( hwnd, GWL_STYLE );
                 if (style & WS_HSCROLL)
-                    user_callbacks->set_standard_scroll_painted( hwnd, SB_HORZ, FALSE );
+                    set_standard_scroll_painted( hwnd, SB_HORZ, FALSE );
                 if (style & WS_VSCROLL)
-                    user_callbacks->set_standard_scroll_painted( hwnd, SB_VERT, FALSE );
+                    set_standard_scroll_painted( hwnd, SB_VERT, FALSE );
 
                 send_message( hwnd, WM_NCPAINT, (WPARAM)whole_rgn, 0 );
             }
             if (whole_rgn > (HRGN)1) NtGdiDeleteObjectApp( whole_rgn );
         }
-        set_thread_dpi_awareness_context( context );
+        SetThreadDpiAwarenessContext( context );
     }
     return client_rgn;
 }
@@ -1336,7 +1357,7 @@ HDC WINAPI NtUserBeginPaint( HWND hwnd, PAINTSTRUCT *ps )
     RECT rect;
     UINT flags = UPDATE_NONCLIENT | UPDATE_ERASE | UPDATE_PAINT | UPDATE_INTERNALPAINT | UPDATE_NOCHILDREN;
 
-    if (user_callbacks) user_callbacks->pHideCaret( hwnd );
+    NtUserHideCaret( hwnd );
 
     if (!(hrgn = send_ncpaint( hwnd, NULL, &flags ))) return 0;
 
@@ -1360,7 +1381,7 @@ HDC WINAPI NtUserBeginPaint( HWND hwnd, PAINTSTRUCT *ps )
  */
 BOOL WINAPI NtUserEndPaint( HWND hwnd, const PAINTSTRUCT *ps )
 {
-    if (user_callbacks) user_callbacks->pShowCaret( hwnd );
+    NtUserShowCaret( hwnd );
     flush_window_surfaces( FALSE );
     if (!ps) return FALSE;
     release_dc( hwnd, ps->hdc, TRUE );
@@ -1428,6 +1449,7 @@ static void update_now( HWND hwnd, UINT rdw_flags )
  */
 BOOL WINAPI NtUserRedrawWindow( HWND hwnd, const RECT *rect, HRGN hrgn, UINT flags )
 {
+    LARGE_INTEGER zero = { .QuadPart = 0 };
     static const RECT empty;
     BOOL ret;
 
@@ -1448,12 +1470,15 @@ BOOL WINAPI NtUserRedrawWindow( HWND hwnd, const RECT *rect, HRGN hrgn, UINT fla
     }
 
     /* process pending expose events before painting */
-    if (flags & RDW_UPDATENOW) user_driver->pMsgWaitForMultipleObjectsEx( 0, NULL, 0, QS_PAINT, 0 );
+    if (flags & RDW_UPDATENOW) user_driver->pMsgWaitForMultipleObjectsEx( 0, NULL, &zero, QS_PAINT, 0 );
 
     if (rect && !hrgn)
     {
-        if (IsRectEmpty( rect )) rect = &empty;
-        ret = redraw_window_rects( hwnd, flags, rect, 1 );
+        RECT ordered = *rect;
+
+        order_rect( &ordered );
+        if (IsRectEmpty( &ordered )) ordered = empty;
+        ret = redraw_window_rects( hwnd, flags, &ordered, 1 );
     }
     else if (!hrgn)
     {
@@ -1483,6 +1508,22 @@ BOOL WINAPI NtUserRedrawWindow( HWND hwnd, const RECT *rect, HRGN hrgn, UINT fla
 }
 
 /***********************************************************************
+ *           NtUserValidateRect (win32u.@)
+ */
+BOOL WINAPI NtUserValidateRect( HWND hwnd, const RECT *rect )
+{
+    UINT flags = RDW_VALIDATE;
+
+    if (!hwnd)
+    {
+        flags = RDW_ALLCHILDREN | RDW_INVALIDATE | RDW_FRAME | RDW_ERASE | RDW_ERASENOW;
+        rect = NULL;
+    }
+
+    return NtUserRedrawWindow( hwnd, rect, 0, flags );
+}
+
+/***********************************************************************
  *           NtUserGetUpdateRgn (win32u.@)
  */
 INT WINAPI NtUserGetUpdateRgn( HWND hwnd, HRGN hrgn, BOOL erase )
@@ -1492,7 +1533,7 @@ INT WINAPI NtUserGetUpdateRgn( HWND hwnd, HRGN hrgn, BOOL erase )
     UINT flags = UPDATE_NOCHILDREN;
     HRGN update_rgn;
 
-    context = set_thread_dpi_awareness_context( get_window_dpi_awareness_context( hwnd ));
+    context = SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( hwnd ));
 
     if (erase) flags |= UPDATE_NONCLIENT | UPDATE_ERASE;
 
@@ -1507,7 +1548,7 @@ INT WINAPI NtUserGetUpdateRgn( HWND hwnd, HRGN hrgn, BOOL erase )
         /* map region to client coordinates */
         map_window_region( 0, hwnd, hrgn );
     }
-    set_thread_dpi_awareness_context( context );
+    SetThreadDpiAwarenessContext( context );
     return retval;
 }
 
@@ -1556,13 +1597,275 @@ INT WINAPI NtUserExcludeUpdateRgn( HDC hdc, HWND hwnd )
         DPI_AWARENESS_CONTEXT context;
         POINT pt;
 
-        context = set_thread_dpi_awareness_context( get_window_dpi_awareness_context( hwnd ));
+        context = SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( hwnd ));
         NtGdiGetDCPoint( hdc, NtGdiGetDCOrg, &pt );
         map_window_points( 0, hwnd, &pt, 1, get_thread_dpi() );
         NtGdiOffsetRgn( update_rgn, -pt.x, -pt.y );
         ret = NtGdiExtSelectClipRgn( hdc, update_rgn, RGN_DIFF );
-        set_thread_dpi_awareness_context( context );
+        SetThreadDpiAwarenessContext( context );
     }
     NtGdiDeleteObjectApp( update_rgn );
     return ret;
+}
+
+/***********************************************************************
+ *           NtUserInvalidateRgn (win32u.@)
+ */
+BOOL WINAPI NtUserInvalidateRgn( HWND hwnd, HRGN hrgn, BOOL erase )
+{
+    if (!hwnd)
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
+        return FALSE;
+    }
+
+    return NtUserRedrawWindow( hwnd, NULL, hrgn, RDW_INVALIDATE | (erase ? RDW_ERASE : 0) );
+}
+
+/***********************************************************************
+ *           NtUserInvalidateRect (win32u.@)
+ */
+BOOL WINAPI NtUserInvalidateRect( HWND hwnd, const RECT *rect, BOOL erase )
+{
+    UINT flags = RDW_INVALIDATE | (erase ? RDW_ERASE : 0);
+
+    if (!hwnd)
+    {
+        flags = RDW_ALLCHILDREN | RDW_INVALIDATE | RDW_FRAME | RDW_ERASE | RDW_ERASENOW;
+        rect = NULL;
+    }
+
+    return NtUserRedrawWindow( hwnd, rect, 0, flags );
+}
+
+/***********************************************************************
+ *           NtUserLockWindowUpdate (win32u.@)
+ */
+BOOL WINAPI NtUserLockWindowUpdate( HWND hwnd )
+{
+    static HWND locked_hwnd;
+
+    FIXME( "(%p), partial stub!\n", hwnd );
+
+    if (!hwnd)
+    {
+        locked_hwnd = NULL;
+        return TRUE;
+    }
+    return !InterlockedCompareExchangePointer( (void **)&locked_hwnd, hwnd, 0 );
+}
+
+/*************************************************************************
+ *             fix_caret
+ *
+ * Helper for NtUserScrollWindowEx:
+ * If the return value is 0, no special caret handling is necessary.
+ * Otherwise the return value is the handle of the window that owns the
+ * caret. Its caret needs to be hidden during the scroll operation and
+ * moved to new_caret_pos if move_caret is TRUE.
+ */
+static HWND fix_caret( HWND hwnd, const RECT *scroll_rect, INT dx, INT dy,
+                       UINT flags, BOOL *move_caret, POINT *new_caret_pos )
+{
+    RECT rect, mapped_caret;
+    GUITHREADINFO info;
+
+    info.cbSize = sizeof(info);
+    if (!NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info )) return 0;
+    if (!info.hwndCaret) return 0;
+
+    mapped_caret = info.rcCaret;
+    if (info.hwndCaret == hwnd)
+    {
+        /* The caret needs to be moved along with scrolling even if it's
+         * outside the visible area. Otherwise, when the caret is scrolled
+         * out from the view, the position won't get updated anymore and
+         * the caret will never scroll back again. */
+        *move_caret = TRUE;
+        new_caret_pos->x = info.rcCaret.left + dx;
+        new_caret_pos->y = info.rcCaret.top + dy;
+    }
+    else
+    {
+        *move_caret = FALSE;
+        if (!(flags & SW_SCROLLCHILDREN) || !is_child( hwnd, info.hwndCaret ))
+            return 0;
+        map_window_points( info.hwndCaret, hwnd, (POINT *)&mapped_caret, 2, get_thread_dpi() );
+    }
+
+    /* If the caret is not in the src/dest rects, all is fine done. */
+    if (!intersect_rect( &rect, scroll_rect, &mapped_caret ))
+    {
+        rect = *scroll_rect;
+        OffsetRect( &rect, dx, dy );
+        if (!intersect_rect( &rect, &rect, &mapped_caret ))
+            return 0;
+    }
+
+    /* Indicate that the caret needs to be updated during the scrolling. */
+    return info.hwndCaret;
+}
+
+/*************************************************************************
+ *           NtUserScrollWindowEx (win32u.@)
+ *
+ * Note: contrary to what the doc says, pixels that are scrolled from the
+ *      outside of clipRect to the inside are NOT painted.
+ */
+INT WINAPI NtUserScrollWindowEx( HWND hwnd, INT dx, INT dy, const RECT *rect,
+                                 const RECT *clip_rect, HRGN update_rgn,
+                                 RECT *update_rect, UINT flags )
+{
+    BOOL update = update_rect || update_rgn || flags & (SW_INVALIDATE | SW_ERASE);
+    BOOL own_rgn = TRUE, move_caret = FALSE;
+    HRGN temp_rgn, winupd_rgn = 0;
+    INT retval = NULLREGION;
+    HWND caret_hwnd = NULL;
+    POINT new_caret_pos;
+    RECT rc, cliprc;
+    int rdw_flags;
+    HDC hdc;
+
+    TRACE( "%p, %d,%d update_rgn=%p update_rect = %p %s %04x\n",
+           hwnd, dx, dy, update_rgn, update_rect, wine_dbgstr_rect(rect), flags );
+    TRACE( "clip_rect = %s\n", wine_dbgstr_rect(clip_rect) );
+    if (flags & ~(SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE | SW_NODCCACHE))
+        FIXME( "some flags (%04x) are unhandled\n", flags );
+
+    rdw_flags = (flags & SW_ERASE) && (flags & SW_INVALIDATE) ?
+        RDW_INVALIDATE | RDW_ERASE  : RDW_INVALIDATE;
+
+    if (!is_window_drawable( hwnd, TRUE )) return ERROR;
+    hwnd = get_full_window_handle( hwnd );
+
+    get_client_rect( hwnd, &rc );
+    if (clip_rect) intersect_rect( &cliprc, &rc, clip_rect );
+    else cliprc = rc;
+
+    if (rect) intersect_rect( &rc, &rc, rect );
+    if (update_rgn) own_rgn = FALSE;
+    else if (update) update_rgn = NtGdiCreateRectRgn( 0, 0, 0, 0 );
+
+    new_caret_pos.x = new_caret_pos.y = 0;
+
+    if (!IsRectEmpty( &cliprc ) && (dx || dy))
+    {
+        DWORD style = get_window_long( hwnd, GWL_STYLE );
+        DWORD dcxflags = 0;
+
+        caret_hwnd = fix_caret( hwnd, &rc, dx, dy, flags, &move_caret, &new_caret_pos );
+        if (caret_hwnd) NtUserHideCaret( caret_hwnd );
+
+        if (!(flags & SW_NODCCACHE)) dcxflags |= DCX_CACHE;
+        if (style & WS_CLIPSIBLINGS) dcxflags |= DCX_CLIPSIBLINGS;
+        if (get_class_long( hwnd, GCL_STYLE, FALSE ) & CS_PARENTDC) dcxflags |= DCX_PARENTCLIP;
+        if (!(flags & SW_SCROLLCHILDREN) && (style & WS_CLIPCHILDREN))
+            dcxflags |= DCX_CLIPCHILDREN;
+        hdc = NtUserGetDCEx( hwnd, 0, dcxflags);
+        if (hdc)
+        {
+            NtUserScrollDC( hdc, dx, dy, &rc, &cliprc, update_rgn, update_rect );
+            NtUserReleaseDC( hwnd, hdc );
+            if (!update) NtUserRedrawWindow( hwnd, NULL, update_rgn, rdw_flags );
+        }
+
+        /* If the windows has an update region, this must be scrolled as well.
+         * Keep a copy in winupd_rgn to be added to hrngUpdate at the end. */
+        temp_rgn = NtGdiCreateRectRgn( 0, 0, 0, 0 );
+        retval = NtUserGetUpdateRgn( hwnd, temp_rgn, FALSE );
+        if (retval != NULLREGION)
+        {
+            HRGN clip_rgn = NtGdiCreateRectRgn( cliprc.left, cliprc.top,
+                                                cliprc.right, cliprc.bottom );
+            if (!own_rgn)
+            {
+                winupd_rgn = NtGdiCreateRectRgn( 0, 0, 0, 0);
+                NtGdiCombineRgn( winupd_rgn, temp_rgn, 0, RGN_COPY);
+            }
+            NtGdiOffsetRgn( temp_rgn, dx, dy );
+            NtGdiCombineRgn( temp_rgn, temp_rgn, clip_rgn, RGN_AND );
+            if (!own_rgn) NtGdiCombineRgn( winupd_rgn, winupd_rgn, temp_rgn, RGN_OR );
+            NtUserRedrawWindow( hwnd, NULL, temp_rgn, rdw_flags );
+
+           /*
+            * Catch the case where the scrolling amount exceeds the size of the
+            * original window. This generated a second update area that is the
+            * location where the original scrolled content would end up.
+            * This second region is not returned by the ScrollDC and sets
+            * ScrollWindowEx apart from just a ScrollDC.
+            *
+            * This has been verified with testing on windows.
+            */
+            if (abs( dx ) > abs( rc.right - rc.left ) || abs( dy ) > abs( rc.bottom - rc.top ))
+            {
+                NtGdiSetRectRgn( temp_rgn, rc.left + dx, rc.top + dy, rc.right+dx, rc.bottom + dy );
+                NtGdiCombineRgn( temp_rgn, temp_rgn, clip_rgn, RGN_AND );
+                NtGdiCombineRgn( update_rgn, update_rgn, temp_rgn, RGN_OR );
+
+                if (update_rect)
+                {
+                    RECT temp_rect;
+                    NtGdiGetRgnBox( temp_rgn, &temp_rect );
+                    union_rect( update_rect, update_rect, &temp_rect );
+                }
+
+                if (!own_rgn) NtGdiCombineRgn( winupd_rgn, winupd_rgn, temp_rgn, RGN_OR );
+            }
+            NtGdiDeleteObjectApp( clip_rgn );
+        }
+        NtGdiDeleteObjectApp( temp_rgn );
+    }
+    else
+    {
+        /* nothing was scrolled */
+        if (!own_rgn) NtGdiSetRectRgn( update_rgn, 0, 0, 0, 0 );
+        SetRectEmpty( update_rect );
+    }
+
+    if (flags & SW_SCROLLCHILDREN)
+    {
+        HWND *list = list_window_children( 0, hwnd, NULL, 0 );
+        if (list)
+        {
+            RECT r, dummy;
+            int i;
+
+            for (i = 0; list[i]; i++)
+            {
+                get_window_rects( list[i], COORDS_PARENT, &r, NULL, get_thread_dpi() );
+                if (!rect || intersect_rect( &dummy, &r, rect ))
+                    NtUserSetWindowPos( list[i], 0, r.left + dx, r.top  + dy, 0, 0,
+                                        SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE |
+                                        SWP_NOREDRAW | SWP_DEFERERASE );
+            }
+            free( list );
+        }
+    }
+
+    if (flags & (SW_INVALIDATE | SW_ERASE))
+        NtUserRedrawWindow( hwnd, NULL, update_rgn, rdw_flags |
+                            ((flags & SW_SCROLLCHILDREN) ? RDW_ALLCHILDREN : 0 ) );
+
+    if (winupd_rgn)
+    {
+        NtGdiCombineRgn( update_rgn, update_rgn, winupd_rgn, RGN_OR );
+        NtGdiDeleteObjectApp( winupd_rgn );
+    }
+
+    if (move_caret) set_caret_pos( new_caret_pos.x, new_caret_pos.y );
+    if (caret_hwnd) NtUserShowCaret( caret_hwnd );
+    if (own_rgn && update_rgn) NtGdiDeleteObjectApp( update_rgn );
+
+    return retval;
+}
+
+/************************************************************************
+ *           NtUserPrintWindow (win32u.@)
+ */
+BOOL WINAPI NtUserPrintWindow( HWND hwnd, HDC hdc, UINT flags )
+{
+    UINT prf_flags = PRF_CHILDREN | PRF_ERASEBKGND | PRF_OWNED | PRF_CLIENT;
+    if (!(flags & PW_CLIENTONLY)) prf_flags |= PRF_NONCLIENT;
+    send_message( hwnd, WM_PRINT, (WPARAM)hdc, prf_flags );
+    return TRUE;
 }

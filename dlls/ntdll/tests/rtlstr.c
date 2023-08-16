@@ -608,7 +608,7 @@ static void test_RtlUpcaseUnicodeChar(void)
 
 static void test_RtlUpcaseUnicodeString(void)
 {
-    int i;
+    int i, j;
     WCHAR ch;
     WCHAR upper_ch;
     WCHAR ascii_buf[257];
@@ -653,6 +653,25 @@ static void test_RtlUpcaseUnicodeString(void)
 	   ascii_str.Buffer[i], ascii_str.Buffer[i],
 	   result_str.Buffer[i], result_str.Buffer[i],
 	   upper_str.Buffer[i], upper_str.Buffer[i]);
+    }
+
+    /* test surrogates */
+    for (i = 0x100; i < 0x1100; i++)
+    {
+        WCHAR src[512], dst[512];
+        for (j = 0; j < 256; j++)
+        {
+            unsigned int ch = ((i << 8) + j) - 0x10000;
+            src[2 * j] = 0xd800 | (ch >> 10);
+            src[2 * j + 1] = 0xdc00 | (ch & 0x3ff);
+        }
+        upper_str.Length = upper_str.MaximumLength = 512 * sizeof(WCHAR);
+        upper_str.Buffer = src;
+        result_str.Length = result_str.MaximumLength = 512 * sizeof(WCHAR);
+        result_str.Buffer = dst;
+        pRtlUpcaseUnicodeString(&result_str, &upper_str, 0);
+        ok( !memcmp(src, dst, sizeof(dst)),
+            "string compare mismatch in %04x-%04x\n", i << 8, (i << 8) + 255 );
     }
 }
 
@@ -2641,6 +2660,25 @@ static void WINAPIV testfmt( const WCHAR *src, const WCHAR *expect, ULONG width,
     ok( size == (lstrlenW(expect) + 1) * sizeof(WCHAR), "%s: wrong size %lu\n", debugstr_w(src), size );
 }
 
+static void testfmt_arg_eaten( const WCHAR *src, ... )
+{
+    va_list args;
+    NTSTATUS status;
+    WCHAR *arg, buffer[1];
+    ULONG size = 0xdeadbeef;
+
+    buffer[0] = 0xcccc;
+    va_start( args, src );
+    status = pRtlFormatMessage( src, 0, FALSE, FALSE, FALSE, &args, buffer, ARRAY_SIZE(buffer), &size );
+    ok( status == STATUS_BUFFER_OVERFLOW, "%s: failed %lx\n", debugstr_w(src), status );
+    todo_wine
+    ok( buffer[0] == 0xcccc, "%s: got %x\n", debugstr_w(src), buffer[0] );
+    ok( size == 0xdeadbeef, "%s: wrong size %lu\n", debugstr_w(src), size );
+    arg = va_arg( args, WCHAR * );
+    ok( !wcscmp( L"unused", arg ), "%s: wrong arg %s\n", debugstr_w(src), debugstr_w(arg) );
+    va_end( args );
+}
+
 static void test_RtlFormatMessage(void)
 {
     WCHAR buffer[128];
@@ -2888,6 +2926,8 @@ static void test_RtlFormatMessage(void)
     ok( !lstrcmpW( buffer, L"abcxxxxxxx" ), "got %s\n", wine_dbgstr_w(buffer) );
     ok( size == 0xdeadbeef, "wrong size %lu\n", size );
 
+    /* va_arg is eaten even in case of buffer overflow */
+    testfmt_arg_eaten( L"%1!s! %2!s!", L"eaten", L"unused" );
 }
 
 START_TEST(rtlstr)

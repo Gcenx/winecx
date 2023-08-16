@@ -21,15 +21,20 @@
 
 #define COBJMACROS
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
+#include "ntuser.h"
 #include "initguid.h"
 #include "ocidl.h"
 #include "featurestagingapi.h"
 #include "shellscalingapi.h"
+#define WINSHLWAPI
 #include "shlwapi.h"
+#include "appmodel.h"
 
 #include "wine/debug.h"
 #include "wine/heap.h"
@@ -250,15 +255,47 @@ HRESULT WINAPI IUnknown_SetSite(IUnknown *obj, IUnknown *site)
 
 HRESULT WINAPI SetCurrentProcessExplicitAppUserModelID(const WCHAR *appid)
 {
-    FIXME("%s: stub\n", debugstr_w(appid));
-    return S_OK;
+    NTSTATUS status;
+    INT len;
+
+    FIXME("%s: semi-stub\n", debugstr_w(appid));
+
+    /* CW Hack 22310 */
+
+    if (!appid) return E_INVALIDARG;
+
+    len = lstrlenW(appid) + 1;
+    /* Native does not enforce the minimum length. */
+    if (len > APPLICATION_USER_MODEL_ID_MAX_LENGTH) return E_INVALIDARG;
+
+    status = __wine_set_current_process_explicit_app_user_model_id(appid);
+    return status ? E_INVALIDARG : S_OK;
 }
 
 HRESULT WINAPI GetCurrentProcessExplicitAppUserModelID(const WCHAR **appid)
 {
-    FIXME("%p: stub\n", appid);
-    *appid = NULL;
-    return E_NOTIMPL;
+    WCHAR *buffer;
+    NTSTATUS status;
+
+    FIXME("%p: semi-stub\n", appid);
+
+    /* CW Hack 22310 */
+
+    if (!appid) return E_INVALIDARG;
+
+    buffer = CoTaskMemAlloc(APPLICATION_USER_MODEL_ID_MAX_LENGTH * sizeof(WCHAR));
+    if (!buffer) return E_OUTOFMEMORY;
+
+    status = __wine_get_current_process_explicit_app_user_model_id(buffer, APPLICATION_USER_MODEL_ID_MAX_LENGTH);
+    if (status)
+    {
+        /* Shouldn't happen; there should be enough space for any AUMID. */
+        CoTaskMemFree(buffer);
+        return E_OUTOFMEMORY;
+    }
+
+    *appid = buffer;
+    return S_OK;
 }
 
 /*************************************************************************

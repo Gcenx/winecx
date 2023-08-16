@@ -42,6 +42,10 @@ static const struct prop_desc msg_props[] =
     { sizeof(WS_XML_READER *), TRUE },          /* WS_MESSAGE_PROPERTY_BODY_READER */
     { sizeof(WS_XML_WRITER *), TRUE },          /* WS_MESSAGE_PROPERTY_BODY_WRITER */
     { sizeof(BOOL), TRUE },                     /* WS_MESSAGE_PROPERTY_IS_ADDRESSED */
+    { sizeof(WS_HEAP_PROPERTIES), TRUE },       /* WS_MESSAGE_PROPERTY_HEAP_PROPERTIES */
+    { sizeof(WS_XML_READER_PROPERTIES), TRUE }, /* WS_MESSAGE_PROPERTY_XML_READER_PROPERTIES */
+    { sizeof(WS_XML_WRITER_PROPERTIES), TRUE }, /* WS_MESSAGE_PROPERTY_XML_WRITER_PROPERTIES */
+    { sizeof(BOOL), FALSE },                    /* WS_MESSAGE_PROPERTY_IS_FAULT */
 };
 
 struct header
@@ -122,6 +126,7 @@ static void free_header( struct header *header )
 
 static void reset_msg( struct msg *msg )
 {
+    BOOL isfault = FALSE;
     ULONG i;
 
     msg->state         = WS_MESSAGE_STATE_EMPTY;
@@ -150,6 +155,8 @@ static void reset_msg( struct msg *msg )
 
     memset( &msg->ctx_send, 0, sizeof(msg->ctx_send) );
     memset( &msg->ctx_receive, 0, sizeof(msg->ctx_receive) );
+
+    prop_set( msg->prop, msg->prop_count, WS_MESSAGE_PROPERTY_IS_FAULT, &isfault, sizeof(isfault) );
 }
 
 static void free_msg( struct msg *msg )
@@ -373,6 +380,13 @@ HRESULT WINAPI WsGetMessageProperty( WS_MESSAGE *handle, WS_MESSAGE_PROPERTY_ID 
     case WS_MESSAGE_PROPERTY_IS_ADDRESSED:
         if (msg->state < WS_MESSAGE_STATE_INITIALIZED) hr = WS_E_INVALID_OPERATION;
         else *(BOOL *)buf = msg->is_addressed;
+        break;
+
+    case WS_MESSAGE_PROPERTY_HEAP_PROPERTIES:
+    case WS_MESSAGE_PROPERTY_XML_READER_PROPERTIES:
+    case WS_MESSAGE_PROPERTY_XML_WRITER_PROPERTIES:
+        FIXME( "property %u not supported\n", id );
+        hr = E_NOTIMPL;
         break;
 
     default:
@@ -625,23 +639,25 @@ static HRESULT write_headers( struct msg *msg, WS_MESSAGE_INITIALIZATION init, W
     if ((hr = write_action_header( writer, prefix_env, ns_env, prefix_addr, ns_addr, msg->action )) != S_OK)
         return hr;
 
-    if (init == WS_REPLY_MESSAGE)
+    if (init == WS_REPLY_MESSAGE || init == WS_FAULT_MESSAGE)
     {
         if ((hr = write_relatesto_header( writer, prefix_env, ns_env, prefix_addr, ns_addr, &msg->id_req )) != S_OK)
             return hr;
     }
-    else if (msg->addr.length)
-    {
-        if ((hr = write_to_header( writer, prefix_env, ns_env, prefix_addr, ns_addr, &msg->addr )) != S_OK)
-            return hr;
-    }
     else
     {
-        if (init == WS_REQUEST_MESSAGE &&
-            (hr = write_msgid_header( writer, prefix_env, ns_env, prefix_addr, ns_addr, &msg->id )) != S_OK) return hr;
+        if (init == WS_REQUEST_MESSAGE)
+        {
+            if ((hr = write_msgid_header(writer, prefix_env, ns_env, prefix_addr, ns_addr, &msg->id)) != S_OK)
+                return hr;
+            if (msg->version_addr == WS_ADDRESSING_VERSION_0_9 &&
+                (hr = write_replyto_header(writer, prefix_env, ns_env, prefix_addr, ns_addr)) != S_OK)
+                return hr;
+        }
 
-        if (msg->version_addr == WS_ADDRESSING_VERSION_0_9 &&
-            (hr = write_replyto_header( writer, prefix_env, ns_env, prefix_addr, ns_addr )) != S_OK) return hr;
+        if (msg->addr.length &&
+            (hr = write_to_header(writer, prefix_env, ns_env, prefix_addr, ns_addr, &msg->addr)) != S_OK)
+            return hr;
     }
 
     for (i = 0; i < msg->header_count; i++)
@@ -875,6 +891,18 @@ static BOOL match_current_element( WS_XML_READER *reader, const WS_XML_STRING *l
     return WsXmlStringEquals( elem->localName, localname, NULL ) == S_OK;
 }
 
+static BOOL match_current_element_with_ns( WS_XML_READER *reader, const WS_XML_STRING *localname, const WS_XML_STRING *ns )
+{
+    const WS_XML_NODE *node;
+    const WS_XML_ELEMENT_NODE *elem;
+
+    if (WsGetReaderNode( reader, &node, NULL ) != S_OK) return FALSE;
+    if (node->nodeType != WS_XML_NODE_TYPE_ELEMENT) return FALSE;
+    elem = (const WS_XML_ELEMENT_NODE *)node;
+    return WsXmlStringEquals( elem->localName, localname, NULL ) == S_OK &&
+           WsXmlStringEquals( elem->ns, ns, NULL ) == S_OK;
+}
+
 static HRESULT read_message_id( WS_XML_READER *reader, GUID *ret )
 {
     const WS_XML_NODE *node;
@@ -912,6 +940,9 @@ static HRESULT read_envelope_start( struct msg *msg, WS_XML_READER *reader )
 {
     static const WS_XML_STRING envelope = {8, (BYTE *)"Envelope"}, body = {4, (BYTE *)"Body"};
     static const WS_XML_STRING header = {6, (BYTE *)"Header"}, msgid = {9, (BYTE *)"MessageID"};
+    static const WS_XML_STRING fault = {5, (BYTE *)"Fault"};
+    const WS_XML_STRING *ns_env = get_env_namespace( msg->version_env );
+    BOOL isfault;
     HRESULT hr;
 
     if ((hr = WsReadNode( reader, NULL )) != S_OK) return hr;
@@ -928,7 +959,10 @@ static HRESULT read_envelope_start( struct msg *msg, WS_XML_READER *reader )
         }
     }
     if (!match_current_element( reader, &body )) return WS_E_INVALID_FORMAT;
-    return WsReadNode( reader, NULL );
+    if ((hr = WsReadNode( reader, NULL )) != S_OK) return hr;
+
+    isfault = match_current_element_with_ns( reader, &fault, ns_env );
+    return prop_set( msg->prop, msg->prop_count, WS_MESSAGE_PROPERTY_IS_FAULT, &isfault, sizeof(isfault) );
 }
 
 /**************************************************************************
@@ -1008,6 +1042,8 @@ HRESULT WINAPI WsReadBody( WS_MESSAGE *handle, const WS_ELEMENT_DESCRIPTION *des
                            WS_HEAP *heap, void *value, ULONG size, WS_ERROR *error )
 {
     struct msg *msg = (struct msg *)handle;
+    WS_ELEMENT_DESCRIPTION tmp;
+    WS_FAULT_DESCRIPTION fault_desc;
     HRESULT hr;
 
     TRACE( "%p %p %u %p %p %lu %p\n", handle, desc, option, heap, value, size, error );
@@ -1024,7 +1060,23 @@ HRESULT WINAPI WsReadBody( WS_MESSAGE *handle, const WS_ELEMENT_DESCRIPTION *des
     }
 
     if (msg->state != WS_MESSAGE_STATE_READING) hr = WS_E_INVALID_OPERATION;
-    else hr = WsReadElement( msg->reader_body, desc, option, heap, value, size, NULL );
+    else
+    {
+        if (!desc->typeDescription)
+        {
+            if (desc->type == WS_FAULT_TYPE)
+            {
+                memcpy( &tmp, desc, sizeof(*desc) );
+                fault_desc.envelopeVersion = msg->version_env;
+                tmp.typeDescription = &fault_desc;
+                desc = &tmp;
+            }
+            else if (desc->type == WS_ENDPOINT_ADDRESS_TYPE)
+                FIXME( "!desc->typeDescription with WS_ENDPOINT_ADDRESS_TYPE\n" );
+        }
+
+        hr = WsReadElement( msg->reader_body, desc, option, heap, value, size, NULL );
+    }
 
     LeaveCriticalSection( &msg->cs );
     TRACE( "returning %#lx\n", hr );
@@ -2206,4 +2258,45 @@ HRESULT message_set_request_id( WS_MESSAGE *handle, const GUID *id )
 
     LeaveCriticalSection( &msg->cs );
     return hr;
+}
+
+/* Attempt to read a fault message. If the message is a fault, WS_E_ENDPOINT_FAULT_RECEIVED will be returned. */
+HRESULT message_read_fault( WS_MESSAGE *handle, WS_HEAP *heap, WS_ERROR *error )
+{
+    static const WS_ELEMENT_DESCRIPTION desc = { NULL, NULL, WS_FAULT_TYPE, NULL };
+    BOOL isfault;
+    WS_FAULT fault = {0};
+    WS_XML_STRING action;
+    HRESULT hr;
+
+    if ((hr = WsGetMessageProperty( handle, WS_MESSAGE_PROPERTY_IS_FAULT, &isfault, sizeof(isfault), NULL )) != S_OK)
+        return hr;
+    if (!isfault)
+        return S_OK;
+
+    if ((hr = WsReadBody( handle, &desc, WS_READ_REQUIRED_VALUE, heap, &fault, sizeof(fault), NULL )) != S_OK ||
+        (hr = WsReadEnvelopeEnd( handle, NULL )) != S_OK)
+        goto done;
+
+    if (!error) goto done;
+
+    if ((hr = WsSetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_FAULT, &fault, sizeof(fault) )) != S_OK)
+        goto done;
+
+    if ((hr = WsGetHeader( handle, WS_ACTION_HEADER, WS_XML_STRING_TYPE, WS_READ_REQUIRED_VALUE,
+                           heap, &action, sizeof(action), NULL )) != S_OK)
+    {
+        if (hr == WS_E_INVALID_FORMAT)
+        {
+            memset( &action, 0, sizeof(action) );
+            hr = S_OK;
+        }
+        else
+            goto done;
+    }
+    hr = WsSetFaultErrorProperty( error, WS_FAULT_ERROR_PROPERTY_ACTION, &action, sizeof(action) );
+
+done:
+    free_fault_fields( heap, &fault );
+    return hr != S_OK ? hr : WS_E_ENDPOINT_FAULT_RECEIVED;
 }

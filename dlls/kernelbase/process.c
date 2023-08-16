@@ -546,6 +546,87 @@ static WCHAR * hack_steam_exe(const WCHAR *tidy_cmdline, WCHAR *steam_dir)
     return new_command_line;
 }
 
+static const WCHAR *hack_append_command_line( const WCHAR *cmd, const WCHAR *cmd_line )
+{
+    /* CROSSOVER HACK: bug 13322 (winehq bug 39403)
+     * Insert --no-sandbox in command line of Steam's web helper process to
+     * work around rendering problems.
+     * CROSSOVER HACK: bug 17315
+     * Insert --in-process-gpu in command line of Steam's web helper process to
+     * work around page rendering problems.
+     * CROSSOVER HACK: bug 21883
+     * Insert --disable-gpu as well.
+     */
+    /* CROSSOVER HACK: bug 18582
+     * Add --in-process-gpu and --use-gl=swiftshader to the Rockstar Social Club's
+     * web helper process command line.
+     */
+    /* CROSSOVER HACK: bug 19537
+     * Add --in-process-gpu to Foxmail's command line.
+     */
+    /* CROSSOVER HACK: bug 15388
+     * Add --in-process-gpu and --use-gl=swiftshader to EO.WebBrowser CEF processes,
+     * used by Quicken.
+     * (It launches processes through rundll32.exe and already passes --no-sandbox)
+     */
+    /* CROSSOVER HACK: bug 19252
+     * Add --use-angle=gl to Ubisoft Connect.
+     */
+    /* CROSSOVER HACK: bug 20889
+     * Add --in-process-gpu and --use-gl=swiftshader to qwSubprocess.exe, another
+     * CEF helper used by Quicken. It already passes --no-sandbox.
+     */
+    /* CROSSOVER HACK: bug 20645
+     * Add --in-process-gpu and --use-gl=swiftshader to the Paradox Launcher.
+     */
+    /* CROSSOVER HACK: bug 19610
+     * Add --in-process-gpu to Battle.net.
+     */
+    /* CROSSOVER HACK: bug 22330
+     * Add --in-process-gpu --use-gl=swiftshader --no-sandbox to msedgewebview2.exe
+     * used by Quicken.
+     */
+    /* CROSSOVER HACK: bug 22598
+     * Add --launcher-skip to the Witcher 3 prelauncher.
+     */
+
+    static const struct
+    {
+        const WCHAR *exe_name;
+        const WCHAR *append;
+        const WCHAR *required_args;
+        const WCHAR *forbidden_args;
+    }
+    options[] =
+    {
+        {L"steamwebhelper.exe", L" --no-sandbox --in-process-gpu --disable-gpu", NULL, L"--type=crashpad-handler"},
+        {L"SocialClubHelper.exe", L" --in-process-gpu --use-gl=swiftshader", NULL, NULL},
+        {L"Foxmail.exe", L" --in-process-gpu", NULL, NULL},
+        {L"rundll32.exe", L" --in-process-gpu --use-gl=swiftshader", L"--no-sandbox", NULL},
+        {L"UplayWebCore.exe", L" --use-angle=vulkan", NULL, NULL},
+        {L"qwSubprocess.exe", L" --in-process-gpu --use-gl=swiftshader", NULL, NULL},
+        {L"Paradox Launcher.exe", L" --in-process-gpu --use-gl=swiftshader", NULL, NULL},
+        {L"Battle.net.exe", L" --in-process-gpu --use-gl=swiftshader", NULL, NULL},
+        {L"msedgewebview2.exe", L" --in-process-gpu --use-gl=swiftshader --no-sandbox", NULL, L"--type=crashpad-handler"},
+        {L"redprelauncher.exe", L" --launcher-skip", NULL, NULL},
+    };
+    unsigned int i;
+
+    if (!cmd) return NULL;
+
+    for (i = 0; i < ARRAY_SIZE(options); ++i)
+    {
+        if (wcsstr( cmd, options[i].exe_name )
+            && (!options[i].required_args || wcsstr(cmd_line, options[i].required_args))
+            && (!options[i].forbidden_args || !wcsstr(cmd_line, options[i].forbidden_args)))
+        {
+            FIXME( "HACK: appending %s to command line.\n", debugstr_w(options[i].append) );
+            return options[i].append;
+        }
+    }
+    return NULL;
+}
+
 /**********************************************************************
  *           CreateProcessInternalW   (kernelbase.@)
  */
@@ -562,6 +643,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
     RTL_USER_PROCESS_INFORMATION rtl_info;
     HANDLE parent = 0, debug = 0;
+    const WCHAR *append;
     ULONG nt_flags = 0;
     NTSTATUS status;
 
@@ -586,92 +668,15 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
         app_name = name;
     }
 
-    /* CROSSOVER HACK: bug 13322 (winehq bug 39403)
-     * Insert --no-sandbox in command line of Steam's web helper process to
-     * work around rendering problems.
-     * CROSSOVER HACK: bug 17315
-     * Insert --in-process-gpu in command line of Steam's web helper process to
-     * work around page rendering problems. */
-    /* CROSSOVER HACK: bug 18582
-     * Add --in-process-gpu to the Rockstar Social Club's
-     * web helper process command line.
-     */
-    /* CROSSOVER HACK: bug 19537
-     * Add --in-process-gpu to Foxmail's command line.
-     */
-    /* CROSSOVER HACK: bug 15388
-     * Add --in-process-gpu and --use-gl=swiftshader to EO.WebBrowser CEF processes,
-     * used by Quicken.
-     * (It launches processes through rundll32.exe and already passes --no-sandbox)
-     */
-    /* CROSSOVER HACK: bug 19252
-     * Add --use-angle=gl to Ubisoft Connect.
-     */
-    /* CROSSOVER HACK: bug 20889
-     * Add --in-process-gpu and --use-gl=swiftshader to qwSubprocess.exe, another
-     * CEF helper used by Quicken. It already passes --no-sandbox.
-     */
-    /* CROSSOVER HACK: bug 20645
-     * Add --in-process-gpu and --no-sandbox to the Paradox Launcher.
-     */
+    /* CROSSOVER HACK */
+    if ((append = hack_append_command_line( app_name, tidy_cmdline )))
     {
-        static const WCHAR steamwebhelperexeW[] = {'s','t','e','a','m','w','e','b','h','e','l','p','e','r','.','e','x','e',0};
-        static const WCHAR socialclubhelperexeW[] = {'S','o','c','i','a','l','C','l','u','b','H','e','l','p','e','r','.','e','x','e',0};
-        static const WCHAR foxmailW[] = {'F','o','x','m','a','i','l','.','e','x','e',0};
-        static const WCHAR rundll32W[] = {'r','u','n','d','l','l','3','2','.','e','x','e',0};
-        static const WCHAR BattlenetW[] = {'B','a','t','t','l','e','.','n','e','t','.','e','x','e',0};
-        static const WCHAR UplayW[] = {'U','p','l','a','y','W','e','b','C','o','r','e','.','e','x','e',0};
-        static const WCHAR qwSubprocessW[] = {'q','w','S','u','b','p','r','o','c','e','s','s','.','e','x','e',0};
-        static const WCHAR paradoxlauncherW[] = {'P','a','r','a','d','o','x',' ','L','a','u','n','c','h','e','r','.','e','x','e',0};
-        static const WCHAR wechatW[] = {'W','e','C','h','a','t','.','e','x','e',0};
-
-        static const WCHAR inprocessgpuW[] = {' ','-','-','i','n','-','p','r','o','c','e','s','s','-','g','p','u',0};
-        static const WCHAR nosandboxW[] = {' ','-','-','n','o','-','s','a','n','d','b','o','x',0};
-        static const WCHAR swiftshaderW[] = {' ','-','-','u','s','e','-','g','l','=','s','w','i','f','t','s','h','a','d','e','r',0};
-        static const WCHAR angleglW[] = {' ','-','-','u','s','e','-','a','n','g','l','e','=','g','l',0};
-        static const WCHAR disablegpuW[] = {' ','-','-','d','i','s','a','b','l','e','-','g','p','u',0};
-
-        if (wcsstr(app_name, steamwebhelperexeW) || wcsstr(app_name, socialclubhelperexeW) || wcsstr(app_name, foxmailW)
-                || wcsstr(app_name, BattlenetW) || (wcsstr(app_name, rundll32W) && wcsstr(tidy_cmdline, nosandboxW))
-                || wcsstr(app_name, UplayW)
-                || wcsstr(app_name, qwSubprocessW)
-                || wcsstr(app_name, wechatW)
-                || wcsstr(app_name, paradoxlauncherW)
-           )
-        {
-            LPWSTR new_command_line;
-
-            new_command_line = RtlAllocateHeap(GetProcessHeap(), 0,
-                    sizeof(WCHAR) * (lstrlenW(tidy_cmdline) + lstrlenW(nosandboxW) +  lstrlenW(inprocessgpuW)
-                        + lstrlenW(swiftshaderW) + lstrlenW(angleglW) + lstrlenW(disablegpuW) + 1));
-
-            if (!new_command_line) return FALSE;
-
-            wcscpy(new_command_line, tidy_cmdline);
-            lstrcatW(new_command_line, nosandboxW);
-            lstrcatW(new_command_line, inprocessgpuW);
-
-            if ((wcsstr(app_name, rundll32W) && wcsstr(tidy_cmdline, nosandboxW))
-                    || wcsstr(app_name, qwSubprocessW))
-            {
-                lstrcatW(new_command_line, swiftshaderW);
-            }
-
-            if (wcsstr(app_name, UplayW))
-            {
-                lstrcatW(new_command_line, angleglW);
-            }
-
-            if (wcsstr(app_name, steamwebhelperexeW))
-            {
-                lstrcatW(new_command_line, disablegpuW);
-            }
-
-            TRACE("CrossOver hack changing command line to %s\n", debugstr_w(new_command_line));
-
-            if (tidy_cmdline != cmd_line) RtlFreeHeap( GetProcessHeap(), 0, tidy_cmdline );
-            tidy_cmdline = new_command_line;
-        }
+        WCHAR *new_cmdline = RtlAllocateHeap( GetProcessHeap(), 0,
+                                              sizeof(WCHAR) * (lstrlenW(cmd_line) + lstrlenW(append) + 1) );
+        lstrcpyW(new_cmdline, tidy_cmdline);
+        lstrcatW(new_cmdline, append);
+        if (tidy_cmdline != cmd_line) RtlFreeHeap( GetProcessHeap(), 0, tidy_cmdline );
+        tidy_cmdline = new_cmdline;
     }
     /* end CROSSOVER HACK */
 
@@ -858,6 +863,26 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessW( const WCHAR *app_name, WCHAR *cmd_
 {
     return CreateProcessInternalW( NULL, app_name, cmd_line, process_attr, thread_attr,
                                    inherit, flags, env, cur_dir, startup_info, info, NULL );
+}
+
+
+/**********************************************************************
+ *           SetProcessInformation   (kernelbase.@)
+ */
+BOOL WINAPI SetProcessInformation( HANDLE process, PROCESS_INFORMATION_CLASS info_class, void *info, DWORD size )
+{
+    switch (info_class)
+    {
+        case ProcessMemoryPriority:
+            return set_ntstatus( NtSetInformationProcess( process, ProcessPagePriority, info, size ));
+        case ProcessPowerThrottling:
+            return set_ntstatus( NtSetInformationProcess( process, ProcessPowerThrottlingState, info, size ));
+        case ProcessLeapSecondInfo:
+            return set_ntstatus( NtSetInformationProcess( process, ProcessLeapSecondInformation, info, size ));
+        default:
+            FIXME("Unrecognized information class %d.\n", info_class);
+            return FALSE;
+    }
 }
 
 

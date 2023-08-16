@@ -128,9 +128,9 @@ enum directions
 
 /* HELPER FUNCTIONS */
 
-static inline unsigned short get_table_entry(const unsigned short *table, WCHAR ch)
+static inline unsigned short get_table_entry_32( const unsigned short *table, UINT ch )
 {
-    return table[table[table[ch >> 8] + ((ch >> 4) & 0x0f)] + (ch & 0xf)];
+    return table[table[table[table[ch >> 12] + ((ch >> 8) & 0x0f)] + ((ch >> 4) & 0x0f)] + (ch & 0xf)];
 }
 
 /* Convert the libwine information to the direction enum */
@@ -139,7 +139,7 @@ static void classify(LPCWSTR lpString, WORD *chartype, DWORD uCount)
     unsigned i;
 
     for (i = 0; i < uCount; ++i)
-        chartype[i] = get_table_entry( bidi_direction_table, lpString[i] );
+        chartype[i] = get_table_entry_32( bidi_direction_table, lpString[i] );
 }
 
 /* Set a run of cval values at locations all prior to, but not including */
@@ -471,7 +471,7 @@ static BOOL BIDI_Reorder( HDC hDC,               /* [in] Display DC */
             WARN("Out of memory\n");
             goto cleanup;
         }
-        psva = HeapAlloc(GetProcessHeap(),0,sizeof(SCRIPT_VISATTR) * uCount);
+        psva = HeapAlloc(GetProcessHeap(),0,sizeof(SCRIPT_VISATTR) * cMaxGlyphs);
         if (!psva)
         {
             WARN("Out of memory\n");
@@ -604,16 +604,22 @@ static BOOL BIDI_Reorder( HDC hDC,               /* [in] Display DC */
                 while (res == E_OUTOFMEMORY)
                 {
                     WORD *new_run_glyphs = HeapReAlloc(GetProcessHeap(), 0, run_glyphs, sizeof(*run_glyphs) * cMaxGlyphs * 2);
-                    if (!new_run_glyphs)
+                    SCRIPT_VISATTR *new_psva = HeapReAlloc(GetProcessHeap(), 0, psva, sizeof(*psva) * cMaxGlyphs * 2);
+                    if (!new_run_glyphs || !new_psva)
                     {
                         WARN("Out of memory\n");
                         HeapFree(GetProcessHeap(), 0, runOrder);
                         HeapFree(GetProcessHeap(), 0, visOrder);
                         HeapFree(GetProcessHeap(), 0, *lpGlyphs);
                         *lpGlyphs = NULL;
+                        if (new_run_glyphs)
+                            run_glyphs = new_run_glyphs;
+                        if (new_psva)
+                            psva = new_psva;
                         goto cleanup;
                     }
                     run_glyphs = new_run_glyphs;
+                    psva = new_psva;
                     cMaxGlyphs *= 2;
                     res = ScriptShape(hDC, &psc, lpString + done + curItem->iCharPos, cChars, cMaxGlyphs, &curItem->a, run_glyphs, pwLogClust, psva, &cOutGlyphs);
                 }
@@ -933,6 +939,7 @@ BOOL WINAPI ExtTextOutW( HDC hdc, INT x, INT y, UINT flags, const RECT *rect,
     if (count > INT_MAX) return FALSE;
     if (is_meta_dc( hdc )) return METADC_ExtTextOut( hdc, x, y, flags, rect, str, count, dx );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_ExtTextOut( dc_attr, x, y, flags, rect, str, count, dx ))
         return FALSE;
 
@@ -2662,10 +2669,11 @@ static BOOL create_fot( const WCHAR *resource, const WCHAR *font_file, const str
 BOOL WINAPI CreateScalableFontResourceW( DWORD hidden, const WCHAR *resource_file,
                                          const WCHAR *font_file, const WCHAR *font_path )
 {
+    WCHAR path[MAX_PATH], face_name[128];
     struct fontdir fontdir = { 0 };
     UNICODE_STRING nt_name;
-    OUTLINETEXTMETRICW otm;
-    WCHAR path[MAX_PATH];
+    TEXTMETRICW otm;
+    UINT em_square;
     BOOL ret;
 
     TRACE("(%ld, %s, %s, %s)\n", hidden, debugstr_w(resource_file),
@@ -2682,10 +2690,10 @@ BOOL WINAPI CreateScalableFontResourceW( DWORD hidden, const WCHAR *resource_fil
         if (!RtlDosPathNameToNtPathName_U( path, &nt_name, NULL, NULL )) goto done;
     }
     else if (!RtlDosPathNameToNtPathName_U( font_file, &nt_name, NULL, NULL )) goto done;
-    ret = __wine_get_file_outline_text_metric( nt_name.Buffer, &otm );
+    ret = __wine_get_file_outline_text_metric( nt_name.Buffer, &otm, &em_square, face_name );
     RtlFreeUnicodeString( &nt_name );
     if (!ret) goto done;
-    if (!(otm.otmTextMetrics.tmPitchAndFamily & TMPF_TRUETYPE)) goto done;
+    if (!(otm.tmPitchAndFamily & TMPF_TRUETYPE)) goto done;
 
     fontdir.num_of_resources  = 1;
     fontdir.res_id            = 0;
@@ -2693,32 +2701,31 @@ BOOL WINAPI CreateScalableFontResourceW( DWORD hidden, const WCHAR *resource_fil
     fontdir.dfSize            = sizeof(fontdir);
     strcpy( fontdir.dfCopyright, "Wine fontdir" );
     fontdir.dfType            = 0x4003;  /* 0x0080 set if private */
-    fontdir.dfPoints          = otm.otmEMSquare;
+    fontdir.dfPoints          = em_square;
     fontdir.dfVertRes         = 72;
     fontdir.dfHorizRes        = 72;
-    fontdir.dfAscent          = otm.otmTextMetrics.tmAscent;
-    fontdir.dfInternalLeading = otm.otmTextMetrics.tmInternalLeading;
-    fontdir.dfExternalLeading = otm.otmTextMetrics.tmExternalLeading;
-    fontdir.dfItalic          = otm.otmTextMetrics.tmItalic;
-    fontdir.dfUnderline       = otm.otmTextMetrics.tmUnderlined;
-    fontdir.dfStrikeOut       = otm.otmTextMetrics.tmStruckOut;
-    fontdir.dfWeight          = otm.otmTextMetrics.tmWeight;
-    fontdir.dfCharSet         = otm.otmTextMetrics.tmCharSet;
+    fontdir.dfAscent          = otm.tmAscent;
+    fontdir.dfInternalLeading = otm.tmInternalLeading;
+    fontdir.dfExternalLeading = otm.tmExternalLeading;
+    fontdir.dfItalic          = otm.tmItalic;
+    fontdir.dfUnderline       = otm.tmUnderlined;
+    fontdir.dfStrikeOut       = otm.tmStruckOut;
+    fontdir.dfWeight          = otm.tmWeight;
+    fontdir.dfCharSet         = otm.tmCharSet;
     fontdir.dfPixWidth        = 0;
-    fontdir.dfPixHeight       = otm.otmTextMetrics.tmHeight;
-    fontdir.dfPitchAndFamily  = otm.otmTextMetrics.tmPitchAndFamily;
-    fontdir.dfAvgWidth        = otm.otmTextMetrics.tmAveCharWidth;
-    fontdir.dfMaxWidth        = otm.otmTextMetrics.tmMaxCharWidth;
-    fontdir.dfFirstChar       = otm.otmTextMetrics.tmFirstChar;
-    fontdir.dfLastChar        = otm.otmTextMetrics.tmLastChar;
-    fontdir.dfDefaultChar     = otm.otmTextMetrics.tmDefaultChar;
-    fontdir.dfBreakChar       = otm.otmTextMetrics.tmBreakChar;
+    fontdir.dfPixHeight       = otm.tmHeight;
+    fontdir.dfPitchAndFamily  = otm.tmPitchAndFamily;
+    fontdir.dfAvgWidth        = otm.tmAveCharWidth;
+    fontdir.dfMaxWidth        = otm.tmMaxCharWidth;
+    fontdir.dfFirstChar       = otm.tmFirstChar;
+    fontdir.dfLastChar        = otm.tmLastChar;
+    fontdir.dfDefaultChar     = otm.tmDefaultChar;
+    fontdir.dfBreakChar       = otm.tmBreakChar;
     fontdir.dfWidthBytes      = 0;
     fontdir.dfDevice          = 0;
     fontdir.dfFace            = FIELD_OFFSET( struct fontdir, szFaceName );
     fontdir.dfReserved        = 0;
-    WideCharToMultiByte( CP_ACP, 0, (WCHAR *)otm.otmpFamilyName, -1,
-                         fontdir.szFaceName, LF_FACESIZE, NULL, NULL );
+    WideCharToMultiByte( CP_ACP, 0, face_name, -1, fontdir.szFaceName, LF_FACESIZE, NULL, NULL );
 
     if (hidden) fontdir.dfType |= 0x80;
     return create_fot( resource_file, font_file, &fontdir );

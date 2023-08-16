@@ -20,8 +20,6 @@
 #ifndef __WINE_WINTABX_H
 #define __WINE_WINTABX_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif /* defined(__cplusplus) */
@@ -128,7 +126,5 @@ extern "C" {
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
-
-#include "wine/winheader_exit.h"
 
 #endif /* defined(__WINE_WINTABX_H */

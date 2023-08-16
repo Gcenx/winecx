@@ -96,6 +96,7 @@ static struct screen_buffer *create_screen_buffer( struct console *console, int 
         screen_buffer->attr       = console->active->attr;
         screen_buffer->popup_attr = console->active->attr;
         screen_buffer->font       = console->active->font;
+        memcpy( screen_buffer->color_map, console->active->color_map, sizeof(console->active->color_map) );
 
         if (screen_buffer->font.face_len)
         {
@@ -358,6 +359,8 @@ static void update_output( struct screen_buffer *screen_buffer, RECT *rect )
     int x, y, size, trailing_spaces;
     char_info_t *ch;
     char buf[8];
+    WCHAR wch;
+    const unsigned int mask = (1u << '\0') | (1u << '\b') | (1u << '\t') | (1u << '\n') | (1u << '\a') | (1u << '\r');
 
     if (!is_active( screen_buffer ) || rect->top > rect->bottom || rect->right < rect->left)
         return;
@@ -393,9 +396,11 @@ static void update_output( struct screen_buffer *screen_buffer, RECT *rect )
                 tty_write( screen_buffer->console, "\x1b[K", 3 );
                 break;
             }
-
+            wch = ch->ch;
+            if (screen_buffer->console->is_unix && wch < L' ' && mask & (1u << wch))
+                wch = L'?';
             size = WideCharToMultiByte( get_tty_cp( screen_buffer->console ), 0,
-                                        &ch->ch, 1, buf, sizeof(buf), NULL, NULL );
+                                        &wch, 1, buf, sizeof(buf), NULL, NULL );
             tty_write( screen_buffer->console, buf, size );
             screen_buffer->console->tty_cursor_x++;
         }
@@ -2675,12 +2680,16 @@ static NTSTATUS console_input_ioctl( struct console *console, unsigned int code,
 
     case IOCTL_CONDRV_GET_TITLE:
         {
-            WCHAR *result;
+            size_t title_len, str_size;
+            struct condrv_title_params *params;
             if (in_size) return STATUS_INVALID_PARAMETER;
+            title_len = console->title ? wcslen( console->title ) : 0;
+            str_size = min( *out_size - sizeof(*params), title_len * sizeof(WCHAR) );
+            *out_size = sizeof(*params) + str_size;
+            if (!(params = alloc_ioctl_buffer( *out_size ))) return STATUS_NO_MEMORY;
             TRACE( "returning title %s\n", debugstr_w(console->title) );
-            *out_size = min( *out_size, console->title ? wcslen( console->title ) * sizeof(WCHAR) : 0 );
-            if (!(result = alloc_ioctl_buffer( *out_size ))) return STATUS_NO_MEMORY;
-            if (*out_size) memcpy( result, console->title, *out_size );
+            if (str_size) memcpy( params->buffer, console->title, str_size );
+            params->title_len = title_len;
             return STATUS_SUCCESS;
         }
 
@@ -2851,9 +2860,18 @@ static int main_loop( struct console *console, HANDLE signal )
     return 0;
 }
 
+static void teardown( struct console *console )
+{
+    if (console->is_unix)
+    {
+        set_tty_attr( console, empty_char_info.attr );
+        tty_flush( console );
+    }
+}
+
 int __cdecl wmain(int argc, WCHAR *argv[])
 {
-    int headless = 0, i, width = 0, height = 0;
+    int headless = 0, i, width = 0, height = 0, ret;
     HANDLE signal = NULL;
     WCHAR *end;
 
@@ -2946,5 +2964,8 @@ int __cdecl wmain(int argc, WCHAR *argv[])
         ShowWindow( console.win, (si.dwFlags & STARTF_USESHOWWINDOW) ? si.wShowWindow : SW_SHOW );
     }
 
-    return main_loop( &console, signal );
+    ret = main_loop( &console, signal );
+    teardown( &console );
+
+    return ret;
 }

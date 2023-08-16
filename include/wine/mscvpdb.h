@@ -112,6 +112,25 @@ typedef unsigned short  cv_typ16_t;
 typedef unsigned int    cv_typ_t;
 typedef cv_typ_t        cv_itemid_t;
 
+typedef struct cv_property_t
+{
+    unsigned short  is_packed               : 1;
+    unsigned short  has_ctor                : 1;
+    unsigned short  has_overloaded_operator : 1;
+    unsigned short  is_nested               : 1;
+    unsigned short  has_nested              : 1;
+    unsigned short  has_overloaded_assign   : 1;
+    unsigned short  has_operator_cast       : 1;
+    unsigned short  is_forward_defn         : 1;
+    unsigned short  is_scoped               : 1;
+    unsigned short  has_decorated_name      : 1; /* follows name field */
+    unsigned short  is_sealed               : 1; /* not usage as base class */
+    unsigned short  hfa                     : 2;
+    unsigned short  is_intrinsic            : 1;
+    unsigned short  mocom                   : 2;
+}
+cv_property_t;
+
 /* ======================================== *
  *             Type information
  * ======================================== */
@@ -201,7 +220,7 @@ union codeview_type
         unsigned short int      id;
         short int               n_element;
         cv_typ16_t              fieldlist;
-        short int               property;
+        cv_property_t           property;
         cv_typ16_t              derived;
         cv_typ16_t              vshape;
         unsigned short int      structlen;  /* numeric leaf */
@@ -215,7 +234,7 @@ union codeview_type
         unsigned short int      len;
         unsigned short int      id;
         short int               n_element;
-        short int               property;
+        cv_property_t           property;
         cv_typ_t                fieldlist;
         cv_typ_t                derived;
         cv_typ_t                vshape;
@@ -230,7 +249,7 @@ union codeview_type
         unsigned short int      len;
         unsigned short int      id;
         short int               n_element;
-        short int               property;
+        cv_property_t           property;
         cv_typ_t                fieldlist;
         cv_typ_t                derived;
         cv_typ_t                vshape;
@@ -246,7 +265,7 @@ union codeview_type
         unsigned short int      id;
         short int               count;
         cv_typ16_t              fieldlist;
-        short int               property;
+        cv_property_t           property;
         unsigned short int      un_len;     /* numeric leaf */
 #if 0
         struct p_string         p_name;
@@ -258,7 +277,7 @@ union codeview_type
         unsigned short int      len;
         unsigned short int      id;
         short int               count;
-        short int               property;
+        cv_property_t           property;
         cv_typ_t                fieldlist;
         unsigned short int      un_len;     /* numeric leaf */
 #if 0
@@ -271,7 +290,7 @@ union codeview_type
         unsigned short int      len;
         unsigned short int      id;
         short int               count;
-        short int               property;
+        cv_property_t           property;
         cv_typ_t                fieldlist;
         unsigned short int      un_len;     /* numeric leaf */
 #if 0
@@ -286,7 +305,7 @@ union codeview_type
         short int               count;
         cv_typ16_t              type;
         cv_typ16_t              fieldlist;
-        short int               property;
+        cv_property_t           property;
         struct p_string         p_name;
     } enumeration_v1;
 
@@ -295,7 +314,7 @@ union codeview_type
         unsigned short int      len;
         unsigned short int      id;
         short int               count;
-        short int               property;
+        cv_property_t           property;
         cv_typ_t                type;
         cv_typ_t                fieldlist;
         struct p_string         p_name;
@@ -306,7 +325,7 @@ union codeview_type
         unsigned short int      len;
         unsigned short int      id;
         short int               count;
-        short int               property;
+        cv_property_t           property;
         cv_typ_t                type;
         cv_typ_t                fieldlist;
         char                    name[1];
@@ -1172,7 +1191,8 @@ union codeview_fieldtype
 #define T_64PCHAR8          0x067c  /* 64 near pointer to 8-bit unicode char */
 
 /* counts, bit masks, and shift values needed to access various parts of the built-in type numbers */
-#define T_MAXPREDEFINEDTYPE 0x0580  /* maximum type index for all built-in types */
+#define T_FIRSTDEFINABLETYPE 0x1000 /* first type index that's not predefined */
+#define T_MAXPREDEFINEDTYPE 0x0680  /* maximum type index for all built-in types */
 #define T_MAXBASICTYPE      0x0080  /* maximum type index all non-pointer built-in types */
 #define T_BASICTYPE_MASK    0x00ff  /* mask of bits that can potentially identify a non-pointer basic type */
 #define T_BASICTYPE_SHIFT   8       /* shift count to push out the basic type bits from a type number */
@@ -1352,6 +1372,24 @@ struct cv_addr_gap
 {
     unsigned short              gapStartOffset;
     unsigned short              cbRange;
+};
+
+struct cv_local_varflag
+{
+    unsigned short is_param          : 1;
+    unsigned short address_taken     : 1;
+    unsigned short from_compiler     : 1; /* generated by compiler */
+    unsigned short is_aggregate      : 1; /* split in several variables by compiler */
+    unsigned short from_aggregate    : 1; /* marks a temporary from an aggregate */
+    unsigned short is_aliased        : 1;
+    unsigned short from_alias        : 1;
+    unsigned short is_return_value   : 1;
+    unsigned short optimized_out     : 1;
+    unsigned short enreg_global      : 1; /* global variable accessed from register */
+    unsigned short enreg_static      : 1;
+
+    unsigned short unused            : 5;
+
 };
 
 union codeview_symbol
@@ -1854,7 +1892,7 @@ union codeview_symbol
         unsigned short int      len;
         unsigned short int      id;
         cv_typ_t                symtype;
-        unsigned short          varflags;
+        struct cv_local_varflag varflags;
         char                    name[1];
     } local_v3;
 
@@ -1983,7 +2021,7 @@ union codeview_symbol
         unsigned short int      id;
         cv_typ_t                typind;
         unsigned int            modOffset;
-        unsigned short          varflags;
+        struct cv_local_varflag varflags;
         char                    name[1];
     } file_static_v3;
 
@@ -2403,7 +2441,7 @@ typedef struct _PDB_TYPES_OLD
     unsigned short first_index;
     unsigned short last_index;
     unsigned int   type_size;
-    unsigned short file;
+    unsigned short hash_file;
     unsigned short pad;
 } PDB_TYPES_OLD, *PPDB_TYPES_OLD;
 
@@ -2414,16 +2452,16 @@ typedef struct _PDB_TYPES
     unsigned int   first_index;
     unsigned int   last_index;
     unsigned int   type_size;
-    unsigned short file;
+    unsigned short hash_file;
     unsigned short pad;
     unsigned int   hash_size;
-    unsigned int   hash_base;
+    unsigned int   hash_num_buckets;
     unsigned int   hash_offset;
     unsigned int   hash_len;
     unsigned int   search_offset;
     unsigned int   search_len;
-    unsigned int   unknown_offset;
-    unsigned int   unknown_len;
+    unsigned int   type_remap_offset;
+    unsigned int   type_remap_len;
 } PDB_TYPES, *PPDB_TYPES;
 
 typedef struct _PDB_SYMBOL_RANGE
@@ -2497,7 +2535,7 @@ typedef struct _PDB_SYMBOL_IMPORT
 
 typedef struct _PDB_SYMBOLS_OLD
 {
-    unsigned short global_file;
+    unsigned short global_hash_file;
     unsigned short public_file;
     unsigned short gsym_file;
     unsigned short pad;
@@ -2512,7 +2550,7 @@ typedef struct _PDB_SYMBOLS
     unsigned int   signature;
     unsigned int   version;
     unsigned int   age;
-    unsigned short global_file;
+    unsigned short global_hash_file;
     unsigned short flags;
     unsigned short public_file;
     unsigned short bldVer;
@@ -2571,6 +2609,60 @@ typedef struct _PDB_FPO_DATA
 #define PDB_FPO_DFL_IN_BLOCK    0x00000004
     unsigned int   flags;
 } PDB_FPO_DATA;
+
+typedef struct _PDB_STRING_TABLE
+{
+    unsigned int   magic;
+    unsigned int   hash_version;
+    unsigned int   length;
+}
+PDB_STRING_TABLE;
+/* This header is followed by:
+ * - a series (of bytes hdr.length) of 0-terminated strings
+ * - a serialized hash table
+ */
+
+/* Header for hash tables inside DBI (aka symbols) stream.
+ * - The global hash stream contains only the hash table.
+ * - The public stream contains the same layout for its hash table
+ *   (but other information as well).
+ */
+typedef struct
+{
+    unsigned signature;
+    unsigned version;
+    unsigned size_hash_records;
+    unsigned unknown;
+} DBI_HASH_HEADER;
+/* This header is followed by:
+ * - DBI_HASH_RECORDS (on hdr:size_hash_records bytes)
+ * - a bitmap of DBI_MAX_HASH + 1 entries (on DBI_BITMAP_HASH_SIZE bytes)
+ * - a table (one entry per present bit in bitmap) as index into hdr:num_records
+ */
+
+typedef struct
+{
+    unsigned offset;
+    unsigned unknown;
+} DBI_HASH_RECORD;
+
+#define DBI_MAX_HASH 4096
+#define DBI_BITMAP_HASH_SIZE ((DBI_MAX_HASH / (8 * sizeof(unsigned)) + 1) * sizeof(unsigned))
+
+/* Header for public stream (from DBI / SYMBOLS stream)
+ * Followed by a hash table (cf DBI_HASH_HEADER and the following bits)
+ */
+typedef struct
+{
+    unsigned hash_size;
+    unsigned address_map_size;
+    unsigned num_thunks;
+    unsigned size_thunk;
+    unsigned short section_thunk_table;
+    unsigned short _pad0;
+    unsigned offset_thunk_table;
+    unsigned num_sects;
+} DBI_PUBLIC_HEADER;
 
 #include "poppack.h"
 

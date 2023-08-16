@@ -331,6 +331,15 @@ NTSTATUS WINAPI RtlDosPathNameToRelativeNtPathName_U_WithStatus(const WCHAR *dos
 }
 
 /**************************************************************************
+ *        RtlDosPathNameToRelativeNtPathName_U [NTDLL.@]
+ */
+BOOLEAN WINAPI RtlDosPathNameToRelativeNtPathName_U(const WCHAR *dos_path, UNICODE_STRING *ntpath,
+    WCHAR **file_part, RTL_RELATIVE_NAME *relative)
+{
+    return RtlDosPathNameToRelativeNtPathName_U_WithStatus(dos_path, ntpath, file_part, relative) == STATUS_SUCCESS;
+}
+
+/**************************************************************************
  *        RtlReleaseRelativeName [NTDLL.@]
  */
 void WINAPI RtlReleaseRelativeName(RTL_RELATIVE_NAME *relative)
@@ -714,7 +723,7 @@ DWORD WINAPI RtlGetFullPathName_U(const WCHAR* name, ULONG size, WCHAR* buffer,
     DWORD       dosdev;
     DWORD       reqsize;
 
-    TRACE("(%s %u %p %p)\n", debugstr_w(name), size, buffer, file_part);
+    TRACE("(%s %lu %p %p)\n", debugstr_w(name), size, buffer, file_part);
 
     if (!name || !*name) return 0;
 
@@ -870,7 +879,7 @@ ULONG WINAPI RtlGetCurrentDirectory_U(ULONG buflen, LPWSTR buf)
     UNICODE_STRING*     us;
     ULONG               len;
 
-    TRACE("(%u %p)\n", buflen, buf);
+    TRACE("(%lu %p)\n", buflen, buf);
 
     RtlAcquirePebLock();
 

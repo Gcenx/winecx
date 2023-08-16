@@ -27,6 +27,7 @@
 #include <ole2.h>
 #include <commctrl.h>
 #include <oleacc.h>
+#include <servprov.h>
 
 #define DEFINE_EXPECT(func) \
     static BOOL expect_ ## func = FALSE, called_ ## func = FALSE
@@ -58,8 +59,13 @@ DEFINE_EXPECT(Accessible_get_accChildCount);
 DEFINE_EXPECT(Accessible_get_accChild);
 DEFINE_EXPECT(Accessible_get_accName);
 DEFINE_EXPECT(Accessible_get_accParent);
+DEFINE_EXPECT(Accessible_accNavigate);
 DEFINE_EXPECT(Accessible_child_get_accName);
 DEFINE_EXPECT(Accessible_child_get_accParent);
+DEFINE_EXPECT(Accessible_child_accNavigate);
+
+#define NAVDIR_INTERNAL_HWND 10
+DEFINE_GUID(SID_AccFromDAWrapper, 0x33f139ee, 0xe509, 0x47f7, 0xbf,0x39, 0x83,0x76,0x44,0xf7,0x45,0x76);
 
 static HANDLE (WINAPI *pGetProcessHandleFromHwnd)(HWND);
 
@@ -90,16 +96,38 @@ static BOOL iface_cmp(IUnknown *iface1, IUnknown *iface2)
     return unk1 == unk2;
 }
 
-static IAccessible Accessible_child;
+static struct Accessible
+{
+    IAccessible IAccessible_iface;
+    IOleWindow IOleWindow_iface;
+    LONG ref;
+
+    IAccessible *parent;
+    HWND acc_hwnd;
+    HWND ow_hwnd;
+} Accessible, Accessible_child;
+
+static inline struct Accessible* impl_from_Accessible(IAccessible *iface)
+{
+    return CONTAINING_RECORD(iface, struct Accessible, IAccessible_iface);
+}
 
 static HRESULT WINAPI Accessible_QueryInterface(
         IAccessible *iface, REFIID riid, void **ppvObject)
 {
+    struct Accessible *This = impl_from_Accessible(iface);
+
     if(IsEqualIID(riid, &IID_IUnknown) ||
             IsEqualIID(riid, &IID_IDispatch) ||
             IsEqualIID(riid, &IID_IAccessible)) {
         IAccessible_AddRef(iface);
         *ppvObject = iface;
+        return S_OK;
+    }
+
+    if(IsEqualIID(riid, &IID_IOleWindow)) {
+        *ppvObject = &This->IOleWindow_iface;
+        IOleWindow_AddRef(&This->IOleWindow_iface);
         return S_OK;
     }
 
@@ -113,12 +141,14 @@ static HRESULT WINAPI Accessible_QueryInterface(
 
 static ULONG WINAPI Accessible_AddRef(IAccessible *iface)
 {
-    return 2;
+    struct Accessible *This = impl_from_Accessible(iface);
+    return InterlockedIncrement(&This->ref);
 }
 
 static ULONG WINAPI Accessible_Release(IAccessible *iface)
 {
-    return 1;
+    struct Accessible *This = impl_from_Accessible(iface);
+    return InterlockedDecrement(&This->ref);
 }
 
 static HRESULT WINAPI Accessible_GetTypeInfoCount(
@@ -153,17 +183,28 @@ static HRESULT WINAPI Accessible_Invoke(IAccessible *iface, DISPID dispIdMember,
 static HRESULT WINAPI Accessible_get_accParent(
         IAccessible *iface, IDispatch **ppdispParent)
 {
-    if(iface == &Accessible_child)
+    struct Accessible *This = impl_from_Accessible(iface);
+
+    if(This == &Accessible_child)
         CHECK_EXPECT(Accessible_child_get_accParent);
     else
         CHECK_EXPECT(Accessible_get_accParent);
 
-    return E_NOTIMPL;
+    if(This->parent)
+    {
+        return IAccessible_QueryInterface(This->parent, &IID_IDispatch,
+                (void **)ppdispParent);
+    }
+    *ppdispParent = NULL;
+    return S_FALSE;
 }
 
 static HRESULT WINAPI Accessible_get_accChildCount(
         IAccessible *iface, LONG *pcountChildren)
 {
+    struct Accessible *This = impl_from_Accessible(iface);
+
+    ok(This == &Accessible, "unexpected call\n");
     CHECK_EXPECT(Accessible_get_accChildCount);
     *pcountChildren = 1;
     return S_OK;
@@ -172,6 +213,9 @@ static HRESULT WINAPI Accessible_get_accChildCount(
 static HRESULT WINAPI Accessible_get_accChild(IAccessible *iface,
         VARIANT varChildID, IDispatch **ppdispChild)
 {
+    struct Accessible *This = impl_from_Accessible(iface);
+
+    ok(This == &Accessible, "unexpected call\n");
     CHECK_EXPECT(Accessible_get_accChild);
     ok(V_VT(&varChildID) == VT_I4, "V_VT(&varChildID) = %d\n", V_VT(&varChildID));
 
@@ -184,10 +228,12 @@ static HRESULT WINAPI Accessible_get_accChild(IAccessible *iface,
         *ppdispChild = NULL;
         return S_FALSE;
     case 3:
-        *ppdispChild = (IDispatch*)&Accessible_child;
+        *ppdispChild = (IDispatch*)&Accessible_child.IAccessible_iface;
+        IDispatch_AddRef(*ppdispChild);
         return S_OK;
     case 4:
-        *ppdispChild = (IDispatch*)&Accessible_child;
+        *ppdispChild = (IDispatch*)&Accessible_child.IAccessible_iface;
+        IDispatch_AddRef(*ppdispChild);
         return S_FALSE;
     default:
         ok(0, "unexpected call\n");
@@ -198,8 +244,9 @@ static HRESULT WINAPI Accessible_get_accChild(IAccessible *iface,
 static HRESULT WINAPI Accessible_get_accName(IAccessible *iface,
         VARIANT varID, BSTR *pszName)
 {
+    struct Accessible *This = impl_from_Accessible(iface);
 
-    if(iface == &Accessible_child)
+    if(This == &Accessible_child)
         CHECK_EXPECT(Accessible_child_get_accName);
     else
         CHECK_EXPECT(Accessible_get_accName);
@@ -294,7 +341,23 @@ static HRESULT WINAPI Accessible_accLocation(IAccessible *iface, LONG *pxLeft,
 static HRESULT WINAPI Accessible_accNavigate(IAccessible *iface,
         LONG navDir, VARIANT varStart, VARIANT *pvarEnd)
 {
-    ok(0, "unexpected call\n");
+    struct Accessible *This = impl_from_Accessible(iface);
+
+    if(This == &Accessible_child)
+        CHECK_EXPECT(Accessible_child_accNavigate);
+    else
+        CHECK_EXPECT(Accessible_accNavigate);
+
+    /*
+     * Magic number value for retrieving an HWND. Used by DynamicAnnotation
+     * IAccessible wrapper.
+     */
+    if(navDir == NAVDIR_INTERNAL_HWND) {
+        V_VT(pvarEnd) = VT_I4;
+        V_I4(pvarEnd) = HandleToULong(This->acc_hwnd);
+        return V_I4(pvarEnd) ? S_OK : S_FALSE;
+    }
+
     return E_NOTIMPL;
 }
 
@@ -357,8 +420,67 @@ static IAccessibleVtbl AccessibleVtbl = {
     Accessible_put_accValue
 };
 
-static IAccessible Accessible = {&AccessibleVtbl};
-static IAccessible Accessible_child = {&AccessibleVtbl};
+static inline struct Accessible* impl_from_OleWindow(IOleWindow *iface)
+{
+    return CONTAINING_RECORD(iface, struct Accessible, IOleWindow_iface);
+}
+
+static HRESULT WINAPI OleWindow_QueryInterface(IOleWindow *iface, REFIID riid, void **obj)
+{
+    struct Accessible *This = impl_from_OleWindow(iface);
+    return IAccessible_QueryInterface(&This->IAccessible_iface, riid, obj);
+}
+
+static ULONG WINAPI OleWindow_AddRef(IOleWindow *iface)
+{
+    struct Accessible *This = impl_from_OleWindow(iface);
+    return IAccessible_AddRef(&This->IAccessible_iface);
+}
+
+static ULONG WINAPI OleWindow_Release(IOleWindow *iface)
+{
+    struct Accessible *This = impl_from_OleWindow(iface);
+    return IAccessible_Release(&This->IAccessible_iface);
+}
+
+static HRESULT WINAPI OleWindow_GetWindow(IOleWindow *iface, HWND *hwnd)
+{
+    struct Accessible *This = impl_from_OleWindow(iface);
+
+    *hwnd = This->ow_hwnd;
+    return *hwnd ? S_OK : E_FAIL;
+}
+
+static HRESULT WINAPI OleWindow_ContextSensitiveHelp(IOleWindow *iface, BOOL f_enter_mode)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static const IOleWindowVtbl OleWindowVtbl = {
+    OleWindow_QueryInterface,
+    OleWindow_AddRef,
+    OleWindow_Release,
+    OleWindow_GetWindow,
+    OleWindow_ContextSensitiveHelp
+};
+
+static struct Accessible Accessible =
+{
+    { &AccessibleVtbl },
+    { &OleWindowVtbl },
+    1,
+    NULL,
+    0, 0
+};
+static struct Accessible Accessible_child =
+{
+    { &AccessibleVtbl },
+    { &OleWindowVtbl },
+    1,
+    &Accessible.IAccessible_iface,
+    0, 0
+};
 
 static void test_getroletext(void)
 {
@@ -683,7 +805,8 @@ static void test_AccessibleObjectFromWindow(void)
 
 static void test_AccessibleObjectFromEvent(void)
 {
-    IAccessible *acc;
+    IAccessible *acc, *acc2;
+    IServiceProvider *sp;
     VARIANT cid;
     HRESULT hr;
     HWND hwnd;
@@ -719,6 +842,21 @@ static void test_AccessibleObjectFromEvent(void)
     CHECK_CALLED(Accessible_get_accChild);
     ok(hr == S_OK, "got %#lx\n", hr);
     todo_wine ok(!iface_cmp((IUnknown*)acc, (IUnknown*)&Accessible), "acc == &Accessible\n");
+    /* Get &Accessible out of the Dynamic Annotation IAccessible wrapper. */
+    if (!iface_cmp((IUnknown*)acc, (IUnknown*)&Accessible))
+    {
+        hr = IAccessible_QueryInterface(acc, &IID_IServiceProvider, (void **)&sp);
+        ok(hr == S_OK, "got %#lx\n", hr);
+        ok(!!sp, "sp == NULL\n");
+
+        hr = IServiceProvider_QueryService(sp, &SID_AccFromDAWrapper, &IID_IAccessible,
+                (void**)&acc2);
+        ok(hr == S_OK, "got %#lx\n", hr);
+        ok(iface_cmp((IUnknown*)acc2, (IUnknown*)&Accessible), "acc != &Accessible\n");
+        IAccessible_Release(acc2);
+        IServiceProvider_Release(sp);
+    }
+
     ok(V_VT(&cid) == VT_I4, "got %#x, expected %#x\n", V_VT(&cid), VT_I4);
     ok(V_I4(&cid) == 1, "got %#lx, expected 1\n", V_I4(&cid));
     SET_EXPECT(Accessible_get_accParent);
@@ -765,7 +903,7 @@ static void test_AccessibleObjectFromEvent(void)
     hr = AccessibleObjectFromEvent(hwnd, 1, 4, &acc, &cid);
     CHECK_CALLED(Accessible_get_accChild);
     ok(hr == S_OK, "got %#lx\n", hr);
-    ok(acc == &Accessible_child, "acc != &Accessible_child\n");
+    ok(acc == &Accessible_child.IAccessible_iface, "acc != &Accessible_child\n");
     ok(V_VT(&cid) == VT_I4, "got %#x, expected %#x\n", V_VT(&cid), VT_I4);
     ok(V_I4(&cid) == CHILDID_SELF, "got %#lx, expected %#x\n", V_I4(&cid), CHILDID_SELF);
     SET_EXPECT(Accessible_child_get_accName);
@@ -775,6 +913,8 @@ static void test_AccessibleObjectFromEvent(void)
     IAccessible_Release(acc);
 
     DestroyWindow(hwnd);
+    ok(Accessible.ref == 1, "Accessible.ref = %ld\n", Accessible.ref);
+    ok(Accessible_child.ref == 1, "Accessible.ref = %ld\n", Accessible_child.ref);
 }
 
 static void test_GetProcessHandleFromHwnd(void)
@@ -811,25 +951,25 @@ static void test_AccessibleChildren(IAccessible *acc)
     hr = AccessibleChildren(acc, 0, 0, children, NULL);
     ok(hr == E_INVALIDARG, "AccessibleChildren returned %lx\n", hr);
 
-    if(acc == &Accessible) {
+    if(acc == &Accessible.IAccessible_iface) {
         SET_EXPECT(Accessible_QI_IEnumVARIANT);
         SET_EXPECT(Accessible_get_accChildCount);
     }
     hr = AccessibleChildren(acc, 0, 0, children, &count);
     ok(hr == S_OK, "AccessibleChildren returned %lx\n", hr);
-    if(acc == &Accessible) {
+    if(acc == &Accessible.IAccessible_iface) {
         CHECK_CALLED(Accessible_QI_IEnumVARIANT);
         CHECK_CALLED(Accessible_get_accChildCount);
     }
     ok(!count, "count = %ld\n", count);
     count = -1;
-    if(acc == &Accessible) {
+    if(acc == &Accessible.IAccessible_iface) {
         SET_EXPECT(Accessible_QI_IEnumVARIANT);
         SET_EXPECT(Accessible_get_accChildCount);
     }
     hr = AccessibleChildren(acc, 5, 0, children, &count);
     ok(hr == S_OK, "AccessibleChildren returned %lx\n", hr);
-    if(acc == &Accessible) {
+    if(acc == &Accessible.IAccessible_iface) {
         CHECK_CALLED(Accessible_QI_IEnumVARIANT);
         CHECK_CALLED(Accessible_get_accChildCount);
     }
@@ -837,14 +977,14 @@ static void test_AccessibleChildren(IAccessible *acc)
 
     memset(children, 0xfe, sizeof(children));
     V_VT(children) = VT_DISPATCH;
-    if(acc == &Accessible) {
+    if(acc == &Accessible.IAccessible_iface) {
         SET_EXPECT(Accessible_QI_IEnumVARIANT);
         SET_EXPECT(Accessible_get_accChildCount);
         SET_EXPECT(Accessible_get_accChild);
     }
     hr = AccessibleChildren(acc, 0, 1, children, &count);
     ok(hr == S_OK, "AccessibleChildren returned %lx\n", hr);
-    if(acc == &Accessible) {
+    if(acc == &Accessible.IAccessible_iface) {
         CHECK_CALLED(Accessible_QI_IEnumVARIANT);
         CHECK_CALLED(Accessible_get_accChildCount);
         CHECK_CALLED(Accessible_get_accChild);
@@ -857,14 +997,14 @@ static void test_AccessibleChildren(IAccessible *acc)
     }
     ok(count == 1, "count = %ld\n", count);
 
-    if(acc == &Accessible) {
+    if(acc == &Accessible.IAccessible_iface) {
         SET_EXPECT(Accessible_QI_IEnumVARIANT);
         SET_EXPECT(Accessible_get_accChildCount);
         SET_EXPECT(Accessible_get_accChild);
     }
     hr = AccessibleChildren(acc, 0, 3, children, &count);
     ok(hr == S_FALSE, "AccessibleChildren returned %lx\n", hr);
-    if(acc == &Accessible) {
+    if(acc == &Accessible.IAccessible_iface) {
         CHECK_CALLED(Accessible_QI_IEnumVARIANT);
         CHECK_CALLED(Accessible_get_accChildCount);
         CHECK_CALLED(Accessible_get_accChild);
@@ -883,6 +1023,9 @@ static void test_AccessibleChildren(IAccessible *acc)
         IDispatch_Release(V_DISPATCH(children+1));
     }
     ok(V_VT(children+2) == VT_EMPTY, "V_VT(children+2) = %d\n", V_VT(children+2));
+
+    ok(Accessible.ref == 1, "Accessible.ref = %ld\n", Accessible.ref);
+    ok(Accessible_child.ref == 1, "Accessible.ref = %ld\n", Accessible_child.ref);
 }
 
 #define check_acc_state(acc, state) _check_acc_state(__LINE__, acc, state)
@@ -1409,6 +1552,30 @@ static LRESULT WINAPI test_query_class(HWND hwnd, UINT msg, WPARAM wparam, LPARA
     return 0;
 }
 
+#define check_acc_proxy_service( acc ) \
+        check_acc_proxy_service_( (acc), __LINE__)
+static void check_acc_proxy_service_(IAccessible *acc, int line)
+{
+    IServiceProvider *service = NULL;
+    IUnknown *unk = NULL;
+    HRESULT hr;
+
+    hr = IAccessible_QueryInterface(acc, &IID_IServiceProvider, (void **)&service);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    hr = IServiceProvider_QueryService(service, &IIS_IsOleaccProxy, &IID_IUnknown, (void **)&unk);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    ok(!!unk, "unk == NULL\n");
+    ok(iface_cmp(unk, (IUnknown*)acc), "unk != acc\n");
+    IUnknown_Release(unk);
+
+    unk = (IUnknown*)0xdeadbeef;
+    hr = IServiceProvider_QueryService(service, &IID_IUnknown, &IID_IUnknown, (void **)&unk);
+    ok(hr == E_INVALIDARG, "got %#lx\n", hr);
+    ok(!unk, "unk != NULL\n");
+    IServiceProvider_Release(service);
+}
+
 static void test_CreateStdAccessibleObject_classes(void)
 {
     static const struct {
@@ -1463,6 +1630,7 @@ static void test_CreateStdAccessibleObject_classes(void)
         ok(hr == S_OK, "CreateStdAccessibleObject failed %lx\n", hr);
         if (tests[i].client)
             CHECK_CALLED(winproc_GETOBJECT);
+        check_acc_proxy_service(acc);
         IAccessible_Release(acc);
 
         if (tests[i].window)
@@ -1471,6 +1639,7 @@ static void test_CreateStdAccessibleObject_classes(void)
         ok(hr == S_OK, "CreateStdAccessibleObject failed %lx\n", hr);
         if (tests[i].window)
             CHECK_CALLED(winproc_GETOBJECT);
+        check_acc_proxy_service(acc);
         IAccessible_Release(acc);
 
         SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)win_proc);
@@ -1799,6 +1968,57 @@ static void test_default_edit_accessible_object(void)
     DestroyWindow(hwnd);
 }
 
+static void test_WindowFromAccessibleObject(void)
+{
+    HRESULT hr;
+    HWND hwnd;
+
+    /* Successfully retrieve an HWND from the IOleWindow interface. */
+    Accessible.ow_hwnd = (HWND)0xdeadf00d;
+    hwnd = (HWND)0xdeadbeef;
+    hr = WindowFromAccessibleObject(&Accessible.IAccessible_iface, &hwnd);
+    ok(hr == S_OK, "got %lx\n", hr);
+    ok(hwnd == (HWND)0xdeadf00d, "hwnd != 0xdeadf00d!\n");
+
+    /* Successfully retrieve an HWND from IAccessible::accNavigate. */
+    Accessible.acc_hwnd = (HWND)0xdeadf00d;
+    Accessible.ow_hwnd = NULL;
+    hwnd = (HWND)0xdeadbeef;
+    SET_EXPECT(Accessible_accNavigate);
+    hr = WindowFromAccessibleObject(&Accessible.IAccessible_iface, &hwnd);
+    ok(hr == S_OK, "got %lx\n", hr);
+    /* This value gets sign-extended on 64-bit. */
+    ok(hwnd == IntToPtr(0xdeadf00d), "hwnd != 0xdeadf00d!\n");
+    CHECK_CALLED(Accessible_accNavigate);
+
+    /* Don't return an HWND from either method. */
+    Accessible.acc_hwnd = NULL;
+    hwnd = (HWND)0xdeadbeef;
+    SET_EXPECT(Accessible_accNavigate);
+    SET_EXPECT(Accessible_get_accParent);
+    hr = WindowFromAccessibleObject(&Accessible.IAccessible_iface, &hwnd);
+    /* Return value from IAccessible::get_accParent. */
+    ok(hr == S_FALSE, "got %lx\n", hr);
+    ok(!hwnd, "hwnd %p\n", hwnd);
+    CHECK_CALLED(Accessible_accNavigate);
+    CHECK_CALLED(Accessible_get_accParent);
+
+    /* Successfully retrieve an HWND from a parent IAccessible's IOleWindow interface. */
+    Accessible.ow_hwnd = (HWND)0xdeadf00d;
+    hwnd = (HWND)0xdeadbeef;
+    SET_EXPECT(Accessible_child_accNavigate);
+    SET_EXPECT(Accessible_child_get_accParent);
+    hr = WindowFromAccessibleObject(&Accessible_child.IAccessible_iface, &hwnd);
+    ok(hr == S_OK, "got %lx\n", hr);
+    ok(hwnd == (HWND)0xdeadf00d, "hwnd != 0xdeadf00d!\n");
+    CHECK_CALLED(Accessible_child_accNavigate);
+    CHECK_CALLED(Accessible_child_get_accParent);
+
+    Accessible.ow_hwnd = NULL;
+    ok(Accessible.ref == 1, "Accessible.ref = %ld\n", Accessible.ref);
+    ok(Accessible_child.ref == 1, "Accessible.ref = %ld\n", Accessible_child.ref);
+}
+
 START_TEST(main)
 {
     int argc;
@@ -1835,11 +2055,12 @@ START_TEST(main)
     test_AccessibleObjectFromWindow();
     test_GetProcessHandleFromHwnd();
     test_default_client_accessible_object();
-    test_AccessibleChildren(&Accessible);
+    test_AccessibleChildren(&Accessible.IAccessible_iface);
     test_AccessibleObjectFromEvent();
     test_AccessibleObjectFromPoint();
     test_CreateStdAccessibleObject_classes();
     test_default_edit_accessible_object();
+    test_WindowFromAccessibleObject();
 
     unregister_window_class();
     CoUninitialize();

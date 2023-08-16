@@ -21,8 +21,6 @@
 #ifndef __D3DX9SHAPE_H__
 #define __D3DX9SHAPE_H__
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -48,7 +46,5 @@ HRESULT WINAPI D3DXCreateTorus(struct IDirect3DDevice9 *device,
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __D3DX9SHAPE_H__ */

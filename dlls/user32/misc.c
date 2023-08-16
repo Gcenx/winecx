@@ -38,18 +38,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(win);
 BOOL WINAPI ImmSetActiveContext(HWND, HIMC, BOOL);
 
 #define IMM_INIT_MAGIC 0x19650412
-static HWND (WINAPI *imm_get_ui_window)(HKL);
-BOOL (WINAPI *imm_register_window)(HWND) = NULL;
-void (WINAPI *imm_unregister_window)(HWND) = NULL;
-
-/* MSIME messages */
-static UINT WM_MSIME_SERVICE;
-static UINT WM_MSIME_RECONVERTOPTIONS;
-static UINT WM_MSIME_MOUSE;
-static UINT WM_MSIME_RECONVERTREQUEST;
-static UINT WM_MSIME_RECONVERT;
-static UINT WM_MSIME_QUERYPOSITION;
-static UINT WM_MSIME_DOCUMENTFEED;
+static LRESULT (WINAPI *imm_ime_wnd_proc)( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, BOOL ansi);
 
 /* USER signal proc flags and codes */
 /* See UserSignalProc for comments */
@@ -146,7 +135,7 @@ static UINT WM_MSIME_DOCUMENTFEED;
 WORD WINAPI UserSignalProc( UINT uCode, DWORD dwThreadOrProcessID,
                             DWORD dwFlags, HMODULE16 hModule )
 {
-    FIXME("(%04x, %08x, %04x, %04x)\n",
+    FIXME("(%04x, %08lx, %04lx, %04x)\n",
           uCode, dwThreadOrProcessID, dwFlags, hModule );
     /* FIXME: Should chain to GdiSignalProc now. */
     return 0;
@@ -165,7 +154,7 @@ void WINAPI SetLastErrorEx(
     DWORD error, /* [in] Per-thread error code */
     DWORD type)  /* [in] Error type */
 {
-    TRACE("(0x%08x, 0x%08x)\n", error,type);
+    TRACE("(0x%08lx, 0x%08lx)\n", error,type);
     switch(type) {
         case 0:
             break;
@@ -174,7 +163,7 @@ void WINAPI SetLastErrorEx(
         case SLE_WARNING:
             /* Fall through for now */
         default:
-            FIXME("(error=%08x, type=%08x): Unhandled type\n", error,type);
+            FIXME("(error=%08lx, type=%08lx): Unhandled type\n", error,type);
             break;
     }
     SetLastError( error );
@@ -210,7 +199,7 @@ BOOL WINAPI GetAltTabInfoW(HWND hwnd, int iItem, PALTTABINFO pati, LPWSTR pszIte
  */
 VOID WINAPI SetDebugErrorLevel( DWORD dwLevel )
 {
-    FIXME("(%d): stub\n", dwLevel);
+    FIXME("(%ld): stub\n", dwLevel);
 }
 
 
@@ -219,7 +208,7 @@ VOID WINAPI SetDebugErrorLevel( DWORD dwLevel )
  */
 DWORD WINAPI SetWindowStationUser(DWORD x1,DWORD x2)
 {
-    FIXME("(0x%08x,0x%08x),stub!\n",x1,x2);
+    FIXME("(0x%08lx,0x%08lx),stub!\n",x1,x2);
     return 1;
 }
 
@@ -246,7 +235,7 @@ DWORD WINAPI SetLogonNotifyWindow(HWINSTA hwinsta,HWND hwnd)
  */
 void WINAPI RegisterSystemThread(DWORD flags, DWORD reserved)
 {
-    FIXME("(%08x, %08x)\n", flags, reserved);
+    FIXME("(%08lx, %08lx)\n", flags, reserved);
 }
 
 /***********************************************************************
@@ -274,7 +263,7 @@ BOOL WINAPI DeregisterShellHookWindow(HWND hWnd)
  */
 DWORD WINAPI RegisterTasklist (DWORD x)
 {
-    FIXME("0x%08x\n",x);
+    FIXME("0x%08lx\n",x);
     return TRUE;
 }
 
@@ -302,7 +291,7 @@ DWORD WINAPI GetAppCompatFlags2( HTASK hTask )
  */
 BOOL WINAPI AlignRects(LPRECT rect, DWORD b, DWORD c, DWORD d)
 {
-    FIXME("(%p, %d, %d, %d): stub\n", rect, b, c, d);
+    FIXME("(%p, %ld, %ld, %ld): stub\n", rect, b, c, d);
     if (rect)
         FIXME("rect: %s\n", wine_dbgstr_rect(rect));
     /* Calls OffsetRect */
@@ -327,27 +316,17 @@ BOOL WINAPI User32InitializeImmEntryTable(DWORD magic)
 {
     HMODULE imm32 = GetModuleHandleW(L"imm32.dll");
 
-    TRACE("(%x)\n", magic);
+    TRACE("(%lx)\n", magic);
 
     if (!imm32 || magic != IMM_INIT_MAGIC)
         return FALSE;
 
-    if (imm_get_ui_window)
+    if (imm_ime_wnd_proc)
         return TRUE;
 
-    WM_MSIME_SERVICE = RegisterWindowMessageA("MSIMEService");
-    WM_MSIME_RECONVERTOPTIONS = RegisterWindowMessageA("MSIMEReconvertOptions");
-    WM_MSIME_MOUSE = RegisterWindowMessageA("MSIMEMouseOperation");
-    WM_MSIME_RECONVERTREQUEST = RegisterWindowMessageA("MSIMEReconvertRequest");
-    WM_MSIME_RECONVERT = RegisterWindowMessageA("MSIMEReconvert");
-    WM_MSIME_QUERYPOSITION = RegisterWindowMessageA("MSIMEQueryPosition");
-    WM_MSIME_DOCUMENTFEED = RegisterWindowMessageA("MSIMEDocumentFeed");
-
     /* this part is not compatible with native imm32.dll */
-    imm_get_ui_window = (void*)GetProcAddress(imm32, "__wine_get_ui_window");
-    imm_register_window = (void*)GetProcAddress(imm32, "__wine_register_window");
-    imm_unregister_window = (void*)GetProcAddress(imm32, "__wine_unregister_window");
-    if (!imm_get_ui_window)
+    imm_ime_wnd_proc = (void*)GetProcAddress(imm32, "__wine_ime_wnd_proc");
+    if (!imm_ime_wnd_proc)
         FIXME("native imm32.dll not supported\n");
     return TRUE;
 }
@@ -388,7 +367,7 @@ BOOL WINAPI WINNLSGetEnableStatus(HWND hwnd)
  */
 LRESULT WINAPI SendIMEMessageExA(HWND hwnd, LPARAM lparam)
 {
-  FIXME("(%p,%lx): stub\n", hwnd, lparam);
+  FIXME("(%p,%Ix): stub\n", hwnd, lparam);
   SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
   return 0;
 }
@@ -399,7 +378,7 @@ LRESULT WINAPI SendIMEMessageExA(HWND hwnd, LPARAM lparam)
  */
 LRESULT WINAPI SendIMEMessageExW(HWND hwnd, LPARAM lparam)
 {
-  FIXME("(%p,%lx): stub\n", hwnd, lparam);
+  FIXME("(%p,%Ix): stub\n", hwnd, lparam);
   SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
   return 0;
 }
@@ -430,7 +409,7 @@ BOOL WINAPI UserHandleGrantAccess(HANDLE handle, HANDLE job, BOOL grant)
  */
 HPOWERNOTIFY WINAPI RegisterPowerSettingNotification(HANDLE recipient, const GUID *guid, DWORD flags)
 {
-    FIXME("(%p,%s,%x): stub\n", recipient, debugstr_guid(guid), flags);
+    FIXME("(%p,%s,%lx): stub\n", recipient, debugstr_guid(guid), flags);
     return (HPOWERNOTIFY)0xdeadbeef;
 }
 
@@ -448,7 +427,7 @@ BOOL WINAPI UnregisterPowerSettingNotification(HPOWERNOTIFY handle)
  */
 HPOWERNOTIFY WINAPI RegisterSuspendResumeNotification(HANDLE recipient, DWORD flags)
 {
-    FIXME("%p, %#x: stub.\n", recipient, flags);
+    FIXME("%p, %#lx: stub.\n", recipient, flags);
     return (HPOWERNOTIFY)0xdeadbeef;
 }
 
@@ -459,35 +438,6 @@ BOOL WINAPI UnregisterSuspendResumeNotification(HPOWERNOTIFY handle)
 {
     FIXME("%p: stub.\n", handle);
     return TRUE;
-}
-
-/*****************************************************************************
- * GetGestureConfig (USER32.@)
- */
-BOOL WINAPI GetGestureConfig( HWND hwnd, DWORD reserved, DWORD flags, UINT *count, GESTURECONFIG *config, UINT size )
-{
-    FIXME("(%p %08x %08x %p %p %u): stub\n", hwnd, reserved, flags, count, config, size);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-/**********************************************************************
- * SetGestureConfig [USER32.@]
- */
-BOOL WINAPI SetGestureConfig( HWND hwnd, DWORD reserved, UINT id, PGESTURECONFIG config, UINT size )
-{
-    FIXME("(%p %08x %u %p %u): stub\n", hwnd, reserved, id, config, size);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-/**********************************************************************
- * IsTouchWindow [USER32.@]
- */
-BOOL WINAPI IsTouchWindow( HWND hwnd, PULONG flags )
-{
-    FIXME("(%p %p): stub\n", hwnd, flags);
-    return FALSE;
 }
 
 /**********************************************************************
@@ -530,7 +480,7 @@ BOOL WINAPI GetPointerDevices(UINT32 *device_count, POINTER_DEVICE_INFO *devices
  */
 BOOL WINAPI RegisterTouchHitTestingWindow(HWND hwnd, ULONG value)
 {
-    FIXME("(%p %d): stub\n", hwnd, value);
+    FIXME("(%p %ld): stub\n", hwnd, value);
     return TRUE;
 }
 
@@ -551,103 +501,22 @@ BOOL WINAPI GetPointerType(UINT32 id, POINTER_INPUT_TYPE *type)
     return TRUE;
 }
 
-const struct builtin_class_descr IME_builtin_class =
+BOOL WINAPI GetPointerInfo(UINT32 id, POINTER_INFO *info)
 {
-    L"IME",             /* name */
-    0,                  /* style  */
-    WINPROC_IME,        /* proc */
-    2*sizeof(LONG_PTR), /* extra */
-    IDC_ARROW,          /* cursor */
-    0                   /* brush */
-};
+    FIXME("(%d %p): stub\n", id, info);
 
-static BOOL is_ime_ui_msg( UINT msg )
-{
-    switch(msg) {
-    case WM_IME_STARTCOMPOSITION:
-    case WM_IME_ENDCOMPOSITION:
-    case WM_IME_COMPOSITION:
-    case WM_IME_SETCONTEXT:
-    case WM_IME_NOTIFY:
-    case WM_IME_CONTROL:
-    case WM_IME_COMPOSITIONFULL:
-    case WM_IME_SELECT:
-    case WM_IME_CHAR:
-    case WM_IME_REQUEST:
-    case WM_IME_KEYDOWN:
-    case WM_IME_KEYUP:
-        return TRUE;
-    default:
-        if ((msg == WM_MSIME_RECONVERTOPTIONS) ||
-                (msg == WM_MSIME_SERVICE) ||
-                (msg == WM_MSIME_MOUSE) ||
-                (msg == WM_MSIME_RECONVERTREQUEST) ||
-                (msg == WM_MSIME_RECONVERT) ||
-                (msg == WM_MSIME_QUERYPOSITION) ||
-                (msg == WM_MSIME_DOCUMENTFEED))
-            return TRUE;
-
-        return FALSE;
-    }
-}
-
-static LRESULT ime_internal_msg( WPARAM wParam, LPARAM lParam)
-{
-    HWND hwnd = (HWND)lParam;
-    HIMC himc;
-
-    switch(wParam)
-    {
-    case IME_INTERNAL_ACTIVATE:
-    case IME_INTERNAL_DEACTIVATE:
-        himc = ImmGetContext(hwnd);
-        ImmSetActiveContext(hwnd, himc, wParam == IME_INTERNAL_ACTIVATE);
-        ImmReleaseContext(hwnd, himc);
-        break;
-    default:
-        FIXME("wParam = %lx\n", wParam);
-        break;
-    }
-
-    return 0;
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
 }
 
 LRESULT WINAPI ImeWndProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
 {
-    HWND uiwnd;
-
-    if (msg==WM_CREATE)
-        return TRUE;
-
-    if (msg==WM_IME_INTERNAL)
-        return ime_internal_msg(wParam, lParam);
-
-    if (imm_get_ui_window && is_ime_ui_msg(msg))
-    {
-        if ((uiwnd = imm_get_ui_window( NtUserGetKeyboardLayout(0) )))
-            return SendMessageA(uiwnd, msg, wParam, lParam);
-        return FALSE;
-    }
-
-    return DefWindowProcA(hwnd, msg, wParam, lParam);
+    if (!imm_ime_wnd_proc) return DefWindowProcA(hwnd, msg, wParam, lParam);
+    return imm_ime_wnd_proc( hwnd, msg, wParam, lParam, TRUE );
 }
 
 LRESULT WINAPI ImeWndProcW( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
 {
-    HWND uiwnd;
-
-    if (msg==WM_CREATE)
-        return TRUE;
-
-    if (msg==WM_IME_INTERNAL)
-        return ime_internal_msg(wParam, lParam);
-
-    if (imm_get_ui_window && is_ime_ui_msg(msg))
-    {
-        if ((uiwnd = imm_get_ui_window( NtUserGetKeyboardLayout(0) )))
-            return SendMessageW(uiwnd, msg, wParam, lParam);
-        return FALSE;
-    }
-
-    return DefWindowProcW(hwnd, msg, wParam, lParam);
+    if (!imm_ime_wnd_proc) return DefWindowProcW(hwnd, msg, wParam, lParam);
+    return imm_ime_wnd_proc( hwnd, msg, wParam, lParam, FALSE );
 }

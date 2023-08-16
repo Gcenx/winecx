@@ -29,9 +29,11 @@
 static void test_data_key(void)
 {
     ISpRegDataKey *data_key;
+    ISpDataKey *sub;
     HRESULT hr;
     HKEY key;
     LONG res;
+    WCHAR *value;
 
     hr = CoCreateInstance( &CLSID_SpDataKey, NULL, CLSCTX_INPROC_SERVER,
                            &IID_ISpRegDataKey, (void **)&data_key );
@@ -41,10 +43,26 @@ static void test_data_key(void)
                            NULL, &key, NULL );
     ok( res == ERROR_SUCCESS, "got %ld\n", res );
 
+    hr = ISpRegDataKey_CreateKey( data_key, L"Testing", &sub );
+    ok( hr == E_HANDLE, "got %08lx\n", hr );
+
+    hr = ISpRegDataKey_GetStringValue( data_key, L"Voice", &value );
+    ok( hr == E_HANDLE, "got %08lx\n", hr );
+
     hr = ISpRegDataKey_SetKey( data_key, key, FALSE );
     ok( hr == S_OK, "got %08lx\n", hr );
     hr = ISpRegDataKey_SetKey( data_key, key, FALSE );
     ok( hr == SPERR_ALREADY_INITIALIZED, "got %08lx\n", hr );
+
+    hr = ISpRegDataKey_GetStringValue( data_key, L"Voice", &value );
+    ok( hr == SPERR_NOT_FOUND, "got %08lx\n", hr );
+
+    hr = ISpRegDataKey_GetStringValue( data_key, L"", &value );
+    ok( hr == SPERR_NOT_FOUND, "got %08lx\n", hr );
+
+    hr = ISpRegDataKey_CreateKey( data_key, L"Testing", &sub );
+    ok( hr == S_OK, "got %08lx\n", hr );
+    ISpDataKey_Release(sub);
 
     ISpRegDataKey_Release( data_key );
 }
@@ -173,9 +191,45 @@ static void test_default_token_id(void)
     ISpObjectTokenCategory_Release( cat );
 }
 
+static void tests_token_voices(void)
+{
+    ISpObjectTokenCategory *cat;
+    HRESULT hr;
+    IEnumSpObjectTokens *tokens;
+    ISpObjectToken *item;
+    ULONG fetched = 0;
+    ULONG count;
+
+    hr = CoCreateInstance( &CLSID_SpObjectTokenCategory, NULL, CLSCTX_INPROC_SERVER,
+                           &IID_ISpObjectTokenCategory, (void **)&cat );
+    ok( hr == S_OK, "got %08lx\n", hr );
+
+    hr = ISpObjectTokenCategory_SetId( cat, SPCAT_VOICES, FALSE );
+    ok( hr == S_OK, "got %08lx\n", hr );
+
+    hr = ISpObjectTokenCategory_EnumTokens(cat, NULL, NULL, &tokens);
+    ok( hr == S_OK, "got %08lx\n", hr );
+
+    hr = IEnumSpObjectTokens_GetCount( tokens, &count );
+    ok( hr == S_OK, "got %08lx\n", hr );
+    ok( count != 0, "got %lu\n", count );
+    ISpObjectTokenCategory_Release( cat );
+
+    hr = IEnumSpObjectTokens_Item(tokens, 0, &item);
+    ok( hr == S_OK, "got %08lx\n", hr );
+    ISpObjectToken_Release(item);
+
+    hr = IEnumSpObjectTokens_Next(tokens, 1, &item, &fetched);
+    ok( hr == S_OK, "got %08lx\n", hr );
+    ISpObjectToken_Release(item);
+
+    IEnumSpObjectTokens_Release(tokens);
+}
+
 static void test_object_token(void)
 {
     ISpObjectToken *token;
+    ISpDataKey *sub_key;
     HRESULT hr;
     LPWSTR tempW, token_id;
     ISpObjectTokenCategory *cat;
@@ -185,11 +239,11 @@ static void test_object_token(void)
     ok( hr == S_OK, "got %08lx\n", hr );
 
     hr = ISpObjectToken_GetId( token, NULL );
-    todo_wine ok( hr == SPERR_UNINITIALIZED, "got %08lx\n", hr );
+    ok( hr == SPERR_UNINITIALIZED, "got %08lx\n", hr );
 
     tempW = (LPWSTR)0xdeadbeef;
     hr = ISpObjectToken_GetId( token, &tempW );
-    todo_wine ok( hr == SPERR_UNINITIALIZED, "got %08lx\n", hr );
+    ok( hr == SPERR_UNINITIALIZED, "got %08lx\n", hr );
     ok( tempW == (LPWSTR)0xdeadbeef, "got %s\n", wine_dbgstr_w(tempW) );
 
     hr = ISpObjectToken_GetCategory( token, NULL );
@@ -220,20 +274,27 @@ static void test_object_token(void)
     ok( hr == SPERR_ALREADY_INITIALIZED, "got %08lx\n", hr );
 
     hr = ISpObjectToken_GetId( token, NULL );
-    todo_wine ok( hr == E_POINTER, "got %08lx\n", hr );
+    ok( hr == E_POINTER, "got %08lx\n", hr );
 
     hr = ISpObjectToken_GetCategory( token, NULL );
     todo_wine ok( hr == E_POINTER, "got %08lx\n", hr );
 
     tempW = NULL;
     hr = ISpObjectToken_GetId( token, &tempW );
-    todo_wine ok( hr == S_OK, "got %08lx\n", hr );
-    todo_wine ok( tempW != NULL, "got %p\n", tempW );
+    ok( hr == S_OK, "got %08lx\n", hr );
+    ok( tempW != NULL, "got %p\n", tempW );
     if (tempW) {
         ok( !wcscmp(tempW, L"HKEY_LOCAL_MACHINE\\SOFTWARE"), "got %s\n",
             wine_dbgstr_w(tempW) );
         CoTaskMemFree( tempW );
     }
+
+    hr = ISpObjectToken_OpenKey(token, L"Non-exist", &sub_key);
+    ok( hr == SPERR_NOT_FOUND, "got %08lx\n", hr );
+
+    hr = ISpObjectToken_OpenKey(token, L"Classes", &sub_key);
+    ok( hr == S_OK, "got %08lx\n", hr );
+    ISpDataKey_Release(sub_key);
 
     cat = (LPVOID)0xdeadbeef;
     hr = ISpObjectToken_GetCategory( token, &cat );
@@ -268,8 +329,8 @@ static void test_object_token(void)
 
     tempW = NULL;
     hr = ISpObjectToken_GetId( token, &tempW );
-    todo_wine ok( hr == S_OK, "got %08lx\n", hr );
-    todo_wine ok( tempW != NULL, "got %p\n", tempW );
+    ok( hr == S_OK, "got %08lx\n", hr );
+    ok( tempW != NULL, "got %p\n", tempW );
     if (tempW) {
         ok( !wcsncmp(tempW, token_id, wcslen(token_id)),
             "got %s (expected %s)\n", wine_dbgstr_w(tempW), wine_dbgstr_w(token_id) );
@@ -305,5 +366,6 @@ START_TEST(token)
     test_token_enum();
     test_default_token_id();
     test_object_token();
+    tests_token_voices();
     CoUninitialize();
 }

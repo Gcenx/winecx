@@ -25,19 +25,19 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
-/*********************************************************************
- *		getenv (MSVCRT.@)
- */
-char * CDECL getenv(const char *name)
+static char * getenv_helper(const char *name)
 {
     char **env;
-    unsigned int length=strlen(name);
+    size_t len;
+
+    if (!name) return NULL;
+    len = strlen(name);
 
     for (env = MSVCRT__environ; *env; env++)
     {
         char *str = *env;
         char *pos = strchr(str,'=');
-        if (pos && ((pos - str) == length) && !_strnicmp(str,name,length))
+        if (pos && ((pos - str) == len) && !_strnicmp(str, name, len))
         {
             TRACE("(%s): got %s\n", debugstr_a(name), debugstr_a(pos + 1));
             return pos + 1;
@@ -47,12 +47,22 @@ char * CDECL getenv(const char *name)
 }
 
 /*********************************************************************
- *		_wgetenv (MSVCRT.@)
+ *              getenv (MSVCRT.@)
  */
-wchar_t * CDECL _wgetenv(const wchar_t *name)
+char * CDECL getenv(const char *name)
+{
+    if (!MSVCRT_CHECK_PMT(name != NULL)) return NULL;
+
+    return getenv_helper(name);
+}
+
+static wchar_t * wgetenv_helper(const wchar_t *name)
 {
     wchar_t **env;
-    unsigned int length=wcslen(name);
+    size_t len;
+
+    if (!name) return NULL;
+    len = wcslen(name);
 
     /* Initialize the _wenviron array if it's not already created. */
     if (!MSVCRT__wenviron)
@@ -62,13 +72,23 @@ wchar_t * CDECL _wgetenv(const wchar_t *name)
     {
         wchar_t *str = *env;
         wchar_t *pos = wcschr(str,'=');
-        if (pos && ((pos - str) == length) && !_wcsnicmp(str,name,length))
+        if (pos && ((pos - str) == len) && !_wcsnicmp(str, name, len))
         {
             TRACE("(%s): got %s\n", debugstr_w(name), debugstr_w(pos + 1));
             return pos + 1;
         }
     }
     return NULL;
+}
+
+/*********************************************************************
+ *              _wgetenv (MSVCRT.@)
+ */
+wchar_t * CDECL _wgetenv(const wchar_t *name)
+{
+    if (!MSVCRT_CHECK_PMT(name != NULL)) return NULL;
+
+    return wgetenv_helper(name);
 }
 
 /*********************************************************************
@@ -163,19 +183,24 @@ finish:
 /*********************************************************************
  *		_putenv_s (MSVCRT.@)
  */
-int CDECL _putenv_s(const char *name, const char *value)
+errno_t CDECL _putenv_s(const char *name, const char *value)
 {
-    int ret;
+    errno_t ret = 0;
 
     TRACE("%s %s\n", debugstr_a(name), debugstr_a(value));
 
-    if (!MSVCRT_CHECK_PMT(name != NULL)) return -1;
-    if (!MSVCRT_CHECK_PMT(value != NULL)) return -1;
+    if (!MSVCRT_CHECK_PMT(name != NULL)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(value != NULL)) return EINVAL;
 
-    ret = SetEnvironmentVariableA(name, value[0] ? value : NULL) ? 0 : -1;
-
-    /* _putenv returns success on deletion of nonexistent variable, unlike [Rtl]SetEnvironmentVariable */
-    if ((ret == -1) && (GetLastError() == ERROR_ENVVAR_NOT_FOUND)) ret = 0;
+    if (!SetEnvironmentVariableA(name, value[0] ? value : NULL))
+    {
+        /* _putenv returns success on deletion of nonexistent variable */
+        if (GetLastError() != ERROR_ENVVAR_NOT_FOUND)
+        {
+            msvcrt_set_errno(GetLastError());
+            ret = *_errno();
+        }
+    }
 
     MSVCRT__environ = msvcrt_SnapshotOfEnvironmentA(MSVCRT__environ);
     MSVCRT__wenviron = msvcrt_SnapshotOfEnvironmentW(MSVCRT__wenviron);
@@ -186,19 +211,24 @@ int CDECL _putenv_s(const char *name, const char *value)
 /*********************************************************************
  *		_wputenv_s (MSVCRT.@)
  */
-int CDECL _wputenv_s(const wchar_t *name, const wchar_t *value)
+errno_t CDECL _wputenv_s(const wchar_t *name, const wchar_t *value)
 {
-    int ret;
+    errno_t ret = 0;
 
     TRACE("%s %s\n", debugstr_w(name), debugstr_w(value));
 
-    if (!MSVCRT_CHECK_PMT(name != NULL)) return -1;
-    if (!MSVCRT_CHECK_PMT(value != NULL)) return -1;
+    if (!MSVCRT_CHECK_PMT(name != NULL)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(value != NULL)) return EINVAL;
 
-    ret = SetEnvironmentVariableW(name, value[0] ? value : NULL) ? 0 : -1;
-
-    /* _putenv returns success on deletion of nonexistent variable, unlike [Rtl]SetEnvironmentVariable */
-    if ((ret == -1) && (GetLastError() == ERROR_ENVVAR_NOT_FOUND)) ret = 0;
+    if (!SetEnvironmentVariableW(name, value[0] ? value : NULL))
+    {
+        /* _putenv returns success on deletion of nonexistent variable */
+        if (GetLastError() != ERROR_ENVVAR_NOT_FOUND)
+        {
+            msvcrt_set_errno(GetLastError());
+            ret = *_errno();
+        }
+    }
 
     MSVCRT__environ = msvcrt_SnapshotOfEnvironmentA(MSVCRT__environ);
     MSVCRT__wenviron = msvcrt_SnapshotOfEnvironmentW(MSVCRT__wenviron);
@@ -262,24 +292,20 @@ int CDECL _wdupenv_s(wchar_t **buffer, size_t *numberOfElements,
 /******************************************************************
  *		getenv_s (MSVCRT.@)
  */
-int CDECL getenv_s(size_t *pReturnValue, char* buffer, size_t numberOfElements, const char *varname)
+int CDECL getenv_s(size_t *ret_len, char* buffer, size_t len, const char *varname)
 {
     char *e;
 
-    if (!MSVCRT_CHECK_PMT(pReturnValue != NULL)) return EINVAL;
-    if (!MSVCRT_CHECK_PMT(!(buffer == NULL && numberOfElements > 0))) return EINVAL;
-    if (!MSVCRT_CHECK_PMT(varname != NULL)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(ret_len != NULL)) return EINVAL;
+    *ret_len = 0;
+    if (!MSVCRT_CHECK_PMT((buffer && len > 0) || (!buffer && !len))) return EINVAL;
+    if (buffer) buffer[0] = 0;
 
-    if (!(e = getenv(varname)))
-    {
-        *pReturnValue = 0;
-        return *_errno() = EINVAL;
-    }
-    *pReturnValue = strlen(e) + 1;
-    if (numberOfElements < *pReturnValue)
-    {
-        return *_errno() = ERANGE;
-    }
+    if (!(e = getenv_helper(varname))) return 0;
+    *ret_len = strlen(e) + 1;
+    if (!len) return 0;
+    if (len < *ret_len) return ERANGE;
+
     strcpy(buffer, e);
     return 0;
 }
@@ -287,25 +313,21 @@ int CDECL getenv_s(size_t *pReturnValue, char* buffer, size_t numberOfElements, 
 /******************************************************************
  *		_wgetenv_s (MSVCRT.@)
  */
-int CDECL _wgetenv_s(size_t *pReturnValue, wchar_t *buffer, size_t numberOfElements,
+int CDECL _wgetenv_s(size_t *ret_len, wchar_t *buffer, size_t len,
                      const wchar_t *varname)
 {
     wchar_t *e;
 
-    if (!MSVCRT_CHECK_PMT(pReturnValue != NULL)) return EINVAL;
-    if (!MSVCRT_CHECK_PMT(!(buffer == NULL && numberOfElements > 0))) return EINVAL;
-    if (!MSVCRT_CHECK_PMT(varname != NULL)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(ret_len != NULL)) return EINVAL;
+    *ret_len = 0;
+    if (!MSVCRT_CHECK_PMT((buffer && len > 0) || (!buffer && !len))) return EINVAL;
+    if (buffer) buffer[0] = 0;
 
-    if (!(e = _wgetenv(varname)))
-    {
-        *pReturnValue = 0;
-        return *_errno() = EINVAL;
-    }
-    *pReturnValue = wcslen(e) + 1;
-    if (numberOfElements < *pReturnValue)
-    {
-        return *_errno() = ERANGE;
-    }
+    if (!(e = wgetenv_helper(varname))) return 0;
+    *ret_len = wcslen(e) + 1;
+    if (!len) return 0;
+    if (len < *ret_len) return ERANGE;
+
     wcscpy(buffer, e);
     return 0;
 }

@@ -23,274 +23,21 @@
 #include "ksmedia.h"
 #include "wmcodecdsp.h"
 #include "initguid.h"
+#include "d3d9types.h"
 #include "mfapi.h"
 
 #include "wine/debug.h"
+#include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 
-struct video_processor
-{
-    IMFTransform IMFTransform_iface;
-    LONG refcount;
-    IMFAttributes *attributes;
-    IMFAttributes *output_attributes;
-};
-
-static struct video_processor *impl_video_processor_from_IMFTransform(IMFTransform *iface)
-{
-    return CONTAINING_RECORD(iface, struct video_processor, IMFTransform_iface);
-}
-
-static HRESULT WINAPI video_processor_QueryInterface(IMFTransform *iface, REFIID riid, void **obj)
-{
-    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
-
-    if (IsEqualIID(riid, &IID_IMFTransform) ||
-            IsEqualIID(riid, &IID_IUnknown))
-    {
-        *obj = iface;
-        IMFTransform_AddRef(iface);
-        return S_OK;
-    }
-
-    WARN("Unsupported %s.\n", debugstr_guid(riid));
-    *obj = NULL;
-    return E_NOINTERFACE;
-}
-
-static ULONG WINAPI video_processor_AddRef(IMFTransform *iface)
-{
-    struct video_processor *transform = impl_video_processor_from_IMFTransform(iface);
-    ULONG refcount = InterlockedIncrement(&transform->refcount);
-
-    TRACE("%p, refcount %lu.\n", iface, refcount);
-
-    return refcount;
-}
-
-static ULONG WINAPI video_processor_Release(IMFTransform *iface)
-{
-    struct video_processor *transform = impl_video_processor_from_IMFTransform(iface);
-    ULONG refcount = InterlockedDecrement(&transform->refcount);
-
-    TRACE("%p, refcount %lu.\n", iface, refcount);
-
-    if (!refcount)
-    {
-        if (transform->attributes)
-            IMFAttributes_Release(transform->attributes);
-        if (transform->output_attributes)
-            IMFAttributes_Release(transform->output_attributes);
-        free(transform);
-    }
-
-    return refcount;
-}
-
-static HRESULT WINAPI video_processor_GetStreamLimits(IMFTransform *iface, DWORD *input_minimum, DWORD *input_maximum,
-        DWORD *output_minimum, DWORD *output_maximum)
-{
-    TRACE("%p, %p, %p, %p, %p.\n", iface, input_minimum, input_maximum, output_minimum, output_maximum);
-
-    *input_minimum = *input_maximum = *output_minimum = *output_maximum = 1;
-
-    return S_OK;
-}
-
-static HRESULT WINAPI video_processor_GetStreamCount(IMFTransform *iface, DWORD *inputs, DWORD *outputs)
-{
-    TRACE("%p, %p, %p.\n", iface, inputs, outputs);
-
-    *inputs = *outputs = 1;
-
-    return S_OK;
-}
-
-static HRESULT WINAPI video_processor_GetStreamIDs(IMFTransform *iface, DWORD input_size, DWORD *inputs,
-        DWORD output_size, DWORD *outputs)
-{
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_GetInputStreamInfo(IMFTransform *iface, DWORD id, MFT_INPUT_STREAM_INFO *info)
-{
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_GetOutputStreamInfo(IMFTransform *iface, DWORD id, MFT_OUTPUT_STREAM_INFO *info)
-{
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_GetAttributes(IMFTransform *iface, IMFAttributes **attributes)
-{
-    struct video_processor *transform = impl_video_processor_from_IMFTransform(iface);
-
-    TRACE("%p, %p.\n", iface, attributes);
-
-    *attributes = transform->attributes;
-    IMFAttributes_AddRef(*attributes);
-
-    return S_OK;
-}
-
-static HRESULT WINAPI video_processor_GetInputStreamAttributes(IMFTransform *iface, DWORD id,
-        IMFAttributes **attributes)
-{
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_GetOutputStreamAttributes(IMFTransform *iface, DWORD id,
-        IMFAttributes **attributes)
-{
-    struct video_processor *transform = impl_video_processor_from_IMFTransform(iface);
-
-    TRACE("%p, %lu, %p.\n", iface, id, attributes);
-
-    *attributes = transform->output_attributes;
-    IMFAttributes_AddRef(*attributes);
-
-    return S_OK;
-}
-
-static HRESULT WINAPI video_processor_DeleteInputStream(IMFTransform *iface, DWORD id)
-{
-    TRACE("%p, %lu.\n", iface, id);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_AddInputStreams(IMFTransform *iface, DWORD streams, DWORD *ids)
-{
-    TRACE("%p, %lu, %p.\n", iface, streams, ids);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_GetInputAvailableType(IMFTransform *iface, DWORD id, DWORD index,
-        IMFMediaType **type)
-{
-    FIXME("%p, %lu, %lu, %p.\n", iface, id, index, type);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_GetOutputAvailableType(IMFTransform *iface, DWORD id, DWORD index,
-        IMFMediaType **type)
-{
-    FIXME("%p, %lu, %lu, %p.\n", iface, id, index, type);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_SetInputType(IMFTransform *iface, DWORD id, IMFMediaType *type, DWORD flags)
-{
-    FIXME("%p, %lu, %p, %#lx.\n", iface, id, type, flags);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_SetOutputType(IMFTransform *iface, DWORD id, IMFMediaType *type, DWORD flags)
-{
-    FIXME("%p, %lu, %p, %#lx.\n", iface, id, type, flags);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_GetInputCurrentType(IMFTransform *iface, DWORD id, IMFMediaType **type)
-{
-    FIXME("%p, %lu, %p.\n", iface, id, type);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_GetOutputCurrentType(IMFTransform *iface, DWORD id, IMFMediaType **type)
-{
-    FIXME("%p, %lu, %p.\n", iface, id, type);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_GetInputStatus(IMFTransform *iface, DWORD id, DWORD *flags)
-{
-    FIXME("%p, %lu, %p.\n", iface, id, flags);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_GetOutputStatus(IMFTransform *iface, DWORD *flags)
-{
-    FIXME("%p, %p.\n", iface, flags);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_SetOutputBounds(IMFTransform *iface, LONGLONG lower, LONGLONG upper)
-{
-    FIXME("%p, %s, %s.\n", iface, wine_dbgstr_longlong(lower), wine_dbgstr_longlong(upper));
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_ProcessEvent(IMFTransform *iface, DWORD id, IMFMediaEvent *event)
-{
-    TRACE("%p, %lu, %p.\n", iface, id, event);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_ProcessMessage(IMFTransform *iface, MFT_MESSAGE_TYPE message, ULONG_PTR param)
-{
-    FIXME("%p, %u, %#Ix.\n", iface, message, param);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_ProcessInput(IMFTransform *iface, DWORD id, IMFSample *sample, DWORD flags)
-{
-    FIXME("%p, %lu, %p, %#lx.\n", iface, id, sample, flags);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI video_processor_ProcessOutput(IMFTransform *iface, DWORD flags, DWORD count,
-        MFT_OUTPUT_DATA_BUFFER *samples, DWORD *status)
-{
-    FIXME("%p, %#lx, %lu, %p, %p.\n", iface, flags, count, samples, status);
-
-    return E_NOTIMPL;
-}
-
-static const IMFTransformVtbl video_processor_vtbl =
-{
-    video_processor_QueryInterface,
-    video_processor_AddRef,
-    video_processor_Release,
-    video_processor_GetStreamLimits,
-    video_processor_GetStreamCount,
-    video_processor_GetStreamIDs,
-    video_processor_GetInputStreamInfo,
-    video_processor_GetOutputStreamInfo,
-    video_processor_GetAttributes,
-    video_processor_GetInputStreamAttributes,
-    video_processor_GetOutputStreamAttributes,
-    video_processor_DeleteInputStream,
-    video_processor_AddInputStreams,
-    video_processor_GetInputAvailableType,
-    video_processor_GetOutputAvailableType,
-    video_processor_SetInputType,
-    video_processor_SetOutputType,
-    video_processor_GetInputCurrentType,
-    video_processor_GetOutputCurrentType,
-    video_processor_GetInputStatus,
-    video_processor_GetOutputStatus,
-    video_processor_SetOutputBounds,
-    video_processor_ProcessEvent,
-    video_processor_ProcessMessage,
-    video_processor_ProcessInput,
-    video_processor_ProcessOutput,
-};
+DEFINE_GUID(DMOVideoFormat_RGB32,D3DFMT_X8R8G8B8,0x524f,0x11ce,0x9f,0x53,0x00,0x20,0xaf,0x0b,0xa7,0x70);
+DEFINE_GUID(DMOVideoFormat_RGB24,D3DFMT_R8G8B8,0x524f,0x11ce,0x9f,0x53,0x00,0x20,0xaf,0x0b,0xa7,0x70);
+DEFINE_GUID(DMOVideoFormat_RGB565,D3DFMT_R5G6B5,0x524f,0x11ce,0x9f,0x53,0x00,0x20,0xaf,0x0b,0xa7,0x70);
+DEFINE_GUID(DMOVideoFormat_RGB555,D3DFMT_X1R5G5B5,0x524f,0x11ce,0x9f,0x53,0x00,0x20,0xaf,0x0b,0xa7,0x70);
+DEFINE_GUID(DMOVideoFormat_RGB8,D3DFMT_P8,0x524f,0x11ce,0x9f,0x53,0x00,0x20,0xaf,0x0b,0xa7,0x70);
+DEFINE_MEDIATYPE_GUID(MFAudioFormat_RAW_AAC,WAVE_FORMAT_RAW_AAC1);
+DEFINE_MEDIATYPE_GUID(MFVideoFormat_VC1S,MAKEFOURCC('V','C','1','S'));
 
 struct class_factory
 {
@@ -368,35 +115,7 @@ static const IClassFactoryVtbl class_factory_vtbl =
     class_factory_LockServer,
 };
 
-static HRESULT video_processor_create(REFIID riid, void **ret)
-{
-    struct video_processor *object;
-    HRESULT hr;
-
-    if (!(object = calloc(1, sizeof(*object))))
-        return E_OUTOFMEMORY;
-
-    object->IMFTransform_iface.lpVtbl = &video_processor_vtbl;
-    object->refcount = 1;
-
-    if (FAILED(hr = MFCreateAttributes(&object->attributes, 0)))
-        goto failed;
-
-    if (FAILED(hr = MFCreateAttributes(&object->output_attributes, 0)))
-        goto failed;
-
-    *ret = &object->IMFTransform_iface;
-    return S_OK;
-
-failed:
-
-    IMFTransform_Release(&object->IMFTransform_iface);
-    return hr;
-}
-
 static const GUID CLSID_GStreamerByteStreamHandler = {0x317df618, 0x5e5a, 0x468a, {0x9f, 0x15, 0xd8, 0x27, 0xa9, 0xa0, 0x81, 0x62}};
-
-static const GUID CLSID_WINEAudioConverter = {0x6a170414,0xaad9,0x4693,{0xb8,0x06,0x3a,0x0c,0x47,0xc5,0x70,0xd6}};
 
 static const struct class_object
 {
@@ -407,7 +126,7 @@ class_objects[] =
 {
     { &CLSID_VideoProcessorMFT, &video_processor_create },
     { &CLSID_GStreamerByteStreamHandler, &winegstreamer_stream_handler_create },
-    { &CLSID_WINEAudioConverter, &audio_converter_create },
+    { &CLSID_MSAACDecMFT, &aac_decoder_create },
     { &CLSID_MSH264DecoderMFT, &h264_decoder_create },
 };
 
@@ -437,114 +156,265 @@ HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj)
     return CLASS_E_CLASSNOTAVAILABLE;
 }
 
-static WCHAR audio_converterW[] = L"Audio Converter";
-static const GUID *const audio_converter_supported_types[] =
-{
-    &MFAudioFormat_PCM,
-    &MFAudioFormat_Float,
-};
-
-static WCHAR wma_decoderW[] = L"WMAudio Decoder MFT";
-static const GUID *const wma_decoder_input_types[] =
-{
-    &MEDIASUBTYPE_MSAUDIO1,
-    &MFAudioFormat_WMAudioV8,
-    &MFAudioFormat_WMAudioV9,
-    &MFAudioFormat_WMAudio_Lossless,
-};
-static const GUID *const wma_decoder_output_types[] =
-{
-    &MFAudioFormat_PCM,
-    &MFAudioFormat_Float,
-};
-
-static WCHAR h264_decoderW[] = L"Microsoft H264 Video Decoder MFT";
-static const GUID *const h264_decoder_input_types[] =
-{
-    &MFVideoFormat_H264,
-    &MFVideoFormat_H264_ES,
-};
-static const GUID *const h264_decoder_output_types[] =
-{
-    &MFVideoFormat_NV12,
-    &MFVideoFormat_YV12,
-    &MFVideoFormat_IYUV,
-    &MFVideoFormat_I420,
-    &MFVideoFormat_YUY2,
-};
-
-static const struct mft
-{
-    const GUID *clsid;
-    const GUID *category;
-    LPWSTR name;
-    const UINT32 flags;
-    const GUID *major_type;
-    const UINT32 input_types_count;
-    const GUID *const *input_types;
-    const UINT32 output_types_count;
-    const GUID *const *output_types;
-}
-mfts[] =
-{
-    {
-        &CLSID_WINEAudioConverter,
-        &MFT_CATEGORY_AUDIO_EFFECT,
-        audio_converterW,
-        MFT_ENUM_FLAG_SYNCMFT,
-        &MFMediaType_Audio,
-        ARRAY_SIZE(audio_converter_supported_types),
-        audio_converter_supported_types,
-        ARRAY_SIZE(audio_converter_supported_types),
-        audio_converter_supported_types,
-    },
-    {
-        &CLSID_WMADecMediaObject,
-        &MFT_CATEGORY_AUDIO_DECODER,
-        wma_decoderW,
-        MFT_ENUM_FLAG_SYNCMFT,
-        &MFMediaType_Audio,
-        ARRAY_SIZE(wma_decoder_input_types),
-        wma_decoder_input_types,
-        ARRAY_SIZE(wma_decoder_output_types),
-        wma_decoder_output_types,
-    },
-    {
-        &CLSID_MSH264DecoderMFT,
-        &MFT_CATEGORY_VIDEO_DECODER,
-        h264_decoderW,
-        MFT_ENUM_FLAG_SYNCMFT,
-        &MFMediaType_Video,
-        ARRAY_SIZE(h264_decoder_input_types),
-        h264_decoder_input_types,
-        ARRAY_SIZE(h264_decoder_output_types),
-        h264_decoder_output_types,
-    },
-};
-
 HRESULT mfplat_DllRegisterServer(void)
 {
-    unsigned int i, j;
+    MFT_REGISTER_TYPE_INFO resampler_types[] =
+    {
+        {MFMediaType_Audio, MFAudioFormat_PCM},
+        {MFMediaType_Audio, MFAudioFormat_Float},
+    };
+
+    MFT_REGISTER_TYPE_INFO aac_decoder_input_types[] =
+    {
+        {MFMediaType_Audio, MFAudioFormat_AAC},
+        {MFMediaType_Audio, MFAudioFormat_RAW_AAC},
+        {MFMediaType_Audio, MFAudioFormat_ADTS},
+    };
+    MFT_REGISTER_TYPE_INFO aac_decoder_output_types[] =
+    {
+        {MFMediaType_Audio, MFAudioFormat_Float},
+        {MFMediaType_Audio, MFAudioFormat_PCM},
+    };
+
+    MFT_REGISTER_TYPE_INFO wma_decoder_input_types[] =
+    {
+        {MFMediaType_Audio, MEDIASUBTYPE_MSAUDIO1},
+        {MFMediaType_Audio, MFAudioFormat_WMAudioV8},
+        {MFMediaType_Audio, MFAudioFormat_WMAudioV9},
+        {MFMediaType_Audio, MFAudioFormat_WMAudio_Lossless},
+    };
+    MFT_REGISTER_TYPE_INFO wma_decoder_output_types[] =
+    {
+        {MFMediaType_Audio, MFAudioFormat_PCM},
+        {MFMediaType_Audio, MFAudioFormat_Float},
+    };
+
+    MFT_REGISTER_TYPE_INFO h264_decoder_input_types[] =
+    {
+        {MFMediaType_Video, MFVideoFormat_H264},
+        {MFMediaType_Video, MFVideoFormat_H264_ES},
+    };
+    MFT_REGISTER_TYPE_INFO h264_decoder_output_types[] =
+    {
+        {MFMediaType_Video, MFVideoFormat_NV12},
+        {MFMediaType_Video, MFVideoFormat_YV12},
+        {MFMediaType_Video, MFVideoFormat_IYUV},
+        {MFMediaType_Video, MFVideoFormat_I420},
+        {MFMediaType_Video, MFVideoFormat_YUY2},
+    };
+
+    MFT_REGISTER_TYPE_INFO video_processor_input_types[] =
+    {
+        {MFMediaType_Video, MFVideoFormat_IYUV},
+        {MFMediaType_Video, MFVideoFormat_YV12},
+        {MFMediaType_Video, MFVideoFormat_NV12},
+        {MFMediaType_Video, MFVideoFormat_YUY2},
+        {MFMediaType_Video, MFVideoFormat_ARGB32},
+        {MFMediaType_Video, MFVideoFormat_RGB32},
+        {MFMediaType_Video, MFVideoFormat_NV11},
+        {MFMediaType_Video, MFVideoFormat_AYUV},
+        {MFMediaType_Video, MFVideoFormat_UYVY},
+        {MFMediaType_Video, MEDIASUBTYPE_P208},
+        {MFMediaType_Video, MFVideoFormat_RGB24},
+        {MFMediaType_Video, MFVideoFormat_RGB555},
+        {MFMediaType_Video, MFVideoFormat_RGB565},
+        {MFMediaType_Video, MFVideoFormat_RGB8},
+        {MFMediaType_Video, MFVideoFormat_I420},
+        {MFMediaType_Video, MFVideoFormat_Y216},
+        {MFMediaType_Video, MFVideoFormat_v410},
+        {MFMediaType_Video, MFVideoFormat_Y41P},
+        {MFMediaType_Video, MFVideoFormat_Y41T},
+        {MFMediaType_Video, MFVideoFormat_Y42T},
+        {MFMediaType_Video, MFVideoFormat_YVYU},
+        {MFMediaType_Video, MFVideoFormat_420O},
+    };
+    MFT_REGISTER_TYPE_INFO video_processor_output_types[] =
+    {
+        {MFMediaType_Video, MFVideoFormat_IYUV},
+        {MFMediaType_Video, MFVideoFormat_YV12},
+        {MFMediaType_Video, MFVideoFormat_NV12},
+        {MFMediaType_Video, MFVideoFormat_YUY2},
+        {MFMediaType_Video, MFVideoFormat_ARGB32},
+        {MFMediaType_Video, MFVideoFormat_RGB32},
+        {MFMediaType_Video, MFVideoFormat_NV11},
+        {MFMediaType_Video, MFVideoFormat_AYUV},
+        {MFMediaType_Video, MFVideoFormat_UYVY},
+        {MFMediaType_Video, MEDIASUBTYPE_P208},
+        {MFMediaType_Video, MFVideoFormat_RGB24},
+        {MFMediaType_Video, MFVideoFormat_RGB555},
+        {MFMediaType_Video, MFVideoFormat_RGB565},
+        {MFMediaType_Video, MFVideoFormat_RGB8},
+        {MFMediaType_Video, MFVideoFormat_I420},
+        {MFMediaType_Video, MFVideoFormat_Y216},
+        {MFMediaType_Video, MFVideoFormat_v410},
+        {MFMediaType_Video, MFVideoFormat_Y41P},
+        {MFMediaType_Video, MFVideoFormat_Y41T},
+        {MFMediaType_Video, MFVideoFormat_Y42T},
+        {MFMediaType_Video, MFVideoFormat_YVYU},
+    };
+
+    MFT_REGISTER_TYPE_INFO wmv_decoder_input_types[] =
+    {
+        {MFMediaType_Video, MFVideoFormat_WMV1},
+        {MFMediaType_Video, MFVideoFormat_WMV2},
+        {MFMediaType_Video, MFVideoFormat_WMV3},
+        {MFMediaType_Video, MEDIASUBTYPE_WMVP},
+        {MFMediaType_Video, MEDIASUBTYPE_WVP2},
+        {MFMediaType_Video, MEDIASUBTYPE_WMVR},
+        {MFMediaType_Video, MEDIASUBTYPE_WMVA},
+        {MFMediaType_Video, MFVideoFormat_WVC1},
+        {MFMediaType_Video, MFVideoFormat_VC1S},
+    };
+    MFT_REGISTER_TYPE_INFO wmv_decoder_output_types[] =
+    {
+        {MFMediaType_Video, MFVideoFormat_YV12},
+        {MFMediaType_Video, MFVideoFormat_YUY2},
+        {MFMediaType_Video, MFVideoFormat_UYVY},
+        {MFMediaType_Video, MFVideoFormat_YVYU},
+        {MFMediaType_Video, MFVideoFormat_NV11},
+        {MFMediaType_Video, MFVideoFormat_NV12},
+        {MFMediaType_Video, DMOVideoFormat_RGB32},
+        {MFMediaType_Video, DMOVideoFormat_RGB24},
+        {MFMediaType_Video, DMOVideoFormat_RGB565},
+        {MFMediaType_Video, DMOVideoFormat_RGB555},
+        {MFMediaType_Video, DMOVideoFormat_RGB8},
+    };
+
+    MFT_REGISTER_TYPE_INFO color_convert_input_types[] =
+    {
+        {MFMediaType_Video, MFVideoFormat_YV12},
+        {MFMediaType_Video, MFVideoFormat_YUY2},
+        {MFMediaType_Video, MFVideoFormat_UYVY},
+        {MFMediaType_Video, MFVideoFormat_AYUV},
+        {MFMediaType_Video, MFVideoFormat_NV12},
+        {MFMediaType_Video, DMOVideoFormat_RGB32},
+        {MFMediaType_Video, DMOVideoFormat_RGB565},
+        {MFMediaType_Video, MFVideoFormat_I420},
+        {MFMediaType_Video, MFVideoFormat_IYUV},
+        {MFMediaType_Video, MFVideoFormat_YVYU},
+        {MFMediaType_Video, DMOVideoFormat_RGB24},
+        {MFMediaType_Video, DMOVideoFormat_RGB555},
+        {MFMediaType_Video, DMOVideoFormat_RGB8},
+        {MFMediaType_Video, MEDIASUBTYPE_V216},
+        {MFMediaType_Video, MEDIASUBTYPE_V410},
+        {MFMediaType_Video, MFVideoFormat_NV11},
+        {MFMediaType_Video, MFVideoFormat_Y41P},
+        {MFMediaType_Video, MFVideoFormat_Y41T},
+        {MFMediaType_Video, MFVideoFormat_Y42T},
+        {MFMediaType_Video, MFVideoFormat_YVU9},
+    };
+    MFT_REGISTER_TYPE_INFO color_convert_output_types[] =
+    {
+        {MFMediaType_Video, MFVideoFormat_YV12},
+        {MFMediaType_Video, MFVideoFormat_YUY2},
+        {MFMediaType_Video, MFVideoFormat_UYVY},
+        {MFMediaType_Video, MFVideoFormat_AYUV},
+        {MFMediaType_Video, MFVideoFormat_NV12},
+        {MFMediaType_Video, DMOVideoFormat_RGB32},
+        {MFMediaType_Video, DMOVideoFormat_RGB565},
+        {MFMediaType_Video, MFVideoFormat_I420},
+        {MFMediaType_Video, MFVideoFormat_IYUV},
+        {MFMediaType_Video, MFVideoFormat_YVYU},
+        {MFMediaType_Video, DMOVideoFormat_RGB24},
+        {MFMediaType_Video, DMOVideoFormat_RGB555},
+        {MFMediaType_Video, DMOVideoFormat_RGB8},
+        {MFMediaType_Video, MEDIASUBTYPE_V216},
+        {MFMediaType_Video, MEDIASUBTYPE_V410},
+        {MFMediaType_Video, MFVideoFormat_NV11},
+    };
+
+    struct mft
+    {
+        GUID clsid;
+        GUID category;
+        WCHAR name[MAX_PATH];
+        UINT32 flags;
+        UINT32 input_types_count;
+        MFT_REGISTER_TYPE_INFO *input_types;
+        UINT32 output_types_count;
+        MFT_REGISTER_TYPE_INFO *output_types;
+    }
+    mfts[] =
+    {
+        {
+            CLSID_MSAACDecMFT,
+            MFT_CATEGORY_AUDIO_DECODER,
+            L"Microsoft AAC Audio Decoder MFT",
+            MFT_ENUM_FLAG_SYNCMFT,
+            ARRAY_SIZE(aac_decoder_input_types),
+            aac_decoder_input_types,
+            ARRAY_SIZE(aac_decoder_output_types),
+            aac_decoder_output_types,
+        },
+        {
+            CLSID_WMADecMediaObject,
+            MFT_CATEGORY_AUDIO_DECODER,
+            L"WMAudio Decoder MFT",
+            MFT_ENUM_FLAG_SYNCMFT,
+            ARRAY_SIZE(wma_decoder_input_types),
+            wma_decoder_input_types,
+            ARRAY_SIZE(wma_decoder_output_types),
+            wma_decoder_output_types,
+        },
+        {
+            CLSID_MSH264DecoderMFT,
+            MFT_CATEGORY_VIDEO_DECODER,
+            L"Microsoft H264 Video Decoder MFT",
+            MFT_ENUM_FLAG_SYNCMFT,
+            ARRAY_SIZE(h264_decoder_input_types),
+            h264_decoder_input_types,
+            ARRAY_SIZE(h264_decoder_output_types),
+            h264_decoder_output_types,
+        },
+        {
+            CLSID_WMVDecoderMFT,
+            MFT_CATEGORY_VIDEO_DECODER,
+            L"WMVideo Decoder MFT",
+            MFT_ENUM_FLAG_SYNCMFT,
+            ARRAY_SIZE(wmv_decoder_input_types),
+            wmv_decoder_input_types,
+            ARRAY_SIZE(wmv_decoder_output_types),
+            wmv_decoder_output_types,
+        },
+        {
+            CLSID_VideoProcessorMFT,
+            MFT_CATEGORY_VIDEO_PROCESSOR,
+            L"Microsoft Video Processor MFT",
+            MFT_ENUM_FLAG_SYNCMFT,
+            ARRAY_SIZE(video_processor_input_types),
+            video_processor_input_types,
+            ARRAY_SIZE(video_processor_output_types),
+            video_processor_output_types,
+        },
+        {
+            CLSID_CResamplerMediaObject,
+            MFT_CATEGORY_AUDIO_EFFECT,
+            L"Resampler MFT",
+            MFT_ENUM_FLAG_SYNCMFT,
+            ARRAY_SIZE(resampler_types),
+            resampler_types,
+            ARRAY_SIZE(resampler_types),
+            resampler_types,
+        },
+        {
+            CLSID_CColorConvertDMO,
+            MFT_CATEGORY_VIDEO_EFFECT,
+            L"Color Converter MFT",
+            MFT_ENUM_FLAG_SYNCMFT,
+            ARRAY_SIZE(color_convert_input_types),
+            color_convert_input_types,
+            ARRAY_SIZE(color_convert_output_types),
+            color_convert_output_types,
+        },
+    };
+
+    unsigned int i;
     HRESULT hr;
-    MFT_REGISTER_TYPE_INFO input_types[4], output_types[5];
 
     for (i = 0; i < ARRAY_SIZE(mfts); i++)
     {
-        const struct mft *cur = &mfts[i];
-
-        for (j = 0; j < cur->input_types_count; j++)
-        {
-            input_types[j].guidMajorType = *(cur->major_type);
-            input_types[j].guidSubtype = *(cur->input_types[j]);
-        }
-        for (j = 0; j < cur->output_types_count; j++)
-        {
-            output_types[j].guidMajorType = *(cur->major_type);
-            output_types[j].guidSubtype = *(cur->output_types[j]);
-        }
-
-        hr = MFTRegister(*(cur->clsid), *(cur->category), cur->name, cur->flags, cur->input_types_count,
-                    input_types, cur->output_types_count, output_types, NULL);
+        hr = MFTRegister(mfts[i].clsid, mfts[i].category, mfts[i].name, mfts[i].flags, mfts[i].input_types_count,
+                    mfts[i].input_types, mfts[i].output_types_count, mfts[i].output_types, NULL);
 
         if (FAILED(hr))
         {
@@ -552,6 +422,7 @@ HRESULT mfplat_DllRegisterServer(void)
             return hr;
         }
     }
+
     return S_OK;
 }
 
@@ -600,8 +471,8 @@ static inline UINT64 make_uint64(UINT32 high, UINT32 low)
 
 static IMFMediaType *mf_media_type_from_wg_format_audio(const struct wg_format *format)
 {
+    unsigned int i, block_align;
     IMFMediaType *type;
-    unsigned int i;
 
     for (i = 0; i < ARRAY_SIZE(audio_formats); ++i)
     {
@@ -617,12 +488,16 @@ static IMFMediaType *mf_media_type_from_wg_format_audio(const struct wg_format *
             IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_NUM_CHANNELS, format->u.audio.channels);
             IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_CHANNEL_MASK, format->u.audio.channel_mask);
             IMFMediaType_SetUINT32(type, &MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
-            IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_BLOCK_ALIGNMENT, format->u.audio.channels * audio_formats[i].depth / 8);
+
+            block_align = format->u.audio.channels * audio_formats[i].depth / 8;
+            IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_BLOCK_ALIGNMENT, block_align);
+            IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, block_align * format->u.audio.rate);
 
             return type;
         }
     }
 
+    FIXME("Unknown audio format %#x.\n", format->u.audio.format);
     return NULL;
 }
 
@@ -648,10 +523,25 @@ static IMFMediaType *mf_media_type_from_wg_format_video(const struct wg_format *
             IMFMediaType_SetUINT32(type, &MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
             IMFMediaType_SetUINT32(type, &MF_MT_VIDEO_ROTATION, MFVideoRotationFormat_0);
 
+            if (!IsRectEmpty(&format->u.video.padding))
+            {
+                MFVideoArea aperture =
+                {
+                    .OffsetX = {.value = format->u.video.padding.left},
+                    .OffsetY = {.value = format->u.video.padding.top},
+                    .Area.cx = format->u.video.width - format->u.video.padding.right - format->u.video.padding.left,
+                    .Area.cy = format->u.video.height - format->u.video.padding.bottom - format->u.video.padding.top,
+                };
+
+                IMFMediaType_SetBlob(type, &MF_MT_MINIMUM_DISPLAY_APERTURE,
+                        (BYTE *)&aperture, sizeof(aperture));
+            }
+
             return type;
         }
     }
 
+    FIXME("Unknown video format %#x.\n", format->u.video.format);
     return NULL;
 }
 
@@ -659,8 +549,12 @@ IMFMediaType *mf_media_type_from_wg_format(const struct wg_format *format)
 {
     switch (format->major_type)
     {
-        case WG_MAJOR_TYPE_H264:
-        case WG_MAJOR_TYPE_WMA:
+        case WG_MAJOR_TYPE_AUDIO_MPEG1:
+        case WG_MAJOR_TYPE_AUDIO_MPEG4:
+        case WG_MAJOR_TYPE_AUDIO_WMA:
+        case WG_MAJOR_TYPE_VIDEO_CINEPAK:
+        case WG_MAJOR_TYPE_VIDEO_H264:
+        case WG_MAJOR_TYPE_VIDEO_WMV:
             FIXME("Format %u not implemented!\n", format->major_type);
             /* fallthrough */
         case WG_MAJOR_TYPE_UNKNOWN:
@@ -726,10 +620,57 @@ static void mf_media_type_to_wg_format_audio(IMFMediaType *type, const GUID *sub
     FIXME("Unrecognized audio subtype %s, depth %u.\n", debugstr_guid(subtype), depth);
 }
 
+static void mf_media_type_to_wg_format_audio_mpeg4(IMFMediaType *type, struct wg_format *format)
+{
+    /* Audio specific config is stored at after HEAACWAVEINFO in MF_MT_USER_DATA
+     * https://docs.microsoft.com/en-us/windows/win32/api/mmreg/ns-mmreg-heaacwaveformat
+     */
+    typedef struct
+    {
+        WORD wPayloadType;
+        WORD wAudioProfileLevelIndication;
+        WORD wStructType;
+        WORD wReserved1;
+        DWORD dwReserved2;
+    } HEAACWAVEINFO;
+    typedef struct
+    {
+        HEAACWAVEINFO wfInfo;
+        BYTE pbAudioSpecificConfig[1];
+    } HEAACWAVEFORMAT;
+
+    BYTE buffer[64];
+    HEAACWAVEFORMAT *user_data = (HEAACWAVEFORMAT *)buffer;
+    UINT32 codec_data_size;
+
+    if (FAILED(IMFMediaType_GetBlob(type, &MF_MT_USER_DATA, buffer, sizeof(buffer), &codec_data_size)))
+    {
+        FIXME("Codec data is not set.\n");
+        return;
+    }
+
+    codec_data_size -= min(codec_data_size, offsetof(HEAACWAVEFORMAT, pbAudioSpecificConfig));
+    if (codec_data_size > sizeof(format->u.audio_mpeg4.codec_data))
+    {
+        FIXME("Codec data needs %u bytes.\n", codec_data_size);
+        return;
+    }
+
+    format->major_type = WG_MAJOR_TYPE_AUDIO_MPEG4;
+
+    if (FAILED(IMFMediaType_GetUINT32(type, &MF_MT_AAC_PAYLOAD_TYPE, &format->u.audio_mpeg4.payload_type)))
+        format->u.audio_mpeg4.payload_type = -1;
+
+    format->u.audio_mpeg4.codec_data_len = codec_data_size;
+    memcpy(format->u.audio_mpeg4.codec_data, user_data->pbAudioSpecificConfig, codec_data_size);
+}
+
 static void mf_media_type_to_wg_format_video(IMFMediaType *type, const GUID *subtype, struct wg_format *format)
 {
     UINT64 frame_rate, frame_size;
+    MFVideoArea aperture;
     unsigned int i;
+    UINT32 size;
 
     if (FAILED(IMFMediaType_GetUINT64(type, &MF_MT_FRAME_SIZE, &frame_size)))
     {
@@ -742,6 +683,15 @@ static void mf_media_type_to_wg_format_video(IMFMediaType *type, const GUID *sub
     format->u.video.height = (UINT32)frame_size;
     format->u.video.fps_n = 1;
     format->u.video.fps_d = 1;
+
+    if (SUCCEEDED(IMFMediaType_GetBlob(type, &MF_MT_MINIMUM_DISPLAY_APERTURE, (BYTE *)&aperture,
+            sizeof(aperture), &size)) && size == sizeof(aperture))
+    {
+        format->u.video.padding.left = aperture.OffsetX.value;
+        format->u.video.padding.top = aperture.OffsetY.value;
+        format->u.video.padding.right = format->u.video.width - aperture.Area.cx - aperture.OffsetX.value;
+        format->u.video.padding.bottom = format->u.video.height - aperture.Area.cy - aperture.OffsetY.value;
+    }
 
     if (SUCCEEDED(IMFMediaType_GetUINT64(type, &MF_MT_FRAME_RATE, &frame_rate)) && (UINT32)frame_rate)
     {
@@ -760,7 +710,7 @@ static void mf_media_type_to_wg_format_video(IMFMediaType *type, const GUID *sub
     FIXME("Unrecognized video subtype %s.\n", debugstr_guid(subtype));
 }
 
-static void mf_media_type_to_wg_format_wma(IMFMediaType *type, const GUID *subtype, struct wg_format *format)
+static void mf_media_type_to_wg_format_audio_wma(IMFMediaType *type, const GUID *subtype, struct wg_format *format)
 {
     UINT32 rate, depth, channels, block_align, bytes_per_second, codec_data_len;
     BYTE codec_data[64];
@@ -811,47 +761,47 @@ static void mf_media_type_to_wg_format_wma(IMFMediaType *type, const GUID *subty
         return;
     }
 
-    format->major_type = WG_MAJOR_TYPE_WMA;
-    format->u.wma.version = version;
-    format->u.wma.bitrate = bytes_per_second * 8;
-    format->u.wma.rate = rate;
-    format->u.wma.depth = depth;
-    format->u.wma.channels = channels;
-    format->u.wma.block_align = block_align;
-    format->u.wma.codec_data_len = codec_data_len;
-    memcpy(format->u.wma.codec_data, codec_data, codec_data_len);
+    format->major_type = WG_MAJOR_TYPE_AUDIO_WMA;
+    format->u.audio_wma.version = version;
+    format->u.audio_wma.bitrate = bytes_per_second * 8;
+    format->u.audio_wma.rate = rate;
+    format->u.audio_wma.depth = depth;
+    format->u.audio_wma.channels = channels;
+    format->u.audio_wma.block_align = block_align;
+    format->u.audio_wma.codec_data_len = codec_data_len;
+    memcpy(format->u.audio_wma.codec_data, codec_data, codec_data_len);
 }
 
-static void mf_media_type_to_wg_format_h264(IMFMediaType *type, struct wg_format *format)
+static void mf_media_type_to_wg_format_video_h264(IMFMediaType *type, struct wg_format *format)
 {
     UINT64 frame_rate, frame_size;
     UINT32 profile, level;
 
     memset(format, 0, sizeof(*format));
-    format->major_type = WG_MAJOR_TYPE_H264;
+    format->major_type = WG_MAJOR_TYPE_VIDEO_H264;
 
     if (SUCCEEDED(IMFMediaType_GetUINT64(type, &MF_MT_FRAME_SIZE, &frame_size)))
     {
-        format->u.h264.width = frame_size >> 32;
-        format->u.h264.height = (UINT32)frame_size;
+        format->u.video_h264.width = frame_size >> 32;
+        format->u.video_h264.height = (UINT32)frame_size;
     }
 
     if (SUCCEEDED(IMFMediaType_GetUINT64(type, &MF_MT_FRAME_RATE, &frame_rate)) && (UINT32)frame_rate)
     {
-        format->u.h264.fps_n = frame_rate >> 32;
-        format->u.h264.fps_d = (UINT32)frame_rate;
+        format->u.video_h264.fps_n = frame_rate >> 32;
+        format->u.video_h264.fps_d = (UINT32)frame_rate;
     }
     else
     {
-        format->u.h264.fps_n = 1;
-        format->u.h264.fps_d = 1;
+        format->u.video_h264.fps_n = 1;
+        format->u.video_h264.fps_d = 1;
     }
 
     if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_MPEG2_PROFILE, &profile)))
-        format->u.h264.profile = profile;
+        format->u.video_h264.profile = profile;
 
     if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_MPEG2_LEVEL, &level)))
-        format->u.h264.level = level;
+        format->u.video_h264.level = level;
 }
 
 void mf_media_type_to_wg_format(IMFMediaType *type, struct wg_format *format)
@@ -877,66 +827,19 @@ void mf_media_type_to_wg_format(IMFMediaType *type, struct wg_format *format)
                 IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV8) ||
                 IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV9) ||
                 IsEqualGUID(&subtype, &MFAudioFormat_WMAudio_Lossless))
-            mf_media_type_to_wg_format_wma(type, &subtype, format);
+            mf_media_type_to_wg_format_audio_wma(type, &subtype, format);
+        else if (IsEqualGUID(&subtype, &MFAudioFormat_AAC))
+            mf_media_type_to_wg_format_audio_mpeg4(type, format);
         else
             mf_media_type_to_wg_format_audio(type, &subtype, format);
     }
     else if (IsEqualGUID(&major_type, &MFMediaType_Video))
     {
         if (IsEqualGUID(&subtype, &MFVideoFormat_H264))
-            mf_media_type_to_wg_format_h264(type, format);
+            mf_media_type_to_wg_format_video_h264(type, format);
         else
             mf_media_type_to_wg_format_video(type, &subtype, format);
     }
     else
         FIXME("Unrecognized major type %s.\n", debugstr_guid(&major_type));
-}
-
-struct mf_sample
-{
-    IMFSample *sample;
-    IMFMediaBuffer *media_buffer;
-    struct wg_sample wg_sample;
-};
-
-HRESULT mf_create_wg_sample(IMFSample *sample, struct wg_sample **out)
-{
-    DWORD current_length, max_length;
-    struct mf_sample *mf_sample;
-    BYTE *buffer;
-    HRESULT hr;
-
-    if (!(mf_sample = calloc(1, sizeof(*mf_sample))))
-        return E_OUTOFMEMORY;
-    if (FAILED(hr = IMFSample_ConvertToContiguousBuffer(sample, &mf_sample->media_buffer)))
-        goto out;
-    if (FAILED(hr = IMFMediaBuffer_Lock(mf_sample->media_buffer, &buffer, &max_length, &current_length)))
-        goto out;
-
-    IMFSample_AddRef((mf_sample->sample = sample));
-    mf_sample->wg_sample.data = buffer;
-    mf_sample->wg_sample.size = current_length;
-    mf_sample->wg_sample.max_size = max_length;
-
-    TRACE("Created mf_sample %p for sample %p.\n", mf_sample, sample);
-    *out = &mf_sample->wg_sample;
-    return S_OK;
-
-out:
-    if (mf_sample->media_buffer)
-        IMFMediaBuffer_Release(mf_sample->media_buffer);
-    free(mf_sample);
-    return hr;
-}
-
-void mf_destroy_wg_sample(struct wg_sample *wg_sample)
-{
-    struct mf_sample *mf_sample = CONTAINING_RECORD(wg_sample, struct mf_sample, wg_sample);
-
-    IMFMediaBuffer_Unlock(mf_sample->media_buffer);
-    IMFMediaBuffer_SetCurrentLength(mf_sample->media_buffer, wg_sample->size);
-    IMFMediaBuffer_Release(mf_sample->media_buffer);
-
-    IMFSample_Release(mf_sample->sample);
-    free(mf_sample);
 }

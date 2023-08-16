@@ -19,8 +19,6 @@
 #ifndef __WINE_DPLOBBY8_H
 #define __WINE_DPLOBBY8_H
 
-#include "wine/winheader_enter.h"
-
 #include <ole2.h>
 
 #ifdef __cplusplus
@@ -257,7 +255,5 @@ HRESULT WINAPI DirectPlay8LobbyCreate(const GUID* pcIID, LPVOID* ppvInterface, I
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif 

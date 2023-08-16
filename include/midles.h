@@ -21,8 +21,6 @@
 #ifndef __WINE_MIDLES_H__
 #define __WINE_MIDLES_H__
 
-#include "wine/winheader_enter.h"
-
 #include <rpcndr.h>
 
 #ifdef __cplusplus
@@ -132,7 +130,5 @@ CLIENT_CALL_RETURN RPC_VAR_ENTRY
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_MIDLES_H__ */

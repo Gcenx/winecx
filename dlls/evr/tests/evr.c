@@ -273,15 +273,20 @@ static void check_service_interface_(unsigned int line, void *iface_ptr, REFGUID
 
 static void test_interfaces(void)
 {
-    IBaseFilter *filter = create_evr();
+    IBaseFilter *filter = create_evr(), *filter2;
+    IUnknown *unk;
+    HRESULT hr;
     ULONG ref;
 
     check_interface(filter, &IID_IAMFilterMiscFlags, TRUE);
     check_interface(filter, &IID_IBaseFilter, TRUE);
     check_interface(filter, &IID_IEVRFilterConfig, TRUE);
+    check_interface(filter, &IID_IMFGetService, TRUE);
+    check_interface(filter, &IID_IMFVideoRenderer, TRUE);
     check_interface(filter, &IID_IMediaFilter, TRUE);
     check_interface(filter, &IID_IMediaPosition, TRUE);
     check_interface(filter, &IID_IMediaSeeking, TRUE);
+    check_interface(filter, &IID_IMediaEventSink, TRUE);
     check_interface(filter, &IID_IPersist, TRUE);
     check_interface(filter, &IID_IUnknown, TRUE);
 
@@ -293,6 +298,15 @@ static void test_interfaces(void)
     check_interface(filter, &IID_IPin, FALSE);
     check_interface(filter, &IID_IReferenceClock, FALSE);
     check_interface(filter, &IID_IVideoWindow, FALSE);
+
+    /* The scope of IMediaEventSink */
+    hr = IBaseFilter_QueryInterface(filter, &IID_IMediaEventSink, (void **)&unk);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IUnknown_QueryInterface(unk, &IID_IBaseFilter, (void **)&filter2);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(filter == filter2, "Unexpected pointer.\n");
+    IBaseFilter_Release(filter2);
+    IUnknown_Release(unk);
 
     ref = IBaseFilter_Release(filter);
     ok(!ref, "Got unexpected refcount %ld.\n", ref);
@@ -564,6 +578,113 @@ static void test_misc_flags(void)
     flags = IAMFilterMiscFlags_GetMiscFlags(misc_flags);
     ok(flags == AM_FILTER_MISC_FLAGS_IS_RENDERER, "Unexpected flags %#lx.\n", flags);
     IAMFilterMiscFlags_Release(misc_flags);
+
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+}
+
+static void test_display_control(void)
+{
+    IBaseFilter *filter = create_evr();
+    IMFVideoDisplayControl *display_control;
+    HRESULT hr;
+    ULONG ref;
+
+    hr = MFGetService((IUnknown *)filter, &MR_VIDEO_RENDER_SERVICE,
+            &IID_IMFVideoDisplayControl, (void **)&display_control);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFVideoDisplayControl_SetVideoWindow(display_control, 0);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+
+    IMFVideoDisplayControl_Release(display_control);
+
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+}
+
+static void test_service_lookup(void)
+{
+    IBaseFilter *filter = create_evr();
+    IMFTopologyServiceLookup *service_lookup;
+    IUnknown *unk;
+    DWORD count;
+    HRESULT hr;
+    ULONG ref;
+
+    hr = IBaseFilter_QueryInterface(filter, &IID_IMFTopologyServiceLookup, (void **)&service_lookup);
+    if (FAILED(hr))
+    {
+        win_skip("IMFTopologyServiceLookup is not exposed.\n");
+        IBaseFilter_Release(filter);
+        return;
+    }
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFTopologyServiceLookup_QueryInterface(service_lookup, &IID_IBaseFilter, (void **)&unk);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(unk == (IUnknown *)filter, "Unexpected pointer.\n");
+    IUnknown_Release(unk);
+
+    count = 1;
+    hr = IMFTopologyServiceLookup_LookupService(service_lookup, MF_SERVICE_LOOKUP_GLOBAL, 0,
+            &MR_VIDEO_RENDER_SERVICE, &IID_IMediaEventSink, (void **)&unk, &count);
+    ok(hr == MF_E_NOTACCEPTING, "Unexpected hr %#lx.\n", hr);
+
+    IMFTopologyServiceLookup_Release(service_lookup);
+
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %ld.\n", ref);
+}
+
+static void test_query_accept(void)
+{
+    IBaseFilter *filter = create_evr();
+    AM_MEDIA_TYPE req_mt = {{0}};
+    VIDEOINFOHEADER vih =
+    {
+        {0}, {0}, 0, 0, 0,
+        {sizeof(BITMAPINFOHEADER), 32, 24, 1, 0, 0xdeadbeef}
+    };
+    unsigned int i;
+    HRESULT hr;
+    ULONG ref;
+    IPin *pin;
+
+    static const GUID *subtype_tests[] =
+    {
+        &MEDIASUBTYPE_RGB32,
+        &MEDIASUBTYPE_YUY2,
+    };
+
+    static const GUID *unsupported_subtype_tests[] =
+    {
+        &MEDIASUBTYPE_RGB8,
+    };
+
+    IBaseFilter_FindPin(filter, L"EVR Input0", &pin);
+
+    req_mt.majortype = MEDIATYPE_Video;
+    req_mt.formattype = FORMAT_VideoInfo;
+    req_mt.cbFormat = sizeof(VIDEOINFOHEADER);
+    req_mt.pbFormat = (BYTE *)&vih;
+
+    for (i = 0; i < ARRAY_SIZE(subtype_tests); ++i)
+    {
+        memcpy(&req_mt.subtype, subtype_tests[i], sizeof(GUID));
+        hr = IPin_QueryAccept(pin, &req_mt);
+        todo_wine_if(i)
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    }
+
+    for (i = 0; i < ARRAY_SIZE(unsupported_subtype_tests); ++i)
+    {
+        memcpy(&req_mt.subtype, unsupported_subtype_tests[i], sizeof(GUID));
+        hr = IPin_QueryAccept(pin, &req_mt);
+        ok(hr == S_FALSE, "Got hr %#lx.\n", hr);
+    }
+
+    IPin_Release(pin);
 
     ref = IBaseFilter_Release(filter);
     ok(!ref, "Got outstanding refcount %ld.\n", ref);
@@ -1061,10 +1182,11 @@ static void test_surface_sample(void)
     ok(flags == 0x123, "Unexpected flags %#lx.\n", flags);
 
     IMFSample_Release(sample);
-
-done:
     if (backbuffer)
         IDirect3DSurface9_Release(backbuffer);
+    ok(!IDirect3DDevice9_Release(device), "Unexpected refcount.\n");
+
+done:
     DestroyWindow(window);
 }
 
@@ -1126,6 +1248,11 @@ static void test_default_mixer_type_negotiation(void)
         skip("Failed to create a D3D device, skipping tests.\n");
         goto done;
     }
+
+    hr = IMFTransform_SetInputType(transform, 0, NULL, 0);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFTransform_SetInputType(transform, 0, NULL, MFT_SET_TYPE_TEST_ONLY);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
 
     hr = DXVA2CreateDirect3DDeviceManager9(&token, &manager);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
@@ -1347,8 +1474,47 @@ static void test_default_mixer_type_negotiation(void)
     hr = IMFTransform_GetOutputCurrentType(transform, 0, &media_type2);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(media_type == media_type2, "Unexpected media type instance.\n");
+
+    IMFMediaType_Release(media_type);
+
+    /* Clear input types */
+    hr = IMFTransform_SetInputType(transform, 0, NULL, MFT_SET_TYPE_TEST_ONLY);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFTransform_SetInputType(transform, 0, NULL, 0);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFTransform_GetInputCurrentType(transform, 0, &media_type);
+    ok(hr == MF_E_TRANSFORM_TYPE_NOT_SET, "Unexpected hr %#lx.\n", hr);
+    hr = IMFTransform_GetOutputCurrentType(transform, 0, &media_type);
+    ok(hr == MF_E_TRANSFORM_TYPE_NOT_SET, "Unexpected hr %#lx.\n", hr);
+
+    /* Restore types */
+    hr = IMFTransform_SetOutputType(transform, 0, media_type2, 0);
+    ok(hr == MF_E_INVALIDMEDIATYPE, "Unexpected hr %#lx.\n", hr);
+    hr = IMFTransform_GetOutputCurrentType(transform, 0, &media_type);
+    ok(hr == MF_E_TRANSFORM_TYPE_NOT_SET, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFTransform_SetInputType(transform, 0, video_type, 0);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFTransform_GetInputCurrentType(transform, 0, &media_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(media_type == video_type, "Unexpected media type instance.\n");
+    IMFMediaType_Release(media_type);
+
+    hr = IMFTransform_SetOutputType(transform, 0, media_type2, 0);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFTransform_GetOutputCurrentType(transform, 0, &media_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(media_type2 == media_type, "Unexpected media type instance.\n");
+
     IMFMediaType_Release(media_type2);
     IMFMediaType_Release(media_type);
+
+    /* Resetting type twice */
+    hr = IMFTransform_SetInputType(transform, 0, NULL, 0);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFTransform_SetInputType(transform, 0, NULL, 0);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     IMFVideoProcessor_Release(processor);
 
@@ -1455,6 +1621,7 @@ static void test_default_presenter(void)
 
     hr = MFGetService((IUnknown *)presenter, &MR_VIDEO_ACCELERATION_SERVICE, &IID_IDirect3DDeviceManager9, (void **)&dm);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    IDirect3DDeviceManager9_Release(dm);
 
     hr = IMFVideoPresenter_QueryInterface(presenter, &IID_IMFVideoDisplayControl, (void **)&display_control);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
@@ -1484,6 +1651,7 @@ static void test_default_presenter(void)
     hr = IMFVideoDisplayControl_GetVideoWindow(display_control, &hwnd2);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(hwnd2 == hwnd, "Unexpected window %p.\n", hwnd2);
+    IMFVideoDisplayControl_Release(display_control);
 
     /* Rate support. */
     hr = IMFVideoPresenter_QueryInterface(presenter, &IID_IMFRateSupport, (void **)&rate_support);
@@ -1511,7 +1679,7 @@ static void test_default_presenter(void)
 
     IMFRateSupport_Release(rate_support);
 
-    IMFVideoPresenter_Release(presenter);
+    ok(!IMFVideoPresenter_Release(presenter), "Unexpected refcount.\n");
 
     DestroyWindow(hwnd);
 }
@@ -1697,7 +1865,10 @@ static void test_MFCreateVideoSampleAllocator(void)
     if (!(device = create_device(window)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
-        goto done;
+        IMFMediaType_Release(video_type);
+        IMFMediaType_Release(media_type);
+        DestroyWindow(window);
+        return;
     }
 
     hr = DXVA2CreateDirect3DDeviceManager9(&token, &manager);
@@ -1735,14 +1906,13 @@ static void test_MFCreateVideoSampleAllocator(void)
     hr = IMFMediaBuffer_Unlock(buffer);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
+    IMFMediaBuffer_Release(buffer);
     IMFSample_Release(sample);
-
     IMFVideoSampleAllocator_Release(allocator);
-
+    IMFMediaType_Release(video_type);
     IMFMediaType_Release(media_type);
     IDirect3DDeviceManager9_Release(manager);
     IDirect3DDevice9_Release(device);
-done:
     DestroyWindow(window);
 }
 
@@ -2067,6 +2237,7 @@ static void test_presenter_native_video_size(void)
 
     hr = IMFVideoPresenter_QueryInterface(presenter, &IID_IMFTopologyServiceLookupClient, (void **)&lookup_client);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    IMFTopologyServiceLookupClient_Release(lookup_client);
 
     hr = IMFVideoPresenter_QueryInterface(presenter, &IID_IMFVideoDisplayControl, (void **)&display_control);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
@@ -2141,6 +2312,7 @@ static void test_presenter_native_video_size(void)
     ok((ratio.cx == 4 && ratio.cy == 3) || broken(!memcmp(&ratio, &size, sizeof(ratio))) /* < Win10 */,
             "Unexpected ratio %lu x %lu.\n", ratio.cx, ratio.cy);
 
+    IMFTopologyServiceLookupClient_Release(lookup_client);
     IMFMediaType_Release(video_type);
     IMFVideoDisplayControl_Release(display_control);
     IMFVideoPresenter_Release(presenter);
@@ -2259,7 +2431,8 @@ static void test_presenter_video_window(void)
     hr = IDirect3DDeviceManager9_CloseDeviceHandle(dm, hdevice);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
-    IMFVideoDisplayControl_Release(display_control);
+    IDirect3DDeviceManager9_Release(dm);
+    ok(!IMFVideoDisplayControl_Release(display_control), "Unexpected refcount.\n");
 
     DestroyWindow(window);
 }
@@ -2420,6 +2593,7 @@ static void test_presenter_media_type(void)
 
     hr = IMFTopologyServiceLookupClient_InitServicePointers(lookup_client, &host.IMFTopologyServiceLookup_iface);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    IMFTopologyServiceLookupClient_Release(lookup_client);
 
     hr = IMFVideoDisplayControl_SetVideoWindow(display_control, window);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
@@ -2431,6 +2605,7 @@ static void test_presenter_media_type(void)
 
     hr = IMFTransform_SetInputType(mixer, 0, input_type, 0);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    IMFMediaType_Release(input_type);
 
     hr = IMFVideoPresenter_ProcessMessage(presenter, MFVP_MESSAGE_INVALIDATEMEDIATYPE, 0);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
@@ -2463,6 +2638,8 @@ static void test_presenter_media_type(void)
     IMFVideoDisplayControl_Release(display_control);
     IMFVideoPresenter_Release(presenter);
     IMFTransform_Release(mixer);
+    IDirect3DDeviceManager9_Release(manager);
+    IDirect3DDevice9_Release(device);
 
 done:
     DestroyWindow(window);
@@ -2949,6 +3126,7 @@ static void test_mixer_samples(void)
     ok(hr == MF_E_INVALIDSTREAMNUMBER, "Unexpected hr %#lx.\n", hr);
 
     IMFDesiredSample_Clear(desired);
+    IMFDesiredSample_Release(desired);
 
     hr = IMFTransform_ProcessInput(mixer, 0, NULL, 0);
     ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
@@ -3045,8 +3223,8 @@ static void test_mixer_samples(void)
     IMFVideoProcessor_Release(processor);
     IMFTransform_Release(mixer);
 
-    IDirect3DDevice9_Release(device);
     IDirect3DDeviceManager9_Release(manager);
+    ok(!IDirect3DDevice9_Release(device), "Unexpected refcount.\n");
 
 done:
     DestroyWindow(window);
@@ -3120,9 +3298,11 @@ static void test_mixer_render(void)
 
     hr = IMFTransform_QueryInterface(mixer, &IID_IMFVideoProcessor, (void **)&processor);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    IMFVideoProcessor_Release(processor);
 
     hr = IMFTransform_QueryInterface(mixer, &IID_IMFVideoMixerControl, (void **)&mixer_control);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    IMFVideoMixerControl_Release(mixer_control);
 
     /* Configure device and media types. */
     hr = DXVA2CreateDirect3DDeviceManager9(&token, &manager);
@@ -3197,8 +3377,8 @@ static void test_mixer_render(void)
     IDirect3DSurface9_Release(surface);
     IMFTransform_Release(mixer);
 
-    IDirect3DDevice9_Release(device);
     IDirect3DDeviceManager9_Release(manager);
+    ok(!IDirect3DDevice9_Release(device), "Unexpected refcount.\n");
 
 done:
     DestroyWindow(window);
@@ -3226,6 +3406,9 @@ START_TEST(evr)
     test_pin_info();
     test_unconnected_eos();
     test_misc_flags();
+    test_display_control();
+    test_service_lookup();
+    test_query_accept();
 
     test_default_mixer();
     test_default_mixer_type_negotiation();

@@ -51,6 +51,24 @@ static int sock_send(int fd, const void *msg, size_t len, WSAOVERLAPPED *ovr)
     return -1;
 }
 
+BOOL netconn_wait_overlapped_result( struct netconn *conn, WSAOVERLAPPED *ovr, DWORD *len )
+{
+    OVERLAPPED *completion_ovr;
+    ULONG_PTR key;
+
+    if (!GetQueuedCompletionStatus( conn->port, len, &key, &completion_ovr, INFINITE ))
+    {
+        WARN( "GetQueuedCompletionStatus failed, err %lu.\n", GetLastError() );
+        return FALSE;
+    }
+    if ((key != conn->socket && conn->socket != -1) || completion_ovr != (OVERLAPPED *)ovr)
+    {
+        ERR( "Unexpected completion key %Ix, overlapped %p.\n", key, completion_ovr );
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static int sock_recv(int fd, void *msg, size_t len, int flags)
 {
     int ret;
@@ -196,6 +214,7 @@ DWORD netconn_create( struct hostdata *host, const struct sockaddr_storage *sock
     winsock_init();
 
     if (!(conn = calloc( 1, sizeof(*conn) ))) return ERROR_OUTOFMEMORY;
+    conn->refs = 1;
     conn->host = host;
     conn->sockaddr = *sockaddr;
     if ((conn->socket = WSASocketW( sockaddr->ss_family, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED )) == -1)
@@ -259,8 +278,15 @@ DWORD netconn_create( struct hostdata *host, const struct sockaddr_storage *sock
     return ERROR_SUCCESS;
 }
 
-void netconn_close( struct netconn *conn )
+void netconn_addref( struct netconn *conn )
 {
+    InterlockedIncrement( &conn->refs );
+}
+
+void netconn_release( struct netconn *conn )
+{
+    if (InterlockedDecrement( &conn->refs )) return;
+    TRACE( "Closing connection %p.\n", conn );
     if (conn->secure)
     {
         free( conn->peek_msg_mem );
@@ -269,8 +295,11 @@ void netconn_close( struct netconn *conn )
         free(conn->extra_buf);
         DeleteSecurityContext(&conn->ssl_ctx);
     }
-    closesocket( conn->socket );
+    if (conn->socket != -1)
+        closesocket( conn->socket );
     release_host( conn->host );
+    if (conn->port)
+        CloseHandle( conn->port );
     free(conn);
 }
 
@@ -322,14 +351,12 @@ DWORD netconn_secure_connect( struct netconn *conn, WCHAR *hostname, DWORD secur
 
             memmove(read_buf, (BYTE*)in_bufs[0].pvBuffer+in_bufs[0].cbBuffer-in_bufs[1].cbBuffer, in_bufs[1].cbBuffer);
             in_bufs[0].cbBuffer = in_bufs[1].cbBuffer;
-
-            in_bufs[1].BufferType = SECBUFFER_EMPTY;
-            in_bufs[1].cbBuffer = 0;
-            in_bufs[1].pvBuffer = NULL;
         }
 
         assert(in_bufs[0].BufferType == SECBUFFER_TOKEN);
-        assert(in_bufs[1].BufferType == SECBUFFER_EMPTY);
+        in_bufs[1].BufferType = SECBUFFER_EMPTY;
+        in_bufs[1].cbBuffer = 0;
+        in_bufs[1].pvBuffer = NULL;
 
         if(in_bufs[0].cbBuffer + 1024 > read_buf_size) {
             BYTE *new_read_buf;
@@ -443,6 +470,12 @@ static DWORD send_ssl_chunk( struct netconn *conn, const void *msg, size_t size,
 DWORD netconn_send( struct netconn *conn, const void *msg, size_t len, int *sent, WSAOVERLAPPED *ovr )
 {
     DWORD err;
+
+    if (ovr && !conn->port)
+    {
+        if (!(conn->port = CreateIoCompletionPort( (HANDLE)(SOCKET)conn->socket, NULL, (ULONG_PTR)conn->socket, 0 )))
+            ERR( "Failed to create port.\n" );
+    }
 
     if (conn->secure)
     {
@@ -629,6 +662,13 @@ DWORD netconn_recv( struct netconn *conn, void *buf, size_t len, int flags, int 
     return ERROR_SUCCESS;
 }
 
+void netconn_cancel_io( struct netconn *conn )
+{
+    SOCKET socket = InterlockedExchange( (LONG *)&conn->socket, -1 );
+
+    closesocket( socket );
+}
+
 ULONG netconn_query_data_available( struct netconn *conn )
 {
     return conn->secure ? conn->peek_len : 0;
@@ -720,18 +760,51 @@ static DWORD resolve_hostname( const WCHAR *name, INTERNET_PORT port, struct soc
 
 struct async_resolve
 {
-    const WCHAR             *hostname;
+    LONG                     ref;
+    WCHAR                   *hostname;
     INTERNET_PORT            port;
-    struct sockaddr_storage *addr;
+    struct sockaddr_storage  addr;
     DWORD                    result;
     HANDLE                   done;
 };
 
+static struct async_resolve *create_async_resolve( const WCHAR *hostname, INTERNET_PORT port )
+{
+    struct async_resolve *ret;
+
+    if (!(ret = malloc(sizeof(*ret))))
+    {
+        ERR( "No memory.\n" );
+        return NULL;
+    }
+    ret->ref = 1;
+    ret->hostname = wcsdup( hostname );
+    ret->port     = port;
+    if (!(ret->done = CreateEventW( NULL, FALSE, FALSE, NULL )))
+    {
+        free( ret->hostname );
+        free( ret );
+        return NULL;
+    }
+    return ret;
+}
+
+static void async_resolve_release( struct async_resolve *async )
+{
+    if (InterlockedDecrement( &async->ref )) return;
+
+    free( async->hostname );
+    CloseHandle( async->done );
+    free( async );
+}
+
 static void CALLBACK resolve_proc( TP_CALLBACK_INSTANCE *instance, void *ctx )
 {
     struct async_resolve *async = ctx;
-    async->result = resolve_hostname( async->hostname, async->port, async->addr );
+
+    async->result = resolve_hostname( async->hostname, async->port, &async->addr );
     SetEvent( async->done );
+    async_resolve_release( async );
 }
 
 DWORD netconn_resolve( WCHAR *hostname, INTERNET_PORT port, struct sockaddr_storage *addr, int timeout )
@@ -741,20 +814,25 @@ DWORD netconn_resolve( WCHAR *hostname, INTERNET_PORT port, struct sockaddr_stor
     if (!timeout) ret = resolve_hostname( hostname, port, addr );
     else
     {
-        struct async_resolve async;
+        struct async_resolve *async;
 
-        async.hostname = hostname;
-        async.port     = port;
-        async.addr     = addr;
-        if (!(async.done = CreateEventW( NULL, FALSE, FALSE, NULL ))) return GetLastError();
-        if (!TrySubmitThreadpoolCallback( resolve_proc, &async, NULL ))
+        if (!(async = create_async_resolve( hostname, port )))
+            return ERROR_OUTOFMEMORY;
+
+        InterlockedIncrement( &async->ref );
+        if (!TrySubmitThreadpoolCallback( resolve_proc, async, NULL ))
         {
-            CloseHandle( async.done );
+            InterlockedDecrement( &async->ref );
+            async_resolve_release( async );
             return GetLastError();
         }
-        if (WaitForSingleObject( async.done, timeout ) != WAIT_OBJECT_0) ret = ERROR_WINHTTP_TIMEOUT;
-        else ret = async.result;
-        CloseHandle( async.done );
+        if (WaitForSingleObject( async->done, timeout ) != WAIT_OBJECT_0) ret = ERROR_WINHTTP_TIMEOUT;
+        else
+        {
+            *addr = async->addr;
+            ret = async->result;
+        }
+        async_resolve_release( async );
     }
 
     return ret;

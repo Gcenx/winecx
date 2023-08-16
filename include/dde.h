@@ -22,18 +22,18 @@
 #ifndef __WINE_DDE_H
 #define __WINE_DDE_H
 
-#include "wine/winheader_enter.h"
-
 #include <windef.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#ifdef _USER32_
+#ifndef WINUSERAPI
+#if defined(_USER32_) || defined(WINE_UNIX_LIB)
 #define WINUSERAPI
 #else
-#define WINUSERAPI DECLSPEC_HIDDEN
+#define WINUSERAPI DECLSPEC_IMPORT
+#endif
 #endif
 
 #include <dde.rh>
@@ -77,7 +77,5 @@ WINUSERAPI BOOL        WINAPI UnpackDDElParam(UINT,LPARAM,PUINT_PTR,PUINT_PTR);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_DDE_H */

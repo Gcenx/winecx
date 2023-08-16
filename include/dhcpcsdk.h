@@ -18,8 +18,6 @@
 #ifndef _DHCPCSDK_
 #define _DHCPCSDK_
 
-#include "wine/winheader_enter.h"
-
 #define OPTION_PAD                      0
 #define OPTION_SUBNET_MASK              1
 #define OPTION_TIME_OFFSET              2
@@ -123,7 +121,5 @@ void WINAPI DhcpCApiCleanup(void);
 DWORD WINAPI DhcpCApiInitialize(DWORD *);
 DWORD WINAPI DhcpRequestParams(DWORD, void *, WCHAR *, DHCPCAPI_CLASSID *, DHCPCAPI_PARAMS_ARRAY,
                                DHCPCAPI_PARAMS_ARRAY, BYTE *, DWORD *, WCHAR *);
-
-#include "wine/winheader_exit.h"
 
 #endif

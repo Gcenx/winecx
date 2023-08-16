@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2022-04-15 18:10+0200\n"
+"PO-Revision-Date: 2022-12-28 23:15+0100\n"
 "Last-Translator: Floris Renaud <jkfloris@dds.nl>\n"
 "Language-Team: Dutch\n"
 "Language: nl\n"
@@ -43,7 +43,7 @@ msgid ""
 "To install a new program from a floppy disk, CD-ROM drive, or your hard "
 "drive, click Install."
 msgstr ""
-"Om een programma te installeren vanaf een diskette, CD-ROM, of uw harde "
+"Om een programma te installeren vanaf een diskette, CD-ROM, of de harde "
 "schijf, klik op Installeren."
 
 #: dlls/appwiz.cpl/appwiz.rc:62
@@ -64,8 +64,8 @@ msgstr ""
 msgid "&Support Information"
 msgstr "Onder&steuning"
 
-#: dlls/appwiz.cpl/appwiz.rc:68 programs/regedit/regedit.rc:133
-#: programs/regedit/regedit.rc:232
+#: dlls/appwiz.cpl/appwiz.rc:68 programs/regedit/regedit.rc:136
+#: programs/regedit/regedit.rc:237
 msgid "&Modify..."
 msgstr "&Wijzigen..."
 
@@ -98,22 +98,22 @@ msgstr "Ondersteuning"
 #: dlls/shlwapi/shlwapi.rc:44 dlls/twain_32/twain.rc:32
 #: dlls/user32/user32.rc:83 dlls/user32/user32.rc:98 dlls/wininet/wininet.rc:62
 #: dlls/wininet/wininet.rc:82 dlls/winspool.drv/winspool.rc:42
-#: programs/conhost/conhost.rc:126 programs/net/net.rc:47
-#: programs/notepad/notepad.rc:117 programs/oleview/oleview.rc:161
-#: programs/oleview/oleview.rc:174 programs/progman/progman.rc:106
-#: programs/progman/progman.rc:124 programs/progman/progman.rc:142
-#: programs/progman/progman.rc:158 programs/progman/progman.rc:180
-#: programs/progman/progman.rc:199 programs/progman/progman.rc:216
-#: programs/regedit/regedit.rc:296 programs/regedit/regedit.rc:307
-#: programs/regedit/regedit.rc:320 programs/regedit/regedit.rc:336
-#: programs/regedit/regedit.rc:349 programs/regedit/regedit.rc:362
-#: programs/taskmgr/taskmgr.rc:442 programs/taskmgr/taskmgr.rc:517
-#: programs/winecfg/winecfg.rc:213 programs/winecfg/winecfg.rc:223
-#: programs/winefile/winefile.rc:127 programs/winefile/winefile.rc:150
-#: programs/winefile/winefile.rc:180 programs/winemine/winemine.rc:73
-#: programs/winemine/winemine.rc:84 programs/winemine/winemine.rc:98
-#: programs/wordpad/wordpad.rc:215 programs/wordpad/wordpad.rc:226
-#: programs/wordpad/wordpad.rc:244 programs/wordpad/wordpad.rc:257
+#: programs/net/net.rc:47 programs/notepad/notepad.rc:124
+#: programs/oleview/oleview.rc:161 programs/oleview/oleview.rc:174
+#: programs/progman/progman.rc:106 programs/progman/progman.rc:124
+#: programs/progman/progman.rc:142 programs/progman/progman.rc:158
+#: programs/progman/progman.rc:180 programs/progman/progman.rc:199
+#: programs/progman/progman.rc:216 programs/regedit/regedit.rc:301
+#: programs/regedit/regedit.rc:312 programs/regedit/regedit.rc:325
+#: programs/regedit/regedit.rc:341 programs/regedit/regedit.rc:354
+#: programs/regedit/regedit.rc:367 programs/taskmgr/taskmgr.rc:442
+#: programs/taskmgr/taskmgr.rc:517 programs/winecfg/winecfg.rc:213
+#: programs/winecfg/winecfg.rc:223 programs/winefile/winefile.rc:127
+#: programs/winefile/winefile.rc:150 programs/winefile/winefile.rc:180
+#: programs/winemine/winemine.rc:73 programs/winemine/winemine.rc:84
+#: programs/winemine/winemine.rc:98 programs/wordpad/wordpad.rc:215
+#: programs/wordpad/wordpad.rc:226 programs/wordpad/wordpad.rc:244
+#: programs/wordpad/wordpad.rc:257
 msgid "OK"
 msgstr "OK"
 
@@ -169,13 +169,12 @@ msgid ""
 "href=\"https://wiki.winehq.org/Gecko\">https://wiki.winehq.org/Gecko</a> for "
 "details."
 msgstr ""
-"Wine kon geen Gecko-pakket vinden. Gecko is nodig voor programma's die "
-"gebruik maken van embedded HTML. Wine kan het automatisch voor u downloaden "
-"en installeren.\n"
+"Wine kon geen Gecko-pakket vinden. Gecko is nodig voor programma's die HTML "
+"ingebed gebruiken. Wine kan het automatisch downloaden en installeren.\n"
 "\n"
-"Noot: Het wordt aanbevolen om distributiepakketten te gebruiken. Zie <a "
-"href=\"https://wiki.winehq.org/Gecko\">https://wiki.winehq.org/Gecko</a> "
-"voor details."
+"Opmerking: Het wordt aanbevolen om de pakketten van de distributie te "
+"gebruiken. Lees de <a href=\"https://wiki.winehq.org/Gecko\">WineHQ Wiki</a> "
+"voor meer informatie."
 
 #: dlls/appwiz.cpl/appwiz.rc:109 dlls/appwiz.cpl/appwiz.rc:124
 msgid "&Install"
@@ -205,15 +204,15 @@ msgstr "&Installeren"
 #: dlls/shell32/shell32.rc:340 dlls/shlwapi/shlwapi.rc:45
 #: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:84 dlls/user32/user32.rc:99
 #: dlls/wininet/wininet.rc:63 dlls/wininet/wininet.rc:83
-#: dlls/winspool.drv/winspool.rc:43 programs/conhost/conhost.rc:127
-#: programs/notepad/notepad.rc:118 programs/oleview/oleview.rc:162
+#: dlls/winspool.drv/winspool.rc:43 programs/notepad/notepad.rc:125
+#: programs/notepad/notepad.rc:138 programs/oleview/oleview.rc:162
 #: programs/oleview/oleview.rc:175 programs/progman/progman.rc:107
 #: programs/progman/progman.rc:125 programs/progman/progman.rc:143
 #: programs/progman/progman.rc:159 programs/progman/progman.rc:181
 #: programs/progman/progman.rc:200 programs/progman/progman.rc:217
-#: programs/regedit/regedit.rc:297 programs/regedit/regedit.rc:308
-#: programs/regedit/regedit.rc:321 programs/regedit/regedit.rc:337
-#: programs/regedit/regedit.rc:350 programs/regedit/regedit.rc:363
+#: programs/regedit/regedit.rc:302 programs/regedit/regedit.rc:313
+#: programs/regedit/regedit.rc:326 programs/regedit/regedit.rc:342
+#: programs/regedit/regedit.rc:355 programs/regedit/regedit.rc:368
 #: programs/taskmgr/taskmgr.rc:443 programs/taskmgr/taskmgr.rc:518
 #: programs/wineboot/wineboot.rc:34 programs/winecfg/winecfg.rc:214
 #: programs/winecfg/winecfg.rc:224 programs/winefile/winefile.rc:128
@@ -239,12 +238,11 @@ msgid ""
 "details."
 msgstr ""
 "Wine kon geen wine-mono-pakket vinden. Mono is nodig voor programma's die "
-"gebruik maken van het .NET raamwerk . Wine kan het automatisch voor u "
-"downloaden en installeren.\n"
+"gebruik maken van .NET. Wine kan het automatisch downloaden en installeren.\n"
 "\n"
-"Noot: Het wordt aanbevolen om distributiepakketten te gebruiken. Zie <a "
-"href=\"https://wiki.winehq.org/Mono\">https://wiki.winehq.org/Mono</a> voor "
-"details."
+"Opmerking: Het wordt aanbevolen om de pakketten van de distributie te "
+"gebruiken. Lees de <a href=\"https://wiki.winehq.org/Mono\">WineHQ Wiki</a> "
+"voor meer informatie."
 
 #: dlls/appwiz.cpl/appwiz.rc:31
 msgid "Add/Remove Programs"
@@ -255,8 +253,8 @@ msgid ""
 "Allows you to install new software, or remove existing software from your "
 "computer."
 msgstr ""
-"Hiermee installeert u nieuwe programma's, of verwijdert u bestaande "
-"programma's van uw computer."
+"Nieuwe programma's op de computer installeren of bestaande programma's "
+"wijzigen en verwijderen."
 
 #: dlls/appwiz.cpl/appwiz.rc:33 programs/taskmgr/taskmgr.rc:262
 #: programs/winecfg/winecfg.rc:32
@@ -268,8 +266,8 @@ msgid ""
 "Unable to execute the uninstaller, '%s'. Do you want to remove the uninstall "
 "entry for this program from the registry?"
 msgstr ""
-"Het deïnstallatie-programma '%s' kan niet gestart worden. Wilt u de "
-"deïnstallatie-informatie verwijderen uit het register?"
+"Het deïnstallatie-programma '%s' kan niet gestart worden. De deïnstallatie-"
+"informatie verwijderen uit het register?"
 
 #: dlls/appwiz.cpl/appwiz.rc:36
 msgid "Not specified"
@@ -277,7 +275,7 @@ msgstr "Niet gespecificeerd"
 
 #: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:38
 #: dlls/shell32/shell32.rc:144 dlls/shell32/shell32.rc:239
-#: programs/regedit/regedit.rc:147 programs/winefile/winefile.rc:106
+#: programs/regedit/regedit.rc:150 programs/winefile/winefile.rc:106
 msgid "Name"
 msgstr "Naam"
 
@@ -299,8 +297,8 @@ msgstr "Programma's (*.exe)"
 
 #: dlls/appwiz.cpl/appwiz.rc:43 dlls/avifil32/avifil32.rc:33
 #: dlls/cryptui/cryptui.rc:83 dlls/shell32/shell32.rc:197
-#: programs/notepad/notepad.rc:76 programs/oleview/oleview.rc:103
-#: programs/progman/progman.rc:82 programs/regedit/regedit.rc:225
+#: programs/notepad/notepad.rc:81 programs/oleview/oleview.rc:103
+#: programs/progman/progman.rc:82 programs/regedit/regedit.rc:230
 #: programs/winedbg/winedbg.rc:43 programs/winhlp32/winhlp32.rc:90
 msgid "All files (*.*)"
 msgstr "Alle bestanden (*.*)"
@@ -454,12 +452,12 @@ msgstr "&Reset"
 #: dlls/comdlg32/comdlg32.rc:531 dlls/ieframe/ieframe.rc:58
 #: dlls/msacm32/msacm32.rc:52 dlls/oledlg/oledlg.rc:96
 #: dlls/shell32/shell32.rc:128 programs/clock/clock.rc:44
-#: programs/notepad/notepad.rc:60 programs/notepad/notepad.rc:119
+#: programs/notepad/notepad.rc:65 programs/notepad/notepad.rc:126
 #: programs/oleview/oleview.rc:72 programs/progman/progman.rc:55
 #: programs/progman/progman.rc:108 programs/progman/progman.rc:126
 #: programs/progman/progman.rc:144 programs/progman/progman.rc:160
 #: programs/progman/progman.rc:184 programs/progman/progman.rc:202
-#: programs/progman/progman.rc:219 programs/regedit/regedit.rc:77
+#: programs/progman/progman.rc:219 programs/regedit/regedit.rc:78
 #: programs/taskmgr/taskmgr.rc:87 programs/winefile/winefile.rc:82
 #: programs/winemine/winemine.rc:53 programs/winhlp32/winhlp32.rc:57
 #: programs/wordpad/wordpad.rc:102
@@ -522,7 +520,7 @@ msgid "See details"
 msgstr "Bekijk details"
 
 #: dlls/comctl32/comctl32.rc:31 dlls/cryptui/cryptui.rc:235
-#: programs/regedit/regedit.rc:286 programs/taskmgr/taskmgr.rc:434
+#: programs/regedit/regedit.rc:291 programs/taskmgr/taskmgr.rc:434
 #: programs/winedbg/winedbg.rc:61 programs/winedbg/winedbg.rc:76
 #: programs/wordpad/wordpad.rc:180
 msgid "Close"
@@ -588,7 +586,7 @@ msgid "Print range"
 msgstr "Afdrukbereik"
 
 #: dlls/comdlg32/comdlg32.rc:208 dlls/comdlg32/comdlg32.rc:376
-#: programs/regedit/regedit.rc:268
+#: programs/regedit/regedit.rc:273
 msgid "&All"
 msgstr "&Alles"
 
@@ -768,8 +766,8 @@ msgctxt "Solid"
 msgid "&o"
 msgstr "&f"
 
-#: dlls/comdlg32/comdlg32.rc:318 programs/regedit/regedit.rc:275
-#: programs/regedit/regedit.rc:285
+#: dlls/comdlg32/comdlg32.rc:318 programs/regedit/regedit.rc:280
+#: programs/regedit/regedit.rc:290
 msgid "Find"
 msgstr "Zoeken"
 
@@ -785,7 +783,7 @@ msgstr "Geheel &woord"
 msgid "Match &Case"
 msgstr "Gelijke &hoofd-/kleine letters"
 
-#: dlls/comdlg32/comdlg32.rc:325 dlls/joy.cpl/joy.rc:76
+#: dlls/comdlg32/comdlg32.rc:325
 msgid "Direction"
 msgstr "Oriëntatie"
 
@@ -909,7 +907,7 @@ msgstr "&Staand"
 msgid "L&eft:"
 msgstr "L&inks:"
 
-#: dlls/comdlg32/comdlg32.rc:449 programs/notepad/notepad.rc:112
+#: dlls/comdlg32/comdlg32.rc:449 programs/notepad/notepad.rc:119
 msgid "&Right:"
 msgstr "&Rechts:"
 
@@ -917,7 +915,7 @@ msgstr "&Rechts:"
 msgid "T&op:"
 msgstr "B&oven:"
 
-#: dlls/comdlg32/comdlg32.rc:453 programs/notepad/notepad.rc:114
+#: dlls/comdlg32/comdlg32.rc:453 programs/notepad/notepad.rc:121
 msgid "&Bottom:"
 msgstr "&Onder:"
 
@@ -968,8 +966,8 @@ msgid ""
 "File does not exist.\n"
 "Do you want to create file?"
 msgstr ""
-"Dit bestand bestaat nog niet.\n"
-"Wilt u het bestand aanmaken?"
+"Bestand bestaat niet.\n"
+"Het bestand aanmaken?"
 
 #: dlls/comdlg32/comdlg32.rc:36
 msgid ""
@@ -977,7 +975,7 @@ msgid ""
 "Do you want to replace it?"
 msgstr ""
 "Bestand bestaat al.\n"
-"Wilt u het vervangen?"
+"Het bestand vervangen?"
 
 #: dlls/comdlg32/comdlg32.rc:37
 msgid "Invalid character(s) in path"
@@ -1114,7 +1112,7 @@ msgid ""
 "Please enter a value between %1!d! and %2!d!."
 msgstr ""
 "Deze waarde ligt niet binnen het paginabereik\n"
-"Voert u s.v.p. een waarde tussen %1!d! en %2!d! in."
+"Voer een waarde tussen %1!d! en %2!d! in."
 
 #: dlls/comdlg32/comdlg32.rc:61
 msgid "The 'from' entry cannot exceed the 'to' entry."
@@ -1126,7 +1124,7 @@ msgid ""
 "Please reenter margins."
 msgstr ""
 "De marges overlappen of vallen buiten het papier.\n"
-"Voer a.u.b. nieuwe marges in."
+"Voer nieuwe marges in."
 
 #: dlls/comdlg32/comdlg32.rc:65
 msgid "The 'Number of copies' field cannot be empty."
@@ -1137,7 +1135,7 @@ msgid ""
 "This large number of copies is not supported by your printer.\n"
 "Please enter a value between 1 and %d."
 msgstr ""
-"Uw printer ondersteunt dergelijke hoeveelheid kopieen niet.\n"
+"De printer ondersteunt deze hoeveelheid kopieën niet.\n"
 "Voer een waarde tussen 1 en %d in."
 
 #: dlls/comdlg32/comdlg32.rc:68
@@ -1169,9 +1167,8 @@ msgid ""
 "Before you can perform printer-related tasks such as page setup or printing "
 "a document, you need to install a printer. Please install one and retry."
 msgstr ""
-"Voordat u printer-gerelateerde taken zoals pagina instellingen of het "
-"printen van een document kun uitvoeren, moet u een printer installeren. "
-"Installeer een printer en probeer het opnieuw."
+"Voordat printer gerelateerde taken uitgevoerd kunnen worden, moet er een "
+"printer geïnstalleerd worden. Installeer een printer en probeer het opnieuw."
 
 #: dlls/comdlg32/comdlg32.rc:142
 msgid "Select a font size between %1!d! and %2!d! points."
@@ -1227,7 +1224,7 @@ msgstr "Papier is op; "
 
 #: dlls/comdlg32/comdlg32.rc:90
 msgid "Feed paper manual; "
-msgstr "Voer s.v.p. met de hand papier in; "
+msgstr "Voer papier met de hand in; "
 
 #: dlls/comdlg32/comdlg32.rc:91
 msgid "Paper problem; "
@@ -1326,6 +1323,19 @@ msgctxt "unit: millimeters"
 msgid "mm"
 msgstr "mm"
 
+#: dlls/compstui/compstui.rc:29 dlls/shell32/shell32.rc:74
+msgid "Properties"
+msgstr "Eigenschappen"
+
+#: dlls/compstui/compstui.rc:30 dlls/hhctrl.ocx/hhctrl.rc:50
+#: programs/conhost/conhost.rc:51 programs/wordpad/wordpad.rc:166
+msgid "Options"
+msgstr "Instellingen"
+
+#: dlls/compstui/compstui.rc:31
+msgid "Default"
+msgstr "Standaard"
+
 #: dlls/credui/credui.rc:45
 msgid "&User name:"
 msgstr "&Gebruikersnaam:"
@@ -1356,8 +1366,8 @@ msgid ""
 "Make sure that your user name\n"
 "and password are correct."
 msgstr ""
-"Controleer of uw gebruikersnaam\n"
-"en wachtwoord correct zijn."
+"Controleer of de gebruikersnaam\n"
+"en het wachtwoord correct zijn."
 
 #: dlls/credui/credui.rc:35
 msgid ""
@@ -1366,10 +1376,10 @@ msgid ""
 "Press the Caps Lock key on your keyboard to turn off Caps Lock before\n"
 "entering your password."
 msgstr ""
-"Met Caps Lock aan kan uw wachtwoord verkeerd worden ingevoerd.\n"
+"Met Caps Lock aan kan het wachtwoord verkeerd worden ingevoerd.\n"
 "\n"
-"Druk op de Caps Lock toets op uw toetsenbord om Caps Lock uit\n"
-"te zetten voor invoer van uw wachtwoord."
+"Druk op de Caps Lock toets op het toetsenbord om Caps Lock uit\n"
+"te schakelen voordat het wachtwoord wordt ingevoerd."
 
 #: dlls/credui/credui.rc:34
 msgid "Caps Lock is On"
@@ -1590,7 +1600,7 @@ msgstr "Straat/Adres"
 
 #: dlls/crypt32/crypt32.rc:83
 msgid "Serial Number"
-msgstr "Registratie Nummer"
+msgstr "Registratienummer"
 
 #: dlls/crypt32/crypt32.rc:84
 msgid "CA Version"
@@ -1714,7 +1724,7 @@ msgstr "PKCS 7 Samengevat"
 
 #: dlls/crypt32/crypt32.rc:114
 msgid "PKCS 7 Encrypted"
-msgstr "PKCS 7 Gecodeerd"
+msgstr "PKCS 7 Versleuteling"
 
 #: dlls/crypt32/crypt32.rc:115
 msgid "Previous CA Certificate Hash"
@@ -1746,7 +1756,7 @@ msgstr "Ondernemings Basis OID"
 
 #: dlls/crypt32/crypt32.rc:122
 msgid "Dummy Signer"
-msgstr "Dummie Tekenaar"
+msgstr "Dummie Ondertekenaar"
 
 #: dlls/crypt32/crypt32.rc:123
 msgid "Encrypted Private Key"
@@ -2326,7 +2336,7 @@ msgstr "Selecteer certificatenopslag"
 
 #: dlls/cryptui/cryptui.rc:276
 msgid "Select the certificate store you want to use:"
-msgstr "Selecteer de certificatenopslag die u wilt gebruiken:"
+msgstr "Selecteer de certificatenopslag die gebruikt moet worden:"
 
 #: dlls/cryptui/cryptui.rc:279
 msgid "&Show physical stores"
@@ -2336,11 +2346,11 @@ msgstr "&Toon fysieke opslagen"
 #: dlls/cryptui/cryptui.rc:313 dlls/cryptui/cryptui.rc:327
 #: dlls/cryptui/cryptui.rc:71
 msgid "Certificate Import Wizard"
-msgstr "Certificaat importeerhulp"
+msgstr "Certificaat Importeerhulp"
 
 #: dlls/cryptui/cryptui.rc:288
 msgid "Welcome to the Certificate Import Wizard"
-msgstr "Welkom bij de certificaat importeerhulp"
+msgstr "Welkom bij de Certificaat Importeerhulp"
 
 #: dlls/cryptui/cryptui.rc:291
 msgid ""
@@ -2354,12 +2364,12 @@ msgid ""
 "\n"
 "To continue, click Next."
 msgstr ""
-"Deze wizard helpt u certificaten, lijsten van herroepen certificaten en "
+"Deze wizard helpt bij certificaten, lijsten van herroepen certificaten en "
 "lijsten van vertrouwde certificaten uit een bestand in een certificaatkluis "
 "te importeren.\n"
 "\n"
-"Een certificaat kan gebruikt worden om u of de computer waarmee u "
-"communiceert te identificeren. Het kan ook gebruikt worden voor "
+"Een certificaat kan gebruikt worden om de computer of het apparaat waarmee "
+"gecommuniceerd wordt te identificeren. Het kan ook gebruikt worden voor "
 "authenticatie en om berichten te ondertekenen. Een certificaatkluis bevat "
 "een verzameling van certificaten, lijsten van herroepen certificaten en "
 "lijsten van vertrouwde certificaten.\n"
@@ -2380,7 +2390,7 @@ msgid ""
 "Note: The following file formats may contain more than one certificate, "
 "certificate revocation list, or certificate trust list:"
 msgstr ""
-"Noot: De volgende bestandsformaten kunnen meer dan één certificaat, "
+"Opmerking: De volgende bestandsformaten kunnen meer dan één certificaat, "
 "certificaat terugroeplijst of certificaat vertrouwenslijst bevatten:"
 
 #: dlls/cryptui/cryptui.rc:304
@@ -2401,8 +2411,8 @@ msgid ""
 "Wine can automatically select the certificate store, or you can specify a "
 "location for the certificates."
 msgstr ""
-"Wine kan automatisch de certificatenopslag selecteren, of u kunt een locatie "
-"opgeven voor de certificaten."
+"Wine kan automatisch de certificatenopslag selecteren, of er kan een locatie "
+"opgeven worden voor de certificaten."
 
 #: dlls/cryptui/cryptui.rc:318
 msgid "&Automatically select certificate store"
@@ -2414,15 +2424,15 @@ msgstr "&Plaats alle certificaten in de volgende opslag:"
 
 #: dlls/cryptui/cryptui.rc:330
 msgid "Completing the Certificate Import Wizard"
-msgstr "Afronden van de certificaat importeerhulp"
+msgstr "Afronden van de Certificaat Importeerhulp"
 
 #: dlls/cryptui/cryptui.rc:332
 msgid "You have successfully completed the Certificate Import Wizard."
-msgstr "U heeft de certificaat importeerhulp succesvol afgerond."
+msgstr "De Certificaat Importeerhulp is succesvol afgerond."
 
 #: dlls/cryptui/cryptui.rc:334 dlls/cryptui/cryptui.rc:448
 msgid "You have specified the following settings:"
-msgstr "U heeft de volgende instellingen ingegeven:"
+msgstr "De volgende instellingen zijn gegeven:"
 
 #: dlls/cryptui/cryptui.rc:342 dlls/cryptui/cryptui.rc:122
 #: dlls/inetcpl.cpl/inetcpl.rc:111
@@ -2437,8 +2447,8 @@ msgstr "&Doeleinden:"
 msgid "&Import..."
 msgstr "&Importeer..."
 
-#: dlls/cryptui/cryptui.rc:350 programs/regedit/regedit.rc:91
-#: programs/regedit/regedit.rc:112
+#: dlls/cryptui/cryptui.rc:350 programs/regedit/regedit.rc:92
+#: programs/regedit/regedit.rc:114
 msgid "&Export..."
 msgstr "&Exporteren..."
 
@@ -2452,12 +2462,12 @@ msgstr "Certificaat doeleinden"
 
 #: dlls/cryptui/cryptui.rc:355 dlls/ieframe/ieframe.rc:45
 #: dlls/shell32/shell32.rc:43 dlls/shell32/shell32.rc:120
-#: programs/oleview/oleview.rc:59 programs/oleview/oleview.rc:61
-#: programs/oleview/oleview.rc:85 programs/regedit/regedit.rc:64
-#: programs/taskmgr/taskmgr.rc:52 programs/winefile/winefile.rc:48
-#: programs/wordpad/wordpad.rc:69
+#: programs/notepad/notepad.rc:61 programs/oleview/oleview.rc:59
+#: programs/oleview/oleview.rc:61 programs/oleview/oleview.rc:85
+#: programs/regedit/regedit.rc:65 programs/taskmgr/taskmgr.rc:52
+#: programs/winefile/winefile.rc:48 programs/wordpad/wordpad.rc:69
 msgid "&View"
-msgstr "&Bekijk"
+msgstr "&Beeld"
 
 #: dlls/cryptui/cryptui.rc:360
 msgid "Advanced Options"
@@ -2487,7 +2497,7 @@ msgstr "Certificaat Exporteerhulp"
 
 #: dlls/cryptui/cryptui.rc:378
 msgid "Welcome to the Certificate Export Wizard"
-msgstr "Welkom bij de Certificaat exporteerhulp"
+msgstr "Welkom bij de Certificaat Exporteerhulp"
 
 #: dlls/cryptui/cryptui.rc:381
 msgid ""
@@ -2501,12 +2511,12 @@ msgid ""
 "\n"
 "To continue, click Next."
 msgstr ""
-"Deze wizard helpt u certificaten, lijsten van herroepen certificaten en "
+"Deze wizard helpt certificaten, lijsten van herroepen certificaten en "
 "lijsten van vertrouwde certificaten van een certificaatkluis naar een "
 "bestand te exporteren.\n"
 "\n"
-"Een certificaat kan gebruikt worden om u of de computer waarmee u "
-"communiceert te identificeren. Het kan ook gebruikt worden voor "
+"Een certificaat kan gebruikt worden om de computer of het apparaat waarmee "
+"gecommuniceerd wordt te identificeren. Het kan ook gebruikt worden voor "
 "authenticatie en om berichten te ondertekenen. Een certificaatkluis bevat "
 "een verzameling van certificaten, lijsten van herroepen certificaten en "
 "lijsten van vertrouwde certificaten.\n"
@@ -2518,12 +2528,12 @@ msgid ""
 "If you choose to export the private key, you will be prompted for a password "
 "to protect the private key on a later page."
 msgstr ""
-"Als u de persoonlijke sleutel wilt exporteren zult u later verzocht worden "
-"een wachtwoord in te geven om de sleutel te beveiligen."
+"Als de persoonlijke sleutel geëxporteerd wordt, zal later verzocht worden "
+"eenwachtwoord in te geven om de sleutel te beveiligen."
 
 #: dlls/cryptui/cryptui.rc:390
 msgid "Do you wish to export the private key?"
-msgstr "Wilt u de persoonlijke sleutel exporteren?"
+msgstr "De persoonlijke sleutel exporteren?"
 
 #: dlls/cryptui/cryptui.rc:391
 msgid "&Yes, export the private key"
@@ -2539,7 +2549,7 @@ msgstr "&Bevestig wachtwoord:"
 
 #: dlls/cryptui/cryptui.rc:412
 msgid "Select the format you want to use:"
-msgstr "Selecteer het formaat dat u wilt gebruiken:"
+msgstr "Selecteer het formaat dat gebruikt moet worden:"
 
 #: dlls/cryptui/cryptui.rc:413
 msgid "&DER-encoded X.509 (*.cer)"
@@ -2579,7 +2589,7 @@ msgstr "Afronden van de Certificaat exporteerhulp"
 
 #: dlls/cryptui/cryptui.rc:446
 msgid "You have successfully completed the Certificate Export Wizard."
-msgstr "U heeft de Certificaat exporteerhulp succesvol afgerond."
+msgstr "De Certificaat Exporteerhulp is succesvol afgerond."
 
 #: dlls/cryptui/cryptui.rc:456 dlls/cryptui/cryptui.rc:179
 msgid "Select Certificate"
@@ -2587,7 +2597,7 @@ msgstr "Selecteer Certificaat"
 
 #: dlls/cryptui/cryptui.rc:459
 msgid "Select a certificate you want to use"
-msgstr "Selecteer het certificaat dat u wilt gebruiken"
+msgstr "Selecteer het certificaat dat gebruikt moet worden"
 
 #: dlls/cryptui/cryptui.rc:30 dlls/cryptui/cryptui.rc:93
 msgid "Certificate"
@@ -2595,14 +2605,14 @@ msgstr "Certificaat"
 
 #: dlls/cryptui/cryptui.rc:31
 msgid "Certificate Information"
-msgstr "Certificaat informatie"
+msgstr "Certificaat Informatie"
 
 #: dlls/cryptui/cryptui.rc:32
 msgid ""
 "This certificate has an invalid signature. The certificate may have been "
 "altered or corrupted."
 msgstr ""
-"Dit certificaat heeft een foutieve handtekening. Het certificaat kan "
+"Dit certificaat heeft een ongeldige handtekening. Het certificaat kan "
 "gewijzigd of gemanipuleerd zijn."
 
 #: dlls/cryptui/cryptui.rc:33
@@ -2610,12 +2620,12 @@ msgid ""
 "This root certificate is not trusted. To trust it, add it to your system's "
 "trusted root certificate store."
 msgstr ""
-"Dit basis certificaat wordt niet vertrouwd. Om het te vertrouwen, voeg het "
-"toe aan het vertrouwde basiscertificaatarchief van uw systeem."
+"Dit basiscertificaat wordt niet vertrouwd. Om het te vertrouwen, voeg het "
+"toe aan het vertrouwde basiscertificaatarchief van het systeem."
 
 #: dlls/cryptui/cryptui.rc:34
 msgid "This certificate could not be validated to a trusted root certificate."
-msgstr "Dit certificaat heeft geen vertrouwd basis certificaat."
+msgstr "Dit certificaat heeft geen vertrouwd basiscertificaat."
 
 #: dlls/cryptui/cryptui.rc:35
 msgid "This certificate's issuer could not be found."
@@ -2647,7 +2657,7 @@ msgstr " tot "
 
 #: dlls/cryptui/cryptui.rc:42
 msgid "This certificate has an invalid signature."
-msgstr "Dit certificaat heeft een foutieve handtekening."
+msgstr "Dit certificaat heeft een ongeldige handtekening."
 
 #: dlls/cryptui/cryptui.rc:43
 msgid "This certificate has expired or is not yet valid."
@@ -2747,7 +2757,7 @@ msgstr "Certificaat eigenschappen"
 
 #: dlls/cryptui/cryptui.rc:67
 msgid "Please enter an OID in the form 1.2.3.4"
-msgstr "Geef aub. een OID in in de vorm van 1.2.3.4"
+msgstr "Geef een OID in in de vorm van 1.2.3.4"
 
 #: dlls/cryptui/cryptui.rc:68
 msgid "The OID you entered already exists."
@@ -2755,7 +2765,7 @@ msgstr "De ingegeven OID bestaat reeds."
 
 #: dlls/cryptui/cryptui.rc:70
 msgid "Please select a certificate store."
-msgstr "Selecteer aub. een certificatenopslag."
+msgstr "Selecteer een certificatenopslag."
 
 #: dlls/cryptui/cryptui.rc:72
 msgid ""
@@ -2763,7 +2773,7 @@ msgid ""
 "select another file."
 msgstr ""
 "Het bestand bevat objecten die niet voldoen aan de opgegeven criteria. "
-"Selecteer a.u.b. een ander bestand."
+"Selecteer een ander bestand."
 
 #: dlls/cryptui/cryptui.rc:73
 msgid "File to Import"
@@ -2771,7 +2781,7 @@ msgstr "Bestand om te importeren"
 
 #: dlls/cryptui/cryptui.rc:74
 msgid "Specify the file you want to import."
-msgstr "Specificeer het bestand dat u wilt importeren."
+msgstr "Specificeer het bestand dat geïmporteerd moet worden."
 
 #: dlls/cryptui/cryptui.rc:75 dlls/cryptui/cryptui.rc:98
 msgid "Certificate Store"
@@ -2811,8 +2821,7 @@ msgstr "Selecteer een bestand."
 
 #: dlls/cryptui/cryptui.rc:85
 msgid "The file format is not recognized. Please select another file."
-msgstr ""
-"Het bestandsformaat wordt niet herkend. Selecteer a.u.b. een ander bestand."
+msgstr "Het bestandsformaat wordt niet herkend. Selecteer een ander bestand."
 
 #: dlls/cryptui/cryptui.rc:86
 msgid "Could not open "
@@ -2896,9 +2905,9 @@ msgid ""
 "sign messages with it.\n"
 "Are you sure you want to remove this certificate?"
 msgstr ""
-"U kunt niet langer berichten ontcijferen of ondertekenen met dit "
+"Berichten kunnen niet langer ontcijfert of ondertekent worden met dit "
 "certificaat.\n"
-"Weet u zeker dat u dit certificaat wilt verwijderen?"
+"Moet dit certificaat verwijderd worden?"
 
 #: dlls/cryptui/cryptui.rc:111
 msgid ""
@@ -2906,9 +2915,9 @@ msgid ""
 "sign messages with them.\n"
 "Are you sure you want to remove these certificates?"
 msgstr ""
-"U kunt niet langer berichten ontcijferen of ondertekenen met deze "
+"Berichten kunnen niet langer ontcijfert of ondertekent worden met deze "
 "certificaten.\n"
-"Weet u zeker dat u deze certificaten wilt verwijderen?"
+"Moeten deze certificaten verwijderd worden?"
 
 #: dlls/cryptui/cryptui.rc:112
 msgid ""
@@ -2916,8 +2925,9 @@ msgid ""
 "verify messages signed with it.\n"
 "Are you sure you want to remove this certificate?"
 msgstr ""
-"U kunt niet langer berichten coderen of verifiëren met dit certificaat.\n"
-"Weet u zeker dat u dit certificaat wilt verwijderen?"
+"Berichten kunnen niet langer versleuteld of geverifieerd worden met dit "
+"certificaat.\n"
+"Moet dit certificaat verwijderd worden?"
 
 #: dlls/cryptui/cryptui.rc:113
 msgid ""
@@ -2925,8 +2935,9 @@ msgid ""
 "verify messages signed with them.\n"
 "Are you sure you want to remove these certificates?"
 msgstr ""
-"U kunt niet langer berichten coderen of verifiëren met deze certificaten.\n"
-"Weet u zeker dat u deze certificaten wilt verwijderen?"
+"Berichten kunnen niet langer versleuteld of geverifieerd worden met deze "
+"certificaten.\n"
+"Moeten deze certificaten verwijderd worden?"
 
 #: dlls/cryptui/cryptui.rc:114
 msgid ""
@@ -2936,7 +2947,7 @@ msgid ""
 msgstr ""
 "Certificaten uitgegeven door deze certificaten autoriteit zullen niet meer "
 "vertrouwd worden.\n"
-"Weet u zeker dat u dit certificaat wilt verwijderen?"
+"Moet dit certificaat verwijderd worden?"
 
 #: dlls/cryptui/cryptui.rc:115
 msgid ""
@@ -2946,7 +2957,7 @@ msgid ""
 msgstr ""
 "Certificaten uitgegeven door deze certificaten autoriteiten zullen niet meer "
 "vertrouwd worden.\n"
-"Weet u zeker dat u deze certificaten wilt verwijderen?"
+"Moeten deze certificaten verwijderd worden?"
 
 #: dlls/cryptui/cryptui.rc:116
 msgid ""
@@ -2954,10 +2965,10 @@ msgid ""
 "certification authorities it issued, will no longer be trusted.\n"
 "Are you sure you want to remove this trusted root certificate?"
 msgstr ""
-"Certificaten uitgegeven door deze basic certificaten autoriteit, alsmede "
-"enige certificatie autoriteit die hij verstrekt, zullen niet meer vertrouwd "
+"Certificaten uitgegeven door deze basiscertificaten autoriteit, alsmede "
+"enige certificatie autoriteit die zij verstrekt, zullen niet meer vertrouwd "
 "worden.\n"
-"Weet u zeker dat u dit vertrouwde basic certificaat wilt verwijderen?"
+"Moet dit vertrouwde basiscertificaat verwijderd worden?"
 
 #: dlls/cryptui/cryptui.rc:117
 msgid ""
@@ -2965,10 +2976,10 @@ msgid ""
 "certification authorities they issued, will no longer be trusted.\n"
 "Are you sure you want to remove these trusted root certificates?"
 msgstr ""
-"Certificaten uitgegeven door deze basic certificaten autoriteiten, alsmede "
+"Certificaten uitgegeven door deze basiscertificaten autoriteiten, alsmede "
 "enige certificatie autoriteit die zij verstrekken, zullen niet meer "
 "vertrouwd worden.\n"
-"Weet u zeker dat u deze vertrouwde basic certificaten wilt verwijderen?"
+"Moeten deze vertrouwde basiscertificaten verwijderd worden?"
 
 #: dlls/cryptui/cryptui.rc:118
 msgid ""
@@ -2976,7 +2987,7 @@ msgid ""
 "Are you sure you want to remove this certificate?"
 msgstr ""
 "Software ondertekend door deze uitgever zal niet meer vertrouwd worden.\n"
-"Weet u zeker dat u dit certificaat wilt verwijderen?"
+"Moet dit certificaat wilt verwijderd worden?"
 
 #: dlls/cryptui/cryptui.rc:119
 msgid ""
@@ -2984,15 +2995,15 @@ msgid ""
 "Are you sure you want to remove these certificates?"
 msgstr ""
 "Software ondertekend door deze uitgevers zal niet meer vertrouwd worden.\n"
-"Weet u zeker dat u deze certificaten wilt verwijderen?"
+"Moeten deze certificaten verwijderd worden?"
 
 #: dlls/cryptui/cryptui.rc:120
 msgid "Are you sure you want to remove this certificate?"
-msgstr "Weet u zeker dat u dit certificaat wilt verwijderen?"
+msgstr "Moet dit certificaat verwijderd worden?"
 
 #: dlls/cryptui/cryptui.rc:121
 msgid "Are you sure you want to remove these certificates?"
-msgstr "Weet u zeker dat u deze certificaten wilt verwijderen?"
+msgstr "Moeten deze certificaten verwijderd worden?"
 
 #: dlls/cryptui/cryptui.rc:124
 msgid "Ensures the identity of a remote computer"
@@ -3000,7 +3011,7 @@ msgstr "Bewijst de identiteit van een andere computer"
 
 #: dlls/cryptui/cryptui.rc:125
 msgid "Proves your identity to a remote computer"
-msgstr "Bewijst uw identiteit aan een andere computer"
+msgstr "Bewijst de identiteit aan een andere computer"
 
 #: dlls/cryptui/cryptui.rc:126
 msgid ""
@@ -3024,11 +3035,11 @@ msgstr "Laat data ondertekend worden met de huidige tijd"
 
 #: dlls/cryptui/cryptui.rc:130
 msgid "Allows you to digitally sign a certificate trust list"
-msgstr "Laat u een certificaat vertrouwenslijst digitaal ondertekenen"
+msgstr "Een certificaat-vertrouwenslijst digitaal ondertekenen"
 
 #: dlls/cryptui/cryptui.rc:131
 msgid "Allows data on disk to be encrypted"
-msgstr "Laat data op de disk gecodeerd worden"
+msgstr "Maakt het mogelijk gegevens op schijf te versleutelen"
 
 #: dlls/cryptui/cryptui.rc:147
 msgid "Private Key Archival"
@@ -3036,7 +3047,7 @@ msgstr "Persoonlijke sleutel archiefbescheiden"
 
 #: dlls/cryptui/cryptui.rc:151
 msgid "Export Format"
-msgstr "Export formaat"
+msgstr "Uitvoerformaat"
 
 #: dlls/cryptui/cryptui.rc:152
 msgid "Choose the format in which the content will be saved."
@@ -3044,7 +3055,7 @@ msgstr "Selecteer het formaat waarin de inhoud zal worden opgeslagen."
 
 #: dlls/cryptui/cryptui.rc:153
 msgid "Export Filename"
-msgstr "Exporteer bestandsnaam"
+msgstr "Uitvoer Bestandsnaam"
 
 #: dlls/cryptui/cryptui.rc:154
 msgid "Specify the name of the file in which the content will be saved."
@@ -3052,7 +3063,7 @@ msgstr "Geef de naam van het bestand waarin de inhoud zal worden opgeslagen."
 
 #: dlls/cryptui/cryptui.rc:155
 msgid "The specified file already exists. Do you want to replace it?"
-msgstr "Het gespecifeerde bestand bestaat reeds. Wilt u het vervangen?"
+msgstr "Dit bestand bestaat al. Het bestand vervangen?"
 
 #: dlls/cryptui/cryptui.rc:156
 msgid "DER-Encoded Binary X.509 (*.cer)"
@@ -3108,7 +3119,7 @@ msgstr "Voer wachtwoord in"
 
 #: dlls/cryptui/cryptui.rc:173
 msgid "You may password-protect a private key."
-msgstr "U kunt een persoonlijke sleutel beveiligen met een wachtwoord."
+msgstr "Een persoonlijke sleutel beveiligen met een wachtwoord."
 
 #: dlls/cryptui/cryptui.rc:174
 msgid "The passwords do not match."
@@ -3117,12 +3128,14 @@ msgstr "De wachtwoorden zijn niet gelijk."
 #: dlls/cryptui/cryptui.rc:175
 msgid "Note: The private key for this certificate could not be opened."
 msgstr ""
-"Noot: De persoonlijke sleutel voor dit certificaat kon niet geopend worden."
+"Opmerking: De persoonlijke sleutel voor dit certificaat kon niet geopend "
+"worden."
 
 #: dlls/cryptui/cryptui.rc:176
 msgid "Note: The private key for this certificate is not exportable."
 msgstr ""
-"Noot: De privé sleutel voor dit certificaat kan niet geëxporteerd worden."
+"Opmerking: De persoonlijke sleutel voor dit certificaat kan niet "
+"geëxporteerd worden."
 
 #: dlls/cryptui/cryptui.rc:177
 msgid "Intended Use"
@@ -3139,7 +3152,7 @@ msgstr "Selecteer een certificaat"
 #: dlls/cryptui/cryptui.rc:181 programs/winefile/winefile.rc:101
 #: programs/winhlp32/winhlp32.rc:110 programs/winhlp32/winhlp32.rc:85
 msgid "Not yet implemented"
-msgstr "Nog niet geimplementeerd"
+msgstr "Nog niet geïmplementeerd"
 
 #: dlls/dinput/dinput.rc:34
 msgid "Configure Devices"
@@ -3424,11 +3437,6 @@ msgstr "Startpagina"
 msgid "Sync"
 msgstr "Synchroniseren"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:50 programs/conhost/conhost.rc:51
-#: programs/wordpad/wordpad.rc:166
-msgid "Options"
-msgstr "Instellingen"
-
 #: dlls/hhctrl.ocx/hhctrl.rc:51 dlls/ieframe/ieframe.rc:67
 msgid "Forward"
 msgstr "Vooruit"
@@ -3447,7 +3455,7 @@ msgid "&File"
 msgstr "&Bestand"
 
 #: dlls/ieframe/ieframe.rc:30 programs/regedit/regedit.rc:45
-#: programs/regedit/regedit.rc:97 programs/regedit/regedit.rc:119
+#: programs/regedit/regedit.rc:98 programs/regedit/regedit.rc:121
 msgid "&New"
 msgstr "&Nieuw"
 
@@ -3489,11 +3497,11 @@ msgstr "&Standaardbalk"
 msgid "&Address bar"
 msgstr "&Adresbalk"
 
-#: dlls/ieframe/ieframe.rc:53 programs/regedit/regedit.rc:72
+#: dlls/ieframe/ieframe.rc:53 programs/regedit/regedit.rc:73
 msgid "&Favorites"
 msgstr "&Favorieten"
 
-#: dlls/ieframe/ieframe.rc:55 programs/regedit/regedit.rc:74
+#: dlls/ieframe/ieframe.rc:55 programs/regedit/regedit.rc:75
 msgid "&Add to Favorites..."
 msgstr "&Toevoegen aan favorieten..."
 
@@ -3507,7 +3515,7 @@ msgstr "Open URL"
 
 #: dlls/ieframe/ieframe.rc:93
 msgid "Specify the URL you wish to open in Internet Explorer"
-msgstr "Specificeer de URL die u wilt openen in Internet Explorer"
+msgstr "Geef de URL die geopend moet worden in Internet Explorer"
 
 #: dlls/ieframe/ieframe.rc:94
 msgid "Open:"
@@ -3548,7 +3556,7 @@ msgstr "Homepage"
 
 #: dlls/inetcpl.cpl/inetcpl.rc:50
 msgid "You can choose the address that will be used as your home page."
-msgstr "Hier kunt u het adres kiezen dat gebruikt wordt als uw startpagina."
+msgstr "Geef het adres dat gebruikt zal worden als startpagina."
 
 #: dlls/inetcpl.cpl/inetcpl.rc:53
 msgid "&Current page"
@@ -3568,8 +3576,7 @@ msgstr "Browsegeschiedenis"
 
 #: dlls/inetcpl.cpl/inetcpl.rc:57
 msgid "You can delete cached pages, cookies and other data."
-msgstr ""
-"U kunt tijdelijke opgeslagen pagina's, cookies en andere data verwijderen."
+msgstr "Tijdelijk opgeslagen pagina's, cookies en andere data verwijderen."
 
 #: dlls/inetcpl.cpl/inetcpl.rc:59
 msgid "Delete &files..."
@@ -3589,7 +3596,7 @@ msgid ""
 "Cached copies of web pages, images and certificates."
 msgstr ""
 "Tijdelijke internetbestanden\n"
-"Tussenopslag van webpagina's, afbeeldingen en certificaten."
+"Opgeslagen webpagina's, afbeeldingen en certificaten."
 
 #: dlls/inetcpl.cpl/inetcpl.rc:73
 msgid ""
@@ -3598,8 +3605,8 @@ msgid ""
 "preferences and login information."
 msgstr ""
 "Cookies\n"
-"Bestanden opgeslagen op je computer door websites, waarin dingen zoals "
-"voorkeuren en logininformatie worden bewaard."
+"Bestanden opgeslagen op de computer door websites. In deze bestanden worden "
+"onder andere voorkeuren en aanmeldinformatie bewaard."
 
 #: dlls/inetcpl.cpl/inetcpl.rc:75
 msgid ""
@@ -3607,7 +3614,7 @@ msgid ""
 "List of websites you have accessed."
 msgstr ""
 "Geschiedenis\n"
-"Lijst van websites waar u bent geweest."
+"Lijst van websites die bezocht zijn."
 
 #: dlls/inetcpl.cpl/inetcpl.rc:77
 msgid ""
@@ -3615,7 +3622,7 @@ msgid ""
 "Usernames and other information you have entered into forms."
 msgstr ""
 "Formuliergegevens\n"
-"Gebruikersnamen en andere informatie die u in formulieren heeft ingevuld."
+"Gebruikersnamen en andere informatie die in formulieren zijn ingevuld."
 
 #: dlls/inetcpl.cpl/inetcpl.rc:79
 msgid ""
@@ -3623,7 +3630,7 @@ msgid ""
 "Saved passwords you have entered into forms."
 msgstr ""
 "Wachtwoorden\n"
-"Opgeslagen wachtwoorden die u in formulieren heeft ingevuld."
+"Opgeslagen wachtwoorden die in formulieren zijn ingevuld."
 
 #: dlls/inetcpl.cpl/inetcpl.rc:82 programs/progman/progman.rc:67
 msgid "Delete"
@@ -3634,7 +3641,7 @@ msgid ""
 "Certificates are used for your personal identification and to identify "
 "certificate authorities and publishers."
 msgstr ""
-"Certificaten worden gebruikt voor uw persoonlijke identificatie en om "
+"Certificaten worden gebruikt voor persoonlijke identificatie en om "
 "certificaatautoriteiten en uitgevers te identificeren."
 
 #: dlls/inetcpl.cpl/inetcpl.rc:114
@@ -3751,31 +3758,92 @@ msgid ""
 "updated here until you restart this applet."
 msgstr ""
 "Na het uit- of inschakelen van een apparaat zullen de aangesloten joysticks "
-"niet vernieuwd worden totdat deze applicatie herstart wordt."
+"niet vernieuwd worden totdat dit programma herstart wordt."
 
 #: dlls/joy.cpl/joy.rc:55
-msgid "Test Joystick"
-msgstr "Joystick testen"
+msgid "DInput"
+msgstr "DInput"
 
 #: dlls/joy.cpl/joy.rc:59
+msgid "Axes"
+msgstr "Assen"
+
+#: dlls/joy.cpl/joy.rc:60
+msgid "POVs"
+msgstr "Gezichtsveld"
+
+#: dlls/joy.cpl/joy.rc:61
 msgid "Buttons"
 msgstr "Knoppen"
 
-#: dlls/joy.cpl/joy.rc:68
-msgid "Test Force Feedback"
-msgstr "Force Feedback Testen"
+#: dlls/joy.cpl/joy.rc:62
+msgid "Force Feedback Effect"
+msgstr "Force Feedback Effect"
 
-#: dlls/joy.cpl/joy.rc:72
-msgid "Available Effects"
-msgstr "Beschikbare effecten"
-
-#: dlls/joy.cpl/joy.rc:74
+#: dlls/joy.cpl/joy.rc:64
 msgid ""
 "Press any button in the controller to activate the chosen effect. The effect "
 "direction can be changed with the controller axis."
 msgstr ""
 "Druk op een knop op de controller om het gewenste effect te activeren. De "
 "richting van het effect kan veranderd worden met de assen van de controller."
+
+#: dlls/joy.cpl/joy.rc:70
+msgid "XInput"
+msgstr "XInput"
+
+#: dlls/joy.cpl/joy.rc:73
+msgid "User #0"
+msgstr "Gebruiker 0"
+
+#: dlls/joy.cpl/joy.rc:74
+msgid "User #1"
+msgstr "Gebruiker 1"
+
+#: dlls/joy.cpl/joy.rc:75
+msgid "User #2"
+msgstr "Gebruiker 2"
+
+#: dlls/joy.cpl/joy.rc:76
+msgid "User #3"
+msgstr "Gebruiker 3"
+
+#: dlls/joy.cpl/joy.rc:78
+msgid ""
+"No user detected on slot #0, make sure your gamepad is plugged in, and not "
+"overridden for DInput in the Joysticks tab."
+msgstr ""
+"Geen gebruiker gevonden op slot nr. 0. Zorg dat de gamepad is aangesloten en "
+"niet voor DInput is overschreven op het Joysticks-tabblad."
+
+#: dlls/joy.cpl/joy.rc:82
+msgid ""
+"No user detected on slot #1, make sure your gamepad is plugged in, and not "
+"overridden for DInput in the Joysticks tab."
+msgstr ""
+"Geen gebruiker gevonden op slot nr. 1. Zorg dat de gamepad is aangesloten en "
+"niet voor DInput is overschreven op het Joysticks-tabblad."
+
+#: dlls/joy.cpl/joy.rc:86
+msgid ""
+"No user detected on slot #2, make sure your gamepad is plugged in, and not "
+"overridden for DInput in the Joysticks tab."
+msgstr ""
+"Geen gebruiker gevonden op slot nr. 2. Zorg dat de gamepad is aangesloten en "
+"niet voor DInput is overschreven op het Joysticks-tabblad."
+
+#: dlls/joy.cpl/joy.rc:90
+msgid ""
+"No user detected on slot #3, make sure your gamepad is plugged in, and not "
+"overridden for DInput in the Joysticks tab."
+msgstr ""
+"Geen gebruiker gevonden op slot nr. 3. Zorg dat de gamepad is aangesloten en "
+"niet voor DInput is overschreven op het Joysticks-tabblad."
+
+#: dlls/joy.cpl/joy.rc:95 dlls/joy.cpl/joy.rc:96 dlls/joy.cpl/joy.rc:97
+#: dlls/joy.cpl/joy.rc:98
+msgid "Rumble"
+msgstr "Trillen"
 
 #: dlls/joy.cpl/joy.rc:31
 msgid "Game Controllers"
@@ -4013,11 +4081,11 @@ msgstr "'this' is geen | object"
 msgid "Property cannot have both accessors and a value"
 msgstr "Eigenschap kan niet zowel accessors als een waarde hebben"
 
-#: include/wine/wine_common_ver.rc:129
+#: include/wine/wine_common_ver.rc:133
 msgid "Wine kernel DLL"
 msgstr "Wine kernel DLL"
 
-#: include/wine/wine_common_ver.rc:134 dlls/winemac.drv/winemac.rc:32
+#: include/wine/wine_common_ver.rc:138 dlls/winemac.drv/winemac.rc:32
 #: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:137
 msgid "Wine"
 msgstr "Wine"
@@ -4276,7 +4344,7 @@ msgstr "Netwerktoegang geweigerd.\n"
 
 #: dlls/kernelbase/winerror.mc:298
 msgid "Bad device type.\n"
-msgstr "Slecht devicetype.\n"
+msgstr "Slecht apparaattype.\n"
 
 #: dlls/kernelbase/winerror.mc:303
 msgid "Bad network name.\n"
@@ -4828,7 +4896,7 @@ msgstr "Uitgebreide attribuuttoegang geweigerd.\n"
 
 #: dlls/kernelbase/winerror.mc:998
 msgid "I/O operation aborted.\n"
-msgstr "I/O operatie onderbroken.\n"
+msgstr "I/O-bewerking onderbroken.\n"
 
 #: dlls/kernelbase/winerror.mc:1003
 msgid "Overlapped I/O incomplete.\n"
@@ -5040,7 +5108,7 @@ msgstr "Opstart al geaccepteerd als laatste goede configuratie.\n"
 
 #: dlls/kernelbase/winerror.mc:1263
 msgid "Service not started since last boot.\n"
-msgstr "Service niet gestart sinds laatste boot.\n"
+msgstr "Service niet gestart sinds laatste keer opstarten.\n"
 
 #: dlls/kernelbase/winerror.mc:1268
 msgid "Duplicate service name.\n"
@@ -5096,7 +5164,7 @@ msgstr "Ongeldige bloklengte.\n"
 
 #: dlls/kernelbase/winerror.mc:1333
 msgid "Device not partitioned.\n"
-msgstr "Device niet gepartitioneerd.\n"
+msgstr "Apparaat niet gepartitioneerd.\n"
 
 #: dlls/kernelbase/winerror.mc:1338
 msgid "Unable to lock media.\n"
@@ -5136,11 +5204,11 @@ msgstr "Niet bezig af te sluiten.\n"
 
 #: dlls/kernelbase/winerror.mc:1383
 msgid "I/O device error.\n"
-msgstr "I/O device-fout.\n"
+msgstr "I/O-apparaatfout.\n"
 
 #: dlls/kernelbase/winerror.mc:1388
 msgid "No serial devices found.\n"
-msgstr "Geen seriële devices gevonden.\n"
+msgstr "Geen seriële apparaten gevonden.\n"
 
 #: dlls/kernelbase/winerror.mc:1393
 msgid "Shared IRQ busy.\n"
@@ -5176,7 +5244,7 @@ msgstr "Harde schijf rekalibratie mislukt.\n"
 
 #: dlls/kernelbase/winerror.mc:1433
 msgid "Hard disk operation failed.\n"
-msgstr "Harde schijf operatie mislukt.\n"
+msgstr "Harde schijf bewerking mislukt.\n"
 
 #: dlls/kernelbase/winerror.mc:1438
 msgid "Hard disk reset failed.\n"
@@ -5212,7 +5280,7 @@ msgstr "Te veel links.\n"
 
 #: dlls/kernelbase/winerror.mc:1478
 msgid "Newer Windows version needed.\n"
-msgstr "Nieuwere windows-versie nodig.\n"
+msgstr "Nieuwere Windows-versie nodig.\n"
 
 #: dlls/kernelbase/winerror.mc:1483
 msgid "Wrong operating system.\n"
@@ -5260,7 +5328,7 @@ msgstr "Het doelelement is vol.\n"
 
 #: dlls/kernelbase/winerror.mc:1538
 msgid "The element address is invalid.\n"
-msgstr "De elementadres is ongeldig.\n"
+msgstr "Het elementadres is ongeldig.\n"
 
 #: dlls/kernelbase/winerror.mc:1543
 msgid "The magazine is not present.\n"
@@ -5424,7 +5492,7 @@ msgstr "Geen netwerk.\n"
 
 #: dlls/kernelbase/winerror.mc:1748
 msgid "Operation canceled by user.\n"
-msgstr "Operatie geannuleerd door gebruiker.\n"
+msgstr "Bewerking geannuleerd door gebruiker.\n"
 
 #: dlls/kernelbase/winerror.mc:1753
 msgid "File has a user-mapped section.\n"
@@ -5480,7 +5548,7 @@ msgstr "Verbinding afgebroken.\n"
 
 #: dlls/kernelbase/winerror.mc:1818
 msgid "Please retry operation.\n"
-msgstr "Probeer operatie a.u.b. opnieuw.\n"
+msgstr "Probeer de bewerking opnieuw.\n"
 
 #: dlls/kernelbase/winerror.mc:1823
 msgid "Connection count limit reached.\n"
@@ -5524,7 +5592,7 @@ msgstr "Reeds geïnitialiseerd.\n"
 
 #: dlls/kernelbase/winerror.mc:1873
 msgid "No more local devices.\n"
-msgstr "Niet meer lokale devices.\n"
+msgstr "Niet meer lokale apparaten.\n"
 
 #: dlls/kernelbase/winerror.mc:1878
 msgid "The site does not exist.\n"
@@ -5540,7 +5608,7 @@ msgstr "Alleen ondersteund in verbonden toestand.\n"
 
 #: dlls/kernelbase/winerror.mc:1893
 msgid "Perform operation even when nothing changed.\n"
-msgstr "Voer de operatie ook uit als er niets veranderd is.\n"
+msgstr "Voer de bewerking ook uit als er niets veranderd is.\n"
 
 #: dlls/kernelbase/winerror.mc:1898
 msgid "The user profile is invalid.\n"
@@ -6557,11 +6625,11 @@ msgstr "Onbekende autorisatieservice.\n"
 
 #: dlls/kernelbase/winerror.mc:3173
 msgid "Invalid entry.\n"
-msgstr "Ongeldige entry.\n"
+msgstr "Ongeldige invoer.\n"
 
 #: dlls/kernelbase/winerror.mc:3178
 msgid "Can't perform operation.\n"
-msgstr "Kan operatie niet uitvoeren.\n"
+msgstr "Kan bewerking niet uitvoeren.\n"
 
 #: dlls/kernelbase/winerror.mc:3183
 msgid "Endpoints not registered.\n"
@@ -6609,7 +6677,7 @@ msgstr "Ongeldige netwerkadresfamilie.\n"
 
 #: dlls/kernelbase/winerror.mc:3238
 msgid "Operation not supported.\n"
-msgstr "Operatie niet ondersteund.\n"
+msgstr "Bewerking niet ondersteund.\n"
 
 #: dlls/kernelbase/winerror.mc:3243
 msgid "No security context available.\n"
@@ -6737,7 +6805,7 @@ msgstr "Onbekende poort.\n"
 
 #: dlls/kernelbase/winerror.mc:3398
 msgid "Unknown printer driver.\n"
-msgstr "Onbekende printerdriver.\n"
+msgstr "Onbekend printerstuurprogramma.\n"
 
 #: dlls/kernelbase/winerror.mc:3403
 msgid "Unknown print processor.\n"
@@ -7226,7 +7294,7 @@ msgstr "Envelop Monarch"
 
 #: dlls/localspl/localspl.rc:74
 msgid "6 3/4 Envelope"
-msgstr "6 3/4 envelope"
+msgstr "6 3/4 Envelop"
 
 #: dlls/localspl/localspl.rc:75
 msgid "US Std Fanfold"
@@ -7584,7 +7652,7 @@ msgstr "Deze poort heeft geen opties om in te stellen"
 #: dlls/mapi32/mapi32.rc:31
 msgid "Mail sending failed as you do not have a MAPI mail client installed."
 msgstr ""
-"Mail kan niet worden verstuurd aangezien er geen MAPI mail client is "
+"Mail kan niet worden verstuurd omdat er geen MAPI mail-cliënt is "
 "geïnstalleerd."
 
 #: dlls/mapi32/mapi32.rc:32
@@ -7989,7 +8057,7 @@ msgstr "Voer het Netwerk Wachtwoord in"
 
 #: dlls/mpr/mpr.rc:38 dlls/wininet/wininet.rc:51 dlls/wininet/wininet.rc:71
 msgid "Please enter your username and password:"
-msgstr "Voer a.u.b. uw gebruikersnaam en wachtwoord in:"
+msgstr "Voer de gebruikersnaam en het wachtwoord in:"
 
 #: dlls/mpr/mpr.rc:39 dlls/wininet/wininet.rc:52
 msgid "Proxy"
@@ -8585,7 +8653,7 @@ msgid ""
 "that you can access it."
 msgstr ""
 "Bronbestand niet gevonden{{(cabinet)}}: [2]. Controleer of het bestand "
-"bestaat en of u toegang tot het bestand hebt."
+"bestaat en of er toegang tot het bestand is."
 
 #: dlls/msrle32/msrle32.rc:31
 msgid "Wine MS-RLE video codec"
@@ -8681,7 +8749,7 @@ msgstr "venster"
 
 #: dlls/oleacc/oleacc.rc:41
 msgid "client"
-msgstr "client"
+msgstr "cliënt"
 
 #: dlls/oleacc/oleacc.rc:42
 msgid "popup menu"
@@ -9081,7 +9149,7 @@ msgstr "Leverancier"
 
 #: dlls/oledb32/version.rc:59
 msgid "Select the data you want to connect to:"
-msgstr "Selecteer met welke gegevens u verbinging wilt maken:"
+msgstr "Selecteer met welke gegevens verbinding gemaakt moet worden:"
 
 #: dlls/oledb32/version.rc:66
 msgid "Connection"
@@ -9305,15 +9373,15 @@ msgstr "Wijzig p&ictogram..."
 
 #: dlls/oledlg/oledlg.rc:28
 msgid "Insert a new %s object into your document"
-msgstr "Voeg een nieuw %s object in uw document in"
+msgstr "Voeg in het document een nieuw %s object in"
 
 #: dlls/oledlg/oledlg.rc:29
 msgid ""
 "Insert the contents of the file as an object into your document so that you "
 "may activate it using the program which created it."
 msgstr ""
-"Voeg de inhoud van het bestand als object in uw document in, zodat u het "
-"later kunt bewerken met het programma waarmee u het heeft gemaakt."
+"Voeg de inhoud van het bestand als object in het document in. Hierdoor kan "
+"het later bewerkt worden met het programma waarmee het gemaakt is."
 
 #: dlls/oledlg/oledlg.rc:30 dlls/shell32/shell32.rc:195
 msgid "Browse"
@@ -9347,23 +9415,23 @@ msgstr "&Object"
 
 #: dlls/oledlg/oledlg.rc:41
 msgid "Inserts the contents of the clipboard into your document as %s."
-msgstr "Voegt de inhoud van het klembord in uw document in als %s."
+msgstr "Voegt de inhoud van het klembord toe in het document als %s."
 
 #: dlls/oledlg/oledlg.rc:42
 msgid ""
 "Inserts the contents of the clipboard into your document so that you can "
 "activate it using %s."
 msgstr ""
-"Voegt de inhoud van het klembord in uw document in, zodat u het kan "
-"activeren met %s."
+"Voegt de inhoud van het klembord toe in het document. Hierdoor kan het "
+"gebruikt worden met %s."
 
 #: dlls/oledlg/oledlg.rc:43
 msgid ""
 "Inserts the contents of the clipboard into your document so that you can "
 "activate it using %s. It will be displayed as an icon."
 msgstr ""
-"Voegt de inhoud van het klembord in uw document in, zodat u het kan "
-"activeren met %s. Het zal als een pictogram weergegeven worden."
+"Voegt de inhoud van het klembord toe in het document. Hierdoor kan het "
+"gebruikt worden met %s. Het zal als een pictogram weergegeven worden."
 
 #: dlls/oledlg/oledlg.rc:44
 msgid ""
@@ -9371,9 +9439,9 @@ msgid ""
 "linked to the source file so that changes to the file will be reflected in "
 "your document."
 msgstr ""
-"De inhoud van het klembord in uw document invoegen als %s. De gegevens zijn "
+"De inhoud van het klembord in het document invoegen als %s. De gegevens zijn "
 "verbonden met het bestand, zodat wijzigingen in dat bestand worden getoond "
-"in uw document."
+"in het document."
 
 #: dlls/oledlg/oledlg.rc:45
 msgid ""
@@ -9381,9 +9449,9 @@ msgid ""
 "is linked to the source file so that changes to the file will be reflected "
 "in your document."
 msgstr ""
-"Een afbeelding vanuit het klembord invoegen in uw document. De afbeelding is "
-"verbonden met het bestand, zodat wijzigingen in dat bestand worden getoond "
-"in uw document."
+"Een afbeelding vanuit het klembord invoegen in het document. De afbeelding "
+"is verbonden met het bestand, zodat wijzigingen in het bestand worden "
+"getoond in het document."
 
 #: dlls/oledlg/oledlg.rc:46
 msgid ""
@@ -9393,13 +9461,13 @@ msgid ""
 msgstr ""
 "Een verwijzing die wijst naar de locatie van de inhoud van het klembord "
 "invoegen. De verwijzing is verbonden met het bestand, zodat wijzigingen in "
-"dat bestand worden getoond in uw document."
+"het bestand worden getoond in het document."
 
 #: dlls/oledlg/oledlg.rc:47
 msgid "Inserts the contents of the clipboard into your document."
-msgstr "De inhoud van het klembord in uw document toevoegen."
+msgstr "De inhoud van het klembord in het document toevoegen."
 
-#: dlls/oledlg/oledlg.rc:48 programs/regedit/regedit.rc:430
+#: dlls/oledlg/oledlg.rc:48 programs/regedit/regedit.rc:435
 msgid "Unknown Type"
 msgstr "Onbekend type"
 
@@ -9779,7 +9847,7 @@ msgstr "Scroll naar rechts"
 
 #: dlls/shdoclc/shdoclc.rc:28
 msgid "Wine Internet Explorer"
-msgstr "Wine Internet Verkenner"
+msgstr "Wine Internet Explorer"
 
 #: dlls/shdoclc/shdoclc.rc:33
 msgid "&w&bPage &p"
@@ -9855,10 +9923,6 @@ msgstr "Nieuwe &map"
 #: dlls/shell32/shell32.rc:70
 msgid "New &Link"
 msgstr "Nieuwe sne&lkoppeling"
-
-#: dlls/shell32/shell32.rc:74
-msgid "Properties"
-msgstr "Eigenschappen"
 
 #: dlls/shell32/shell32.rc:85
 msgctxt "recycle bin"
@@ -10008,7 +10072,7 @@ msgstr "Laatst geopend:"
 msgid "Size"
 msgstr "Grootte"
 
-#: dlls/shell32/shell32.rc:139 programs/regedit/regedit.rc:148
+#: dlls/shell32/shell32.rc:139 programs/regedit/regedit.rc:151
 msgid "Type"
 msgstr "Type"
 
@@ -10043,7 +10107,7 @@ msgctxt "display name"
 msgid "Desktop"
 msgstr "Bureaublad"
 
-#: dlls/shell32/shell32.rc:155 programs/regedit/regedit.rc:238
+#: dlls/shell32/shell32.rc:155 programs/regedit/regedit.rc:243
 msgid "My Computer"
 msgstr "Deze Computer"
 
@@ -10061,7 +10125,7 @@ msgstr "Herstarten"
 
 #: dlls/shell32/shell32.rc:188
 msgid "Do you want to simulate a Windows reboot?"
-msgstr "Wilt u een Windows herstart simuleren?"
+msgstr "Een Windows herstart simuleren?"
 
 #: dlls/shell32/shell32.rc:189
 msgid "Shutdown"
@@ -10069,7 +10133,7 @@ msgstr "Afsluiten"
 
 #: dlls/shell32/shell32.rc:190
 msgid "Do you want to shutdown your Wine session?"
-msgstr "Wilt u uw Wine sessie afsluiten?"
+msgstr "De Wine sessie afsluiten?"
 
 #: dlls/shell32/shell32.rc:201 programs/progman/progman.rc:83
 msgid "Programs"
@@ -10167,19 +10231,19 @@ msgstr "Model"
 
 #: dlls/shell32/shell32.rc:226
 msgid "Sample Music"
-msgstr "Voorbeelden van muziek"
+msgstr "Voorbeeld Muziek"
 
 #: dlls/shell32/shell32.rc:227
 msgid "Sample Pictures"
-msgstr "Voorbeelden van afbeeldingen"
+msgstr "Voorbeeld Afbeeldingen"
 
 #: dlls/shell32/shell32.rc:228
 msgid "Sample Playlists"
-msgstr "Voorbeelden van afspeellijsten"
+msgstr "Voorbeeld Afspeellijsten"
 
 #: dlls/shell32/shell32.rc:229
 msgid "Sample Videos"
-msgstr "Voorbeelden van video's"
+msgstr "Voorbeeld Video's"
 
 #: dlls/shell32/shell32.rc:230
 msgid "Saved Games"
@@ -10215,11 +10279,11 @@ msgstr "Bevestig mapverwijdering"
 
 #: dlls/shell32/shell32.rc:171
 msgid "Are you sure you want to delete '%1'?"
-msgstr "Weet u zeker dat u '%1' wilt verwijderen?"
+msgstr "Moet '%1' verwijderd worden?"
 
 #: dlls/shell32/shell32.rc:172
 msgid "Are you sure you want to delete these %1 items?"
-msgstr "Weet u zeker dat u deze %1 bestanden wilt verwijderen?"
+msgstr "Moeten deze %1 bestanden verwijderd worden?"
 
 #: dlls/shell32/shell32.rc:179
 msgid "Confirm file overwrite"
@@ -10233,33 +10297,31 @@ msgid ""
 msgstr ""
 "Deze map bevat reeds een bestand genaamd '%1'.\n"
 "\n"
-"Wilt u het vervangen?"
+"Moet deze vervangen worden?"
 
 #: dlls/shell32/shell32.rc:173
 msgid "Are you sure you want to delete the selected item(s)?"
-msgstr "Weet u zeker dat u de geselecteerde bestand(en) wilt verwijderen?"
+msgstr "Moeten de geselecteerde bestanden verwijderd worden?"
 
 #: dlls/shell32/shell32.rc:175
 msgid ""
 "Are you sure that you want to send '%1' and all its content to the Trash?"
 msgstr ""
-"Weet u zeker dat u '%1' en zijn gehele inhoud naar de Prullenbak wilt "
-"verplaatsen?"
+"Moet '%1' en de gehele inhoud ervan naar de Prullenbak verplaatst worden?"
 
 #: dlls/shell32/shell32.rc:174
 msgid "Are you sure that you want to send '%1' to the Trash?"
-msgstr "Weet u zeker dat u '%1' naar de Prullenbak wilt verplaatsen?"
+msgstr "Moet '%1' naar de Prullenbak verplaatst worden?"
 
 #: dlls/shell32/shell32.rc:176
 msgid "Are you sure that you want to send these %1 items to the Trash?"
-msgstr ""
-"Weet u zeker dat u deze %1 bestanden naar de Prullenbak wilt verplaatsen?"
+msgstr "Moeten deze %1 bestanden naar de Prullenbak verplaatst worden?"
 
 #: dlls/shell32/shell32.rc:177
 msgid "The item '%1' can't be sent to Trash. Do you want to delete it instead?"
 msgstr ""
-"Bestand '%1' kan niet naar de Prullenbak worden verplaatst. Wilt u het "
-"bestand permanent verwijderen?"
+"Bestand '%1' kan niet naar de Prullenbak worden verplaatst. Moet het bestand "
+"permanent verwijderd worden?"
 
 #: dlls/shell32/shell32.rc:184
 msgid ""
@@ -10272,8 +10334,7 @@ msgstr ""
 "Deze map bevat reeds een map genaamd '%1'.\n"
 "\n"
 "Als de bestanden in de doelmap dezelfde naam hebben als de bestanden in de\n"
-"geselecteerde map zullen ze worden overschreven. Wilt u alsnog de map "
-"kopiëren\n"
+"geselecteerde map zullen ze worden overschreven. De map alsnog kopiëren\n"
 "of verplaatsen?"
 
 #: dlls/shell32/shell32.rc:238
@@ -10299,11 +10360,11 @@ msgstr ""
 
 #: dlls/shell32/shell32.rc:244
 msgid "Are you sure you wish to permanently delete '%1'?"
-msgstr "Weet u zeker dat u '%1' permanent wilt verwijderen?"
+msgstr "Moet '%1' permanent verwijderd worden?"
 
 #: dlls/shell32/shell32.rc:245
 msgid "Are you sure you wish to permanently delete these %1 items?"
-msgstr "Weet u zeker dat u deze %1 bestanden permanent wilt verwijderen?"
+msgstr "Moeten deze %1 bestanden permanent verwijderd worden?"
 
 #: dlls/shell32/shell32.rc:246
 msgid "Confirm deletion"
@@ -10317,7 +10378,7 @@ msgid ""
 msgstr ""
 "Bestand bestaat al in het pad %1.\n"
 "\n"
-"Wilt u het vervangen?"
+"Moet het vervangen worden?"
 
 #: dlls/shell32/shell32.rc:248
 msgid ""
@@ -10327,7 +10388,7 @@ msgid ""
 msgstr ""
 "Map bestaat al in het pad %1.\n"
 "\n"
-"Wilt u het vervangen?"
+"Moet het vervangen worden?"
 
 #: dlls/shell32/shell32.rc:249
 msgid "Confirm overwrite"
@@ -10373,7 +10434,7 @@ msgid "Trash"
 msgstr "Prullenbak"
 
 #: dlls/shlwapi/shlwapi.rc:38 dlls/user32/user32.rc:71
-#: programs/regedit/regedit.rc:204 programs/winecfg/winecfg.rc:86
+#: programs/regedit/regedit.rc:208 programs/winecfg/winecfg.rc:86
 #: programs/winefile/winefile.rc:97
 msgid "Error"
 msgstr "Fout"
@@ -10405,1899 +10466,1899 @@ msgstr " sec"
 msgid "Select Source"
 msgstr "Selecteer Bron"
 
-#: dlls/tzres/tzres.rc:126
+#: dlls/tzres/tzres.rc:108
 msgctxt "maximum 31 characters"
 msgid "China Standard Time"
 msgstr "China Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:127
+#: dlls/tzres/tzres.rc:109
 msgctxt "maximum 31 characters"
 msgid "China Daylight Time"
 msgstr "China Zomertijd"
 
-#: dlls/tzres/tzres.rc:128
+#: dlls/tzres/tzres.rc:110
 msgid "(UTC+08:00) Beijing, Chongqing, Hong Kong, Urumqi"
 msgstr "(UTC+8:00) Peking, Tsjoengking, Hongkong, Urumqi"
 
-#: dlls/tzres/tzres.rc:267
+#: dlls/tzres/tzres.rc:249
 msgctxt "maximum 31 characters"
 msgid "North Asia Standard Time"
 msgstr "Noord-Azië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:268
+#: dlls/tzres/tzres.rc:250
 msgctxt "maximum 31 characters"
 msgid "North Asia Daylight Time"
 msgstr "Noord-Azië Zomertijd"
 
-#: dlls/tzres/tzres.rc:269
+#: dlls/tzres/tzres.rc:251
 msgid "(UTC+07:00) Krasnoyarsk"
 msgstr "(UTC+07:00) Krasnojarsk"
 
-#: dlls/tzres/tzres.rc:168
+#: dlls/tzres/tzres.rc:150
 msgctxt "maximum 31 characters"
 msgid "Georgian Standard Time"
 msgstr "Georgië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:169
+#: dlls/tzres/tzres.rc:151
 msgctxt "maximum 31 characters"
 msgid "Georgian Daylight Time"
 msgstr "Georgië Zomertijd"
 
-#: dlls/tzres/tzres.rc:170
+#: dlls/tzres/tzres.rc:152
 msgid "(UTC+04:00) Tbilisi"
 msgstr "(UTC+04:00) Tbilisi"
 
-#: dlls/tzres/tzres.rc:393 dlls/tzres/tzres.rc:394
+#: dlls/tzres/tzres.rc:375 dlls/tzres/tzres.rc:376
 msgctxt "maximum 31 characters"
 msgid "UTC+12"
 msgstr "UTC+12"
 
-#: dlls/tzres/tzres.rc:395
+#: dlls/tzres/tzres.rc:377
 msgid "(UTC+12:00) Coordinated Universal Time+12"
 msgstr "(UTC+12:00 Gecoördineerde Wereldtijd+12"
 
-#: dlls/tzres/tzres.rc:252
+#: dlls/tzres/tzres.rc:234
 msgctxt "maximum 31 characters"
 msgid "Nepal Standard Time"
 msgstr "Nepal Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:253
+#: dlls/tzres/tzres.rc:235
 msgctxt "maximum 31 characters"
 msgid "Nepal Daylight Time"
 msgstr "Nepal Zomertijd"
 
-#: dlls/tzres/tzres.rc:254
+#: dlls/tzres/tzres.rc:236
 msgid "(UTC+05:45) Kathmandu"
 msgstr "(UTC+05:45) Kathmandu"
 
-#: dlls/tzres/tzres.rc:90
+#: dlls/tzres/tzres.rc:72
 msgctxt "maximum 31 characters"
 msgid "Cape Verde Standard Time"
 msgstr "Kaapverdië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:91
+#: dlls/tzres/tzres.rc:73
 msgctxt "maximum 31 characters"
 msgid "Cape Verde Daylight Time"
 msgstr "Kaapverdië Zomertijd"
 
-#: dlls/tzres/tzres.rc:92
+#: dlls/tzres/tzres.rc:74
 msgid "(UTC-01:00) Cabo Verde Is."
 msgstr "(UTC-01:00) Kaapverdië"
 
-#: dlls/tzres/tzres.rc:183
+#: dlls/tzres/tzres.rc:165
 msgctxt "maximum 31 characters"
 msgid "Haiti Standard Time"
 msgstr "Haïti Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:184
+#: dlls/tzres/tzres.rc:166
 msgctxt "maximum 31 characters"
 msgid "Haiti Daylight Time"
 msgstr "Haïti Zomertijd"
 
-#: dlls/tzres/tzres.rc:185
+#: dlls/tzres/tzres.rc:167
 msgid "(UTC-05:00) Haiti"
 msgstr "(UTC-05:00) Haïti"
 
-#: dlls/tzres/tzres.rc:111
+#: dlls/tzres/tzres.rc:93
 msgctxt "maximum 31 characters"
 msgid "Central European Standard Time"
 msgstr "Midden-Europese Tijd"
 
-#: dlls/tzres/tzres.rc:112
+#: dlls/tzres/tzres.rc:94
 msgctxt "maximum 31 characters"
 msgid "Central European Daylight Time"
 msgstr "Midden-Europese Zomertijd"
 
-#: dlls/tzres/tzres.rc:113
+#: dlls/tzres/tzres.rc:95
 msgid "(UTC+01:00) Sarajevo, Skopje, Warsaw, Zagreb"
 msgstr "(UTC+01:00) Sarajevo, Skopje, Warschau, Zagreb"
 
-#: dlls/tzres/tzres.rc:234
+#: dlls/tzres/tzres.rc:216
 msgctxt "maximum 31 characters"
 msgid "Morocco Standard Time"
 msgstr "Marokko Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:235
+#: dlls/tzres/tzres.rc:217
 msgctxt "maximum 31 characters"
 msgid "Morocco Daylight Time"
 msgstr "Marokko Zomertijd"
 
-#: dlls/tzres/tzres.rc:236
+#: dlls/tzres/tzres.rc:218
 msgid "(UTC+01:00) Casablanca"
 msgstr "(UTC+01:00) Casablanca"
 
-#: dlls/tzres/tzres.rc:402 dlls/tzres/tzres.rc:403
+#: dlls/tzres/tzres.rc:384 dlls/tzres/tzres.rc:385
 msgctxt "maximum 31 characters"
 msgid "UTC-08"
 msgstr "UTC-08"
 
-#: dlls/tzres/tzres.rc:404
+#: dlls/tzres/tzres.rc:386
 msgid "(UTC-08:00) Coordinated Universal Time-08"
 msgstr "(UTC-08:00) Gecoördineerde Wereldtijd-08"
 
-#: dlls/tzres/tzres.rc:39
+#: dlls/tzres/tzres.rc:21
 msgctxt "maximum 31 characters"
 msgid "Altai Standard Time"
 msgstr "Altaj Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:40
+#: dlls/tzres/tzres.rc:22
 msgctxt "maximum 31 characters"
 msgid "Altai Daylight Time"
 msgstr "Altaj Zomertijd"
 
-#: dlls/tzres/tzres.rc:41
+#: dlls/tzres/tzres.rc:23
 msgid "(UTC+07:00) Barnaul, Gorno-Altaysk"
 msgstr "(UTC+07:00 Barnaoel, Gorno-Altajsk"
 
-#: dlls/tzres/tzres.rc:108
+#: dlls/tzres/tzres.rc:90
 msgctxt "maximum 31 characters"
 msgid "Central Europe Standard Time"
 msgstr "Centraal Europa Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:109
+#: dlls/tzres/tzres.rc:91
 msgctxt "maximum 31 characters"
 msgid "Central Europe Daylight Time"
 msgstr "Centraal Europa Zomertijd"
 
-#: dlls/tzres/tzres.rc:110
+#: dlls/tzres/tzres.rc:92
 msgid "(UTC+01:00) Belgrade, Bratislava, Budapest, Ljubljana, Prague"
 msgstr "(UTC+01:00) Belgrado, Bratislava, Boedapest, Ljubljana, Praag"
 
-#: dlls/tzres/tzres.rc:192
+#: dlls/tzres/tzres.rc:174
 msgctxt "maximum 31 characters"
 msgid "Iran Standard Time"
 msgstr "Iran Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:193
+#: dlls/tzres/tzres.rc:175
 msgctxt "maximum 31 characters"
 msgid "Iran Daylight Time"
 msgstr "Iran Zomertijd"
 
-#: dlls/tzres/tzres.rc:194
+#: dlls/tzres/tzres.rc:176
 msgid "(UTC+03:30) Tehran"
 msgstr "(UTC+03:30) Teheran"
 
-#: dlls/tzres/tzres.rc:318
+#: dlls/tzres/tzres.rc:300
 msgctxt "maximum 31 characters"
 msgid "Saint Pierre Standard Time"
 msgstr "Saint-Pierre Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:319
+#: dlls/tzres/tzres.rc:301
 msgctxt "maximum 31 characters"
 msgid "Saint Pierre Daylight Time"
 msgstr "Saint-Pierre Zomertijd"
 
-#: dlls/tzres/tzres.rc:320
+#: dlls/tzres/tzres.rc:302
 msgid "(UTC-03:00) Saint Pierre and Miquelon"
 msgstr "(UTC-03:00) Saint-Pierre en Miquelon"
 
-#: dlls/tzres/tzres.rc:327
+#: dlls/tzres/tzres.rc:309
 msgctxt "maximum 31 characters"
 msgid "Sao Tome Standard Time"
 msgstr "Sao Tomé Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:328
+#: dlls/tzres/tzres.rc:310
 msgctxt "maximum 31 characters"
 msgid "Sao Tome Daylight Time"
 msgstr "Sao Tomé Zomertijd"
 
-#: dlls/tzres/tzres.rc:329
+#: dlls/tzres/tzres.rc:311
 msgid "(UTC+00:00) Sao Tome"
 msgstr "(UTC+00:00) Sao Tomé"
 
-#: dlls/tzres/tzres.rc:249
+#: dlls/tzres/tzres.rc:231
 msgctxt "maximum 31 characters"
 msgid "Namibia Standard Time"
 msgstr "Namibië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:250
+#: dlls/tzres/tzres.rc:232
 msgctxt "maximum 31 characters"
 msgid "Namibia Daylight Time"
 msgstr "Namibië Zomertijd"
 
-#: dlls/tzres/tzres.rc:251
+#: dlls/tzres/tzres.rc:233
 msgid "(UTC+02:00) Windhoek"
 msgstr "(UTC+02:00) Windhoek"
 
-#: dlls/tzres/tzres.rc:369
+#: dlls/tzres/tzres.rc:351
 msgctxt "maximum 31 characters"
 msgid "Tonga Standard Time"
 msgstr "Tonga Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:370
+#: dlls/tzres/tzres.rc:352
 msgctxt "maximum 31 characters"
 msgid "Tonga Daylight Time"
 msgstr "Tonga Zomertijd"
 
-#: dlls/tzres/tzres.rc:371
+#: dlls/tzres/tzres.rc:353
 msgid "(UTC+13:00) Nuku'alofa"
 msgstr "(UTC+13:00) Nuku'alofa"
 
-#: dlls/tzres/tzres.rc:240
+#: dlls/tzres/tzres.rc:222
 msgctxt "maximum 31 characters"
 msgid "Mountain Standard Time (Mexico)"
 msgstr "Mountain St. Tijd (Mexico)"
 
-#: dlls/tzres/tzres.rc:241
+#: dlls/tzres/tzres.rc:223
 msgctxt "maximum 31 characters"
 msgid "Mountain Daylight Time (Mexico)"
 msgstr "Mountain Zomertijd (Mexico)"
 
-#: dlls/tzres/tzres.rc:242
+#: dlls/tzres/tzres.rc:224
 msgid "(UTC-07:00) Chihuahua, La Paz, Mazatlan"
 msgstr "(UTC-07:00) Chihuahua, La Paz, Mazatlán"
 
-#: dlls/tzres/tzres.rc:171
+#: dlls/tzres/tzres.rc:153
 msgctxt "maximum 31 characters"
 msgid "GMT Standard Time"
 msgstr "GMT (Standaard Tijd)"
 
-#: dlls/tzres/tzres.rc:172
+#: dlls/tzres/tzres.rc:154
 msgctxt "maximum 31 characters"
 msgid "GMT Daylight Time"
 msgstr "GMT Zomertijd"
 
-#: dlls/tzres/tzres.rc:173
+#: dlls/tzres/tzres.rc:155
 msgid "(UTC+00:00) Dublin, Edinburgh, Lisbon, London"
 msgstr "(UTC+00:00) Dublin, Edinburgh, Lissabon, Londen"
 
-#: dlls/tzres/tzres.rc:342
+#: dlls/tzres/tzres.rc:324
 msgctxt "maximum 31 characters"
 msgid "South Sudan Standard Time"
 msgstr "Zuid-Soedan Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:343
+#: dlls/tzres/tzres.rc:325
 msgctxt "maximum 31 characters"
 msgid "South Sudan Daylight Time"
 msgstr "Zuid-Soedan Zomertijd"
 
-#: dlls/tzres/tzres.rc:344
+#: dlls/tzres/tzres.rc:326
 msgid "(UTC+02:00) Juba"
 msgstr "(UTC+02:00) Juba"
 
-#: dlls/tzres/tzres.rc:102
+#: dlls/tzres/tzres.rc:84
 msgctxt "maximum 31 characters"
 msgid "Central Asia Standard Time"
 msgstr "Centraal Azië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:103
+#: dlls/tzres/tzres.rc:85
 msgctxt "maximum 31 characters"
 msgid "Central Asia Daylight Time"
 msgstr "Centraal Azië Zomertijd"
 
-#: dlls/tzres/tzres.rc:104
+#: dlls/tzres/tzres.rc:86
 msgid "(UTC+06:00) Astana"
 msgstr "(UTC+06:00) Astana"
 
-#: dlls/tzres/tzres.rc:213
+#: dlls/tzres/tzres.rc:195
 msgctxt "maximum 31 characters"
 msgid "Lord Howe Standard Time"
 msgstr "Lord Howe Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:214
+#: dlls/tzres/tzres.rc:196
 msgctxt "maximum 31 characters"
 msgid "Lord Howe Daylight Time"
 msgstr "Lord Howe Zomertijd"
 
-#: dlls/tzres/tzres.rc:215
+#: dlls/tzres/tzres.rc:197
 msgid "(UTC+10:30) Lord Howe Island"
 msgstr "(UTC+10:30) Lord Howe-eiland"
 
-#: dlls/tzres/tzres.rc:48
+#: dlls/tzres/tzres.rc:30
 msgctxt "maximum 31 characters"
 msgid "Arabic Standard Time"
 msgstr "Arab. Schiereiland St. Tijd"
 
-#: dlls/tzres/tzres.rc:49
+#: dlls/tzres/tzres.rc:31
 msgctxt "maximum 31 characters"
 msgid "Arabic Daylight Time"
 msgstr "Arab. Schiereiland Zomertijd"
 
-#: dlls/tzres/tzres.rc:50
+#: dlls/tzres/tzres.rc:32
 msgid "(UTC+03:00) Baghdad"
 msgstr "(UTC+03:00) Bagdad"
 
-#: dlls/tzres/tzres.rc:396 dlls/tzres/tzres.rc:397
+#: dlls/tzres/tzres.rc:378 dlls/tzres/tzres.rc:379
 msgctxt "maximum 31 characters"
 msgid "UTC+13"
 msgstr "UTC+13"
 
-#: dlls/tzres/tzres.rc:398
+#: dlls/tzres/tzres.rc:380
 msgid "(UTC+13:00) Coordinated Universal Time+13"
 msgstr "(UTC+13:00) Gecoördineerde Wereldtijd+13"
 
-#: dlls/tzres/tzres.rc:216
+#: dlls/tzres/tzres.rc:198
 msgctxt "maximum 31 characters"
 msgid "Magadan Standard Time"
 msgstr "Magadan Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:217
+#: dlls/tzres/tzres.rc:199
 msgctxt "maximum 31 characters"
 msgid "Magadan Daylight Time"
 msgstr "Magadan Zomertijd"
 
-#: dlls/tzres/tzres.rc:218
+#: dlls/tzres/tzres.rc:200
 msgid "(UTC+11:00) Magadan"
 msgstr "(UTC+11:00) Magadan"
 
-#: dlls/tzres/tzres.rc:258
+#: dlls/tzres/tzres.rc:240
 msgctxt "maximum 31 characters"
 msgid "Newfoundland Standard Time"
 msgstr "Newfoundland Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:259
+#: dlls/tzres/tzres.rc:241
 msgctxt "maximum 31 characters"
 msgid "Newfoundland Daylight Time"
 msgstr "Newfoundland Zomertijd"
 
-#: dlls/tzres/tzres.rc:260
+#: dlls/tzres/tzres.rc:242
 msgid "(UTC-03:30) Newfoundland"
 msgstr "(UTC-03:30) Newfoundland"
 
-#: dlls/tzres/tzres.rc:348
+#: dlls/tzres/tzres.rc:330
 msgctxt "maximum 31 characters"
 msgid "Sudan Standard Time"
 msgstr "Soedan Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:349
+#: dlls/tzres/tzres.rc:331
 msgctxt "maximum 31 characters"
 msgid "Sudan Daylight Time"
 msgstr "Soedan Zomertijd"
 
-#: dlls/tzres/tzres.rc:350
+#: dlls/tzres/tzres.rc:332
 msgid "(UTC+02:00) Khartoum"
 msgstr "(UTC+02:00) Khartoem"
 
-#: dlls/tzres/tzres.rc:438
+#: dlls/tzres/tzres.rc:420
 msgctxt "maximum 31 characters"
 msgid "West Pacific Standard Time"
 msgstr "West Pacific Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:439
+#: dlls/tzres/tzres.rc:421
 msgctxt "maximum 31 characters"
 msgid "West Pacific Daylight Time"
 msgstr "West Pacific Zomertijd"
 
-#: dlls/tzres/tzres.rc:440
+#: dlls/tzres/tzres.rc:422
 msgid "(UTC+10:00) Guam, Port Moresby"
 msgstr "(UTC+10:00) Guam, Port Moresby"
 
-#: dlls/tzres/tzres.rc:279
+#: dlls/tzres/tzres.rc:261
 msgctxt "maximum 31 characters"
 msgid "Pacific Standard Time"
 msgstr "Pacific Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:280
+#: dlls/tzres/tzres.rc:262
 msgctxt "maximum 31 characters"
 msgid "Pacific Daylight Time"
 msgstr "Pacific Zomertijd"
 
-#: dlls/tzres/tzres.rc:281
+#: dlls/tzres/tzres.rc:263
 msgid "(UTC-08:00) Pacific Time (US & Canada)"
 msgstr "(UTC-08:00) Pacific Time (VS & Canada)"
 
-#: dlls/tzres/tzres.rc:69
+#: dlls/tzres/tzres.rc:51
 msgctxt "maximum 31 characters"
 msgid "Azerbaijan Standard Time"
 msgstr "Azerbeidzjan Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:70
+#: dlls/tzres/tzres.rc:52
 msgctxt "maximum 31 characters"
 msgid "Azerbaijan Daylight Time"
 msgstr "Azerbeidzjan Zomertijd"
 
-#: dlls/tzres/tzres.rc:71
+#: dlls/tzres/tzres.rc:53
 msgid "(UTC+04:00) Baku"
 msgstr "(UTC+04:00) Bakoe"
 
-#: dlls/tzres/tzres.rc:219
+#: dlls/tzres/tzres.rc:201
 msgctxt "maximum 31 characters"
 msgid "Magallanes Standard Time"
 msgstr "Magallanes Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:220
+#: dlls/tzres/tzres.rc:202
 msgctxt "maximum 31 characters"
 msgid "Magallanes Daylight Time"
 msgstr "Magallanes Zomertijd"
 
-#: dlls/tzres/tzres.rc:221
+#: dlls/tzres/tzres.rc:203
 msgid "(UTC-03:00) Punta Arenas"
 msgstr "(UTC-03:00) Punta Arenas"
 
-#: dlls/tzres/tzres.rc:324
+#: dlls/tzres/tzres.rc:306
 msgctxt "maximum 31 characters"
 msgid "Samoa Standard Time"
 msgstr "Samoa Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:325
+#: dlls/tzres/tzres.rc:307
 msgctxt "maximum 31 characters"
 msgid "Samoa Daylight Time"
 msgstr "Samoa Zomertijd"
 
-#: dlls/tzres/tzres.rc:326
+#: dlls/tzres/tzres.rc:308
 msgid "(UTC+13:00) Samoa"
 msgstr "(UTC+13:00) Samoa"
 
-#: dlls/tzres/tzres.rc:201
+#: dlls/tzres/tzres.rc:183
 msgctxt "maximum 31 characters"
 msgid "Kaliningrad Standard Time"
 msgstr "Kaliningrad Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:202
+#: dlls/tzres/tzres.rc:184
 msgctxt "maximum 31 characters"
 msgid "Kaliningrad Daylight Time"
 msgstr "Kaliningrad Zomertijd"
 
-#: dlls/tzres/tzres.rc:203
+#: dlls/tzres/tzres.rc:185
 msgid "(UTC+02:00) Kaliningrad"
 msgstr "(UTC+02:00) Kaliningrad"
 
-#: dlls/tzres/tzres.rc:282
+#: dlls/tzres/tzres.rc:264
 msgctxt "maximum 31 characters"
 msgid "Pacific Standard Time (Mexico)"
 msgstr "Pacific Standaard Tijd (Mexico)"
 
-#: dlls/tzres/tzres.rc:283
+#: dlls/tzres/tzres.rc:265
 msgctxt "maximum 31 characters"
 msgid "Pacific Daylight Time (Mexico)"
 msgstr "Pacific Zomertijd (Mexico)"
 
-#: dlls/tzres/tzres.rc:284
+#: dlls/tzres/tzres.rc:266
 msgid "(UTC-08:00) Baja California"
 msgstr "(UTC-08:00) Baja California"
 
-#: dlls/tzres/tzres.rc:228
+#: dlls/tzres/tzres.rc:210
 msgctxt "maximum 31 characters"
 msgid "Middle East Standard Time"
 msgstr "Midden-Oosten Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:229
+#: dlls/tzres/tzres.rc:211
 msgctxt "maximum 31 characters"
 msgid "Middle East Daylight Time"
 msgstr "Midden-Oosten Zomertijd"
 
-#: dlls/tzres/tzres.rc:230
+#: dlls/tzres/tzres.rc:212
 msgid "(UTC+02:00) Beirut"
 msgstr "(UTC+02:00) Beiroet"
 
-#: dlls/tzres/tzres.rc:363
+#: dlls/tzres/tzres.rc:345
 msgctxt "maximum 31 characters"
 msgid "Tokyo Standard Time"
 msgstr "Tokio Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:364
+#: dlls/tzres/tzres.rc:346
 msgctxt "maximum 31 characters"
 msgid "Tokyo Daylight Time"
 msgstr "Tokio Zomertijd"
 
-#: dlls/tzres/tzres.rc:365
+#: dlls/tzres/tzres.rc:347
 msgid "(UTC+09:00) Osaka, Sapporo, Tokyo"
 msgstr "(UTC+09:00) Osaka, Sapporo, Tokio"
 
-#: dlls/tzres/tzres.rc:210
+#: dlls/tzres/tzres.rc:192
 msgctxt "maximum 31 characters"
 msgid "Line Islands Standard Time"
 msgstr "Line-eilanden Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:211
+#: dlls/tzres/tzres.rc:193
 msgctxt "maximum 31 characters"
 msgid "Line Islands Daylight Time"
 msgstr "Line-eilanden Zomertijd"
 
-#: dlls/tzres/tzres.rc:212
+#: dlls/tzres/tzres.rc:194
 msgid "(UTC+14:00) Kiritimati Island"
 msgstr "(UTC+14:00) Kiritimati-eiland"
 
-#: dlls/tzres/tzres.rc:129
+#: dlls/tzres/tzres.rc:111
 msgctxt "maximum 31 characters"
 msgid "Cuba Standard Time"
 msgstr "Cuba Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:130
+#: dlls/tzres/tzres.rc:112
 msgctxt "maximum 31 characters"
 msgid "Cuba Daylight Time"
 msgstr "Cuba Zomertijd"
 
-#: dlls/tzres/tzres.rc:131
+#: dlls/tzres/tzres.rc:113
 msgid "(UTC-05:00) Havana"
 msgstr "(UTC-05:00) Havana"
 
-#: dlls/tzres/tzres.rc:198
+#: dlls/tzres/tzres.rc:180
 msgctxt "maximum 31 characters"
 msgid "Jordan Standard Time"
 msgstr "Jordanië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:199
+#: dlls/tzres/tzres.rc:181
 msgctxt "maximum 31 characters"
 msgid "Jordan Daylight Time"
 msgstr "Jordanië Zomertijd"
 
-#: dlls/tzres/tzres.rc:200
+#: dlls/tzres/tzres.rc:182
 msgid "(UTC+02:00) Amman"
 msgstr "(UTC+02:00) Amman"
 
-#: dlls/tzres/tzres.rc:117
+#: dlls/tzres/tzres.rc:99
 msgctxt "maximum 31 characters"
 msgid "Central Standard Time"
 msgstr "CST (Standaard Tijd)"
 
-#: dlls/tzres/tzres.rc:118
+#: dlls/tzres/tzres.rc:100
 msgctxt "maximum 31 characters"
 msgid "Central Daylight Time"
 msgstr "CST Zomertijd"
 
-#: dlls/tzres/tzres.rc:119
+#: dlls/tzres/tzres.rc:101
 msgid "(UTC-06:00) Central Time (US & Canada)"
 msgstr "(UTC-06:00) Central Time (VS & Canada)"
 
-#: dlls/tzres/tzres.rc:303 dlls/tzres/tzres.rc:304
+#: dlls/tzres/tzres.rc:285 dlls/tzres/tzres.rc:286
 msgctxt "maximum 31 characters"
 msgid "Russia Time Zone 3"
 msgstr "Rusland tijdzone 3"
 
-#: dlls/tzres/tzres.rc:305
+#: dlls/tzres/tzres.rc:287
 msgid "(UTC+04:00) Izhevsk, Samara"
 msgstr "(UTC+04:00) Izhevsk, Samara"
 
-#: dlls/tzres/tzres.rc:417
+#: dlls/tzres/tzres.rc:399
 msgctxt "maximum 31 characters"
 msgid "Volgograd Standard Time"
 msgstr "Wolgograd Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:418
+#: dlls/tzres/tzres.rc:400
 msgctxt "maximum 31 characters"
 msgid "Volgograd Daylight Time"
 msgstr "Wolgograd Zomertijd"
 
-#: dlls/tzres/tzres.rc:419
+#: dlls/tzres/tzres.rc:401
 msgid "(UTC+04:00) Volgograd"
 msgstr "(UTC+04:00) Wolgograd"
 
-#: dlls/tzres/tzres.rc:72
+#: dlls/tzres/tzres.rc:54
 msgctxt "maximum 31 characters"
 msgid "Azores Standard Time"
 msgstr "Azoren Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:73
+#: dlls/tzres/tzres.rc:55
 msgctxt "maximum 31 characters"
 msgid "Azores Daylight Time"
 msgstr "Azoren Zomertijd"
 
-#: dlls/tzres/tzres.rc:74
+#: dlls/tzres/tzres.rc:56
 msgid "(UTC-01:00) Azores"
 msgstr "(UTC-01:00) Azoren"
 
-#: dlls/tzres/tzres.rc:264
+#: dlls/tzres/tzres.rc:246
 msgctxt "maximum 31 characters"
 msgid "North Asia East Standard Time"
 msgstr "Noord-Oost Azië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:265
+#: dlls/tzres/tzres.rc:247
 msgctxt "maximum 31 characters"
 msgid "North Asia East Daylight Time"
 msgstr "Noord-Oost Azië Zomertijd"
 
-#: dlls/tzres/tzres.rc:266
+#: dlls/tzres/tzres.rc:248
 msgid "(UTC+08:00) Irkutsk"
 msgstr "(UTC+08:00) Irkoetsk"
 
-#: dlls/tzres/tzres.rc:408 dlls/tzres/tzres.rc:409
+#: dlls/tzres/tzres.rc:390 dlls/tzres/tzres.rc:391
 msgctxt "maximum 31 characters"
 msgid "UTC-11"
 msgstr "UTC-11"
 
-#: dlls/tzres/tzres.rc:410
+#: dlls/tzres/tzres.rc:392
 msgid "(UTC-11:00) Coordinated Universal Time-11"
 msgstr "(UTC-11:00) Gecoördineerde Wereldtijd-11"
 
-#: dlls/tzres/tzres.rc:51
+#: dlls/tzres/tzres.rc:33
 msgctxt "maximum 31 characters"
 msgid "Argentina Standard Time"
 msgstr "Argentinië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:52
+#: dlls/tzres/tzres.rc:34
 msgctxt "maximum 31 characters"
 msgid "Argentina Daylight Time"
 msgstr "Argentinië Zomertijd"
 
-#: dlls/tzres/tzres.rc:53
+#: dlls/tzres/tzres.rc:35
 msgid "(UTC-03:00) City of Buenos Aires"
 msgstr "(UTC-03:00) Buenos Aires (stad)"
 
-#: dlls/tzres/tzres.rc:378
+#: dlls/tzres/tzres.rc:360
 msgctxt "maximum 31 characters"
 msgid "Turks And Caicos Standard Time"
 msgstr "Turks en Caicos Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:379
+#: dlls/tzres/tzres.rc:361
 msgctxt "maximum 31 characters"
 msgid "Turks And Caicos Daylight Time"
 msgstr "Turks en Caicos Zomertijd"
 
-#: dlls/tzres/tzres.rc:380
+#: dlls/tzres/tzres.rc:362
 msgid "(UTC-05:00) Turks and Caicos"
 msgstr "(UTC-05:00) Turks- en Caicoseilanden"
 
-#: dlls/tzres/tzres.rc:222
+#: dlls/tzres/tzres.rc:204
 msgctxt "maximum 31 characters"
 msgid "Marquesas Standard Time"
 msgstr "Marquesas Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:223
+#: dlls/tzres/tzres.rc:205
 msgctxt "maximum 31 characters"
 msgid "Marquesas Daylight Time"
 msgstr "Marquesas Zomertijd"
 
-#: dlls/tzres/tzres.rc:224
+#: dlls/tzres/tzres.rc:206
 msgid "(UTC-09:30) Marquesas Islands"
 msgstr "(UTC-09:30) Marquesaseilanden"
 
-#: dlls/tzres/tzres.rc:243
+#: dlls/tzres/tzres.rc:225
 msgctxt "maximum 31 characters"
 msgid "Myanmar Standard Time"
 msgstr "Myanmar Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:244
+#: dlls/tzres/tzres.rc:226
 msgctxt "maximum 31 characters"
 msgid "Myanmar Daylight Time"
 msgstr "Myanmar Zomertijd"
 
-#: dlls/tzres/tzres.rc:245
+#: dlls/tzres/tzres.rc:227
 msgid "(UTC+06:30) Yangon (Rangoon)"
 msgstr "(UTC+06:30) Yangon (Rangoon)"
 
-#: dlls/tzres/tzres.rc:390 dlls/tzres/tzres.rc:391
+#: dlls/tzres/tzres.rc:372 dlls/tzres/tzres.rc:373
 msgctxt "maximum 31 characters"
 msgid "Coordinated Universal Time"
 msgstr "Gecoördineerde Wereldtijd"
 
-#: dlls/tzres/tzres.rc:392
+#: dlls/tzres/tzres.rc:374
 msgid "(UTC) Coordinated Universal Time"
 msgstr "(UTC) Gecoördineerde Wereldtijd"
 
-#: dlls/tzres/tzres.rc:189
+#: dlls/tzres/tzres.rc:171
 msgctxt "maximum 31 characters"
 msgid "India Standard Time"
 msgstr "India Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:190
+#: dlls/tzres/tzres.rc:172
 msgctxt "maximum 31 characters"
 msgid "India Daylight Time"
 msgstr "India Zomertijd"
 
-#: dlls/tzres/tzres.rc:191
+#: dlls/tzres/tzres.rc:173
 msgid "(UTC+05:30) Chennai, Kolkata, Mumbai, New Delhi"
 msgstr "(UTC+05:30) Madras, Calcutta, Mumbai, New Delhi"
 
-#: dlls/tzres/tzres.rc:180
+#: dlls/tzres/tzres.rc:162
 msgctxt "maximum 31 characters"
 msgid "GTB Standard Time"
 msgstr "GTB Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:181
+#: dlls/tzres/tzres.rc:163
 msgctxt "maximum 31 characters"
 msgid "GTB Daylight Time"
 msgstr "GTB Zomertijd"
 
-#: dlls/tzres/tzres.rc:182
+#: dlls/tzres/tzres.rc:164
 msgid "(UTC+02:00) Athens, Bucharest"
 msgstr "(UTC+02:00) Athene, Boekarest"
 
-#: dlls/tzres/tzres.rc:375
+#: dlls/tzres/tzres.rc:357
 msgctxt "maximum 31 characters"
 msgid "Turkey Standard Time"
 msgstr "Turkije Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:376
+#: dlls/tzres/tzres.rc:358
 msgctxt "maximum 31 characters"
 msgid "Turkey Daylight Time"
 msgstr "Turkije Zomertijd"
 
-#: dlls/tzres/tzres.rc:377
+#: dlls/tzres/tzres.rc:359
 msgid "(UTC+03:00) Istanbul"
 msgstr "(UTC+03:00) Istanboel"
 
-#: dlls/tzres/tzres.rc:54
+#: dlls/tzres/tzres.rc:36
 msgctxt "maximum 31 characters"
 msgid "Astrakhan Standard Time"
 msgstr "Astrachan Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:55
+#: dlls/tzres/tzres.rc:37
 msgctxt "maximum 31 characters"
 msgid "Astrakhan Daylight Time"
 msgstr "Astrachan Zomertijd"
 
-#: dlls/tzres/tzres.rc:56
+#: dlls/tzres/tzres.rc:38
 msgid "(UTC+04:00) Astrakhan, Ulyanovsk"
 msgstr "(UTC+04:00) Astrachan, Oeljanovsk"
 
-#: dlls/tzres/tzres.rc:162
+#: dlls/tzres/tzres.rc:144
 msgctxt "maximum 31 characters"
 msgid "Fiji Standard Time"
 msgstr "Fiji Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:163
+#: dlls/tzres/tzres.rc:145
 msgctxt "maximum 31 characters"
 msgid "Fiji Daylight Time"
 msgstr "Fiji Zomertijd"
 
-#: dlls/tzres/tzres.rc:164
+#: dlls/tzres/tzres.rc:146
 msgid "(UTC+12:00) Fiji"
 msgstr "(UTC+12:00) Fiji"
 
-#: dlls/tzres/tzres.rc:87
+#: dlls/tzres/tzres.rc:69
 msgctxt "maximum 31 characters"
 msgid "Canada Central Standard Time"
 msgstr "Centraal Canada Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:88
+#: dlls/tzres/tzres.rc:70
 msgctxt "maximum 31 characters"
 msgid "Canada Central Daylight Time"
 msgstr "Centraal Canada Zomertijd"
 
-#: dlls/tzres/tzres.rc:89
+#: dlls/tzres/tzres.rc:71
 msgid "(UTC-06:00) Saskatchewan"
 msgstr "(UTC-06:00) Saskatchewan"
 
-#: dlls/tzres/tzres.rc:444
+#: dlls/tzres/tzres.rc:426
 msgctxt "maximum 31 characters"
 msgid "Yukon Standard Time"
 msgstr "Yukon Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:445
+#: dlls/tzres/tzres.rc:427
 msgctxt "maximum 31 characters"
 msgid "Yukon Daylight Time"
 msgstr "Yukon Zomertijd"
 
-#: dlls/tzres/tzres.rc:446
+#: dlls/tzres/tzres.rc:428
 msgid "(UTC-07:00) Yukon"
 msgstr "(UTC-07:00) Yukon"
 
-#: dlls/tzres/tzres.rc:354
+#: dlls/tzres/tzres.rc:336
 msgctxt "maximum 31 characters"
 msgid "Taipei Standard Time"
 msgstr "Taiwan Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:355
+#: dlls/tzres/tzres.rc:337
 msgctxt "maximum 31 characters"
 msgid "Taipei Daylight Time"
 msgstr "Taiwan Zomertijd"
 
-#: dlls/tzres/tzres.rc:356
+#: dlls/tzres/tzres.rc:338
 msgid "(UTC+08:00) Taipei"
 msgstr "(UTC+08:00) Taiwan"
 
-#: dlls/tzres/tzres.rc:426
+#: dlls/tzres/tzres.rc:408
 msgctxt "maximum 31 characters"
 msgid "W. Europe Standard Time"
 msgstr "West-Europa Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:427
+#: dlls/tzres/tzres.rc:409
 msgctxt "maximum 31 characters"
 msgid "W. Europe Daylight Time"
 msgstr "West-Europa Zomertijd"
 
-#: dlls/tzres/tzres.rc:428
+#: dlls/tzres/tzres.rc:410
 msgid "(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna"
 msgstr "(UTC+01:00) Amsterdam, Berlijn, Bern, Rome, Stockholm, Wenen"
 
-#: dlls/tzres/tzres.rc:231
+#: dlls/tzres/tzres.rc:213
 msgctxt "maximum 31 characters"
 msgid "Montevideo Standard Time"
 msgstr "Montevideo Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:232
+#: dlls/tzres/tzres.rc:214
 msgctxt "maximum 31 characters"
 msgid "Montevideo Daylight Time"
 msgstr "Montevideo Zomertijd"
 
-#: dlls/tzres/tzres.rc:233
+#: dlls/tzres/tzres.rc:215
 msgid "(UTC-03:00) Montevideo"
 msgstr "(UTC-03:00) Montevideo"
 
-#: dlls/tzres/tzres.rc:285
+#: dlls/tzres/tzres.rc:267
 msgctxt "maximum 31 characters"
 msgid "Pakistan Standard Time"
 msgstr "Pakistan Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:286
+#: dlls/tzres/tzres.rc:268
 msgctxt "maximum 31 characters"
 msgid "Pakistan Daylight Time"
 msgstr "Pakistan Zomertijd"
 
-#: dlls/tzres/tzres.rc:287
+#: dlls/tzres/tzres.rc:269
 msgid "(UTC+05:00) Islamabad, Karachi"
 msgstr "(UTC+05:00) Islamabad, Karachi"
 
-#: dlls/tzres/tzres.rc:366
+#: dlls/tzres/tzres.rc:348
 msgctxt "maximum 31 characters"
 msgid "Tomsk Standard Time"
 msgstr "Tomsk Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:367
+#: dlls/tzres/tzres.rc:349
 msgctxt "maximum 31 characters"
 msgid "Tomsk Daylight Time"
 msgstr "Tomsk Zomertijd"
 
-#: dlls/tzres/tzres.rc:368
+#: dlls/tzres/tzres.rc:350
 msgid "(UTC+07:00) Tomsk"
 msgstr "(UTC+07:00) Tomsk"
 
-#: dlls/tzres/tzres.rc:93
+#: dlls/tzres/tzres.rc:75
 msgctxt "maximum 31 characters"
 msgid "Caucasus Standard Time"
 msgstr "Kaukasus Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:94
+#: dlls/tzres/tzres.rc:76
 msgctxt "maximum 31 characters"
 msgid "Caucasus Daylight Time"
 msgstr "Kaukasus Zomertijd"
 
-#: dlls/tzres/tzres.rc:95
+#: dlls/tzres/tzres.rc:77
 msgid "(UTC+04:00) Yerevan"
 msgstr "(UTC+04:00) Jerevan"
 
-#: dlls/tzres/tzres.rc:66
+#: dlls/tzres/tzres.rc:48
 msgctxt "maximum 31 characters"
 msgid "AUS Eastern Standard Time"
 msgstr "Oost-Australië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:67
+#: dlls/tzres/tzres.rc:49
 msgctxt "maximum 31 characters"
 msgid "AUS Eastern Daylight Time"
 msgstr "Oost-Australië Zomertijd"
 
-#: dlls/tzres/tzres.rc:68
+#: dlls/tzres/tzres.rc:50
 msgid "(UTC+10:00) Canberra, Melbourne, Sydney"
 msgstr "(UTC+10:00) Canberra, Melbourne, Sydney"
 
-#: dlls/tzres/tzres.rc:246
+#: dlls/tzres/tzres.rc:228
 msgctxt "maximum 31 characters"
 msgid "N. Central Asia Standard Time"
 msgstr "Noordcentraal-Azië St. Tijd"
 
-#: dlls/tzres/tzres.rc:247
+#: dlls/tzres/tzres.rc:229
 msgctxt "maximum 31 characters"
 msgid "N. Central Asia Daylight Time"
 msgstr "Noordcentraal-Azië Zomertijd"
 
-#: dlls/tzres/tzres.rc:248
+#: dlls/tzres/tzres.rc:230
 msgid "(UTC+07:00) Novosibirsk"
 msgstr "(UTC+07:00) Novosibirsk"
 
-#: dlls/tzres/tzres.rc:150
+#: dlls/tzres/tzres.rc:132
 msgctxt "maximum 31 characters"
 msgid "Eastern Standard Time"
 msgstr "Oostkust Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:151
+#: dlls/tzres/tzres.rc:133
 msgctxt "maximum 31 characters"
 msgid "Eastern Daylight Time"
 msgstr "Oostkust Zomertijd"
 
-#: dlls/tzres/tzres.rc:152
+#: dlls/tzres/tzres.rc:134
 msgid "(UTC-05:00) Eastern Time (US & Canada)"
 msgstr "(UTC-05:00) Oostkust (VS & Canada)"
 
-#: dlls/tzres/tzres.rc:372
+#: dlls/tzres/tzres.rc:354
 msgctxt "maximum 31 characters"
 msgid "Transbaikal Standard Time"
 msgstr "Transbaikal Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:373
+#: dlls/tzres/tzres.rc:355
 msgctxt "maximum 31 characters"
 msgid "Transbaikal Daylight Time"
 msgstr "Transbaikal Zomertijd"
 
-#: dlls/tzres/tzres.rc:374
+#: dlls/tzres/tzres.rc:356
 msgid "(UTC+09:00) Chita"
 msgstr "(UTC+09:00) Chita"
 
-#: dlls/tzres/tzres.rc:141
+#: dlls/tzres/tzres.rc:123
 msgctxt "maximum 31 characters"
 msgid "E. Europe Standard Time"
 msgstr "Oost-Europa Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:142
+#: dlls/tzres/tzres.rc:124
 msgctxt "maximum 31 characters"
 msgid "E. Europe Daylight Time"
 msgstr "Oost-Europa Zomertijd"
 
-#: dlls/tzres/tzres.rc:143
+#: dlls/tzres/tzres.rc:125
 msgid "(UTC+02:00) Chisinau"
 msgstr "(UTC+02:00) Chisinau"
 
-#: dlls/tzres/tzres.rc:120
+#: dlls/tzres/tzres.rc:102
 msgctxt "maximum 31 characters"
 msgid "Central Standard Time (Mexico)"
 msgstr "CST (Mexico)"
 
-#: dlls/tzres/tzres.rc:121
+#: dlls/tzres/tzres.rc:103
 msgctxt "maximum 31 characters"
 msgid "Central Daylight Time (Mexico)"
 msgstr "CST Zomertijd (Mexico)"
 
-#: dlls/tzres/tzres.rc:122
+#: dlls/tzres/tzres.rc:104
 msgid "(UTC-06:00) Guadalajara, Mexico City, Monterrey"
 msgstr "(UTC-06:00) Guadalajara, Mexico-Stad, Monterrey"
 
-#: dlls/tzres/tzres.rc:330
+#: dlls/tzres/tzres.rc:312
 msgctxt "maximum 31 characters"
 msgid "Saratov Standard Time"
 msgstr "Saratov Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:331
+#: dlls/tzres/tzres.rc:313
 msgctxt "maximum 31 characters"
 msgid "Saratov Daylight Time"
 msgstr "Saratov Zomertijd"
 
-#: dlls/tzres/tzres.rc:332
+#: dlls/tzres/tzres.rc:314
 msgid "(UTC+04:00) Saratov"
 msgstr "(UTC+04:00) Saratov"
 
-#: dlls/tzres/tzres.rc:57
+#: dlls/tzres/tzres.rc:39
 msgctxt "maximum 31 characters"
 msgid "Atlantic Standard Time"
 msgstr "Atlantische Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:58
+#: dlls/tzres/tzres.rc:40
 msgctxt "maximum 31 characters"
 msgid "Atlantic Daylight Time"
 msgstr "Atlantische tijd Zomertijd"
 
-#: dlls/tzres/tzres.rc:59
+#: dlls/tzres/tzres.rc:41
 msgid "(UTC-04:00) Atlantic Time (Canada)"
 msgstr "(UTC-04:00) Atlantische tijd (Canada)"
 
-#: dlls/tzres/tzres.rc:237
+#: dlls/tzres/tzres.rc:219
 msgctxt "maximum 31 characters"
 msgid "Mountain Standard Time"
 msgstr "Mountain Standaard tijd"
 
-#: dlls/tzres/tzres.rc:238
+#: dlls/tzres/tzres.rc:220
 msgctxt "maximum 31 characters"
 msgid "Mountain Daylight Time"
 msgstr "Mountain Zomertijd"
 
-#: dlls/tzres/tzres.rc:239
+#: dlls/tzres/tzres.rc:221
 msgid "(UTC-07:00) Mountain Time (US & Canada)"
 msgstr "(UTC-07:00) Mountain Tijd (VS & Canada)"
 
-#: dlls/tzres/tzres.rc:384
+#: dlls/tzres/tzres.rc:366
 msgctxt "maximum 31 characters"
 msgid "US Eastern Standard Time"
 msgstr "VS Oost Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:385
+#: dlls/tzres/tzres.rc:367
 msgctxt "maximum 31 characters"
 msgid "US Eastern Daylight Time"
 msgstr "VS Oost Zomertijd"
 
-#: dlls/tzres/tzres.rc:386
+#: dlls/tzres/tzres.rc:368
 msgid "(UTC-05:00) Indiana (East)"
 msgstr "(UTC-05:00) Indiana (Oost)"
 
-#: dlls/tzres/tzres.rc:321
+#: dlls/tzres/tzres.rc:303
 msgctxt "maximum 31 characters"
 msgid "Sakhalin Standard Time"
 msgstr "Sachalin Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:322
+#: dlls/tzres/tzres.rc:304
 msgctxt "maximum 31 characters"
 msgid "Sakhalin Daylight Time"
 msgstr "Sachalin Zomertijd"
 
-#: dlls/tzres/tzres.rc:323
+#: dlls/tzres/tzres.rc:305
 msgid "(UTC+11:00) Sakhalin"
 msgstr "(UTC+11:00) Sachalin"
 
-#: dlls/tzres/tzres.rc:270
+#: dlls/tzres/tzres.rc:252
 msgctxt "maximum 31 characters"
 msgid "North Korea Standard Time"
 msgstr "Noord-Korea Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:271
+#: dlls/tzres/tzres.rc:253
 msgctxt "maximum 31 characters"
 msgid "North Korea Daylight Time"
 msgstr "Noord-Korea Zomertijd"
 
-#: dlls/tzres/tzres.rc:272
+#: dlls/tzres/tzres.rc:254
 msgid "(UTC+09:00) Pyongyang"
 msgstr "(UTC+09:00) Pyongyang"
 
-#: dlls/tzres/tzres.rc:357
+#: dlls/tzres/tzres.rc:339
 msgctxt "maximum 31 characters"
 msgid "Tasmania Standard Time"
 msgstr "Tasmanië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:358
+#: dlls/tzres/tzres.rc:340
 msgctxt "maximum 31 characters"
 msgid "Tasmania Daylight Time"
 msgstr "Tasmanië Zomertijd"
 
-#: dlls/tzres/tzres.rc:359
+#: dlls/tzres/tzres.rc:341
 msgid "(UTC+10:00) Hobart"
 msgstr "(UTC+10:00) Hobart"
 
-#: dlls/tzres/tzres.rc:99
+#: dlls/tzres/tzres.rc:81
 msgctxt "maximum 31 characters"
 msgid "Central America Standard Time"
 msgstr "Centraal-Amerika Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:100
+#: dlls/tzres/tzres.rc:82
 msgctxt "maximum 31 characters"
 msgid "Central America Daylight Time"
 msgstr "Centraal-Amerika Zomertijd"
 
-#: dlls/tzres/tzres.rc:101
+#: dlls/tzres/tzres.rc:83
 msgid "(UTC-06:00) Central America"
 msgstr "(UTC-06:00) Centraal-Amerika"
 
-#: dlls/tzres/tzres.rc:399 dlls/tzres/tzres.rc:400
+#: dlls/tzres/tzres.rc:381 dlls/tzres/tzres.rc:382
 msgctxt "maximum 31 characters"
 msgid "UTC-02"
 msgstr "UTC-02"
 
-#: dlls/tzres/tzres.rc:401
+#: dlls/tzres/tzres.rc:383
 msgid "(UTC-02:00) Coordinated Universal Time-02"
 msgstr "(UTC-02:00) Gecoördineerde Wereldtijd-02"
 
-#: dlls/tzres/tzres.rc:387
+#: dlls/tzres/tzres.rc:369
 msgctxt "maximum 31 characters"
 msgid "US Mountain Standard Time"
 msgstr "VS Mountain Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:388
+#: dlls/tzres/tzres.rc:370
 msgctxt "maximum 31 characters"
 msgid "US Mountain Daylight Time"
 msgstr "VS Mountain Zomertijd"
 
-#: dlls/tzres/tzres.rc:389
+#: dlls/tzres/tzres.rc:371
 msgid "(UTC-07:00) Arizona"
 msgstr "(UTC-07:00) Arizona"
 
-#: dlls/tzres/tzres.rc:339
+#: dlls/tzres/tzres.rc:321
 msgctxt "maximum 31 characters"
 msgid "South Africa Standard Time"
 msgstr "Zuid-Afrika Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:340
+#: dlls/tzres/tzres.rc:322
 msgctxt "maximum 31 characters"
 msgid "South Africa Daylight Time"
 msgstr "Zuid-Afrika Zomertijd"
 
-#: dlls/tzres/tzres.rc:341
+#: dlls/tzres/tzres.rc:323
 msgid "(UTC+02:00) Harare, Pretoria"
 msgstr "(UTC+02:00) Harare, Pretoria"
 
-#: dlls/tzres/tzres.rc:96
+#: dlls/tzres/tzres.rc:78
 msgctxt "maximum 31 characters"
 msgid "Cen. Australia Standard Time"
 msgstr "Centraal Australië St. Tijd"
 
-#: dlls/tzres/tzres.rc:97
+#: dlls/tzres/tzres.rc:79
 msgctxt "maximum 31 characters"
 msgid "Cen. Australia Daylight Time"
 msgstr "Centraal Australië Zomertijd"
 
-#: dlls/tzres/tzres.rc:98
+#: dlls/tzres/tzres.rc:80
 msgid "(UTC+09:30) Adelaide"
 msgstr "(UTC+09:30) Adelaide"
 
-#: dlls/tzres/tzres.rc:405 dlls/tzres/tzres.rc:406
+#: dlls/tzres/tzres.rc:387 dlls/tzres/tzres.rc:388
 msgctxt "maximum 31 characters"
 msgid "UTC-09"
 msgstr "UTC-09"
 
-#: dlls/tzres/tzres.rc:407
+#: dlls/tzres/tzres.rc:389
 msgid "(UTC-09:00) Coordinated Universal Time-09"
 msgstr "(UTC-09:00) Gecoördineerde Wereldtijd-09"
 
-#: dlls/tzres/tzres.rc:345
+#: dlls/tzres/tzres.rc:327
 msgctxt "maximum 31 characters"
 msgid "Sri Lanka Standard Time"
 msgstr "Sri Lanka Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:346
+#: dlls/tzres/tzres.rc:328
 msgctxt "maximum 31 characters"
 msgid "Sri Lanka Daylight Time"
 msgstr "Sri Lanka Zomertijd"
 
-#: dlls/tzres/tzres.rc:347
+#: dlls/tzres/tzres.rc:329
 msgid "(UTC+05:30) Sri Jayawardenepura"
 msgstr "(UTC+05:30) Sri Jayawardenepura"
 
-#: dlls/tzres/tzres.rc:30
+#: dlls/tzres/tzres.rc:12
 msgctxt "maximum 31 characters"
 msgid "Afghanistan Standard Time"
 msgstr "Afghanistan Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:31
+#: dlls/tzres/tzres.rc:13
 msgctxt "maximum 31 characters"
 msgid "Afghanistan Daylight Time"
 msgstr "Afghanistan Zomertijd"
 
-#: dlls/tzres/tzres.rc:32
+#: dlls/tzres/tzres.rc:14
 msgid "(UTC+04:30) Kabul"
 msgstr "(UTC+04:30) Kabul"
 
-#: dlls/tzres/tzres.rc:441
+#: dlls/tzres/tzres.rc:423
 msgctxt "maximum 31 characters"
 msgid "Yakutsk Standard Time"
 msgstr "Yakutsk Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:442
+#: dlls/tzres/tzres.rc:424
 msgctxt "maximum 31 characters"
 msgid "Yakutsk Daylight Time"
 msgstr "Yakutsk Zomertijd"
 
-#: dlls/tzres/tzres.rc:443
+#: dlls/tzres/tzres.rc:425
 msgid "(UTC+09:00) Yakutsk"
 msgstr "(UTC+09:00) Yakutsk"
 
-#: dlls/tzres/tzres.rc:309
+#: dlls/tzres/tzres.rc:291
 msgctxt "maximum 31 characters"
 msgid "SA Eastern Standard Time"
 msgstr "Zuid-Amerika Oost St. Tijd"
 
-#: dlls/tzres/tzres.rc:310
+#: dlls/tzres/tzres.rc:292
 msgctxt "maximum 31 characters"
 msgid "SA Eastern Daylight Time"
 msgstr "Zuid-Amerika Oost Zomertijd"
 
-#: dlls/tzres/tzres.rc:311
+#: dlls/tzres/tzres.rc:293
 msgid "(UTC-03:00) Cayenne, Fortaleza"
 msgstr "(UTC-03:00) Cayenne, Fortaleza"
 
-#: dlls/tzres/tzres.rc:42
+#: dlls/tzres/tzres.rc:24
 msgctxt "maximum 31 characters"
 msgid "Arab Standard Time"
 msgstr "Arabische Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:43
+#: dlls/tzres/tzres.rc:25
 msgctxt "maximum 31 characters"
 msgid "Arab Daylight Time"
 msgstr "Arabische Zomertijd"
 
-#: dlls/tzres/tzres.rc:44
+#: dlls/tzres/tzres.rc:26
 msgid "(UTC+03:00) Kuwait, Riyadh"
 msgstr "(UTC+03:00) Koeweit, Riyad"
 
-#: dlls/tzres/tzres.rc:45
+#: dlls/tzres/tzres.rc:27
 msgctxt "maximum 31 characters"
 msgid "Arabian Standard Time"
 msgstr "Arabische Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:46
+#: dlls/tzres/tzres.rc:28
 msgctxt "maximum 31 characters"
 msgid "Arabian Daylight Time"
 msgstr "Arabische Zomertijd"
 
-#: dlls/tzres/tzres.rc:47
+#: dlls/tzres/tzres.rc:29
 msgid "(UTC+04:00) Abu Dhabi, Muscat"
 msgstr "(UTC+04:00) Abu Dhabi, Muscat"
 
-#: dlls/tzres/tzres.rc:360
+#: dlls/tzres/tzres.rc:342
 msgctxt "maximum 31 characters"
 msgid "Tocantins Standard Time"
 msgstr "Tocantins Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:361
+#: dlls/tzres/tzres.rc:343
 msgctxt "maximum 31 characters"
 msgid "Tocantins Daylight Time"
 msgstr "Tocantins Zomertijd"
 
-#: dlls/tzres/tzres.rc:362
+#: dlls/tzres/tzres.rc:344
 msgid "(UTC-03:00) Araguaina"
 msgstr "(UTC-03:00) Araguaína"
 
-#: dlls/tzres/tzres.rc:306
+#: dlls/tzres/tzres.rc:288
 msgctxt "maximum 31 characters"
 msgid "Russian Standard Time"
 msgstr "Rusland Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:307
+#: dlls/tzres/tzres.rc:289
 msgctxt "maximum 31 characters"
 msgid "Russian Daylight Time"
 msgstr "Rusland Zomertijd"
 
-#: dlls/tzres/tzres.rc:308
+#: dlls/tzres/tzres.rc:290
 msgid "(UTC+03:00) Moscow, St. Petersburg"
 msgstr "(UTC+03:00) Moskou, Sint-Petersburg"
 
-#: dlls/tzres/tzres.rc:63
+#: dlls/tzres/tzres.rc:45
 msgctxt "maximum 31 characters"
 msgid "Aus Central W. Standard Time"
 msgstr "W-Centraal Australië St. Tijd"
 
-#: dlls/tzres/tzres.rc:64
+#: dlls/tzres/tzres.rc:46
 msgctxt "maximum 31 characters"
 msgid "Aus Central W. Daylight Time"
 msgstr "W-Centraal Australië Zomertijd"
 
-#: dlls/tzres/tzres.rc:65
+#: dlls/tzres/tzres.rc:47
 msgid "(UTC+08:45) Eucla"
 msgstr "(UTC+08:45) Eucla"
 
-#: dlls/tzres/tzres.rc:294
+#: dlls/tzres/tzres.rc:276
 msgctxt "maximum 31 characters"
 msgid "Romance Standard Time"
 msgstr "Rome Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:295
+#: dlls/tzres/tzres.rc:277
 msgctxt "maximum 31 characters"
 msgid "Romance Daylight Time"
 msgstr "Rome Zomertijd"
 
-#: dlls/tzres/tzres.rc:296
+#: dlls/tzres/tzres.rc:278
 msgid "(UTC+01:00) Brussels, Copenhagen, Madrid, Paris"
 msgstr "(UTC+01:00) Brussel, Kopenhagen, Madrid, Parijs"
 
-#: dlls/tzres/tzres.rc:159
+#: dlls/tzres/tzres.rc:141
 msgctxt "maximum 31 characters"
 msgid "Ekaterinburg Standard Time"
 msgstr "Jekaterinenburg Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:160
+#: dlls/tzres/tzres.rc:142
 msgctxt "maximum 31 characters"
 msgid "Ekaterinburg Daylight Time"
 msgstr "Jekaterinenburg Zomertijd"
 
-#: dlls/tzres/tzres.rc:161
+#: dlls/tzres/tzres.rc:143
 msgid "(UTC+05:00) Ekaterinburg"
 msgstr "(UTC+05:00) Jekaterinenburg"
 
-#: dlls/tzres/tzres.rc:300 dlls/tzres/tzres.rc:301
+#: dlls/tzres/tzres.rc:282 dlls/tzres/tzres.rc:283
 msgctxt "maximum 31 characters"
 msgid "Russia Time Zone 11"
 msgstr "Rusland tijdzone 11"
 
-#: dlls/tzres/tzres.rc:302
+#: dlls/tzres/tzres.rc:284
 msgid "(UTC+12:00) Anadyr, Petropavlovsk-Kamchatsky"
 msgstr "(UTC+12:00) Anadyr, Petropavlovsk-Kamtsjatski"
 
-#: dlls/tzres/tzres.rc:435
+#: dlls/tzres/tzres.rc:417
 msgctxt "maximum 31 characters"
 msgid "West Bank Standard Time"
 msgstr "W. Jordaanoever Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:436
+#: dlls/tzres/tzres.rc:418
 msgctxt "maximum 31 characters"
 msgid "West Bank Daylight Time"
 msgstr "W. Jordaanoever Zomertijd"
 
-#: dlls/tzres/tzres.rc:437
+#: dlls/tzres/tzres.rc:419
 msgid "(UTC+02:00) Gaza, Hebron"
 msgstr "(UTC+02:00) Gaza, Hebron"
 
-#: dlls/tzres/tzres.rc:351
+#: dlls/tzres/tzres.rc:333
 msgctxt "maximum 31 characters"
 msgid "Syria Standard Time"
 msgstr "Syrië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:352
+#: dlls/tzres/tzres.rc:334
 msgctxt "maximum 31 characters"
 msgid "Syria Daylight Time"
 msgstr "Syrië Zomertijd"
 
-#: dlls/tzres/tzres.rc:353
+#: dlls/tzres/tzres.rc:335
 msgid "(UTC+02:00) Damascus"
 msgstr "(UTC+02:00) Damascus"
 
-#: dlls/tzres/tzres.rc:60
+#: dlls/tzres/tzres.rc:42
 msgctxt "maximum 31 characters"
 msgid "AUS Central Standard Time"
 msgstr "Centraal-Australië St. Tijd"
 
-#: dlls/tzres/tzres.rc:61
+#: dlls/tzres/tzres.rc:43
 msgctxt "maximum 31 characters"
 msgid "AUS Central Daylight Time"
 msgstr "Centraal-Australië Zomertijd"
 
-#: dlls/tzres/tzres.rc:62
+#: dlls/tzres/tzres.rc:44
 msgid "(UTC+09:30) Darwin"
 msgstr "(UTC+09:30) Darwin"
 
-#: dlls/tzres/tzres.rc:177
+#: dlls/tzres/tzres.rc:159
 msgctxt "maximum 31 characters"
 msgid "Greenwich Standard Time"
 msgstr "Greenwich Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:178
+#: dlls/tzres/tzres.rc:160
 msgctxt "maximum 31 characters"
 msgid "Greenwich Daylight Time"
 msgstr "Greenwich Zomertijd"
 
-#: dlls/tzres/tzres.rc:179
+#: dlls/tzres/tzres.rc:161
 msgid "(UTC+00:00) Monrovia, Reykjavik"
 msgstr "(UTC+00:00) Monrovia, Reykjavik"
 
-#: dlls/tzres/tzres.rc:381
+#: dlls/tzres/tzres.rc:363
 msgctxt "maximum 31 characters"
 msgid "Ulaanbaatar Standard Time"
 msgstr "Ulaanbaatar Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:382
+#: dlls/tzres/tzres.rc:364
 msgctxt "maximum 31 characters"
 msgid "Ulaanbaatar Daylight Time"
 msgstr "Ulaanbaatar Zomertijd"
 
-#: dlls/tzres/tzres.rc:383
+#: dlls/tzres/tzres.rc:365
 msgid "(UTC+08:00) Ulaanbaatar"
 msgstr "(UTC+08:00) Ulaanbaatar"
 
-#: dlls/tzres/tzres.rc:261
+#: dlls/tzres/tzres.rc:243
 msgctxt "maximum 31 characters"
 msgid "Norfolk Standard Time"
 msgstr "Norfolk Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:262
+#: dlls/tzres/tzres.rc:244
 msgctxt "maximum 31 characters"
 msgid "Norfolk Daylight Time"
 msgstr "Norfolk Zomertijd"
 
-#: dlls/tzres/tzres.rc:263
+#: dlls/tzres/tzres.rc:245
 msgid "(UTC+11:00) Norfolk Island"
 msgstr "(UTC+11:00) Norfolk-Eiland"
 
-#: dlls/tzres/tzres.rc:195
+#: dlls/tzres/tzres.rc:177
 msgctxt "maximum 31 characters"
 msgid "Israel Standard Time"
 msgstr "Israël Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:196
+#: dlls/tzres/tzres.rc:178
 msgctxt "maximum 31 characters"
 msgid "Israel Daylight Time"
 msgstr "Israël Zomertijd"
 
-#: dlls/tzres/tzres.rc:197
+#: dlls/tzres/tzres.rc:179
 msgid "(UTC+02:00) Jerusalem"
 msgstr "(UTC+02:00) Jeruzalem"
 
-#: dlls/tzres/tzres.rc:78
+#: dlls/tzres/tzres.rc:60
 msgctxt "maximum 31 characters"
 msgid "Bangladesh Standard Time"
 msgstr "Bangladesh Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:79
+#: dlls/tzres/tzres.rc:61
 msgctxt "maximum 31 characters"
 msgid "Bangladesh Daylight Time"
 msgstr "Bangladesh Zomertijd"
 
-#: dlls/tzres/tzres.rc:80
+#: dlls/tzres/tzres.rc:62
 msgid "(UTC+06:00) Dhaka"
 msgstr "(UTC+06:00) Dhaka"
 
-#: dlls/tzres/tzres.rc:312
+#: dlls/tzres/tzres.rc:294
 msgctxt "maximum 31 characters"
 msgid "SA Pacific Standard Time"
 msgstr "Zuid-Amerika West St. Tijd"
 
-#: dlls/tzres/tzres.rc:313
+#: dlls/tzres/tzres.rc:295
 msgctxt "maximum 31 characters"
 msgid "SA Pacific Daylight Time"
 msgstr "Zuid-Amerika West Zomertijd"
 
-#: dlls/tzres/tzres.rc:314
+#: dlls/tzres/tzres.rc:296
 msgid "(UTC-05:00) Bogota, Lima, Quito, Rio Branco"
 msgstr "(UTC-05:00) Bogota, Lima, Quito, Rio Branco"
 
-#: dlls/tzres/tzres.rc:432
+#: dlls/tzres/tzres.rc:414
 msgctxt "maximum 31 characters"
 msgid "West Asia Standard Time"
 msgstr "West-Azië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:433
+#: dlls/tzres/tzres.rc:415
 msgctxt "maximum 31 characters"
 msgid "West Asia Daylight Time"
 msgstr "West-Azië Zomertijd"
 
-#: dlls/tzres/tzres.rc:434
+#: dlls/tzres/tzres.rc:416
 msgid "(UTC+05:00) Ashgabat, Tashkent"
 msgstr "(UTC+05:00) Asjchabad, Tasjkent"
 
-#: dlls/tzres/tzres.rc:33
+#: dlls/tzres/tzres.rc:15
 msgctxt "maximum 31 characters"
 msgid "Alaskan Standard Time"
 msgstr "Alaska Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:34
+#: dlls/tzres/tzres.rc:16
 msgctxt "maximum 31 characters"
 msgid "Alaskan Daylight Time"
 msgstr "Alaska Zomertijd"
 
-#: dlls/tzres/tzres.rc:35
+#: dlls/tzres/tzres.rc:17
 msgid "(UTC-09:00) Alaska"
 msgstr "(UTC-09:00) Alaska"
 
-#: dlls/tzres/tzres.rc:288
+#: dlls/tzres/tzres.rc:270
 msgctxt "maximum 31 characters"
 msgid "Paraguay Standard Time"
 msgstr "Paraguay Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:289
+#: dlls/tzres/tzres.rc:271
 msgctxt "maximum 31 characters"
 msgid "Paraguay Daylight Time"
 msgstr "Paraguay Zomertijd"
 
-#: dlls/tzres/tzres.rc:290
+#: dlls/tzres/tzres.rc:272
 msgid "(UTC-04:00) Asuncion"
 msgstr "(UTC-04:00) Asuncion"
 
-#: dlls/tzres/tzres.rc:132
+#: dlls/tzres/tzres.rc:114
 msgctxt "maximum 31 characters"
 msgid "Dateline Standard Time"
 msgstr "Datumgrens Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:133
+#: dlls/tzres/tzres.rc:115
 msgctxt "maximum 31 characters"
 msgid "Dateline Daylight Time"
 msgstr "Datumgrens Zomertijd"
 
-#: dlls/tzres/tzres.rc:134
+#: dlls/tzres/tzres.rc:116
 msgid "(UTC-12:00) International Date Line West"
 msgstr "(UTC-12:00) Internationale westelijke datumgrens"
 
-#: dlls/tzres/tzres.rc:207
+#: dlls/tzres/tzres.rc:189
 msgctxt "maximum 31 characters"
 msgid "Libya Standard Time"
 msgstr "Libië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:208
+#: dlls/tzres/tzres.rc:190
 msgctxt "maximum 31 characters"
 msgid "Libya Daylight Time"
 msgstr "Libië Zomertijd"
 
-#: dlls/tzres/tzres.rc:209
+#: dlls/tzres/tzres.rc:191
 msgid "(UTC+02:00) Tripoli"
 msgstr "(UTC+02:00) Tripoli"
 
-#: dlls/tzres/tzres.rc:75
+#: dlls/tzres/tzres.rc:57
 msgctxt "maximum 31 characters"
 msgid "Bahia Standard Time"
 msgstr "Bahia Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:76
+#: dlls/tzres/tzres.rc:58
 msgctxt "maximum 31 characters"
 msgid "Bahia Daylight Time"
 msgstr "Bahia Zomertijd"
 
-#: dlls/tzres/tzres.rc:77
+#: dlls/tzres/tzres.rc:59
 msgid "(UTC-03:00) Salvador"
 msgstr "(UTC-03:00) Salvador"
 
-#: dlls/tzres/tzres.rc:411
+#: dlls/tzres/tzres.rc:393
 msgctxt "maximum 31 characters"
 msgid "Venezuela Standard Time"
 msgstr "Venezuela Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:412
+#: dlls/tzres/tzres.rc:394
 msgctxt "maximum 31 characters"
 msgid "Venezuela Daylight Time"
 msgstr "Venezuela Zomertijd"
 
-#: dlls/tzres/tzres.rc:413
+#: dlls/tzres/tzres.rc:395
 msgid "(UTC-04:00) Caracas"
 msgstr "(UTC-04:00) Caracas"
 
-#: dlls/tzres/tzres.rc:84
+#: dlls/tzres/tzres.rc:66
 msgctxt "maximum 31 characters"
 msgid "Bougainville Standard Time"
 msgstr "Bougainville Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:85
+#: dlls/tzres/tzres.rc:67
 msgctxt "maximum 31 characters"
 msgid "Bougainville Daylight Time"
 msgstr "Bougainville Zomertijd"
 
-#: dlls/tzres/tzres.rc:86
+#: dlls/tzres/tzres.rc:68
 msgid "(UTC+11:00) Bougainville Island"
 msgstr "(UTC+11:00) Bougainville (eiland)"
 
-#: dlls/tzres/tzres.rc:186
+#: dlls/tzres/tzres.rc:168
 msgctxt "maximum 31 characters"
 msgid "Hawaiian Standard Time"
 msgstr "Hawaï Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:187
+#: dlls/tzres/tzres.rc:169
 msgctxt "maximum 31 characters"
 msgid "Hawaiian Daylight Time"
 msgstr "Hawaï Zomertijd"
 
-#: dlls/tzres/tzres.rc:188
+#: dlls/tzres/tzres.rc:170
 msgid "(UTC-10:00) Hawaii"
 msgstr "(UTC-10:00) Hawaï"
 
-#: dlls/tzres/tzres.rc:333
+#: dlls/tzres/tzres.rc:315
 msgctxt "maximum 31 characters"
 msgid "SE Asia Standard Time"
 msgstr "Zuid-Oost-Azië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:334
+#: dlls/tzres/tzres.rc:316
 msgctxt "maximum 31 characters"
 msgid "SE Asia Daylight Time"
 msgstr "Zuid-Oost-Azië Zomertijd"
 
-#: dlls/tzres/tzres.rc:335
+#: dlls/tzres/tzres.rc:317
 msgid "(UTC+07:00) Bangkok, Hanoi, Jakarta"
 msgstr "(UTC+07:00) Bangkok, Hanoi, Jakarta"
 
-#: dlls/tzres/tzres.rc:291
+#: dlls/tzres/tzres.rc:273
 msgctxt "maximum 31 characters"
 msgid "Qyzylorda Standard Time"
 msgstr "Qizilorda Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:292
+#: dlls/tzres/tzres.rc:274
 msgctxt "maximum 31 characters"
 msgid "Qyzylorda Daylight Time"
 msgstr "Qizilorda Zomertijd"
 
-#: dlls/tzres/tzres.rc:293
+#: dlls/tzres/tzres.rc:275
 msgid "(UTC+05:00) Qyzylorda"
 msgstr "(UTC+05:00) Qizilorda"
 
-#: dlls/tzres/tzres.rc:429
+#: dlls/tzres/tzres.rc:411
 msgctxt "maximum 31 characters"
 msgid "W. Mongolia Standard Time"
 msgstr "West-Mongolië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:430
+#: dlls/tzres/tzres.rc:412
 msgctxt "maximum 31 characters"
 msgid "W. Mongolia Daylight Time"
 msgstr "West-Mongolië Zomertijd"
 
-#: dlls/tzres/tzres.rc:431
+#: dlls/tzres/tzres.rc:413
 msgid "(UTC+07:00) Hovd"
 msgstr "(UTC+07:00) Hovd"
 
-#: dlls/tzres/tzres.rc:255
+#: dlls/tzres/tzres.rc:237
 msgctxt "maximum 31 characters"
 msgid "New Zealand Standard Time"
 msgstr "Nieuw-Zeeland Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:256
+#: dlls/tzres/tzres.rc:238
 msgctxt "maximum 31 characters"
 msgid "New Zealand Daylight Time"
 msgstr "Nieuw-Zeeland Zomertijd"
 
-#: dlls/tzres/tzres.rc:257
+#: dlls/tzres/tzres.rc:239
 msgid "(UTC+12:00) Auckland, Wellington"
 msgstr "(UTC+12:00) Auckland, Wellington"
 
-#: dlls/tzres/tzres.rc:36
+#: dlls/tzres/tzres.rc:18
 msgctxt "maximum 31 characters"
 msgid "Aleutian Standard Time"
 msgstr "Aleoeten Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:37
+#: dlls/tzres/tzres.rc:19
 msgctxt "maximum 31 characters"
 msgid "Aleutian Daylight Time"
 msgstr "Aleoeten Zomertijd"
 
-#: dlls/tzres/tzres.rc:38
+#: dlls/tzres/tzres.rc:20
 msgid "(UTC-10:00) Aleutian Islands"
 msgstr "(UTC-10:00) Aleoeten"
 
-#: dlls/tzres/tzres.rc:273
+#: dlls/tzres/tzres.rc:255
 msgctxt "maximum 31 characters"
 msgid "Omsk Standard Time"
 msgstr "Omsk Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:274
+#: dlls/tzres/tzres.rc:256
 msgctxt "maximum 31 characters"
 msgid "Omsk Daylight Time"
 msgstr "Omsk Zomertijd"
 
-#: dlls/tzres/tzres.rc:275
+#: dlls/tzres/tzres.rc:257
 msgid "(UTC+06:00) Omsk"
 msgstr "(UTC+06:00) Omsk"
 
-#: dlls/tzres/tzres.rc:105
+#: dlls/tzres/tzres.rc:87
 msgctxt "maximum 31 characters"
 msgid "Central Brazilian Standard Time"
 msgstr "Centraal Brazilië St. Tijd"
 
-#: dlls/tzres/tzres.rc:106
+#: dlls/tzres/tzres.rc:88
 msgctxt "maximum 31 characters"
 msgid "Central Brazilian Daylight Time"
 msgstr "Centraal Brazilië Zomertijd"
 
-#: dlls/tzres/tzres.rc:107
+#: dlls/tzres/tzres.rc:89
 msgid "(UTC-04:00) Cuiaba"
 msgstr "(UTC-04:00) Cuiaba"
 
-#: dlls/tzres/tzres.rc:81
+#: dlls/tzres/tzres.rc:63
 msgctxt "maximum 31 characters"
 msgid "Belarus Standard Time"
 msgstr "Wit-Rusland Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:82
+#: dlls/tzres/tzres.rc:64
 msgctxt "maximum 31 characters"
 msgid "Belarus Daylight Time"
 msgstr "Wit-Rusland Zomertijd"
 
-#: dlls/tzres/tzres.rc:83
+#: dlls/tzres/tzres.rc:65
 msgid "(UTC+03:00) Minsk"
 msgstr "(UTC+03:00) Minsk"
 
-#: dlls/tzres/tzres.rc:315
+#: dlls/tzres/tzres.rc:297
 msgctxt "maximum 31 characters"
 msgid "SA Western Standard Time"
 msgstr "Zuid-Amerika West St. Tijd"
 
-#: dlls/tzres/tzres.rc:316
+#: dlls/tzres/tzres.rc:298
 msgctxt "maximum 31 characters"
 msgid "SA Western Daylight Time"
 msgstr "Zuid-Amerika West Zomertijd"
 
-#: dlls/tzres/tzres.rc:317
+#: dlls/tzres/tzres.rc:299
 msgid "(UTC-04:00) Georgetown, La Paz, Manaus, San Juan"
 msgstr "(UTC-04:00) Georgetown, La Paz, Manaus, San Juan"
 
-#: dlls/tzres/tzres.rc:174
+#: dlls/tzres/tzres.rc:156
 msgctxt "maximum 31 characters"
 msgid "Greenland Standard Time"
 msgstr "Groenland Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:175
+#: dlls/tzres/tzres.rc:157
 msgctxt "maximum 31 characters"
 msgid "Greenland Daylight Time"
 msgstr "Groenland Zomertijd"
 
-#: dlls/tzres/tzres.rc:176
+#: dlls/tzres/tzres.rc:158
 msgid "(UTC-03:00) Greenland"
 msgstr "(UTC-03:00) Groenland"
 
-#: dlls/tzres/tzres.rc:147
+#: dlls/tzres/tzres.rc:129
 msgctxt "maximum 31 characters"
 msgid "Easter Island Standard Time"
 msgstr "Paaseiland Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:148
+#: dlls/tzres/tzres.rc:130
 msgctxt "maximum 31 characters"
 msgid "Easter Island Daylight Time"
 msgstr "Paaseiland Zomertijd"
 
-#: dlls/tzres/tzres.rc:149
+#: dlls/tzres/tzres.rc:131
 msgid "(UTC-06:00) Easter Island"
 msgstr "(UTC-06:00) Paaseiland"
 
-#: dlls/tzres/tzres.rc:297 dlls/tzres/tzres.rc:298
+#: dlls/tzres/tzres.rc:279 dlls/tzres/tzres.rc:280
 msgctxt "maximum 31 characters"
 msgid "Russia Time Zone 10"
 msgstr "Rusland tijdzone 10"
 
-#: dlls/tzres/tzres.rc:299
+#: dlls/tzres/tzres.rc:281
 msgid "(UTC+11:00) Chokurdakh"
 msgstr "(UTC+11:00) Tsjokoerdach"
 
-#: dlls/tzres/tzres.rc:156
+#: dlls/tzres/tzres.rc:138
 msgctxt "maximum 31 characters"
 msgid "Egypt Standard Time"
 msgstr "Egypte Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:157
+#: dlls/tzres/tzres.rc:139
 msgctxt "maximum 31 characters"
 msgid "Egypt Daylight Time"
 msgstr "Egypte Zomertijd"
 
-#: dlls/tzres/tzres.rc:158
+#: dlls/tzres/tzres.rc:140
 msgid "(UTC+02:00) Cairo"
 msgstr "(UTC+02:00) Caïro"
 
-#: dlls/tzres/tzres.rc:153
+#: dlls/tzres/tzres.rc:135
 msgctxt "maximum 31 characters"
 msgid "Eastern Standard Time (Mexico)"
 msgstr "EST (Mexico)"
 
-#: dlls/tzres/tzres.rc:154
+#: dlls/tzres/tzres.rc:136
 msgctxt "maximum 31 characters"
 msgid "Eastern Daylight Time (Mexico)"
 msgstr "EST Zomertijd (Mexico)"
 
-#: dlls/tzres/tzres.rc:155
+#: dlls/tzres/tzres.rc:137
 msgid "(UTC-05:00) Chetumal"
 msgstr "(UTC-05:00) Chetumal"
 
-#: dlls/tzres/tzres.rc:225
+#: dlls/tzres/tzres.rc:207
 msgctxt "maximum 31 characters"
 msgid "Mauritius Standard Time"
 msgstr "Mauritius Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:226
+#: dlls/tzres/tzres.rc:208
 msgctxt "maximum 31 characters"
 msgid "Mauritius Daylight Time"
 msgstr "Mauritius Zomertijd"
 
-#: dlls/tzres/tzres.rc:227
+#: dlls/tzres/tzres.rc:209
 msgid "(UTC+04:00) Port Louis"
 msgstr "(UTC+04:00) Port Louis"
 
-#: dlls/tzres/tzres.rc:414
+#: dlls/tzres/tzres.rc:396
 msgctxt "maximum 31 characters"
 msgid "Vladivostok Standard Time"
 msgstr "Wladiwostok Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:415
+#: dlls/tzres/tzres.rc:397
 msgctxt "maximum 31 characters"
 msgid "Vladivostok Daylight Time"
 msgstr "Wladiwostok Zomertijd"
 
-#: dlls/tzres/tzres.rc:416
+#: dlls/tzres/tzres.rc:398
 msgid "(UTC+10:00) Vladivostok"
 msgstr "(UTC+10:00) Wladiwostok"
 
-#: dlls/tzres/tzres.rc:336
+#: dlls/tzres/tzres.rc:318
 msgctxt "maximum 31 characters"
 msgid "Singapore Standard Time"
 msgstr "Singapore Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:337
+#: dlls/tzres/tzres.rc:319
 msgctxt "maximum 31 characters"
 msgid "Singapore Daylight Time"
 msgstr "Singapore Zomertijd"
 
-#: dlls/tzres/tzres.rc:338
+#: dlls/tzres/tzres.rc:320
 msgid "(UTC+08:00) Kuala Lumpur, Singapore"
 msgstr "(UTC+08:00) Kuala Lumpur, Singapore"
 
-#: dlls/tzres/tzres.rc:204
+#: dlls/tzres/tzres.rc:186
 msgctxt "maximum 31 characters"
 msgid "Korea Standard Time"
 msgstr "Korea Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:205
+#: dlls/tzres/tzres.rc:187
 msgctxt "maximum 31 characters"
 msgid "Korea Daylight Time"
 msgstr "Korea Zomertijd"
 
-#: dlls/tzres/tzres.rc:206
+#: dlls/tzres/tzres.rc:188
 msgid "(UTC+09:00) Seoul"
 msgstr "(UTC+09:00) Seoel"
 
-#: dlls/tzres/tzres.rc:123
+#: dlls/tzres/tzres.rc:105
 msgctxt "maximum 31 characters"
 msgid "Chatham Islands Standard Time"
 msgstr "Chathameilanden Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:124
+#: dlls/tzres/tzres.rc:106
 msgctxt "maximum 31 characters"
 msgid "Chatham Islands Daylight Time"
 msgstr "Chathameilanden Zomertijd"
 
-#: dlls/tzres/tzres.rc:125
+#: dlls/tzres/tzres.rc:107
 msgid "(UTC+12:45) Chatham Islands"
 msgstr "(UTC+12:45) Chathameilanden"
 
-#: dlls/tzres/tzres.rc:135
+#: dlls/tzres/tzres.rc:117
 msgctxt "maximum 31 characters"
 msgid "E. Africa Standard Time"
 msgstr "Oost-Afrika Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:136
+#: dlls/tzres/tzres.rc:118
 msgctxt "maximum 31 characters"
 msgid "E. Africa Daylight Time"
 msgstr "Oost-Afrika Zomertijd"
 
-#: dlls/tzres/tzres.rc:137
+#: dlls/tzres/tzres.rc:119
 msgid "(UTC+03:00) Nairobi"
 msgstr "(UTC+03:00) Nairobi"
 
-#: dlls/tzres/tzres.rc:165
+#: dlls/tzres/tzres.rc:147
 msgctxt "maximum 31 characters"
 msgid "FLE Standard Time"
 msgstr "Oost-Europa Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:166
+#: dlls/tzres/tzres.rc:148
 msgctxt "maximum 31 characters"
 msgid "FLE Daylight Time"
 msgstr "Oost-Europa Zomertijd"
 
-#: dlls/tzres/tzres.rc:167
+#: dlls/tzres/tzres.rc:149
 msgid "(UTC+02:00) Helsinki, Kyiv, Riga, Sofia, Tallinn, Vilnius"
 msgstr "(UTC+02:00) Helsinki, Kiev, Riga, Sofia, Tallinn, Vilnius"
 
-#: dlls/tzres/tzres.rc:144
+#: dlls/tzres/tzres.rc:126
 msgctxt "maximum 31 characters"
 msgid "E. South America Standard Time"
 msgstr "Oost Zuid-Amerika St. Tijd"
 
-#: dlls/tzres/tzres.rc:145
+#: dlls/tzres/tzres.rc:127
 msgctxt "maximum 31 characters"
 msgid "E. South America Daylight Time"
 msgstr "Oost Zuid-Amerika Zomertijd"
 
-#: dlls/tzres/tzres.rc:146
+#: dlls/tzres/tzres.rc:128
 msgid "(UTC-03:00) Brasilia"
 msgstr "(UTC-03:00) Brasilia"
 
-#: dlls/tzres/tzres.rc:114
+#: dlls/tzres/tzres.rc:96
 msgctxt "maximum 31 characters"
 msgid "Central Pacific Standard Time"
 msgstr "Central Pacific Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:115
+#: dlls/tzres/tzres.rc:97
 msgctxt "maximum 31 characters"
 msgid "Central Pacific Daylight Time"
 msgstr "Central Pacific Zomertijd"
 
-#: dlls/tzres/tzres.rc:116
+#: dlls/tzres/tzres.rc:98
 msgid "(UTC+11:00) Solomon Is., New Caledonia"
 msgstr "(UTC+11:00) Salomonseilanden, Nieuw-Caledonië"
 
-#: dlls/tzres/tzres.rc:423
+#: dlls/tzres/tzres.rc:405
 msgctxt "maximum 31 characters"
 msgid "W. Central Africa Standard Time"
 msgstr "West Centraal-Afrika St. Tijd"
 
-#: dlls/tzres/tzres.rc:424
+#: dlls/tzres/tzres.rc:406
 msgctxt "maximum 31 characters"
 msgid "W. Central Africa Daylight Time"
 msgstr "West Centraal-Afrika Zomertijd"
 
-#: dlls/tzres/tzres.rc:425
+#: dlls/tzres/tzres.rc:407
 msgid "(UTC+01:00) West Central Africa"
 msgstr "(UTC+01:00) West Centraal-Afrika"
 
-#: dlls/tzres/tzres.rc:276
+#: dlls/tzres/tzres.rc:258
 msgctxt "maximum 31 characters"
 msgid "Pacific SA Standard Time"
 msgstr "Pacific Zuid-Amerika St. Tijd"
 
-#: dlls/tzres/tzres.rc:277
+#: dlls/tzres/tzres.rc:259
 msgctxt "maximum 31 characters"
 msgid "Pacific SA Daylight Time"
 msgstr "Pacific Zuid-Amerika Zomertijd"
 
-#: dlls/tzres/tzres.rc:278
+#: dlls/tzres/tzres.rc:260
 msgid "(UTC-04:00) Santiago"
 msgstr "(UTC-04:00) Santiago"
 
-#: dlls/tzres/tzres.rc:138
+#: dlls/tzres/tzres.rc:120
 msgctxt "maximum 31 characters"
 msgid "E. Australia Standard Time"
 msgstr "Oost-Australië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:139
+#: dlls/tzres/tzres.rc:121
 msgctxt "maximum 31 characters"
 msgid "E. Australia Daylight Time"
 msgstr "Oost-Australië Zomertijd"
 
-#: dlls/tzres/tzres.rc:140
+#: dlls/tzres/tzres.rc:122
 msgid "(UTC+10:00) Brisbane"
 msgstr "(UTC+10:00) Brisbane"
 
-#: dlls/tzres/tzres.rc:420
+#: dlls/tzres/tzres.rc:402
 msgctxt "maximum 31 characters"
 msgid "W. Australia Standard Time"
 msgstr "West-Australië Standaard Tijd"
 
-#: dlls/tzres/tzres.rc:421
+#: dlls/tzres/tzres.rc:403
 msgctxt "maximum 31 characters"
 msgid "W. Australia Daylight Time"
 msgstr "West-Australië Zomertijd"
 
-#: dlls/tzres/tzres.rc:422
+#: dlls/tzres/tzres.rc:404
 msgid "(UTC+08:00) Perth"
 msgstr "(UTC+08:00) Perth"
 
@@ -12307,7 +12368,7 @@ msgstr "Veiligheidswaarschuwing"
 
 #: dlls/urlmon/urlmon.rc:35
 msgid "Do you want to install this software?"
-msgstr "Wilt u deze software installeren?"
+msgstr "Deze software installeren?"
 
 #: dlls/urlmon/urlmon.rc:39
 msgid "Don't install"
@@ -12318,9 +12379,9 @@ msgid ""
 "When installed, an ActiveX component has full access to your computer. Do "
 "not click install unless you have absolute trust in the above source."
 msgstr ""
-"Indien geinstalleerd, heeft een ActiveX component volledige toegang tot uw "
-"computer. Klik niet op install als u bovenstaande bron niet volledig "
-"vertrouwt."
+"Indien geïnstalleerd, heeft een ActiveX component volledige toegang tot de "
+"computer. Klik niet op installeren als de bovenstaande bron niet volledig "
+"vertrouwt is."
 
 #: dlls/urlmon/urlmon.rc:51
 msgid "Installation of component failed: %08x"
@@ -12417,7 +12478,7 @@ msgstr "Type komt niet overeen"
 
 #: dlls/vbscript/vbscript.rc:36
 msgid "Device I/O error"
-msgstr "I/O apparaatfout"
+msgstr "I/O-apparaatfout"
 
 #: dlls/vbscript/vbscript.rc:37
 msgid "File already exists"
@@ -12563,10 +12624,6 @@ msgstr "Papier&formaat:"
 msgid "Duplex:"
 msgstr "Dubbelzijdig:"
 
-#: dlls/wineps.drv/wineps.rc:50
-msgid "Setup"
-msgstr "Eigenschappen"
-
 #: dlls/wininet/wininet.rc:53 dlls/wininet/wininet.rc:73
 msgid "Realm"
 msgstr "Realm"
@@ -12585,7 +12642,7 @@ msgstr "Er is een probleem met het certificaat voor deze site."
 
 #: dlls/wininet/wininet.rc:93
 msgid "Do you want to continue anyway?"
-msgstr "Wilt u toch doorgaan?"
+msgstr "Toch doorgaan?"
 
 #: dlls/wininet/wininet.rc:28
 msgid "LAN Connection"
@@ -12701,7 +12758,7 @@ msgstr "Ongedefinieerde fout van buitenaf."
 #: dlls/winmm/winmm.rc:34
 msgid "A device ID has been used that is out of range for your system."
 msgstr ""
-"Een apparaat-ID werd gebruikt dat buiten de grenzen van uw systeem ligt."
+"Een apparaat-ID werd gebruikt dat buiten de grenzen van het systeem ligt."
 
 #: dlls/winmm/winmm.rc:35
 msgid "The driver was not enabled."
@@ -12721,7 +12778,7 @@ msgstr "De gespecificeerde apparaatverwijzing is ongeldig."
 
 #: dlls/winmm/winmm.rc:38
 msgid "There is no driver installed on your system!"
-msgstr "Er is geen stuurprogramma geïnstalleerd op uw systeem!"
+msgstr "Er is geen stuurprogramma geïnstalleerd op het systeem!"
 
 #: dlls/winmm/winmm.rc:39 dlls/winmm/winmm.rc:65
 msgid ""
@@ -12827,24 +12884,24 @@ msgstr ""
 #: dlls/winmm/winmm.rc:60
 msgid "Invalid MCI device ID. Use the ID returned when opening the MCI device."
 msgstr ""
-"Ongeldig MCI-apparaat-ID. Gebruik het teruggegeven ID als u dit MCI-apparaat "
-"opent."
+"Ongeldig MCI-apparaat-ID. Gebruik het ID dat wordt weergegeven als dit MCI-"
+"apparaat wordt geopend."
 
 #: dlls/winmm/winmm.rc:61
 msgid "The driver cannot recognize the specified command parameter."
-msgstr "De driver herkent de opgegeven opdrachtparameter niet."
+msgstr "Het stuurprogramma herkent de opgegeven opdrachtparameter niet."
 
 #: dlls/winmm/winmm.rc:62
 msgid "The driver cannot recognize the specified command."
-msgstr "De driver herkent de opgegeven opdracht niet."
+msgstr "Het stuurprogramma herkent de opgegeven opdracht niet."
 
 #: dlls/winmm/winmm.rc:63
 msgid ""
 "There is a problem with your media device. Make sure it is working correctly "
 "or contact the device manufacturer."
 msgstr ""
-"Er is een probleem met uw media-apparaat. Controleer of het correct werkt of "
-"neem contact op met de leverancier."
+"Er is een probleem met het media-apparaat. Controleer of het correct werkt "
+"of neem contact op met de leverancier."
 
 #: dlls/winmm/winmm.rc:64
 msgid "The specified device is not open or is not recognized by MCI."
@@ -12907,11 +12964,11 @@ msgstr ""
 
 #: dlls/winmm/winmm.rc:74
 msgid "The specified command requires a parameter. Please supply one."
-msgstr "De gegeven opdracht heeft een parameter nodig. Vult u deze a.u.b. in."
+msgstr "De gegeven opdracht heeft een parameter nodig. Vul deze in."
 
 #: dlls/winmm/winmm.rc:75
 msgid "The MCI device you are using does not support the specified command."
-msgstr "Het MCI-apparaat dat u gebruikt ondersteund het gegeven commando niet."
+msgstr "Het gebruikte MCI-apparaat ondersteunt dit commando niet."
 
 #: dlls/winmm/winmm.rc:76
 msgid ""
@@ -12969,15 +13026,15 @@ msgid ""
 "still connected to the network."
 msgstr ""
 "Kan het opgegeven bestand niet opslaan. Zorg ervoor dat er voldoende "
-"schijfruimte is of dat u nog steeds met het netwerk verbonden bent."
+"schijfruimte is of dat er nog steeds verbinding met het netwerk is."
 
 #: dlls/winmm/winmm.rc:86
 msgid ""
 "Cannot find the specified device. Make sure it is installed and that the "
 "device name is spelled correctly."
 msgstr ""
-"Kan het opgegeven apparaat niet vinden. Verzeker u ervan dat het "
-"geïnstalleerd is en dat de apparaatnaam correct is opgegeven."
+"Kan het opgegeven apparaat niet vinden. Zorg ervoor dat het geïnstalleerd is "
+"en dat de apparaatnaam correct is opgegeven."
 
 #: dlls/winmm/winmm.rc:87
 msgid ""
@@ -13004,8 +13061,8 @@ msgid ""
 "The device driver is already in use. To share it, use the 'shareable' "
 "parameter with each 'open' command."
 msgstr ""
-"Het stuurprogramma is al in gebruik. Om het te delen, moet u de parameter "
-"'deelbaar' bij elke opdracht 'openen' gebruiken."
+"Het stuurprogramma is al in gebruik. Om het te delen, moet de parameter "
+"'deelbaar' bij elke opdracht 'openen' gebruikt worden."
 
 #: dlls/winmm/winmm.rc:91
 msgid ""
@@ -13054,7 +13111,7 @@ msgstr "Kan een bestand zonder naam niet opslaan. Geef een bestandsnaam op."
 
 #: dlls/winmm/winmm.rc:98
 msgid "You must specify an alias when using the 'new' parameter."
-msgstr "U moet een alias opgeven als u de 'new' parameter gebruikt."
+msgstr "Een alias moet opgeven worden als de 'new' parameter gebruikt wordt."
 
 #: dlls/winmm/winmm.rc:99
 msgid "Cannot use the 'notify' flag with auto-opened devices."
@@ -13195,9 +13252,7 @@ msgstr ""
 msgid ""
 "The device you are trying to play to cannot recognize the current file "
 "format."
-msgstr ""
-"Het apparaat waar u mee probeert af te spelen is niet in staat om het "
-"huidige formaat te herkennen."
+msgstr "Het afspeelapparaat herkent het huidige bestandsformaat niet."
 
 #: dlls/winmm/winmm.rc:120
 msgid ""
@@ -13212,9 +13267,7 @@ msgstr ""
 msgid ""
 "The device you are trying to record from cannot recognize the current file "
 "format."
-msgstr ""
-"Het apparaat waar u mee probeert op te nemen is niet in staat om het huidige "
-"formaat te herkennen."
+msgstr "Het opname apparaat herkent het huidige bestandsformaat niet."
 
 #: dlls/winmm/winmm.rc:126
 msgid ""
@@ -13222,7 +13275,7 @@ msgid ""
 "You can't use them together."
 msgstr ""
 "Van de tijdsformaten \"song pointer\" en SMPTE kan er maar één in gebruik "
-"zijn. U kunt ze niet beide tegelijkertijd gebruiken."
+"zijn. Ze kunnen niet beide tegelijkertijd gebruikt worden."
 
 #: dlls/winmm/winmm.rc:128
 msgid ""
@@ -13314,7 +13367,7 @@ msgstr "&Bestandsnaam:"
 
 #: dlls/winspool.drv/winspool.rc:31
 msgid "The output file already exists. Click OK to overwrite."
-msgstr "Het uitvoerbestand bestaat al. Klik OK om het te overschrijven."
+msgstr "Het bestand bestaat al. Klik OK om het te overschrijven."
 
 #: dlls/winspool.drv/winspool.rc:32
 msgid "Unable to create the output file."
@@ -13538,7 +13591,7 @@ msgstr "Kan geen verbinding maken met LDAP-server"
 
 #: dlls/wldap32/wldap32.rc:124
 msgid "Operation not supported by this version of the LDAP protocol"
-msgstr "Operatie niet ondersteund door deze versie van het LDAP-protocol"
+msgstr "Bewerking niet ondersteund door deze versie van het LDAP-protocol"
 
 #: dlls/wldap32/wldap32.rc:125
 msgid "Specified control was not found in message"
@@ -13770,7 +13823,7 @@ msgstr ""
 "De FOR opdracht wordt gebruikt om een opdracht uit te voeren voor ieder van\n"
 "een verzameling bestanden.\n"
 "\n"
-"Syntax: FOR %variabele IN (verzameling) DO opdracht\n"
+"Gebruik: FOR %variabele IN (verzameling) DO opdracht\n"
 "\n"
 "Het % teken moet verdubbeld worden als FOR in een batch bestand wordt\n"
 "gebruikt.\n"
@@ -13821,9 +13874,9 @@ msgid ""
 msgstr ""
 "IF wordt gebruikt om een opdracht voorwaardelijk uit te voeren.\n"
 "\n"
-"Syntax: IF [NOT] EXIST bestandsnaam opdracht\n"
-"        IF [NOT] tekenreeks1==tekenreeks2 opdracht\n"
-"        IF [NOT] ERRORLEVEL getal opdracht\n"
+"Gebruik: IF [NOT] EXIST bestandsnaam opdracht\n"
+"         IF [NOT] tekenreeks1==tekenreeks2 opdracht\n"
+"         IF [NOT] ERRORLEVEL getal opdracht\n"
 "\n"
 "In de tweede vorm van de opdracht moeten tekenreeks1 en tekenreeks2 tussen\n"
 "dubbele aanhalingstekens staan. De vergelijking is niet gevoelig voor het\n"
@@ -13839,10 +13892,9 @@ msgid ""
 msgstr ""
 "LABEL wordt gebruikt om een schijflabel te wijzigen.\n"
 "\n"
-"Syntax: LABEL [schijf:]\n"
-"De opdracht vraagt u om een nieuw label in te tikken voor de opgegeven "
-"schijf.\n"
-"U kunt het label van een schijf tonen met behulp van de VOL opdracht.\n"
+"Gebruik: LABEL [schijf:]\n"
+"De opdracht vraagt om een nieuwe label voor de opgegeven schijf.\n"
+"Het label van een schijf kan getoond worden met behulp van de VOL opdracht.\n"
 
 #: programs/cmd/cmd.rc:121
 msgid "MD <name> is the short version of MKDIR. It creates a subdirectory.\n"
@@ -13885,11 +13937,11 @@ msgstr ""
 "PATH toon of wijzigt het zoekpad van cmd.\n"
 "\n"
 "De opdracht PATH toont het huidige zoekpad (de beginwaarde wordt uit het\n"
-"register gehaald). Om het zoekpad te wijzigen laat u de PATH opdracht door\n"
-"de nieuwe waarde.\n"
+"register gehaald). Om het zoekpad te wijzigen gebruik de PATH opdracht\n"
+"gevolgd door de nieuwe waarde.\n"
 "\n"
 "Het is ook mogelijk om het zoekpad te wijzigen met behulp van de PATH\n"
-"omgevingsvariabele, bij voorbeeld:\n"
+"omgevingsvariabele, bijvoorbeeld:\n"
 "PATH %PATH%;c:\\temp\n"
 
 #: programs/cmd/cmd.rc:148
@@ -14117,7 +14169,7 @@ msgstr ""
 
 #: programs/cmd/cmd.rc:256
 msgid "VER displays the version of cmd you are running.\n"
-msgstr "VER toont de versie van cmd die u draait.\n"
+msgstr "VER toont de versie van cmd die draait.\n"
 
 #: programs/cmd/cmd.rc:259
 msgid "VOL shows the volume label of a disk device.\n"
@@ -14338,7 +14390,7 @@ msgstr ""
 
 #: programs/cmd/cmd.rc:365
 msgid "Are you sure?"
-msgstr "Weet u het zeker?"
+msgstr "Zeker weten?"
 
 #: programs/cmd/cmd.rc:366 programs/reg/reg.rc:126 programs/xcopy/xcopy.rc:43
 msgctxt "Yes key"
@@ -14368,7 +14420,7 @@ msgstr "Meer..."
 
 #: programs/cmd/cmd.rc:372
 msgid "Line in Batch processing possibly truncated. Using:\n"
-msgstr "Regel in Batch proces mogelijk afgebroken. We gebruiken:\n"
+msgstr "Regel in Batch proces mogelijk afgebroken. Gebruikt:\n"
 
 #: programs/cmd/cmd.rc:374
 msgid "Argument missing\n"
@@ -14380,7 +14432,7 @@ msgstr "Syntaxisfout\n"
 
 #: programs/cmd/cmd.rc:377
 msgid "No help available for %1\n"
-msgstr "Geen help beschikbaar voor %1\n"
+msgstr "Help niet beschikbaar voor %1\n"
 
 #: programs/cmd/cmd.rc:378
 msgid "Target to GOTO not found\n"
@@ -14592,11 +14644,11 @@ msgstr "Bufferzone"
 
 #: programs/conhost/conhost.rc:96
 msgid "&Width:"
-msgstr "&Breedte :"
+msgstr "&Breedte:"
 
 #: programs/conhost/conhost.rc:99
 msgid "&Height:"
-msgstr "&Hoogte :"
+msgstr "&Hoogte:"
 
 #: programs/conhost/conhost.rc:103
 msgid "Window size"
@@ -14604,15 +14656,15 @@ msgstr "Venstergrootte"
 
 #: programs/conhost/conhost.rc:104
 msgid "W&idth:"
-msgstr "B&reedte :"
+msgstr "B&reedte:"
 
 #: programs/conhost/conhost.rc:107
 msgid "H&eight:"
-msgstr "H&oogte :"
+msgstr "H&oogte:"
 
 #: programs/conhost/conhost.rc:111
 msgid "End of program"
-msgstr "Einde programma"
+msgstr "Programma einde"
 
 #: programs/conhost/conhost.rc:112
 msgid "&Close console"
@@ -14621,18 +14673,6 @@ msgstr "&Console afsluiten"
 #: programs/conhost/conhost.rc:114
 msgid "Edition"
 msgstr "Modus"
-
-#: programs/conhost/conhost.rc:120
-msgid "Console parameters"
-msgstr "Console parameters"
-
-#: programs/conhost/conhost.rc:123
-msgid "Retain these settings for later sessions"
-msgstr "Bewaar deze instellingen voor latere sessies"
-
-#: programs/conhost/conhost.rc:124
-msgid "Modify only current session"
-msgstr "Wijzig alleen de huidige sessie"
 
 #: programs/conhost/conhost.rc:32 programs/notepad/notepad.rc:41
 #: programs/regedit/regedit.rc:43 programs/winhlp32/winhlp32.rc:39
@@ -14731,7 +14771,7 @@ msgstr ""
 
 #: programs/fsutil/fsutil.mc:40
 msgid "Syntax: fsutil hardlink create <new> <existing>\n"
-msgstr "Syntax: fsutil hardlink create <nieuw> <bestaand>\n"
+msgstr "Gebruik: fsutil hardlink create <nieuw> <bestaand>\n"
 
 #: programs/hostname/hostname.rc:30
 msgid "Usage: hostname\n"
@@ -14838,7 +14878,7 @@ msgid ""
 "\n"
 "Where 'command' is one of HELP, START, STOP or USE.\n"
 msgstr ""
-"Gebruik van dit commando is:\n"
+"Gebruik deze opdracht als volgt:\n"
 "\n"
 "NET opdracht [argumenten]\n"
 "    -of-\n"
@@ -14855,7 +14895,7 @@ msgid ""
 "Displays the list of running services if 'service' is omitted. Otherwise "
 "'service' is the name of the service to start.\n"
 msgstr ""
-"De syntax van deze opdracht is:\n"
+"Gebruik deze opdracht als volgt:\n"
 "\n"
 "NET START [service]\n"
 "\n"
@@ -14870,7 +14910,7 @@ msgid ""
 "\n"
 "Where 'service' is the name of the service to stop.\n"
 msgstr ""
-"De syntax van deze opdracht is:\n"
+"Gebruik deze opdracht als volgt:\n"
 "\n"
 "NET STOP service\n"
 "\n"
@@ -15112,8 +15152,8 @@ msgid "&Paste\tCtrl+V"
 msgstr "&Plakken\tCtrl+V"
 
 #: programs/notepad/notepad.rc:47 programs/progman/progman.rc:37
-#: programs/regedit/regedit.rc:56 programs/regedit/regedit.rc:109
-#: programs/regedit/regedit.rc:136 programs/winefile/winefile.rc:32
+#: programs/regedit/regedit.rc:57 programs/regedit/regedit.rc:111
+#: programs/regedit/regedit.rc:139 programs/winefile/winefile.rc:32
 msgid "&Delete\tDel"
 msgstr "Ver&wijderen\tDel"
 
@@ -15141,122 +15181,149 @@ msgstr "V&olgende zoeken\tF3"
 msgid "&Replace...\tCtrl+H"
 msgstr "&Vervangen...\tCtrl+H"
 
-#: programs/notepad/notepad.rc:61 programs/progman/progman.rc:56
-#: programs/regedit/regedit.rc:79 programs/winefile/winefile.rc:83
+#: programs/notepad/notepad.rc:59
+msgid "&Go To...\tCtrl+G"
+msgstr "&Ga Naar...\tCtrl+G"
+
+#: programs/notepad/notepad.rc:63 programs/oleview/oleview.rc:68
+#: programs/oleview/oleview.rc:90 programs/winefile/winefile.rc:67
+#: programs/wordpad/wordpad.rc:74 programs/wordpad/wordpad.rc:275
+msgid "&Status Bar"
+msgstr "&Statusbalk"
+
+#: programs/notepad/notepad.rc:66 programs/progman/progman.rc:56
+#: programs/regedit/regedit.rc:80 programs/winefile/winefile.rc:83
 msgid "&Contents\tF1"
 msgstr "Help-onder&werpen\tF1"
 
-#: programs/notepad/notepad.rc:62
+#: programs/notepad/notepad.rc:67
 msgid "&About Notepad"
 msgstr "&Over Notepad"
 
-#: programs/notepad/notepad.rc:100
+#: programs/notepad/notepad.rc:107
 msgid "Page Setup"
 msgstr "Pagina-instellingen"
 
-#: programs/notepad/notepad.rc:102
+#: programs/notepad/notepad.rc:109
 msgid "&Header:"
 msgstr "&Koptekst:"
 
-#: programs/notepad/notepad.rc:104
+#: programs/notepad/notepad.rc:111
 msgid "&Footer:"
 msgstr "&Voettekst:"
 
-#: programs/notepad/notepad.rc:107
+#: programs/notepad/notepad.rc:114
 msgid "Margins (millimeters)"
 msgstr "Marges (millimeter)"
 
-#: programs/notepad/notepad.rc:108
+#: programs/notepad/notepad.rc:115
 msgid "&Left:"
 msgstr "L&inks:"
 
-#: programs/notepad/notepad.rc:110
+#: programs/notepad/notepad.rc:117
 msgid "&Top:"
 msgstr "&Boven:"
 
-#: programs/notepad/notepad.rc:126
+#: programs/notepad/notepad.rc:132
+msgid "Go To Line"
+msgstr "Ga Naar Regel"
+
+#: programs/notepad/notepad.rc:134
+msgid "&Line Number:"
+msgstr "Rege&l Nummer:"
+
+#: programs/notepad/notepad.rc:137
+msgid "Go To"
+msgstr "Ga Naar"
+
+#: programs/notepad/notepad.rc:145
 msgid "Encoding:"
 msgstr "Codering:"
 
-#: programs/notepad/notepad.rc:132 programs/wordpad/wordpad.rc:289
+#: programs/notepad/notepad.rc:151 programs/wordpad/wordpad.rc:289
 msgctxt "accelerator Select All"
 msgid "A"
 msgstr "A"
 
-#: programs/notepad/notepad.rc:133 programs/wordpad/wordpad.rc:291
+#: programs/notepad/notepad.rc:152 programs/wordpad/wordpad.rc:291
 msgctxt "accelerator Copy"
 msgid "C"
 msgstr "C"
 
-#: programs/notepad/notepad.rc:134 programs/regedit/regedit.rc:372
+#: programs/notepad/notepad.rc:153 programs/regedit/regedit.rc:377
 #: programs/wordpad/wordpad.rc:287
 msgctxt "accelerator Find"
 msgid "F"
 msgstr "F"
 
-#: programs/notepad/notepad.rc:135 programs/wordpad/wordpad.rc:288
+#: programs/notepad/notepad.rc:154 programs/wordpad/wordpad.rc:288
 msgctxt "accelerator Replace"
 msgid "H"
 msgstr "H"
 
-#: programs/notepad/notepad.rc:136 programs/wordpad/wordpad.rc:297
+#: programs/notepad/notepad.rc:155 programs/wordpad/wordpad.rc:297
 msgctxt "accelerator New"
 msgid "N"
 msgstr "N"
 
-#: programs/notepad/notepad.rc:137 programs/wordpad/wordpad.rc:298
+#: programs/notepad/notepad.rc:156 programs/wordpad/wordpad.rc:298
 msgctxt "accelerator Open"
 msgid "O"
 msgstr "O"
 
-#: programs/notepad/notepad.rc:138 programs/regedit/regedit.rc:373
+#: programs/notepad/notepad.rc:157 programs/regedit/regedit.rc:378
 #: programs/wordpad/wordpad.rc:300
 msgctxt "accelerator Print"
 msgid "P"
 msgstr "P"
 
-#: programs/notepad/notepad.rc:139 programs/wordpad/wordpad.rc:299
+#: programs/notepad/notepad.rc:158 programs/wordpad/wordpad.rc:299
 msgctxt "accelerator Save"
 msgid "S"
 msgstr "S"
 
-#: programs/notepad/notepad.rc:140
+#: programs/notepad/notepad.rc:159
 msgctxt "accelerator Paste"
 msgid "V"
 msgstr "V"
 
-#: programs/notepad/notepad.rc:141 programs/wordpad/wordpad.rc:290
+#: programs/notepad/notepad.rc:160 programs/wordpad/wordpad.rc:290
 msgctxt "accelerator Cut"
 msgid "X"
 msgstr "X"
 
-#: programs/notepad/notepad.rc:142 programs/wordpad/wordpad.rc:292
+#: programs/notepad/notepad.rc:161 programs/wordpad/wordpad.rc:292
 msgctxt "accelerator Undo"
 msgid "Z"
 msgstr "Z"
 
-#: programs/notepad/notepad.rc:69
+#: programs/notepad/notepad.rc:162
+msgctxt "accelerator GoTo"
+msgid "G"
+msgstr "G"
+
+#: programs/notepad/notepad.rc:74
 msgid "Page &p"
 msgstr "Pagina &p"
 
-#: programs/notepad/notepad.rc:71
+#: programs/notepad/notepad.rc:76
 msgid "Notepad"
 msgstr "Kladblok"
 
-#: programs/notepad/notepad.rc:72 programs/progman/progman.rc:64
+#: programs/notepad/notepad.rc:77 programs/progman/progman.rc:64
 #: programs/winhlp32/winhlp32.rc:82
 msgid "ERROR"
 msgstr "FOUT"
 
-#: programs/notepad/notepad.rc:74
+#: programs/notepad/notepad.rc:79
 msgid "Untitled"
 msgstr "Naamloos"
 
-#: programs/notepad/notepad.rc:77 programs/winedbg/winedbg.rc:42
+#: programs/notepad/notepad.rc:82 programs/winedbg/winedbg.rc:42
 msgid "Text files (*.txt)"
 msgstr "Tekstbestanden (*.txt)"
 
-#: programs/notepad/notepad.rc:80
+#: programs/notepad/notepad.rc:85
 msgid ""
 "File '%s' does not exist.\n"
 "\n"
@@ -15264,9 +15331,9 @@ msgid ""
 msgstr ""
 "Bestand '%s' bestaat niet.\n"
 "\n"
-"Wilt u een nieuw bestand maken?"
+"Een nieuw bestand maken?"
 
-#: programs/notepad/notepad.rc:82
+#: programs/notepad/notepad.rc:87
 msgid ""
 "File '%s' has been modified.\n"
 "\n"
@@ -15274,25 +15341,25 @@ msgid ""
 msgstr ""
 "Bestand '%s' is gewijzigd.\n"
 "\n"
-"Wilt u de wijzigingen opslaan?"
+"De wijzigingen opslaan?"
 
-#: programs/notepad/notepad.rc:83
+#: programs/notepad/notepad.rc:88
 msgid "'%s' could not be found."
 msgstr "'%s' kan niet worden gevonden."
 
-#: programs/notepad/notepad.rc:85
+#: programs/notepad/notepad.rc:92
 msgid "Unicode (UTF-16)"
 msgstr "Unicode (UTF-16)"
 
-#: programs/notepad/notepad.rc:86
+#: programs/notepad/notepad.rc:93
 msgid "Unicode (UTF-16 big-endian)"
 msgstr "Unicode (UTF-16 big-endian)"
 
-#: programs/notepad/notepad.rc:87
+#: programs/notepad/notepad.rc:94
 msgid "Unicode (UTF-8)"
 msgstr "Unicode (UTF-8)"
 
-#: programs/notepad/notepad.rc:94
+#: programs/notepad/notepad.rc:101
 msgid ""
 "%1\n"
 "This file contains Unicode characters which will be lost if\n"
@@ -15306,7 +15373,11 @@ msgstr ""
 "als dit bestand wordt opgeslagen in de %2 codering.\n"
 "Klik op Annuleren om deze tekens te behouden, en selecteer\n"
 "daarna één van de Unicode-opties in de coderingskeuzelijst.\n"
-"Wilt u doorgaan?"
+"Doorgaan?"
+
+#: programs/notepad/notepad.rc:90
+msgid "Ln %ld, Col %ld"
+msgstr "Rij %ld, Kol %ld"
 
 #: programs/oleview/oleview.rc:32
 msgid "&Bind to file..."
@@ -15382,13 +15453,7 @@ msgstr "Ver&borgen componentcategorieën"
 msgid "&Toolbar"
 msgstr "&Gereedschapsbalk"
 
-#: programs/oleview/oleview.rc:68 programs/oleview/oleview.rc:90
-#: programs/winefile/winefile.rc:67 programs/wordpad/wordpad.rc:74
-#: programs/wordpad/wordpad.rc:275
-msgid "&Status Bar"
-msgstr "&Statusbalk"
-
-#: programs/oleview/oleview.rc:70 programs/regedit/regedit.rc:70
+#: programs/oleview/oleview.rc:70 programs/regedit/regedit.rc:71
 #: programs/winefile/winefile.rc:79
 msgid "&Refresh\tF5"
 msgstr "&Vernieuwen\tF5"
@@ -15813,11 +15878,11 @@ msgstr "Informatie"
 
 #: programs/progman/progman.rc:68
 msgid "Delete group `%s'?"
-msgstr "Wilt u groep `%s' verwijderen?"
+msgstr "Verwijder groep `%s'?"
 
 #: programs/progman/progman.rc:69
 msgid "Delete program `%s'?"
-msgstr "Wilt u programma `%s' verwijderen?"
+msgstr "Verwijder programma `%s'?"
 
 #: programs/progman/progman.rc:70
 msgid "Not implemented"
@@ -15837,7 +15902,7 @@ msgid ""
 "Should it be tried further on?"
 msgstr ""
 "Het groepsbestand `%s' kan niet worden geopend.\n"
-"Wilt u het nogmaals proberen?"
+"Nogmaals proberen?"
 
 #: programs/progman/progman.rc:77
 msgid "Help not available."
@@ -15897,7 +15962,7 @@ msgstr "reg: Kan de gegeven registersleutel niet vinden\n"
 msgid "reg: Unable to find the specified registry value\n"
 msgstr "reg: Kan de gegeven registerwaarde niet vinden\n"
 
-#: programs/reg/reg.rc:132 programs/regedit/regedit.rc:239
+#: programs/reg/reg.rc:132 programs/regedit/regedit.rc:244
 msgid "(Default)"
 msgstr "(Standaard)"
 
@@ -15961,7 +16026,7 @@ msgid ""
 "     <type> must be one of the following:\n"
 "\n"
 "         REG_SZ    | REG_MULTI_SZ | REG_EXPAND_SZ\n"
-"         REG_DWORD | REG_BINARY   | REG_NONE\n"
+"         REG_DWORD | REG_QWORD    | REG_BINARY   | REG_NONE\n"
 "\n"
 "     If [/t] is not specified, the default data type is REG_SZ.\n"
 "\n"
@@ -16013,7 +16078,7 @@ msgstr ""
 "     <type> één van de volgende zijn:\n"
 "\n"
 "         REG_SZ    | REG_MULTI_SZ | REG_EXPAND_SZ\n"
-"         REG_DWORD | REG_BINARY   | REG_NONE\n"
+"         REG_DWORD | REG_QWORD    | REG_BINARY   | REG_NONE\n"
 "\n"
 "     Als [/t] niet is gegeven, dan wordt het type REG_SZ verondersteld.\n"
 "\n"
@@ -16377,7 +16442,7 @@ msgstr "reg: Register data type wordt niet ondersteund [%1]\n"
 
 #: programs/reg/reg.rc:125
 msgid "The registry value '%1' already exists. Do you want to overwrite it?"
-msgstr "De registerwaarde '%1' bestand bestaat al. Wilt u het vervangen?"
+msgstr "De registerwaarde '%1' bestand bestaat al. Deze vervangen?"
 
 #: programs/reg/reg.rc:118
 msgid "reg: Invalid command line parameters\n"
@@ -16391,20 +16456,19 @@ msgstr "reg: De bron- en de doelsleutel kunnen niet hetzelfde zijn\n"
 msgid ""
 "The value '%1\\%2' already exists in the destination key. Do you want to "
 "overwrite it?"
-msgstr ""
-"De waarde '%1\\%2' komt al voor in de doelsleutel. Wilt u het overschrijven?"
+msgstr "De waarde '%1\\%2' komt al voor in de doelsleutel. Deze overschrijven?"
 
 #: programs/reg/reg.rc:133
 msgid "Are you sure you want to delete the registry value '%1'?"
-msgstr "Weet u zeker dat u de registerwaarde '%1' wilt verwijderen?"
+msgstr "Moet de registerwaarde '%1' verwijderd worden?"
 
 #: programs/reg/reg.rc:134
 msgid "Are you sure you want to delete all registry values in '%1'?"
-msgstr "Weet u zeker dat u alle registerwaardes in '%1' wilt verwijderen?"
+msgstr "Moeten alle registerwaardes in '%1' verwijderd worden?"
 
 #: programs/reg/reg.rc:135
 msgid "Are you sure you want to delete the registry key '%1'?"
-msgstr "Weet u zeker dat u registersleutel '%1' wilt verwijderen?"
+msgstr "Moet de registersleutel '%1' verwijderd worden?"
 
 #: programs/reg/reg.rc:137
 msgid "reg: Unable to delete all registry values in '%1'\n"
@@ -16412,7 +16476,7 @@ msgstr "reg: Kan niet alle registerwaardes in '%1' verwijderen.\n"
 
 #: programs/reg/reg.rc:173
 msgid "The file '%1' already exists. Do you want to overwrite it?"
-msgstr "Het bestand '%1' bestaat al. Wilt u het overschrijven?"
+msgstr "Het bestand '%1' bestaat al. Overschrijven?"
 
 #: programs/reg/reg.rc:151
 msgid "reg: Unrecognized escape sequence [\\%1!c!]\n"
@@ -16426,7 +16490,7 @@ msgstr "reg: Importeren van de registersleutel '%1' is niet mogelijk.\n"
 msgid "reg: The file '%1' was not found.\n"
 msgstr "reg: Het bestand '%1' is niet gevonden.\n"
 
-#: programs/reg/reg.rc:143 programs/regedit/regedit.rc:240
+#: programs/reg/reg.rc:143 programs/regedit/regedit.rc:245
 msgid "(value not set)"
 msgstr "(Geen waarde ingesteld)"
 
@@ -16446,233 +16510,238 @@ msgstr "Registerbestand &importeren..."
 msgid "&Export Registry File..."
 msgstr "Registerbestand &exporteren..."
 
-#: programs/regedit/regedit.rc:47 programs/regedit/regedit.rc:99
-#: programs/regedit/regedit.rc:121
+#: programs/regedit/regedit.rc:47 programs/regedit/regedit.rc:100
+#: programs/regedit/regedit.rc:123
 msgid "&Key"
 msgstr "&Sleutel"
 
-#: programs/regedit/regedit.rc:49 programs/regedit/regedit.rc:101
-#: programs/regedit/regedit.rc:123
+#: programs/regedit/regedit.rc:49 programs/regedit/regedit.rc:102
+#: programs/regedit/regedit.rc:125
 msgid "&String Value"
 msgstr "&Tekenreekswaarde"
 
-#: programs/regedit/regedit.rc:50 programs/regedit/regedit.rc:102
-#: programs/regedit/regedit.rc:124
+#: programs/regedit/regedit.rc:50 programs/regedit/regedit.rc:103
+#: programs/regedit/regedit.rc:126
 msgid "&Binary Value"
 msgstr "&Binaire waarde"
 
-#: programs/regedit/regedit.rc:51 programs/regedit/regedit.rc:103
-#: programs/regedit/regedit.rc:125
+#: programs/regedit/regedit.rc:51 programs/regedit/regedit.rc:104
+#: programs/regedit/regedit.rc:127
 msgid "&DWORD Value"
 msgstr "&DWORD-waarde"
 
-#: programs/regedit/regedit.rc:52 programs/regedit/regedit.rc:104
-#: programs/regedit/regedit.rc:126
+#: programs/regedit/regedit.rc:52 programs/regedit/regedit.rc:105
+#: programs/regedit/regedit.rc:128
+msgid "&QWORD Value"
+msgstr "&QWORD-waarde"
+
+#: programs/regedit/regedit.rc:53 programs/regedit/regedit.rc:106
+#: programs/regedit/regedit.rc:129
 msgid "&Multi-String Value"
 msgstr "&Multi-Tekenreekswaarde"
 
-#: programs/regedit/regedit.rc:53 programs/regedit/regedit.rc:105
-#: programs/regedit/regedit.rc:127
+#: programs/regedit/regedit.rc:54 programs/regedit/regedit.rc:107
+#: programs/regedit/regedit.rc:130
 msgid "&Expandable String Value"
 msgstr "&Expandeerbare tekenreekswaarde"
 
-#: programs/regedit/regedit.rc:57 programs/regedit/regedit.rc:110
-#: programs/regedit/regedit.rc:137
+#: programs/regedit/regedit.rc:58 programs/regedit/regedit.rc:112
+#: programs/regedit/regedit.rc:140
 msgid "&Rename\tF2"
 msgstr "N&aam wijzigen\tF2"
 
-#: programs/regedit/regedit.rc:59 programs/regedit/regedit.rc:114
+#: programs/regedit/regedit.rc:60 programs/regedit/regedit.rc:116
 msgid "&Copy Key Name"
 msgstr "&Sleutelnaam kopiëren"
 
-#: programs/regedit/regedit.rc:61 programs/regedit/regedit.rc:107
+#: programs/regedit/regedit.rc:62 programs/regedit/regedit.rc:109
 #: programs/wordpad/wordpad.rc:53
 msgid "&Find...\tCtrl+F"
 msgstr "&Zoeken...\tCtrl+F"
 
-#: programs/regedit/regedit.rc:62
+#: programs/regedit/regedit.rc:63
 msgid "Find Ne&xt\tF3"
 msgstr "Volgende Zoeken\tF3"
 
-#: programs/regedit/regedit.rc:66
+#: programs/regedit/regedit.rc:67
 msgid "Status &Bar"
 msgstr "&Statusbalk"
 
-#: programs/regedit/regedit.rc:68 programs/winefile/winefile.rc:49
+#: programs/regedit/regedit.rc:69 programs/winefile/winefile.rc:49
 msgid "Sp&lit"
 msgstr "Sp&litsen"
 
-#: programs/regedit/regedit.rc:75
+#: programs/regedit/regedit.rc:76
 msgid "&Remove Favorite..."
 msgstr "&Verwijderen uit favorieten..."
 
-#: programs/regedit/regedit.rc:80
+#: programs/regedit/regedit.rc:81
 msgid "&About Registry Editor"
 msgstr "&Info"
 
-#: programs/regedit/regedit.rc:89 programs/regedit/regedit.rc:96
-#: programs/regedit/regedit.rc:230
+#: programs/regedit/regedit.rc:90 programs/regedit/regedit.rc:97
+#: programs/regedit/regedit.rc:235
 msgid "Expand"
 msgstr "Uitvouwen"
 
-#: programs/regedit/regedit.rc:134 programs/regedit/regedit.rc:233
+#: programs/regedit/regedit.rc:137 programs/regedit/regedit.rc:238
 msgid "Modify &Binary Data..."
 msgstr "&Binaire data wijzigen..."
 
-#: programs/regedit/regedit.rc:267
+#: programs/regedit/regedit.rc:272
 msgid "Export registry"
 msgstr "Registerbestand &exporteren"
 
-#: programs/regedit/regedit.rc:269
+#: programs/regedit/regedit.rc:274
 msgid "S&elected branch:"
 msgstr "&Gekozen subsleutel:"
 
-#: programs/regedit/regedit.rc:278
+#: programs/regedit/regedit.rc:283
 msgid "Find:"
 msgstr "Zoek:"
 
-#: programs/regedit/regedit.rc:280
+#: programs/regedit/regedit.rc:285
 msgid "Find in:"
 msgstr "In:"
 
-#: programs/regedit/regedit.rc:281
+#: programs/regedit/regedit.rc:286
 msgid "Keys"
 msgstr "Sleutels"
 
-#: programs/regedit/regedit.rc:282
+#: programs/regedit/regedit.rc:287
 msgid "Value names"
 msgstr "Waarden"
 
-#: programs/regedit/regedit.rc:283
+#: programs/regedit/regedit.rc:288
 msgid "Value content"
 msgstr "Gegevens"
 
-#: programs/regedit/regedit.rc:284
+#: programs/regedit/regedit.rc:289
 msgid "Whole string only"
 msgstr "Hele tekenreeks"
 
-#: programs/regedit/regedit.rc:291
+#: programs/regedit/regedit.rc:296
 msgid "Add Favorite"
 msgstr "Toevoegen aan favorieten"
 
-#: programs/regedit/regedit.rc:294 programs/regedit/regedit.rc:305
+#: programs/regedit/regedit.rc:299 programs/regedit/regedit.rc:310
 msgid "Name:"
 msgstr "Naam:"
 
-#: programs/regedit/regedit.rc:302
+#: programs/regedit/regedit.rc:307
 msgid "Remove Favorite"
 msgstr "Favorieten verwijderen"
 
-#: programs/regedit/regedit.rc:313
+#: programs/regedit/regedit.rc:318
 msgid "Edit String"
 msgstr "Tekenreeks bewerken"
 
-#: programs/regedit/regedit.rc:316 programs/regedit/regedit.rc:329
-#: programs/regedit/regedit.rc:345 programs/regedit/regedit.rc:358
+#: programs/regedit/regedit.rc:321 programs/regedit/regedit.rc:334
+#: programs/regedit/regedit.rc:350 programs/regedit/regedit.rc:363
 msgid "Value name:"
 msgstr "Waardenaam:"
 
-#: programs/regedit/regedit.rc:318 programs/regedit/regedit.rc:331
-#: programs/regedit/regedit.rc:347 programs/regedit/regedit.rc:360
+#: programs/regedit/regedit.rc:323 programs/regedit/regedit.rc:336
+#: programs/regedit/regedit.rc:352 programs/regedit/regedit.rc:365
 msgid "Value data:"
 msgstr "Waardegegevens:"
 
-#: programs/regedit/regedit.rc:326
+#: programs/regedit/regedit.rc:331
 msgid "Edit DWORD"
 msgstr "DWORD waarde bewerken"
 
-#: programs/regedit/regedit.rc:333
+#: programs/regedit/regedit.rc:338
 msgid "Base"
 msgstr "Grondtal"
 
-#: programs/regedit/regedit.rc:334
+#: programs/regedit/regedit.rc:339
 msgid "Hexadecimal"
 msgstr "Hexadecimaal"
 
-#: programs/regedit/regedit.rc:335
+#: programs/regedit/regedit.rc:340
 msgid "Decimal"
 msgstr "Decimaal"
 
-#: programs/regedit/regedit.rc:342
+#: programs/regedit/regedit.rc:347
 msgid "Edit Binary"
 msgstr "Binaire waarde bewerken"
 
-#: programs/regedit/regedit.rc:355
+#: programs/regedit/regedit.rc:360
 msgid "Edit Multi-String"
 msgstr "Multi-tekenreeks bewerken"
 
-#: programs/regedit/regedit.rc:159
+#: programs/regedit/regedit.rc:162
 msgid "Contains commands for working with the whole registry"
 msgstr "Opdrachten voor het werken met het gehele register"
 
-#: programs/regedit/regedit.rc:160
+#: programs/regedit/regedit.rc:163
 msgid "Contains commands for editing values or keys"
 msgstr "Opdrachten voor het bewerken van waarden of sleutels"
 
-#: programs/regedit/regedit.rc:161
+#: programs/regedit/regedit.rc:164
 msgid "Contains commands for customizing the registry window"
 msgstr "Opdrachten voor het aanpassen van het registervenster"
 
-#: programs/regedit/regedit.rc:162
+#: programs/regedit/regedit.rc:165
 msgid "Contains commands for accessing frequently used keys"
 msgstr "Opdrachten voor toegang tot vaak gebruikte sleutels"
 
-#: programs/regedit/regedit.rc:163
+#: programs/regedit/regedit.rc:166
 msgid ""
 "Contains commands for displaying Help and information about Registry Editor"
 msgstr ""
 "Opdrachten voor het weergeven van Help en informatie over de Register "
 "Bewerker"
 
-#: programs/regedit/regedit.rc:164
+#: programs/regedit/regedit.rc:167
 msgid "Contains commands for creating new keys or values"
 msgstr "Opdrachten voor het maken van nieuwe sleutels of waarden"
 
-#: programs/regedit/regedit.rc:149
+#: programs/regedit/regedit.rc:152
 msgid "Data"
 msgstr "Gegevens"
 
-#: programs/regedit/regedit.rc:154
+#: programs/regedit/regedit.rc:157
 msgid "Registry Editor"
 msgstr "Register Bewerker"
 
-#: programs/regedit/regedit.rc:221
+#: programs/regedit/regedit.rc:226
 msgid "Import Registry File"
 msgstr "Registerbestand importeren"
 
-#: programs/regedit/regedit.rc:222
+#: programs/regedit/regedit.rc:227
 msgid "Export Registry File"
 msgstr "Registerbestand exporteren"
 
-#: programs/regedit/regedit.rc:223
+#: programs/regedit/regedit.rc:228
 msgid "Registry files (*.reg)"
 msgstr "Registerbestanden (*.reg)"
 
-#: programs/regedit/regedit.rc:224
+#: programs/regedit/regedit.rc:229
 msgid "Win9x/NT4 Registry files (REGEDIT4)"
 msgstr "Win9x/NT4 Registerbestanden (REGEDIT4)"
 
-#: programs/regedit/regedit.rc:241
+#: programs/regedit/regedit.rc:246
 msgid "(cannot display value)"
 msgstr "(kan waarde niet weergeven)"
 
-#: programs/regedit/regedit.rc:242
+#: programs/regedit/regedit.rc:247
 msgid "(unknown %d)"
 msgstr "(onbekend %d)"
 
-#: programs/regedit/regedit.rc:247
+#: programs/regedit/regedit.rc:252
 msgid "Unable to modify the selected registry value."
 msgstr "Onmogelijk om de geselecteerde registerwaarde te wijzigen."
 
-#: programs/regedit/regedit.rc:248
+#: programs/regedit/regedit.rc:253
 msgid "Unable to create a new registry key."
 msgstr "Onmogelijk om een nieuwe registersleutel te maken."
 
-#: programs/regedit/regedit.rc:249
+#: programs/regedit/regedit.rc:254
 msgid "Unable to create a new registry value."
 msgstr "Onmogelijk om een nieuwe registerwaarde te maken."
 
-#: programs/regedit/regedit.rc:250
+#: programs/regedit/regedit.rc:255
 msgid ""
 "Unable to rename the key '%1'.\n"
 "The specified key name already exists."
@@ -16680,7 +16749,7 @@ msgstr ""
 "Onmogelijk om de sleutel '%1' te hernoemen.\n"
 "De opgeven sleutelnaam bestaat al."
 
-#: programs/regedit/regedit.rc:251
+#: programs/regedit/regedit.rc:256
 msgid ""
 "Unable to rename the value '%1'.\n"
 "The specified value name already exists."
@@ -16688,29 +16757,29 @@ msgstr ""
 "Onmogelijk om de waarde '%1' te hernoemen.\n"
 "De opgeven naam van de waarde bestaat al."
 
-#: programs/regedit/regedit.rc:252
+#: programs/regedit/regedit.rc:257
 msgid "Unable to delete the selected registry key."
 msgstr "Onmogelijk om de geselecteerde registersleutel te verwijderen."
 
-#: programs/regedit/regedit.rc:253
+#: programs/regedit/regedit.rc:258
 msgid "Unable to rename the selected registry key."
 msgstr "Onmogelijk om de geselecteerde registersleutel te hernoemen."
 
-#: programs/regedit/regedit.rc:254
+#: programs/regedit/regedit.rc:259
 msgid "Unable to rename the selected registry value."
 msgstr "Onmogelijk om de geselecteerde registerwaarde te hernoemen."
 
-#: programs/regedit/regedit.rc:255
+#: programs/regedit/regedit.rc:260
 msgid ""
 "The keys and values contained in %1 were successfully added to the registry."
 msgstr ""
 "De sleutel en de waardes van %1 zijn succesvol aan het register toegevoegd."
 
-#: programs/regedit/regedit.rc:256
+#: programs/regedit/regedit.rc:261
 msgid "Unable to import %1. The specified file is not a valid registry file."
 msgstr "Onmogelijk om %1 te importeren. Dit bestand is geen registerbestand."
 
-#: programs/regedit/regedit.rc:408
+#: programs/regedit/regedit.rc:413
 msgid ""
 "Usage:\n"
 "  regedit [options] [filename] [reg_key]\n"
@@ -16761,44 +16830,48 @@ msgstr ""
 "                 plek aan waar het register informatie wordt geëxporteerd.\n"
 "  [sleutel]      De te wijzigen registersleutel.\n"
 "\n"
+"Bijvoorbeeld:\n"
+"  regedit \"import.reg\"\n"
+"  regedit /E \"export.reg\" \"HKEY_CURRENT_USER\\Console\"\n"
+"  regedit /D \"HKEY_LOCAL_MACHINE\\Sleutel\\Pad\"\n"
 
-#: programs/regedit/regedit.rc:409
+#: programs/regedit/regedit.rc:414
 msgid "regedit: Invalid or unrecognized switch [%1]\n"
 msgstr "regedit: Ongeldige of onbekende optie [%1]\n"
 
-#: programs/regedit/regedit.rc:410
+#: programs/regedit/regedit.rc:415
 msgid "Type \"regedit /?\" for help.\n"
 msgstr "Type \"regedit /?\" voor hulp.\n"
 
-#: programs/regedit/regedit.rc:411
+#: programs/regedit/regedit.rc:416
 msgid "regedit: No filename was specified.\n"
 msgstr "regedit: Geen bestand opgegeven.\n"
 
-#: programs/regedit/regedit.rc:412
+#: programs/regedit/regedit.rc:417
 msgid "regedit: No registry key was specified for removal.\n"
 msgstr "regedit: Geen registersleutel gegeven om te verwijderen.\n"
 
-#: programs/regedit/regedit.rc:413
+#: programs/regedit/regedit.rc:418
 msgid "regedit: The file '%1' was not found.\n"
 msgstr "regedit: Het bestand '%1' is niet gevonden.\n"
 
-#: programs/regedit/regedit.rc:414
+#: programs/regedit/regedit.rc:419
 msgid "regedit: Unable to open the file '%1'.\n"
 msgstr "regedit: Onmogelijk om bestand '%1' te openen.\n"
 
-#: programs/regedit/regedit.rc:415
+#: programs/regedit/regedit.rc:420
 msgid "regedit: Unhandled action.\n"
 msgstr "regedit Onverwerkte actie.\n"
 
-#: programs/regedit/regedit.rc:416
+#: programs/regedit/regedit.rc:421
 msgid "regedit: Out of memory! (%1!S!, line %2!u!)\n"
 msgstr "regedit: Onvoldoende geheugen! (%1!S!, lijn %2!u!)\n"
 
-#: programs/regedit/regedit.rc:417
+#: programs/regedit/regedit.rc:422
 msgid "regedit: Invalid hexadecimal value.\n"
 msgstr "regedit: Ongeldige hexadecimale waarde.\n"
 
-#: programs/regedit/regedit.rc:418
+#: programs/regedit/regedit.rc:423
 msgid ""
 "regedit: Unable to convert hexadecimal data. An invalid value was "
 "encountered at '%1'.\n"
@@ -16806,217 +16879,225 @@ msgstr ""
 "regedit: Onmogelijk om de hexadecimale gegevens om te zetten. Er is een "
 "ongeldige waarde aangetroffen op '%1'.\n"
 
-#: programs/regedit/regedit.rc:419
+#: programs/regedit/regedit.rc:424
 msgid "regedit: Unrecognized escape sequence [\\%1!c!]\n"
 msgstr "regedit: Escape-tekenreeks niet herkend [\\%1!c!]\n"
 
-#: programs/regedit/regedit.rc:420
+#: programs/regedit/regedit.rc:425
 msgid "regedit: Unsupported registry data type [0x%1!x!]\n"
 msgstr "regedit: Register gegevenstype niet ondersteund [0x%1!x!]\n"
 
-#: programs/regedit/regedit.rc:421
+#: programs/regedit/regedit.rc:426
 msgid "regedit: Unexpected end of line in '%1'.\n"
 msgstr "regedit: Onverwachte regeleinde op regel '%1'.\n"
 
-#: programs/regedit/regedit.rc:422
+#: programs/regedit/regedit.rc:427
 msgid "regedit: The line '%1' was not recognized.\n"
 msgstr "regedit: De regel '%1' wordt niet herkend.\n"
 
-#: programs/regedit/regedit.rc:423
+#: programs/regedit/regedit.rc:428
 msgid "regedit: Unable to add the registry value '%1' to '%2'.\n"
 msgstr "regedit: Kan registerwaarde '%1' tot '%2' niet toevoegen.\n"
 
-#: programs/regedit/regedit.rc:424
+#: programs/regedit/regedit.rc:429
 msgid "regedit: Unable to open the registry key '%1'.\n"
 msgstr "regedit: Kan de registersleutel '%1' niet openen.\n"
 
-#: programs/regedit/regedit.rc:425
+#: programs/regedit/regedit.rc:430
 msgid ""
 "regedit: Unsupported registry data type [0x%1!x!] encountered in '%2'.\n"
 msgstr ""
 "regedit: Register gegevenstype [0x%1!x!] aangetroffen in '%2' wordt niet\n"
 "ondersteund.\n"
 
-#: programs/regedit/regedit.rc:426
+#: programs/regedit/regedit.rc:431
 msgid "regedit: The registry value '%1' will be exported as binary data.\n"
 msgstr "regedit: De registerwaarde '%1' wordt geëxporteerd als binaire data.\n"
 
-#: programs/regedit/regedit.rc:427
+#: programs/regedit/regedit.rc:432
 msgid "regedit: Invalid system key [%1]\n"
 msgstr "regedit: Ongeldige systeemsleutel [%1]\n"
 
-#: programs/regedit/regedit.rc:428
+#: programs/regedit/regedit.rc:433
 msgid ""
 "regedit: Unable to export '%1'. The specified registry key was not found.\n"
 msgstr ""
 "regedit: Kan '%1' niet exporteren. De registersleutel werd niet gevonden.\n"
 
-#: programs/regedit/regedit.rc:429
+#: programs/regedit/regedit.rc:434
 msgid "regedit: Unable to delete the registry key '%1'.\n"
 msgstr "regedit: Kan de registersleutel '%1' niet verwijderen.\n"
 
-#: programs/regedit/regedit.rc:431
+#: programs/regedit/regedit.rc:436
 msgid "regedit: The line contains invalid syntax.\n"
 msgstr "regedit: De regel bevat een ongeldige opdracht.\n"
 
-#: programs/regedit/regedit.rc:187
+#: programs/regedit/regedit.rc:191
 msgid "Quits the Registry Editor"
 msgstr "De Register Bewerker afsluiten"
 
-#: programs/regedit/regedit.rc:188
+#: programs/regedit/regedit.rc:192
 msgid "Adds keys to the favorites list"
 msgstr "Sleutels toevoegen aan de lijst met favorieten"
 
-#: programs/regedit/regedit.rc:189
+#: programs/regedit/regedit.rc:193
 msgid "Removes keys from the favorites list"
 msgstr "Sleutels verwijderen uit de lijst met favorieten"
 
-#: programs/regedit/regedit.rc:190
+#: programs/regedit/regedit.rc:194
 msgid "Shows or hides the status bar"
 msgstr "De statusbalk weergeven of verbergen"
 
-#: programs/regedit/regedit.rc:191
+#: programs/regedit/regedit.rc:195
 msgid "Changes the position of the split between two panes"
 msgstr "De scheiding tussen twee deelvensters wijzigen"
 
-#: programs/regedit/regedit.rc:192
+#: programs/regedit/regedit.rc:196
 msgid "Refreshes the window"
 msgstr "Het venster vernieuwen"
 
-#: programs/regedit/regedit.rc:193
+#: programs/regedit/regedit.rc:197
 msgid "Deletes the selection"
 msgstr "De selectie verwijderen"
 
-#: programs/regedit/regedit.rc:194
+#: programs/regedit/regedit.rc:198
 msgid "Renames the selection"
 msgstr "De naam van de selectie wijzigen"
 
-#: programs/regedit/regedit.rc:195
+#: programs/regedit/regedit.rc:199
 msgid "Copies the name of the selected key to the clipboard"
 msgstr "De naam van de geselecteerde sleutel naar het Klembord kopiëren"
 
-#: programs/regedit/regedit.rc:196
+#: programs/regedit/regedit.rc:200
 msgid "Finds a text string in a key, value or data"
 msgstr "Een tekenreeks zoeken in een sleutel, een waarde of gegevens"
 
-#: programs/regedit/regedit.rc:197
+#: programs/regedit/regedit.rc:201
 msgid "Finds next occurrence of text specified in previous search"
 msgstr "De opgegeven tekst nogmaals zoeken"
 
-#: programs/regedit/regedit.rc:169
+#: programs/regedit/regedit.rc:172
 msgid "Modifies the value's data"
 msgstr "De gegevens van de waarde wijzigen"
 
-#: programs/regedit/regedit.rc:171
+#: programs/regedit/regedit.rc:174
 msgid "Adds a new key"
 msgstr "Een nieuwe sleutel toevoegen"
 
-#: programs/regedit/regedit.rc:172
+#: programs/regedit/regedit.rc:175
 msgid "Adds a new string value"
 msgstr "Een nieuwe tekenreekswaarde toevoegen"
 
-#: programs/regedit/regedit.rc:173
+#: programs/regedit/regedit.rc:176
 msgid "Adds a new binary value"
 msgstr "Een nieuwe binaire waarde toevoegen"
 
-#: programs/regedit/regedit.rc:174
+#: programs/regedit/regedit.rc:177
 msgid "Adds a new 32-bit value"
 msgstr "Een nieuwe 32-bit waarde toevoegen"
 
-#: programs/regedit/regedit.rc:177
+#: programs/regedit/regedit.rc:181
 msgid "Imports a text file into the registry"
 msgstr "Een tekstbestand in het register importeren"
 
-#: programs/regedit/regedit.rc:179
+#: programs/regedit/regedit.rc:183
 msgid "Exports all or part of the registry to a text file"
 msgstr "Het register of een gedeelte ervan naar een tekstbestand exporteren"
 
-#: programs/regedit/regedit.rc:180
+#: programs/regedit/regedit.rc:184
 msgid "Prints all or part of the registry"
 msgstr "Het register of een gedeelte ervan afdrukken"
 
-#: programs/regedit/regedit.rc:181
+#: programs/regedit/regedit.rc:185
 msgid "Opens Registry Editor Help"
 msgstr "Register Bewerker Help"
 
-#: programs/regedit/regedit.rc:182
+#: programs/regedit/regedit.rc:186
 msgid "Displays program information, version number and copyright"
 msgstr "Programmagegevens, versienummer en copyrightgegevens weergeven"
 
-#: programs/regedit/regedit.rc:206
+#: programs/regedit/regedit.rc:210
 msgid "Unable to query the registry value '%1'."
 msgstr "Kan de registerwaarde '%1' niet opvragen."
 
-#: programs/regedit/regedit.rc:207
+#: programs/regedit/regedit.rc:211
 msgid "Unable to edit registry keys of this type (%1!u!)."
 msgstr "Kan dit type registersleutel (%1!u!) niet bewerken."
 
-#: programs/regedit/regedit.rc:208
+#: programs/regedit/regedit.rc:212
 msgid "The value is too big (%1!u!)."
-msgstr "De waarde te groot (%1!u!)."
+msgstr "De waarde is te groot (%1!u!)."
 
-#: programs/regedit/regedit.rc:209
+#: programs/regedit/regedit.rc:213
 msgid "Confirm Value Delete"
 msgstr "Waarde verwijderen bevestigen"
 
-#: programs/regedit/regedit.rc:210
+#: programs/regedit/regedit.rc:214
 msgid "Are you sure you want to delete the selected registry value?"
-msgstr "Weet u zeker dat u deze registerwaarden wilt verwijderen?"
+msgstr "Moeten deze registerwaarden verwijderd worden?"
 
-#: programs/regedit/regedit.rc:216
+#: programs/regedit/regedit.rc:220
 msgid "Search complete. The string '%1' was not found."
 msgstr "Zoeken voltooid. Tekenreeks '%1' is niet gevonden."
 
-#: programs/regedit/regedit.rc:211
-msgid "Are you sure you want to delete these values?"
-msgstr "Weet u zeker dat u deze waarden wilt verwijderen?"
-
-#: programs/regedit/regedit.rc:214
-msgid "New Key #%d"
-msgstr "Nieuwe sleutel #%d"
-
 #: programs/regedit/regedit.rc:215
-msgid "New Value #%d"
-msgstr "Nieuwe waarde #%d"
+msgid "Are you sure you want to delete these values?"
+msgstr "Moeten deze waarden verwijderd worden?"
 
-#: programs/regedit/regedit.rc:205
+#: programs/regedit/regedit.rc:218
+msgid "New Key #%d"
+msgstr "Nieuwe sleutel %d"
+
+#: programs/regedit/regedit.rc:219
+msgid "New Value #%d"
+msgstr "Nieuwe waarde %d"
+
+#: programs/regedit/regedit.rc:209
 msgid "Unable to query the registry key '%1'."
 msgstr "Kan de registersleutel '%1' niet opvragen."
 
-#: programs/regedit/regedit.rc:170
+#: programs/regedit/regedit.rc:173
 msgid "Modifies the value's data in binary form"
 msgstr "De gegevens van de waarde binair wijzigen"
 
-#: programs/regedit/regedit.rc:175
+#: programs/regedit/regedit.rc:179
 msgid "Adds a new multi-string value"
 msgstr "Een nieuwe multi-tekenreekswaarde toevoegen"
 
-#: programs/regedit/regedit.rc:198
+#: programs/regedit/regedit.rc:202
 msgid "Exports the selected branch of the registry to a text file"
 msgstr ""
 "Exporteert de geselecteerde subsleutel van het register naar een tekst "
 "bestand"
 
-#: programs/regedit/regedit.rc:176
+#: programs/regedit/regedit.rc:180
 msgid "Adds a new expandable string value"
 msgstr "Een nieuwe uitbreidbare tekenreekswaarde toevoegen"
 
-#: programs/regedit/regedit.rc:212
+#: programs/regedit/regedit.rc:216
 msgid "Confirm Key Delete"
 msgstr "Sleutel verwijderen bevestigen"
 
-#: programs/regedit/regedit.rc:213
+#: programs/regedit/regedit.rc:217
 msgid ""
 "Are you sure you want to delete this registry key and all of its subkeys?"
 msgstr "Deze registersleutel met alle subsleutels verwijderen?"
 
-#: programs/regedit/regedit.rc:199
+#: programs/regedit/regedit.rc:203
 msgid "Expands or collapses the selected node"
-msgstr "Vouwt het geselecteerde knooppunt uit of samen"
+msgstr "Vouwt de geselecteerde map uit of samen"
 
-#: programs/regedit/regedit.rc:231
+#: programs/regedit/regedit.rc:236
 msgid "Collapse"
 msgstr "Invouwen"
+
+#: programs/regedit/regedit.rc:178
+msgid "Adds a new 64-bit value"
+msgstr "Een nieuwe 64-bit waarde toevoegen"
+
+#: programs/regedit/regedit.rc:221
+msgid "Edit QWORD"
+msgstr "QWORD waarde bewerken"
 
 #: programs/regsvr32/regsvr32.rc:33
 msgid ""
@@ -17134,8 +17215,7 @@ msgid ""
 "/ProgIDOpen    Open a document using the specified progID.\n"
 "/?             Display this help and exit.\n"
 msgstr ""
-"Start een programma, of open een document met het programma dat normaal "
-"voor\n"
+"Start een programma, of open een document met het programma dat normaal voor "
 "deze extensie gebruikt wordt.\n"
 "Gebruik:\n"
 "start [opties] programma-naam [...]\n"
@@ -17735,7 +17815,7 @@ msgstr ""
 #: programs/taskmgr/taskmgr.rc:190
 msgid "Task Manager is minimized when a SwitchTo operation is performed"
 msgstr ""
-"Taakbeheer minimaliseert zich als een 'Wissel naar' operatie uitgevoerd wordt"
+"Taakbeheer minimaliseert als een 'Wissel naar' bewerking uitgevoerd wordt"
 
 #: programs/taskmgr/taskmgr.rc:191
 msgid "Hide the Task Manager when it is minimized"
@@ -17835,7 +17915,7 @@ msgstr "Brengt de taak naar de voorgrond en wisselt focus naar de taak"
 
 #: programs/taskmgr/taskmgr.rc:227
 msgid "Tells the selected tasks to close"
-msgstr "Zegt de geselecteerde taken zich te beëindigen"
+msgstr "Vraagt de geselecteerde taken om te beëindigen"
 
 #: programs/taskmgr/taskmgr.rc:228
 msgid "Switches the focus to the process of the selected task"
@@ -17979,9 +18059,9 @@ msgid ""
 "cause undesired results including system instability. Are you\n"
 "sure you want to change the priority class?"
 msgstr ""
-"WAARSCHUWING: Het veranderen van de prioriteitsklasse van dit\n"
-"proces kan ongewenste gevolgen hebben zoals instabiliteit van\n"
-"het systeem. Weet u zeker dat u de prioriteitsklasse wilt veranderen?"
+"WAARSCHUWING: Het veranderen van de prioriteitsklasse van dit proces kan "
+"ongewenste gevolgen hebben zoals instabiliteit van het systeem. De "
+"prioriteitsklasse veranderen?"
 
 #: programs/taskmgr/taskmgr.rc:305
 msgid "Unable to Change Priority"
@@ -17995,11 +18075,10 @@ msgid ""
 "data before it is terminated. Are you sure you want to\n"
 "terminate the process?"
 msgstr ""
-"WAARSCHUWING: Het stoppen van een proces kan ongewenste\n"
-"gevolgen hebben zoals verlies van gegevens en instabiliteit\n"
-"van het systeem. Het proces zal geen mogelijkheid worden gegeven\n"
-"om zijn gegevens of status op te slaan. Weet u zeker dat u dit proces\n"
-"wilt stoppen?"
+"WAARSCHUWING: Het stoppen van een proces kan ongewenste gevolgen hebben "
+"zoals verlies van gegevens en instabiliteit van het systeem. Het proces zal "
+"geen mogelijkheid worden gegeven om zijn gegevens of status op te slaan. Dit "
+"proces stoppen?"
 
 #: programs/taskmgr/taskmgr.rc:311
 msgid "Unable to Terminate Process"
@@ -18010,8 +18089,9 @@ msgid ""
 "WARNING: Debugging this process may result in loss of data.\n"
 "Are you sure you wish to attach the debugger?"
 msgstr ""
-"WAARSCHUWING: Het debuggen van dit proces kan verlies van data tot\n"
-"gevolg hebben. Weet u zeker dat u de debugger wilt koppelen?"
+"WAARSCHUWING: Het debuggen van dit proces kan verlies van data tot gevolg "
+"hebben.\n"
+"Moet de debugger gekoppeld worden?"
 
 #: programs/taskmgr/taskmgr.rc:314
 msgid "Unable to Debug Process"
@@ -18057,7 +18137,7 @@ msgid ""
 msgstr ""
 "Het uitvoeren van de verwijderopdracht '%s' is mislukt, wellicht vanwege een "
 "ontbrekend bestand.\n"
-"Wilt u de verwijdersleutel verwijderen uit het register?"
+"De vermelding verwijderen uit het register?"
 
 #: programs/uninstaller/uninstaller.rc:31
 msgid "uninstaller: The application with GUID '%1' was not found\n"
@@ -18106,7 +18186,7 @@ msgstr ""
 "  --list\t    Toon alle geïnstalleerde programma's in deze Wine prefix.\n"
 "  --remove {GUID}   Verwijder het programma.\n"
 "\t\t    Gebruik '--list' om de GUID te bepalen.\n"
-"  [geen optie]       Start de grafische versie van dit programma.\n"
+"  [geen optie]\t    Start de grafische versie van dit programma.\n"
 "\n"
 
 #: programs/view/view.rc:36
@@ -18151,7 +18231,7 @@ msgstr ""
 "Een gesimuleerde uitlog- of afsluitactie is bezig, maar dit programma "
 "reageert niet.\n"
 "\n"
-"Als u het proces beëindigt kunt u alle niet-opgeslagen data verliezen."
+"Als het proces beëindigd wordt kan alle niet-opgeslagen data verloren gaan."
 
 #: programs/wineboot/wineboot.rc:46
 msgid "The Wine configuration in %s is being updated, please wait..."
@@ -18462,7 +18542,7 @@ msgstr "Thema-bestanden (*.msstyles; *.theme)"
 
 #: programs/winecfg/winecfg.rc:46
 msgid "Select a theme file"
-msgstr "Thema-bestanden kiezen"
+msgstr "Thema-bestand kiezen"
 
 #: programs/winecfg/winecfg.rc:47
 msgid "Folder"
@@ -18513,8 +18593,9 @@ msgid ""
 "Changing the load order of this library is not recommended.\n"
 "Are you sure you want to do this?"
 msgstr ""
-"Veranderen van de laadvolgorde van deze bibliotheek wordt niet aanbevolen\n"
-". Weet u zeker dat u dit wilt doen?"
+"Het veranderen van de laadvolgorde van deze bibliotheek wordt niet "
+"aanbevolen.\n"
+"Doorgaan?"
 
 #: programs/winecfg/winecfg.rc:54
 msgid "Warning: system library"
@@ -18582,7 +18663,7 @@ msgid ""
 "\n"
 "Each drive must have a letter, from A to Z, so you cannot have more than 26."
 msgstr ""
-"U kunt geen schijven meer toevoegen.\n"
+"Er kan geen schijf meer toegevoegd worden.\n"
 "\n"
 "Elke schijf moet een letter van A tot Z hebben. Het kunnen er dus niet meer "
 "dan 26 zijn."
@@ -18598,11 +18679,10 @@ msgid ""
 "Most Windows applications expect drive C to exist, and will die messily if "
 "it doesn't. If you proceed, remember to recreate it!"
 msgstr ""
-"Weet u zeker dat u de C-schijf wilt verwijderen?\n"
+"Moet de C-schijf verwijderd worden?\n"
 "\n"
-"De meeste Windows toepassingen verwachten dat er C-schijf bestaat en zullen, "
-"met onverwachte resultaten, afbreken. Als u doorgaat vergeet dan niet om de "
-"C-schijf opnieuw aan te maken!"
+"De meeste Windows toepassingen verwachten dat er C-schijf bestaat en zullen "
+"niet werken. Vergeet niet om de C-schijf opnieuw aan te maken!"
 
 #: programs/winecfg/winecfg.rc:76
 msgctxt "Drive letter"
@@ -18619,9 +18699,9 @@ msgid ""
 "\n"
 "Remember to click 'Add' in the Drives tab to create one!\n"
 msgstr ""
-"U heeft geen C-schijf. Dit kan tot problemen leiden.\n"
+"Er is geen C-schijf. Dit kan tot problemen leiden.\n"
 "\n"
-"Vergeet niet om m.b.v. de knop 'Toevoegen' in het 'Schijven'-tabblad een\n"
+"Vergeet niet om met de knop 'Toevoegen' in het 'Schijven'-tabblad een\n"
 "C-schijf aan te maken!\n"
 
 #: programs/winecfg/winecfg.rc:98
@@ -18794,17 +18874,18 @@ msgid ""
 "button, then <a href=\"http://www.codeweavers.com/support/tickets/enter/"
 "\">file a bug report</a> and attach that file to the report."
 msgstr ""
-"Indien dit probleem zich niet voordoet onder Windows en het probleem nog "
-"niet is gerapporteerd, dan kunt u gedetailleerde informatie in een bestand "
-"opslaan met de \"Opslaan als\" knop. Dit bestand kunt u via <a "
-"href=\"https://wiki.winehq.org/Bugs\">file a bug report</a> versturen."
+"Als dit probleem zich niet voordoet onder Windows en het probleem nog niet "
+"is gerapporteerd, dan kan gedetailleerde informatie in een bestand worden "
+"opgeslagen met de \"Opslaan als\" knop. Maak een nieuwe <a href=\"https://"
+"wiki.winehq.org/Bugs\">foutrapportage</a> aan en voeg het bestand toe aan de "
+"foutrapportage."
 
 #: programs/winedbg/winedbg.rc:40
 msgid ""
 "A program on your system has crashed, but WineDbg was unable to attach to "
 "the process to obtain a backtrace."
 msgstr ""
-"Een programma op uw computer is vastgelopen, maar WineDbg kon niet aan het "
+"Een programma op de computer is vastgelopen, maar WineDbg kon niet aan het "
 "proces vastgemaakt worden om een backtrace te verkrijgen."
 
 #: programs/winedbg/winedbg.rc:41
@@ -18817,7 +18898,7 @@ msgstr "Opslaan mislukt"
 
 #: programs/winedbg/winedbg.rc:45
 msgid "Loading detailed information, please wait..."
-msgstr "Even geduld a.u.b. Gedetailleerde informatie wordt geladen..."
+msgstr "Gedetailleerde informatie wordt geladen, even geduld..."
 
 #: programs/winefile/winefile.rc:29
 msgid "&Open\tEnter"
@@ -19070,7 +19151,7 @@ msgstr "Gefeliciteerd!"
 
 #: programs/winemine/winemine.rc:82
 msgid "Please enter your name"
-msgstr "Voer uw naam in"
+msgstr "Voer een naam in"
 
 #: programs/winemine/winemine.rc:90
 msgid "Custom Game"
@@ -19090,7 +19171,7 @@ msgstr "Mijnen"
 
 #: programs/winemine/winemine.rc:34
 msgid "All results will be lost. Are you sure?"
-msgstr "Alle resultaten worden gewist. Weet u het zeker?"
+msgstr "Alle resultaten worden gewist. Doorgaan?"
 
 #: programs/winemine/winemine.rc:30
 msgid "WineMine"
@@ -19182,7 +19263,7 @@ msgstr "Helpbestanden (*.hlp)"
 
 #: programs/winhlp32/winhlp32.rc:92
 msgid "Cannot find '%s'. Do you want to find this file yourself?"
-msgstr "Kan '%s' niet openen. Wilt u zelf dit bestand zoeken?"
+msgstr "Kan '%s' niet openen. Dit bestand zelf zoeken?"
 
 #: programs/winhlp32/winhlp32.rc:93
 msgid "Cannot find a richedit implementation... Aborting"
@@ -19326,7 +19407,7 @@ msgstr "&Systeem\tCtrl+1"
 
 #: programs/wordpad/wordpad.rc:99
 msgid "&Pale yellow\tCtrl+2"
-msgstr "&Geeltje\tCtrl+2"
+msgstr "Licht&geel\tCtrl+2"
 
 #: programs/wordpad/wordpad.rc:104
 msgid "&About Wine Wordpad"
@@ -19398,7 +19479,7 @@ msgstr "Geen regelafbraak"
 
 #: programs/wordpad/wordpad.rc:269
 msgid "Wrap text by the &window border"
-msgstr "Breek tekst af bij &venster rand"
+msgstr "Breek tekst af bij &vensterrand"
 
 #: programs/wordpad/wordpad.rc:270
 msgid "Wrap text by the &margin"
@@ -19559,8 +19640,8 @@ msgid ""
 "You have chosen to save in plain text format, which will cause all "
 "formatting to be lost. Are you sure that you wish to do this?"
 msgstr ""
-"U koos voor opslaan in gewoon tekst formaat, waardoor alle formattering "
-"verloren zal gaan. Weet u zeker dat u dit wilt?"
+"Bij het opslaan in het kale tekst formaat zal alle formattering verloren "
+"gaan. Doorgaan?"
 
 #: programs/wordpad/wordpad.rc:198
 msgid "Invalid number format."

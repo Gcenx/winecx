@@ -70,7 +70,7 @@ struct MSVCRT_JUMP_BUFFER
 };
 
 
-static void dump_scope_table( ULONG64 base, const SCOPE_TABLE *table )
+static void dump_scope_table( ULONG base, const SCOPE_TABLE *table )
 {
     unsigned int i;
 
@@ -134,6 +134,7 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
 {
     LDR_DATA_TABLE_ENTRY *module;
     NTSTATUS status;
+    DWORD pc;
 
     dispatch->ImageBase        = 0;
     dispatch->ScopeIndex       = 0;
@@ -144,14 +145,14 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
      * signal frame.
      */
     dispatch->ControlPcIsUnwound = (context->ContextFlags & CONTEXT_UNWOUND_TO_CALL) != 0;
+    pc = context->Pc - (dispatch->ControlPcIsUnwound ? 2 : 0);
 
     /* first look for PE exception information */
 
-    if ((dispatch->FunctionEntry = lookup_function_info(
-             context->Pc - (dispatch->ControlPcIsUnwound ? 2 : 0),
+    if ((dispatch->FunctionEntry = lookup_function_info(pc,
              (ULONG_PTR*)&dispatch->ImageBase, &module )))
     {
-        dispatch->LanguageHandler = RtlVirtualUnwind( type, dispatch->ImageBase, context->Pc,
+        dispatch->LanguageHandler = RtlVirtualUnwind( type, dispatch->ImageBase, pc,
                                                       dispatch->FunctionEntry, context,
                                                       &dispatch->HandlerData, (ULONG_PTR *)&dispatch->EstablisherFrame,
                                                       NULL );
@@ -162,7 +163,9 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
 
     if (!module || (module->Flags & LDR_WINE_INTERNAL))
     {
-        status = unix_funcs->unwind_builtin_dll( type, dispatch, context );
+        struct unwind_builtin_dll_params params = { type, dispatch, context };
+
+        status = NTDLL_UNIX_CALL( unwind_builtin_dll, &params );
         if (status != STATUS_SUCCESS) return status;
 
         if (dispatch->EstablisherFrame)
@@ -180,7 +183,7 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
     {
         status = context->Pc != context->Lr ?
                  STATUS_SUCCESS : STATUS_INVALID_DISPOSITION;
-        WARN( "exception data not found in %s for %p, LR %p, status %x\n",
+        WARN( "exception data not found in %s for %p, LR %p, status %lx\n",
                debugstr_w(module->BaseDllName.Buffer), (void*) context->Pc,
                (void*) context->Lr, status );
         dispatch->EstablisherFrame = context->Sp;
@@ -243,10 +246,10 @@ static DWORD call_unwind_handler( EXCEPTION_RECORD *rec, DISPATCHER_CONTEXT *dis
     frame.dispatch = dispatch;
     __wine_push_frame( &frame.frame );
 
-    TRACE( "calling handler %p (rec=%p, frame=0x%x context=%p, dispatch=%p)\n",
+    TRACE( "calling handler %p (rec=%p, frame=0x%lx context=%p, dispatch=%p)\n",
          dispatch->LanguageHandler, rec, dispatch->EstablisherFrame, dispatch->ContextRecord, dispatch );
     res = dispatch->LanguageHandler( rec, (void *)dispatch->EstablisherFrame, dispatch->ContextRecord, dispatch );
-    TRACE( "handler %p returned %x\n", dispatch->LanguageHandler, res );
+    TRACE( "handler %p returned %lx\n", dispatch->LanguageHandler, res );
 
     __wine_pop_frame( &frame.frame );
 
@@ -277,7 +280,7 @@ static DWORD call_teb_unwind_handler( EXCEPTION_RECORD *rec, DISPATCHER_CONTEXT 
     TRACE( "calling TEB handler %p (rec=%p, frame=%p context=%p, dispatch=%p)\n",
            teb_frame->Handler, rec, teb_frame, dispatch->ContextRecord, dispatch );
     res = teb_frame->Handler( rec, teb_frame, dispatch->ContextRecord, (EXCEPTION_REGISTRATION_RECORD**)dispatch );
-    TRACE( "handler at %p returned %u\n", teb_frame->Handler, res );
+    TRACE( "handler at %p returned %lu\n", teb_frame->Handler, res );
 
     switch (res)
     {
@@ -317,10 +320,10 @@ static DWORD call_handler( EXCEPTION_RECORD *rec, CONTEXT *context, DISPATCHER_C
     frame.Handler = nested_exception_handler;
     __wine_push_frame( &frame );
 
-    TRACE( "calling handler %p (rec=%p, frame=0x%x context=%p, dispatch=%p)\n",
+    TRACE( "calling handler %p (rec=%p, frame=0x%lx context=%p, dispatch=%p)\n",
            dispatch->LanguageHandler, rec, dispatch->EstablisherFrame, dispatch->ContextRecord, dispatch );
     res = dispatch->LanguageHandler( rec, (void *)dispatch->EstablisherFrame, context, dispatch );
-    TRACE( "handler at %p returned %u\n", dispatch->LanguageHandler, res );
+    TRACE( "handler at %p returned %lu\n", dispatch->LanguageHandler, res );
 
     rec->ExceptionFlags &= EH_NONCONTINUABLE;
     __wine_pop_frame( &frame );
@@ -342,7 +345,7 @@ static DWORD call_teb_handler( EXCEPTION_RECORD *rec, CONTEXT *context, DISPATCH
     TRACE( "calling TEB handler %p (rec=%p, frame=%p context=%p, dispatch=%p)\n",
            teb_frame->Handler, rec, teb_frame, dispatch->ContextRecord, dispatch );
     res = teb_frame->Handler( rec, teb_frame, context, (EXCEPTION_REGISTRATION_RECORD**)dispatch );
-    TRACE( "handler at %p returned %u\n", teb_frame->Handler, res );
+    TRACE( "handler at %p returned %lu\n", teb_frame->Handler, res );
     return res;
 }
 
@@ -377,7 +380,7 @@ static NTSTATUS call_function_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_con
 
         if (!is_valid_frame( dispatch.EstablisherFrame ))
         {
-            ERR( "invalid frame %x (%p-%p)\n", dispatch.EstablisherFrame,
+            ERR( "invalid frame %lx (%p-%p)\n", dispatch.EstablisherFrame,
                  NtCurrentTeb()->Tib.StackLimit, NtCurrentTeb()->Tib.StackBase );
             rec->ExceptionFlags |= EH_STACK_INVALID;
             break;
@@ -412,7 +415,7 @@ static NTSTATUS call_function_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_con
         /* hack: call wine handlers registered in the tib list */
         else while ((DWORD)teb_frame < context.Sp)
         {
-            TRACE( "found wine frame %p rsp %x handler %p\n",
+            TRACE( "found wine frame %p rsp %lx handler %p\n",
                     teb_frame, context.Sp, teb_frame->Handler );
             dispatch.EstablisherFrame = (DWORD)teb_frame;
             switch (call_teb_handler( rec, orig_context, &dispatch, teb_frame ))
@@ -457,11 +460,10 @@ NTSTATUS WINAPI KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CONTEXT *conte
     NTSTATUS status;
     DWORD c;
 
-    TRACE( "code=%x flags=%x addr=%p pc=%08x tid=%04x\n",
-           rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
-           context->Pc, GetCurrentThreadId() );
+    TRACE( "code=%lx flags=%lx addr=%p pc=%08lx\n",
+           rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress, context->Pc );
     for (c = 0; c < rec->NumberParameters; c++)
-        TRACE( " info[%d]=%08lx\n", c, rec->ExceptionInformation[c] );
+        TRACE( " info[%ld]=%08Ix\n", c, rec->ExceptionInformation[c] );
 
     if (rec->ExceptionCode == EXCEPTION_WINE_STUB)
     {
@@ -470,7 +472,7 @@ NTSTATUS WINAPI KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CONTEXT *conte
                      rec->ExceptionAddress,
                      (char*)rec->ExceptionInformation[0], (char*)rec->ExceptionInformation[1] );
         else
-            MESSAGE( "wine: Call from %p to unimplemented function %s.%ld, aborting\n",
+            MESSAGE( "wine: Call from %p to unimplemented function %s.%Id, aborting\n",
                      rec->ExceptionAddress,
                      (char*)rec->ExceptionInformation[0], rec->ExceptionInformation[1] );
     }
@@ -479,8 +481,10 @@ NTSTATUS WINAPI KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CONTEXT *conte
         if ((DWORD)rec->ExceptionInformation[2] == -1)
             WARN_(threadname)( "Thread renamed to %s\n", debugstr_a((char *)rec->ExceptionInformation[1]) );
         else
-            WARN_(threadname)( "Thread ID %04x renamed to %s\n", (DWORD)rec->ExceptionInformation[2],
+            WARN_(threadname)( "Thread ID %04lx renamed to %s\n", (DWORD)rec->ExceptionInformation[2],
                                debugstr_a((char *)rec->ExceptionInformation[1]) );
+
+        set_native_thread_name((DWORD)rec->ExceptionInformation[2], (char *)rec->ExceptionInformation[1]);
     }
     else if (rec->ExceptionCode == DBG_PRINTEXCEPTION_C)
     {
@@ -493,15 +497,15 @@ NTSTATUS WINAPI KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CONTEXT *conte
     else
     {
         if (rec->ExceptionCode == STATUS_ASSERTION_FAILURE)
-            ERR( "%s exception (code=%x) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
+            ERR( "%s exception (code=%lx) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
         else
-            WARN( "%s exception (code=%x) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
+            WARN( "%s exception (code=%lx) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
 
-        TRACE( " r0=%08x r1=%08x r2=%08x r3=%08x r4=%08x r5=%08x\n",
+        TRACE( " r0=%08lx r1=%08lx r2=%08lx r3=%08lx r4=%08lx r5=%08lx\n",
                context->R0, context->R1, context->R2, context->R3, context->R4, context->R5 );
-        TRACE( " r6=%08x r7=%08x r8=%08x r9=%08x r10=%08x r11=%08x\n",
+        TRACE( " r6=%08lx r7=%08lx r8=%08lx r9=%08lx r10=%08lx r11=%08lx\n",
                context->R6, context->R7, context->R8, context->R9, context->R10, context->R11 );
-        TRACE( " r12=%08x sp=%08x lr=%08x pc=%08x cpsr=%08x\n",
+        TRACE( " r12=%08lx sp=%08lx lr=%08lx pc=%08lx cpsr=%08lx\n",
                context->R12, context->Sp, context->Lr, context->Pc, context->Cpsr );
     }
 
@@ -532,9 +536,21 @@ void WINAPI KiUserApcDispatcher( CONTEXT *context, ULONG_PTR ctx, ULONG_PTR arg1
  */
 void WINAPI KiUserCallbackDispatcher( ULONG id, void *args, ULONG len )
 {
-    NTSTATUS (WINAPI *func)(void *, ULONG) = ((void **)NtCurrentTeb()->Peb->KernelCallbackTable)[id];
+    NTSTATUS status;
 
-    RtlRaiseStatus( NtCallbackReturn( NULL, 0, func( args, len )));
+    __TRY
+    {
+        NTSTATUS (WINAPI *func)(void *, ULONG) = ((void **)NtCurrentTeb()->Peb->KernelCallbackTable)[id];
+        status = NtCallbackReturn( NULL, 0, func( args, len ));
+    }
+    __EXCEPT_ALL
+    {
+        ERR_(seh)( "ignoring exception\n" );
+        status = NtCallbackReturn( 0, 0, 0 );
+    }
+    __ENDTRY
+
+    RtlRaiseStatus( status );
 }
 
 
@@ -736,6 +752,8 @@ static void process_unwind_codes( BYTE *ptr, BYTE *end, CONTEXT *context,
             WARN( "unsupported code %02x\n", *ptr );
         else if (*ptr <= 0xef && ((val & 0xff) <= 0x0f)) /* ldr lr, [sp], #x */
             pop_lr( 4 * (val & 0x0f), context, ptrs );
+        else if (*ptr == 0xf4) /* Custom private (unallocated) opcode, saved a full CONTEXT on the stack */
+            memcpy( context, (DWORD *)context->Sp, sizeof(CONTEXT) );
         else if (*ptr <= 0xf4) /* Available */
             WARN( "unsupported code %02x\n", *ptr );
         else if (*ptr <= 0xf5) /* vpop {dS-dE} */
@@ -977,7 +995,7 @@ static void *unwind_full_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION *f
     end = (BYTE *)data + codes * 4;
 
     TRACE( "function %lx-%lx: len=%#x ver=%u X=%u E=%u F=%u epilogs=%u codes=%u\n",
-           base + func->BeginAddress, base + func->BeginAddress + info->function_length * 4,
+           base + func->BeginAddress, base + func->BeginAddress + info->function_length * 2,
            info->function_length, info->version, info->x, info->e, info->f, epilogs, codes * 4 );
 
     /* check for prolog */
@@ -1043,7 +1061,7 @@ PVOID WINAPI RtlVirtualUnwind( ULONG type, ULONG_PTR base, ULONG_PTR pc,
 {
     void *handler;
 
-    TRACE( "type %x pc %lx sp %x func %lx\n", type, pc, context->Sp, base + func->BeginAddress );
+    TRACE( "type %lx pc %Ix sp %lx func %lx\n", type, pc, context->Sp, base + func->BeginAddress );
 
     *handler_data = NULL;
 
@@ -1053,7 +1071,7 @@ PVOID WINAPI RtlVirtualUnwind( ULONG type, ULONG_PTR base, ULONG_PTR pc,
     else
         handler = unwind_full_data( base, pc, func, context, handler_data, ctx_ptr );
 
-    TRACE( "ret: lr=%x sp=%x handler=%p\n", context->Lr, context->Sp, handler );
+    TRACE( "ret: lr=%lx sp=%lx handler=%p\n", context->Lr, context->Sp, handler );
     if (!context->Pc)
         context->Pc = context->Lr;
     context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
@@ -1080,11 +1098,18 @@ extern void * WINAPI call_consolidate_callback( CONTEXT *context,
                                                 EXCEPTION_RECORD *rec );
 __ASM_GLOBAL_FUNC( call_consolidate_callback,
                    "push {r0-r2,lr}\n\t"
+                   __ASM_SEH(".seh_nop\n\t")
                    "sub sp, sp, #0x1a0\n\t"
+                   __ASM_SEH(".seh_nop\n\t")
                    "mov r1, r0\n\t"
+                   __ASM_SEH(".seh_nop\n\t")
                    "mov r0, sp\n\t"
+                   __ASM_SEH(".seh_nop\n\t")
                    "mov r2, #0x1a0\n\t"
+                   __ASM_SEH(".seh_nop_w\n\t")
                    "bl " __ASM_NAME("memcpy") "\n\t"
+                   __ASM_SEH(".seh_custom 0xf4\n\t") /* A custom (unallocated) SEH opcode for CONTEXT on stack */
+                   __ASM_SEH(".seh_endprologue\n\t")
                    __ASM_CFI(".cfi_def_cfa 13, 0\n\t")
                    __ASM_CFI(".cfi_escape 0x0f,0x04,0x7d,0xb8,0x00,0x06\n\t") /* DW_CFA_def_cfa_expression: DW_OP_breg13 + 56, DW_OP_deref */
                    __ASM_CFI(".cfi_escape 0x10,0x04,0x02,0x7d,0x14\n\t") /* DW_CFA_expression: R4 DW_OP_breg13 + 20 */
@@ -1107,6 +1132,18 @@ __ASM_GLOBAL_FUNC( call_consolidate_callback,
                    __ASM_CFI(".cfi_escape 0x10,0x8e,0x02,0x03,0x7d,0xc0,0x01\n\t") /* DW_CFA_expression: D14 DW_OP_breg13 + 192 */
                    __ASM_CFI(".cfi_escape 0x10,0x8f,0x02,0x03,0x7d,0xc8,0x01\n\t") /* DW_CFA_expression: D15 DW_OP_breg13 + 200 */
 #endif
+                   /* These EHABI opcodes are to be read bottom up - they
+                    * restore relevant registers from the CONTEXT. */
+                   __ASM_EHABI(".save {sp}\n\t") /* Restore Sp last */
+                   __ASM_EHABI(".pad #-(0x80 + 0x0c + 0x0c)\n\t") /* Move back across D0-D15, Cpsr, Fpscr, Padding, Pc, Lr and Sp */
+                   __ASM_EHABI(".vsave {d8-d15}\n\t")
+                   __ASM_EHABI(".pad #0x40\n\t") /* Skip past D0-D7 */
+                   __ASM_EHABI(".pad #0x0c\n\t") /* Skip past Cpsr, Fpscr and Padding */
+                   __ASM_EHABI(".save {lr, pc}\n\t")
+                   __ASM_EHABI(".pad #0x08\n\t") /* Skip past R12 and Sp - Sp is restored last */
+                   __ASM_EHABI(".save {r4-r11}\n\t")
+                   __ASM_EHABI(".pad #0x14\n\t") /* Skip past ContextFlags and R0-R3 */
+
                    "ldrd r1, r2, [sp, #0x1a4]\n\t"
                    "mov r0, r2\n\t"
                    "blx r1\n\t"
@@ -1152,7 +1189,7 @@ void CDECL RtlRestoreContext( CONTEXT *context, EXCEPTION_RECORD *rec )
         teb_frame = __wine_pop_frame( teb_frame );
     }
 
-    TRACE( "returning to %x stack %x\n", context->Pc, context->Sp );
+    TRACE( "returning to %lx stack %lx\n", context->Pc, context->Sp );
     NtContinue( context, FALSE );
 }
 
@@ -1186,17 +1223,17 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
 
     rec->ExceptionFlags |= EH_UNWINDING | (end_frame ? 0 : EH_EXIT_UNWIND);
 
-    TRACE( "code=%x flags=%x end_frame=%p target_ip=%p pc=%08x\n",
+    TRACE( "code=%lx flags=%lx end_frame=%p target_ip=%p pc=%08lx\n",
            rec->ExceptionCode, rec->ExceptionFlags, end_frame, target_ip, context->Pc );
     for (i = 0; i < min( EXCEPTION_MAXIMUM_PARAMETERS, rec->NumberParameters ); i++)
-        TRACE( " info[%d]=%016lx\n", i, rec->ExceptionInformation[i] );
-    TRACE("  r0=%08x  r1=%08x  r2=%08x  r3=%08x\n",
+        TRACE( " info[%ld]=%08Ix\n", i, rec->ExceptionInformation[i] );
+    TRACE("  r0=%08lx  r1=%08lx  r2=%08lx  r3=%08lx\n",
           context->R0, context->R1, context->R2, context->R3 );
-    TRACE("  r4=%08x  r5=%08x  r6=%08x  r7=%08x\n",
+    TRACE("  r4=%08lx  r5=%08lx  r6=%08lx  r7=%08lx\n",
           context->R4, context->R5, context->R6, context->R7 );
-    TRACE("  r8=%08x  r9=%08x r10=%08x r11=%08x\n",
+    TRACE("  r8=%08lx  r9=%08lx r10=%08lx r11=%08lx\n",
           context->R8, context->R9, context->R10, context->R11 );
-    TRACE(" r12=%08x  sp=%08x  lr=%08x  pc=%08x\n",
+    TRACE(" r12=%08lx  sp=%08lx  lr=%08lx  pc=%08lx\n",
           context->R12, context->Sp, context->Lr, context->Pc );
 
     dispatch.TargetPc         = (ULONG_PTR)target_ip;
@@ -1214,7 +1251,7 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
 
         if (!is_valid_frame( dispatch.EstablisherFrame ))
         {
-            ERR( "invalid frame %x (%p-%p)\n", dispatch.EstablisherFrame,
+            ERR( "invalid frame %lx (%p-%p)\n", dispatch.EstablisherFrame,
                  NtCurrentTeb()->Tib.StackLimit, NtCurrentTeb()->Tib.StackBase );
             rec->ExceptionFlags |= EH_STACK_INVALID;
             break;
@@ -1224,7 +1261,7 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
         {
             if (end_frame && (dispatch.EstablisherFrame > (DWORD)end_frame))
             {
-                ERR( "invalid end frame %x/%p\n", dispatch.EstablisherFrame, end_frame );
+                ERR( "invalid end frame %lx/%p\n", dispatch.EstablisherFrame, end_frame );
                 raise_status( STATUS_INVALID_UNWIND_TARGET, rec );
             }
             if (dispatch.EstablisherFrame == (DWORD)end_frame) rec->ExceptionFlags |= EH_TARGET_UNWIND;
@@ -1245,7 +1282,7 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
         }
         else  /* hack: call builtin handlers registered in the tib list */
         {
-            DWORD64 backup_frame = dispatch.EstablisherFrame;
+            DWORD backup_frame = dispatch.EstablisherFrame;
             while ((DWORD)teb_frame < new_context.Sp && (DWORD)teb_frame < (DWORD)end_frame)
             {
                 TRACE( "found builtin frame %p handler %p\n", teb_frame, teb_frame->Handler );
@@ -1305,6 +1342,9 @@ extern LONG __C_ExecuteExceptionFilter(PEXCEPTION_POINTERS ptrs, PVOID frame,
                                        PUCHAR nonvolatile);
 __ASM_GLOBAL_FUNC( __C_ExecuteExceptionFilter,
                    "push {r4-r11,lr}\n\t"
+                   __ASM_EHABI(".save {r4-r11,lr}\n\t")
+                   __ASM_SEH(".seh_save_regs_w {r4-r11,lr}\n\t")
+                   __ASM_SEH(".seh_endprologue\n\t")
 
                    __ASM_CFI(".cfi_def_cfa 13, 36\n\t")
                    __ASM_CFI(".cfi_offset r4, -36\n\t")
@@ -1338,7 +1378,7 @@ EXCEPTION_DISPOSITION WINAPI __C_specific_handler( EXCEPTION_RECORD *rec,
 {
     SCOPE_TABLE *table = dispatch->HandlerData;
     ULONG i;
-    DWORD64 ControlPc = dispatch->ControlPc;
+    DWORD ControlPc = dispatch->ControlPc;
 
     TRACE( "%p %p %p %p\n", rec, frame, context, dispatch );
     if (TRACE_ON(seh)) dump_scope_table( dispatch->ImageBase, table );
@@ -1415,7 +1455,12 @@ EXCEPTION_DISPOSITION WINAPI __C_specific_handler( EXCEPTION_RECORD *rec,
  */
 __ASM_STDCALL_FUNC( RtlRaiseException, 4,
                     "push {r0, lr}\n\t"
+                    __ASM_EHABI(".save {r0, lr}\n\t")
+                    __ASM_SEH(".seh_save_regs {r0, lr}\n\t")
                     "sub sp, sp, #0x1a0\n\t"  /* sizeof(CONTEXT) */
+                    __ASM_EHABI(".pad #0x1a0\n\t")
+                    __ASM_SEH(".seh_stackalloc 0x1a0\n\t")
+                    __ASM_SEH(".seh_endprologue\n\t")
                     __ASM_CFI(".cfi_adjust_cfa_offset 424\n\t")
                     __ASM_CFI(".cfi_offset lr, -4\n\t")
                     "mov r0, sp\n\t"  /* context */
@@ -1440,7 +1485,7 @@ __ASM_STDCALL_FUNC( RtlRaiseException, 4,
  */
 USHORT WINAPI RtlCaptureStackBackTrace( ULONG skip, ULONG count, PVOID *buffer, ULONG *hash )
 {
-    FIXME( "(%d, %d, %p, %p) stub!\n", skip, count, buffer, hash );
+    FIXME( "(%ld, %ld, %p, %p) stub!\n", skip, count, buffer, hash );
     return 0;
 }
 

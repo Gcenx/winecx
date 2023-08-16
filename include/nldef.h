@@ -18,8 +18,6 @@
 #ifndef __WINE_NLDEF_H
 #define __WINE_NLDEF_H
 
-#include "wine/winheader_enter.h"
-
 typedef enum
 {
     IpPrefixOriginOther = 0,
@@ -124,7 +122,5 @@ typedef enum _NL_NEIGHBOR_STATE
     NlnsPermanent,
     NlnsMaximum,
 } NL_NEIGHBOR_STATE, *PNL_NEIGHBOR_STATE;
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_NLDEF_H */

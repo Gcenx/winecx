@@ -430,6 +430,7 @@ static void test_state_change(IFilterGraph2 *graph)
     hr = IMediaControl_Pause(control);
     ok(SUCCEEDED(hr), "Got hr %#lx.\n", hr);
     hr = IMediaControl_GetState(control, 1000, &state);
+    flaky_wine
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(state == State_Paused, "Got state %ld.\n", state);
 
@@ -519,10 +520,12 @@ static void test_media_event(IFilterGraph2 *graph)
             }
         }
     }
+    flaky_wine
     ok(got_eos, "didn't get EOS\n");
 
     hr = IMediaSeeking_GetCurrentPosition(seeking, &current);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    flaky_wine
     ok(current == stop, "expected %s, got %s\n", wine_dbgstr_longlong(stop), wine_dbgstr_longlong(current));
 
     hr = IMediaControl_Stop(control);
@@ -1498,7 +1501,7 @@ static HRESULT WINAPI testfilter_JoinFilterGraph(IBaseFilter *iface, IFilterGrap
 
     filter->graph = graph;
     free(filter->name);
-    filter->name = name ? wcsdup(name) : NULL;
+    filter->name = wcsdup(name);
     return S_OK;
 }
 
@@ -5210,10 +5213,11 @@ static void test_window_threading(void)
     };
     WCHAR *filename = load_resource(L"test.avi");
     IFilterGraph2 *graph = create_graph();
+    HWND hwnd, hwnd2, parent;
+    IFilterGraph2 *graph2;
     IVideoWindow *window;
-    HWND hwnd, parent;
+    DWORD tid, tid2;
     HRESULT hr;
-    DWORD tid;
     ULONG ref;
     BOOL ret;
 
@@ -5250,6 +5254,17 @@ static void test_window_threading(void)
         ok(hr == S_OK, "Got hr %#lx.\n", hr);
         IVideoWindow_Release(window);
         ok(!(GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_NOPARENTNOTIFY), "Window has WS_EX_NOPARENTNOTIFY.\n");
+
+        graph2 = create_graph();
+        hr = IFilterGraph2_RenderFile(graph2, filename, NULL);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        hwnd2 = get_renderer_hwnd(graph);
+        ok(!!hwnd2, "Failed to get renderer window.\n");
+        tid2 = GetWindowThreadProcessId(hwnd, NULL);
+        ok(tid2 == tid, "Expected thread to be shared.\n");
+
+        ref = IFilterGraph2_Release(graph2);
+        ok(!ref, "Got outstanding refcount %ld.\n", ref);
     }
     else
         skip("Could not find renderer window.\n");

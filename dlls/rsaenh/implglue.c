@@ -23,6 +23,7 @@
  */
 
 #include <stdarg.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include "windef.h"
 #include "winbase.h"
@@ -35,48 +36,32 @@ BOOL WINAPI SystemFunction036(PVOID pbBuffer, ULONG dwLen);
 
 BOOL init_hash_impl(ALG_ID aiAlgid, BCRYPT_HASH_HANDLE *hash_handle)
 {
-    BCRYPT_ALG_HANDLE provider;
-    NTSTATUS status;
-
-    switch (aiAlgid) 
+    switch (aiAlgid)
     {
-        case CALG_MD2:
-            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_MD2_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
-            break;
-        
-        case CALG_MD4:
-            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_MD4_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
-            break;
-        
-        case CALG_MD5:
-            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_MD5_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
-            break;
-        
-        case CALG_SHA:
-            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_SHA1_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
-            break;
+    case CALG_MD2:
+        return !BCryptCreateHash(BCRYPT_MD2_ALG_HANDLE, hash_handle, NULL, 0, NULL, 0, 0);
 
-        case CALG_SHA_256:
-            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_SHA256_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
-            break;
+    case CALG_MD4:
+        return !BCryptCreateHash(BCRYPT_MD4_ALG_HANDLE, hash_handle, NULL, 0, NULL, 0, 0);
 
-        case CALG_SHA_384:
-            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_SHA384_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
-            break;
+    case CALG_MD5:
+        return !BCryptCreateHash(BCRYPT_MD5_ALG_HANDLE, hash_handle, NULL, 0, NULL, 0, 0);
 
-        case CALG_SHA_512:
-            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_SHA512_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
-            break;
+    case CALG_SHA:
+        return !BCryptCreateHash(BCRYPT_SHA1_ALG_HANDLE, hash_handle, NULL, 0, NULL, 0, 0);
 
-        default:
-            return TRUE;
+    case CALG_SHA_256:
+        return !BCryptCreateHash(BCRYPT_SHA256_ALG_HANDLE, hash_handle, NULL, 0, NULL, 0, 0);
+
+    case CALG_SHA_384:
+        return !BCryptCreateHash(BCRYPT_SHA384_ALG_HANDLE, hash_handle, NULL, 0, NULL, 0, 0);
+
+    case CALG_SHA_512:
+        return !BCryptCreateHash(BCRYPT_SHA512_ALG_HANDLE, hash_handle, NULL, 0, NULL, 0, 0);
+
+    default:
+        return TRUE;
     }
-
-    if (status) return FALSE;
-
-    status = BCryptCreateHash(provider, hash_handle, NULL, 0, NULL, 0, 0);
-    BCryptCloseAlgorithmProvider(provider, 0);
-    return !status;
 }
 
 BOOL update_hash_impl(BCRYPT_HASH_HANDLE hash_handle, const BYTE *pbData, DWORD dwDataLen)
@@ -85,9 +70,9 @@ BOOL update_hash_impl(BCRYPT_HASH_HANDLE hash_handle, const BYTE *pbData, DWORD 
     return TRUE;
 }
 
-BOOL finalize_hash_impl(BCRYPT_HASH_HANDLE hash_handle, BYTE *pbHashValue)
+BOOL finalize_hash_impl(BCRYPT_HASH_HANDLE hash_handle, BYTE *hash_value, DWORD hash_size)
 {
-    BCryptFinishHash(hash_handle, pbHashValue, RSAENH_MAX_HASH_SIZE, 0);
+    BCryptFinishHash(hash_handle, hash_value, hash_size, 0);
     BCryptDestroyHash(hash_handle);
     return TRUE;
 }
@@ -273,7 +258,7 @@ BOOL encrypt_block_impl(ALG_ID aiAlgid, DWORD dwKeySpec, KEY_CONTEXT *pKeyContex
                 }
                 reverse_bytes(out, outlen);
             } else {
-                in_reversed = HeapAlloc(GetProcessHeap(), 0, inlen);
+                in_reversed = malloc(inlen);
                 if (!in_reversed) {
                     SetLastError(NTE_NO_MEMORY);
                     return FALSE;
@@ -281,11 +266,11 @@ BOOL encrypt_block_impl(ALG_ID aiAlgid, DWORD dwKeySpec, KEY_CONTEXT *pKeyContex
                 memcpy(in_reversed, in, inlen);
                 reverse_bytes(in_reversed, inlen);
                 if (rsa_exptmod(in_reversed, inlen, out, &outlen, dwKeySpec, &pKeyContext->rsa) != CRYPT_OK) {
-                    HeapFree(GetProcessHeap(), 0, in_reversed);
+                    free(in_reversed);
                     SetLastError(NTE_FAIL);
                     return FALSE;
                 }
-                HeapFree(GetProcessHeap(), 0, in_reversed);
+                free(in_reversed);
             }
             break;
 
@@ -341,14 +326,14 @@ BOOL import_public_key_impl(const BYTE *pbSrc, KEY_CONTEXT *pKeyContext, DWORD d
         return FALSE;
     }
 
-    pbTemp = HeapAlloc(GetProcessHeap(), 0, dwKeyLen);
+    pbTemp = malloc(dwKeyLen);
     if (!pbTemp) return FALSE;
     memcpy(pbTemp, pbSrc, dwKeyLen);
     
     pKeyContext->rsa.type = PK_PUBLIC;
     reverse_bytes(pbTemp, dwKeyLen);
     mp_read_unsigned_bin(&pKeyContext->rsa.N, pbTemp, dwKeyLen);
-    HeapFree(GetProcessHeap(), 0, pbTemp);
+    free(pbTemp);
     mp_set_int(&pKeyContext->rsa.e, dwPubExp);
 
     return TRUE;    
@@ -416,7 +401,7 @@ BOOL import_private_key_impl(const BYTE *pbSrc, KEY_CONTEXT *pKeyContext, DWORD 
         return FALSE;
     }
 
-    pbTemp = HeapAlloc(GetProcessHeap(), 0, 2*dwKeyLen+5*((dwKeyLen+1)>>1));
+    pbTemp = malloc(2*dwKeyLen+5*((dwKeyLen+1)>>1));
     if (!pbTemp) return FALSE;
     memcpy(pbTemp, pbSrc, min(dwDataLen, 2*dwKeyLen+5*((dwKeyLen+1)>>1)));
     pbBigNum = pbTemp;
@@ -448,6 +433,6 @@ BOOL import_private_key_impl(const BYTE *pbSrc, KEY_CONTEXT *pKeyContext, DWORD 
     mp_read_unsigned_bin(&pKeyContext->rsa.d, pbBigNum, dwKeyLen);
     mp_set_int(&pKeyContext->rsa.e, dwPubExp);
     
-    HeapFree(GetProcessHeap(), 0, pbTemp);
+    free(pbTemp);
     return TRUE;
 }

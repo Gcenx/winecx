@@ -162,11 +162,6 @@ typedef struct dwarf2_traverse_context_s
     const unsigned char*        end_data;
 } dwarf2_traverse_context_t;
 
-/* symt_cache indexes */
-#define sc_void         0
-#define sc_unknown      1
-#define sc_num          2
-
 typedef struct dwarf2_cuhead_s
 {
     unsigned char               word_size; /* size of a word on target machine */
@@ -180,7 +175,6 @@ typedef struct dwarf2_parse_module_context_s
     const dwarf2_section_t*     sections;
     struct module*              module;
     const struct elf_thunk_area*thunks;
-    struct symt*                symt_cache[sc_num]; /* void, unknown */
     struct vector               unit_contexts;
     struct dwarf2_dwz_alternate_s* dwz;
     DWORD                       cu_versions;
@@ -219,6 +213,7 @@ typedef struct dwarf2_parse_context_s
     dwarf2_cuhead_t             head;
     enum unit_status            status;
     dwarf2_traverse_context_t   traverse_DIE;
+    unsigned                    language;
 } dwarf2_parse_context_t;
 
 /* stored in the dbghelp's module internal structure for later reuse */
@@ -593,7 +588,7 @@ static BOOL dwarf2_fill_attr(const dwarf2_parse_context_t* ctx,
 
     case DW_FORM_data8:
         attr->u.lluvalue = dwarf2_get_u8(data);
-        TRACE("data8<%s>\n", wine_dbgstr_longlong(attr->u.uvalue));
+        TRACE("data8<%Ix>\n", attr->u.uvalue);
         break;
 
     case DW_FORM_ref1:
@@ -676,7 +671,7 @@ static BOOL dwarf2_fill_attr(const dwarf2_parse_context_t* ctx,
 
     case DW_FORM_sec_offset:
         attr->u.lluvalue = dwarf2_get_addr(data, ctx->head.offset_size);
-        TRACE("sec_offset<%s>\n", wine_dbgstr_longlong(attr->u.lluvalue));
+        TRACE("sec_offset<%I64x>\n", attr->u.lluvalue);
         break;
 
     case DW_FORM_GNU_ref_alt:
@@ -1138,14 +1133,14 @@ static struct symt* dwarf2_lookup_type(const dwarf2_debug_info_t* di)
 
     if (!dwarf2_find_attribute(di, DW_AT_type, &attr))
         /* this is only valid if current language of CU is C or C++ */
-        return di->unit_ctx->module_ctx->symt_cache[sc_void];
+        return &symt_get_basic(btVoid, 0)->symt;
     if (!(type = dwarf2_jump_to_debug_info(&attr)))
-        return di->unit_ctx->module_ctx->symt_cache[sc_unknown];
+        return &symt_get_basic(btNoType, 0)->symt;
 
     if (type == di)
     {
         FIXME("Reference to itself\n");
-        return di->unit_ctx->module_ctx->symt_cache[sc_unknown];
+        return &symt_get_basic(btNoType, 0)->symt;
     }
     if (!type->symt)
     {
@@ -1154,7 +1149,7 @@ static struct symt* dwarf2_lookup_type(const dwarf2_debug_info_t* di)
         if (!type->symt)
         {
             FIXME("Unable to load forward reference for tag %Ix\n", type->abbrev->tag);
-            return di->unit_ctx->module_ctx->symt_cache[sc_unknown];
+            return &symt_get_basic(btNoType, 0)->symt;
         }
     }
     return type->symt;
@@ -1211,129 +1206,75 @@ static const char* dwarf2_get_cpp_name(dwarf2_debug_info_t* di, const char* name
     return last;
 }
 
-/******************************************************************
- *		dwarf2_read_range
- *
- * read a range for a given debug_info (either using AT_range attribute, in which
- * case we don't return all the details, or using AT_low_pc & AT_high_pc attributes)
- * in all cases, range is relative to beginning of compilation unit
- */
-static BOOL dwarf2_read_range(dwarf2_parse_context_t* ctx, const dwarf2_debug_info_t* di,
-                              ULONG_PTR* plow, ULONG_PTR* phigh)
+static unsigned dwarf2_get_num_ranges(const dwarf2_debug_info_t* di)
 {
     struct attribute            range;
 
     if (dwarf2_find_attribute(di, DW_AT_ranges, &range))
     {
         dwarf2_traverse_context_t   traverse;
-        ULONG_PTR                   low, high;
-        const ULONG_PTR             UMAX = ~(ULONG_PTR)0u;
-
-        traverse.data = ctx->module_ctx->sections[section_ranges].address + range.u.uvalue;
-        traverse.end_data = ctx->module_ctx->sections[section_ranges].address +
-            ctx->module_ctx->sections[section_ranges].size;
-
-        *plow  = UMAX;
-        *phigh = 0;
-        while (traverse.data + 2 * ctx->head.word_size < traverse.end_data)
-        {
-            low = dwarf2_parse_addr_head(&traverse, &ctx->head);
-            high = dwarf2_parse_addr_head(&traverse, &ctx->head);
-            if (low == 0 && high == 0) break;
-            if (low == (ctx->head.word_size == 8 ? (~(DWORD64)0u) : (DWORD64)(~0u)))
-                FIXME("unsupported yet (base address selection)\n");
-            /* range values are relative to start of compilation unit */
-            low += ctx->compiland->address - ctx->module_ctx->load_offset;
-            high += ctx->compiland->address - ctx->module_ctx->load_offset;
-            if (low  < *plow)  *plow = low;
-            if (high > *phigh) *phigh = high;
-        }
-        if (*plow == UMAX || *phigh == 0) {WARN("no entry found\n"); return FALSE;}
-        if (*plow == *phigh) {WARN("entry found, but low=high %Ix %Ix\n", low, high); return FALSE;}
-
-        return TRUE;
-    }
-    else
-    {
-        struct attribute            low_pc;
-        struct attribute            high_pc;
-
-        if (!dwarf2_find_attribute(di, DW_AT_low_pc, &low_pc) ||
-            !dwarf2_find_attribute(di, DW_AT_high_pc, &high_pc))
-            return FALSE;
-        *plow = low_pc.u.uvalue;
-        *phigh = high_pc.u.uvalue;
-        if (ctx->head.version >= 4)
-            switch (high_pc.form)
-            {
-            case DW_FORM_addr:
-                break;
-            case DW_FORM_data1:
-            case DW_FORM_data2:
-            case DW_FORM_data4:
-            case DW_FORM_data8:
-            case DW_FORM_sdata:
-            case DW_FORM_udata:
-                /* From dwarf4 on, when FORM's class is constant, high_pc is an offset from low_pc */
-                *phigh += *plow;
-                break;
-            default:
-                FIXME("Unsupported class for high_pc\n");
-                break;
-            }
-        return TRUE;
-    }
-}
-
-static struct addr_range* dwarf2_get_ranges(const dwarf2_debug_info_t* di, unsigned* num_ranges)
-{
-    struct attribute            range;
-    struct addr_range*          ranges;
-    struct addr_range*          new_ranges;
-
-    if (dwarf2_find_attribute(di, DW_AT_ranges, &range))
-    {
-        dwarf2_traverse_context_t   traverse;
-        unsigned alloc = 16;
-        ranges = malloc(sizeof(struct addr_range) * alloc);
-        if (!ranges) return NULL;
-        *num_ranges = 0;
+        unsigned num_ranges = 0;
 
         traverse.data = di->unit_ctx->module_ctx->sections[section_ranges].address + range.u.uvalue;
         traverse.end_data = di->unit_ctx->module_ctx->sections[section_ranges].address +
             di->unit_ctx->module_ctx->sections[section_ranges].size;
 
-        while (traverse.data + 2 * di->unit_ctx->head.word_size < traverse.end_data)
+        for (num_ranges = 0; traverse.data + 2 * di->unit_ctx->head.word_size < traverse.end_data; num_ranges++)
         {
             ULONG_PTR low = dwarf2_parse_addr_head(&traverse, &di->unit_ctx->head);
             ULONG_PTR high = dwarf2_parse_addr_head(&traverse, &di->unit_ctx->head);
             if (low == 0 && high == 0) break;
             if (low == (di->unit_ctx->head.word_size == 8 ? (~(DWORD64)0u) : (DWORD64)(~0u)))
                 FIXME("unsupported yet (base address selection)\n");
-            if (*num_ranges >= alloc)
-            {
-                alloc *= 2;
-                new_ranges = realloc(ranges, sizeof(struct addr_range) * alloc);
-                if (!new_ranges)
-                {
-                    free(ranges);
-                    return NULL;
-                }
-                ranges = new_ranges;
-            }
-            ranges[*num_ranges].low = di->unit_ctx->compiland->address + low;
-            ranges[*num_ranges].high = di->unit_ctx->compiland->address + high;
-            (*num_ranges)++;
         }
+        return num_ranges;
     }
     else
     {
         struct attribute            low_pc;
         struct attribute            high_pc;
 
-        if (!dwarf2_find_attribute(di, DW_AT_low_pc, &low_pc) ||
+        return dwarf2_find_attribute(di, DW_AT_low_pc, &low_pc) &&
+            dwarf2_find_attribute(di, DW_AT_high_pc, &high_pc) ? 1 : 0;
+    }
+}
+
+/* nun_ranges must have been gotten from dwarf2_get_num_ranges() */
+static BOOL dwarf2_fill_ranges(const dwarf2_debug_info_t* di, struct addr_range* ranges, unsigned num_ranges)
+{
+    struct attribute            range;
+
+    if (dwarf2_find_attribute(di, DW_AT_ranges, &range))
+    {
+        dwarf2_traverse_context_t   traverse;
+        unsigned                    index;
+
+        traverse.data = di->unit_ctx->module_ctx->sections[section_ranges].address + range.u.uvalue;
+        traverse.end_data = di->unit_ctx->module_ctx->sections[section_ranges].address +
+            di->unit_ctx->module_ctx->sections[section_ranges].size;
+
+        for (index = 0; traverse.data + 2 * di->unit_ctx->head.word_size < traverse.end_data; index++)
+        {
+            ULONG_PTR low = dwarf2_parse_addr_head(&traverse, &di->unit_ctx->head);
+            ULONG_PTR high = dwarf2_parse_addr_head(&traverse, &di->unit_ctx->head);
+            if (low == 0 && high == 0) break;
+            if (low == (di->unit_ctx->head.word_size == 8 ? (~(DWORD64)0u) : (DWORD64)(~0u)))
+                FIXME("unsupported yet (base address selection)\n");
+            if (index >= num_ranges) return FALSE; /* sanity check */
+            ranges[index].low = di->unit_ctx->compiland->address + low;
+            ranges[index].high = di->unit_ctx->compiland->address + high;
+        }
+        return index == num_ranges; /* sanity check */
+    }
+    else
+    {
+        struct attribute            low_pc;
+        struct attribute            high_pc;
+
+        if (num_ranges != 1 || /* sanity check */
+            !dwarf2_find_attribute(di, DW_AT_low_pc, &low_pc) ||
             !dwarf2_find_attribute(di, DW_AT_high_pc, &high_pc))
-            return NULL;
+            return FALSE;
         if (di->unit_ctx->head.version >= 4)
             switch (high_pc.form)
             {
@@ -1352,12 +1293,21 @@ static struct addr_range* dwarf2_get_ranges(const dwarf2_debug_info_t* di, unsig
                 FIXME("Unsupported class for high_pc\n");
                 break;
             }
-        ranges = malloc(sizeof(struct addr_range));
-        if (!ranges) return NULL;
         ranges[0].low = di->unit_ctx->module_ctx->load_offset + low_pc.u.uvalue;
         ranges[0].high = di->unit_ctx->module_ctx->load_offset + high_pc.u.uvalue;
-        *num_ranges = 1;
     }
+    return TRUE;
+}
+
+static struct addr_range* dwarf2_get_ranges(const dwarf2_debug_info_t* di, unsigned* num_ranges)
+{
+    unsigned nr = dwarf2_get_num_ranges(di);
+    struct addr_range* ranges;
+
+    if (nr == 0) return NULL;
+    ranges = malloc(nr * sizeof(ranges[0]));
+    if (!ranges || !dwarf2_fill_ranges(di, ranges, nr)) return NULL;
+    *num_ranges = nr;
     return ranges;
 }
 
@@ -1456,15 +1406,42 @@ static struct vector* dwarf2_get_di_children(dwarf2_debug_info_t* di)
     return NULL;
 }
 
+/* reconstruct whether integer is long (contains 'long' only once) */
+static BOOL is_long(const char* name)
+{
+    /* we assume name is made only of basic C keywords:
+     *    int long short unsigned signed void float double char _Bool _Complex
+     */
+    const char* p = strstr(name, "long");
+    return p && strstr(p + 4, "long") == NULL;
+}
+
+static BOOL is_c_language(dwarf2_parse_context_t* unit_ctx)
+{
+    return unit_ctx->language == DW_LANG_C ||
+        unit_ctx->language == DW_LANG_C89 ||
+        unit_ctx->language == DW_LANG_C99;
+}
+
+static BOOL is_cpp_language(dwarf2_parse_context_t* unit_ctx)
+{
+    return unit_ctx->language == DW_LANG_C_plus_plus;
+}
+
 static struct symt* dwarf2_parse_base_type(dwarf2_debug_info_t* di)
 {
     struct attribute name;
     struct attribute size;
     struct attribute encoding;
     enum BasicType bt;
+    BOOL c_language, cpp_language;
+
     if (di->symt) return di->symt;
 
     TRACE("%s\n", dwarf2_debug_di(di));
+
+    c_language = is_c_language(di->unit_ctx);
+    cpp_language = is_cpp_language(di->unit_ctx);
 
     if (!dwarf2_find_attribute(di, DW_AT_name, &name))
         name.u.string = NULL;
@@ -1478,13 +1455,22 @@ static struct symt* dwarf2_parse_base_type(dwarf2_debug_info_t* di)
     case DW_ATE_boolean:        bt = btBool; break;
     case DW_ATE_complex_float:  bt = btComplex; break;
     case DW_ATE_float:          bt = btFloat; break;
-    case DW_ATE_signed:         bt = btInt; break;
-    case DW_ATE_unsigned:       bt = btUInt; break;
-    case DW_ATE_signed_char:    bt = btChar; break;
-    case DW_ATE_unsigned_char:  bt = btChar; break;
+    case DW_ATE_signed:         bt = ((c_language || cpp_language) && is_long(name.u.string)) ? btLong : btInt; break;
+    case DW_ATE_unsigned:
+        if ((c_language || cpp_language) && is_long(name.u.string)) bt = btULong;
+        else if (cpp_language && !strcmp(name.u.string, "wchar_t")) bt = btWChar;
+        else if (cpp_language && !strcmp(name.u.string, "char8_t")) bt = btChar8;
+        else if (cpp_language && !strcmp(name.u.string, "char16_t")) bt = btChar16;
+        else if (cpp_language && !strcmp(name.u.string, "char32_t")) bt = btChar32;
+        else bt = btUInt;
+        break;
+    /* on Windows, in C, char == signed char, but not in C++ */
+    case DW_ATE_signed_char:    bt = (cpp_language && !strcmp(name.u.string, "signed char")) ? btInt : btChar; break;
+    case DW_ATE_unsigned_char:  bt = btUInt; break;
+    case DW_ATE_UTF:            bt = (size.u.uvalue == 1) ? btChar8 : (size.u.uvalue == 2 ? btChar16 : btChar32); break;
     default:                    bt = btNoType; break;
     }
-    di->symt = &symt_new_basic(di->unit_ctx->module_ctx->module, bt, name.u.string, size.u.uvalue)->symt;
+    di->symt = &symt_get_basic(bt, size.u.uvalue)->symt;
 
     if (dwarf2_get_di_children(di)) FIXME("Unsupported children\n");
     return di->symt;
@@ -1503,7 +1489,15 @@ static struct symt* dwarf2_parse_typedef(dwarf2_debug_info_t* di)
     ref_type = dwarf2_lookup_type(di);
 
     if (name.u.string)
+    {
+        /* Note: The MS C compiler has tweaks for WCHAR support.
+         *       Even if WCHAR is a typedef to wchar_t, wchar_t is emitted as btUInt/2 (it's defined as
+         *          unsigned short, so far so good), while WCHAR is emitted as btWChar/2).
+         */
+        if ((is_c_language(di->unit_ctx) || is_cpp_language(di->unit_ctx)) && !strcmp(name.u.string, "WCHAR"))
+            ref_type = &symt_get_basic(btWChar, 2)->symt;
         di->symt = &symt_new_typedef(di->unit_ctx->module_ctx->module, ref_type, name.u.string)->symt;
+    }
     if (dwarf2_get_di_children(di)) FIXME("Unsupported children\n");
     return di->symt;
 }
@@ -1566,14 +1560,14 @@ static struct symt* dwarf2_parse_array_type(dwarf2_debug_info_t* di)
     {
         /* fake an array with unknown size */
         /* FIXME: int4 even on 64bit machines??? */
-        idx_type = &symt_new_basic(di->unit_ctx->module_ctx->module, btInt, "int", 4)->symt;
+        idx_type = &symt_get_basic(btInt, 4)->symt;
         min.u.uvalue = 0;
         cnt.u.uvalue = 0;
     }
     else for (i = 0; i < vector_length(children); i++)
     {
         child = *(dwarf2_debug_info_t**)vector_at(children, i);
-        if (child->symt == di->unit_ctx->module_ctx->symt_cache[sc_unknown]) continue;
+        if (child->symt == &symt_get_basic(btNoType, 0)->symt) continue;
         switch (child->abbrev->tag)
         {
         case DW_TAG_subrange_type:
@@ -1665,19 +1659,18 @@ static struct symt* dwarf2_parse_restrict_type(dwarf2_debug_info_t* di)
 static struct symt* dwarf2_parse_unspecified_type(dwarf2_debug_info_t* di)
 {
     struct attribute name;
-    struct attribute size;
-    struct symt_basic *basic;
+    struct symt* basic;
 
     TRACE("%s\n", dwarf2_debug_di(di));
 
     if (di->symt) return di->symt;
 
-    if (!dwarf2_find_attribute(di, DW_AT_name, &name))
-        name.u.string = "void";
-    size.u.uvalue = di->unit_ctx->module_ctx->module->cpu->word_size;
-
-    basic = symt_new_basic(di->unit_ctx->module_ctx->module, btVoid, name.u.string, size.u.uvalue);
-    di->symt = &basic->symt;
+    basic = &symt_get_basic(btVoid, 0)->symt;
+    if (dwarf2_find_attribute(di, DW_AT_name, &name))
+        /* define the missing type as a typedef to void... */
+        di->symt = &symt_new_typedef(di->unit_ctx->module_ctx->module, basic, name.u.string)->symt;
+    else /* or use void if it doesn't even have a name */
+        di->symt = basic;
 
     if (dwarf2_get_di_children(di)) FIXME("Unsupported children\n");
     return di->symt;
@@ -1878,10 +1871,10 @@ static struct symt* dwarf2_parse_enumeration_type(dwarf2_debug_info_t* di)
 
         switch (size.u.uvalue) /* FIXME: that's wrong */
         {
-        case 1: basetype = symt_new_basic(di->unit_ctx->module_ctx->module, btInt, "char", 1); break;
-        case 2: basetype = symt_new_basic(di->unit_ctx->module_ctx->module, btInt, "short", 2); break;
+        case 1: basetype = symt_get_basic(btInt, 1); break;
+        case 2: basetype = symt_get_basic(btInt, 2); break;
         default:
-        case 4: basetype = symt_new_basic(di->unit_ctx->module_ctx->module, btInt, "int", 4); break;
+        case 4: basetype = symt_get_basic(btInt, 4); break;
         }
         type = &basetype->symt;
     }
@@ -1955,13 +1948,23 @@ static void dwarf2_parse_variable(dwarf2_subprogram_t* subpgm,
             break;
         case loc_absolute:
             /* it's a global variable */
-            /* FIXME: we don't handle its scope yet */
             if (!dwarf2_find_attribute(di, DW_AT_external, &ext))
                 ext.u.uvalue = 0;
             loc.offset += subpgm->ctx->module_ctx->load_offset;
-            symt_new_global_variable(subpgm->ctx->module_ctx->module, subpgm->ctx->compiland,
-                                     dwarf2_get_cpp_name(di, name.u.string), !ext.u.uvalue,
-                                     loc, 0, param_type);
+            if (subpgm->top_func)
+            {
+                if (ext.u.uvalue) WARN("unexpected global inside a function\n");
+                symt_add_func_local(subpgm->ctx->module_ctx->module, subpgm->current_func,
+                                    DataIsStaticLocal, &loc, subpgm->current_block,
+                                    param_type, dwarf2_get_cpp_name(di, name.u.string));
+            }
+            else
+            {
+                symt_new_global_variable(subpgm->ctx->module_ctx->module,
+                                         ext.u.uvalue ? NULL : subpgm->ctx->compiland,
+                                         dwarf2_get_cpp_name(di, name.u.string), !ext.u.uvalue,
+                                         loc, 0, param_type);
+            }
             break;
         default:
             subpgm->non_computed_variable = TRUE;
@@ -2090,7 +2093,7 @@ static void dwarf2_parse_subprogram_label(dwarf2_subprogram_t* subpgm,
     if (dwarf2_find_attribute(di, DW_AT_low_pc, &low_pc))
     {
         loc.kind = loc_absolute;
-        loc.offset = subpgm->ctx->module_ctx->load_offset + low_pc.u.uvalue - subpgm->top_func->address;
+        loc.offset = subpgm->ctx->module_ctx->load_offset + low_pc.u.uvalue - subpgm->top_func->ranges[0].low;
         symt_add_function_point(subpgm->ctx->module_ctx->module, subpgm->top_func, SymTagLabel,
                                 &loc, name.u.string);
     }
@@ -2108,21 +2111,19 @@ static void dwarf2_parse_inlined_subroutine(dwarf2_subprogram_t* subpgm,
                                             dwarf2_debug_info_t* di)
 {
     struct attribute    name;
-    ULONG_PTR           low_pc, high_pc;
     struct symt*        ret_type;
     struct symt_function_signature* sig_type;
-    struct symt_inlinesite* inlined;
+    struct symt_function* inlined;
     struct vector*      children;
     dwarf2_debug_info_t*child;
     unsigned int        i;
-    struct addr_range*  adranges;
-    unsigned            num_adranges;
+    unsigned            num_ranges;
 
     TRACE("%s\n", dwarf2_debug_di(di));
 
-    if (!dwarf2_read_range(subpgm->ctx, di, &low_pc, &high_pc))
+    if (!(num_ranges = dwarf2_get_num_ranges(di)))
     {
-        WARN("cannot read range\n");
+        WARN("cannot read ranges\n");
         return;
     }
     if (!dwarf2_find_attribute(di, DW_AT_name, &name))
@@ -2139,20 +2140,15 @@ static void dwarf2_parse_inlined_subroutine(dwarf2_subprogram_t* subpgm,
                                   subpgm->top_func,
                                   subpgm->current_block ? &subpgm->current_block->symt : &subpgm->current_func->symt,
                                   dwarf2_get_cpp_name(di, name.u.string),
-                                  subpgm->ctx->module_ctx->load_offset + low_pc,
-                                  &sig_type->symt);
+                                  &sig_type->symt, num_ranges);
     subpgm->current_func = (struct symt_function*)inlined;
     subpgm->current_block = NULL;
 
-    if ((adranges = dwarf2_get_ranges(di, &num_adranges)) != NULL)
+    if (!dwarf2_fill_ranges(di, inlined->ranges, num_ranges))
     {
-        for (i = 0; i < num_adranges; ++i)
-            symt_add_inlinesite_range(subpgm->ctx->module_ctx->module, inlined,
-                                      adranges[i].low, adranges[i].high);
-        free(adranges);
+        FIXME("Unexpected situation\n");
+        inlined->num_ranges = 0;
     }
-    else
-        WARN("cannot read ranges\n");
 
     children = dwarf2_get_di_children(di);
     if (children) for (i = 0; i < vector_length(children); i++)
@@ -2184,28 +2180,57 @@ static void dwarf2_parse_inlined_subroutine(dwarf2_subprogram_t* subpgm,
     }
     subpgm->current_block = symt_check_tag(subpgm->current_func->container, SymTagBlock) ?
         (struct symt_block*)subpgm->current_func->container : NULL;
-    subpgm->current_func = (struct symt_function*)symt_get_upper_inlined((struct symt_inlinesite*)subpgm->current_func);
+    subpgm->current_func = (struct symt_function*)symt_get_upper_inlined(subpgm->current_func);
 }
 
 static void dwarf2_parse_subprogram_block(dwarf2_subprogram_t* subpgm,
 					  dwarf2_debug_info_t* di)
 {
-    ULONG_PTR           low_pc, high_pc;
+    unsigned int        num_ranges;
     struct vector*      children;
     dwarf2_debug_info_t*child;
     unsigned int        i;
 
     TRACE("%s\n", dwarf2_debug_di(di));
 
-    if (!dwarf2_read_range(subpgm->ctx, di, &low_pc, &high_pc))
+    num_ranges = dwarf2_get_num_ranges(di);
+    if (!num_ranges)
     {
-        WARN("no range\n");
+        WARN("no ranges\n");
         return;
     }
 
-    subpgm->current_block = symt_open_func_block(subpgm->ctx->module_ctx->module, subpgm->current_func, subpgm->current_block,
-                                                 subpgm->ctx->module_ctx->load_offset + low_pc - subpgm->current_func->address,
-                                                 high_pc - low_pc);
+    /* Dwarf tends to keep the structure of the C/C++ program, and emits DW_TAG_lexical_block
+     * for every block the in source program.
+     * With inlining and other optimizations, code for a block no longer lies in a contiguous
+     * chunk of memory. It's hence described with (potentially) multiple chunks of memory.
+     * Then each variable of each block is attached to its block. (A)
+     *
+     * PDB on the other hand no longer emits block information, and merge variable information
+     * at function level (actually function and each inline site).
+     * For example, if several variables of same name exist in different blocks of a function,
+     * only one entry for that name will exist. The information stored in (A) will point
+     * to the correct instance as defined by C/C++ scoping rules.
+     *
+     * (A) in all cases, there is information telling for each address of the function if a
+     *     variable is accessible, and if so, how to get its value.
+     *
+     * DbgHelp only exposes a contiguous chunk of memory for a block.
+     *
+     * => Store internally all the ranges of addresses in a block, but only expose the size
+     *    of the first chunk of memory.
+     *    Otherwise, it would break the rule: blocks' chunks don't overlap.
+     * Note: This could mislead some programs using the blocks' address and size information.
+     *       That's very unlikely to happen (most will use the APIs from DbgHelp, which will
+     *       hide this information to the caller).
+     */
+    subpgm->current_block = symt_open_func_block(subpgm->ctx->module_ctx->module, subpgm->current_func,
+                                                 subpgm->current_block, num_ranges);
+    if (!dwarf2_fill_ranges(di, subpgm->current_block->ranges, num_ranges))
+    {
+        FIXME("Unexpected situation\n");
+        subpgm->current_block->num_ranges = 0;
+    }
 
     children = dwarf2_get_di_children(di);
     if (children) for (i = 0; i < vector_length(children); i++)
@@ -2264,9 +2289,7 @@ static void dwarf2_parse_subprogram_block(dwarf2_subprogram_t* subpgm,
         }
     }
 
-    symt_close_func_block(subpgm->ctx->module_ctx->module, subpgm->current_func, subpgm->current_block, 0);
-    subpgm->current_block = symt_check_tag(subpgm->current_block->container, SymTagBlock) ?
-        (struct symt_block*)subpgm->current_block->container : NULL;
+    subpgm->current_block = symt_close_func_block(subpgm->ctx->module_ctx->module, subpgm->current_func, subpgm->current_block);
 }
 
 static struct symt* dwarf2_parse_subprogram(dwarf2_debug_info_t* di)
@@ -2457,7 +2480,7 @@ static void dwarf2_parse_namespace(dwarf2_debug_info_t* di)
 
     TRACE("%s\n", dwarf2_debug_di(di));
 
-    di->symt = di->unit_ctx->module_ctx->symt_cache[sc_void];
+    di->symt = &symt_get_basic(btVoid, 0)->symt;
 
     children = dwarf2_get_di_children(di);
     if (children) for (i = 0; i < vector_length(children); i++)
@@ -2576,7 +2599,7 @@ static void dwarf2_set_line_number(struct module* module, ULONG_PTR address,
                                    const struct vector* v, unsigned file, unsigned line)
 {
     struct symt_function*       func;
-    struct symt_inlinesite*     inlined;
+    struct symt_function*       inlined;
     struct symt_ht*             symt;
     unsigned*                   psrc;
 
@@ -2584,19 +2607,18 @@ static void dwarf2_set_line_number(struct module* module, ULONG_PTR address,
 
     TRACE("%s %Ix %s %u\n",
           debugstr_w(module->modulename), address, debugstr_a(source_get(module, *psrc)), line);
-    symt = symt_find_nearest(module, address);
+    symt = symt_find_symbol_at(module, address);
     if (symt_check_tag(&symt->symt, SymTagFunction))
     {
         func = (struct symt_function*)symt;
-        for (inlined = func->next_inlinesite; inlined; inlined = inlined->func.next_inlinesite)
+        for (inlined = func->next_inlinesite; inlined; inlined = inlined->next_inlinesite)
         {
             int i;
-            for (i = 0; i < inlined->vranges.num_elts; ++i)
+            for (i = 0; i < inlined->num_ranges; ++i)
             {
-                struct addr_range* ar = (struct addr_range*)vector_at(&inlined->vranges, i);
-                if (ar->low <= address && address < ar->high)
+                if (inlined->ranges[i].low <= address && address < inlined->ranges[i].high)
                 {
-                    symt_add_func_line(module, &inlined->func, *psrc, line, address);
+                    symt_add_func_line(module, inlined, *psrc, line, address);
                     return; /* only add to lowest matching inline site */
                 }
             }
@@ -2924,6 +2946,7 @@ static BOOL dwarf2_parse_compilation_unit(dwarf2_parse_context_t* ctx)
             unsigned int                i;
             struct attribute            stmt_list, low_pc;
             struct attribute            comp_dir;
+            struct attribute            language;
 
             if (!dwarf2_find_attribute(di, DW_AT_name, &name))
                 name.u.string = NULL;
@@ -2934,8 +2957,15 @@ static BOOL dwarf2_parse_compilation_unit(dwarf2_parse_context_t* ctx)
 
             if (!dwarf2_find_attribute(di, DW_AT_low_pc, &low_pc))
                 low_pc.u.uvalue = 0;
-            ctx->compiland = symt_new_compiland(ctx->module_ctx->module, ctx->module_ctx->load_offset + low_pc.u.uvalue,
+
+            if (!dwarf2_find_attribute(di, DW_AT_language, &language))
+                language.u.uvalue = DW_LANG_C;
+
+            ctx->language = language.u.uvalue;
+
+            ctx->compiland = symt_new_compiland(ctx->module_ctx->module,
                                                 source_new(ctx->module_ctx->module, comp_dir.u.string, name.u.string));
+            ctx->compiland->address = ctx->module_ctx->load_offset + low_pc.u.uvalue;
             dwarf2_cache_cuhead(ctx->module_ctx->module->format_info[DFI_DWARF]->u.dwarf2_info, ctx->compiland, &ctx->head);
             di->symt = &ctx->compiland->symt;
             children = dwarf2_get_di_children(di);
@@ -2987,7 +3017,7 @@ static BOOL dwarf2_lookup_loclist(const struct module_format* modfmt, const dwar
 static const dwarf2_cuhead_t* get_cuhead_from_func(const struct symt_function* func)
 {
     if (symt_check_tag(&func->symt, SymTagInlineSite))
-        func = symt_get_function_from_inlined((struct symt_inlinesite*)func);
+        func = symt_get_function_from_inlined((struct symt_function*)func);
     if (symt_check_tag(&func->symt, SymTagFunction) && symt_check_tag(func->container, SymTagCompiland))
     {
         struct symt_compiland* c = (struct symt_compiland*)func->container;
@@ -2997,7 +3027,7 @@ static const dwarf2_cuhead_t* get_cuhead_from_func(const struct symt_function* f
     return NULL;
 }
 
-static BOOL compute_call_frame_cfa(struct module* module, ULONG_PTR ip, struct location* frame);
+static enum location_error compute_call_frame_cfa(struct module* module, ULONG_PTR ip, struct location* frame);
 
 static enum location_error loc_compute_frame(struct process* pcs,
                                              const struct module_format* modfmt,
@@ -3040,7 +3070,8 @@ static enum location_error loc_compute_frame(struct process* pcs,
                 }
                 break;
             case loc_dwarf2_frame_cfa:
-                if (!compute_call_frame_cfa(modfmt->module, ip + ((struct symt_compiland*)func->container)->address, frame)) return loc_err_internal;
+                err = compute_call_frame_cfa(modfmt->module, ip + ((struct symt_compiland*)func->container)->address, frame);
+                if (err < 0) return err;
                 break;
             default:
                 WARN("Unsupported frame kind %d\n", pframe->kind);
@@ -3633,7 +3664,7 @@ static ULONG_PTR eval_expression(const struct module* module, struct cpu_stack_w
             tmp = 0;
             if (!sw_read_mem(csw, stack[sp], &tmp, module->format_info[DFI_DWARF]->u.dwarf2_info->word_size))
             {
-                ERR("Couldn't read memory at %s\n", wine_dbgstr_longlong(stack[sp]));
+                ERR("Couldn't read memory at %I64x\n", stack[sp]);
                 tmp = 0;
             }
             stack[sp] = tmp;
@@ -3683,7 +3714,7 @@ static ULONG_PTR eval_expression(const struct module* module, struct cpu_stack_w
             sz = dwarf2_parse_byte(&ctx);
             if (!sw_read_mem(csw, stack[sp], &tmp, sz))
             {
-                ERR("Couldn't read memory at %s\n", wine_dbgstr_longlong(stack[sp]));
+                ERR("Couldn't read memory at %I64x\n", stack[sp]);
                 tmp = 0;
             }
             /* do integral promotion */
@@ -3717,7 +3748,7 @@ static void apply_frame_state(const struct module* module, struct cpu_stack_walk
         *cfa = eval_expression(module, csw, (const unsigned char*)state->cfa_offset, context);
         if (!sw_read_mem(csw, *cfa, cfa, csw->cpu->word_size))
         {
-            WARN("Couldn't read memory at %s\n", wine_dbgstr_longlong(*cfa));
+            WARN("Couldn't read memory at %I64x\n", *cfa);
             return;
         }
         break;
@@ -3835,11 +3866,11 @@ BOOL dwarf2_virtual_unwind(struct cpu_stack_walk *csw, ULONG_PTR ip,
     return TRUE;
 }
 
-static BOOL compute_call_frame_cfa(struct module* module, ULONG_PTR ip, struct location* frame)
+static enum location_error compute_call_frame_cfa(struct module* module, ULONG_PTR ip, struct location* frame)
 {
     struct frame_info info;
 
-    if (!dwarf2_fetch_frame_info(module, module->cpu, ip, &info)) return FALSE;
+    if (!dwarf2_fetch_frame_info(module, module->cpu, ip, &info)) return loc_err_internal;
 
     /* beginning of function, or no available dwarf information ? */
     if (ip == info.ip || info.state.rules[info.retaddr_reg] == RULE_UNSET)
@@ -3857,11 +3888,15 @@ static BOOL compute_call_frame_cfa(struct module* module, ULONG_PTR ip, struct l
         switch (info.state.cfa_rule)
         {
         case RULE_EXPRESSION:
-            FIXME("Too complex expression for frame_CFA resolution (RULE_EXPRESSION)\n");
-            return FALSE;
+            WARN("Too complex expression for frame_CFA resolution (RULE_EXPRESSION)\n");
+            return loc_err_too_complex;
         case RULE_VAL_EXPRESSION:
-            FIXME("Too complex expression for frame_CFA resolution (RULE_VAL_EXPRESSION)\n");
-            return FALSE;
+            /* unfortunately, we've seen at least construct like:
+             *     cfa := 'breg_x + offset; deref'
+             * which is an indirection too much for the DbgHelp API.
+             */
+            WARN("Too complex expression for frame_CFA resolution (RULE_VAL_EXPRESSION)\n");
+            return loc_err_too_complex;
         default:
             frame->kind = loc_regrel;
             frame->reg = module->cpu->map_dwarf_register(info.state.cfa_reg, module, TRUE);
@@ -3869,7 +3904,7 @@ static BOOL compute_call_frame_cfa(struct module* module, ULONG_PTR ip, struct l
             break;
         }
     }
-    return TRUE;
+    return 0;
 }
 
 static void dwarf2_location_compute(struct process* pcs,
@@ -4071,9 +4106,6 @@ static BOOL dwarf2_load_CU_module(dwarf2_parse_module_context_t* module_ctx, str
     module_ctx->module = module;
     module_ctx->thunks = thunks;
     module_ctx->load_offset = load_offset;
-    memset(module_ctx->symt_cache, 0, sizeof(module_ctx->symt_cache));
-    module_ctx->symt_cache[sc_void] = &symt_new_basic(module_ctx->module, btVoid, "void", 0)->symt;
-    module_ctx->symt_cache[sc_unknown] = &symt_new_basic(module_ctx->module, btNoType, "# unknown", 0)->symt;
     vector_init(&module_ctx->unit_contexts, sizeof(dwarf2_parse_context_t), 16);
     module_ctx->cu_versions = 0;
 

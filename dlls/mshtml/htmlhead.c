@@ -103,15 +103,29 @@ static HRESULT WINAPI HTMLTitleElement_Invoke(IHTMLTitleElement *iface, DISPID d
 static HRESULT WINAPI HTMLTitleElement_put_text(IHTMLTitleElement *iface, BSTR v)
 {
     HTMLTitleElement *This = impl_from_IHTMLTitleElement(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    nsAString text;
+    nsresult nsres;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    nsAString_InitDepend(&text, v);
+    nsres = nsIDOMNode_SetTextContent(This->element.node.nsnode, &text);
+    nsAString_Finish(&text);
+
+    return map_nsresult(nsres);
 }
 
 static HRESULT WINAPI HTMLTitleElement_get_text(IHTMLTitleElement *iface, BSTR *p)
 {
     HTMLTitleElement *This = impl_from_IHTMLTitleElement(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsAString text;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    nsAString_InitDepend(&text, NULL);
+    nsres = nsIDOMNode_GetTextContent(This->element.node.nsnode, &text);
+    return return_nsstr(nsres, &text, p);
 }
 
 static const IHTMLTitleElementVtbl HTMLTitleElementVtbl = {
@@ -159,6 +173,7 @@ static const NodeImplVtbl HTMLTitleElementImplVtbl = {
     HTMLTitleElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col
 };
@@ -180,7 +195,7 @@ HRESULT HTMLTitleElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HT
 {
     HTMLTitleElement *ret;
 
-    ret = heap_alloc_zero(sizeof(*ret));
+    ret = calloc(1, sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -331,8 +346,10 @@ static const NodeImplVtbl HTMLHtmlElementImplVtbl = {
     HTMLHtmlElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -364,7 +381,7 @@ HRESULT HTMLHtmlElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTM
 {
     HTMLHtmlElement *ret;
 
-    ret = heap_alloc_zero(sizeof(*ret));
+    ret = calloc(1, sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -579,6 +596,7 @@ static const NodeImplVtbl HTMLMetaElementImplVtbl = {
     HTMLMetaElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col
 };
@@ -601,7 +619,7 @@ HRESULT HTMLMetaElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTM
 {
     HTMLMetaElement *ret;
 
-    ret = heap_alloc_zero(sizeof(*ret));
+    ret = calloc(1, sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -744,6 +762,7 @@ static const NodeImplVtbl HTMLHeadElementImplVtbl = {
     HTMLHeadElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col
 };
@@ -765,7 +784,7 @@ HRESULT HTMLHeadElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTM
 {
     HTMLHeadElement *ret;
 
-    ret = heap_alloc_zero(sizeof(*ret));
+    ret = calloc(1, sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 

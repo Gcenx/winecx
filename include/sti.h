@@ -19,8 +19,6 @@
 #ifndef __WINE_STI_H
 #define __WINE_STI_H
 
-#include "wine/winheader_enter.h"
-
 #include <objbase.h>
 /* #include <stireg.h> */
 /* #include <stierr.h> */
@@ -179,7 +177,5 @@ DECLARE_INTERFACE_(IStillImageW, IUnknown)
 #endif
 
 #include <poppack.h>
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_STI_H */

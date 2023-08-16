@@ -19,8 +19,6 @@
 #ifndef _PERFLIB_H_
 #define _PERFLIB_H_
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -83,6 +81,28 @@ typedef struct _PROVIDER_CONTEXT {
     LPVOID pMemContext;
 } PERF_PROVIDER_CONTEXT, * PPERF_PROVIDER_CONTEXT;
 
+typedef struct _PERF_COUNTER_IDENTIFIER {
+    GUID CounterSetGuid;
+    ULONG Status;
+    ULONG Size;
+    ULONG CounterId;
+    ULONG InstanceId;
+    ULONG Index;
+    ULONG Reserved;
+} PERF_COUNTER_IDENTIFIER, *PPERF_COUNTER_IDENTIFIER;
+
+#define PERF_WILDCARD_COUNTER  0xFFFFFFFF
+#define PERF_WILDCARD_INSTANCE L"*"
+
+typedef struct _PERF_DATA_HEADER {
+    ULONG dwTotalSize;
+    ULONG dwNumCounters;
+    LONGLONG PerfTimeStamp;
+    LONGLONG PerfTime100NSec;
+    LONGLONG PerfFreq;
+    SYSTEMTIME SystemTime;
+} PERF_DATA_HEADER, *PPERF_DATA_HEADER;
+
 PERF_COUNTERSET_INSTANCE WINAPI *PerfCreateInstance(HANDLE, const GUID *, const WCHAR *, ULONG);
 ULONG WINAPI PerfDeleteInstance(HANDLE, PERF_COUNTERSET_INSTANCE *);
 ULONG WINAPI PerfSetCounterRefValue(HANDLE, PERF_COUNTERSET_INSTANCE *, ULONG, void *);
@@ -91,10 +111,13 @@ ULONG WINAPI PerfStartProvider(GUID *, PERFLIBREQUEST, HANDLE *);
 ULONG WINAPI PerfStartProviderEx(GUID *, PERF_PROVIDER_CONTEXT *, HANDLE *);
 ULONG WINAPI PerfStopProvider(HANDLE);
 
+ULONG WINAPI PerfAddCounters(HANDLE, PERF_COUNTER_IDENTIFIER *, DWORD);
+ULONG WINAPI PerfCloseQueryHandle(HANDLE);
+ULONG WINAPI PerfOpenQueryHandle(const WCHAR *, HANDLE *);
+ULONG WINAPI PerfQueryCounterData(HANDLE, PERF_DATA_HEADER *, DWORD, DWORD *);
+
 #ifdef __cplusplus
 }       /* extern "C" */
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* _PERFLIB_H_ */

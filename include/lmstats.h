@@ -19,8 +19,6 @@
 #ifndef __WINE_LMSTATS_H
 #define __WINE_LMSTATS_H
 
-#include "wine/winheader_enter.h"
-
 #include <lmcons.h>
 
 #ifdef __cplusplus
@@ -96,7 +94,5 @@ NET_API_STATUS WINAPI NetStatisticsGet(LPWSTR server, LPWSTR service, DWORD leve
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

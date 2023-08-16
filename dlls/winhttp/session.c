@@ -144,6 +144,20 @@ static BOOL session_query_option( struct object_header *hdr, DWORD option, void 
         *buflen = sizeof(DWORD);
         return TRUE;
 
+    case WINHTTP_OPTION_WEB_SOCKET_RECEIVE_BUFFER_SIZE:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
+        *(DWORD *)buffer = session->websocket_receive_buffer_size;
+        *buflen = sizeof(DWORD);
+        return TRUE;
+
+    case WINHTTP_OPTION_WEB_SOCKET_SEND_BUFFER_SIZE:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
+        *(DWORD *)buffer = session->websocket_send_buffer_size;
+        *buflen = sizeof(DWORD);
+        return TRUE;
+
     default:
         FIXME( "unimplemented option %lu\n", option );
         SetLastError( ERROR_INVALID_PARAMETER );
@@ -233,6 +247,38 @@ static BOOL session_set_option( struct object_header *hdr, DWORD option, void *b
         FIXME( "WINHTTP_OPTION_MAX_CONNS_PER_1_0_SERVER: %lu\n", *(DWORD *)buffer );
         return TRUE;
 
+    case WINHTTP_OPTION_WEB_SOCKET_RECEIVE_BUFFER_SIZE:
+    {
+        DWORD buffer_size;
+
+        if (buflen != sizeof(buffer_size))
+        {
+            SetLastError( ERROR_INSUFFICIENT_BUFFER );
+            return FALSE;
+        }
+
+        buffer_size = *(DWORD *)buffer;
+        TRACE( "%#lx\n", buffer_size );
+        session->websocket_receive_buffer_size = buffer_size;
+        return TRUE;
+    }
+
+    case WINHTTP_OPTION_WEB_SOCKET_SEND_BUFFER_SIZE:
+    {
+        DWORD buffer_size;
+
+        if (buflen != sizeof(buffer_size))
+        {
+            SetLastError( ERROR_INSUFFICIENT_BUFFER );
+            return FALSE;
+        }
+
+        buffer_size = *(DWORD *)buffer;
+        TRACE( "%#lx\n", buffer_size );
+        session->websocket_send_buffer_size = buffer_size;
+        return TRUE;
+    }
+
     default:
         FIXME( "unimplemented option %lu\n", option );
         SetLastError( ERROR_WINHTTP_INVALID_OPTION );
@@ -242,6 +288,7 @@ static BOOL session_set_option( struct object_header *hdr, DWORD option, void *b
 
 static const struct object_vtbl session_vtbl =
 {
+    NULL,
     session_destroy,
     session_query_option,
     session_set_option
@@ -269,24 +316,26 @@ HINTERNET WINAPI WinHttpOpen( LPCWSTR agent, DWORD access, LPCWSTR proxy, LPCWST
     session->send_timeout = DEFAULT_SEND_TIMEOUT;
     session->receive_timeout = DEFAULT_RECEIVE_TIMEOUT;
     session->receive_response_timeout = DEFAULT_RECEIVE_RESPONSE_TIMEOUT;
+    session->websocket_receive_buffer_size = 32768;
+    session->websocket_send_buffer_size = 32768;
     list_init( &session->cookie_cache );
     InitializeCriticalSection( &session->cs );
     session->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": session.cs");
 
-    if (agent && !(session->agent = strdupW( agent ))) goto end;
+    if (agent && !(session->agent = wcsdup( agent ))) goto end;
     if (access == WINHTTP_ACCESS_TYPE_DEFAULT_PROXY)
     {
         WINHTTP_PROXY_INFO info;
 
         WinHttpGetDefaultProxyConfiguration( &info );
         session->access = info.dwAccessType;
-        if (info.lpszProxy && !(session->proxy_server = strdupW( info.lpszProxy )))
+        if (info.lpszProxy && !(session->proxy_server = wcsdup( info.lpszProxy )))
         {
             GlobalFree( info.lpszProxy );
             GlobalFree( info.lpszProxyBypass );
             goto end;
         }
-        if (info.lpszProxyBypass && !(session->proxy_bypass = strdupW( info.lpszProxyBypass )))
+        if (info.lpszProxyBypass && !(session->proxy_bypass = wcsdup( info.lpszProxyBypass )))
         {
             GlobalFree( info.lpszProxy );
             GlobalFree( info.lpszProxyBypass );
@@ -296,8 +345,8 @@ HINTERNET WINAPI WinHttpOpen( LPCWSTR agent, DWORD access, LPCWSTR proxy, LPCWST
     else if (access == WINHTTP_ACCESS_TYPE_NAMED_PROXY)
     {
         session->access = access;
-        if (proxy && !(session->proxy_server = strdupW( proxy ))) goto end;
-        if (bypass && !(session->proxy_bypass = strdupW( bypass ))) goto end;
+        if (proxy && !(session->proxy_server = wcsdup( proxy ))) goto end;
+        if (bypass && !(session->proxy_bypass = wcsdup( bypass ))) goto end;
     }
 
     handle = alloc_handle( &session->hdr );
@@ -382,6 +431,7 @@ static BOOL connect_query_option( struct object_header *hdr, DWORD option, void 
 
 static const struct object_vtbl connect_vtbl =
 {
+    NULL,
     connect_destroy,
     connect_query_option,
     NULL
@@ -506,7 +556,7 @@ BOOL set_server_for_hostname( struct connect *connect, const WCHAR *server, INTE
             {
                 free( connect->servername );
                 connect->resolved = FALSE;
-                if (!(connect->servername = strdupW( session->proxy_server )))
+                if (!(connect->servername = wcsdup( session->proxy_server )))
                 {
                     ret = FALSE;
                     goto end;
@@ -519,7 +569,7 @@ BOOL set_server_for_hostname( struct connect *connect, const WCHAR *server, INTE
     {
         free( connect->servername );
         connect->resolved = FALSE;
-        if (!(connect->servername = strdupW( server )))
+        if (!(connect->servername = wcsdup( server )))
         {
             ret = FALSE;
             goto end;
@@ -574,7 +624,7 @@ HINTERNET WINAPI WinHttpConnect( HINTERNET hsession, const WCHAR *server, INTERN
     addref_object( &session->hdr );
     connect->session = session;
 
-    if (!(connect->hostname = strdupW( server ))) goto end;
+    if (!(connect->hostname = wcsdup( server ))) goto end;
     connect->hostport = port;
     if (!set_server_for_hostname( connect, server, port )) goto end;
 
@@ -840,6 +890,20 @@ static BOOL request_query_option( struct object_header *hdr, DWORD option, void 
         *buflen = sizeof(DWORD);
         return TRUE;
 
+    case WINHTTP_OPTION_WEB_SOCKET_RECEIVE_BUFFER_SIZE:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
+        *(DWORD *)buffer = request->websocket_receive_buffer_size;
+        *buflen = sizeof(DWORD);
+        return TRUE;
+
+    case WINHTTP_OPTION_WEB_SOCKET_SEND_BUFFER_SIZE:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
+        *(DWORD *)buffer = request->websocket_set_send_buffer_size;
+        *buflen = sizeof(DWORD);
+        return TRUE;
+
     default:
         FIXME( "unimplemented option %lu\n", option );
         SetLastError( ERROR_INVALID_PARAMETER );
@@ -1076,6 +1140,38 @@ static BOOL request_set_option( struct object_header *hdr, DWORD option, void *b
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
 
+    case WINHTTP_OPTION_WEB_SOCKET_RECEIVE_BUFFER_SIZE:
+    {
+        DWORD buffer_size;
+
+        if (buflen != sizeof(buffer_size))
+        {
+            SetLastError( ERROR_INSUFFICIENT_BUFFER );
+            return FALSE;
+        }
+
+        buffer_size = *(DWORD *)buffer;
+        WARN( "Setting websocket receive buffer size currently has not effct, size %lu\n", buffer_size );
+        request->websocket_receive_buffer_size = buffer_size;
+        return TRUE;
+    }
+
+    case WINHTTP_OPTION_WEB_SOCKET_SEND_BUFFER_SIZE:
+    {
+        DWORD buffer_size;
+
+        if (buflen != sizeof(buffer_size))
+        {
+            SetLastError( ERROR_INSUFFICIENT_BUFFER );
+            return FALSE;
+        }
+
+        buffer_size = *(DWORD *)buffer;
+        request->websocket_set_send_buffer_size = buffer_size;
+        TRACE( "Websocket send buffer size %lu.\n", buffer_size);
+        return TRUE;
+    }
+
     default:
         FIXME( "unimplemented option %lu\n", option );
         SetLastError( ERROR_WINHTTP_INVALID_OPTION );
@@ -1085,6 +1181,7 @@ static BOOL request_set_option( struct object_header *hdr, DWORD option, void *b
 
 static const struct object_vtbl request_vtbl =
 {
+    NULL,
     request_destroy,
     request_query_option,
     request_set_option
@@ -1171,13 +1268,17 @@ HINTERNET WINAPI WinHttpOpenRequest( HINTERNET hconnect, const WCHAR *verb, cons
     request->receive_timeout = connect->session->receive_timeout;
     request->receive_response_timeout = connect->session->receive_response_timeout;
     request->max_redirects = 10;
+    request->websocket_receive_buffer_size = connect->session->websocket_receive_buffer_size;
+    request->websocket_send_buffer_size = connect->session->websocket_send_buffer_size;
+    request->websocket_set_send_buffer_size = request->websocket_send_buffer_size;
+    request->read_reply_status = ERROR_WINHTTP_INCORRECT_HANDLE_STATE;
 
     if (!verb || !verb[0]) verb = L"GET";
-    if (!(request->verb = strdupW( verb ))) goto end;
+    if (!(request->verb = wcsdup( verb ))) goto end;
     if (!(request->path = get_request_path( object ))) goto end;
 
     if (!version || !version[0]) version = L"HTTP/1.1";
-    if (!(request->version = strdupW( version ))) goto end;
+    if (!(request->version = wcsdup( version ))) goto end;
     if (!(add_accept_types_header( request, types ))) goto end;
 
     if ((hrequest = alloc_handle( &request->hdr )))
@@ -1801,6 +1902,50 @@ static BOOL parse_script_result( const char *result, WINHTTP_PROXY_INFO *info )
     return TRUE;
 }
 
+static SRWLOCK cache_lock = SRWLOCK_INIT;
+static DWORD cached_script_size;
+static ULONGLONG cache_update_time;
+static char *cached_script;
+static WCHAR *cached_url;
+
+static BOOL get_cached_script( const WCHAR *url, char **buffer, DWORD *out_size )
+{
+    BOOL ret = FALSE;
+
+    *buffer = NULL;
+    *out_size = 0;
+
+    AcquireSRWLockExclusive( &cache_lock );
+    if (cached_url && !wcscmp( cached_url, url ) && GetTickCount64() - cache_update_time < 60000)
+    {
+        ret = TRUE;
+        if (cached_script && (*buffer = malloc( cached_script_size )))
+        {
+            memcpy( *buffer, cached_script, cached_script_size );
+            *out_size = cached_script_size;
+        }
+    }
+    ReleaseSRWLockExclusive( &cache_lock );
+    return ret;
+}
+
+static void cache_script( const WCHAR *url, char *buffer, DWORD size )
+{
+    AcquireSRWLockExclusive( &cache_lock );
+    free( cached_url );
+    free( cached_script );
+    cached_script_size = 0;
+    cached_script = NULL;
+
+    if ((cached_url = wcsdup( url )) && buffer && (cached_script = malloc( size )))
+    {
+        memcpy( cached_script, buffer, size );
+        cached_script_size = size;
+    }
+    cache_update_time = GetTickCount64();
+    ReleaseSRWLockExclusive( &cache_lock );
+}
+
 static char *download_script( const WCHAR *url, DWORD *out_size )
 {
     static const WCHAR *acceptW[] = {L"*/*", NULL};
@@ -1808,9 +1953,14 @@ static char *download_script( const WCHAR *url, DWORD *out_size )
     WCHAR *hostname;
     URL_COMPONENTSW uc;
     DWORD status, size = sizeof(status), offset, to_read, bytes_read, flags = 0;
-    char *tmp, *buffer = NULL;
+    char *tmp, *buffer;
 
-    *out_size = 0;
+    if (get_cached_script( url, &buffer, out_size ))
+    {
+        TRACE( "Returning cached result.\n" );
+        if (!buffer) SetLastError( ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT );
+        return buffer;
+    }
 
     memset( &uc, 0, sizeof(uc) );
     uc.dwStructSize = sizeof(uc);
@@ -1822,6 +1972,7 @@ static char *download_script( const WCHAR *url, DWORD *out_size )
     hostname[uc.dwHostNameLength] = 0;
 
     if (!(ses = WinHttpOpen( NULL, WINHTTP_ACCESS_TYPE_NO_PROXY, NULL, NULL, 0 ))) goto done;
+    WinHttpSetTimeouts( ses, 5000, 60000, 30000, 30000 );
     if (!(con = WinHttpConnect( ses, hostname, uc.nPort, 0 ))) goto done;
     if (uc.nScheme == INTERNET_SCHEME_HTTPS) flags |= WINHTTP_FLAG_SECURE;
     if (!(req = WinHttpOpenRequest( con, NULL, uc.lpszUrlPath, NULL, NULL, acceptW, flags ))) goto done;
@@ -1856,6 +2007,7 @@ done:
     WinHttpCloseHandle( con );
     WinHttpCloseHandle( ses );
     free( hostname );
+    cache_script( url, buffer, *out_size );
     if (!buffer) SetLastError( ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT );
     return buffer;
 }
@@ -1942,7 +2094,8 @@ BOOL WINAPI WinHttpGetProxyForUrl( HINTERNET hsession, LPCWSTR url, WINHTTP_AUTO
         !(options->dwFlags & (WINHTTP_AUTOPROXY_AUTO_DETECT|WINHTTP_AUTOPROXY_CONFIG_URL)) ||
         ((options->dwFlags & WINHTTP_AUTOPROXY_AUTO_DETECT) && !options->dwAutoDetectFlags) ||
         ((options->dwFlags & WINHTTP_AUTOPROXY_AUTO_DETECT) &&
-         (options->dwFlags & WINHTTP_AUTOPROXY_CONFIG_URL)))
+         (options->dwFlags & WINHTTP_AUTOPROXY_CONFIG_URL)) ||
+        (options->dwFlags & WINHTTP_AUTOPROXY_CONFIG_URL && !options->lpszAutoConfigUrl))
     {
         release_object( &session->hdr );
         SetLastError( ERROR_INVALID_PARAMETER );

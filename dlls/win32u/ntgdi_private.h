@@ -30,6 +30,9 @@
 /* extra stock object: default 1x1 bitmap for memory DCs */
 #define DEFAULT_BITMAP (STOCK_LAST+1)
 
+/* Undocumented value for DIB's color use: indicates a mono DIB w/o pal entries */
+#define DIB_PAL_INDICES 2
+
 struct gdi_obj_funcs
 {
     INT     (*pGetObjectW)( HGDIOBJ handle, INT count, LPVOID buffer );
@@ -51,7 +54,7 @@ typedef struct tagDC
     HDC          hSelf;            /* Handle to this DC */
     struct gdi_physdev nulldrv;    /* physdev for the null driver */
     PHYSDEV      physDev;          /* current top of the physdev stack */
-    DWORD        thread;           /* thread owning the DC */
+    UINT         thread;           /* thread owning the DC */
     LONG         refcount;         /* thread refcount */
     LONG         dirty;            /* dirty flag */
     DC_ATTR     *attr;             /* DC attributes accessible by client */
@@ -183,6 +186,7 @@ extern struct dce *get_dc_dce( HDC hdc ) DECLSPEC_HIDDEN;
 extern void set_dc_dce( HDC hdc, struct dce *dce ) DECLSPEC_HIDDEN;
 extern WORD set_dce_flags( HDC hdc, WORD flags ) DECLSPEC_HIDDEN;
 extern DWORD set_stretch_blt_mode( HDC hdc, DWORD mode ) DECLSPEC_HIDDEN;
+extern BOOL set_viewport_org( HDC hdc, INT x, INT y, POINT *point ) DECLSPEC_HIDDEN;
 extern void DC_InitDC( DC * dc ) DECLSPEC_HIDDEN;
 extern void DC_UpdateXforms( DC * dc ) DECLSPEC_HIDDEN;
 
@@ -230,7 +234,7 @@ extern const struct gdi_dc_funcs *get_display_driver(void) DECLSPEC_HIDDEN;
 
 struct font_gamma_ramp
 {
-    DWORD gamma;
+    UINT  gamma;
     BYTE  encode[256];
     BYTE  decode[256];
 };
@@ -314,24 +318,23 @@ struct gdi_font
 struct font_backend_funcs
 {
     void  (*load_fonts)(void);
-    BOOL  (*enum_family_fallbacks)( DWORD pitch_and_family, int index, WCHAR buffer[LF_FACESIZE] );
-    INT   (*add_font)( const WCHAR *file, DWORD flags );
-    INT   (*add_mem_font)( void *ptr, SIZE_T size, DWORD flags );
+    BOOL  (*enum_family_fallbacks)( UINT pitch_and_family, int index, WCHAR buffer[LF_FACESIZE] );
+    INT   (*add_font)( const WCHAR *file, UINT flags );
+    INT   (*add_mem_font)( void *ptr, SIZE_T size, UINT flags );
 
     BOOL  (*load_font)( struct gdi_font *gdi_font );
-    DWORD (*get_font_data)( struct gdi_font *gdi_font, DWORD table, DWORD offset,
-                            void *buf, DWORD count );
+    UINT  (*get_font_data)( struct gdi_font *gdi_font, UINT table, UINT offset, void *buf, UINT count );
     UINT  (*get_aa_flags)( struct gdi_font *font, UINT aa_flags, BOOL antialias_fakes );
     BOOL  (*get_glyph_index)( struct gdi_font *gdi_font, UINT *glyph, BOOL use_encoding );
     UINT  (*get_default_glyph)( struct gdi_font *gdi_font );
-    DWORD (*get_glyph_outline)( struct gdi_font *font, UINT glyph, UINT format,
-                                GLYPHMETRICS *gm, ABC *abc, DWORD buflen, void *buf,
+    UINT  (*get_glyph_outline)( struct gdi_font *font, UINT glyph, UINT format,
+                                GLYPHMETRICS *gm, ABC *abc, UINT buflen, void *buf,
                                 const MAT2 *mat, BOOL tategaki );
-    DWORD (*get_unicode_ranges)( struct gdi_font *font, GLYPHSET *gs );
+    UINT  (*get_unicode_ranges)( struct gdi_font *font, GLYPHSET *gs );
     BOOL  (*get_char_width_info)( struct gdi_font *font, struct char_width_info *info );
     BOOL  (*set_outline_text_metrics)( struct gdi_font *font );
     BOOL  (*set_bitmap_text_metrics)( struct gdi_font *font );
-    DWORD (*get_kerning_pairs)( struct gdi_font *gdi_font, KERNINGPAIR **kern_pair );
+    UINT  (*get_kerning_pairs)( struct gdi_font *gdi_font, KERNINGPAIR **kern_pair );
     void  (*destroy_font)( struct gdi_font *font );
 };
 
@@ -341,7 +344,6 @@ extern int add_gdi_face( const WCHAR *family_name, const WCHAR *second_name,
                          DWORD ntmflags, DWORD version, DWORD flags,
                          const struct bitmap_font_size *size ) DECLSPEC_HIDDEN;
 extern UINT font_init(void) DECLSPEC_HIDDEN;
-extern CPTABLEINFO *get_cptable( WORD cp ) DECLSPEC_HIDDEN;
 extern const struct font_backend_funcs *init_freetype_lib(void) DECLSPEC_HIDDEN;
 
 /* opentype.c */
@@ -353,23 +355,23 @@ struct opentype_name
 {
     DWORD codepage;
     DWORD length;
-    const void * HOSTPTR bytes;
+    const void *bytes;
 };
 
-extern BOOL opentype_get_ttc_sfnt_v1( const void * HOSTPTR data, size_t size, DWORD index, DWORD *count,
-                                      const struct ttc_sfnt_v1 * HOSTPTR * HOSTPTR ttc_sfnt_v1 ) DECLSPEC_HIDDEN;
-extern BOOL opentype_get_tt_name_v0( const void * HOSTPTR data, size_t size, const struct ttc_sfnt_v1 * HOSTPTR ttc_sfnt_v1,
-                                     const struct tt_name_v0 * HOSTPTR * HOSTPTR tt_name_v0 ) DECLSPEC_HIDDEN;
+extern BOOL opentype_get_ttc_sfnt_v1( const void *data, size_t size, DWORD index, DWORD *count,
+                                      const struct ttc_sfnt_v1 **ttc_sfnt_v1 ) DECLSPEC_HIDDEN;
+extern BOOL opentype_get_tt_name_v0( const void *data, size_t size, const struct ttc_sfnt_v1 *ttc_sfnt_v1,
+                                     const struct tt_name_v0 **tt_name_v0 ) DECLSPEC_HIDDEN;
 
 typedef BOOL ( *opentype_enum_names_cb )( LANGID langid, struct opentype_name *name, void *user );
-extern BOOL opentype_enum_family_names( const struct tt_name_v0 * HOSTPTR tt_name_v0,
+extern BOOL opentype_enum_family_names( const struct tt_name_v0 *tt_name_v0,
                                         opentype_enum_names_cb callback, void *user ) DECLSPEC_HIDDEN;
-extern BOOL opentype_enum_style_names( const struct tt_name_v0 * HOSTPTR tt_name_v0,
+extern BOOL opentype_enum_style_names( const struct tt_name_v0 *tt_name_v0,
                                        opentype_enum_names_cb callback, void *user ) DECLSPEC_HIDDEN;
-extern BOOL opentype_enum_full_names( const struct tt_name_v0 * HOSTPTR tt_name_v0,
+extern BOOL opentype_enum_full_names( const struct tt_name_v0 *tt_name_v0,
                                       opentype_enum_names_cb callback, void *user ) DECLSPEC_HIDDEN;
 
-extern BOOL opentype_get_properties( const void * HOSTPTR data, size_t size, const struct ttc_sfnt_v1 * HOSTPTR ttc_sfnt_v1,
+extern BOOL opentype_get_properties( const void *data, size_t size, const struct ttc_sfnt_v1 *ttc_sfnt_v1,
                                      DWORD *version, FONTSIGNATURE *fs, DWORD *ntm_flags ) DECLSPEC_HIDDEN;
 extern BOOL translate_charset_info( DWORD *src, CHARSETINFO *cs, DWORD flags ) DECLSPEC_HIDDEN;
 
@@ -383,7 +385,6 @@ extern void GDI_ReleaseObj( HGDIOBJ ) DECLSPEC_HIDDEN;
 extern UINT GDI_get_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern HGDIOBJ GDI_inc_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern BOOL GDI_dec_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
-extern HGDIOBJ get_stock_object( INT obj ) DECLSPEC_HIDDEN;
 extern DWORD get_gdi_object_type( HGDIOBJ obj ) DECLSPEC_HIDDEN;
 extern void make_gdi_object_system( HGDIOBJ handle, BOOL set ) DECLSPEC_HIDDEN;
 
@@ -393,7 +394,6 @@ extern void lp_to_dp( DC *dc, POINT *points, INT count ) DECLSPEC_HIDDEN;
 extern BOOL set_map_mode( DC *dc, int mode ) DECLSPEC_HIDDEN;
 extern void combine_transform( XFORM *result, const XFORM *xform1,
                                const XFORM *xform2 ) DECLSPEC_HIDDEN;
-extern int muldiv( int a, int b, int c ) DECLSPEC_HIDDEN;
 
 /* driver.c */
 extern BOOL is_display_device( LPCWSTR name ) DECLSPEC_HIDDEN;

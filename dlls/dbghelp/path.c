@@ -31,22 +31,19 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
 
-#ifdef __i386__
-static const WCHAR pe_dir[] = L"\\i386-windows";
-static const WCHAR so_dir[] = L"\\i386-unix";
-#elif defined __x86_64__
-static const WCHAR pe_dir[] = L"\\x86_64-windows";
-static const WCHAR so_dir[] = L"\\x86_64-unix";
-#elif defined __arm__
-static const WCHAR pe_dir[] = L"\\arm-windows";
-static const WCHAR so_dir[] = L"\\arm-unix";
-#elif defined __aarch64__
-static const WCHAR pe_dir[] = L"\\aarch64-windows";
-static const WCHAR so_dir[] = L"\\aarch64-unix";
-#else
-static const WCHAR pe_dir[] = L"";
-static const WCHAR so_dir[] = L"";
-#endif
+static const struct machine_dir
+{
+    DWORD machine;
+    const WCHAR *pe_dir;
+    const WCHAR *so_dir;
+}
+    all_machine_dir[] =
+{
+    {IMAGE_FILE_MACHINE_I386,  L"\\i386-windows\\",    L"\\i386-unix\\"},
+    {IMAGE_FILE_MACHINE_AMD64, L"\\x86_64-windows\\",  L"\\x86_64-unix\\"},
+    {IMAGE_FILE_MACHINE_ARMNT, L"\\arm-windows\\",     L"\\arm-unix\\"},
+    {IMAGE_FILE_MACHINE_ARM64, L"\\aarch64-windows\\", L"\\aarch64-unix\\"},
+};
 
 static inline BOOL is_sepA(char ch) {return ch == '/' || ch == '\\';}
 static inline BOOL is_sep(WCHAR ch) {return ch == '/' || ch == '\\';}
@@ -705,57 +702,79 @@ WCHAR *get_dos_file_name(const WCHAR *filename)
     return dos_path;
 }
 
+static inline const WCHAR* get_machine_dir(const struct machine_dir *machine_dir, const WCHAR *name)
+{
+    WCHAR *ptr;
+    if ((ptr = wcsrchr(name, L'.')) && !lstrcmpW(ptr, L".so"))
+        return machine_dir->so_dir;
+    return machine_dir->pe_dir;
+}
+
+static BOOL try_match_file(const WCHAR *name, BOOL (*match)(void*, HANDLE, const WCHAR*), void *param)
+{
+    HANDLE file = CreateFileW(name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file != INVALID_HANDLE_VALUE)
+    {
+        BOOL ret = match(param, file, name);
+        CloseHandle(file);
+        return ret;
+    }
+    return FALSE;
+}
+
 BOOL search_dll_path(const struct process *process, const WCHAR *name, BOOL (*match)(void*, HANDLE, const WCHAR*), void *param)
 {
     const WCHAR *env;
     WCHAR *p, *end;
-    size_t len, i;
-    HANDLE file;
+    size_t len, i, machine_dir_len;
     WCHAR *buf;
-    BOOL ret;
+    const struct cpu* cpu;
+    const struct machine_dir* machine_dir;
 
     name = file_name(name);
 
+    cpu = process_get_cpu(process);
+    for (machine_dir = all_machine_dir; machine_dir < all_machine_dir + ARRAY_SIZE(all_machine_dir); machine_dir++)
+        if (machine_dir->machine == cpu->machine) break;
+    if (machine_dir >= all_machine_dir + ARRAY_SIZE(all_machine_dir)) return FALSE;
+    machine_dir_len = max(wcslen(machine_dir->pe_dir), wcslen(machine_dir->so_dir));
+
     if ((env = process_getenv(process, L"WINEBUILDDIR")))
     {
-        const WCHAR dllsW[] = { '\\','d','l','l','s','\\' };
-        const WCHAR programsW[] = { '\\','p','r','o','g','r','a','m','s','\\' };
-
         len = lstrlenW(env);
-        if (!(buf = heap_alloc((len + 8 + 3 * lstrlenW(name)) * sizeof(WCHAR)))) return FALSE;
+        if (!(buf = heap_alloc((len + wcslen(L"\\programs\\") + machine_dir_len +
+                                2 * lstrlenW(name) + 1) * sizeof(WCHAR)))) return FALSE;
         wcscpy(buf, env);
         end = buf + len;
 
-        memcpy(end, dllsW, sizeof(dllsW));
-        lstrcpyW(end + ARRAY_SIZE(dllsW), name);
+        wcscpy(end, L"\\dlls\\");
+        wcscat(end, name);
         if ((p = wcsrchr(end, '.')) && !lstrcmpW(p, L".so")) *p = 0;
         if ((p = wcsrchr(end, '.')) && !lstrcmpW(p, L".dll")) *p = 0;
         p = end + lstrlenW(end);
+        /* try multi-arch first */
+        wcscpy(p, get_machine_dir(machine_dir, name));
+        wcscpy(p + wcslen(p), name);
+        if (try_match_file(buf, match, param)) goto found;
+        /* then old mono-arch */
         *p++ = '\\';
         lstrcpyW(p, name);
-        file = CreateFileW(buf, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (file != INVALID_HANDLE_VALUE)
-        {
-            ret = match(param, file, buf);
-            CloseHandle(file);
-            if (ret) goto found;
-        }
+        if (try_match_file(buf, match, param)) goto found;
 
-        memcpy(end, programsW, sizeof(programsW));
-        end += ARRAY_SIZE(programsW);
-        lstrcpyW(end, name);
+        wcscpy(end, L"\\programs\\");
+        end += wcslen(end);
+        wcscpy(end, name);
         if ((p = wcsrchr(end, '.')) && !lstrcmpW(p, L".so")) *p = 0;
         if ((p = wcsrchr(end, '.')) && !lstrcmpW(p, L".exe")) *p = 0;
         p = end + lstrlenW(end);
+        /* try multi-arch first */
+        wcscpy(p, get_machine_dir(machine_dir, name));
+        wcscpy(p + wcslen(p), name);
+        if (try_match_file(buf, match, param)) goto found;
+        /* then old mono-arch */
         *p++ = '\\';
         lstrcpyW(p, name);
-        file = CreateFileW(buf, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (file != INVALID_HANDLE_VALUE)
-        {
-            ret = match(param, file, buf);
-            CloseHandle(file);
-            if (ret) goto found;
-        }
+        if (try_match_file(buf, match, param)) goto found;
 
         heap_free(buf);
     }
@@ -765,27 +784,12 @@ BOOL search_dll_path(const struct process *process, const WCHAR *name, BOOL (*ma
         WCHAR env_name[64];
         swprintf(env_name, ARRAY_SIZE(env_name), L"WINEDLLDIR%u", i);
         if (!(env = process_getenv(process, env_name))) return FALSE;
-        len = wcslen(env) + wcslen(pe_dir) + wcslen(name) + 2;
+        len = wcslen(env) + machine_dir_len + wcslen(name) + 1;
         if (!(buf = heap_alloc(len * sizeof(WCHAR)))) return FALSE;
-        if ((p = wcsrchr(name, '.')) && !lstrcmpW(p, L".so"))
-            swprintf(buf, len, L"%s%s\\%s", env, so_dir, name);
-        else
-            swprintf(buf, len, L"%s%s\\%s", env, pe_dir, name);
-        file = CreateFileW(buf, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (file != INVALID_HANDLE_VALUE)
-        {
-            ret = match(param, file, buf);
-            CloseHandle(file);
-            if (ret) goto found;
-        }
+        swprintf(buf, len, L"%s%s%s", env, get_machine_dir(machine_dir, name), name);
+        if (try_match_file(buf, match, param)) goto found;
         swprintf(buf, len, L"%s\\%s", env, name);
-        file = CreateFileW(buf, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (file != INVALID_HANDLE_VALUE)
-        {
-            ret = match(param, file, buf);
-            CloseHandle(file);
-            if (ret) goto found;
-        }
+        if (try_match_file(buf, match, param)) goto found;
         heap_free(buf);
     }
 
@@ -822,13 +826,8 @@ BOOL search_unix_path(const WCHAR *name, const WCHAR *path, BOOL (*match)(void*,
             WideCharToMultiByte(CP_UNIXCP, 0, name, -1, buf + len, size - len, NULL, NULL);
             if ((dos_path = wine_get_dos_file_name(buf)))
             {
-                HANDLE file = CreateFileW(dos_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-                if (file != INVALID_HANDLE_VALUE)
-                {
-                    ret = match(param, file, dos_path);
-                    CloseHandle(file);
-                    if (ret) TRACE("found %s\n", debugstr_w(dos_path));
-                }
+                ret = try_match_file(dos_path, match, param);
+                if (ret) TRACE("found %s\n", debugstr_w(dos_path));
                 heap_free(dos_path);
                 if (ret) break;
             }

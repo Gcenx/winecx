@@ -158,6 +158,9 @@ struct gdi_dc_funcs
     BOOL     (CDECL *pStrokePath)(PHYSDEV);
     BOOL     (CDECL *pUnrealizePalette)(HPALETTE);
     NTSTATUS (CDECL *pD3DKMTCheckVidPnExclusiveOwnership)(const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *);
+    NTSTATUS (CDECL *pD3DKMTCloseAdapter)(const D3DKMT_CLOSEADAPTER *);
+    NTSTATUS (CDECL *pD3DKMTOpenAdapterFromLuid)(D3DKMT_OPENADAPTERFROMLUID *);
+    NTSTATUS (CDECL *pD3DKMTQueryVideoMemoryInfo)(D3DKMT_QUERYVIDEOMEMORYINFO *);
     NTSTATUS (CDECL *pD3DKMTSetVidPnSourceOwner)(const D3DKMT_SETVIDPNSOURCEOWNER *);
 
     /* priority order for the driver on the stack */
@@ -165,7 +168,7 @@ struct gdi_dc_funcs
 };
 
 /* increment this when you change the DC function table */
-#define WINE_GDI_DRIVER_VERSION 77
+#define WINE_GDI_DRIVER_VERSION 81
 
 #define GDI_PRIORITY_NULL_DRV        0  /* null driver */
 #define GDI_PRIORITY_FONT_DRV      100  /* any font driver */
@@ -193,9 +196,9 @@ static inline void push_dc_driver( PHYSDEV *dev, PHYSDEV physdev, const struct g
 
 /* support for window surfaces */
 
-struct window_surface;
+#ifdef WINE_UNIX_LIB
 
-#ifndef __WINE_USE_MSVCRT
+struct window_surface;
 
 struct window_surface_funcs
 {
@@ -263,7 +266,10 @@ struct gdi_device_manager
     void (*add_gpu)( const struct gdi_gpu *gpu, void *param );
     void (*add_adapter)( const struct gdi_adapter *adapter, void *param );
     void (*add_monitor)( const struct gdi_monitor *monitor, void *param );
+    void (*add_mode)( const DEVMODEW *mode, void *param );
 };
+
+#define WINE_DM_UNSUPPORTED 0x80000000
 
 struct tagUPDATELAYEREDWINDOWINFO;
 
@@ -288,18 +294,21 @@ struct user_driver_funcs
     BOOL    (*pSetCursorPos)(INT,INT);
     BOOL    (*pClipCursor)(LPCRECT);
     /* clipboard functions */
+    LRESULT (*pClipboardWindowProc)(HWND,UINT,WPARAM,LPARAM);
     void    (*pUpdateClipboard)(void);
     /* display modes */
-    LONG    (*pChangeDisplaySettingsEx)(LPCWSTR,LPDEVMODEW,HWND,DWORD,LPVOID);
-    BOOL    (*pEnumDisplaySettingsEx)(LPCWSTR,DWORD,LPDEVMODEW,DWORD);
-    void    (*pUpdateDisplayDevices)(const struct gdi_device_manager *,BOOL,void*);
+    LONG    (*pChangeDisplaySettings)(LPDEVMODEW,LPCWSTR,HWND,DWORD,LPVOID);
+    BOOL    (*pGetCurrentDisplaySettings)(LPCWSTR,BOOL,LPDEVMODEW);
+    INT     (*pGetDisplayDepth)(LPCWSTR,BOOL);
+    BOOL    (*pUpdateDisplayDevices)(const struct gdi_device_manager *,BOOL,void*);
     /* windowing functions */
     BOOL    (*pCreateDesktopWindow)(HWND);
     BOOL    (*pCreateWindow)(HWND);
+    LRESULT (*pDesktopWindowProc)(HWND,UINT,WPARAM,LPARAM);
     void    (*pDestroyWindow)(HWND);
     void    (*pFlashWindowEx)(FLASHWINFO*);
     void    (*pGetDC)(HDC,HWND,HWND,const RECT *,const RECT *,DWORD);
-    DWORD   (*pMsgWaitForMultipleObjectsEx)(DWORD,const HANDLE*,DWORD,DWORD,DWORD);
+    NTSTATUS (*pMsgWaitForMultipleObjectsEx)(DWORD,const HANDLE*,const LARGE_INTEGER*,DWORD,DWORD);
     void    (*pReleaseDC)(HWND,HDC);
     BOOL    (*pScrollDC)(HDC,INT,INT,HRGN);
     void    (*pSetCapture)(HWND,UINT);
@@ -326,13 +335,14 @@ struct user_driver_funcs
     struct opengl_funcs * (*pwine_get_wgl_driver)(UINT);
     /* thread management */
     void    (*pThreadDetach)(void);
+    /* application user model ID support */
+    /* CW Hack 22310 */
+    NTSTATUS (*pSetCurrentProcessExplicitAppUserModelID)(LPCWSTR);
+    NTSTATUS (*pGetCurrentProcessExplicitAppUserModelID)(LPWSTR,INT);
 };
 
-#endif /* __WINE_USE_MSVCRT */
+extern void __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT version );
 
-struct user_driver_funcs;
-extern void CDECL __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT version );
-extern struct opengl_funcs * CDECL __wine_get_wgl_driver( HDC hdc, UINT version );
-extern const struct vulkan_funcs * CDECL __wine_get_vulkan_driver( UINT version );
+#endif /* WINE_UNIX_LIB */
 
 #endif /* __WINE_WINE_GDI_DRIVER_H */

@@ -7,7 +7,7 @@
 #define _WSTRING_DEFINED
 
 #include <corecrt.h>
-#include "wine/asm.h"
+#include <corecrt_malloc.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,9 +18,6 @@ extern "C" {
 _ACRTIMP void*   __cdecl memchr(const void*,int,size_t);
 _ACRTIMP int     __cdecl memcmp(const void*,const void*,size_t);
 _ACRTIMP void*   __cdecl memcpy(void*,const void*,size_t);
-#ifdef __i386_on_x86_64__
-_ACRTIMP void* HOSTPTR __cdecl memcpy(void* HOSTPTR,const void* HOSTPTR,size_t) __attribute__((overloadable)) asm(__ASM_NAME("wine_memcpy_HOSTPTR"));
-#endif
 _ACRTIMP errno_t __cdecl memcpy_s(void*,size_t,const void*,size_t);
 _ACRTIMP void*   __cdecl memset(void*,int,size_t);
 _ACRTIMP void*   __cdecl _memccpy(void*,const void*,int,size_t);
@@ -33,7 +30,7 @@ static inline void* memccpy(void *s1, const void *s2, int c, size_t n) { return 
 
 _ACRTIMP void*   __cdecl memmove(void*,const void*,size_t);
 
-_ACRTIMP wchar_t* __cdecl _wcsdup(const wchar_t*);
+_ACRTIMP wchar_t* __cdecl _wcsdup(const wchar_t*) __WINE_DEALLOC(free) __WINE_MALLOC;
 _ACRTIMP int      __cdecl _wcsicmp(const wchar_t*,const wchar_t*);
 _ACRTIMP int      __cdecl _wcsicoll(const wchar_t*,const wchar_t*);
 _ACRTIMP int      __cdecl _wcsicoll_l(const wchar_t*, const wchar_t*, _locale_t);
@@ -63,6 +60,7 @@ _ACRTIMP errno_t  __cdecl wcscpy_s(wchar_t*,size_t,const wchar_t*);
 _ACRTIMP size_t   __cdecl wcscspn(const wchar_t*,const wchar_t*);
 _ACRTIMP size_t   __cdecl wcslen(const wchar_t*);
 _ACRTIMP wchar_t* __cdecl wcsncat(wchar_t*,const wchar_t*,size_t);
+_ACRTIMP errno_t  __cdecl wcsncat_s(wchar_t*,size_t,const wchar_t*,size_t);
 _ACRTIMP int      __cdecl wcsncmp(const wchar_t*,const wchar_t*,size_t);
 _ACRTIMP wchar_t* __cdecl wcsncpy(wchar_t*,const wchar_t*,size_t);
 _ACRTIMP errno_t  __cdecl wcsncpy_s(wchar_t*,size_t,const wchar_t*,size_t);

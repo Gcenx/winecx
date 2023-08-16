@@ -125,8 +125,11 @@ struct wine_phys_dev
     VkPhysicalDevice handle; /* client physical device */
     VkPhysicalDevice phys_dev; /* native physical device */
 
+    VkPhysicalDeviceMemoryProperties memory_properties;
     VkExtensionProperties *extensions;
     uint32_t extension_count;
+
+    uint32_t external_memory_align;
 
     struct wine_vk_mapping mapping;
 };
@@ -242,9 +245,6 @@ BOOL wine_vk_instance_extension_supported(const char *name) DECLSPEC_HIDDEN;
 BOOL wine_vk_is_type_wrapped(VkObjectType type) DECLSPEC_HIDDEN;
 
 NTSTATUS init_vulkan(void *args) DECLSPEC_HIDDEN;
-NTSTATUS init_vulkan32(void *args) DECLSPEC_HIDDEN;
-
-NTSTATUS WINAPI vk_direct_unix_call(unixlib_handle_t handle, unsigned int code, void *arg) DECLSPEC_HIDDEN;
 
 NTSTATUS vk_is_available_instance_function(void *arg) DECLSPEC_HIDDEN;
 NTSTATUS vk_is_available_device_function(void *arg) DECLSPEC_HIDDEN;

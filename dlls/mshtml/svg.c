@@ -198,6 +198,7 @@ static const NodeImplVtbl SVGElementImplVtbl = {
     HTMLElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     NULL,
     HTMLElement_get_attr_col,
 };
@@ -739,6 +740,7 @@ static const NodeImplVtbl SVGSVGElementImplVtbl = {
     HTMLElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     NULL,
     HTMLElement_get_attr_col,
 };
@@ -747,7 +749,7 @@ static HRESULT create_viewport_element(HTMLDocumentNode *doc, nsIDOMSVGElement *
 {
     SVGSVGElement *ret;
 
-    ret = heap_alloc_zero(sizeof(SVGSVGElement));
+    ret = calloc(1, sizeof(SVGSVGElement));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -908,6 +910,7 @@ static const NodeImplVtbl SVGCircleElementImplVtbl = {
     HTMLElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     NULL,
     HTMLElement_get_attr_col,
 };
@@ -916,7 +919,7 @@ static HRESULT create_circle_element(HTMLDocumentNode *doc, nsIDOMSVGElement *ns
 {
     SVGCircleElement *ret;
 
-    ret = heap_alloc_zero(sizeof(SVGCircleElement));
+    ret = calloc(1, sizeof(SVGCircleElement));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -1152,6 +1155,7 @@ static const NodeImplVtbl SVGTSpanElementImplVtbl = {
     HTMLElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     NULL,
     HTMLElement_get_attr_col,
 };
@@ -1160,7 +1164,7 @@ static HRESULT create_tspan_element(HTMLDocumentNode *doc, nsIDOMSVGElement *nse
 {
     SVGTSpanElement *ret;
 
-    ret = heap_alloc_zero(sizeof(SVGTSpanElement));
+    ret = calloc(1, sizeof(SVGTSpanElement));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -1185,7 +1189,7 @@ HRESULT create_svg_element(HTMLDocumentNode *doc, nsIDOMSVGElement *dom_element,
     if(!wcscmp(tag_name, L"tspan"))
         return create_tspan_element(doc, dom_element, elem);
 
-    svg_element = heap_alloc_zero(sizeof(*svg_element));
+    svg_element = calloc(1, sizeof(*svg_element));
     if(!svg_element)
         return E_OUTOFMEMORY;
 

@@ -35,6 +35,7 @@
 #include <errno.h>
 #include <sys/time.h>
 #include <time.h>
+#include <dirent.h>
 #ifdef HAVE_SYS_PARAM_H
 # include <sys/param.h>
 #endif
@@ -53,14 +54,12 @@
 #ifdef HAVE_SYS_RESOURCE_H
 # include <sys/resource.h>
 #endif
-#ifdef HAVE_IOKIT_IOKITLIB_H
+#ifdef __APPLE__
 # include <CoreFoundation/CoreFoundation.h>
 # include <IOKit/IOKitLib.h>
 # include <IOKit/pwr_mgt/IOPM.h>
 # include <IOKit/pwr_mgt/IOPMLib.h>
 # include <IOKit/ps/IOPowerSources.h>
-#endif
-#ifdef __APPLE__
 # include <mach/mach.h>
 # include <mach/machine.h>
 # include <mach/mach_init.h>
@@ -234,6 +233,8 @@ static SYSTEM_LOGICAL_PROCESSOR_INFORMATION *logical_proc_info;
 static unsigned int logical_proc_info_len, logical_proc_info_alloc_len;
 static SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *logical_proc_info_ex;
 static unsigned int logical_proc_info_ex_size, logical_proc_info_ex_alloc_size;
+
+static pthread_mutex_t timezone_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /*******************************************************************************
  * Architecture specific feature detection for CPUs
@@ -588,39 +589,10 @@ static DWORD count_bits( ULONG_PTR mask )
     return count;
 }
 
-/* Store package and core information for a logical processor. Parsing of processor
- * data may happen in multiple passes; the 'id' parameter is then used to locate
- * previously stored data. The type of data stored in 'id' depends on 'rel':
- * - RelationProcessorPackage: package id ('CPU socket').
- * - RelationProcessorCore: physical core number.
- */
-static BOOL logical_proc_info_add_by_id( LOGICAL_PROCESSOR_RELATIONSHIP rel, DWORD id, ULONG_PTR mask )
+static BOOL logical_proc_info_ex_add_by_id( LOGICAL_PROCESSOR_RELATIONSHIP rel, DWORD id, ULONG_PTR mask )
 {
     SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *dataex;
-    unsigned int ofs = 0, i;
-
-    for (i = 0; i < logical_proc_info_len; i++)
-    {
-        if (rel == RelationProcessorPackage && logical_proc_info[i].Relationship == rel
-            && logical_proc_info[i].u.Reserved[1] == id)
-        {
-            logical_proc_info[i].ProcessorMask |= mask;
-            return TRUE;
-        }
-        else if (rel == RelationProcessorCore && logical_proc_info[i].Relationship == rel
-                 && logical_proc_info[i].u.Reserved[1] == id)
-            return TRUE;
-    }
-
-    if (!grow_logical_proc_buf()) return FALSE;
-
-    logical_proc_info[i].Relationship = rel;
-    logical_proc_info[i].ProcessorMask = mask;
-    if (rel == RelationProcessorCore)
-        logical_proc_info[i].u.ProcessorCore.Flags = count_bits( mask ) > 1 ? LTP_PC_SMT : 0;
-    logical_proc_info[i].u.Reserved[0] = 0;
-    logical_proc_info[i].u.Reserved[1] = id;
-    logical_proc_info_len = i + 1;
+    unsigned int ofs = 0;
 
     while (ofs < logical_proc_info_ex_size)
     {
@@ -658,8 +630,43 @@ static BOOL logical_proc_info_add_by_id( LOGICAL_PROCESSOR_RELATIONSHIP rel, DWO
     dataex->u.Processor.Reserved[1] = id;
 
     logical_proc_info_ex_size += dataex->Size;
-
     return TRUE;
+}
+
+/* Store package and core information for a logical processor. Parsing of processor
+ * data may happen in multiple passes; the 'id' parameter is then used to locate
+ * previously stored data. The type of data stored in 'id' depends on 'rel':
+ * - RelationProcessorPackage: package id ('CPU socket').
+ * - RelationProcessorCore: physical core number.
+ */
+static BOOL logical_proc_info_add_by_id( LOGICAL_PROCESSOR_RELATIONSHIP rel, DWORD id, ULONG_PTR mask )
+{
+    unsigned int i;
+
+    for (i = 0; i < logical_proc_info_len; i++)
+    {
+        if (rel == RelationProcessorPackage && logical_proc_info[i].Relationship == rel
+            && logical_proc_info[i].u.Reserved[1] == id)
+        {
+            logical_proc_info[i].ProcessorMask |= mask;
+            return logical_proc_info_ex_add_by_id( rel, id, mask );
+        }
+        else if (rel == RelationProcessorCore && logical_proc_info[i].Relationship == rel
+                 && logical_proc_info[i].u.Reserved[1] == id)
+            return logical_proc_info_ex_add_by_id( rel, id, mask );
+    }
+
+    if (!grow_logical_proc_buf()) return FALSE;
+
+    logical_proc_info[i].Relationship = rel;
+    logical_proc_info[i].ProcessorMask = mask;
+    if (rel == RelationProcessorCore)
+        logical_proc_info[i].u.ProcessorCore.Flags = count_bits( mask ) > 1 ? LTP_PC_SMT : 0;
+    logical_proc_info[i].u.Reserved[0] = 0;
+    logical_proc_info[i].u.Reserved[1] = id;
+    logical_proc_info_len = i + 1;
+
+    return logical_proc_info_ex_add_by_id( rel, id, mask );
 }
 
 static BOOL logical_proc_info_add_cache( ULONG_PTR mask, CACHE_DESCRIPTOR *cache )
@@ -768,7 +775,7 @@ static BOOL logical_proc_info_add_group( DWORD num_cpus, ULONG_PTR mask )
 static BOOL sysfs_parse_bitmap(const char *filename, ULONG_PTR *mask)
 {
     FILE *f;
-    DWORD r;
+    unsigned int r;
 
     f = fopen(filename, "r");
     if (!f) return FALSE;
@@ -793,7 +800,7 @@ static BOOL sysfs_parse_bitmap(const char *filename, ULONG_PTR *mask)
  * - /sys/devices/system/cpu/cpu0/cache/index0/shared_cpu_list
  * - /sys/devices/system/cpu/cpu0/topology/thread_siblings_list.
  */
-static BOOL sysfs_count_list_elements(const char *filename, DWORD *result)
+static BOOL sysfs_count_list_elements(const char *filename, unsigned int *result)
 {
     FILE *f;
 
@@ -803,7 +810,7 @@ static BOOL sysfs_count_list_elements(const char *filename, DWORD *result)
     while (!feof(f))
     {
         char op;
-        DWORD beg, end;
+        unsigned int beg, end;
 
         if (!fscanf(f, "%u%c ", &beg, &op)) break;
         if(op == '-')
@@ -825,7 +832,7 @@ static NTSTATUS create_logical_proc_info(void)
     static const char numa_info[] = "/sys/devices/system/node/node%u/cpumap";
 
     FILE *fcpu_list, *fnuma_list, *f;
-    DWORD beg, end, i, j, r, num_cpus = 0, max_cpus = 0;
+    unsigned int beg, end, i, j, r, num_cpus = 0, max_cpus = 0;
     char op, name[MAX_PATH];
     ULONG_PTR all_cpus_mask = 0;
 
@@ -854,7 +861,7 @@ static NTSTATUS create_logical_proc_info(void)
 
         for(i = beg; i <= end; i++)
         {
-            DWORD phys_core = 0;
+            unsigned int phys_core = 0;
             ULONG_PTR thread_mask = 0;
 
             if (i > 8 * sizeof(ULONG_PTR))
@@ -1014,13 +1021,13 @@ static NTSTATUS create_logical_proc_info(void)
 /* for 'data', max_len is the array count. for 'dataex', max_len is in bytes */
 static NTSTATUS create_logical_proc_info(void)
 {
-    DWORD pkgs_no, cores_no, lcpu_no, lcpu_per_core, cores_per_package, assoc;
-    DWORD cache_ctrs[10] = {0};
+    unsigned int pkgs_no, cores_no, lcpu_no, lcpu_per_core, cores_per_package, assoc;
+    unsigned int cache_ctrs[10] = {0};
     ULONG_PTR all_cpus_mask = 0;
     CACHE_DESCRIPTOR cache[10];
     LONGLONG cache_size, cache_line_size, cache_sharing[10];
     size_t size;
-    DWORD p,i,j,k;
+    unsigned int p, i, j, k;
 
     lcpu_no = peb->NumberOfProcessors;
 
@@ -1162,7 +1169,7 @@ static NTSTATUS create_logical_proc_info(void)
  */
 void init_cpu_info(void)
 {
-    NTSTATUS status;
+    unsigned int status;
     long num;
 
 #ifdef _SC_NPROCESSORS_ONLN
@@ -1189,8 +1196,8 @@ void init_cpu_info(void)
     peb->NumberOfProcessors = num;
     get_cpuinfo( &cpu_info );
     TRACE( "<- CPU arch %d, level %d, rev %d, features 0x%x\n",
-           cpu_info.ProcessorArchitecture, cpu_info.ProcessorLevel, cpu_info.ProcessorRevision,
-           cpu_info.ProcessorFeatureBits );
+           (int)cpu_info.ProcessorArchitecture, (int)cpu_info.ProcessorLevel,
+           (int)cpu_info.ProcessorRevision, (int)cpu_info.ProcessorFeatureBits );
 
     if ((status = create_logical_proc_info()))
     {
@@ -1606,7 +1613,7 @@ static NTSTATUS get_firmware_info( SYSTEM_FIRMWARE_TABLE_INFORMATION *sfti, ULON
                                      &bios_args, &system_args, &board_args, &chassis_args );
     }
     default:
-        FIXME("info_class SYSTEM_FIRMWARE_TABLE_INFORMATION provider %08x\n", sfti->ProviderSignature);
+        FIXME("info_class SYSTEM_FIRMWARE_TABLE_INFORMATION provider %08x\n", (int)sfti->ProviderSignature);
         return STATUS_NOT_IMPLEMENTED;
     }
 }
@@ -1623,7 +1630,7 @@ static NTSTATUS get_smbios_from_iokit( SYSTEM_FIRMWARE_TABLE_INFORMATION *sfti, 
     struct smbios_prologue *prologue;
     BYTE major_version = 2, minor_version = 0;
 
-    if (!(service = IOServiceGetMatchingService(kIOMasterPortDefault, IOServiceMatching("AppleSMBIOS"))))
+    if (!(service = IOServiceGetMatchingService(0, IOServiceMatching("AppleSMBIOS"))))
     {
         WARN("can't find AppleSMBIOS service\n");
         return STATUS_NO_MEMORY;
@@ -1718,7 +1725,7 @@ static NTSTATUS generate_smbios( SYSTEM_FIRMWARE_TABLE_INFORMATION *sfti, ULONG 
     struct smbios_board_args board_args;
     struct smbios_chassis_args chassis_args;
 
-    platform_expert = IOServiceGetMatchingService(kIOMasterPortDefault, IOServiceMatching("IOPlatformExpertDevice"));
+    platform_expert = IOServiceGetMatchingService(0, IOServiceMatching("IOPlatformExpertDevice"));
     if (!platform_expert)
         return STATUS_NO_MEMORY;
 
@@ -1797,7 +1804,7 @@ static NTSTATUS get_firmware_info( SYSTEM_FIRMWARE_TABLE_INFORMATION *sfti, ULON
         return ret;
     }
     default:
-        FIXME("info_class SYSTEM_FIRMWARE_TABLE_INFORMATION provider %08x\n", sfti->ProviderSignature);
+        FIXME("info_class SYSTEM_FIRMWARE_TABLE_INFORMATION provider %08x\n", (unsigned int)sfti->ProviderSignature);
         return STATUS_NOT_IMPLEMENTED;
     }
 }
@@ -1847,6 +1854,22 @@ static void get_performance_info( SYSTEM_PERFORMANCE_INFORMATION *info )
             if (!sysctlbyname("kern.cp_time", ptimes, &size, NULL, 0))
                 info->IdleTime.QuadPart = (ULONGLONG)ptimes[CP_IDLE] * 10000000 / clockrate.stathz;
         }
+    }
+#elif defined(__APPLE__)
+    {
+        host_name_port_t host = mach_host_self();
+        struct host_cpu_load_info load_info;
+        mach_msg_type_number_t count;
+
+        count = HOST_CPU_LOAD_INFO_COUNT;
+        if (host_statistics(host, HOST_CPU_LOAD_INFO, (host_info_t)&load_info, &count) == KERN_SUCCESS)
+        {
+            /* Believe it or not, based on my reading of XNU source, this is
+             * already in the units we want (100 ns).
+             */
+            info->IdleTime.QuadPart = load_info.cpu_ticks[CPU_STATE_IDLE];
+        }
+        mach_port_deallocate(mach_task_self(), host);
     }
 #else
     {
@@ -2016,6 +2039,11 @@ static BOOL match_tz_date( const RTL_SYSTEM_TIME *st, const RTL_SYSTEM_TIME *reg
     if (!reg_st->wYear) /* date in a day-of-week format */
         wDay = weekday_to_mday(st->wYear - 1900, reg_st->wDay, reg_st->wMonth - 1, reg_st->wDayOfWeek);
 
+    /* special case for 23:59:59.999, match with 0:00:00.000 on the following day */
+    if (!reg_st->wYear && reg_st->wHour == 23 && reg_st->wMinute == 59 &&
+        reg_st->wSecond == 59 && reg_st->wMilliseconds == 999)
+        return (st->wDay == wDay + 1 && !st->wHour && !st->wMinute && !st->wSecond && !st->wMilliseconds);
+
     return (st->wDay == wDay &&
             st->wHour == reg_st->wHour &&
             st->wMinute == reg_st->wMinute &&
@@ -2079,7 +2107,7 @@ static BOOL reg_query_value( HKEY key, LPCWSTR name, DWORD type, void *data, DWO
     UNICODE_STRING nameW;
     KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)buf;
 
-    if (count > sizeof(buf) - sizeof(KEY_VALUE_PARTIAL_INFORMATION)) return FALSE;
+    if (count > sizeof(buf) - offsetof(KEY_VALUE_PARTIAL_INFORMATION, Data)) return FALSE;
 
     nameW.Buffer = (WCHAR *)name;
     nameW.Length = wcslen( name ) * sizeof(WCHAR);
@@ -2098,7 +2126,8 @@ static void find_reg_tz_info(RTL_DYNAMIC_TIME_ZONE_INFORMATION *tzi, const char*
     static const WCHAR mui_stdW[] = { 'M','U','I','_','S','t','d',0 };
     static const WCHAR mui_dltW[] = { 'M','U','I','_','D','l','t',0 };
     static const WCHAR tziW[] = { 'T','Z','I',0 };
-    static const WCHAR Time_ZonesW[] = { 'M','a','c','h','i','n','e','\\',
+    static const WCHAR Time_ZonesW[] = { '\\','R','e','g','i','s','t','r','y','\\',
+        'M','a','c','h','i','n','e','\\',
         'S','o','f','t','w','a','r','e','\\',
         'M','i','c','r','o','s','o','f','t','\\',
         'W','i','n','d','o','w','s',' ','N','T','\\',
@@ -2168,19 +2197,19 @@ static void find_reg_tz_info(RTL_DYNAMIC_TIME_ZONE_INFORMATION *tzi, const char*
         reg_tzi.StandardDate = tz_data.std_date;
         reg_tzi.DaylightDate = tz_data.dlt_date;
 
-        TRACE("%s: bias %d\n", debugstr_us(&nameW), reg_tzi.Bias);
+        TRACE("%s: bias %d\n", debugstr_us(&nameW), (int)reg_tzi.Bias);
         TRACE("std (d/m/y): %u/%02u/%04u day of week %u %u:%02u:%02u.%03u bias %d\n",
               reg_tzi.StandardDate.wDay, reg_tzi.StandardDate.wMonth,
               reg_tzi.StandardDate.wYear, reg_tzi.StandardDate.wDayOfWeek,
               reg_tzi.StandardDate.wHour, reg_tzi.StandardDate.wMinute,
               reg_tzi.StandardDate.wSecond, reg_tzi.StandardDate.wMilliseconds,
-              reg_tzi.StandardBias);
+              (int)reg_tzi.StandardBias);
         TRACE("dst (d/m/y): %u/%02u/%04u day of week %u %u:%02u:%02u.%03u bias %d\n",
               reg_tzi.DaylightDate.wDay, reg_tzi.DaylightDate.wMonth,
               reg_tzi.DaylightDate.wYear, reg_tzi.DaylightDate.wDayOfWeek,
               reg_tzi.DaylightDate.wHour, reg_tzi.DaylightDate.wMinute,
               reg_tzi.DaylightDate.wSecond, reg_tzi.DaylightDate.wMilliseconds,
-              reg_tzi.DaylightBias);
+              (int)reg_tzi.DaylightBias);
 
         if (match_tz_info( tzi, &reg_tzi ) && match_tz_name( tz_name, &reg_tzi ))
         {
@@ -2198,7 +2227,7 @@ static void find_reg_tz_info(RTL_DYNAMIC_TIME_ZONE_INFORMATION *tzi, const char*
 
     FIXME("Can't find matching timezone information in the registry for "
           "%s, bias %d, std (d/m/y): %u/%02u/%04u, dlt (d/m/y): %u/%02u/%04u\n",
-          tz_name, tzi->Bias,
+          tz_name, (int)tzi->Bias,
           tzi->StandardDate.wDay, tzi->StandardDate.wMonth, tzi->StandardDate.wYear,
           tzi->DaylightDate.wDay, tzi->DaylightDate.wMonth, tzi->DaylightDate.wYear);
 }
@@ -2313,7 +2342,7 @@ static void get_timezone_info( RTL_DYNAMIC_TIME_ZONE_INFORMATION *tzi )
             tzi->DaylightDate.wYear, tzi->DaylightDate.wDayOfWeek,
             tzi->DaylightDate.wHour, tzi->DaylightDate.wMinute,
             tzi->DaylightDate.wSecond, tzi->DaylightDate.wMilliseconds,
-            tzi->DaylightBias);
+            (int)tzi->DaylightBias);
 
         tmp = std - tzi->Bias * 60 - tzi->DaylightBias * 60;
         tm = gmtime(&tmp);
@@ -2334,7 +2363,7 @@ static void get_timezone_info( RTL_DYNAMIC_TIME_ZONE_INFORMATION *tzi )
             tzi->StandardDate.wYear, tzi->StandardDate.wDayOfWeek,
             tzi->StandardDate.wHour, tzi->StandardDate.wMinute,
             tzi->StandardDate.wSecond, tzi->StandardDate.wMilliseconds,
-            tzi->StandardBias);
+            (int)tzi->StandardBias);
     }
 
     find_reg_tz_info(tzi, tz_name, current_year + 1900);
@@ -2359,13 +2388,13 @@ static void read_dev_urandom( void *buf, ULONG len )
     else WARN( "can't open /dev/urandom\n" );
 }
 
-static NTSTATUS get_system_process_info( SYSTEM_INFORMATION_CLASS class, void *info, ULONG size, ULONG *len )
+static unsigned int get_system_process_info( SYSTEM_INFORMATION_CLASS class, void *info, ULONG size, ULONG *len )
 {
     unsigned int process_count, total_thread_count, total_name_len, i, j;
     unsigned int thread_info_size;
     unsigned int pos = 0;
     char *buffer = NULL;
-    NTSTATUS ret;
+    unsigned int ret;
 
 C_ASSERT( sizeof(struct thread_info) <= sizeof(SYSTEM_THREAD_INFORMATION) );
 C_ASSERT( sizeof(struct process_info) <= sizeof(SYSTEM_PROCESS_INFORMATION) );
@@ -2488,10 +2517,10 @@ C_ASSERT( sizeof(struct process_info) <= sizeof(SYSTEM_PROCESS_INFORMATION) );
 NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
                                           void *info, ULONG size, ULONG *ret_size )
 {
-    NTSTATUS ret = STATUS_SUCCESS;
+    unsigned int ret = STATUS_SUCCESS;
     ULONG len = 0;
 
-    TRACE( "(0x%08x,%p,0x%08x,%p)\n", class, info, size, ret_size );
+    TRACE( "(0x%08x,%p,0x%08x,%p)\n", class, info, (int)size, ret_size );
 
     switch (class)
     {
@@ -2544,17 +2573,28 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
 
     case SystemTimeOfDayInformation:  /* 3 */
     {
+        static LONGLONG last_bias;
+        static time_t last_utc;
         struct tm *tm;
-        time_t now;
+        time_t utc;
         SYSTEM_TIMEOFDAY_INFORMATION sti = {{{ 0 }}};
 
         sti.BootTime.QuadPart = server_start_time;
-        now = time( NULL );
-        tm = gmtime( &now );
-        sti.TimeZoneBias.QuadPart = mktime( tm ) - now;
-        tm = localtime( &now );
-        if (tm->tm_isdst) sti.TimeZoneBias.QuadPart -= 3600;
-        sti.TimeZoneBias.QuadPart *= TICKSPERSEC;
+
+        utc = time( NULL );
+        pthread_mutex_lock( &timezone_mutex );
+        if (utc != last_utc)
+        {
+            last_utc = utc;
+            tm = gmtime( &utc );
+            last_bias = mktime( tm ) - utc;
+            tm = localtime( &utc );
+            if (tm->tm_isdst) last_bias -= 3600;
+            last_bias *= TICKSPERSEC;
+        }
+        sti.TimeZoneBias.QuadPart = last_bias;
+        pthread_mutex_unlock( &timezone_mutex );
+
         NtQuerySystemTime( &sti.SystemTime );
 
         if (size <= sizeof(sti))
@@ -3101,7 +3141,7 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
     {
         SYSTEM_CODEINTEGRITY_INFORMATION *integrity_info = info;
 
-        FIXME("SystemCodeIntegrityInformation, size %u, info %p, stub!\n", size, info);
+        FIXME("SystemCodeIntegrityInformation, size %u, info %p, stub!\n", (int)size, info);
 
         len = sizeof(SYSTEM_CODEINTEGRITY_INFORMATION);
 
@@ -3141,14 +3181,14 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         struct utsname buf;
 
         uname( &buf );
-        len = strlen(version) + strlen(wine_build) + strlen(buf.sysname) + strlen(buf.release) + 4;
         snprintf( info, size, "%s%c%s%c%s%c%s", version, 0, wine_build, 0, buf.sysname, 0, buf.release );
+        len = strlen(version) + strlen(wine_build) + strlen(buf.sysname) + strlen(buf.release) + 4;
         if (size < len) ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
     }
 
     default:
-	FIXME( "(0x%08x,%p,0x%08x,%p) stub\n", class, info, size, ret_size );
+	FIXME( "(0x%08x,%p,0x%08x,%p) stub\n", class, info, (int)size, ret_size );
 
         /* Several Information Classes are not implemented on Windows and return 2 different values
          * STATUS_NOT_IMPLEMENTED or STATUS_INVALID_INFO_CLASS
@@ -3170,9 +3210,9 @@ NTSTATUS WINAPI NtQuerySystemInformationEx( SYSTEM_INFORMATION_CLASS class,
                                             void *info, ULONG size, ULONG *ret_size )
 {
     ULONG len = 0;
-    NTSTATUS ret = STATUS_NOT_IMPLEMENTED;
+    unsigned int ret = STATUS_NOT_IMPLEMENTED;
 
-    TRACE( "(0x%08x,%p,%u,%p,%u,%p) stub\n", class, query, query_len, info, size, ret_size );
+    TRACE( "(0x%08x,%p,%u,%p,%u,%p) stub\n", class, query, (int)query_len, info, (int)size, ret_size );
 
     switch (class)
     {
@@ -3281,7 +3321,7 @@ NTSTATUS WINAPI NtQuerySystemInformationEx( SYSTEM_INFORMATION_CLASS class,
     }
 
     default:
-        FIXME( "(0x%08x,%p,%u,%p,%u,%p) stub\n", class, query, query_len, info, size, ret_size );
+        FIXME( "(0x%08x,%p,%u,%p,%u,%p) stub\n", class, query, (int)query_len, info, (int)size, ret_size );
         break;
     }
     if (ret_size) *ret_size = len;
@@ -3294,7 +3334,7 @@ NTSTATUS WINAPI NtQuerySystemInformationEx( SYSTEM_INFORMATION_CLASS class,
  */
 NTSTATUS WINAPI NtSetSystemInformation( SYSTEM_INFORMATION_CLASS class, void *info, ULONG length )
 {
-    FIXME( "(0x%08x,%p,0x%08x) stub\n", class, info, length );
+    FIXME( "(0x%08x,%p,0x%08x) stub\n", class, info, (int)length );
     return STATUS_SUCCESS;
 }
 
@@ -3305,7 +3345,7 @@ NTSTATUS WINAPI NtSetSystemInformation( SYSTEM_INFORMATION_CLASS class, void *in
 NTSTATUS WINAPI NtQuerySystemEnvironmentValue( UNICODE_STRING *name, WCHAR *buffer, ULONG length,
                                                ULONG *retlen )
 {
-    FIXME( "(%s, %p, %u, %p), stub\n", debugstr_us(name), buffer, length, retlen );
+    FIXME( "(%s, %p, %u, %p), stub\n", debugstr_us(name), buffer, (int)length, retlen );
     return STATUS_NOT_IMPLEMENTED;
 }
 
@@ -3328,7 +3368,8 @@ NTSTATUS WINAPI NtQuerySystemEnvironmentValueEx( UNICODE_STRING *name, GUID *ven
 NTSTATUS WINAPI NtSystemDebugControl( SYSDBG_COMMAND command, void *in_buff, ULONG in_len,
                                       void *out_buff, ULONG out_len, ULONG *retlen )
 {
-    FIXME( "(%d, %p, %d, %p, %d, %p), stub\n", command, in_buff, in_len, out_buff, out_len, retlen );
+    FIXME( "(%d, %p, %d, %p, %d, %p), stub\n",
+           command, in_buff, (int)in_len, out_buff, (int)out_len, retlen );
     return STATUS_NOT_IMPLEMENTED;
 }
 
@@ -3374,12 +3415,14 @@ static ULONG mhz_from_cpuinfo(void)
     return cmz;
 }
 
-static const char * get_sys_str(const char *path, char *s)
+static const char * get_sys_str(const char *dirname, const char *basename, char *s)
 {
-    FILE *f = fopen(path, "r");
+    char path[64];
+    FILE *f;
     const char *ret = NULL;
 
-    if (f)
+    if (snprintf(path, sizeof(path), "%s/%s", dirname, basename) >= sizeof(path)) return NULL;
+    if ((f = fopen(path, "r")))
     {
         if (fgets(s, 16, f)) ret = s;
         fclose(f);
@@ -3387,46 +3430,72 @@ static const char * get_sys_str(const char *path, char *s)
     return ret;
 }
 
-static int get_sys_int(const char *path, int def)
+static int get_sys_int(const char *dirname, const char *basename)
 {
     char s[16];
-    return get_sys_str(path, s) ? atoi(s) : def;
+    return get_sys_str(dirname, basename, s) ? atoi(s) : 0;
 }
 
 static NTSTATUS fill_battery_state( SYSTEM_BATTERY_STATE *bs )
 {
+    DIR *d = opendir("/sys/class/power_supply");
+    struct dirent *de;
     char s[16], path[64];
-    unsigned int i = 0;
+    BOOL found_ac = FALSE;
     LONG64 voltage; /* microvolts */
 
-    bs->AcOnLine = get_sys_int("/sys/class/power_supply/AC/online", 1);
+    bs->AcOnLine = TRUE;
+    if (!d) return STATUS_SUCCESS;
 
-    for (;;)
+    while ((de = readdir(d)))
     {
-        sprintf(path, "/sys/class/power_supply/BAT%u/status", i);
-        if (!get_sys_str(path, s)) break;
-        bs->Charging |= (strcmp(s, "Charging\n") == 0);
-        bs->Discharging |= (strcmp(s, "Discharging\n") == 0);
-        bs->BatteryPresent = TRUE;
-        i++;
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
+        if (snprintf(path, sizeof(path), "/sys/class/power_supply/%s", de->d_name) >= sizeof(path)) continue;
+        if (get_sys_str(path, "scope", s) && strcmp(s, "Device\n") == 0) continue;
+        if (!get_sys_str(path, "type", s)) continue;
+
+        if (strcmp(s, "Mains\n") == 0)
+        {
+            if (!get_sys_str(path, "online", s)) continue;
+            if (found_ac)
+            {
+                FIXME("Multiple mains found, only reporting on the first\n");
+            }
+            else
+            {
+                bs->AcOnLine = atoi(s);
+                found_ac = TRUE;
+            }
+        }
+        else if (strcmp(s, "Battery\n") == 0)
+        {
+            if (!get_sys_str(path, "status", s)) continue;
+            if (bs->BatteryPresent)
+            {
+                FIXME("Multiple batteries found, only reporting on the first\n");
+            }
+            else
+            {
+                bs->Charging = (strcmp(s, "Charging\n") == 0);
+                bs->Discharging = (strcmp(s, "Discharging\n") == 0);
+                bs->BatteryPresent = TRUE;
+                voltage = get_sys_int(path, "voltage_now");
+                bs->MaxCapacity = get_sys_int(path, "charge_full") * voltage / 1e9;
+                bs->RemainingCapacity = get_sys_int(path, "charge_now") * voltage / 1e9;
+                bs->Rate = -get_sys_int(path, "current_now") * voltage / 1e9;
+                if (!bs->Charging && (LONG)bs->Rate < 0)
+                    bs->EstimatedTime = 3600 * bs->RemainingCapacity / -(LONG)bs->Rate;
+                else
+                    bs->EstimatedTime = ~0u;
+            }
+        }
     }
 
-    if (bs->BatteryPresent)
-    {
-        voltage = get_sys_int("/sys/class/power_supply/BAT0/voltage_now", 0);
-        bs->MaxCapacity = get_sys_int("/sys/class/power_supply/BAT0/charge_full", 0) * voltage / 1e9;
-        bs->RemainingCapacity = get_sys_int("/sys/class/power_supply/BAT0/charge_now", 0) * voltage / 1e9;
-        bs->Rate = -get_sys_int("/sys/class/power_supply/BAT0/current_now", 0) * voltage / 1e9;
-        if (!bs->Charging && (LONG)bs->Rate < 0)
-            bs->EstimatedTime = 3600 * bs->RemainingCapacity / -(LONG)bs->Rate;
-        else
-            bs->EstimatedTime = ~0u;
-    }
-
+    closedir(d);
     return STATUS_SUCCESS;
 }
 
-#elif defined(HAVE_IOKIT_IOKITLIB_H)
+#elif defined(__APPLE__)
 
 static NTSTATUS fill_battery_state( SYSTEM_BATTERY_STATE *bs )
 {
@@ -3436,7 +3505,7 @@ static NTSTATUS fill_battery_state( SYSTEM_BATTERY_STATE *bs )
     uint32_t value, voltage;
     CFTimeInterval remain;
 
-    if (IOPMCopyBatteryInfo( kIOMasterPortDefault, &batteries ) != kIOReturnSuccess)
+    if (IOPMCopyBatteryInfo( 0, &batteries ) != kIOReturnSuccess)
         return STATUS_ACCESS_DENIED;
 
     if (CFArrayGetCount( batteries ) == 0)
@@ -3554,7 +3623,7 @@ static NTSTATUS fill_battery_state( SYSTEM_BATTERY_STATE *bs )
 NTSTATUS WINAPI NtPowerInformation( POWER_INFORMATION_LEVEL level, void *input, ULONG in_size,
                                     void *output, ULONG out_size )
 {
-    TRACE( "(%d,%p,%d,%p,%d)\n", level, input, in_size, output, out_size );
+    TRACE( "(%d,%p,%d,%p,%d)\n", level, input, (int)in_size, output, (int)out_size );
     switch (level)
     {
     case SystemPowerCapabilities:
@@ -3625,14 +3694,15 @@ NTSTATUS WINAPI NtPowerInformation( POWER_INFORMATION_LEVEL level, void *input, 
         if ((out_size / sizeof(PROCESSOR_POWER_INFORMATION)) < out_cpus) return STATUS_BUFFER_TOO_SMALL;
 #if defined(linux)
         {
+            unsigned int val;
             char filename[128];
             FILE* f;
 
             for(i = 0; i < out_cpus; i++) {
                 sprintf(filename, "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", i);
                 f = fopen(filename, "r");
-                if (f && (fscanf(f, "%d", &cpu_power[i].MaxMhz) == 1)) {
-                    cpu_power[i].MaxMhz /= 1000;
+                if (f && (fscanf(f, "%u", &val) == 1)) {
+                    cpu_power[i].MaxMhz = val / 1000;
                     fclose(f);
                     cpu_power[i].CurrentMhz = cpu_power[i].MaxMhz;
                 }
@@ -3650,8 +3720,8 @@ NTSTATUS WINAPI NtPowerInformation( POWER_INFORMATION_LEVEL level, void *input, 
 
                 sprintf(filename, "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_max_freq", i);
                 f = fopen(filename, "r");
-                if(f && (fscanf(f, "%d", &cpu_power[i].MhzLimit) == 1)) {
-                    cpu_power[i].MhzLimit /= 1000;
+                if(f && (fscanf(f, "%u", &val) == 1)) {
+                    cpu_power[i].MhzLimit = val / 1000;
                     fclose(f);
                 }
                 else
@@ -3719,9 +3789,9 @@ NTSTATUS WINAPI NtPowerInformation( POWER_INFORMATION_LEVEL level, void *input, 
         WARN("Unable to detect CPU MHz for this platform. Reporting %d MHz.\n", cannedMHz);
 #endif
         for(i = 0; i < out_cpus; i++) {
-            TRACE("cpu_power[%d] = %u %u %u %u %u %u\n", i, cpu_power[i].Number,
-                  cpu_power[i].MaxMhz, cpu_power[i].CurrentMhz, cpu_power[i].MhzLimit,
-                  cpu_power[i].MaxIdleState, cpu_power[i].CurrentIdleState);
+            TRACE("cpu_power[%d] = %u %u %u %u %u %u\n", i, (int)cpu_power[i].Number,
+                  (int)cpu_power[i].MaxMhz, (int)cpu_power[i].CurrentMhz, (int)cpu_power[i].MhzLimit,
+                  (int)cpu_power[i].MaxIdleState, (int)cpu_power[i].CurrentIdleState);
         }
         return STATUS_SUCCESS;
     }
@@ -3771,7 +3841,7 @@ NTSTATUS WINAPI NtRaiseHardError( NTSTATUS status, ULONG count,
                                   UNICODE_STRING *params_mask, void **params,
                                   HARDERROR_RESPONSE_OPTION option, HARDERROR_RESPONSE *response )
 {
-    FIXME( "%08x stub\n", status );
+    FIXME( "%08x stub\n", (int)status );
     return STATUS_NOT_IMPLEMENTED;
 }
 
@@ -3782,7 +3852,7 @@ NTSTATUS WINAPI NtRaiseHardError( NTSTATUS status, ULONG count,
 NTSTATUS WINAPI NtInitiatePowerAction( POWER_ACTION action, SYSTEM_POWER_STATE state,
                                        ULONG flags, BOOLEAN async )
 {
-    FIXME( "(%d,%d,0x%08x,%d),stub\n", action, state, flags, async );
+    FIXME( "(%d,%d,0x%08x,%d),stub\n", action, state, (int)flags, async );
     return STATUS_NOT_IMPLEMENTED;
 }
 
@@ -3794,7 +3864,7 @@ NTSTATUS WINAPI NtSetThreadExecutionState( EXECUTION_STATE new_state, EXECUTION_
 {
     static EXECUTION_STATE current = ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED | ES_USER_PRESENT;
 
-    WARN( "(0x%x, %p): stub, harmless.\n", new_state, old_state );
+    WARN( "(0x%x, %p): stub, harmless.\n", (int)new_state, old_state );
     *old_state = current;
     if (!(current & ES_CONTINUOUS) || (new_state & ES_CONTINUOUS)) current = new_state;
     return STATUS_SUCCESS;

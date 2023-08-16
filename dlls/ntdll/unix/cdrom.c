@@ -75,7 +75,7 @@
 # include <sys/scsiio.h>
 #endif
 
-#ifdef HAVE_IOKIT_IOKITLIB_H
+#ifdef __APPLE__
 # include <libkern/OSByteOrder.h>
 # include <sys/disk.h>
 # include <IOKit/IOKitLib.h>
@@ -367,7 +367,7 @@ static NTSTATUS get_parent_device( int fd, char *name, size_t len )
 
     CFDictionaryAddValue( dict, CFSTR("Removable"), kCFBooleanTrue );
 
-    service = IOServiceGetMatchingService( kIOMasterPortDefault, dict );
+    service = IOServiceGetMatchingService( 0, dict );
 
     /* now look for the parent that has the "Whole" attribute set to TRUE */
 
@@ -1456,8 +1456,8 @@ static NTSTATUS CDROM_RawRead(int fd, const RAW_READ_INFO* raw, void* buffer, DW
     dk_cd_read_t cdrd;
 #endif
 
-    TRACE("RAW_READ_INFO: DiskOffset=%i,%i SectorCount=%i TrackMode=%i\n buffer=%p len=%i sz=%p\n",
-          raw->DiskOffset.u.HighPart, raw->DiskOffset.u.LowPart, raw->SectorCount, raw->TrackMode, buffer, len, sz);
+    TRACE("RAW_READ_INFO: DiskOffset=%s SectorCount=%i TrackMode=%i\n buffer=%p len=%i sz=%p\n",
+          wine_dbgstr_longlong(raw->DiskOffset.QuadPart), (int)raw->SectorCount, (int)raw->TrackMode, buffer, (int)len, sz);
 
     if (len < raw->SectorCount * 2352) return STATUS_BUFFER_TOO_SMALL;
 
@@ -2814,8 +2814,8 @@ static NTSTATUS GetInquiryData(int fd, PSCSI_ADAPTER_BUS_INFO BufferOut, DWORD O
  *		cdrom_DeviceIoControl
  */
 NTSTATUS cdrom_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
-                                client_ptr_t io, ULONG code, void *in_buffer,
-                                ULONG in_size, void *out_buffer, ULONG out_size )
+                                client_ptr_t io, UINT code, void *in_buffer,
+                                UINT in_size, void *out_buffer, UINT out_size )
 {
     DWORD       sz = 0;
     NTSTATUS    status = STATUS_SUCCESS;
@@ -3054,11 +3054,11 @@ NTSTATUS cdrom_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc
         else if (out_size < sz) status = STATUS_BUFFER_TOO_SMALL;
         else
         {
-            TRACE("before in 0x%08x out 0x%08x\n",(in_buffer)?*(PDVD_SESSION_ID)in_buffer:0,
-                  *(PDVD_SESSION_ID)out_buffer);
+            TRACE("before in 0x%08x out 0x%08x\n",(int)(in_buffer ? *(DVD_SESSION_ID *)in_buffer : 0),
+                  (int)*(DVD_SESSION_ID *)out_buffer);
             status = DVD_StartSession(fd, in_buffer, out_buffer);
-            TRACE("before in 0x%08x out 0x%08x\n",(in_buffer)?*(PDVD_SESSION_ID)in_buffer:0,
-                  *(PDVD_SESSION_ID)out_buffer);
+            TRACE("before in 0x%08x out 0x%08x\n",(int)(in_buffer ? *(DVD_SESSION_ID *)in_buffer : 0),
+                  (int)*(DVD_SESSION_ID *)out_buffer);
         }
         break;
     case IOCTL_DVD_END_SESSION:

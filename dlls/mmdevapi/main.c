@@ -102,7 +102,7 @@ static BOOL load_driver(const WCHAR *name, DriverFuncs *driver)
 
 static BOOL WINAPI init_driver(INIT_ONCE *once, void *param, void **context)
 {
-    static WCHAR default_list[] = L"pulse,alsa,oss,coreaudio,android";
+    static WCHAR default_list[] = L"pulse,alsa,oss,coreaudio";
     DriverFuncs driver;
     HKEY key;
     WCHAR reg_list[256], *p, *next, *driver_list = default_list;
@@ -380,6 +380,8 @@ static IActivateAudioInterfaceAsyncOperationVtbl IActivateAudioInterfaceAsyncOpe
 static DWORD WINAPI activate_async_threadproc(void *user)
 {
     struct activate_async_op *op = user;
+
+    SetThreadDescription(GetCurrentThread(), L"wine_mmdevapi_activate_async");
 
     IActivateAudioInterfaceCompletionHandler_ActivateCompleted(op->callback, &op->IActivateAudioInterfaceAsyncOperation_iface);
 

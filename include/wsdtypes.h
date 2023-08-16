@@ -19,8 +19,6 @@
 #ifndef WSDTYPES_H
 #define WSDTYPES_H
 
-#include "wine/winheader_enter.h"
-
 interface IWSDMessageParameters;
 
 typedef struct _WSD_APP_SEQUENCE WSD_APP_SEQUENCE;
@@ -112,7 +110,5 @@ struct _WSD_SCOPES
     const WCHAR *MatchBy;
     WSD_URI_LIST *Scopes;
 };
-
-#include "wine/winheader_exit.h"
 
 #endif

@@ -45,9 +45,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(odbc);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
-static unixlib_handle_t odbc_handle;
-
-#define ODBC_CALL( func, params ) __wine_unix_call( odbc_handle, unix_ ## func, params )
+#define ODBC_CALL( func, params ) WINE_UNIX_CALL( unix_ ## func, params )
 
 /***********************************************************************
  * ODBC_ReplicateODBCInstToRegistry
@@ -1040,12 +1038,6 @@ SQLRETURN WINAPI SQLGetInfo(SQLHDBC ConnectionHandle, SQLUSMALLINT InfoType, SQL
 
     TRACE("(ConnectionHandle, %p, InfoType %d, InfoValue %p, BufferLength %d, StringLength %p)\n", ConnectionHandle,
           InfoType, InfoValue, BufferLength, StringLength);
-
-    if (!InfoValue)
-    {
-        WARN("Unexpected NULL InfoValue address\n");
-        return SQL_ERROR;
-    }
 
     ret = ODBC_CALL( SQLGetInfo, &params );
     TRACE("Returning %d\n", ret);
@@ -2246,12 +2238,6 @@ SQLRETURN WINAPI SQLGetInfoW(SQLHDBC ConnectionHandle, SQLUSMALLINT InfoType, SQ
     TRACE("(ConnectionHandle, %p, InfoType %d, InfoValue %p, BufferLength %d, StringLength %p)\n", ConnectionHandle,
           InfoType, InfoValue, BufferLength, StringLength);
 
-    if (!InfoValue)
-    {
-        WARN("Unexpected NULL InfoValue address\n");
-        return SQL_ERROR;
-    }
-
     ret = ODBC_CALL( SQLGetInfoW, &params );
     TRACE("Returning %d\n", ret);
     return ret;
@@ -2653,18 +2639,16 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved)
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
-       DisableThreadLibraryCalls(hinstDLL);
-        if (!NtQueryVirtualMemory( GetCurrentProcess(), hinstDLL, MemoryWineUnixFuncs,
-                                   &odbc_handle, sizeof(odbc_handle), NULL ) &&
-            !__wine_unix_call( odbc_handle, process_attach, NULL))
+        DisableThreadLibraryCalls(hinstDLL);
+        if (!__wine_init_unix_call() && !WINE_UNIX_CALL( process_attach, NULL ))
         {
             ODBC_ReplicateToRegistry();
         }
-       break;
+        break;
 
     case DLL_PROCESS_DETACH:
-      if (reserved) break;
-      __wine_unix_call( odbc_handle, process_detach, NULL );
+        if (reserved) break;
+        WINE_UNIX_CALL( process_detach, NULL );
     }
 
     return TRUE;

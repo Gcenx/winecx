@@ -42,7 +42,7 @@ BOOL types_get_real_type(struct dbg_type* type, DWORD* tag)
         if (!types_get_info(type, TI_GET_SYMTAG, tag))
             return FALSE;
         if (*tag != SymTagTypedef) return TRUE;
-    } while (types_get_info(type, TI_GET_TYPE, &type->id));
+    } while (types_get_info(type, TI_GET_TYPE, type));
     return FALSE;
 }
 
@@ -91,11 +91,15 @@ dbg_lgint_t types_extract_as_lgint(const struct dbg_lvalue* lvalue,
         switch (bt)
         {
         case btChar:
+        case btWChar:
+        case btBool:
         case btInt:
+        case btLong:
             if (!memory_fetch_integer(lvalue, (unsigned)size, s = TRUE, &rtn))
                 RaiseException(DEBUG_STATUS_INTERNAL_ERROR, 0, 0, NULL);
             break;
         case btUInt:
+        case btULong:
             if (!memory_fetch_integer(lvalue, (unsigned)size, s = FALSE, &rtn))
                 RaiseException(DEBUG_STATUS_INTERNAL_ERROR, 0, 0, NULL);
             break;
@@ -195,8 +199,7 @@ static BOOL types_get_udt_element_lvalue(struct dbg_lvalue* lvalue, const struct
     DWORD       offset, bitoffset;
     DWORD64     length;
 
-    types_get_info(type, TI_GET_TYPE, &lvalue->type.id);
-    lvalue->type.module = type->module;
+    types_get_info(type, TI_GET_TYPE, &lvalue->type);
     if (!types_get_info(type, TI_GET_OFFSET, &offset)) return FALSE;
     lvalue->addr.Offset += offset;
 
@@ -296,13 +299,13 @@ BOOL types_array_index(const struct dbg_lvalue* lvalue, int index, struct dbg_lv
         }
         break;
     default:
-        assert(FALSE);
+        FIXME("unexpected tag %lx\n", tag);
+        return FALSE;
     }
     /*
      * Get the base type, so we know how much to index by.
      */
-    if (!types_get_info(&type, TI_GET_TYPE, &result->type.id)) return FALSE;
-    result->type.module = type.module;
+    if (!types_get_info(&type, TI_GET_TYPE, &result->type)) return FALSE;
     if (index)
     {
         DWORD64             length;
@@ -328,39 +331,34 @@ BOOL types_array_index(const struct dbg_lvalue* lvalue, int index, struct dbg_lv
 
 struct type_find_t
 {
-    ULONG               result; /* out: the found type */
     enum SymTagEnum     tag;    /* in: the tag to look for */
-    union
-    {
-        ULONG                   typeid; /* when tag is SymTagUDT */
-        const char*             name;   /* when tag is SymTagPointerType */
-    } u;
+    struct dbg_type     type;   /* out: the type found */
+    ULONG               ptr_typeid; /* in: when tag is SymTagPointerType */
 };
 
 static BOOL CALLBACK types_cb(PSYMBOL_INFO sym, ULONG size, void* _user)
 {
     struct type_find_t* user = _user;
     BOOL                ret = TRUE;
-    struct dbg_type     type;
-    DWORD               type_id;
+    struct dbg_type     type, type_id;
 
     if (sym->Tag == user->tag)
     {
         switch (user->tag)
         {
         case SymTagUDT:
-            if (!strcmp(user->u.name, sym->Name))
-            {
-                user->result = sym->TypeIndex;
-                ret = FALSE;
-            }
+        case SymTagEnum:
+        case SymTagTypedef:
+            user->type.module = sym->ModBase;
+            user->type.id = sym->TypeIndex;
+            ret = FALSE;
             break;
         case SymTagPointerType:
             type.module = sym->ModBase;
             type.id = sym->TypeIndex;
-            if (types_get_info(&type, TI_GET_TYPE, &type_id) && type_id == user->u.typeid)
+            if (types_get_info(&type, TI_GET_TYPE, &type_id) && type_id.id == user->ptr_typeid)
             {
-                user->result = sym->TypeIndex;
+                user->type = type;
                 ret = FALSE;
             }
             break;
@@ -373,21 +371,57 @@ static BOOL CALLBACK types_cb(PSYMBOL_INFO sym, ULONG size, void* _user)
 /******************************************************************
  *		types_find_pointer
  *
- * Should look up in module based at linear whether (typeid*) exists
- * Otherwise, we could create it locally
+ * There's no simple API in dbghelp for looking up the pointer type of a given type
+ * - SymEnumTypes would do, but it'll enumerate all types, which could be long
+ * - and more impacting, there's no guarantee such a type exists
+ * Hence, we synthetize inside Winedbg all needed pointer types.
+ * That's cumbersome as we end up with dbg_type in different modules between pointer
+ * and pointee types.
  */
-struct dbg_type types_find_pointer(const struct dbg_type* type)
+BOOL types_find_pointer(const struct dbg_type* type, struct dbg_type* outtype)
 {
     struct type_find_t  f;
-    struct dbg_type     ret;
+    unsigned i;
+    struct dbg_type* new;
 
-    f.result = dbg_itype_none;
+    if (!dbg_curr_process) return FALSE;
+
+    /* first lookup if pointer to type exists in module */
+    f.type.id = dbg_itype_none;
     f.tag = SymTagPointerType;
-    f.u.typeid = type->id;
+    f.ptr_typeid = type->id;
     SymEnumTypes(dbg_curr_process->handle, type->module, types_cb, &f);
-    ret.module = type->module;
-    ret.id = f.result;
-    return ret;
+    if (f.type.id != dbg_itype_none)
+    {
+        *outtype = f.type;
+        return TRUE;
+    }
+
+    /* then look up in synthetized types */
+    for (i = 0; i < dbg_curr_process->num_synthetized_types; i++)
+        if (!memcmp(type, &dbg_curr_process->synthetized_types[i], sizeof(*type)))
+        {
+            outtype->module = 0;
+            outtype->id = dbg_itype_synthetized + i;
+            return TRUE;
+        }
+    if (dbg_itype_synthetized + dbg_curr_process->num_synthetized_types >= dbg_itype_first)
+    {
+        /* for now, we don't reuse old slots... */
+        FIXME("overflow in pointer types\n");
+        return FALSE;
+    }
+    /* otherwise, synthetize it */
+    new = realloc(dbg_curr_process->synthetized_types,
+                  (dbg_curr_process->num_synthetized_types + 1) * sizeof(*new));
+    if (!new) return FALSE;
+    dbg_curr_process->synthetized_types = new;
+    dbg_curr_process->synthetized_types[dbg_curr_process->num_synthetized_types] = *type;
+    outtype->module = 0;
+    outtype->id = dbg_itype_synthetized + dbg_curr_process->num_synthetized_types;
+    dbg_curr_process->num_synthetized_types++;
+
+    return TRUE;
 }
 
 /******************************************************************
@@ -396,19 +430,29 @@ struct dbg_type types_find_pointer(const struct dbg_type* type)
  * Should look up in the module based at linear address whether a type
  * named 'name' and with the correct tag exists
  */
-struct dbg_type types_find_type(DWORD64 linear, const char* name, enum SymTagEnum tag)
-
+BOOL types_find_type(const char* name, enum SymTagEnum tag, struct dbg_type* outtype)
 {
     struct type_find_t  f;
-    struct dbg_type     ret;
+    char* str = NULL;
+    BOOL ret;
 
-    f.result = dbg_itype_none;
+    if (!strchr(name, '!')) /* no module, lookup across all modules */
+    {
+        str = malloc(strlen(name) + 3);
+        if (!str) return FALSE;
+        str[0] = '*';
+        str[1] = '!';
+        strcpy(str + 2, name);
+        name = str;
+    }
+    f.type.id = dbg_itype_none;
     f.tag = tag;
-    f.u.name = name;
-    SymEnumTypes(dbg_curr_process->handle, linear, types_cb, &f);
-    ret.module = linear;
-    ret.id = f.result;
-    return ret;
+    ret = SymEnumTypesByName(dbg_curr_process->handle, 0, name, types_cb, &f);
+    free(str);
+    if (!ret || f.type.id == dbg_itype_none)
+        return FALSE;
+    *outtype = f.type;
+    return TRUE;
 }
 
 /***********************************************************************
@@ -498,7 +542,7 @@ void print_value(const struct dbg_lvalue* lvalue, char format, int level)
         types_get_info(&type, TI_GET_COUNT, &count);
         types_get_info(&type, TI_GET_LENGTH, &size);
         lvalue_field = *lvalue;
-        types_get_info(&lvalue_field.type, TI_GET_TYPE, &lvalue_field.type.id);
+        types_get_info(&lvalue_field.type, TI_GET_TYPE, &lvalue_field.type);
         types_get_real_type(&lvalue_field.type, &tag);
 
         if (size == count && tag == SymTagBaseType)
@@ -532,11 +576,11 @@ void print_value(const struct dbg_lvalue* lvalue, char format, int level)
         dbg_printf("Function ");
         print_bare_address(&lvalue->addr);
         dbg_printf(": ");
-        types_print_type(&type, FALSE);
+        types_print_type(&type, FALSE, NULL);
         break;
     case SymTagTypedef:
         lvalue_field = *lvalue;
-        types_get_info(&lvalue->type, TI_GET_TYPE, &lvalue_field.type.id);
+        types_get_info(&lvalue->type, TI_GET_TYPE, &lvalue_field.type);
         print_value(&lvalue_field, format, level);
         break;
     default:
@@ -556,7 +600,7 @@ static BOOL CALLBACK print_types_cb(PSYMBOL_INFO sym, ULONG size, void* ctx)
     type.module = sym->ModBase;
     type.id = sym->TypeIndex;
     dbg_printf("Mod: %0*Ix ID: %08lx\n", ADDRWIDTH, type.module, type.id);
-    types_print_type(&type, TRUE);
+    types_print_type(&type, TRUE, FALSE);
     dbg_printf("\n");
     return TRUE;
 }
@@ -577,12 +621,14 @@ BOOL print_types(void)
     return FALSE;
 }
 
-BOOL types_print_type(const struct dbg_type* type, BOOL details)
+BOOL types_print_type(const struct dbg_type* type, BOOL details, const WCHAR* varname)
 {
     WCHAR*              ptr;
     const WCHAR*        name;
-    DWORD               tag, udt, count;
+    DWORD               tag, udt, count, bitoffset, bt;
+    DWORD64             bitlen;
     struct dbg_type     subtype;
+    BOOL                printed = FALSE;
 
     if (type->id == dbg_itype_none || !types_get_info(type, TI_GET_SYMTAG, &tag))
     {
@@ -595,12 +641,17 @@ BOOL types_print_type(const struct dbg_type* type, BOOL details)
     switch (tag)
     {
     case SymTagBaseType:
-        if (details) dbg_printf("Basic<%ls>", name); else dbg_printf("%ls", name);
+        dbg_printf("%ls", name);
+        if (details && types_get_info(type, TI_GET_LENGTH, &bitlen) && types_get_info(type, TI_GET_BASETYPE, &bt))
+        {
+            const char* longness = "";
+            if (bt == btLong || bt == btULong) longness = " long";
+            dbg_printf(": size=%I64d%s", bitlen, longness);
+        }
         break;
     case SymTagPointerType:
-        types_get_info(type, TI_GET_TYPE, &subtype.id);
-        subtype.module = type->module;
-        types_print_type(&subtype, FALSE);
+        types_get_info(type, TI_GET_TYPE, &subtype);
+        types_print_type(&subtype, FALSE, NULL);
         dbg_printf("*");
         break;
     case SymTagUDT:
@@ -633,14 +684,20 @@ BOOL types_print_type(const struct dbg_type* type, BOOL details)
                         type_elt.module = type->module;
                         type_elt.id = fcp->ChildId[i];
                         if (!types_get_info(&type_elt, TI_GET_SYMNAME, &ptr) || !ptr) continue;
-                        dbg_printf("%ls", ptr);
-                        HeapFree(GetProcessHeap(), 0, ptr);
-                        if (types_get_info(&type_elt, TI_GET_TYPE, &type_elt.id))
+                        if (!types_get_info(&type_elt, TI_GET_BITPOSITION, &bitoffset) ||
+                            !types_get_info(&type_elt, TI_GET_LENGTH, &bitlen))
+                            bitlen = ~(DWORD64)0;
+                        if (types_get_info(&type_elt, TI_GET_TYPE, &type_elt))
                         {
-                            dbg_printf(":");
-                            types_print_type(&type_elt, details);
+                            /* print details of embedded UDT:s */
+                            types_print_type(&type_elt, types_get_info(&type_elt, TI_GET_UDTKIND, &udt), ptr);
                         }
-                        if (i < min(fcp->Count, count) - 1 || count > 256) dbg_printf(", ");
+                        else dbg_printf("<unknown> %ls", ptr);
+                        HeapFree(GetProcessHeap(), 0, ptr);
+                        if (bitlen != ~(DWORD64)0)
+                            dbg_printf(" : %I64u", bitlen);
+                        dbg_printf(";");
+                        if (i < min(fcp->Count, count) - 1 || count > 256) dbg_printf(" ");
                     }
                 }
                 count -= min(count, 256);
@@ -650,31 +707,78 @@ BOOL types_print_type(const struct dbg_type* type, BOOL details)
         }
         break;
     case SymTagArrayType:
-        types_get_info(type, TI_GET_TYPE, &subtype.id);
-        subtype.module = type->module;
-        types_print_type(&subtype, details);
-        if (types_get_info(type, TI_GET_COUNT, &count))
-            dbg_printf(" %ls[%ld]", name, count);
-        else
-            dbg_printf(" %ls[]", name);
+        if (types_get_info(type, TI_GET_TYPE, &subtype))
+        {
+            types_print_type(&subtype, FALSE, varname);
+            if (types_get_info(type, TI_GET_COUNT, &count))
+                dbg_printf("[%ld]", count);
+            else
+                dbg_printf("[]");
+            printed = TRUE;
+        }
         break;
     case SymTagEnum:
         dbg_printf("enum %ls", name);
+        if (details &&
+            types_get_info(type, TI_GET_CHILDRENCOUNT, &count))
+        {
+            char                        buffer[sizeof(TI_FINDCHILDREN_PARAMS) + 256 * sizeof(DWORD)];
+            TI_FINDCHILDREN_PARAMS*     fcp = (TI_FINDCHILDREN_PARAMS*)buffer;
+            WCHAR*                      ptr;
+            int                         i;
+            struct dbg_type             type_elt;
+            VARIANT                     variant;
+
+            dbg_printf(" {");
+
+            fcp->Start = 0;
+            while (count)
+            {
+                fcp->Count = min(count, 256);
+                if (types_get_info(type, TI_FINDCHILDREN, fcp))
+                {
+                    for (i = 0; i < min(fcp->Count, count); i++)
+                    {
+                        type_elt.module = type->module;
+                        type_elt.id = fcp->ChildId[i];
+                        if (!types_get_info(&type_elt, TI_GET_SYMNAME, &ptr) || !ptr) continue;
+                        if (!types_get_info(&type_elt, TI_GET_VALUE, &variant) || !ptr) continue;
+                        dbg_printf("%ls = ", ptr);
+                        switch (V_VT(&variant))
+                        {
+                        case VT_I1:  dbg_printf("%d",    V_I1(&variant)); break;
+                        case VT_I2:  dbg_printf("%d",    V_I2(&variant)); break;
+                        case VT_I4:  dbg_printf("%ld",   V_I4(&variant)); break;
+                        case VT_I8:  dbg_printf("%I64d", V_I8(&variant)); break;
+                        case VT_UI1: dbg_printf("%u",    V_UI1(&variant)); break;
+                        case VT_UI2: dbg_printf("%u",    V_UI2(&variant)); break;
+                        case VT_UI4: dbg_printf("%lu",   V_UI4(&variant)); break;
+                        case VT_UI8: dbg_printf("%I64u", V_UI8(&variant)); break;
+                        }
+                        HeapFree(GetProcessHeap(), 0, ptr);
+                        if (i < min(fcp->Count, count) - 1 || count > 256) dbg_printf(", ");
+                    }
+                }
+                count -= min(count, 256);
+                fcp->Start += 256;
+            }
+            dbg_printf("}");
+        }
         break;
     case SymTagFunctionType:
-        types_get_info(type, TI_GET_TYPE, &subtype.id);
+        types_get_info(type, TI_GET_TYPE, &subtype);
         /* is the returned type the same object as function sig itself ? */
         if (subtype.id != type->id)
         {
-            subtype.module = type->module;
-            types_print_type(&subtype, FALSE);
+            types_print_type(&subtype, FALSE, NULL);
         }
         else
         {
             subtype.module = 0;
             dbg_printf("<ret_type=self>");
         }
-        dbg_printf(" (*%ls)(", name);
+        dbg_printf(" (*%ls)(", varname ? varname : L"");
+        printed = TRUE;
         if (types_get_info(type, TI_GET_CHILDRENCOUNT, &count))
         {
             char                        buffer[sizeof(TI_FINDCHILDREN_PARAMS) + 256 * sizeof(DWORD)];
@@ -691,8 +795,8 @@ BOOL types_print_type(const struct dbg_type* type, BOOL details)
                     for (i = 0; i < min(fcp->Count, count); i++)
                     {
                         subtype.id = fcp->ChildId[i];
-                        types_get_info(&subtype, TI_GET_TYPE, &subtype.id);
-                        types_print_type(&subtype, FALSE);
+                        types_get_info(&subtype, TI_GET_TYPE, &subtype);
+                        types_print_type(&subtype, FALSE, NULL);
                         if (i < min(fcp->Count, count) - 1 || count > 256) dbg_printf(", ");
                     }
                 }
@@ -703,61 +807,350 @@ BOOL types_print_type(const struct dbg_type* type, BOOL details)
         dbg_printf(")");
         break;
     case SymTagTypedef:
-        dbg_printf("%ls", name);
+        if (details && types_get_info(type, TI_GET_TYPE, &subtype))
+        {
+            dbg_printf("typedef %ls => ", name);
+            types_print_type(&subtype, FALSE, NULL);
+        }
+        else dbg_printf("%ls", name);
         break;
     default:
         WINE_ERR("Unknown type %lu for %ls\n", tag, name);
         break;
     }
+    if (varname && !printed) dbg_printf(" %ls", varname);
 
-    HeapFree(GetProcessHeap(), 0, ptr);
+    if (name == ptr)
+        HeapFree(GetProcessHeap(), 0, ptr);
+    return TRUE;
+}
+
+/* order here must match order in enum dbg_internal_type */
+static struct
+{
+    unsigned char base_type;
+    unsigned char byte_size;
+}
+    basic_types_details[] =
+{
+    {btVoid,      0},
+    {btBool,      1},
+    /* chars */
+    {btChar,      1},
+    {btWChar,     2},
+    {btChar8,     1},
+    {btChar16,    2},
+    {btChar32,    4},
+    /* unsigned integers */
+    {btUInt,      1},
+    {btUInt,      2},
+    {btUInt,      4},
+    {btUInt,      8},
+    {btUInt,     16},
+    {btULong,     4},
+    {btULong,     8},
+    /* signed integers */
+    {btInt,       1},
+    {btInt,       2},
+    {btInt,       4},
+    {btInt,       8},
+    {btInt,      16},
+    {btLong,      4},
+    {btLong,      8},
+    /* floats */
+    {btFloat,     4},
+    {btFloat,     8},
+    {btFloat,    10},
+};
+
+C_ASSERT(ARRAY_SIZE(basic_types_details) == dbg_itype_last - dbg_itype_first);
+
+const struct data_model ilp32_data_model[] =
+{
+    {dbg_itype_void,                    L"void"},
+
+    {dbg_itype_bool,                    L"bool"},
+
+    {dbg_itype_char,                    L"char"},
+    {dbg_itype_wchar,                   L"WCHAR"},
+    {dbg_itype_char8,                   L"char8_t"},
+    {dbg_itype_char16,                  L"char16_t"},
+    {dbg_itype_char32,                  L"char32_t"},
+
+    {dbg_itype_unsigned_int8,           L"unsigned char"},
+    {dbg_itype_unsigned_int16,          L"unsigned short int"},
+    {dbg_itype_unsigned_int32,          L"unsigned int"},
+    {dbg_itype_unsigned_int64,          L"unsigned long long int"},
+    {dbg_itype_unsigned_int64,          L"unsigned __int64"},
+    {dbg_itype_unsigned_long32,         L"unsigned long int"},
+
+    {dbg_itype_signed_int8,             L"signed char"},
+    {dbg_itype_signed_int16,            L"short int"},
+    {dbg_itype_signed_int32,            L"int"},
+    {dbg_itype_signed_int64,            L"long long int"},
+    {dbg_itype_signed_int64,            L"__int64"},
+    {dbg_itype_signed_long32,           L"long int"},
+
+    {dbg_itype_short_real,              L"float"},
+    {dbg_itype_real,                    L"double"},
+    {dbg_itype_long_real,               L"long double"},
+
+    {0,                                 NULL}
+};
+
+const struct data_model llp64_data_model[] =
+{
+    {dbg_itype_void,                    L"void"},
+
+    {dbg_itype_bool,                    L"bool"},
+
+    {dbg_itype_char,                    L"char"},
+    {dbg_itype_wchar,                   L"WCHAR"},
+    {dbg_itype_char8,                   L"char8_t"},
+    {dbg_itype_char16,                  L"char16_t"},
+    {dbg_itype_char32,                  L"char32_t"},
+
+    {dbg_itype_unsigned_int8,           L"unsigned char"},
+    {dbg_itype_unsigned_int16,          L"unsigned short int"},
+    {dbg_itype_unsigned_int32,          L"unsigned int"},
+    {dbg_itype_unsigned_int64,          L"unsigned long long int"},
+    {dbg_itype_unsigned_int64,          L"unsigned __int64"},
+    {dbg_itype_unsigned_int128,         L"unsigned __int128"},
+
+    {dbg_itype_unsigned_long32,         L"unsigned long int"},
+
+    {dbg_itype_signed_int8,             L"signed char"},
+    {dbg_itype_signed_int16,            L"short int"},
+    {dbg_itype_signed_int32,            L"int"},
+    {dbg_itype_signed_int64,            L"long long int"},
+    {dbg_itype_signed_int64,            L"__int64"},
+    {dbg_itype_signed_int128,           L"__int128"},
+    {dbg_itype_signed_long32,           L"long int"},
+
+    {dbg_itype_short_real,              L"float"},
+    {dbg_itype_real,                    L"double"},
+    {dbg_itype_long_real,               L"long double"},
+
+    {0,                                 NULL}
+};
+
+const struct data_model lp64_data_model[] =
+{
+    {dbg_itype_void,                    L"void"},
+
+    {dbg_itype_bool,                    L"bool"},
+
+    {dbg_itype_char,                    L"char"},
+    {dbg_itype_wchar,                   L"WCHAR"},
+    {dbg_itype_char8,                   L"char8_t"},
+    {dbg_itype_char16,                  L"char16_t"},
+    {dbg_itype_char32,                  L"char32_t"},
+
+    {dbg_itype_unsigned_int8,           L"unsigned char"},
+    {dbg_itype_unsigned_int16,          L"unsigned short int"},
+    {dbg_itype_unsigned_int32,          L"unsigned int"},
+    {dbg_itype_unsigned_int64,          L"unsigned long long int"},
+    {dbg_itype_unsigned_int64,          L"unsigned __int64"},
+    {dbg_itype_unsigned_int128,         L"unsigned __int128"},
+    {dbg_itype_unsigned_long64,         L"unsigned long int"}, /* we can't discriminate 'unsigned long' from 'unsigned long long' (on output) */
+
+    {dbg_itype_signed_int8,             L"signed char"},
+    {dbg_itype_signed_int16,            L"short int"},
+    {dbg_itype_signed_int32,            L"int"},
+    {dbg_itype_signed_int64,            L"long long int"},
+    {dbg_itype_signed_int64,            L"__int64"},
+    {dbg_itype_signed_int128,           L"__int128"},
+    {dbg_itype_signed_long64,           L"long int"}, /* we can't discriminate 'long' from 'long long' (on output)*/
+
+    {dbg_itype_short_real,              L"float"},
+    {dbg_itype_real,                    L"double"},
+    {dbg_itype_long_real,               L"long double"},
+
+    {0,                                 NULL}
+};
+
+static const struct data_model* get_data_model(DWORD64 modaddr)
+{
+    const struct data_model *model;
+
+    if (dbg_curr_process->data_model)
+        model = dbg_curr_process->data_model;
+    else if (ADDRSIZE == 4) model = ilp32_data_model;
+    else
+    {
+        IMAGEHLP_MODULEW64 mi;
+        DWORD opt = SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, TRUE);
+
+        mi.SizeOfStruct = sizeof(mi);
+        if (SymGetModuleInfoW64(dbg_curr_process->handle, modaddr, &mi) &&
+            (wcsstr(mi.ModuleName, L".so") || wcsstr(mi.ModuleName, L"<")))
+            model = lp64_data_model;
+        else
+            model = llp64_data_model;
+        SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, opt);
+    }
+    return model;
+}
+
+struct mod_by_name
+{
+    const char* modname;
+    ULONG64 base;
+};
+
+static BOOL CALLBACK enum_mod_cb(const char* module, DWORD64 base, void* user)
+{
+    struct mod_by_name* mbn = user;
+    if (!mbn->modname) /* lookup data model from main module */
+    {
+        IMAGEHLP_MODULE64 mi;
+        mi.SizeOfStruct = sizeof(mi);
+        if (SymGetModuleInfo64(dbg_curr_process->handle, base, &mi))
+        {
+            size_t len = strlen(mi.ImageName);
+            if (len >= 4 && !strcmp(mi.ImageName + len - 4, ".exe"))
+            {
+                mbn->base = base;
+                return FALSE;
+            }
+        }
+    }
+    else if (SymMatchStringA(module, mbn->modname, FALSE))
+    {
+        mbn->base = base;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+BOOL             types_find_basic(const WCHAR* name, const char* mod, struct dbg_type* type)
+{
+    const struct data_model* model;
+    struct mod_by_name mbn = {mod, 0};
+    DWORD opt;
+    BOOL ret;
+
+    opt = SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, TRUE);
+    ret = SymEnumerateModules64(dbg_curr_process->handle, enum_mod_cb, &mbn);
+    SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, opt);
+    if (!ret || mbn.base == 0)
+        return FALSE;
+    model = get_data_model(mbn.base);
+    for (; model->name; model++)
+    {
+        if (!wcscmp(name, model->name))
+        {
+            type->module = 0;
+            type->id = model->itype;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static BOOL lookup_base_type_in_data_model(DWORD64 module, unsigned bt, unsigned len, WCHAR** pname)
+{
+    const WCHAR* name = NULL;
+    WCHAR tmp[64];
+    const struct data_model* model;
+
+    model = get_data_model(module);
+    for (; model->name; model++)
+    {
+        if (model->itype >= dbg_itype_first && model->itype < dbg_itype_last &&
+            bt == basic_types_details[model->itype - dbg_itype_first].base_type &&
+            len == basic_types_details[model->itype - dbg_itype_first].byte_size)
+        {
+            name = model->name;
+            break;
+        }
+    }
+    if (!name) /* synthetize name */
+    {
+        WINE_FIXME("Unsupported basic type %u %u\n", bt, len);
+        swprintf(tmp, ARRAY_SIZE(tmp), L"bt[%u,%u]", bt, len);
+        name = tmp;
+    }
+    *pname = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(name) + 1) * sizeof(WCHAR));
+    if (!*pname) return FALSE;
+    lstrcpyW(*pname, name);
     return TRUE;
 }
 
 /* helper to typecast pInfo to its expected type (_t) */
 #define X(_t) (*((_t*)pInfo))
 
+/* Wrapper around SymGetTypeInfo
+ * - module & type id on input are in dbg_type structure
+ * - for TI_GET_TYPE a pointer to a dbg_type is expected for pInfo
+ *   (instead of DWORD* for SymGetTypeInfo)
+ * - handles also internal types, and synthetized types.
+ */
 BOOL types_get_info(const struct dbg_type* type, IMAGEHLP_SYMBOL_TYPE_INFO ti, void* pInfo)
 {
     if (type->id == dbg_itype_none) return FALSE;
     if (type->module != 0)
     {
-        DWORD ret, tag, bt;
-        ret = SymGetTypeInfo(dbg_curr_process->handle, type->module, type->id, ti, pInfo);
-        if (!ret &&
-            ti == TI_GET_SYMNAME &&
-            SymGetTypeInfo(dbg_curr_process->handle, type->module, type->id, TI_GET_SYMTAG, &tag) &&
-            tag == SymTagBaseType &&
-            SymGetTypeInfo(dbg_curr_process->handle, type->module, type->id, TI_GET_BASETYPE, &bt))
+        if (ti == TI_GET_SYMNAME)
         {
-            const WCHAR* name = NULL;
-
-            switch (bt)
+            DWORD tag, bt;
+            DWORD64 len;
+            WCHAR* name;
+            if (SymGetTypeInfo(dbg_curr_process->handle, type->module, type->id, TI_GET_SYMTAG, &tag) &&
+                tag == SymTagBaseType &&
+                SymGetTypeInfo(dbg_curr_process->handle, type->module, type->id, TI_GET_BASETYPE, &bt) &&
+                SymGetTypeInfo(dbg_curr_process->handle, type->module, type->id, TI_GET_LENGTH, &len) &&
+                len == (DWORD)len)
             {
-            case btVoid:        name = L"void"; break;
-            case btChar:        name = L"char"; break;
-            case btWChar:       name = L"WCHAR"; break;
-            case btInt:         name = L"int"; break;
-            case btUInt:        name = L"unsigned int"; break;
-            case btFloat:       name = L"float"; break;
-            case btBool:        name = L"bool"; break;
-            case btLong:        name = L"long int"; break;
-            case btULong:       name = L"unsigned long int"; break;
-            case btComplex:     name = L"complex"; break;
-            default:            WINE_FIXME("Unsupported basic type %lu\n", bt); return FALSE;
-            }
-            X(WCHAR*) = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(name) + 1) * sizeof(WCHAR));
-            if (X(WCHAR*))
-            {
-                lstrcpyW(X(WCHAR*), name);
-                ret = TRUE;
+                if (!lookup_base_type_in_data_model(type->module, bt, len, &name)) return FALSE;
+                X(WCHAR*) = name;
+                return TRUE;
             }
         }
-        return ret;
+        else if (ti == TI_GET_TYPE)
+        {
+            struct dbg_type* dt = (struct dbg_type*)pInfo;
+            if (!SymGetTypeInfo(dbg_curr_process->handle, type->module, type->id, ti, &dt->id))
+                return FALSE;
+            dt->module = type->module;
+            return TRUE;
+        }
+        return SymGetTypeInfo(dbg_curr_process->handle, type->module, type->id, ti, pInfo);
+    }
+
+    if (type->id >= dbg_itype_synthetized && type->id < dbg_itype_first)
+    {
+        unsigned i = type->id - dbg_itype_synthetized;
+        if (i >= dbg_curr_process->num_synthetized_types) return FALSE;
+        switch (ti)
+        {
+        case TI_GET_SYMTAG:  X(DWORD)   = SymTagPointerType; break;
+        case TI_GET_LENGTH:  X(DWORD64) = ADDRSIZE; break;
+        case TI_GET_TYPE:    if (dbg_curr_process->synthetized_types[i].module == 0 &&
+                                 dbg_curr_process->synthetized_types[i].id == dbg_itype_none) return FALSE;
+
+                             X(struct dbg_type) = dbg_curr_process->synthetized_types[i];
+                             break;
+        default: WINE_FIXME("unsupported %u for pointer type %d\n", ti, i); return FALSE;
+        }
+        return TRUE;
     }
 
     assert(type->id >= dbg_itype_first);
 
+    if (type->id >= dbg_itype_first && type->id < dbg_itype_last)
+    {
+        switch (ti)
+        {
+        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
+        case TI_GET_LENGTH:     X(DWORD64) = basic_types_details[type->id - dbg_itype_first].byte_size; break;
+        case TI_GET_BASETYPE:   X(DWORD)   = basic_types_details[type->id - dbg_itype_first].base_type; break;
+        case TI_GET_SYMNAME:    return lookup_base_type_in_data_model(0, basic_types_details[type->id - dbg_itype_first].base_type,
+                                                                      basic_types_details[type->id - dbg_itype_first].byte_size, &X(WCHAR*));
+        default: WINE_FIXME("unsupported %u for itype %#lx\n", ti, type->id); return FALSE;
+        }
+        return TRUE;
+    }
     switch (type->id)
     {
     case dbg_itype_lguint:
@@ -778,93 +1171,12 @@ BOOL types_get_info(const struct dbg_type* type, IMAGEHLP_SYMBOL_TYPE_INFO ti, v
         default: WINE_FIXME("unsupported %u for lgint_t\n", ti); return FALSE;
         }
         break;
-    case dbg_itype_unsigned_long_int:
-        switch (ti)
-        {
-        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
-        case TI_GET_LENGTH:     X(DWORD64) = ADDRSIZE; break;
-        case TI_GET_BASETYPE:   X(DWORD)   = btUInt; break;
-        default: WINE_FIXME("unsupported %u for u-long int\n", ti); return FALSE;
-        }
-        break;
-    case dbg_itype_signed_long_int:
-        switch (ti)
-        {
-        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
-        case TI_GET_LENGTH:     X(DWORD64) = ADDRSIZE; break;
-        case TI_GET_BASETYPE:   X(DWORD)   = btInt; break;
-        default: WINE_FIXME("unsupported %u for s-long int\n", ti); return FALSE;
-        }
-        break;
-    case dbg_itype_unsigned_int:
-        switch (ti)
-        {
-        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
-        case TI_GET_LENGTH:     X(DWORD64) = 4; break;
-        case TI_GET_BASETYPE:   X(DWORD)   = btUInt; break;
-        default: WINE_FIXME("unsupported %u for u-int\n", ti); return FALSE;
-        }
-        break;
-    case dbg_itype_signed_int:
-        switch (ti)
-        {
-        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
-        case TI_GET_LENGTH:     X(DWORD64) = 4; break;
-        case TI_GET_BASETYPE:   X(DWORD)   = btInt; break;
-        default: WINE_FIXME("unsupported %u for s-int\n", ti); return FALSE;
-        }
-        break;
-    case dbg_itype_unsigned_short_int:
-        switch (ti)
-        {
-        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
-        case TI_GET_LENGTH:     X(DWORD64) = 2; break;
-        case TI_GET_BASETYPE:   X(DWORD)   = btUInt; break;
-        default: WINE_FIXME("unsupported %u for u-short int\n", ti); return FALSE;
-        }
-        break;
-    case dbg_itype_signed_short_int:
-        switch (ti)
-        {
-        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
-        case TI_GET_LENGTH:     X(DWORD64) = 2; break;
-        case TI_GET_BASETYPE:   X(DWORD)   = btInt; break;
-        default: WINE_FIXME("unsupported %u for s-short int\n", ti); return FALSE;
-        }
-        break;
-    case dbg_itype_unsigned_char_int:
-        switch (ti)
-        {
-        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
-        case TI_GET_LENGTH:     X(DWORD64) = 1; break;
-        case TI_GET_BASETYPE:   X(DWORD)   = btUInt; break;
-        default: WINE_FIXME("unsupported %u for u-char int\n", ti); return FALSE;
-        }
-        break;
-    case dbg_itype_signed_char_int:
-        switch (ti)
-        {
-        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
-        case TI_GET_LENGTH:     X(DWORD64) = 1; break;
-        case TI_GET_BASETYPE:   X(DWORD)   = btInt; break;
-        default: WINE_FIXME("unsupported %u for s-char int\n", ti); return FALSE;
-        }
-        break;
-    case dbg_itype_char:
-        switch (ti)
-        {
-        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
-        case TI_GET_LENGTH:     X(DWORD64) = 1; break;
-        case TI_GET_BASETYPE:   X(DWORD)   = btChar; break;
-        default: WINE_FIXME("unsupported %u for char int\n", ti); return FALSE;
-        }
-        break;
     case dbg_itype_astring:
         switch (ti)
         {
         case TI_GET_SYMTAG:     X(DWORD)   = SymTagPointerType; break;
         case TI_GET_LENGTH:     X(DWORD64) = ADDRSIZE; break;
-        case TI_GET_TYPE:       X(DWORD)   = dbg_itype_char; break;
+        case TI_GET_TYPE:       { struct dbg_type* dt = pInfo; dt->id = dbg_itype_char; dt->module = type->module; break; }
         default: WINE_FIXME("unsupported %u for a string\n", ti); return FALSE;
         }
         break;
@@ -877,33 +1189,6 @@ BOOL types_get_info(const struct dbg_type* type, IMAGEHLP_SYMBOL_TYPE_INFO ti, v
         default: WINE_FIXME("unsupported %u for seg-ptr\n", ti); return FALSE;
         }
         break;
-    case dbg_itype_short_real:
-        switch (ti)
-        {
-        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
-        case TI_GET_LENGTH:     X(DWORD64) = 4; break;
-        case TI_GET_BASETYPE:   X(DWORD)   = btFloat; break;
-        default: WINE_FIXME("unsupported %u for short real\n", ti); return FALSE;
-        }
-        break;
-    case dbg_itype_real:
-        switch (ti)
-        {
-        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
-        case TI_GET_LENGTH:     X(DWORD64) = 8; break;
-        case TI_GET_BASETYPE:   X(DWORD)   = btFloat; break;
-        default: WINE_FIXME("unsupported %u for real\n", ti); return FALSE;
-        }
-        break;
-    case dbg_itype_long_real:
-        switch (ti)
-        {
-        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
-        case TI_GET_LENGTH:     X(DWORD64) = 10; break;
-        case TI_GET_BASETYPE:   X(DWORD)   = btFloat; break;
-        default: WINE_FIXME("unsupported %u for long real\n", ti); return FALSE;
-        }
-        break;
     case dbg_itype_m128a:
         switch (ti)
         {
@@ -913,10 +1198,25 @@ BOOL types_get_info(const struct dbg_type* type, IMAGEHLP_SYMBOL_TYPE_INFO ti, v
         default: WINE_FIXME("unsupported %u for XMM register\n", ti); return FALSE;
         }
         break;
-    default: WINE_FIXME("unsupported type id 0x%lx\n", type->id);
+    default: WINE_FIXME("unsupported type id 0x%lx\n", type->id); return FALSE;
     }
 
 #undef X
+    return TRUE;
+}
+
+BOOL types_unload_module(DWORD_PTR linear)
+{
+    unsigned i;
+    if (!dbg_curr_process) return FALSE;
+    for (i = 0; i < dbg_curr_process->num_synthetized_types; i++)
+    {
+        if (dbg_curr_process->synthetized_types[i].module == linear)
+        {
+            dbg_curr_process->synthetized_types[i].module = 0;
+            dbg_curr_process->synthetized_types[i].id = dbg_itype_none;
+        }
+    }
     return TRUE;
 }
 
@@ -967,8 +1267,8 @@ static BOOL types_compare_children(struct dbg_type type1, struct dbg_type type2,
                 if (ret && *equal)
                 {
                     /* compare type of member */
-                    ret = types_get_info(&type1, TI_GET_TYPE, &type1.id) &&
-                        types_get_info(&type2, TI_GET_TYPE, &type2.id);
+                    ret = types_get_info(&type1, TI_GET_TYPE, &type1) &&
+                        types_get_info(&type2, TI_GET_TYPE, &type2);
                     if (ret) ret = types_compare(type1, type2, equal);
                     /* FIXME should compare bitfield info when present */
                 }
@@ -1056,8 +1356,8 @@ BOOL types_compare(struct dbg_type type1, struct dbg_type type2, BOOL* equal)
             dbg_printf("Unsupported yet tag %ld\n", tag1);
             return FALSE;
         }
-    } while (types_get_info(&type1, TI_GET_TYPE, &type1.id) &&
-             types_get_info(&type2, TI_GET_TYPE, &type2.id));
+    } while (types_get_info(&type1, TI_GET_TYPE, &type1) &&
+             types_get_info(&type2, TI_GET_TYPE, &type2));
     return FALSE;
 }
 
@@ -1076,7 +1376,7 @@ BOOL types_is_integral_type(const struct dbg_lvalue* lv)
     struct dbg_type type = lv->type;
     DWORD tag, bt;
     if (lv->bitlen) return TRUE;
-    if (!types_get_real_type(&type, &tag) ||
+    if (!types_get_real_type(&type, &tag) || tag != SymTagBaseType ||
         !types_get_info(&type, TI_GET_BASETYPE, &bt)) return FALSE;
     return is_basetype_integer(bt);
 }
@@ -1086,7 +1386,16 @@ BOOL types_is_float_type(const struct dbg_lvalue* lv)
     struct dbg_type type = lv->type;
     DWORD tag, bt;
     if (lv->bitlen) return FALSE;
-    if (!types_get_real_type(&type, &tag) ||
+    if (!types_get_real_type(&type, &tag) || tag != SymTagBaseType ||
         !types_get_info(&type, TI_GET_BASETYPE, &bt)) return FALSE;
     return bt == btFloat;
+}
+
+BOOL types_is_pointer_type(const struct dbg_lvalue* lv)
+{
+    struct dbg_type type = lv->type;
+    DWORD tag;
+    if (lv->bitlen) return FALSE;
+    return types_get_real_type(&type, &tag) &&
+        (tag == SymTagPointerType || tag == SymTagArrayType || tag == SymTagFunctionType);
 }

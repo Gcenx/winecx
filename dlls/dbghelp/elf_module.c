@@ -699,8 +699,7 @@ static void elf_hash_symtab(struct module* module, struct pool* pool,
         {
         case ELF_STT_FILE:
             if (symname)
-                compiland = symt_new_compiland(module, sym.st_value,
-                                               source_new(module, NULL, symname));
+                compiland = symt_new_compiland(module, source_new(module, NULL, symname));
             else
                 compiland = NULL;
             continue;
@@ -842,6 +841,7 @@ static void elf_finish_stabs_info(struct module* module, const struct hash_table
     struct symt_ht*             sym;
     const struct elf_sym*       symp;
     struct elf_module_info*     elf_info = module->format_info[DFI_ELF]->u.elf_info;
+    DWORD64                     size;
 
     hash_table_iter_init(&module->ht_symbols, &hti, NULL);
     while ((ptr = hash_table_iter_up(&hti)))
@@ -850,8 +850,8 @@ static void elf_finish_stabs_info(struct module* module, const struct hash_table
         switch (sym->symt.tag)
         {
         case SymTagFunction:
-            if (((struct symt_function*)sym)->address != elf_info->elf_addr &&
-                ((struct symt_function*)sym)->size)
+            size = addr_range_size(&((struct symt_function*)sym)->ranges[0]);
+            if (((struct symt_function*)sym)->ranges[0].low != elf_info->elf_addr && size)
             {
                 break;
             }
@@ -859,19 +859,19 @@ static void elf_finish_stabs_info(struct module* module, const struct hash_table
                                      ((struct symt_function*)sym)->container);
             if (symp)
             {
-                if (((struct symt_function*)sym)->address != elf_info->elf_addr &&
-                    ((struct symt_function*)sym)->address != elf_info->elf_addr + symp->st_value)
-                    FIXME("Changing address for %p/%s!%s from %08Ix to %s\n",
+                if (((struct symt_function*)sym)->ranges[0].low != elf_info->elf_addr &&
+                    ((struct symt_function*)sym)->ranges[0].low != elf_info->elf_addr + symp->st_value)
+                    FIXME("Changing address for %p/%s!%s from %I64x to %I64x\n",
                           sym, debugstr_w(module->modulename), sym->hash_elt.name,
-                          ((struct symt_function*)sym)->address,
-                          wine_dbgstr_longlong(elf_info->elf_addr + symp->st_value));
-                if (((struct symt_function*)sym)->size && ((struct symt_function*)sym)->size != symp->st_size)
-                    FIXME("Changing size for %p/%s!%s from %08Ix to %08x\n",
+                          ((struct symt_function*)sym)->ranges[0].low,
+                          elf_info->elf_addr + symp->st_value);
+                if (size && size != symp->st_size)
+                    FIXME("Changing size for %p/%s!%s from %I64x to %I64x\n",
                           sym, debugstr_w(module->modulename), sym->hash_elt.name,
-                          ((struct symt_function*)sym)->size, (unsigned int)symp->st_size);
+                          size, symp->st_size);
 
-                ((struct symt_function*)sym)->address = elf_info->elf_addr + symp->st_value;
-                ((struct symt_function*)sym)->size    = symp->st_size;
+                ((struct symt_function*)sym)->ranges[0].low = elf_info->elf_addr + symp->st_value;
+                ((struct symt_function*)sym)->ranges[0].high = elf_info->elf_addr + symp->st_value + symp->st_size;
             } else
                 FIXME("Couldn't find %s!%s\n",
                       debugstr_w(module->modulename), sym->hash_elt.name);
@@ -890,10 +890,10 @@ static void elf_finish_stabs_info(struct module* module, const struct hash_table
                 {
                     if (((struct symt_data*)sym)->u.var.offset != elf_info->elf_addr &&
                         ((struct symt_data*)sym)->u.var.offset != elf_info->elf_addr + symp->st_value)
-                        FIXME("Changing address for %p/%s!%s from %08Ix to %s\n",
+                        FIXME("Changing address for %p/%s!%s from %I64x to %I64x\n",
                               sym, debugstr_w(module->modulename), sym->hash_elt.name,
-                              ((struct symt_function*)sym)->address,
-                              wine_dbgstr_longlong(elf_info->elf_addr + symp->st_value));
+                              ((struct symt_function*)sym)->ranges[0].low,
+                              elf_info->elf_addr + symp->st_value);
                     ((struct symt_data*)sym)->u.var.offset = elf_info->elf_addr + symp->st_value;
                     ((struct symt_data*)sym)->kind = elf_is_local_symbol(symp->st_info) ?
                         DataIsFileStatic : DataIsGlobal;

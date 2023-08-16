@@ -19,8 +19,6 @@
 #ifndef _PRNPTNTV_H_
 #define _PRNPTNTV_H_
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -56,7 +54,5 @@ HRESULT WINAPI PTReleaseMemory(PVOID);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* _PRNPTNTV_H_ */

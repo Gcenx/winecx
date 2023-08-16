@@ -145,6 +145,9 @@ DEFINE_EXPECT(OnLeaveScript);
 #define DISPID_GLOBAL_THROWWITHDESC   1024
 #define DISPID_GLOBAL_PROPARGSET      1025
 #define DISPID_GLOBAL_UNKOBJ          1026
+#define DISPID_GLOBAL_THROWEXCEPTION  1027
+#define DISPID_GLOBAL_ISARRAYFIXED    1028
+#define DISPID_GLOBAL_MAXCHARSIZE     1029
 
 #define DISPID_TESTOBJ_PROPGET      2000
 #define DISPID_TESTOBJ_PROPPUT      2001
@@ -156,6 +159,7 @@ DEFINE_EXPECT(OnLeaveScript);
 #define MAKE_VBSERROR(code) MAKE_HRESULT(SEVERITY_ERROR, FACILITY_VBS, code)
 
 static BOOL strict_dispid_check, is_english, allow_ui;
+static UINT MaxCharSize;
 static int first_day_of_week;
 static const char *test_name = "(null)";
 static int test_counter;
@@ -227,12 +231,16 @@ static const char *vt2a(VARIANT *v)
  */
 static void detect_locale(void)
 {
+    CPINFOEXA cpinfo;
     HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
     LANGID (WINAPI *pGetThreadUILanguage)(void) = (void*)GetProcAddress(kernel32, "GetThreadUILanguage");
 
     is_english = ((!pGetThreadUILanguage || PRIMARYLANGID(pGetThreadUILanguage()) == LANG_ENGLISH) &&
                   PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_ENGLISH &&
                   PRIMARYLANGID(GetUserDefaultLangID()) == LANG_ENGLISH);
+
+    GetCPInfoExA( CP_ACP, 0, &cpinfo );
+    MaxCharSize = cpinfo.MaxCharSize;
 
     GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_IFIRSTDAYOFWEEK | LOCALE_RETURN_NUMBER,
                    (void*)&first_day_of_week, sizeof(first_day_of_week));
@@ -567,7 +575,6 @@ static void test_safearray(SAFEARRAY *safearray, unsigned indims)
     if(!exdims)
         exdims = 1;
     ok(safearray->cDims == exdims, "safearray->cDims = %d, expected %d\n", safearray->cDims, exdims);
-    todo_wine
     ok(safearray->fFeatures == (FADF_VARIANT|FADF_HAVEVARTYPE|FADF_FIXEDSIZE|FADF_STATIC),
        "safearray->fFeatures = %x\n", safearray->fFeatures);
     ok(safearray->cbElements == sizeof(VARIANT), "safearray->cbElements = %lx\n", safearray->cbElements);
@@ -1141,6 +1148,7 @@ static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD 
         { L"reportSuccess",   DISPID_GLOBAL_REPORTSUCCESS, REF_EXPECT(global_success_d) },
         { L"getVT",           DISPID_GLOBAL_GETVT },
         { L"isEnglishLang",   DISPID_GLOBAL_ISENGLANG },
+        { L"MaxCharSize",     DISPID_GLOBAL_MAXCHARSIZE },
         { L"firstDayOfWeek",  DISPID_GLOBAL_WEEKSTARTDAY },
         { L"globalCallback",  DISPID_GLOBAL_GLOBALCALLBACK },
         { L"testObj",         DISPID_GLOBAL_TESTOBJ },
@@ -1157,11 +1165,13 @@ static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD 
         { L"counter",         DISPID_GLOBAL_COUNTER },
         { L"doubleAsString",  DISPID_GLOBAL_DOUBLEASSTRING },
         { L"testArray",       DISPID_GLOBAL_TESTARRAY },
+        { L"throwException",  DISPID_GLOBAL_THROWEXCEPTION },
         { L"throwInt",        DISPID_GLOBAL_THROWINT },
         { L"testOptionalArg", DISPID_GLOBAL_TESTOPTIONALARG },
         { L"testErrorObject", DISPID_GLOBAL_TESTERROROBJECT },
         { L"throwWithDesc",   DISPID_GLOBAL_THROWWITHDESC },
-        { L"unkObj",          DISPID_GLOBAL_UNKOBJ }
+        { L"unkObj",          DISPID_GLOBAL_UNKOBJ },
+        { L"isArrayFixed",    DISPID_GLOBAL_ISARRAYFIXED },
     };
 
     test_grfdex(grfdex, fdexNameCaseInsensitive);
@@ -1259,6 +1269,11 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
 
         V_VT(pvarRes) = VT_BOOL;
         V_BOOL(pvarRes) = is_english ? VARIANT_TRUE : VARIANT_FALSE;
+        return S_OK;
+
+    case DISPID_GLOBAL_MAXCHARSIZE:
+        V_VT(pvarRes) = VT_I4;
+        V_I4(pvarRes) = MaxCharSize;
         return S_OK;
 
     case DISPID_GLOBAL_WEEKSTARTDAY:
@@ -1540,6 +1555,57 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
 
         return hres;
 
+    case DISPID_GLOBAL_THROWEXCEPTION: {
+        VARIANT *v = pdp->rgvarg + pdp->cArgs - 1;
+
+        ok((wFlags & ~INVOKE_PROPERTYGET) == INVOKE_FUNC, "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->rgvarg != NULL, "rgvarg == NULL\n");
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(pdp->cArgs >= 1, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
+        ok(pei != NULL, "pei == NULL\n");
+
+        if(pvarRes) {
+            ok(V_VT(pvarRes) == VT_EMPTY, "V_VT(pvarRes) = %d\n", V_VT(pvarRes));
+            V_VT(pvarRes) = VT_BOOL;
+            V_BOOL(pvarRes) = VARIANT_FALSE;
+        }
+
+        if(V_VT(v) == (VT_VARIANT|VT_BYREF))
+            v = V_VARIANTREF(v);
+
+        memset(pei, 0, sizeof(*pei));
+        switch(V_VT(v)) {
+        case VT_I2:
+            pei->scode = V_I2(v);
+            break;
+        case VT_I4:
+            pei->scode = V_I4(v);
+            break;
+        default:
+            ok(0, "unexpected vt %d\n", V_VT(v));
+            return E_INVALIDARG;
+        }
+
+        if(pdp->cArgs >= 2) {
+            v = pdp->rgvarg + pdp->cArgs - 2;
+            if(!(V_VT(v) == VT_ERROR && V_ERROR(v) == DISP_E_PARAMNOTFOUND)) /* != vtMissing */
+            {
+                ok(V_VT(v) == VT_BSTR, "v = %s\n", debugstr_variant(v));
+                pei->bstrSource = SysAllocString(V_BSTR(v));
+            }
+        }
+
+        if(pdp->cArgs >= 3) {
+            v = pdp->rgvarg + pdp->cArgs - 3;
+            ok(V_VT(v) == VT_BSTR, "v = %s\n", debugstr_variant(v));
+            pei->bstrDescription = SysAllocString(V_BSTR(v));
+        }
+
+        return DISP_E_EXCEPTION;
+    }
+
     case DISPID_GLOBAL_THROWWITHDESC:
         pei->scode = 0xdeadbeef;
         pei->bstrDescription = SysAllocString(L"test");
@@ -1684,6 +1750,34 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
         V_VT(pvarRes) = VT_UNKNOWN;
         V_UNKNOWN(pvarRes) = &unkObj;
         return S_OK;
+
+    case DISPID_GLOBAL_ISARRAYFIXED:
+    {
+        BOOL is_fixed = FALSE;
+        VARIANT *v;
+
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->rgvarg != NULL, "rgvarg == NULL\n");
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(pdp->cArgs == 1, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
+        ok(pvarRes != NULL, "pvarRes == NULL\n");
+        ok(V_VT(pvarRes) == VT_EMPTY, "V_VT(pvarRes) = %d\n", V_VT(pvarRes));
+        ok(pei != NULL, "pei == NULL\n");
+
+        ok(V_VT(pdp->rgvarg) == (VT_VARIANT|VT_BYREF), "Unexpected argument type %d.\n", V_VT(pdp->rgvarg));
+        v = V_VARIANTREF(pdp->rgvarg);
+        ok(V_VT(v) == (VT_VARIANT|VT_ARRAY|VT_BYREF), "Unexpected argument type %d.\n", V_VT(v));
+        if (V_ISARRAY(v))
+        {
+            SAFEARRAY *sa = V_ISBYREF(v) ? *V_ARRAYREF(v) : V_ARRAY(v);
+            is_fixed = (sa->fFeatures & (FADF_FIXEDSIZE | FADF_STATIC)) == (FADF_FIXEDSIZE | FADF_STATIC);
+        }
+
+        V_VT(pvarRes) = VT_BOOL;
+        V_BOOL(pvarRes) = is_fixed ? VARIANT_TRUE : VARIANT_FALSE;
+        return S_OK;
+    }
     }
 
     ok(0, "unexpected call %ld\n", id);
@@ -2351,6 +2445,133 @@ static void test_callbacks(void)
     IActiveScriptParse_Release(parser);
     close_script(script);
     strict_enter_script = FALSE;
+
+    store_script_error = &error1;
+    SET_EXPECT(OnScriptError);
+    hres = parse_script_ar("throwException &h80004002&");
+    ok(hres == MAKE_VBSERROR(430), "got error: %08lx\n", hres);
+    CHECK_CALLED(OnScriptError);
+
+    memset(&ei, 0xcc, sizeof(ei));
+    hres = IActiveScriptError_GetExceptionInfo(error1, &ei);
+    ok(hres == S_OK, "GetExceptionInfo returned %08lx\n", hres);
+    ok(!ei.wCode, "wCode = %x\n", ei.wCode);
+    ok(!ei.wReserved, "wReserved = %x\n", ei.wReserved);
+    if(is_english) {
+        ok(!wcscmp(ei.bstrSource, L"Microsoft VBScript runtime error"),
+           "bstrSource = %s\n", wine_dbgstr_w(ei.bstrSource));
+        ok(!wcscmp(ei.bstrDescription, L"Class doesn't support Automation"),
+           "bstrDescription = %s\n", wine_dbgstr_w(ei.bstrDescription));
+    }
+    ok(!ei.bstrHelpFile, "bstrHelpFile = %s\n", wine_dbgstr_w(ei.bstrHelpFile));
+    ok(!ei.dwHelpContext, "dwHelpContext = %lx\n", ei.dwHelpContext);
+    ok(!ei.pvReserved, "pvReserved = %p\n", ei.pvReserved);
+    ok(!ei.pfnDeferredFillIn, "pfnDeferredFillIn = %p\n", ei.pfnDeferredFillIn);
+    ok(ei.scode == MAKE_VBSERROR(430), "scode = %lx\n", ei.scode);
+    free_ei(&ei);
+
+    IActiveScriptError_Release(error1);
+
+    store_script_error = &error1;
+    SET_EXPECT(OnScriptError);
+    hres = parse_script_ar("throwException &h80004002&, \"test src\"");
+    ok(hres == MAKE_VBSERROR(430), "got error: %08lx\n", hres);
+    CHECK_CALLED(OnScriptError);
+
+    memset(&ei, 0xcc, sizeof(ei));
+    hres = IActiveScriptError_GetExceptionInfo(error1, &ei);
+    ok(hres == S_OK, "GetExceptionInfo returned %08lx\n", hres);
+    ok(!ei.wCode, "wCode = %x\n", ei.wCode);
+    ok(!ei.wReserved, "wReserved = %x\n", ei.wReserved);
+    if(is_english) {
+        ok(!wcscmp(ei.bstrSource, L"test src"), "bstrSource = %s\n", wine_dbgstr_w(ei.bstrSource));
+        ok(!wcscmp(ei.bstrDescription, L"Class doesn't support Automation"),
+           "bstrDescription = %s\n", wine_dbgstr_w(ei.bstrDescription));
+    }
+    ok(!ei.bstrHelpFile, "bstrHelpFile = %s\n", wine_dbgstr_w(ei.bstrHelpFile));
+    ok(!ei.dwHelpContext, "dwHelpContext = %lx\n", ei.dwHelpContext);
+    ok(!ei.pvReserved, "pvReserved = %p\n", ei.pvReserved);
+    ok(!ei.pfnDeferredFillIn, "pfnDeferredFillIn = %p\n", ei.pfnDeferredFillIn);
+    ok(ei.scode == MAKE_VBSERROR(430), "scode = %lx\n", ei.scode);
+    free_ei(&ei);
+
+    IActiveScriptError_Release(error1);
+
+    store_script_error = &error1;
+    SET_EXPECT(OnScriptError);
+    hres = parse_script_ar("throwException &h80004002&, , \"test desc\"");
+    ok(hres == E_NOINTERFACE, "got error: %08lx\n", hres);
+    CHECK_CALLED(OnScriptError);
+
+    memset(&ei, 0xcc, sizeof(ei));
+    hres = IActiveScriptError_GetExceptionInfo(error1, &ei);
+    ok(hres == S_OK, "GetExceptionInfo returned %08lx\n", hres);
+    ok(!ei.wCode, "wCode = %x\n", ei.wCode);
+    ok(!ei.wReserved, "wReserved = %x\n", ei.wReserved);
+    if(is_english) {
+        ok(!ei.bstrSource, "bstrSource = %s\n", wine_dbgstr_w(ei.bstrSource));
+        ok(!wcscmp(ei.bstrDescription, L"test desc"),
+           "bstrDescription = %s\n", wine_dbgstr_w(ei.bstrDescription));
+    }
+    ok(!ei.bstrHelpFile, "bstrHelpFile = %s\n", wine_dbgstr_w(ei.bstrHelpFile));
+    ok(!ei.dwHelpContext, "dwHelpContext = %lx\n", ei.dwHelpContext);
+    ok(!ei.pvReserved, "pvReserved = %p\n", ei.pvReserved);
+    ok(!ei.pfnDeferredFillIn, "pfnDeferredFillIn = %p\n", ei.pfnDeferredFillIn);
+    ok(ei.scode == E_NOINTERFACE, "scode = %lx\n", ei.scode);
+    free_ei(&ei);
+
+    IActiveScriptError_Release(error1);
+
+    store_script_error = &error1;
+    SET_EXPECT(OnScriptError);
+    hres = parse_script_ar("throwException &h80004002&, \"test src\", \"test desc\"");
+    ok(hres == E_NOINTERFACE, "got error: %08lx\n", hres);
+    CHECK_CALLED(OnScriptError);
+
+    memset(&ei, 0xcc, sizeof(ei));
+    hres = IActiveScriptError_GetExceptionInfo(error1, &ei);
+    ok(hres == S_OK, "GetExceptionInfo returned %08lx\n", hres);
+    ok(!ei.wCode, "wCode = %x\n", ei.wCode);
+    ok(!ei.wReserved, "wReserved = %x\n", ei.wReserved);
+    if(is_english) {
+        ok(!wcscmp(ei.bstrSource, L"test src"), "bstrSource = %s\n", wine_dbgstr_w(ei.bstrSource));
+        ok(!wcscmp(ei.bstrDescription, L"test desc"),
+           "bstrDescription = %s\n", wine_dbgstr_w(ei.bstrDescription));
+    }
+    ok(!ei.bstrHelpFile, "bstrHelpFile = %s\n", wine_dbgstr_w(ei.bstrHelpFile));
+    ok(!ei.dwHelpContext, "dwHelpContext = %lx\n", ei.dwHelpContext);
+    ok(!ei.pvReserved, "pvReserved = %p\n", ei.pvReserved);
+    ok(!ei.pfnDeferredFillIn, "pfnDeferredFillIn = %p\n", ei.pfnDeferredFillIn);
+    ok(ei.scode == E_NOINTERFACE, "scode = %lx\n", ei.scode);
+    free_ei(&ei);
+
+    IActiveScriptError_Release(error1);
+
+    store_script_error = &error1;
+    SET_EXPECT(OnScriptError);
+    hres = parse_script_ar("throwException &h8000FFFF&");
+    ok(hres == E_UNEXPECTED, "got error: %08lx\n", hres);
+    CHECK_CALLED(OnScriptError);
+
+    memset(&ei, 0xcc, sizeof(ei));
+    hres = IActiveScriptError_GetExceptionInfo(error1, &ei);
+    ok(hres == S_OK, "GetExceptionInfo returned %08lx\n", hres);
+    ok(!ei.wCode, "wCode = %x\n", ei.wCode);
+    ok(!ei.wReserved, "wReserved = %x\n", ei.wReserved);
+    if(is_english) {
+        ok(!ei.bstrSource,
+           "bstrSource = %s\n", wine_dbgstr_w(ei.bstrSource));
+        ok(!ei.bstrDescription,
+           "bstrDescription = %s\n", wine_dbgstr_w(ei.bstrDescription));
+    }
+    ok(!ei.bstrHelpFile, "bstrHelpFile = %s\n", wine_dbgstr_w(ei.bstrHelpFile));
+    ok(!ei.dwHelpContext, "dwHelpContext = %lx\n", ei.dwHelpContext);
+    ok(!ei.pvReserved, "pvReserved = %p\n", ei.pvReserved);
+    ok(!ei.pfnDeferredFillIn, "pfnDeferredFillIn = %p\n", ei.pfnDeferredFillIn);
+    ok(ei.scode == E_UNEXPECTED, "scode = %lx\n", ei.scode);
+    free_ei(&ei);
+
+    IActiveScriptError_Release(error1);
 }
 
 static void test_gc(void)

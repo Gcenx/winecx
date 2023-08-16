@@ -26,6 +26,7 @@
 #include "winsock2.h"
 #include "ws2ipdef.h"
 #include "iphlpapi.h"
+#include "netioapi.h"
 
 #include "wine/unixlib.h"
 #include "wine/debug.h"
@@ -33,9 +34,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wpcap);
 
-static unixlib_handle_t pcap_handle;
-
-#define PCAP_CALL( func, params ) __wine_unix_call( pcap_handle, unix_ ## func, params )
+#define PCAP_CALL( func, params ) WINE_UNIX_CALL( unix_ ## func, params )
 
 int CDECL pcap_activate( struct pcap *pcap )
 {
@@ -68,15 +67,6 @@ int CDECL pcap_compile( struct pcap *pcap, void *program, const char *buf, int o
     return PCAP_CALL( compile, &params );
 }
 
-struct pcap * CDECL pcap_create( const char *src, char *errbuf )
-{
-    struct pcap *ret;
-    struct create_params params = { src, errbuf, &ret };
-    TRACE( "%s, %p\n", src, errbuf );
-    PCAP_CALL( create, &params );
-    return ret;
-}
-
 int CDECL pcap_datalink( struct pcap *pcap )
 {
     TRACE( "%p\n", pcap );
@@ -106,15 +96,6 @@ const char * CDECL pcap_datalink_val_to_name( int link )
     TRACE( "%d\n", link );
     PCAP_CALL( datalink_val_to_name, &params );
     return ret;
-}
-
-int CDECL pcap_dispatch( struct pcap *pcap, int count,
-                         void (CALLBACK *callback)(unsigned char *, const struct pcap_pkthdr_win32 *, const unsigned char *),
-                         unsigned char *user )
-{
-    /* FIXME: reimplement on top of pcap_next_ex */
-    FIXME( "%p, %d, %p, %p: not implemented\n", pcap, count, callback, user );
-    return -1;
 }
 
 void CDECL pcap_dump( unsigned char *user, const struct pcap_pkthdr_win32 *hdr, const unsigned char *packet )
@@ -155,7 +136,7 @@ void * CDECL pcap_dump_open( struct pcap *pcap, const char *filename )
     params.name = unix_path;
     params.ret = &dumper;
     PCAP_CALL( dump_open, &params );
-    RtlFreeHeap( GetProcessHeap(), 0, unix_path );
+    HeapFree( GetProcessHeap(), 0, unix_path );
     return dumper;
 }
 
@@ -256,59 +237,109 @@ static char *build_win32_description( const struct pcap_interface *unix_dev )
     return ret;
 }
 
-static struct sockaddr_hdr *dup_sockaddr( const struct sockaddr_hdr *addr )
+static struct sockaddr *get_address( const IP_ADAPTER_UNICAST_ADDRESS *addr )
 {
-    struct sockaddr_hdr *ret;
+    struct sockaddr *ret;
+    if (!(ret = malloc( addr->Address.iSockaddrLength ))) return NULL;
+    memcpy( ret, addr->Address.lpSockaddr, addr->Address.iSockaddrLength );
+    return ret;
+}
 
-    switch (addr->sa_family)
+static void convert_length_to_ipv6_mask( ULONG length, IN6_ADDR *mask )
+{
+    unsigned int i;
+    for (i = 0; i < length / 8; i++) mask->u.Byte[i] = 0xff;
+    mask->u.Byte[i] = 0xff << (8 - length % 8);
+}
+
+static struct sockaddr *get_netmask( const IP_ADAPTER_UNICAST_ADDRESS *addr )
+{
+    struct sockaddr *ret;
+
+    switch (addr->Address.lpSockaddr->sa_family)
     {
     case AF_INET:
     {
-        struct sockaddr_in *dst, *src = (struct sockaddr_in *)addr;
-        if (!(dst = calloc( 1, sizeof(*dst) ))) return NULL;
-        dst->sin_family = src->sin_family;
-        dst->sin_port   = src->sin_port;
-        dst->sin_addr   = src->sin_addr;
-        ret = (struct sockaddr_hdr *)dst;
+        struct sockaddr_in *netmask_addr_in;
+
+        if (!(netmask_addr_in = calloc( 1, sizeof(*netmask_addr_in) ))) return NULL;
+        netmask_addr_in->sin_family = AF_INET;
+        ConvertLengthToIpv4Mask( addr->OnLinkPrefixLength, &netmask_addr_in->sin_addr.S_un.S_addr );
+        ret = (struct sockaddr *)netmask_addr_in;
         break;
     }
     case AF_INET6:
     {
-        struct sockaddr_in6 *dst, *src = (struct sockaddr_in6 *)addr;
-        if (!(dst = malloc( sizeof(*dst) ))) return NULL;
-        dst->sin6_family   = src->sin6_family;
-        dst->sin6_port     = src->sin6_port;
-        dst->sin6_flowinfo = src->sin6_flowinfo;
-        dst->sin6_addr     = src->sin6_addr;
-        dst->sin6_scope_id = src->sin6_scope_id;
-        ret = (struct sockaddr_hdr *)dst;
+        struct sockaddr_in6 *netmask_addr_in6;
+
+        if (!(netmask_addr_in6 = calloc( 1, sizeof(*netmask_addr_in6) ))) return NULL;
+        netmask_addr_in6->sin6_family = AF_INET6;
+        convert_length_to_ipv6_mask( addr->OnLinkPrefixLength, &netmask_addr_in6->sin6_addr );
+        ret = (struct sockaddr *)netmask_addr_in6;
         break;
     }
     default:
-        FIXME( "address family %u not supported\n", addr->sa_family );
+        FIXME( "address family %u not supported\n", addr->Address.lpSockaddr->sa_family );
         return NULL;
     }
 
     return ret;
 }
 
-static struct pcap_address *build_win32_address( struct pcap_address *src )
+static struct sockaddr *get_broadcast( const IP_ADAPTER_UNICAST_ADDRESS *addr )
 {
-    struct pcap_address *dst;
+    struct sockaddr *ret;
 
-    if (!(dst = calloc( 1, sizeof(*dst) ))) return NULL;
-    if (src->addr && !(dst->addr = dup_sockaddr( src->addr ))) goto err;
-    if (src->netmask && !(dst->netmask = dup_sockaddr( src->netmask ))) goto err;
-    if (src->broadaddr && !(dst->broadaddr = dup_sockaddr( src->broadaddr ))) goto err;
-    if (src->dstaddr && !(dst->dstaddr = dup_sockaddr( src->dstaddr ))) goto err;
-    return dst;
+    switch (addr->Address.lpSockaddr->sa_family)
+    {
+    case AF_INET:
+    {
+        struct sockaddr_in *broadcast_addr_in, *addr_in = (struct sockaddr_in *)addr->Address.lpSockaddr;
+        ULONG netmask;
+
+        if (!(broadcast_addr_in = calloc( 1, sizeof(*broadcast_addr_in) ))) return FALSE;
+        broadcast_addr_in->sin_family = AF_INET;
+        ConvertLengthToIpv4Mask( addr->OnLinkPrefixLength, &netmask );
+        broadcast_addr_in->sin_addr.S_un.S_addr = addr_in->sin_addr.S_un.S_addr | ~netmask;
+        ret = (struct sockaddr *)broadcast_addr_in;
+        break;
+    }
+    case AF_INET6:
+    {
+        struct sockaddr_in6 *broadcast_addr_in6, *addr_in6 = (struct sockaddr_in6 *)addr->Address.lpSockaddr;
+        IN6_ADDR netmask, *address = (IN6_ADDR *)&addr_in6->sin6_addr;
+        unsigned int i;
+
+        if (!(broadcast_addr_in6 = calloc( 1, sizeof(*broadcast_addr_in6) ))) return NULL;
+        broadcast_addr_in6->sin6_family = AF_INET6;
+        convert_length_to_ipv6_mask( addr->OnLinkPrefixLength, &netmask );
+        for (i = 0; i < 8; i++) broadcast_addr_in6->sin6_addr.u.Word[i] = address->u.Word[i] | ~netmask.u.Word[i];
+        ret = (struct sockaddr *)broadcast_addr_in6;
+        break;
+    }
+    default:
+        FIXME( "address family %u not supported\n", addr->Address.lpSockaddr->sa_family );
+        return NULL;
+    }
+
+    return ret;
+}
+
+static struct pcap_address *build_win32_address( const IP_ADAPTER_UNICAST_ADDRESS *addr )
+{
+    struct pcap_address *ret;
+
+    if (!(ret = calloc( 1, sizeof(*ret) ))) return NULL;
+    if (!(ret->addr = get_address( addr ))) goto err;
+    if (!(ret->netmask = get_netmask( addr ))) goto err;
+    if (!(ret->broadaddr = get_broadcast( addr ))) goto err;
+    return ret;
 
 err:
-    free( dst->addr );
-    free( dst->netmask );
-    free( dst->broadaddr );
-    free( dst->dstaddr );
-    free( dst );
+    free( ret->addr );
+    free( ret->netmask );
+    free( ret->broadaddr );
+    free( ret );
     return NULL;
 }
 
@@ -323,27 +354,27 @@ static void add_win32_address( struct pcap_address **list, struct pcap_address *
     }
 }
 
-static struct pcap_address *build_win32_addresses( struct pcap_address *addrs )
+static struct pcap_address *build_win32_addresses( const IP_ADAPTER_ADDRESSES *adapter )
 {
-    struct pcap_address *src, *dst, *ret = NULL;
-    src = addrs;
+    struct pcap_address *dst, *ret = NULL;
+    IP_ADAPTER_UNICAST_ADDRESS *src = adapter->FirstUnicastAddress;
     while (src)
     {
         if ((dst = build_win32_address( src ))) add_win32_address( &ret, dst );
-        src = src->next;
+        src = src->Next;
     }
     return ret;
 }
 
 static struct pcap_interface *build_win32_device( const struct pcap_interface *unix_dev, const char *source,
-                                                  const char *adapter_name )
+                                                  const IP_ADAPTER_ADDRESSES *adapter )
 {
     struct pcap_interface *ret;
 
     if (!(ret = calloc( 1, sizeof(*ret) ))) return NULL;
-    if (!(ret->name = build_win32_name( source, adapter_name ))) goto err;
+    if (!(ret->name = build_win32_name( source, adapter->AdapterName ))) goto err;
     if (!(ret->description = build_win32_description( unix_dev ))) goto err;
-    ret->addresses = build_win32_addresses( unix_dev->addresses );
+    ret->addresses = build_win32_addresses( adapter );
     ret->flags = unix_dev->flags;
     return ret;
 
@@ -384,7 +415,7 @@ static int find_all_devices( const char *source, struct pcap_interface **devs, c
         cur = unix_devs;
         while (cur)
         {
-            if ((ptr = find_adapter( adapters, cur->name )) && (dev = build_win32_device( cur, source, ptr->AdapterName )))
+            if ((ptr = find_adapter( adapters, cur->name )) && (dev = build_win32_device( cur, source, ptr )))
             {
                 add_win32_device( &win32_devs, dev );
             }
@@ -552,6 +583,38 @@ const unsigned char * CDECL pcap_next( struct pcap *pcap, struct pcap_pkthdr_win
     return data;
 }
 
+int CDECL pcap_dispatch( struct pcap *pcap, int count,
+                         void (CALLBACK *callback)(unsigned char *, const struct pcap_pkthdr_win32 *, const unsigned char *),
+                         unsigned char *user )
+{
+    int processed = 0;
+    TRACE( "%p, %d, %p, %p\n", pcap, count, callback, user );
+
+    while (processed < count)
+    {
+        struct pcap_pkthdr_win32 *hdr = NULL;
+        const unsigned char *data = NULL;
+
+        int ret = pcap_next_ex( pcap, &hdr, &data );
+
+        if (ret == 1)
+            processed++;
+        else if (ret == 0)
+            break;
+        else if (ret == -2)
+        {
+            if (processed == 0) return -2;
+            break;
+        }
+        else
+            return ret;
+
+        callback( user, hdr, data );
+    }
+
+    return processed;
+}
+
 static char *strdupWA( const WCHAR *src )
 {
     char *dst;
@@ -576,6 +639,26 @@ static char *map_win32_device_name( const char *dev )
         }
     }
     free( adapters );
+    return ret;
+}
+
+struct pcap * CDECL pcap_create( const char *source, char *errbuf )
+{
+    char *unix_dev;
+    struct pcap *ret;
+    TRACE( "%s, %p\n", source, errbuf );
+
+    if (!(unix_dev = map_win32_device_name( source )))
+    {
+        if (errbuf) sprintf( errbuf, "Unable to open the adapter." );
+        return NULL;
+    }
+    else
+    {
+        struct create_params params = { unix_dev, errbuf, &ret };
+        PCAP_CALL( create, &params );
+    }
+    free( unix_dev );
     return ret;
 }
 
@@ -796,8 +879,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, void *reserved )
     {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls( hinst );
-        if (NtQueryVirtualMemory( GetCurrentProcess(), hinst, MemoryWineUnixFuncs,
-                                  &pcap_handle, sizeof(pcap_handle), NULL ))
+        if (__wine_init_unix_call())
             ERR( "No pcap support, expect problems\n" );
         break;
     case DLL_PROCESS_DETACH:

@@ -21,8 +21,6 @@
 
 #include "dshow.h"
 
-#include "wine/winheader_enter.h"
-
 HRESULT WINAPI CopyMediaType(AM_MEDIA_TYPE * pDest, const AM_MEDIA_TYPE *pSrc);
 void WINAPI FreeMediaType(AM_MEDIA_TYPE * pMediaType);
 AM_MEDIA_TYPE * WINAPI CreateMediaType(AM_MEDIA_TYPE const * pSrc);
@@ -285,5 +283,3 @@ struct strmbase_renderer_ops
 void strmbase_renderer_init(struct strmbase_renderer *filter, IUnknown *outer,
         const CLSID *clsid, const WCHAR *sink_name, const struct strmbase_renderer_ops *ops);
 void strmbase_renderer_cleanup(struct strmbase_renderer *filter);
-
-#include "wine/winheader_exit.h"

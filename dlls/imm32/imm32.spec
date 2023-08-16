@@ -9,8 +9,8 @@
 @ stdcall ImmDestroyContext(long)
 @ stdcall ImmDestroyIMCC(long)
 @ stdcall ImmDestroySoftKeyboard(long)
-@ stdcall ImmDisableIME(long)
-@ stdcall ImmDisableIme(long) ImmDisableIME
+@ stdcall ImmDisableIME(long) NtUserDisableThreadIme
+@ stdcall ImmDisableIme(long) NtUserDisableThreadIme
 @ stdcall ImmDisableLegacyIME()
 @ stdcall ImmDisableTextFrameService(long)
 @ stdcall ImmEnumInputContext(long ptr long)
@@ -114,6 +114,4 @@
 
 ################################################################
 # Wine internal extensions
-@ stdcall __wine_get_ui_window(ptr)
-@ stdcall __wine_register_window(long)
-@ stdcall __wine_unregister_window(long)
+@ stdcall __wine_ime_wnd_proc(long long long long long)

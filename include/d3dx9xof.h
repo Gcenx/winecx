@@ -19,8 +19,6 @@
 #ifndef __WINE_D3DX9XOF_H
 #define __WINE_D3DX9XOF_H
 
-#include "wine/winheader_enter.h"
-
 #include "d3dx9.h"
 
 #ifdef __cplusplus
@@ -184,7 +182,5 @@ DECLARE_INTERFACE_IID_(ID3DXFileData,IUnknown,"cef08cfd-7b4f-4429-9624-2a690a933
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_D3DX9XOF_H */

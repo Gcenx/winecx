@@ -20,22 +20,24 @@
 #define _WINGDI_
 #ifndef NOGDI
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#ifdef _GDI32_
+#ifndef WINGDIAPI
+#if defined(_GDI32_) || defined(WINE_UNIX_LIB)
 #define WINGDIAPI
 #else
-#define WINGDIAPI DECLSPEC_HIDDEN
+#define WINGDIAPI DECLSPEC_IMPORT
+#endif
 #endif
 
+#ifndef WGLAPI
 #ifdef _OPENGL32_
 #define WGLAPI
 #else
-#define WGLAPI DECLSPEC_HIDDEN
+#define WGLAPI DECLSPEC_IMPORT
+#endif
 #endif
 
 typedef struct _ABCFLOAT {
@@ -2716,6 +2718,27 @@ typedef struct {
 } EMRALPHABLEND, *PEMRALPHABLEND;
 
 typedef struct {
+    EMR      emr;
+    RECTL    rclBounds;
+    LONG     xDest;
+    LONG     yDest;
+    LONG     cxDest;
+    LONG     cyDest;
+    DWORD    dwRop;
+    LONG     xSrc;
+    LONG     ySrc;
+    XFORM    xformSrc;
+    COLORREF crBkColorSrc;
+    DWORD    iUsageSrc;
+    DWORD    offBmiSrc;
+    DWORD    cbBmiSrc;
+    DWORD    offBitsSrc;
+    DWORD    cbBitsSrc;
+    LONG     cxSrc;
+    LONG     cySrc;
+} EMRTRANSPARENTBLT, *PEMRTRANSPARENTBLT;
+
+typedef struct {
     EMR   emr;
     RECTL rclBounds;
     LONG  xDest;
@@ -4186,8 +4209,6 @@ WGLAPI BOOL    WINAPI wglUseFontOutlinesW(HDC,DWORD,DWORD,DWORD,FLOAT,FLOAT,INT,
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* !NOGDI */
 #endif /* _WINGDI_ */

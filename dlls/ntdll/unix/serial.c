@@ -71,7 +71,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(comm);
 
-static const char* iocode2str(DWORD ioc)
+static const char* iocode2str(UINT ioc)
 {
     switch (ioc)
     {
@@ -295,7 +295,7 @@ static NTSTATUS get_line_control(int fd, SERIAL_LINE_CONTROL* slc)
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS get_modem_status(int fd, DWORD* lpModemStat)
+static NTSTATUS get_modem_status(int fd, UINT* lpModemStat)
 {
     NTSTATUS    status = STATUS_NOT_SUPPORTED;
     int         mstat;
@@ -406,7 +406,7 @@ static NTSTATUS get_status(int fd, SERIAL_STATUS* ss)
 
 static void stop_waiting( HANDLE handle )
 {
-    NTSTATUS status;
+    unsigned int status;
 
     SERVER_START_REQ( set_serial_info )
     {
@@ -418,9 +418,9 @@ static void stop_waiting( HANDLE handle )
     SERVER_END_REQ;
 }
 
-static NTSTATUS get_wait_mask(HANDLE hDevice, DWORD *mask, DWORD *cookie, DWORD *pending_write, BOOL start_wait)
+static NTSTATUS get_wait_mask(HANDLE hDevice, UINT *mask, UINT *cookie, BOOL *pending_write, BOOL start_wait)
 {
-    NTSTATUS    status;
+    unsigned int status;
 
     SERVER_START_REQ( get_serial_info )
     {
@@ -549,13 +549,13 @@ static NTSTATUS set_baud_rate(int fd, const SERIAL_BAUD_RATE* sbr)
                  "hardware. I hope you know what you are doing.  Any disruption Wine\n"
                  "has caused to your linux system can be undone with setserial\n"
                  "(see man setserial). If you have incapacitated a Hayes type modem,\n"
-                 "reset it and it will probably recover.\n", sbr->BaudRate, arby);
+                 "reset it and it will probably recover.\n", (int)sbr->BaudRate, arby);
             ioctl(fd, TIOCSSERIAL, &nuts);
             cfsetospeed( &port, B38400 );
         }
         break;
 #else     /* Don't have linux/serial.h or lack TIOCSSERIAL */
-        ERR("baudrate %d\n", sbr->BaudRate);
+        ERR("baudrate %d\n", (int)sbr->BaudRate);
         return STATUS_NOT_SUPPORTED;
 #endif    /* Don't have linux/serial.h or lack TIOCSSERIAL */
     }
@@ -756,7 +756,7 @@ static NTSTATUS set_line_control(int fd, const SERIAL_LINE_CONTROL* slc)
 
 static NTSTATUS set_queue_size(int fd, const SERIAL_QUEUE_SIZE* sqs)
 {
-    FIXME("insize %d outsize %d unimplemented stub\n", sqs->InSize, sqs->OutSize);
+    FIXME("insize %d outsize %d unimplemented stub\n", (int)sqs->InSize, (int)sqs->OutSize);
     return STATUS_SUCCESS;
 }
 
@@ -831,10 +831,10 @@ typedef struct async_commio
     DWORD*              events;
     client_ptr_t        iosb;
     HANDLE              hEvent;
-    DWORD               evtmask;
-    DWORD               cookie;
-    DWORD               mstat;
-    DWORD               pending_write;
+    UINT                evtmask;
+    UINT                cookie;
+    UINT                mstat;
+    BOOL                pending_write;
     serial_irq_info     irq_info;
 } async_commio;
 
@@ -890,10 +890,10 @@ static NTSTATUS get_irq_info(int fd, serial_irq_info *irq_info)
 }
 
 
-static DWORD check_events(int fd, DWORD mask,
+static DWORD check_events(int fd, UINT mask,
                           const serial_irq_info *new,
                           const serial_irq_info *old,
-                          DWORD new_mstat, DWORD old_mstat, DWORD pending_write)
+                          UINT new_mstat, UINT old_mstat, BOOL pending_write)
 {
     DWORD ret = 0, queue;
 
@@ -946,7 +946,7 @@ static void CALLBACK wait_for_event(LPVOID arg)
     if (!server_get_unix_fd( commio->hDevice, FILE_READ_DATA | FILE_WRITE_DATA, &fd, &needs_close, NULL, NULL ))
     {
         serial_irq_info new_irq_info;
-        DWORD new_mstat, dummy, cookie;
+        UINT new_mstat, dummy, cookie;
         LARGE_INTEGER time;
 
         TRACE("device=%p fd=0x%08x mask=0x%08x buffer=%p event=%p irq_info=%p\n",
@@ -1096,8 +1096,8 @@ static NTSTATUS xmit_immediate(HANDLE hDevice, int fd, const char* ptr)
 }
 
 static NTSTATUS io_control( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
-                            client_ptr_t io, ULONG code, void *in_buffer,
-                            ULONG in_size, void *out_buffer, ULONG out_size )
+                            client_ptr_t io, UINT code, void *in_buffer,
+                            UINT in_size, void *out_buffer, UINT out_size )
 {
     DWORD sz = 0, access = FILE_READ_DATA;
     NTSTATUS status = STATUS_SUCCESS;
@@ -1317,8 +1317,8 @@ static NTSTATUS io_control( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, vo
  *		serial_DeviceIoControl
  */
 NTSTATUS serial_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
-                                 client_ptr_t io, ULONG code, void *in_buffer,
-                                 ULONG in_size, void *out_buffer, ULONG out_size )
+                                 client_ptr_t io, UINT code, void *in_buffer,
+                                 UINT in_size, void *out_buffer, UINT out_size )
 {
     NTSTATUS    status;
 

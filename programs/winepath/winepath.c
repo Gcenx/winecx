@@ -195,7 +195,7 @@ int __cdecl wmain(int argc, WCHAR *argv[])
         if (outputformats & UNIXFORMAT) {
             WCHAR *ntpath, *tail;
             int ntpathlen=lstrlenW(argv[i]);
-            ntpath=HeapAlloc(GetProcessHeap(), 0, sizeof(*ntpath)*(ntpathlen+1));
+            ntpath = malloc(sizeof(*ntpath)*(ntpathlen+1));
             lstrcpyW(ntpath, argv[i]);
             tail=NULL;
             while (1)
@@ -247,7 +247,7 @@ int __cdecl wmain(int argc, WCHAR *argv[])
                 tail=slash;
                 *tail='\0';
             }
-            HeapFree(GetProcessHeap(), 0, ntpath);
+            free(ntpath);
         }
         if (outputformats & WINDOWSFORMAT) {
             WCHAR* windows_name;
@@ -255,7 +255,7 @@ int __cdecl wmain(int argc, WCHAR *argv[])
             DWORD size;
 
             size=WideCharToMultiByte(CP_UNIXCP, 0, argv[i], -1, NULL, 0, NULL, NULL);
-            unix_name=HeapAlloc(GetProcessHeap(), 0, size);
+            unix_name = malloc(size);
             WideCharToMultiByte(CP_UNIXCP, 0, argv[i], -1, unix_name, size, NULL, NULL);
 
             if ((windows_name = wine_get_dos_file_name_ptr(unix_name)))
@@ -265,7 +265,7 @@ int __cdecl wmain(int argc, WCHAR *argv[])
                 HeapFree( GetProcessHeap(), 0, windows_name );
             }
             else printf("%c", separator);
-            HeapFree( GetProcessHeap(), 0, unix_name );
+            free( unix_name );
         }
     }
 

@@ -33,7 +33,6 @@
 #include "comctl32.h"
 #include "uxtheme.h"
 #include "vssym32.h"
-#include "wine/heap.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(updown);
@@ -902,7 +901,7 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 	    {
 	    CREATESTRUCTW *pcs = (CREATESTRUCTW*)lParam;
 
-            infoPtr = heap_alloc_zero(sizeof(*infoPtr));
+            infoPtr = Alloc(sizeof(*infoPtr));
 	    SetWindowLongPtrW (hwnd, 0, (DWORD_PTR)infoPtr);
 
 	    /* initialize the info struct */
@@ -935,9 +934,9 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 	    break;
 
 	case WM_DESTROY:
-	    heap_free (infoPtr->AccelVect);
+	    Free (infoPtr->AccelVect);
             UPDOWN_ResetSubclass (infoPtr);
-	    heap_free (infoPtr);
+	    Free (infoPtr);
 	    SetWindowLongPtrW (hwnd, 0, 0);
             theme = GetWindowTheme (hwnd);
             CloseThemeData (theme);
@@ -955,10 +954,8 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 	    break;
 
         case WM_STYLECHANGED:
-            if (wParam == GWL_STYLE) {
+            if (wParam == GWL_STYLE)
                 infoPtr->dwStyle = ((LPSTYLESTRUCT)lParam)->styleNew;
-	        InvalidateRect (infoPtr->Self, NULL, FALSE);
-            }
             break;
 
         case WM_THEMECHANGED:
@@ -1062,12 +1059,12 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 	    TRACE("UDM_SETACCEL\n");
 
 	    if(infoPtr->AccelVect) {
-		heap_free (infoPtr->AccelVect);
+		Free (infoPtr->AccelVect);
 		infoPtr->AccelCount = 0;
 		infoPtr->AccelVect  = 0;
       	    }
 	    if(wParam==0) return TRUE;
-	    infoPtr->AccelVect = heap_alloc(wParam*sizeof(UDACCEL));
+	    infoPtr->AccelVect = Alloc(wParam*sizeof(UDACCEL));
 	    if(!infoPtr->AccelVect) return FALSE;
 	    memcpy(infoPtr->AccelVect, (void*)lParam, wParam*sizeof(UDACCEL));
             infoPtr->AccelCount = wParam;

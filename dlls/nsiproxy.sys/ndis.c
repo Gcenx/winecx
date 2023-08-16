@@ -95,14 +95,14 @@ struct if_entry
     WCHAR *if_name;
     char if_unix_name[IFNAMSIZ];
     IF_PHYSICAL_ADDRESS if_phys_addr;
-    DWORD if_index;
-    DWORD if_type;
+    UINT if_index;
+    UINT if_type;
 };
 
 static struct list if_list = LIST_INIT( if_list );
 static pthread_mutex_t if_list_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static struct if_entry *find_entry_from_index( DWORD index )
+static struct if_entry *find_entry_from_index( UINT index )
 {
     struct if_entry *entry;
 
@@ -123,7 +123,7 @@ static struct if_entry *find_entry_from_luid( const NET_LUID *luid )
 }
 
 #if defined (SIOCGIFHWADDR) && defined (HAVE_STRUCT_IFREQ_IFR_HWADDR)
-static NTSTATUS if_get_physical( const char *name, DWORD *type, IF_PHYSICAL_ADDRESS *phys_addr )
+static NTSTATUS if_get_physical( const char *name, UINT *type, IF_PHYSICAL_ADDRESS *phys_addr )
 {
     int fd, size, i;
     struct ifreq ifr;
@@ -132,7 +132,7 @@ static NTSTATUS if_get_physical( const char *name, DWORD *type, IF_PHYSICAL_ADDR
     {
         unsigned short ifi_type;
         IFTYPE mib_type;
-        DWORD addr_len;
+        UINT addr_len;
     } types[] =
     {
         { ARPHRD_LOOPBACK, MIB_IF_TYPE_LOOPBACK, 0 },
@@ -177,7 +177,7 @@ err:
 
 #elif defined (HAVE_SYS_SYSCTL_H) && defined (HAVE_NET_IF_DL_H)
 
-static NTSTATUS if_get_physical( const char *name, DWORD *type, IF_PHYSICAL_ADDRESS *phys_addr )
+static NTSTATUS if_get_physical( const char *name, UINT *type, IF_PHYSICAL_ADDRESS *phys_addr )
 {
     struct if_msghdr *ifm;
     struct sockaddr_dl *sdl;
@@ -245,7 +245,7 @@ static NTSTATUS if_get_physical( const char *name, DWORD *type, IF_PHYSICAL_ADDR
 static WCHAR *strdupAtoW( const char *str )
 {
     WCHAR *ret = NULL;
-    DWORD len;
+    SIZE_T len;
 
     if (!str) return ret;
     len = strlen( str ) + 1;
@@ -254,7 +254,7 @@ static WCHAR *strdupAtoW( const char *str )
     return ret;
 }
 
-static struct if_entry *add_entry( DWORD index, char *name )
+static struct if_entry *add_entry( UINT index, char *name )
 {
     struct if_entry *entry;
     int name_len = strlen( name );
@@ -286,17 +286,19 @@ static struct if_entry *add_entry( DWORD index, char *name )
     return entry;
 }
 
-static void update_if_table( void )
+static unsigned int update_if_table( void )
 {
     struct if_nameindex *indices = if_nameindex(), *entry;
+    unsigned int append_count = 0;
 
     for (entry = indices; entry->if_index; entry++)
     {
-        if (!find_entry_from_index( entry->if_index ))
-            add_entry( entry->if_index, entry->if_name );
+        if (!find_entry_from_index( entry->if_index ) && add_entry( entry->if_index, entry->if_name ))
+            ++append_count;
     }
 
     if_freenameindex( indices );
+    return append_count;
 }
 
 static void if_counted_string_init( IF_COUNTED_STRING *str, const WCHAR *value )
@@ -331,7 +333,23 @@ static void ifinfo_fill_dynamic( struct if_entry *entry, struct nsi_ndis_ifinfo_
     data->flags.unk = 0;
     data->flags.not_media_conn = 0;
     data->flags.unk2 = 0;
+#ifdef __linux__
+    {
+        char filename[64];
+        FILE *fp;
+
+        sprintf( filename, "/sys/class/net/%s/carrier", entry->if_unix_name );
+        if (!(fp = fopen( filename, "r" ))) data->media_conn_state = MediaConnectStateUnknown;
+        else
+        {
+            if (fgetc( fp ) == '1') data->media_conn_state = MediaConnectStateConnected;
+            else data->media_conn_state = MediaConnectStateDisconnected;
+            fclose( fp );
+        }
+    }
+#else
     data->media_conn_state = MediaConnectStateConnected;
+#endif
     data->unk = 0;
 
     if (!ioctl( fd, SIOCGIFMTU, &req )) data->mtu = req.ifr_mtu;
@@ -446,12 +464,12 @@ static void ifinfo_fill_entry( struct if_entry *entry, NET_LUID *key, struct nsi
     }
 }
 
-static NTSTATUS ifinfo_enumerate_all( void *key_data, DWORD key_size, void *rw_data, DWORD rw_size,
-                                      void *dynamic_data, DWORD dynamic_size,
-                                      void *static_data, DWORD static_size, DWORD_PTR *count )
+static NTSTATUS ifinfo_enumerate_all( void *key_data, UINT key_size, void *rw_data, UINT rw_size,
+                                      void *dynamic_data, UINT dynamic_size,
+                                      void *static_data, UINT static_size, UINT_PTR *count )
 {
     struct if_entry *entry;
-    DWORD num = 0;
+    UINT num = 0;
     NTSTATUS status = STATUS_SUCCESS;
     BOOL want_data = key_size || rw_size || dynamic_size || static_size;
 
@@ -483,9 +501,9 @@ static NTSTATUS ifinfo_enumerate_all( void *key_data, DWORD key_size, void *rw_d
     return status;
 }
 
-static NTSTATUS ifinfo_get_all_parameters( const void *key, DWORD key_size, void *rw_data, DWORD rw_size,
-                                           void *dynamic_data, DWORD dynamic_size,
-                                           void *static_data, DWORD static_size )
+static NTSTATUS ifinfo_get_all_parameters( const void *key, UINT key_size, void *rw_data, UINT rw_size,
+                                           void *dynamic_data, UINT dynamic_size,
+                                           void *static_data, UINT static_size )
 {
     struct if_entry *entry;
     NTSTATUS status = STATUS_OBJECT_NAME_NOT_FOUND;
@@ -495,9 +513,11 @@ static NTSTATUS ifinfo_get_all_parameters( const void *key, DWORD key_size, void
 
     pthread_mutex_lock( &if_list_lock );
 
-    update_if_table();
-
-    entry = find_entry_from_luid( (const NET_LUID *)key );
+    if (!(entry = find_entry_from_luid( (const NET_LUID *)key )))
+    {
+        update_if_table();
+        entry = find_entry_from_luid( (const NET_LUID *)key );
+    }
     if (entry)
     {
         ifinfo_fill_entry( entry, NULL, rw_data, dynamic_data, static_data );
@@ -509,7 +529,7 @@ static NTSTATUS ifinfo_get_all_parameters( const void *key, DWORD key_size, void
     return status;
 }
 
-static NTSTATUS ifinfo_get_rw_parameter( struct if_entry *entry, void *data, DWORD data_size, DWORD data_offset )
+static NTSTATUS ifinfo_get_rw_parameter( struct if_entry *entry, void *data, UINT data_size, UINT data_offset )
 {
     switch (data_offset)
     {
@@ -527,13 +547,13 @@ static NTSTATUS ifinfo_get_rw_parameter( struct if_entry *entry, void *data, DWO
     return STATUS_INVALID_PARAMETER;
 }
 
-static NTSTATUS ifinfo_get_static_parameter( struct if_entry *entry, void *data, DWORD data_size, DWORD data_offset )
+static NTSTATUS ifinfo_get_static_parameter( struct if_entry *entry, void *data, UINT data_size, UINT data_offset )
 {
     switch (data_offset)
     {
     case FIELD_OFFSET( struct nsi_ndis_ifinfo_static, if_index ):
-        if (data_size != sizeof(DWORD)) return STATUS_INVALID_PARAMETER;
-        *(DWORD *)data = entry->if_index;
+        if (data_size != sizeof(UINT)) return STATUS_INVALID_PARAMETER;
+        *(UINT *)data = entry->if_index;
         return STATUS_SUCCESS;
 
     case FIELD_OFFSET( struct nsi_ndis_ifinfo_static, if_guid ):
@@ -547,8 +567,8 @@ static NTSTATUS ifinfo_get_static_parameter( struct if_entry *entry, void *data,
     return STATUS_INVALID_PARAMETER;
 }
 
-static NTSTATUS ifinfo_get_parameter( const void *key, DWORD key_size, DWORD param_type,
-                                      void *data, DWORD data_size, DWORD data_offset )
+static NTSTATUS ifinfo_get_parameter( const void *key, UINT key_size, UINT param_type,
+                                      void *data, UINT data_size, UINT data_offset )
 {
     struct if_entry *entry;
     NTSTATUS status = STATUS_OBJECT_NAME_NOT_FOUND;
@@ -557,9 +577,11 @@ static NTSTATUS ifinfo_get_parameter( const void *key, DWORD key_size, DWORD par
 
     pthread_mutex_lock( &if_list_lock );
 
-    update_if_table();
-
-    entry = find_entry_from_luid( (const NET_LUID *)key );
+    if (!(entry = find_entry_from_luid( (const NET_LUID *)key )))
+    {
+        update_if_table();
+        entry = find_entry_from_luid( (const NET_LUID *)key );
+    }
     if (entry)
     {
         switch (param_type)
@@ -578,8 +600,8 @@ static NTSTATUS ifinfo_get_parameter( const void *key, DWORD key_size, DWORD par
     return status;
 }
 
-static NTSTATUS index_luid_get_parameter( const void *key, DWORD key_size, DWORD param_type,
-                                          void *data, DWORD data_size, DWORD data_offset )
+static NTSTATUS index_luid_get_parameter( const void *key, UINT key_size, UINT param_type,
+                                          void *data, UINT data_size, UINT data_offset )
 {
     struct if_entry *entry;
     NTSTATUS status = STATUS_OBJECT_NAME_NOT_FOUND;
@@ -591,9 +613,11 @@ static NTSTATUS index_luid_get_parameter( const void *key, DWORD key_size, DWORD
 
     pthread_mutex_lock( &if_list_lock );
 
-    update_if_table();
-
-    entry = find_entry_from_index( *(DWORD *)key );
+    if (!(entry = find_entry_from_index( *(UINT *)key )))
+    {
+        update_if_table();
+        entry = find_entry_from_index( *(UINT *)key );
+    }
     if (entry)
     {
         *(NET_LUID *)data = entry->if_luid;
@@ -607,18 +631,24 @@ BOOL convert_unix_name_to_luid( const char *unix_name, NET_LUID *luid )
 {
     struct if_entry *entry;
     BOOL ret = FALSE;
+    int updated = 0;
 
     pthread_mutex_lock( &if_list_lock );
 
-    update_if_table();
-
-    LIST_FOR_EACH_ENTRY( entry, &if_list, struct if_entry, entry )
-        if (!strcmp( entry->if_unix_name, unix_name ))
+    do
+    {
+        LIST_FOR_EACH_ENTRY( entry, &if_list, struct if_entry, entry )
         {
-            *luid = entry->if_luid;
-            ret = TRUE;
-            break;
+            if (!strcmp( entry->if_unix_name, unix_name ))
+            {
+                *luid = entry->if_luid;
+                ret = TRUE;
+                goto done;
+            }
         }
+    } while (!updated++ && update_if_table());
+
+done:
     pthread_mutex_unlock( &if_list_lock );
 
     return ret;
@@ -628,18 +658,24 @@ BOOL convert_luid_to_unix_name( const NET_LUID *luid, const char **unix_name )
 {
     struct if_entry *entry;
     BOOL ret = FALSE;
+    int updated = 0;
 
     pthread_mutex_lock( &if_list_lock );
 
-    update_if_table();
-
-    LIST_FOR_EACH_ENTRY( entry, &if_list, struct if_entry, entry )
-        if (entry->if_luid.Value == luid->Value)
+    do
+    {
+        LIST_FOR_EACH_ENTRY( entry, &if_list, struct if_entry, entry )
         {
-            *unix_name = entry->if_unix_name;
-            ret = TRUE;
-
+            if (entry->if_luid.Value == luid->Value)
+            {
+                *unix_name = entry->if_unix_name;
+                ret = TRUE;
+                goto done;
+            }
         }
+    } while (!updated++ && update_if_table());
+
+done:
     pthread_mutex_unlock( &if_list_lock );
 
     return ret;
@@ -660,7 +696,7 @@ static const struct module_table tables[] =
     {
         NSI_NDIS_INDEX_LUID_TABLE,
         {
-            sizeof(DWORD), 0,
+            sizeof(UINT), 0,
             0, sizeof(NET_LUID)
         },
         NULL,

@@ -37,6 +37,7 @@ static HANDLE alarm_event;
 static BOOL (WINAPI *pDuplicateTokenEx)(HANDLE,DWORD,LPSECURITY_ATTRIBUTES,
                                         SECURITY_IMPERSONATION_LEVEL,TOKEN_TYPE,PHANDLE);
 static BOOL (WINAPI *pCancelIoEx)(HANDLE handle, LPOVERLAPPED lpOverlapped);
+static BOOL (WINAPI *pCancelSynchronousIo)(HANDLE handle);
 static BOOL (WINAPI *pGetNamedPipeClientProcessId)(HANDLE,ULONG*);
 static BOOL (WINAPI *pGetNamedPipeServerProcessId)(HANDLE,ULONG*);
 static BOOL (WINAPI *pGetNamedPipeClientSessionId)(HANDLE,ULONG*);
@@ -677,6 +678,17 @@ static void test_CreateNamedPipe(int pipemode)
             PIPE_TYPE_BYTE, 1, 1024, 1024, NMPWAIT_USE_DEFAULT_WAIT, NULL);
     ok(hnp != INVALID_HANDLE_VALUE, "failed to create pipe, error %lu\n", GetLastError());
     hFile = CreateFileA("\\\\.\\pipe\\a<>*?|\"/b", 0, 0, NULL, OPEN_EXISTING, 0, 0);
+    ok(hFile != INVALID_HANDLE_VALUE, "failed to open pipe, error %lu\n", GetLastError());
+    CloseHandle(hFile);
+    CloseHandle(hnp);
+
+    hnp = CreateNamedPipeA("\\\\.\\pipe\\trailingslash\\", PIPE_ACCESS_DUPLEX,
+            PIPE_TYPE_BYTE, 1, 1024, 1024, NMPWAIT_USE_DEFAULT_WAIT, NULL);
+    ok(hnp != INVALID_HANDLE_VALUE, "failed to create pipe, error %lu\n", GetLastError());
+    hFile = CreateFileA("\\\\.\\pipe\\trailingslash", 0, 0, NULL, OPEN_EXISTING, 0, 0);
+    ok(hFile == INVALID_HANDLE_VALUE, "expected opening pipe to fail\n");
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND, "expected ERROR_FILE_NOT_FOUND, got %lu\n", GetLastError());
+    hFile = CreateFileA("\\\\.\\pipe\\trailingslash\\", 0, 0, NULL, OPEN_EXISTING, 0, 0);
     ok(hFile != INVALID_HANDLE_VALUE, "failed to open pipe, error %lu\n", GetLastError());
     CloseHandle(hFile);
     CloseHandle(hnp);
@@ -4202,6 +4214,100 @@ static void test_exit_process_async(void)
     CloseHandle(server);
 }
 
+static DWORD CALLBACK synchronousIoThreadMain(void *arg)
+{
+    HANDLE pipe;
+    BOOL ret;
+
+    pipe = arg;
+    SetLastError(0xdeadbeef);
+    ret = ConnectNamedPipe(pipe, NULL);
+    ok(!ret, "expected failure\n");
+    ok(GetLastError() == ERROR_OPERATION_ABORTED, "got error %lu\n", GetLastError());
+    return 0;
+}
+
+static DWORD CALLBACK synchronousIoThreadMain2(void *arg)
+{
+    OVERLAPPED ov;
+    HANDLE pipe;
+    BOOL ret;
+
+    pipe = arg;
+    memset(&ov, 0, sizeof(ov));
+    ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+    SetLastError(0xdeadbeef);
+    ret = ConnectNamedPipe(pipe, &ov);
+    ok(!ret, "expected failure\n");
+    ok(GetLastError() == ERROR_IO_PENDING, "got error %lu\n", GetLastError());
+    ret = WaitForSingleObject(ov.hEvent, 1000);
+    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", ret);
+    CloseHandle(ov.hEvent);
+    return 0;
+}
+
+static void test_CancelSynchronousIo(void)
+{
+    BOOL res;
+    DWORD wait;
+    HANDLE file;
+    HANDLE pipe;
+    HANDLE thread;
+
+    /* bogus values */
+    SetLastError(0xdeadbeef);
+    res = pCancelSynchronousIo((HANDLE)0xdeadbeef);
+    ok(!res, "CancelSynchronousIo succeeded unexpectedly\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE,
+        "In CancelSynchronousIo failure, expected ERROR_INVALID_HANDLE, got %ld\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    res = pCancelSynchronousIo(GetCurrentThread());
+    ok(!res, "CancelSynchronousIo succeeded unexpectedly\n");
+    ok(GetLastError() == ERROR_NOT_FOUND,
+        "In CancelSynchronousIo failure, expected ERROR_NOT_FOUND, got %ld\n", GetLastError());
+
+    /* synchronous i/o */
+    pipe = CreateNamedPipeA(PIPENAME, PIPE_ACCESS_DUPLEX,
+                            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+                            1, 1024, 1024, NMPWAIT_USE_DEFAULT_WAIT, NULL);
+    ok(pipe != INVALID_HANDLE_VALUE, "CreateNamedPipe failed with %lu\n", GetLastError());
+    thread = CreateThread(NULL, 0, synchronousIoThreadMain, pipe, 0, NULL);
+    /* wait for I/O to start, which transitions the pipe handle from signaled to nonsignaled state. */
+    while ((wait = WaitForSingleObject(pipe, 0)) == WAIT_OBJECT_0) Sleep(1);
+    ok(wait == WAIT_TIMEOUT, "WaitForSingleObject returned %lu (error %lu)\n", wait, GetLastError());
+    SetLastError(0xdeadbeef);
+    res = pCancelSynchronousIo(thread);
+    ok(res, "CancelSynchronousIo failed with error %ld\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef,
+        "In CancelSynchronousIo failure, expected 0xdeadbeef got %ld\n", GetLastError());
+    wait = WaitForSingleObject(thread, 1000);
+    ok(wait == WAIT_OBJECT_0, "WaitForSingleObject returned %lx\n", wait);
+    CloseHandle(thread);
+    CloseHandle(pipe);
+
+    /* asynchronous i/o */
+    pipe = CreateNamedPipeA(PIPENAME, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+                            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+                            1, 1024, 1024, NMPWAIT_USE_DEFAULT_WAIT, NULL);
+    ok(pipe != INVALID_HANDLE_VALUE, "CreateNamedPipe failed with %lu\n", GetLastError());
+    thread = CreateThread(NULL, 0, synchronousIoThreadMain2, pipe, 0, NULL);
+    /* wait for I/O to start, which transitions the pipe handle from signaled to nonsignaled state. */
+    while ((wait = WaitForSingleObject(pipe, 0)) == WAIT_OBJECT_0) Sleep(1);
+    ok(wait == WAIT_TIMEOUT, "WaitForSingleObject returned %lu (error %lu)\n", wait, GetLastError());
+    SetLastError(0xdeadbeef);
+    res = pCancelSynchronousIo(thread);
+    ok(!res, "CancelSynchronousIo succeeded unexpectedly\n");
+    ok(GetLastError() == ERROR_NOT_FOUND,
+        "In CancelSynchronousIo failure, expected ERROR_NOT_FOUND, got %ld\n", GetLastError());
+    file = CreateFileA(PIPENAME, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0);
+    ok(file != INVALID_HANDLE_VALUE, "CreateFile failed (%ld)\n", GetLastError());
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+    CloseHandle(file);
+    CloseHandle(pipe);
+}
+
 START_TEST(pipe)
 {
     char **argv;
@@ -4212,6 +4318,7 @@ START_TEST(pipe)
     pDuplicateTokenEx = (void *) GetProcAddress(hmod, "DuplicateTokenEx");
     hmod = GetModuleHandleA("kernel32.dll");
     pCancelIoEx = (void *) GetProcAddress(hmod, "CancelIoEx");
+    pCancelSynchronousIo = (void *) GetProcAddress(hmod, "CancelSynchronousIo");
     pGetNamedPipeClientProcessId = (void *) GetProcAddress(hmod, "GetNamedPipeClientProcessId");
     pGetNamedPipeServerProcessId = (void *) GetProcAddress(hmod, "GetNamedPipeServerProcessId");
     pGetNamedPipeClientSessionId = (void *) GetProcAddress(hmod, "GetNamedPipeClientSessionId");
@@ -4282,4 +4389,5 @@ START_TEST(pipe)
     test_nowait(PIPE_TYPE_MESSAGE);
     test_GetOverlappedResultEx();
     test_exit_process_async();
+    test_CancelSynchronousIo();
 }

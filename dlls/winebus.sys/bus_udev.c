@@ -260,12 +260,12 @@ static struct base_device *find_device_from_fd(int fd)
     return NULL;
 }
 
-static struct base_device *find_device_from_udev(struct udev_device *dev)
+static struct base_device *find_device_from_devnode(const char *path)
 {
     struct base_device *impl;
 
     LIST_FOR_EACH_ENTRY(impl, &device_list, struct base_device, unix_device.entry)
-        if (impl->udev_device == dev) return impl;
+        if (!strcmp(impl->devnode, path)) return impl;
 
     return NULL;
 }
@@ -1138,7 +1138,7 @@ static NTSTATUS lnxev_device_physical_effect_update(struct unix_device *iface, B
     case PID_USAGE_ET_SAWTOOTH_UP:
     case PID_USAGE_ET_SAWTOOTH_DOWN:
         effect.u.periodic.period = params->periodic.period;
-        effect.u.periodic.magnitude = params->periodic.magnitude;
+        effect.u.periodic.magnitude = (params->periodic.magnitude * params->gain_percent) / 100;
         effect.u.periodic.offset = params->periodic.offset;
         effect.u.periodic.phase = params->periodic.phase * 0x800 / 1125;
         effect.u.periodic.envelope.attack_length = params->envelope.attack_time;
@@ -1172,7 +1172,7 @@ static NTSTATUS lnxev_device_physical_effect_update(struct unix_device *iface, B
         break;
 
     case PID_USAGE_ET_CONSTANT_FORCE:
-        effect.u.constant.level = params->constant_force.magnitude;
+        effect.u.constant.level = (params->constant_force.magnitude * params->gain_percent) / 100;
         effect.u.constant.envelope.attack_length = params->envelope.attack_time;
         effect.u.constant.envelope.attack_level = params->envelope.attack_level;
         effect.u.constant.envelope.fade_length = params->envelope.fade_time;
@@ -1180,8 +1180,8 @@ static NTSTATUS lnxev_device_physical_effect_update(struct unix_device *iface, B
         break;
 
     case PID_USAGE_ET_RAMP:
-        effect.u.ramp.start_level = params->ramp_force.ramp_start;
-        effect.u.ramp.end_level = params->ramp_force.ramp_end;
+        effect.u.ramp.start_level = (params->ramp_force.ramp_start * params->gain_percent) / 100;
+        effect.u.ramp.end_level = (params->ramp_force.ramp_end * params->gain_percent) / 100;
         effect.u.ramp.envelope.attack_length = params->envelope.attack_time;
         effect.u.ramp.envelope.attack_level = params->envelope.attack_level;
         effect.u.ramp.envelope.fade_length = params->envelope.fade_time;
@@ -1329,7 +1329,9 @@ static void udev_add_device(struct udev_device *dev, int fd)
     if (!strcmp(subsystem, "hidraw"))
     {
         static const WCHAR hidraw[] = {'h','i','d','r','a','w',0};
+#ifdef HAVE_LINUX_HIDRAW_H
         char product[MAX_PATH];
+#endif
 
         if (!desc.manufacturer[0]) memcpy(desc.manufacturer, hidraw, sizeof(hidraw));
 
@@ -1556,16 +1558,6 @@ static int create_inotify(void)
     return fd;
 }
 
-static struct base_device *find_device_from_devnode(const char *path)
-{
-    struct base_device *impl;
-
-    LIST_FOR_EACH_ENTRY(impl, &device_list, struct base_device, unix_device.entry)
-        if (!strcmp(impl->devnode, path)) return impl;
-
-    return NULL;
-}
-
 static void maybe_remove_devnode(const char *base, const char *dir)
 {
     struct base_device *impl;
@@ -1745,7 +1737,7 @@ static void process_monitor_event(struct udev_monitor *monitor)
         udev_add_device(dev, -1);
     else
     {
-        impl = find_device_from_udev(dev);
+        impl = find_device_from_devnode(udev_device_get_devnode(dev));
         if (impl) bus_event_queue_device_removed(&event_queue, &impl->unix_device);
         else WARN("failed to find device for udev device %p\n", dev);
     }
@@ -1773,7 +1765,7 @@ NTSTATUS udev_bus_init(void *args)
         goto error;
     }
 
-#if HAVE_SYS_INOTIFY_H
+#ifdef HAVE_SYS_INOTIFY_H
     if (options.disable_udevd) monitor_fd = create_inotify();
     if (monitor_fd < 0) options.disable_udevd = FALSE;
 #else
@@ -1798,7 +1790,7 @@ NTSTATUS udev_bus_init(void *args)
     poll_count = 2;
 
     if (!options.disable_udevd) build_initial_deviceset_udevd();
-#if HAVE_SYS_INOTIFY_H
+#ifdef HAVE_SYS_INOTIFY_H
     else build_initial_deviceset_direct();
 #endif
 
@@ -1841,7 +1833,7 @@ NTSTATUS udev_bus_wait(void *args)
         if (pfd[0].revents)
         {
             if (udev_monitor) process_monitor_event(udev_monitor);
-#if HAVE_SYS_INOTIFY_H
+#ifdef HAVE_SYS_INOTIFY_H
             else process_inotify_event(pfd[0].fd);
 #endif
         }

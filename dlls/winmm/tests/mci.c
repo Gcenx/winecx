@@ -23,6 +23,7 @@
 #include "windows.h"
 #include "mmsystem.h"
 #include "mmreg.h"
+#include "digitalv.h"
 #include "wine/test.h"
 
 /* The tests use the MCI's own save capability to create the tempfile.wav to play.
@@ -37,6 +38,10 @@ typedef union {
       MCI_GETDEVCAPS_PARMS caps;
       MCI_SYSINFO_PARMSA  sys;
       MCI_SEEK_PARMS      seek;
+      MCI_DGV_OPEN_PARMSW dgv_open;
+      MCI_DGV_PUT_PARMS   put;
+      MCI_DGV_WHERE_PARMS where;
+      MCI_DGV_WINDOW_PARMSW win;
       MCI_GENERIC_PARMS   gen;
     } MCI_PARMS_UNION;
 
@@ -137,6 +142,31 @@ static BOOL spurious_message(LPMSG msg)
     return TRUE;
   }
   return FALSE;
+}
+
+static WCHAR *load_resource(const WCHAR *name)
+{
+    static WCHAR pathW[MAX_PATH];
+    DWORD written;
+    HANDLE file;
+    HRSRC res;
+    void *ptr;
+
+    GetTempPathW(ARRAY_SIZE(pathW), pathW);
+    wcscat(pathW, name);
+
+    file = CreateFileW(pathW, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
+    ok(file != INVALID_HANDLE_VALUE, "Failed to create file %s, error %lu.\n",
+            wine_dbgstr_w(pathW), GetLastError());
+
+    res = FindResourceW(NULL, name, (LPCWSTR)RT_RCDATA);
+    ok(!!res, "Failed to load resource, error %lu.\n", GetLastError());
+    ptr = LockResource(LoadResource(GetModuleHandleA(NULL), res));
+    WriteFile(file, ptr, SizeofResource( GetModuleHandleA(NULL), res), &written, NULL);
+    ok(written == SizeofResource(GetModuleHandleA(NULL), res), "Failed to write resource.\n");
+    CloseHandle(file);
+
+    return pathW;
 }
 
 /* A single ok() in each code path allows us to prefix this with todo_wine */
@@ -1336,6 +1366,19 @@ static void test_playWaveTypeMpegvideo(void)
 
     err = mciSendStringA("close mysound", NULL, 0, NULL);
     ok(!err,"mci close returned %s\n", dbg_mcierr(err));
+
+    /* test a second play */
+    err = mciSendStringA("open tempfile.wav type MPEGVideo alias mysound", NULL, 0, NULL);
+    ok(err==ok_saved,"mci open tempfile.wav type MPEGVideo returned %s\n", dbg_mcierr(err));
+
+    err = mciSendStringA("play mysound", NULL, 0, NULL);
+    ok(!err,"mci play retuend %s\n", dbg_mcierr(err));
+
+    err = mciSendStringA("play mysound", NULL, 0, NULL);
+    ok(!err,"mci play retuend %s\n", dbg_mcierr(err));
+
+    err = mciSendStringA("close mysound", NULL, 0, NULL);
+    ok(!err,"mci close returned %s\n", dbg_mcierr(err));
 }
 
 static void test_asyncWaveTypeMpegvideo(HWND hwnd)
@@ -1380,6 +1423,20 @@ static void test_asyncWaveTypeMpegvideo(HWND hwnd)
     ok(!err,"mci play returned %s\n", dbg_mcierr(err));
     Sleep(200);
     test_notification(hwnd,"play",0);
+
+    err = mciSendStringA("window mysound state hide", NULL, 0, NULL);
+    ok(err == MCIERR_NO_WINDOW, "mci window state returned %s\n", dbg_mcierr(err));
+
+    err = mciSendStringA("window mysound text abracadabra", NULL, 0, NULL);
+    ok(err == MCIERR_NO_WINDOW, "mci window text returned %s\n", dbg_mcierr(err));
+
+    sprintf(buf, "window mysound handle %lu", PtrToUlong(GetDesktopWindow()));
+    err = mciSendStringA(buf, NULL, 0, NULL);
+    ok(err == MCIERR_INTERNAL, "mci window handle (desktop) returned %s\n", dbg_mcierr(err));
+
+    sprintf(buf, "window mysound handle %lu", (unsigned long)0xdeadbeef);
+    err = mciSendStringA(buf, NULL, 0, NULL);
+    ok(err == MCIERR_NO_WINDOW, "mci window handle (deadbeef) returned %s\n", dbg_mcierr(err));
 
     err = mciSendStringA("close mysound wait", NULL, 0, NULL);
     ok(!err,"mci close wait returned %s\n", dbg_mcierr(err));
@@ -1426,6 +1483,286 @@ static void test_threads(void)
     ok(mr == 0, "close gave: 0x%lx\n", mr);
 }
 
+static BOOL CALLBACK my_visible_window_proc(HWND hwnd, LPARAM param)
+{
+    HWND *ret = (HWND *)param;
+    DWORD pid;
+
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid != GetCurrentProcessId())
+        return TRUE;
+
+    if (GetWindowLongW(hwnd, GWL_STYLE) & WS_VISIBLE)
+    {
+        *ret = hwnd;
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static void test_video_window(void)
+{
+    const WCHAR *filename = load_resource(L"test.mpg");
+    MCI_PARMS_UNION parm;
+    WCHAR buffer[256];
+    unsigned int i;
+    MCIDEVICEID id;
+    MCIERROR err;
+    BOOL ret;
+
+    static const struct
+    {
+        DWORD open_flags;
+        DWORD style;
+        DWORD expected_style;
+    }
+    testcase[] =
+    {
+        {
+            0,
+            0,
+            (WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS) & ~WS_MAXIMIZEBOX,
+        },
+        {
+            MCI_DGV_OPEN_PARENT,
+            0,
+            (WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS) & ~WS_MAXIMIZEBOX,
+        },
+        {
+            MCI_DGV_OPEN_WS,
+            0,
+            WS_BORDER | WS_CLIPSIBLINGS | WS_BORDER | WS_DLGFRAME,
+        },
+        {
+            MCI_DGV_OPEN_WS,
+            WS_POPUPWINDOW,
+            WS_POPUPWINDOW | WS_CLIPSIBLINGS,
+        },
+        {
+            MCI_DGV_OPEN_PARENT | MCI_DGV_OPEN_WS,
+            WS_OVERLAPPEDWINDOW,
+            WS_OVERLAPPEDWINDOW | WS_CLIPSIBLINGS,
+        },
+        {
+            MCI_DGV_OPEN_PARENT | MCI_DGV_OPEN_WS,
+            WS_CHILDWINDOW,
+            WS_CHILD,
+        },
+    };
+
+    for (i = 0; i < ARRAY_SIZE(testcase); ++i)
+    {
+        HWND parent_window = NULL, hwnd, video_window, main_window;
+        DWORD style, expected;
+        RECT rc, src_rc, win_rc;
+
+        winetest_push_context("%u", i);
+
+        main_window = CreateWindowExA(0, "static", "main",
+                WS_POPUPWINDOW, 0, 0, 10, 10, 0, 0, 0, NULL);
+        if (testcase[i].open_flags & MCI_DGV_OPEN_PARENT)
+            parent_window = CreateWindowExA(0, "static", "parent",
+                    WS_POPUPWINDOW, 0, 0, 100, 100, 0, 0, 0, NULL);
+
+        parm.dgv_open.lpstrDeviceType = (WCHAR *)L"MPEGVideo";
+        parm.dgv_open.lpstrElementName = (WCHAR *)filename;
+        parm.dgv_open.hWndParent = parent_window;
+        parm.dgv_open.dwStyle = testcase[i].style;
+        err = mciSendCommandW(0, MCI_OPEN,
+                MCI_OPEN_ELEMENT | MCI_OPEN_TYPE | testcase[i].open_flags, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+        id = parm.dgv_open.wDeviceID;
+
+        err = mciSendCommandW(id, MCI_PLAY, 0, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+
+        if (!(testcase[i].style & WS_CHILD))
+        {
+            video_window = NULL;
+            EnumWindows(my_visible_window_proc, (LPARAM)&video_window);
+            ok(video_window != NULL, "Video window should be shown.\n");
+
+            hwnd = GetWindow(video_window, GW_OWNER);
+            ok(hwnd == parent_window, "Got owner %p, expected %p.\n", hwnd, parent_window);
+        }
+        else
+        {
+            ok(!IsWindowVisible(parent_window), "Parent window should be hidden.\n");
+            ShowWindow(parent_window, SW_SHOWNA);
+
+            hwnd = GetWindow(parent_window, GW_CHILD);
+            ok(hwnd != NULL, "Child video window should be shown.\n");
+            video_window = hwnd;
+        }
+
+        expected = testcase[i].expected_style | WS_VISIBLE;
+        style = GetWindowLongW(video_window, GWL_STYLE);
+        ok(style == expected, "Got style %#lx for window %p, expected %#lx.\n", style, video_window, expected);
+
+        /* Get the source video size. */
+        err = mciSendCommandW(id, MCI_WHERE, MCI_DGV_WHERE_SOURCE, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+        SetRect(&rc, 0, 0, 32, 24);
+        ok(EqualRect(&parm.where.rc, &rc), "Got source rect %s, expected %s.\n",
+                wine_dbgstr_rect(&parm.where.rc), wine_dbgstr_rect(&rc));
+        src_rc = parm.where.rc;
+
+        /* Test the default video destination size. */
+        err = mciSendCommandW(id, MCI_WHERE, MCI_DGV_WHERE_DESTINATION, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+        if (style & (WS_POPUP | WS_CHILD))
+            rc = src_rc;
+        else
+            /* The video destination is stretched to fit the window,
+             * in particular if the video width is less than SM_CXMIN. */
+            GetClientRect(video_window, &rc);
+
+        ok(EqualRect(&parm.where.rc, &rc), "Got destination rect %s, expected %s.\n",
+                wine_dbgstr_rect(&parm.where.rc), wine_dbgstr_rect(&rc));
+
+        /* Test the default video window size. */
+        rc = src_rc;
+        /* Windows is broken and always uses WS_OVERLAPPEDWINDOW regardless of
+         * the window's actual style. */
+        AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+        OffsetRect(&rc, -rc.left, -rc.top);
+        rc.right = max(rc.right, GetSystemMetrics(SM_CXMIN));
+
+        GetWindowRect(video_window, &win_rc);
+        OffsetRect(&rc, win_rc.left, win_rc.top);
+        ok(EqualRect(&rc, &win_rc), "Got window rect %s, expected %s.\n",
+                wine_dbgstr_rect(&win_rc), wine_dbgstr_rect(&rc));
+
+        err = mciSendCommandW(id, MCI_WHERE, MCI_DGV_WHERE_WINDOW, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+        win_rc.right -= win_rc.left;
+        win_rc.bottom -= win_rc.top;
+        ok(EqualRect(&win_rc, &parm.where.rc), "Got rect %s, expected %s.\n",
+                wine_dbgstr_rect(&parm.where.rc), wine_dbgstr_rect(&win_rc));
+
+        err = mciSendCommandW(id, MCI_STOP, 0, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+
+        ok(IsWindowVisible(video_window), "Video window should be visible.\n");
+
+        err = mciSendCommandW(id, MCI_PLAY, 0, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+
+        ok(IsWindowVisible(video_window), "Video window should be visible.\n");
+
+        err = mciSendCommandW(id, MCI_SEEK, MCI_SEEK_TO_START, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+
+        ok(IsWindowVisible(video_window), "Video window should be visible.\n");
+
+        /* Test MCI_DGV_WINDOW_HWND. */
+        parm.win.hWnd = (HWND)0xdeadbeef;
+        err = mciSendCommandW(id, MCI_WINDOW, MCI_DGV_WINDOW_HWND, (DWORD_PTR)&parm);
+        ok(err == MCIERR_NO_WINDOW, "Got %s.\n", dbg_mcierr(err));
+
+        parm.win.hWnd = main_window;
+        err = mciSendCommandW(id, MCI_WINDOW, MCI_DGV_WINDOW_HWND, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+        ok(!IsWindowVisible(main_window), "Main window should be hidden.\n");
+
+        hwnd = GetWindow(main_window, GW_CHILD);
+        ok(hwnd != video_window, "Video window (%p) and child window (%p) should be different.\n",
+                video_window, hwnd);
+        style = GetWindowLongW(hwnd, GWL_STYLE);
+        expected = WS_CHILD | WS_VISIBLE;
+        ok(style == expected, "Child window %p: got style %#lx, expected %#lx.\n",
+                hwnd, style, expected);
+
+        style = GetWindowLongW(video_window, GWL_STYLE);
+        expected = testcase[i].expected_style;
+        ok(style == expected, "Video window %p: got style %#lx, expected %#lx.\n",
+                video_window, style, expected);
+
+        /* destination size is reset to the source video size */
+        err = mciSendCommandW(id, MCI_WHERE, MCI_DGV_WHERE_DESTINATION, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+        ok(EqualRect(&parm.where.rc, &src_rc), "Got destination rect %s, expected %s.\n",
+                wine_dbgstr_rect(&parm.where.rc), wine_dbgstr_rect(&src_rc));
+
+        /* destination size isn't reset unless the destination window is changed */
+        SetRect(&rc, 0, 0, src_rc.right * 2, src_rc.bottom / 2);
+        parm.put.rc = rc;
+        err = mciSendCommandW(id, MCI_PUT, MCI_DGV_PUT_DESTINATION | MCI_DGV_RECT, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+
+        parm.win.hWnd = main_window;
+        err = mciSendCommandW(id, MCI_WINDOW, MCI_DGV_WINDOW_HWND, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+        ok(!IsWindowVisible(main_window), "Main window should be hidden.\n");
+
+        err = mciSendCommandW(id, MCI_WHERE, MCI_DGV_WHERE_DESTINATION, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+        ok(EqualRect(&parm.where.rc, &rc), "Got destination rect %s, expected %s.\n",
+                wine_dbgstr_rect(&parm.where.rc), wine_dbgstr_rect(&rc));
+
+        /* MCI_PLAY shows current video window */
+        err = mciSendCommandW(id, MCI_PLAY, 0, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+        ok(IsWindowVisible(main_window), "Main window should be shown.\n");
+        ok(IsWindow(video_window), "Video window should exist.\n");
+        ok(!IsWindowVisible(video_window), "Video window should be hidden.\n");
+
+        /* Test MCI_DGV_WINDOW_STATE for the non-default window. */
+        parm.win.nCmdShow = SW_MINIMIZE;
+        err = mciSendCommandW(id, MCI_WINDOW, MCI_DGV_WINDOW_STATE, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+        ok(IsIconic(main_window), "Video window should be minimized.\n");
+
+        /* Test MCI_DGV_WINDOW_TEXT for the non-default window. */
+        parm.win.lpstrText = (LPWSTR)L"foobar";
+        err = mciSendCommandW(id, MCI_WINDOW, MCI_DGV_WINDOW_TEXT, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+        GetWindowTextW(main_window, buffer, ARRAY_SIZE(buffer));
+        ok(!wcscmp(buffer, parm.win.lpstrText), "Got %s, expected %s\n", wine_dbgstr_w(buffer), wine_dbgstr_w(parm.win.lpstrText));
+
+        /* video window is reset to the default window, which is visible again */
+        parm.win.hWnd = NULL;
+        err = mciSendCommandW(id, MCI_WINDOW, MCI_DGV_WINDOW_HWND, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+        ok(IsWindowVisible(main_window), "Main window should be shown.\n");
+        ok(IsWindowVisible(video_window), "Video window should be shown.\n");
+
+        err = mciSendCommandW(id, MCI_WHERE, MCI_DGV_WHERE_DESTINATION, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+        ok(EqualRect(&parm.where.rc, &src_rc), "Got destination rect %s, expected %s.\n",
+                wine_dbgstr_rect(&parm.where.rc), wine_dbgstr_rect(&src_rc));
+
+        /* Test MCI_DGV_WINDOW_STATE for the default window. */
+        parm.win.nCmdShow = SW_MINIMIZE;
+        err = mciSendCommandW(id, MCI_WINDOW, MCI_DGV_WINDOW_STATE, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+        ok(IsIconic(video_window), "Video window should be minimized.\n");
+
+        /* Test MCI_DGV_WINDOW_TEXT for the default window. */
+        parm.win.lpstrText = (LPWSTR)L"abracadabra";
+        err = mciSendCommandW(id, MCI_WINDOW, MCI_DGV_WINDOW_TEXT, (DWORD_PTR)&parm);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+        GetWindowTextW(video_window, buffer, ARRAY_SIZE(buffer));
+        ok(!wcscmp(buffer, parm.win.lpstrText), "Got %s, expected %s\n", wine_dbgstr_w(buffer), wine_dbgstr_w(parm.win.lpstrText));
+
+        err = mciSendCommandW(id, MCI_CLOSE, 0, 0);
+        ok(!err, "Got %s.\n", dbg_mcierr(err));
+
+        if (parent_window)
+        {
+            ret = DestroyWindow(parent_window);
+            ok(ret, "Failed to destroy parent window\n");
+        }
+        DestroyWindow(main_window);
+
+        winetest_pop_context();
+    }
+
+    ret = DeleteFileW(filename);
+    ok(ret, "Failed to delete %s, error %lu.\n", debugstr_w(filename), GetLastError());
+}
+
 START_TEST(mci)
 {
     char curdir[MAX_PATH], tmpdir[MAX_PATH];
@@ -1450,6 +1787,9 @@ START_TEST(mci)
         test_asyncWaveTypeMpegvideo(hwnd);
     }else
         skip("No output devices available, skipping all output tests\n");
+
+    test_video_window();
+
     /* Win9X hangs when exiting with something still open. */
     err = mciSendStringA("close all", NULL, 0, hwnd);
     ok(!err,"final close all returned %s\n", dbg_mcierr(err));

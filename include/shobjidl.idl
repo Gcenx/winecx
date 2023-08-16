@@ -33,9 +33,17 @@ import "wtypes.idl";
 import "propsys.idl";
 import "objectarray.idl";
 /* FIXME: import "structuredquery.idl"; */
+import "shobjidl_core.idl";
 
 cpp_quote("/* FIXME: #include <sherrors.h> */")
 
+cpp_quote("#ifndef WINSHELLAPI")
+cpp_quote("#ifdef _SHELL32_")
+cpp_quote("# define WINSHELLAPI")
+cpp_quote("#else")
+cpp_quote("# define WINSHELLAPI DECLSPEC_IMPORT")
+cpp_quote("#endif")
+cpp_quote("#endif")
 
 /*****************************************************************************
  * IPersistFolder interface
@@ -381,7 +389,7 @@ interface IShellItem : IUnknown
     typedef DWORD SICHINTF;
 
     HRESULT BindToHandler(
-        [in] IBindCtx *pbc,
+        [in, unique] IBindCtx *pbc,
         [in] REFGUID rbhid,
         [in] REFIID riid,
         [out, iid_is(riid)] void **ppvOut);
@@ -469,6 +477,61 @@ interface IShellItem2 : IShellItem
     HRESULT GetBool(
         [in] REFPROPERTYKEY key,
         [out] BOOL *pf);
+}
+
+/*****************************************************************************
+ * IShellItemImageFactory interface
+ */
+[
+    object,
+    uuid(bcc18b79-ba16-442f-80c4-8a59c30c463b),
+    pointer_default(unique)
+]
+interface IShellItemImageFactory : IUnknown
+{
+    [v1_enum] enum _SIIGBF {
+        SIIGBF_RESIZETOFIT     = 0x00000000,
+        SIIGBF_BIGGERSIZEOK    = 0x00000001,
+        SIIGBF_MEMORYONLY      = 0x00000002,
+        SIIGBF_ICONONLY        = 0x00000004,
+        SIIGBF_THUMBNAILONLY   = 0x00000008,
+        SIIGBF_INCACHEONLY     = 0x00000010,
+        SIIGBF_CROPTOSQUARE    = 0x00000020,
+        SIIGBF_WIDETHUMBNAILS  = 0x00000040,
+        SIIGBF_ICONBACKGROUND  = 0x00000080,
+        SIIGBF_SCALEUP         = 0x00000100,
+    };
+    typedef int SIIGBF;
+
+    HRESULT GetImage(
+        [in] SIZE size,
+        [in] SIIGBF flags,
+        [out] HBITMAP *phbm);
+}
+
+[
+    object,
+    uuid(b3a4b685-b685-4805-99d9-5dead2873236),
+    pointer_default(unique)
+]
+interface IParentAndItem : IUnknown
+{
+    HRESULT SetParentAndItem(
+        [in, unique] PCIDLIST_ABSOLUTE parent,
+        [in, unique] IShellFolder *folder,
+        [in] PCUITEMID_CHILD child);
+
+    [local]
+    HRESULT GetParentAndItem(
+        [out] PIDLIST_ABSOLUTE *parent,
+        [out] IShellFolder **folder,
+        [out] PITEMID_CHILD *child);
+
+    [call_as(GetParentAndItem)]
+    HRESULT RemoteGetParentAndItem(
+        [out] PIDLIST_ABSOLUTE *parent,
+        [out] IShellFolder **folder,
+        [out] PITEMID_CHILD *child);
 }
 
 typedef [v1_enum] enum tagNWMF {
@@ -598,18 +661,18 @@ typedef [v1_enum] enum DATAOBJ_GET_ITEM_FLAGS
 } DATAOBJ_GET_ITEM_FLAGS;
 cpp_quote("DEFINE_ENUM_FLAG_OPERATORS(DATAOBJ_GET_ITEM_FLAGS)")
 
-cpp_quote("HRESULT WINAPI SHGetNameFromIDList(PCIDLIST_ABSOLUTE pidl, SIGDN sigdnName, PWSTR *ppszName);")
-cpp_quote("HRESULT WINAPI SHCreateItemFromParsingName(PCWSTR pszPath, IBindCtx *pbc, REFIID riid, void **ppv);")
-cpp_quote("HRESULT WINAPI SHCreateItemFromIDList(PCIDLIST_ABSOLUTE pidl, REFIID riid, void **ppv);")
-cpp_quote("HRESULT WINAPI SHCreateItemFromRelativeName(IShellItem *parent, PCWSTR name, IBindCtx *pbc, REFIID riid, void **ppv);")
-cpp_quote("HRESULT WINAPI SHGetItemFromDataObject(IDataObject *pdtobj, DATAOBJ_GET_ITEM_FLAGS dwFlags, REFIID riid, void **ppv);")
-cpp_quote("HRESULT WINAPI SHGetIDListFromObject(IUnknown *punk, PIDLIST_ABSOLUTE *ppidl);")
-cpp_quote("HRESULT WINAPI SHGetItemFromObject(IUnknown *punk, REFIID riid, void **ppv);")
-cpp_quote("HRESULT WINAPI SHCreateShellItemArray(PCIDLIST_ABSOLUTE pidlParent, IShellFolder* psf, UINT cidl, PCUITEMID_CHILD_ARRAY ppidl, IShellItemArray **ppsiItemArray);")
-cpp_quote("HRESULT WINAPI SHCreateShellItemArrayFromShellItem(IShellItem *psi, REFIID riid, void **ppv);")
-cpp_quote("HRESULT WINAPI SHCreateShellItemArrayFromIDLists(UINT cidl, PCIDLIST_ABSOLUTE_ARRAY pidl_array, IShellItemArray **psia);")
-cpp_quote("HRESULT WINAPI SHCreateItemInKnownFolder(REFKNOWNFOLDERID rfid, DWORD flags, PCWSTR filename, REFIID riid, void **ppv);")
-cpp_quote("HRESULT WINAPI SHCreateShellItemArrayFromDataObject(IDataObject *pdo, REFIID riid, void **ppv);")
+cpp_quote("WINSHELLAPI HRESULT WINAPI SHGetNameFromIDList(PCIDLIST_ABSOLUTE pidl, SIGDN sigdnName, PWSTR *ppszName);")
+cpp_quote("WINSHELLAPI HRESULT WINAPI SHCreateItemFromParsingName(PCWSTR pszPath, IBindCtx *pbc, REFIID riid, void **ppv);")
+cpp_quote("WINSHELLAPI HRESULT WINAPI SHCreateItemFromIDList(PCIDLIST_ABSOLUTE pidl, REFIID riid, void **ppv);")
+cpp_quote("WINSHELLAPI HRESULT WINAPI SHCreateItemFromRelativeName(IShellItem *parent, PCWSTR name, IBindCtx *pbc, REFIID riid, void **ppv);")
+cpp_quote("WINSHELLAPI HRESULT WINAPI SHGetItemFromDataObject(IDataObject *pdtobj, DATAOBJ_GET_ITEM_FLAGS dwFlags, REFIID riid, void **ppv);")
+cpp_quote("WINSHELLAPI HRESULT WINAPI SHGetIDListFromObject(IUnknown *punk, PIDLIST_ABSOLUTE *ppidl);")
+cpp_quote("WINSHELLAPI HRESULT WINAPI SHGetItemFromObject(IUnknown *punk, REFIID riid, void **ppv);")
+cpp_quote("WINSHELLAPI HRESULT WINAPI SHCreateShellItemArray(PCIDLIST_ABSOLUTE pidlParent, IShellFolder* psf, UINT cidl, PCUITEMID_CHILD_ARRAY ppidl, IShellItemArray **ppsiItemArray);")
+cpp_quote("WINSHELLAPI HRESULT WINAPI SHCreateShellItemArrayFromShellItem(IShellItem *psi, REFIID riid, void **ppv);")
+cpp_quote("WINSHELLAPI HRESULT WINAPI SHCreateShellItemArrayFromIDLists(UINT cidl, PCIDLIST_ABSOLUTE_ARRAY pidl_array, IShellItemArray **psia);")
+cpp_quote("WINSHELLAPI HRESULT WINAPI SHCreateItemInKnownFolder(REFKNOWNFOLDERID rfid, DWORD flags, PCWSTR filename, REFIID riid, void **ppv);")
+cpp_quote("WINSHELLAPI HRESULT WINAPI SHCreateShellItemArrayFromDataObject(IDataObject *pdo, REFIID riid, void **ppv);")
 
 /*****************************************************************************
  * IShellItemFilter interface
@@ -1340,9 +1403,9 @@ interface IPersistFolder3 : IPersistFolder2
     } PERSIST_FOLDER_TARGET_INFO;
 
     HRESULT InitializeEx(
-        [in] IBindCtx *pbc,
+        [in, unique] IBindCtx *pbc,
         [in] LPCITEMIDLIST pidlRoot,
-        [in] const PERSIST_FOLDER_TARGET_INFO *ppfti);
+        [in, unique] const PERSIST_FOLDER_TARGET_INFO *ppfti);
 
     HRESULT GetFolderTargetInfo( [out] PERSIST_FOLDER_TARGET_INFO *ppfti );
 }
@@ -3735,7 +3798,7 @@ typedef enum ASSOC_FILTER
     ASSOC_FILTER_NONE = 0,
     ASSOC_FILTER_RECOMMENDED
 } ASSOC_FILTER;
-cpp_quote("HRESULT WINAPI SHAssocEnumHandlers(PCWSTR extra, ASSOC_FILTER filter, IEnumAssocHandlers **handlersenum);")
+cpp_quote("WINSHELLAPI HRESULT WINAPI SHAssocEnumHandlers(PCWSTR extra, ASSOC_FILTER filter, IEnumAssocHandlers **handlersenum);")
 
 [
     uuid(1df0d7f1-b267-4d28-8b10-12e23202a5c4),

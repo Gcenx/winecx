@@ -150,7 +150,7 @@ static HRESULT MMDevice_GetPropValue(const GUID *devguid, DWORD flow, REFPROPERT
     {
         WARN("Reading %s returned %ld\n", debugstr_w(buffer), ret);
         RegCloseKey(regkey);
-        PropVariantClear(pv);
+        pv->vt = VT_EMPTY;
         return S_OK;
     }
 
@@ -255,6 +255,30 @@ static HRESULT set_driver_prop_value(GUID *id, const EDataFlow flow, const PROPE
     return hr;
 }
 
+struct product_name_overrides
+{
+    const WCHAR *id;
+    const WCHAR *product;
+};
+
+static const struct product_name_overrides product_name_overrides[] =
+{
+    /* Sony controllers */
+    { .id = L"VID_054C&PID_0CE6", .product = L"Wireless Controller" },
+};
+
+static const WCHAR *find_product_name_override(const WCHAR *device_id)
+{
+    const WCHAR *match_id = wcschr( device_id, '\\' ) + 1;
+    DWORD i;
+
+    for (i = 0; i < ARRAY_SIZE(product_name_overrides); ++i)
+        if (!wcsnicmp( product_name_overrides[i].id, match_id, 17 ))
+            return product_name_overrides[i].product;
+
+    return NULL;
+}
+
 /* Creates or updates the state of a device
  * If GUID is null, a random guid will be assigned
  * and the device will be created
@@ -321,14 +345,27 @@ static MMDevice *MMDevice_Create(WCHAR *name, GUID *id, EDataFlow flow, DWORD st
 
             pv.vt = VT_LPWSTR;
             pv.pwszVal = name;
+
+            if (SUCCEEDED(set_driver_prop_value(id, flow, &devicepath_key))) {
+                PROPVARIANT pv2;
+
+                PropVariantInit(&pv2);
+
+                if (SUCCEEDED(MMDevice_GetPropValue(id, flow, &devicepath_key, &pv2)) && pv2.vt == VT_LPWSTR) {
+                    const WCHAR *override;
+                    if ((override = find_product_name_override(pv2.pwszVal)) != NULL)
+                        pv.pwszVal = (WCHAR*) override;
+                }
+
+                PropVariantClear(&pv2);
+            }
+
             MMDevice_SetPropValue(id, flow, (const PROPERTYKEY*)&DEVPKEY_Device_FriendlyName, &pv);
             MMDevice_SetPropValue(id, flow, (const PROPERTYKEY*)&DEVPKEY_DeviceInterface_FriendlyName, &pv);
             MMDevice_SetPropValue(id, flow, (const PROPERTYKEY*)&DEVPKEY_Device_DeviceDesc, &pv);
 
             pv.pwszVal = guidstr;
             MMDevice_SetPropValue(id, flow, &deviceinterface_key, &pv);
-
-            set_driver_prop_value(id, flow, &devicepath_key);
 
             if (FAILED(set_driver_prop_value(id, flow, &PKEY_AudioEndpoint_FormFactor)))
             {
@@ -1126,6 +1163,8 @@ static DWORD WINAPI notif_thread_proc(void *user)
     WCHAR out_name[64], vout_name[64], in_name[64], vin_name[64];
     DWORD size;
 
+    SetThreadDescription(GetCurrentThread(), L"wine_mmdevapi_notification");
+
     lstrcpyW(reg_key, drv_keyW);
     lstrcatW(reg_key, L"\\");
     lstrcatW(reg_key, drvs.module_name);
@@ -1378,6 +1417,7 @@ static HRESULT WINAPI MMDevPropStore_GetAt(IPropertyStore *iface, DWORD prop, PR
 static HRESULT WINAPI MMDevPropStore_GetValue(IPropertyStore *iface, REFPROPERTYKEY key, PROPVARIANT *pv)
 {
     MMDevPropStore *This = impl_from_IPropertyStore(iface);
+    HRESULT hres;
     TRACE("(%p)->(\"%s,%lu\", %p)\n", This, key ? debugstr_guid(&key->fmtid) : NULL, key ? key->pid : 0, pv);
 
     if (!key || !pv)
@@ -1397,7 +1437,19 @@ static HRESULT WINAPI MMDevPropStore_GetValue(IPropertyStore *iface, REFPROPERTY
         return S_OK;
     }
 
-    return MMDevice_GetPropValue(&This->parent->devguid, This->parent->flow, key, pv);
+    hres = MMDevice_GetPropValue(&This->parent->devguid, This->parent->flow, key, pv);
+    if (FAILED(hres))
+        return hres;
+
+    if (WARN_ON(mmdevapi))
+    {
+        if ((IsEqualPropertyKey(*key, DEVPKEY_Device_FriendlyName) ||
+             IsEqualPropertyKey(*key, DEVPKEY_DeviceInterface_FriendlyName) ||
+             IsEqualPropertyKey(*key, DEVPKEY_Device_DeviceDesc)) &&
+            pv->vt == VT_LPWSTR && wcslen(pv->pwszVal) > 62)
+            WARN("Returned name exceeds length limit of some broken apps/libs, might crash: %s\n", debugstr_w(pv->pwszVal));
+    }
+    return hres;
 }
 
 static HRESULT WINAPI MMDevPropStore_SetValue(IPropertyStore *iface, REFPROPERTYKEY key, REFPROPVARIANT pv)

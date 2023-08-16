@@ -135,6 +135,7 @@ char *regscript_name;
 char *regscript_token;
 static char *idfile_name;
 char *temp_name;
+const char *temp_dir = NULL;
 const char *prefix_client = "";
 const char *prefix_server = "";
 static const char *includedir;
@@ -482,7 +483,7 @@ void write_id_data(const statement_list_t *stmts)
 static void init_argv0_dir( const char *argv0 )
 {
 #ifndef _WIN32
-    char *dir;
+    char *dir = NULL;
 
 #if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
     dir = realpath( "/proc/self/exe", NULL );
@@ -490,13 +491,11 @@ static void init_argv0_dir( const char *argv0 )
     static int pathname[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
     size_t path_size = PATH_MAX;
     char *path = xmalloc( path_size );
-    if (!sysctl( pathname, sizeof(pathname)/sizeof(pathname[0]), path, &path_size, NULL, 0 ))
+    if (!sysctl( pathname, ARRAY_SIZE(pathname), path, &path_size, NULL, 0 ))
         dir = realpath( path, NULL );
     free( path );
-#else
-    dir = realpath( argv0, NULL );
 #endif
-    if (!dir) return;
+    if (!dir && !(dir = realpath( argv0, NULL ))) return;
     includedir = strmake( "%s/%s", get_dirname( dir ), BIN_TO_INCLUDEDIR );
     dlldir = strmake( "%s/%s", get_dirname( dir ), BIN_TO_DLLDIR );
 #endif
@@ -686,8 +685,8 @@ int open_typelib( const char *name )
         {
             int namelen = strlen( name );
             if (strendswith( name, ".dll" )) namelen -= 4;
-            TRYOPEN( strmake( "%.*s/%.*s/%s", (int)strlen(dlldirs.str[i]) - 2, dlldirs.str[i],
-                              namelen, name, name ));
+            TRYOPEN( strmake( "%.*s/%.*s%s/%s", (int)strlen(dlldirs.str[i]) - 2, dlldirs.str[i],
+                              namelen, name, pe_dir, name ));
         }
         else
         {
@@ -931,4 +930,6 @@ static void rm_tempfile(void)
     unlink(proxy_name);
   if (do_typelib)
     unlink(typelib_name);
+  if (temp_dir)
+    rmdir(temp_dir);
 }

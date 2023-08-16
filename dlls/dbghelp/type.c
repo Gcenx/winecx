@@ -94,10 +94,9 @@ const char* symt_get_name(const struct symt* sym)
     {
     /* lexical tree */
     case SymTagData:            return ((const struct symt_data*)sym)->hash_elt.name;
-    case SymTagFunction:        return ((const struct symt_function*)sym)->hash_elt.name;
-    case SymTagInlineSite:      return ((const struct symt_inlinesite*)sym)->func.hash_elt.name;
+    case SymTagFunction:
+    case SymTagInlineSite:      return ((const struct symt_function*)sym)->hash_elt.name;
     case SymTagPublicSymbol:    return ((const struct symt_public*)sym)->hash_elt.name;
-    case SymTagBaseType:        return ((const struct symt_basic*)sym)->hash_elt.name;
     case SymTagLabel:           return ((const struct symt_hierarchy_point*)sym)->hash_elt.name;
     case SymTagThunk:           return ((const struct symt_thunk*)sym)->hash_elt.name;
     case SymTagCustom:          return ((const struct symt_custom*)sym)->hash_elt.name;
@@ -110,6 +109,7 @@ const char* symt_get_name(const struct symt* sym)
     default:
         FIXME("Unsupported sym-tag %s\n", symt_get_tag_str(sym->tag));
         /* fall through */
+    case SymTagBaseType:
     case SymTagArrayType:
     case SymTagPointerType:
     case SymTagFunctionType:
@@ -143,19 +143,18 @@ BOOL symt_get_address(const struct symt* type, ULONG64* addr)
         {
         case DataIsGlobal:
         case DataIsFileStatic:
+        case DataIsStaticLocal:
             *addr = ((const struct symt_data*)type)->u.var.offset;
             break;
         default: return FALSE;
         }
         break;
     case SymTagBlock:
-        *addr = ((const struct symt_block*)type)->address;
+        *addr = ((const struct symt_block*)type)->ranges[0].low;
         break;
     case SymTagFunction:
-        *addr = ((const struct symt_function*)type)->address;
-        break;
     case SymTagInlineSite:
-        *addr = ((const struct symt_inlinesite*)type)->func.address;
+        *addr = ((const struct symt_function*)type)->ranges[0].low;
         break;
     case SymTagPublicSymbol:
         *addr = ((const struct symt_public*)type)->address;
@@ -224,31 +223,26 @@ static void symt_add_type(struct module* module, struct symt* symt)
     *p = symt;
 }
 
-struct symt_basic* symt_new_basic(struct module* module, enum BasicType bt, 
-                                  const char* typename, unsigned size)
+struct symt_basic* symt_get_basic(enum BasicType bt, unsigned size)
 {
-    struct symt_basic*          sym;
+    static struct symt_basic cache[32] = { { {SymTagBaseType}, btNoType, 0 } };
+    int i;
 
-    if (typename)
+    if (bt == btNoType) return &cache[0];
+    for (i = 1; i < ARRAY_SIZE(cache); i++)
     {
-        sym = (struct symt_basic*)symt_find_type_by_name(module, SymTagBaseType,
-                                                         typename);
-        if (sym && sym->bt == bt && sym->size == size)
-            return sym;
-    }
-    if ((sym = pool_alloc(&module->pool, sizeof(*sym))))
-    {
-        sym->symt.tag = SymTagBaseType;
-        if (typename)
+        if (cache[i].bt == btNoType) /* empty slot, create new entry */
         {
-            sym->hash_elt.name = pool_strdup(&module->pool, typename);
-            hash_table_add(&module->ht_types, &sym->hash_elt);
-        } else sym->hash_elt.name = NULL;
-        sym->bt = bt;
-        sym->size = size;
-        symt_add_type(module, &sym->symt);
+            cache[i].symt.tag = SymTagBaseType;
+            cache[i].bt = bt;
+            cache[i].size = size;
+            return &cache[i];
+        }
+        if (cache[i].bt == bt && cache[i].size == size)
+            return &cache[i];
     }
-    return sym;
+    FIXME("Too few slots in basic types cache\n");
+    return &cache[0];
 }
 
 struct symt_udt* symt_new_udt(struct module* module, const char* typename, 
@@ -326,7 +320,7 @@ BOOL symt_add_udt_element(struct module* module, struct symt_udt* udt_type,
     m->hash_elt.next = NULL;
 
     m->kind            = DataIsMember;
-    m->container       = &udt_type->symt;
+    m->container       = &module->top->symt; /* native defines lexical parent as module, not udt... */
     m->type            = elt_type;
     m->u.member.offset = offset;
     m->u.member.bit_offset = bit_offset;
@@ -483,9 +477,7 @@ BOOL WINAPI SymEnumTypes(HANDLE hProcess, ULONG64 BaseOfDll,
     DWORD64             size;
     unsigned int        i;
 
-    TRACE("(%p %s %p %p)\n",
-          hProcess, wine_dbgstr_longlong(BaseOfDll), EnumSymbolsCallback,
-          UserContext);
+    TRACE("(%p %I64x %p %p)\n", hProcess, BaseOfDll, EnumSymbolsCallback, UserContext);
 
     if (!module_init_pair(&pair, hProcess, BaseOfDll)) return FALSE;
 
@@ -691,8 +683,8 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
             case SymTagUDT:          v = &((const struct symt_udt*)type)->vchildren; break;
             case SymTagEnum:         v = &((const struct symt_enum*)type)->vchildren; break;
             case SymTagFunctionType: v = &((const struct symt_function_signature*)type)->vchildren; break;
-            case SymTagFunction:     v = &((const struct symt_function*)type)->vchildren; break;
-            case SymTagInlineSite:   v = &((const struct symt_inlinesite*)type)->func.vchildren; break;
+            case SymTagFunction:
+            case SymTagInlineSite:   v = &((const struct symt_function*)type)->vchildren; break;
             case SymTagBlock:        v = &((const struct symt_block*)type)->vchildren; break;
             case SymTagPointerType:
             case SymTagArrayType:
@@ -762,10 +754,8 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
             X(DWORD) = vector_length(&((const struct symt_function_signature*)type)->vchildren);
             break;
         case SymTagFunction:
-            X(DWORD) = vector_length(&((const struct symt_function*)type)->vchildren);
-            break;
         case SymTagInlineSite:
-            X(DWORD) = vector_length(&((const struct symt_inlinesite*)type)->func.vchildren);
+            X(DWORD) = vector_length(&((const struct symt_function*)type)->vchildren);
             break;
         case SymTagBlock:
             X(DWORD) = vector_length(&((const struct symt_block*)type)->vchildren);
@@ -822,10 +812,18 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
             X(DWORD64) = ((const struct symt_basic*)type)->size;
             break;
         case SymTagFunction:
-            X(DWORD64) = ((const struct symt_function*)type)->size;
+            X(DWORD64) = addr_range_size(&((const struct symt_function*)type)->ranges[0]);
             break;
         case SymTagBlock:
-            X(DWORD64) = ((const struct symt_block*)type)->size;
+            /* When there are several ranges available, we can only return one contiguous chunk of memory.
+             * We return only the first range. It will lead to not report the other ranges
+             * being part of the block, but it will not return gaps (between the ranges) as being
+             * part of the block.
+             * So favor a correct (yet incomplete) value than an incorrect one.
+             */
+            if (((const struct symt_block*)type)->num_ranges > 1)
+                WARN("Only returning first range from multiple ranges\n");
+            X(DWORD64) = ((const struct symt_block*)type)->ranges[0].high - ((const struct symt_block*)type)->ranges[0].low;
             break;
         case SymTagPointerType:
             X(DWORD64) = ((const struct symt_pointer*)type)->size;
@@ -838,10 +836,17 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
                 return FALSE;
             break;
         case SymTagData:
-            if (((const struct symt_data*)type)->kind != DataIsMember ||
-                !((const struct symt_data*)type)->u.member.bit_length)
-                return FALSE;
-            X(DWORD64) = ((const struct symt_data*)type)->u.member.bit_length;
+            switch (((const struct symt_data*)type)->kind)
+            {
+            case DataIsMember:
+                if (!((const struct symt_data*)type)->u.member.bit_length)
+                    return FALSE;
+                X(DWORD64) = ((const struct symt_data*)type)->u.member.bit_length;
+                break;
+            default:
+                if (!symt_get_info(module, ((const struct symt_data*)type)->type, TI_GET_LENGTH, pInfo))
+                    return FALSE;
+            }
             break;
         case SymTagArrayType:
             if (!symt_get_info(module, ((const struct symt_array*)type)->base_type,
@@ -889,10 +894,8 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
             X(DWORD) = symt_ptr2index(module, ((const struct symt_data*)type)->container);
             break;
         case SymTagFunction:
-            X(DWORD) = symt_ptr2index(module, ((const struct symt_function*)type)->container);
-            break;
         case SymTagInlineSite:
-            X(DWORD) = symt_ptr2index(module, ((const struct symt_inlinesite*)type)->func.container);
+            X(DWORD) = symt_ptr2index(module, ((const struct symt_function*)type)->container);
             break;
         case SymTagThunk:
             X(DWORD) = symt_ptr2index(module, ((const struct symt_thunk*)type)->container);
@@ -944,13 +947,19 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
             {
             case DataIsParam:
             case DataIsLocal:
-                X(ULONG) = ((const struct symt_data*)type)->u.var.offset; 
+                {
+                    struct location loc = ((const struct symt_data*)type)->u.var;
+                    if (loc.kind == loc_register || loc.kind == loc_regrel)
+                        X(ULONG) = ((const struct symt_data*)type)->u.var.offset;
+                    else
+                        return FALSE; /* FIXME perhaps do better with local context? */
+                }
                 break;
             case DataIsMember:
                 X(ULONG) = ((const struct symt_data*)type)->u.member.offset;
                 break;
             default:
-                FIXME("Unknown kind (%u) for get-offset\n",     
+                WARN("Unsupported kind (%u) for get-offset\n",
                       ((const struct symt_data*)type)->kind);
                 return FALSE;
             }
@@ -962,6 +971,7 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
         case SymTagExe:
         case SymTagCompiland:
         case SymTagUDT:
+        case SymTagEnum:
         case SymTagFunctionType:
         case SymTagFunctionArgType:
         case SymTagPointerType:
@@ -975,6 +985,8 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
         case SymTagLabel:
         case SymTagInlineSite:
         case SymTagCustom:
+        case SymTagPublicSymbol:
+        case SymTagThunk:
             return FALSE;
         }
         break;
@@ -1025,10 +1037,8 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
             X(DWORD) = symt_ptr2index(module, ((const struct symt_data*)type)->type);
             break;
         case SymTagFunction:
-            X(DWORD) = symt_ptr2index(module, ((const struct symt_function*)type)->type);
-            break;
         case SymTagInlineSite:
-            X(DWORD) = symt_ptr2index(module, ((const struct symt_inlinesite*)type)->func.type);
+            X(DWORD) = symt_ptr2index(module, ((const struct symt_function*)type)->type);
             break;
         case SymTagEnum:
             X(DWORD) = symt_ptr2index(module, ((const struct symt_enum*)type)->base_type);

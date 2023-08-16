@@ -21,8 +21,6 @@
 #ifndef __WINE_PSAPI_H
 #define __WINE_PSAPI_H
 
-#include "wine/winheader_enter.h"
-
 #ifndef PSAPI_VERSION
 #define PSAPI_VERSION 2
 #endif
@@ -177,7 +175,5 @@ DWORD WINAPI GetProcessImageFileNameW(HANDLE, LPWSTR, DWORD);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_PSAPI_H */

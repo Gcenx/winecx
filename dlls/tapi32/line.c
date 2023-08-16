@@ -297,6 +297,15 @@ DWORD WINAPI lineGetCallInfoA(HCALL hCall, LPLINECALLINFO lpCallInfo)
 }
 
 /***********************************************************************
+ *		lineGetCallInfoW (TAPI32.@)
+ */
+DWORD WINAPI lineGetCallInfoW(HCALL hCall, LPLINECALLINFO lpCallInfo)
+{
+    FIXME("(%p, %p): stub.\n", hCall, lpCallInfo);
+    return 0;
+}
+
+/***********************************************************************
  *		lineGetCallStatus (TAPI32.@)
  */
 DWORD WINAPI lineGetCallStatus(HCALL hCall, LPLINECALLSTATUS lpCallStatus)
@@ -648,6 +657,15 @@ DWORD WINAPI lineGetDevConfigA(DWORD dwDeviceID, LPVARSTRING lpDeviceConfig, LPC
 }
 
 /***********************************************************************
+ *		lineGetDevConfigW (TAPI32.@)
+ */
+DWORD WINAPI lineGetDevConfigW(DWORD dwDeviceID, LPVARSTRING lpDeviceConfig, LPCWSTR lpszDeviceClass)
+{
+    FIXME("(%08lx, %p, %s): stub.\n", dwDeviceID, lpDeviceConfig, debugstr_w(lpszDeviceClass));
+    return 0;
+}
+
+/***********************************************************************
  *		lineGetIDW (TAPI32.@)
  */
 DWORD WINAPI lineGetIDW(HLINE hLine, DWORD dwAddressID, HCALL hCall, DWORD dwSelect,
@@ -676,6 +694,15 @@ DWORD WINAPI lineGetIDA(HLINE hLine, DWORD dwAddressID, HCALL hCall, DWORD dwSel
 DWORD WINAPI lineGetIconA(DWORD dwDeviceID, LPCSTR lpszDeviceClass, HICON *lphIcon)
 {
     FIXME("(%08lx, %s, %p): stub.\n", dwDeviceID, lpszDeviceClass, lphIcon);
+    return 0;
+}
+
+/***********************************************************************
+ *		lineGetIconW (TAPI32.@)
+ */
+DWORD WINAPI lineGetIconW(DWORD dwDeviceID, LPCWSTR lpszDeviceClass, HICON *lphIcon)
+{
+    FIXME("(%08lx, %s, %p): stub.\n", dwDeviceID, debugstr_w(lpszDeviceClass), lphIcon);
     return 0;
 }
 
@@ -1438,6 +1465,15 @@ DWORD WINAPI lineSetCurrentLocation(HLINEAPP hLineApp, DWORD dwLocation)
 DWORD WINAPI lineSetDevConfigA(DWORD dwDeviceID, LPVOID lpDeviceConfig, DWORD dwSize, LPCSTR lpszDeviceClass)
 {
     FIXME("(%08lx, %p, %08lx, %s): stub.\n", dwDeviceID, lpDeviceConfig, dwSize, lpszDeviceClass);
+    return 0;
+}
+
+/***********************************************************************
+ *		lineSetDevConfigW (TAPI32.@)
+ */
+DWORD WINAPI lineSetDevConfigW(DWORD dwDeviceID, LPVOID lpDeviceConfig, DWORD dwSize, LPCWSTR lpszDeviceClass)
+{
+    FIXME("(%08lx, %p, %08lx, %s): stub.\n", dwDeviceID, lpDeviceConfig, dwSize, debugstr_w(lpszDeviceClass));
     return 0;
 }
 

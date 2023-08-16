@@ -465,7 +465,7 @@ const scriptData scriptInformation[] = {
      MS_MAKE_TAG('k','h','m','r'), L"DaunPenh"},
     {{Script_CJK_Han, 0, 0, 0, 0, 0, 0, { 0,0,0,0,0,0,0,0,0,0,0}},
      {LANG_ENGLISH, 0, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, 0, 0, 0, 1, 0, 0},
-     MS_MAKE_TAG('h','a','n','i'), L""},
+     MS_MAKE_TAG('h','a','n','i'), L"SimSun"},
     {{Script_Ideograph, 0, 0, 0, 0, 0, 0, { 0,0,0,0,0,0,0,0,0,0,0}},
      {LANG_ENGLISH, 0, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, 0, 0, 0, 1, 0, 0},
      MS_MAKE_TAG('h','a','n','i'), L""},
@@ -474,7 +474,7 @@ const scriptData scriptInformation[] = {
      MS_MAKE_TAG('b','o','p','o'), L""},
     {{Script_Kana, 0, 0, 0, 0, 0, 0, { 0,0,0,0,0,0,0,0,0,0,0}},
      {LANG_ENGLISH, 0, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, 0, 0, 0, 1, 0, 0},
-     MS_MAKE_TAG('k','a','n','a'), L""},
+     MS_MAKE_TAG('k','a','n','a'), L"SimSun"},
     {{Script_Hangul, 0, 0, 0, 0, 0, 0, { 0,0,0,0,0,0,0,0,0,0,0}},
      {LANG_KOREAN, 0, 1, 0, 1, DEFAULT_CHARSET, 0, 0, 0, 0, 0, 0, 1, 0, 0},
      MS_MAKE_TAG('h','a','n','g'), L""},
@@ -856,7 +856,7 @@ static HRESULT init_script_cache(const HDC hdc, SCRIPT_CACHE *psc)
 static WCHAR mirror_char( WCHAR ch )
 {
     extern const WCHAR wine_mirror_map[] DECLSPEC_HIDDEN;
-    WCHAR mirror = get_table_entry( wine_mirror_map, ch );
+    WCHAR mirror = get_table_entry_16( wine_mirror_map, ch );
     return mirror ? mirror : ch;
 }
 

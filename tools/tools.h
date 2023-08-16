@@ -79,7 +79,7 @@
 
 struct target
 {
-    enum { CPU_i386, CPU_x86_64, CPU_x86_32on64, CPU_ARM, CPU_ARM64 } cpu;
+    enum { CPU_i386, CPU_x86_64, CPU_ARM, CPU_ARM64 } cpu;
 
     enum
     {
@@ -319,33 +319,53 @@ static inline char *replace_extension( const char *name, const char *old_ext, co
     return strmake( "%.*s%s", name_len, name, new_ext );
 }
 
+/* temp files management */
+
+extern const char *temp_dir;
+
+static inline char *make_temp_dir(void)
+{
+    unsigned int value = time(NULL) + getpid();
+    int count;
+    char *name;
+    const char *tmpdir = NULL;
+
+    for (count = 0; count < 0x8000; count++)
+    {
+        if (tmpdir)
+            name = strmake( "%s/tmp%08x", tmpdir, value );
+        else
+            name = strmake( "tmp%08x", value );
+        if (!mkdir( name, 0700 )) return name;
+        value += 7777;
+        if (errno == EACCES && !tmpdir)
+        {
+            if (!(tmpdir = getenv("TMPDIR"))) tmpdir = "/tmp";
+        }
+        free( name );
+    }
+    fprintf( stderr, "failed to create directory for temp files\n" );
+    exit(1);
+}
 
 static inline int make_temp_file( const char *prefix, const char *suffix, char **name )
 {
     static unsigned int value;
     int fd, count;
-    const char *tmpdir = NULL;
 
-    if (!prefix) prefix = "tmp";
+    if (!temp_dir) temp_dir = make_temp_dir();
     if (!suffix) suffix = "";
-    value += time(NULL) + getpid();
+    if (!prefix) prefix = "tmp";
+    else prefix = get_basename_noext( prefix );
 
     for (count = 0; count < 0x8000; count++)
     {
-        if (tmpdir)
-            *name = strmake( "%s/%s-%08x%s", tmpdir, prefix, value, suffix );
-        else
-            *name = strmake( "%s-%08x%s", prefix, value, suffix );
+        *name = strmake( "%s/%s-%08x%s", temp_dir, prefix, value++, suffix );
         fd = open( *name, O_RDWR | O_CREAT | O_EXCL, 0600 );
         if (fd >= 0) return fd;
-        value += 7777;
-        if (errno == EACCES && !tmpdir && !strchr( prefix, '/' ))
-        {
-            if (!(tmpdir = getenv("TMPDIR"))) tmpdir = "/tmp";
-        }
         free( *name );
     }
-    fprintf( stderr, "failed to create temp file for %s%s\n", prefix, suffix );
+    fprintf( stderr, "failed to create temp file for %s%s in %s\n", prefix, suffix, temp_dir );
     exit(1);
 }
 
@@ -377,8 +397,6 @@ static inline struct target get_default_target(void)
     struct target target;
 #ifdef __i386__
     target.cpu = CPU_i386;
-#elif defined(__i386_on_x86_64__)
-    target.cpu = CPU_x86_32on64;
 #elif defined(__x86_64__)
     target.cpu = CPU_x86_64;
 #elif defined(__arm__)
@@ -416,7 +434,6 @@ static inline unsigned int get_target_ptr_size( struct target target )
     static const unsigned int sizes[] =
     {
         [CPU_i386]      = 4,
-        [CPU_x86_32on64]= 4,
         [CPU_x86_64]    = 8,
         [CPU_ARM]       = 4,
         [CPU_ARM64]     = 8,
@@ -431,8 +448,6 @@ static inline void set_target_ptr_size( struct target *target, unsigned int size
     {
     case CPU_i386:
         if (size == 8) target->cpu = CPU_x86_64;
-        break;
-    case CPU_x86_32on64:
         break;
     case CPU_x86_64:
         if (size == 4) target->cpu = CPU_i386;
@@ -462,7 +477,6 @@ static inline int get_cpu_from_name( const char *name )
         { "i786",      CPU_i386 },
         { "x86_64",    CPU_x86_64 },
         { "amd64",     CPU_x86_64 },
-        { "x86_32on64",  CPU_x86_32on64 },
         { "aarch64",   CPU_ARM64 },
         { "arm64",     CPU_ARM64 },
         { "arm",       CPU_ARM },

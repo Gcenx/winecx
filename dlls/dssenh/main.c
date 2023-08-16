@@ -31,7 +31,6 @@
 #include "ntsecapi.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dssenh);
 
@@ -41,7 +40,6 @@ struct key
     DWORD             magic;
     DWORD             algid;
     DWORD             flags;
-    BCRYPT_ALG_HANDLE alg_handle;
     BCRYPT_KEY_HANDLE handle;
 };
 
@@ -88,7 +86,7 @@ static struct container *create_key_container( const char *name, DWORD flags )
 {
     struct container *ret;
 
-    if (!(ret = heap_alloc_zero( sizeof(*ret) ))) return NULL;
+    if (!(ret = calloc( 1, sizeof(*ret) ))) return NULL;
     ret->magic = MAGIC_CONTAINER;
     ret->flags = flags;
     if (name) strcpy( ret->name, name );
@@ -140,13 +138,11 @@ static const WCHAR *map_keyspec_to_keypair_name( DWORD keyspec )
 static struct key *create_key( ALG_ID algid, DWORD flags )
 {
     struct key *ret;
-    const WCHAR *alg;
 
     switch (algid)
     {
     case AT_SIGNATURE:
     case CALG_DSS_SIGN:
-        alg = BCRYPT_DSA_ALGORITHM;
         break;
 
     default:
@@ -154,16 +150,11 @@ static struct key *create_key( ALG_ID algid, DWORD flags )
         return NULL;
     }
 
-    if (!(ret = heap_alloc_zero( sizeof(*ret) ))) return NULL;
+    if (!(ret = calloc( 1, sizeof(*ret) ))) return NULL;
 
     ret->magic = MAGIC_KEY;
     ret->algid = algid;
     ret->flags = flags;
-    if (BCryptOpenAlgorithmProvider( &ret->alg_handle, alg, MS_PRIMITIVE_PROVIDER, 0 ))
-    {
-        heap_free( ret );
-        return NULL;
-    }
     return ret;
 }
 
@@ -171,9 +162,8 @@ static void destroy_key( struct key *key )
 {
     if (!key) return;
     BCryptDestroyKey( key->handle );
-    BCryptCloseAlgorithmProvider( key->alg_handle, 0 );
     key->magic = 0;
-    heap_free( key );
+    free( key );
 }
 
 static struct key *import_key( DWORD keyspec, BYTE *data, DWORD len )
@@ -182,7 +172,7 @@ static struct key *import_key( DWORD keyspec, BYTE *data, DWORD len )
 
     if (!(ret = create_key( keyspec, 0 ))) return NULL;
 
-    if (BCryptImportKeyPair( ret->alg_handle, NULL, LEGACY_DSA_V2_PRIVATE_BLOB, &ret->handle, data, len, 0 ))
+    if (BCryptImportKeyPair( BCRYPT_DSA_ALG_HANDLE, NULL, LEGACY_DSA_V2_PRIVATE_BLOB, &ret->handle, data, len, 0 ))
     {
         WARN( "failed to import key\n" );
         destroy_key( ret );
@@ -201,7 +191,7 @@ static struct key *read_key( HKEY hkey, DWORD keyspec, DWORD flags )
 
     if (!(value = map_keyspec_to_keypair_name( keyspec ))) return NULL;
     if (RegQueryValueExW( hkey, value, 0, &type, NULL, &len )) return NULL;
-    if (!(data = heap_alloc( len ))) return NULL;
+    if (!(data = malloc( len ))) return NULL;
 
     if (!RegQueryValueExW( hkey, value, 0, &type, data, &len ))
     {
@@ -214,7 +204,7 @@ static struct key *read_key( HKEY hkey, DWORD keyspec, DWORD flags )
         }
     }
 
-    heap_free( data );
+    free( data );
     return ret;
 }
 
@@ -224,7 +214,7 @@ static void destroy_container( struct container *container )
     destroy_key( container->exch_key );
     destroy_key( container->sign_key );
     container->magic = 0;
-    heap_free( container );
+    free( container );
 }
 
 static struct container *read_key_container( const char *name, DWORD flags )
@@ -292,7 +282,7 @@ BOOL WINAPI CPAcquireContext( HCRYPTPROV *ret_prov, LPSTR container, DWORD flags
     case CRYPT_NEWKEYSET | CRYPT_MACHINE_KEYSET:
         if ((ret = read_key_container( name, flags )))
         {
-            heap_free( ret );
+            free( ret );
             SetLastError( NTE_EXISTS );
             return FALSE;
         }
@@ -348,7 +338,7 @@ static BOOL store_key_pair( struct key *key, HKEY hkey, DWORD keyspec, DWORD fla
     if (!(value = map_keyspec_to_keypair_name( keyspec ))) return FALSE;
 
     if (BCryptExportKey( key->handle, NULL, LEGACY_DSA_V2_PRIVATE_BLOB, NULL, 0, &len, 0 )) return FALSE;
-    if (!(data = heap_alloc( len ))) return FALSE;
+    if (!(data = malloc( len ))) return FALSE;
 
     if (!BCryptExportKey( key->handle, NULL, LEGACY_DSA_V2_PRIVATE_BLOB, data, len, &len, 0 ))
     {
@@ -361,7 +351,7 @@ static BOOL store_key_pair( struct key *key, HKEY hkey, DWORD keyspec, DWORD fla
         }
     }
 
-    heap_free( data );
+    free( data );
     return ret;
 }
 
@@ -392,7 +382,7 @@ static struct key *duplicate_key( const struct key *key )
 
     if (BCryptDuplicateKey( key->handle, &ret->handle, NULL, 0, 0 ))
     {
-        heap_free( ret );
+        free( ret );
         return NULL;
     }
     return ret;
@@ -405,7 +395,7 @@ static BOOL generate_key( struct container *container, ALG_ID algid, DWORD bitle
 
     if (!(key = create_key( algid, flags ))) return FALSE;
 
-    if ((status = BCryptGenerateKeyPair( key->alg_handle, &key->handle, bitlen, 0 )))
+    if ((status = BCryptGenerateKeyPair( BCRYPT_DSA_ALG_HANDLE, &key->handle, bitlen, 0 )))
     {
         ERR( "failed to generate key %08lx\n", status );
         destroy_key( key );
@@ -518,7 +508,7 @@ static BOOL import_key_dss2( struct container *container, ALG_ID algid, const BY
 
     if (!(key = create_key( CALG_DSS_SIGN, flags ))) return FALSE;
 
-    if ((status = BCryptImportKeyPair( key->alg_handle, NULL, type, &key->handle, (UCHAR *)data, len, 0 )))
+    if ((status = BCryptImportKeyPair( BCRYPT_DSA_ALG_HANDLE, NULL, type, &key->handle, (UCHAR *)data, len, 0 )))
     {
         TRACE( "failed to import key %08lx\n", status );
         destroy_key( key );
@@ -596,7 +586,7 @@ static BOOL import_key_dss3( struct container *container, ALG_ID algid, const BY
     if (!(key = create_key( CALG_DSS_SIGN, flags ))) return FALSE;
 
     size = sizeof(*blob) + (pubkey->bitlenP / 8) * 3;
-    if (!(blob = heap_alloc_zero( size )))
+    if (!(blob = calloc( 1, size )))
     {
         destroy_key( key );
         return FALSE;
@@ -625,16 +615,16 @@ static BOOL import_key_dss3( struct container *container, ALG_ID algid, const BY
     dst += blob->cbKey;
     for (i = 0; i < blob->cbKey; i++) dst[i] = src[blob->cbKey - i - 1];
 
-    if ((status = BCryptImportKeyPair( key->alg_handle, NULL, BCRYPT_DSA_PUBLIC_BLOB, &key->handle, (UCHAR *)blob,
-                                       size, 0 )))
+    if ((status = BCryptImportKeyPair( BCRYPT_DSA_ALG_HANDLE, NULL, BCRYPT_DSA_PUBLIC_BLOB, &key->handle,
+                                       (UCHAR *)blob, size, 0 )))
     {
         WARN( "failed to import key %08lx\n", status );
         destroy_key( key );
-        heap_free( blob );
+        free( blob );
         return FALSE;
     }
 
-    heap_free( blob );
+    free( blob );
     *ret_key = (HCRYPTKEY)key;
     return TRUE;
 }
@@ -772,18 +762,17 @@ static struct hash *create_hash( ALG_ID algid )
 {
     struct hash *ret;
     BCRYPT_ALG_HANDLE alg_handle;
-    const WCHAR *alg;
     DWORD len;
 
     switch (algid)
     {
     case CALG_MD5:
-        alg = BCRYPT_MD5_ALGORITHM;
+        alg_handle = BCRYPT_MD5_ALG_HANDLE;
         len = 16;
         break;
 
     case CALG_SHA1:
-        alg = BCRYPT_SHA1_ALGORITHM;
+        alg_handle = BCRYPT_SHA1_ALG_HANDLE;
         len = 20;
         break;
 
@@ -792,23 +781,15 @@ static struct hash *create_hash( ALG_ID algid )
         return NULL;
     }
 
-    if (!(ret = heap_alloc_zero( sizeof(*ret) ))) return NULL;
+    if (!(ret = calloc( 1, sizeof(*ret) ))) return NULL;
 
     ret->magic = MAGIC_HASH;
     ret->len   = len;
-    if (BCryptOpenAlgorithmProvider( &alg_handle, alg, MS_PRIMITIVE_PROVIDER, 0 ))
-    {
-        heap_free( ret );
-        return NULL;
-    }
     if (BCryptCreateHash( alg_handle, &ret->handle, NULL, 0, NULL, 0, 0 ))
     {
-        BCryptCloseAlgorithmProvider( alg_handle, 0 );
-        heap_free( ret );
+        free( ret );
         return NULL;
     }
-
-    BCryptCloseAlgorithmProvider( alg_handle, 0 );
     return ret;
 }
 
@@ -841,7 +822,7 @@ static void destroy_hash( struct hash *hash )
     if (!hash) return;
     BCryptDestroyHash( hash->handle );
     hash->magic = 0;
-    heap_free( hash );
+    free( hash );
 }
 
 BOOL WINAPI CPDestroyHash( HCRYPTPROV hprov, HCRYPTHASH hhash )
@@ -864,13 +845,13 @@ static struct hash *duplicate_hash( const struct hash *hash )
 {
     struct hash *ret;
 
-    if (!(ret = heap_alloc( sizeof(*ret) ))) return NULL;
+    if (!(ret = malloc( sizeof(*ret) ))) return NULL;
 
     ret->magic = hash->magic;
     ret->len   = hash->len;
     if (BCryptDuplicateHash( hash->handle, &ret->handle, NULL, 0, 0 ))
     {
-        heap_free( ret );
+        free( ret );
         return NULL;
     }
     memcpy( ret->value, hash->value, sizeof(hash->value) );

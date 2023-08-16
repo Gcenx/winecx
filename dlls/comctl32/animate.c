@@ -36,7 +36,6 @@
 #include "mmsystem.h"
 #include "comctl32.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(animate);
 
@@ -188,20 +187,20 @@ static void ANIMATE_Free(ANIMATE_INFO *infoPtr)
             FreeResource(infoPtr->hRes);
             infoPtr->hRes = 0;
         }
-        heap_free (infoPtr->lpIndex);
+        Free (infoPtr->lpIndex);
         infoPtr->lpIndex = NULL;
         if (infoPtr->hic)
         {
             fnIC.fnICClose(infoPtr->hic);
             infoPtr->hic = 0;
         }
-        heap_free (infoPtr->inbih);
+        Free (infoPtr->inbih);
         infoPtr->inbih = NULL;
-        heap_free (infoPtr->outbih);
+        Free (infoPtr->outbih);
         infoPtr->outbih = NULL;
-        heap_free (infoPtr->indata);
+        Free (infoPtr->indata);
         infoPtr->indata = NULL;
-        heap_free (infoPtr->outdata);
+        Free (infoPtr->outdata);
         infoPtr->outdata = NULL;
         if (infoPtr->hbmPrevFrame)
         {
@@ -565,7 +564,7 @@ static BOOL ANIMATE_GetAviInfo(ANIMATE_INFO *infoPtr)
 	return FALSE;
     }
 
-    infoPtr->inbih = heap_alloc_zero(mmckInfo.cksize);
+    infoPtr->inbih = Alloc(mmckInfo.cksize);
     if (!infoPtr->inbih) {
 	WARN("Can't alloc input BIH\n");
 	return FALSE;
@@ -612,7 +611,7 @@ static BOOL ANIMATE_GetAviInfo(ANIMATE_INFO *infoPtr)
 
     /* FIXME: should handle the 'rec ' LIST when present */
 
-    infoPtr->lpIndex = heap_alloc_zero(infoPtr->mah.dwTotalFrames * sizeof(DWORD));
+    infoPtr->lpIndex = Alloc(infoPtr->mah.dwTotalFrames * sizeof(DWORD));
     if (!infoPtr->lpIndex) 
 	return FALSE;
 
@@ -636,7 +635,7 @@ static BOOL ANIMATE_GetAviInfo(ANIMATE_INFO *infoPtr)
         infoPtr->ash.dwSuggestedBufferSize = insize;
     }
 
-    infoPtr->indata = heap_alloc_zero(infoPtr->ash.dwSuggestedBufferSize);
+    infoPtr->indata = Alloc(infoPtr->ash.dwSuggestedBufferSize);
     if (!infoPtr->indata) 
 	return FALSE;
 
@@ -667,9 +666,8 @@ static BOOL ANIMATE_GetAviCodec(ANIMATE_INFO *infoPtr)
     outSize = fnIC.fnICSendMessage(infoPtr->hic, ICM_DECOMPRESS_GET_FORMAT,
 			    (DWORD_PTR)infoPtr->inbih, 0L);
 
-    infoPtr->outbih = heap_alloc_zero(outSize);
-    if (!infoPtr->outbih)
-	return FALSE;
+    if (!(infoPtr->outbih = Alloc(outSize)))
+        return FALSE;
 
     if (fnIC.fnICSendMessage(infoPtr->hic, ICM_DECOMPRESS_GET_FORMAT,
 		      (DWORD_PTR)infoPtr->inbih, (DWORD_PTR)infoPtr->outbih) != ICERR_OK) 
@@ -678,9 +676,8 @@ static BOOL ANIMATE_GetAviCodec(ANIMATE_INFO *infoPtr)
 	return FALSE;
     }
 
-    infoPtr->outdata = heap_alloc_zero(infoPtr->outbih->biSizeImage);
-    if (!infoPtr->outdata) 
-	return FALSE;
+    if (!(infoPtr->outdata = Alloc(infoPtr->outbih->biSizeImage)))
+        return FALSE;
 
     if (fnIC.fnICSendMessage(infoPtr->hic, ICM_DECOMPRESS_BEGIN,
 		      (DWORD_PTR)infoPtr->inbih, (DWORD_PTR)infoPtr->outbih) != ICERR_OK) {
@@ -772,12 +769,12 @@ static BOOL ANIMATE_OpenA(ANIMATE_INFO *infoPtr, HINSTANCE hInstance, LPSTR lpsz
         return ANIMATE_OpenW(infoPtr, hInstance, (LPWSTR)lpszName);
 
     len = MultiByteToWideChar(CP_ACP, 0, lpszName, -1, NULL, 0);
-    lpwszName = heap_alloc(len * sizeof(WCHAR));
+    lpwszName = Alloc(len * sizeof(WCHAR));
     if (!lpwszName) return FALSE;
     MultiByteToWideChar(CP_ACP, 0, lpszName, -1, lpwszName, len);
 
     result = ANIMATE_OpenW(infoPtr, hInstance, lpwszName);
-    heap_free (lpwszName);
+    Free (lpwszName);
     return result;
 }
 
@@ -809,7 +806,7 @@ static BOOL ANIMATE_Create(HWND hWnd, const CREATESTRUCTW *lpcs)
     }
 
     /* allocate memory for info structure */
-    infoPtr = heap_alloc_zero(sizeof(*infoPtr));
+    infoPtr = Alloc(sizeof(*infoPtr));
     if (!infoPtr) return FALSE;
 
     /* store crossref hWnd <-> info structure */
@@ -839,7 +836,7 @@ static LRESULT ANIMATE_Destroy(ANIMATE_INFO *infoPtr)
 
     infoPtr->cs.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&infoPtr->cs);
-    heap_free(infoPtr);
+    Free(infoPtr);
 
     return 0;
 }
@@ -866,8 +863,6 @@ static LRESULT ANIMATE_StyleChanged(ANIMATE_INFO *infoPtr, WPARAM wStyleType, co
     if (wStyleType != GWL_STYLE) return 0;
   
     infoPtr->dwStyle = lpss->styleNew;
-
-    InvalidateRect(infoPtr->hwndSelf, NULL, TRUE);
     return 0;
 }
 

@@ -118,12 +118,18 @@ static HRESULT get_word(LPCOLESTR *str, strbuf *buf)
     if(*iter == '}' || *iter == '=') {
         strbuf_write(iter++, buf, 1);
     }else if(*iter == '\'') {
-        iter2 = ++iter;
-        iter = wcschr(iter, '\'');
-        if(!iter) {
-            WARN("Unexpected end of script\n");
-            *str = iter;
-            return DISP_E_EXCEPTION;
+        for (;;)
+        {
+            iter2 = ++iter;
+            iter = wcschr(iter, '\'');
+            if(!iter) {
+                WARN("Unexpected end of script\n");
+                *str = iter;
+                return DISP_E_EXCEPTION;
+            }
+            if (iter[1] != '\'') break;
+            iter++;
+            strbuf_write(iter2, buf, iter-iter2);
         }
         strbuf_write(iter2, buf, iter-iter2);
         iter++;
@@ -377,7 +383,7 @@ static HRESULT do_process_root_key(LPCOLESTR data, BOOL do_register)
     strbuf_init(&buf);
     hres = get_word(&iter, &buf);
     if(FAILED(hres))
-        return hres;
+        goto done;
 
     while(*iter) {
         if(!buf.len) {
@@ -411,6 +417,8 @@ static HRESULT do_process_root_key(LPCOLESTR data, BOOL do_register)
         if(FAILED(hres))
             break;
     }
+
+done:
     free(buf.str);
     return hres;
 }

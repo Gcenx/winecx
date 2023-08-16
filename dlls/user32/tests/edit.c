@@ -32,6 +32,35 @@
 #define ID_EDITTEST2 99
 #define MAXLEN 200
 
+static BOOL open_clipboard(HWND hwnd)
+{
+    DWORD start = GetTickCount();
+    while (1)
+    {
+        BOOL ret = OpenClipboard(hwnd);
+        if (ret || GetLastError() != ERROR_ACCESS_DENIED)
+            return ret;
+        if (GetTickCount() - start > 100)
+        {
+            char classname[256];
+            DWORD le = GetLastError();
+            HWND clipwnd = GetOpenClipboardWindow();
+            /* Provide a hint as to the source of interference:
+             * - The class name would typically be CLIPBRDWNDCLASS if the
+             *   clipboard was opened by a Windows application using the
+             *   ole32 API.
+             * - And it would be __wine_clipboard_manager if it was opened in
+             *   response to a native application.
+             */
+            GetClassNameA(clipwnd, classname, ARRAY_SIZE(classname));
+            trace("%p (%s) opened the clipboard\n", clipwnd, classname);
+            SetLastError(le);
+            return ret;
+        }
+        Sleep(15);
+    }
+}
+
 struct edit_notify {
     int en_change, en_maxtext, en_update;
 };
@@ -1150,15 +1179,15 @@ static void test_char_from_pos(void)
     SendMessageA(hwEdit, WM_SETTEXT, 0, (LPARAM) "aa");
     lo = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 0, 0));
     hi = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 1, 0));
-    mid = lo + (hi - lo) / 2;
+    mid = lo + (hi - lo + 1) / 2;
 
     for (i = lo; i < mid; i++) {
        ret = LOWORD(SendMessageA(hwEdit, EM_CHARFROMPOS, 0, i));
-       ok(0 == ret, "expected 0 got %d\n", ret);
+       ok(0 == ret, "%d/%d/%d: expected 0 got %d\n", lo, i, mid, ret);
     }
     for (i = mid; i <= hi; i++) {
        ret = LOWORD(SendMessageA(hwEdit, EM_CHARFROMPOS, 0, i));
-       ok(1 == ret, "expected 1 got %d\n", ret);
+       ok(1 == ret, "%d/%d/%d: expected 1 got %d\n", mid, i, hi, ret);
     }
     ret = SendMessageA(hwEdit, EM_POSFROMCHAR, 2, 0);
     ok(-1 == ret, "expected -1 got %d\n", ret);
@@ -1168,15 +1197,15 @@ static void test_char_from_pos(void)
     SendMessageA(hwEdit, WM_SETTEXT, 0, (LPARAM) "aa");
     lo = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 0, 0));
     hi = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 1, 0));
-    mid = lo + (hi - lo) / 2;
+    mid = lo + (hi - lo + 1) / 2;
 
     for (i = lo; i < mid; i++) {
        ret = LOWORD(SendMessageA(hwEdit, EM_CHARFROMPOS, 0, i));
-       ok(0 == ret, "expected 0 got %d\n", ret);
+       ok(0 == ret, "%d/%d/%d: expected 0 got %d\n", lo, i, mid, ret);
     }
     for (i = mid; i <= hi; i++) {
        ret = LOWORD(SendMessageA(hwEdit, EM_CHARFROMPOS, 0, i));
-       ok(1 == ret, "expected 1 got %d\n", ret);
+       ok(1 == ret, "%d/%d/%d: expected 1 got %d\n", mid, i, hi, ret);
     }
     ret = SendMessageA(hwEdit, EM_POSFROMCHAR, 2, 0);
     ok(-1 == ret, "expected -1 got %d\n", ret);
@@ -1186,15 +1215,15 @@ static void test_char_from_pos(void)
     SendMessageA(hwEdit, WM_SETTEXT, 0, (LPARAM) "aa");
     lo = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 0, 0));
     hi = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 1, 0));
-    mid = lo + (hi - lo) / 2;
+    mid = lo + (hi - lo + 1) / 2;
 
     for (i = lo; i < mid; i++) {
        ret = LOWORD(SendMessageA(hwEdit, EM_CHARFROMPOS, 0, i));
-       ok(0 == ret, "expected 0 got %d\n", ret);
+       ok(0 == ret, "%d/%d/%d: expected 0 got %d\n", lo, i, mid, ret);
     }
     for (i = mid; i <= hi; i++) {
        ret = LOWORD(SendMessageA(hwEdit, EM_CHARFROMPOS, 0, i));
-       ok(1 == ret, "expected 1 got %d\n", ret);
+       ok(1 == ret, "%d/%d/%d: expected 1 got %d\n", mid, i, hi, ret);
     }
     ret = SendMessageA(hwEdit, EM_POSFROMCHAR, 2, 0);
     ok(-1 == ret, "expected -1 got %d\n", ret);
@@ -1204,15 +1233,16 @@ static void test_char_from_pos(void)
     SendMessageA(hwEdit, WM_SETTEXT, 0, (LPARAM) "aa");
     lo = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 0, 0));
     hi = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 1, 0));
-    mid = lo + (hi - lo) / 2 +1;
+    mid = lo + (hi - lo + 1) / 2;
 
     for (i = lo; i < mid; i++) {
        ret = LOWORD(SendMessageA(hwEdit, EM_CHARFROMPOS, 0, i));
-       ok((0 == ret || 1 == ret /* Vista */), "expected 0 or 1 got %d\n", ret);
+       ok(0 == ret || 1 == ret /* Vista */,
+          "%d/%d/%d: expected 0 or 1 got %d\n", lo, i, mid, ret);
     }
     for (i = mid; i <= hi; i++) {
        ret = LOWORD(SendMessageA(hwEdit, EM_CHARFROMPOS, 0, i));
-       ok(1 == ret, "expected 1 got %d\n", ret);
+       ok(1 == ret, "%d/%d/%d: expected 1 got %d\n", mid, i, hi, ret);
     }
     ret = SendMessageA(hwEdit, EM_POSFROMCHAR, 2, 0);
     ok(-1 == ret, "expected -1 got %d\n", ret);
@@ -1222,15 +1252,16 @@ static void test_char_from_pos(void)
     SendMessageA(hwEdit, WM_SETTEXT, 0, (LPARAM) "aa");
     lo = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 0, 0));
     hi = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 1, 0));
-    mid = lo + (hi - lo) / 2 +1;
+    mid = lo + (hi - lo + 1) / 2;
 
     for (i = lo; i < mid; i++) {
        ret = LOWORD(SendMessageA(hwEdit, EM_CHARFROMPOS, 0, i));
-       ok((0 == ret || 1 == ret /* Vista */), "expected 0 or 1 got %d\n", ret);
+       ok(0 == ret || 1 == ret /* Vista */,
+          "%d/%d/%d: expected 0 or 1 got %d\n", lo, i, mid, ret);
     }
     for (i = mid; i <= hi; i++) {
        ret = LOWORD(SendMessageA(hwEdit, EM_CHARFROMPOS, 0, i));
-       ok(1 == ret, "expected 1 got %d\n", ret);
+       ok(1 == ret, "%d/%d/%d: expected 1 got %d\n", mid, i, hi, ret);
     }
     ret = SendMessageA(hwEdit, EM_POSFROMCHAR, 2, 0);
     ok(-1 == ret, "expected -1 got %d\n", ret);
@@ -1240,15 +1271,16 @@ static void test_char_from_pos(void)
     SendMessageA(hwEdit, WM_SETTEXT, 0, (LPARAM) "aa");
     lo = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 0, 0));
     hi = LOWORD(SendMessageA(hwEdit, EM_POSFROMCHAR, 1, 0));
-    mid = lo + (hi - lo) / 2 +1;
+    mid = lo + (hi - lo + 2) / 2;
 
     for (i = lo; i < mid; i++) {
        ret = LOWORD(SendMessageA(hwEdit, EM_CHARFROMPOS, 0, i));
-       ok((0 == ret || 1 == ret /* Vista */), "expected 0 or 1 got %d\n", ret);
+       ok(0 == ret || 1 == ret /* Vista */,
+          "%d/%d/%d: expected 0 or 1 got %d\n", lo, i, mid, ret);
     }
     for (i = mid; i <= hi; i++) {
        ret = LOWORD(SendMessageA(hwEdit, EM_CHARFROMPOS, 0, i));
-       ok(1 == ret, "expected 1 got %d\n", ret);
+       ok(1 == ret, "%d/%d/%d: expected 1 got %d\n", mid, i, hi, ret);
     }
     ret = SendMessageA(hwEdit, EM_POSFROMCHAR, 2, 0);
     ok(-1 == ret, "expected -1 got %d\n", ret);
@@ -2189,7 +2221,7 @@ static void test_espassword(void)
     ok(r == strlen(password), "Expected: %s, got len %ld\n", password, r);
     ok(strcmp(buffer, password) == 0, "expected %s, got %s\n", password, buffer);
 
-    r = OpenClipboard(hwEdit);
+    r = open_clipboard(hwEdit);
     ok(r == TRUE, "expected %d, got %ld le=%lu\n", TRUE, r, GetLastError());
     r = EmptyClipboard();
     ok(r == TRUE, "expected %d, got %ld\n", TRUE, r);
@@ -3172,12 +3204,32 @@ static void test_EM_GETHANDLE(void)
     DestroyWindow(hEdit);
 }
 
+/* In Windows 10+, the WM_PASTE message isn't always successful.
+ * So retry in case of failure.
+ */
+#define check_paste(a, b) _check_paste(__LINE__, (a), (b))
+static void _check_paste(unsigned int line, HWND hedit, const char *content)
+{
+    /* only retry on windows platform */
+    int tries = strcmp(winetest_platform, "wine") ? 3 : 1;
+    int len = 0;
+
+    SendMessageA(hedit, WM_SETTEXT, 0, (LPARAM)"");
+    do
+    {
+        SendMessageA(hedit, WM_PASTE, 0, 0);
+        if ((len = SendMessageA(hedit, WM_GETTEXTLENGTH, 0, 0))) break;
+        Sleep(1);
+    } while (--tries > 0);
+    ok_(__FILE__, line)(len == strlen(content), "Unexpected len %u in edit\n", len);
+}
+
 static void test_paste(void)
 {
     HWND hEdit, hMultilineEdit;
     HANDLE hmem, hmem_ret;
     char *buffer;
-    int r, len;
+    int r;
     static const char *str = "this is a simple text";
     static const char *str2 = "first line\r\nsecond line";
 
@@ -3192,7 +3244,7 @@ static void test_paste(void)
     strcpy(buffer, str);
     GlobalUnlock(hmem);
 
-    r = OpenClipboard(hEdit);
+    r = open_clipboard(hEdit);
     ok(r == TRUE, "expected %d, got %d le=%lu\n", TRUE, r, GetLastError());
     r = EmptyClipboard();
     ok(r == TRUE, "expected %d, got %d\n", TRUE, r);
@@ -3202,10 +3254,7 @@ static void test_paste(void)
     ok(r == TRUE, "expected %d, got %d\n", TRUE, r);
 
     /* Paste single line */
-    SendMessageA(hEdit, WM_SETTEXT, 0, (LPARAM)"");
-    r = SendMessageA(hEdit, WM_PASTE, 0, 0);
-    len = SendMessageA(hEdit, WM_GETTEXTLENGTH, 0, 0);
-    ok(strlen(str) == len, "got %d\n", len);
+    check_paste(hEdit, str);
 
     /* Prepare clipboard data with multiline text */
     hmem = GlobalAlloc(GMEM_MOVEABLE, 255);
@@ -3215,7 +3264,7 @@ static void test_paste(void)
     strcpy(buffer, str2);
     GlobalUnlock(hmem);
 
-    r = OpenClipboard(hEdit);
+    r = open_clipboard(hEdit);
     ok(r == TRUE, "expected %d, got %d le=%lu\n", TRUE, r, GetLastError());
     r = EmptyClipboard();
     ok(r == TRUE, "expected %d, got %d\n", TRUE, r);
@@ -3225,16 +3274,10 @@ static void test_paste(void)
     ok(r == TRUE, "expected %d, got %d\n", TRUE, r);
 
     /* Paste multiline text in singleline edit - should be cut */
-    SendMessageA(hEdit, WM_SETTEXT, 0, (LPARAM)"");
-    r = SendMessageA(hEdit, WM_PASTE, 0, 0);
-    len = SendMessageA(hEdit, WM_GETTEXTLENGTH, 0, 0);
-    ok(strlen("first line") == len, "got %d\n", len);
+    check_paste(hEdit, "first line");
 
     /* Paste multiline text in multiline edit */
-    SendMessageA(hMultilineEdit, WM_SETTEXT, 0, (LPARAM)"");
-    r = SendMessageA(hMultilineEdit, WM_PASTE, 0, 0);
-    len = SendMessageA(hMultilineEdit, WM_GETTEXTLENGTH, 0, 0);
-    ok(strlen(str2) == len, "got %d\n", len);
+    check_paste(hMultilineEdit, str2);
 
     /* Cleanup */
     DestroyWindow(hEdit);
@@ -3323,6 +3366,58 @@ static void test_wordbreak_proc(void)
     DestroyWindow(hwnd);
 }
 
+static void test_dbcs_WM_CHAR(void)
+{
+    WCHAR textW[] = { 0x4e00, 0x4e8c, 0x4e09, 0 }; /* one, two, three */
+    unsigned char bytes[7];
+    HWND hwnd[2];
+    int i;
+
+    WideCharToMultiByte(CP_ACP, 0, textW, -1, (char *)bytes, ARRAY_SIZE(bytes), NULL, NULL);
+    if (!IsDBCSLeadByte(bytes[0]))
+    {
+        skip("Skipping DBCS WM_CHAR test in this codepage\n");
+        return;
+    }
+    hwnd[0] = create_editcontrol(ES_AUTOHSCROLL | ES_AUTOVSCROLL, 0);
+    hwnd[1] = create_editcontrolW(ES_AUTOHSCROLL | ES_AUTOVSCROLL, 0);
+
+    for (i = 0; i < ARRAY_SIZE(hwnd); i++)
+    {
+        const unsigned char* p;
+        WCHAR strW[4];
+        char str[7];
+        MSG msg;
+        BOOL r;
+        int n;
+
+        winetest_push_context("%c", i ? 'W' : 'A');
+
+        r = SetWindowTextA(hwnd[i], "");
+        ok(r, "SetWindowText failed\n");
+
+        for (p = bytes; *p; p++)
+            PostMessageA(hwnd[i], WM_CHAR, *p, 1);
+
+        while (PeekMessageA(&msg, hwnd[i], 0, 0, PM_REMOVE))
+            DispatchMessageA(&msg);
+
+        n = GetWindowTextW(hwnd[i], strW, ARRAY_SIZE(strW));
+        ok(n > 0, "GetWindowTextW failed\n");
+        ok(!wcscmp(strW, textW), "got %s, expected %s\n",
+           wine_dbgstr_w(strW), wine_dbgstr_w(textW));
+
+        n = GetWindowTextA(hwnd[i], str, ARRAY_SIZE(str));
+        ok(n > 0, "GetWindowText failed\n");
+        ok(!strcmp(str, (char*)bytes), "got %s, expected %s\n",
+           wine_dbgstr_a(str), wine_dbgstr_a((char *)bytes));
+
+        DestroyWindow(hwnd[i]);
+
+        winetest_pop_context();
+    }
+}
+
 START_TEST(edit)
 {
     BOOL b;
@@ -3360,6 +3455,7 @@ START_TEST(edit)
     test_paste();
     test_EM_GETLINE();
     test_wordbreak_proc();
+    test_dbcs_WM_CHAR();
 
     UnregisterWindowClasses();
 }

@@ -62,15 +62,6 @@ static BOOL is_process_wow64( HANDLE handle )
     ULONG_PTR info;
 
     if (handle == GetCurrentProcess()) return TRUE;
-    /* CW HACK 20872: fixes getting ProcessBasicInformation and ThreadBasicInformation info */
-    {
-        UNICODE_STRING name_str, val_str;
-
-        RtlInitUnicodeString( &name_str, L"WINEWOW6432BPREFIXMODE" );
-        val_str.MaximumLength = 0;
-        if (RtlQueryEnvironmentVariable_U( NULL, &name_str, &val_str ) != STATUS_VARIABLE_NOT_FOUND)
-            return TRUE;
-    }
     if (NtQueryInformationProcess( handle, ProcessWow64Information, &info, sizeof(info), NULL ))
         return FALSE;
     return !!info;
@@ -440,8 +431,7 @@ __ASM_GLOBAL_FUNC( raise_exception,
 #elif defined(__aarch64__)
 __ASM_GLOBAL_FUNC( raise_exception,
                    "stp x29, x30, [sp, #-32]!\n\t"
-                   __ASM_SEH(".seh_stackalloc 32\n\t")
-                   __ASM_SEH(".seh_save_fplr 0\n\t")
+                   __ASM_SEH(".seh_save_fplr_x 32\n\t")
                    __ASM_SEH(".seh_endprologue\n\t")
                    __ASM_CFI(".cfi_def_cfa x29, 32\n\t")
                    __ASM_CFI(".cfi_offset x30, -24\n\t")
@@ -891,6 +881,9 @@ NTSTATUS WINAPI wow64_NtQueryInformationProcess( UINT *args )
         if (retlen) *retlen = sizeof(SECTION_IMAGE_INFORMATION32);
         return STATUS_INFO_LENGTH_MISMATCH;
 
+    case ProcessWineLdtCopy:
+        return STATUS_NOT_IMPLEMENTED;
+
     default:
         FIXME( "unsupported class %u\n", class );
         return STATUS_INVALID_INFO_CLASS;
@@ -941,6 +934,7 @@ NTSTATUS WINAPI wow64_NtQueryInformationThread( UINT *args )
     case ThreadIsIoPending:  /* ULONG */
     case ThreadHideFromDebugger:  /* BOOLEAN */
     case ThreadSuspendCount:  /* ULONG */
+    case ThreadPriorityBoost:   /* ULONG */
         /* FIXME: check buffer alignment */
         return NtQueryInformationThread( handle, class, ptr, len, retlen );
 
@@ -1120,6 +1114,9 @@ NTSTATUS WINAPI wow64_NtSetInformationProcess( UINT *args )
     case ProcessDefaultHardErrorMode:   /* ULONG */
     case ProcessPriorityClass:   /* PROCESS_PRIORITY_CLASS */
     case ProcessExecuteFlags:   /* ULONG */
+    case ProcessPagePriority:   /* MEMORY_PRIORITY_INFORMATION */
+    case ProcessPowerThrottlingState:   /* PROCESS_POWER_THROTTLING_STATE */
+    case ProcessLeapSecondInformation:   /* PROCESS_LEAP_SECOND_INFO */
         return NtSetInformationProcess( handle, class, ptr, len );
 
     case ProcessAffinityMask:   /* ULONG_PTR */
@@ -1200,6 +1197,9 @@ NTSTATUS WINAPI wow64_NtSetInformationThread( UINT *args )
     case ThreadBasePriority:   /* ULONG */
     case ThreadHideFromDebugger:   /* void */
     case ThreadEnableAlignmentFaultFixup:   /* BOOLEAN */
+    case ThreadPowerThrottlingState:  /* THREAD_POWER_THROTTLING_STATE */
+    case ThreadIdealProcessor:   /* ULONG */
+    case ThreadPriorityBoost:   /* ULONG */
         return NtSetInformationThread( handle, class, ptr, len );
 
     case ThreadImpersonationToken:   /* HANDLE */
@@ -1233,6 +1233,7 @@ NTSTATUS WINAPI wow64_NtSetInformationThread( UINT *args )
         else return STATUS_INVALID_PARAMETER;
 
     case ThreadNameInformation:   /* THREAD_NAME_INFORMATION */
+    case ThreadWineNativeThreadName:
         if (len == sizeof(THREAD_NAME_INFORMATION32))
         {
             THREAD_NAME_INFORMATION32 *info32 = ptr;

@@ -8,9 +8,9 @@
 #ifndef __WINE_STDLIB_H
 #define __WINE_STDLIB_H
 
-#include "wine/winheader_enter.h"
-
+#include <corecrt_malloc.h>
 #include <corecrt_wstdlib.h>
+#include <limits.h>
 
 #include <pshpack8.h>
 
@@ -180,6 +180,7 @@ _ACRTIMP int           __cdecl _makepath_s(char*,size_t,const char*,const char*,
 _ACRTIMP size_t        __cdecl _mbstrlen(const char*);
 _ACRTIMP _onexit_t     __cdecl _onexit(_onexit_t);
 _ACRTIMP int           __cdecl _putenv(const char*);
+_ACRTIMP errno_t       __cdecl _putenv_s(const char*,const char*);
 #ifndef _rotl
 _ACRTIMP unsigned int  __cdecl _rotl(unsigned int,int);
 #endif
@@ -191,6 +192,7 @@ _ACRTIMP int           __cdecl _set_error_mode(int);
 _ACRTIMP void          __cdecl _seterrormode(int);
 _ACRTIMP void          __cdecl _sleep(__msvcrt_ulong);
 _ACRTIMP void          __cdecl _splitpath(const char*,char*,char*,char*,char*);
+_ACRTIMP errno_t       __cdecl _splitpath_s(const char*,char*,size_t,char*,size_t,char*,size_t,char*,size_t);
 _ACRTIMP void          __cdecl _swab(char*,char*,int);
 _ACRTIMP char*         __cdecl _ui64toa(unsigned __int64,char*,int);
 _ACRTIMP errno_t       __cdecl _ui64toa_s(unsigned __int64,char*,size_t,int);
@@ -207,34 +209,26 @@ _ACRTIMP int           __cdecl atoi(const char*);
 _ACRTIMP int           __cdecl _atoi_l(const char*,_locale_t);
 _ACRTIMP __msvcrt_long __cdecl atol(const char*);
 _ACRTIMP __int64       __cdecl atoll(const char*);
-_ACRTIMP void*         __cdecl calloc(size_t,size_t);
 #ifndef __i386__
 _ACRTIMP div_t  __cdecl div(int,int);
 _ACRTIMP ldiv_t __cdecl ldiv(__msvcrt_long,__msvcrt_long);
 #endif
 _ACRTIMP lldiv_t       __cdecl lldiv(__int64,__int64);
 _ACRTIMP DECLSPEC_NORETURN void __cdecl exit(int);
-_ACRTIMP void          __cdecl free(void*);
 _ACRTIMP char*         __cdecl getenv(const char*);
 _ACRTIMP __msvcrt_long __cdecl labs(__msvcrt_long);
 _ACRTIMP __int64       __cdecl llabs(__int64);
-_ACRTIMP void*         __cdecl malloc(size_t);
 _ACRTIMP int           __cdecl mblen(const char*,size_t);
 _ACRTIMP void          __cdecl perror(const char*);
 _ACRTIMP int           __cdecl rand(void);
 _ACRTIMP errno_t       __cdecl rand_s(unsigned int*);
-_ACRTIMP void*         __cdecl realloc(void*,size_t);
 _ACRTIMP void          __cdecl srand(unsigned int);
 _ACRTIMP float         __cdecl strtof(const char*,char**);
 _ACRTIMP double        __cdecl strtod(const char*,char**);
 _ACRTIMP __msvcrt_long __cdecl strtol(const char*,char**,int);
 _ACRTIMP __msvcrt_ulong __cdecl strtoul(const char*,char**,int);
-_ACRTIMP __int64       __cdecl strtoll_l(const char*,char**,int,_locale_t);
-_ACRTIMP unsigned __int64 __cdecl strtoull_l(const char*,char**,int,_locale_t);
-_ACRTIMP __int64       __cdecl strtoimax(const char*,char**,int);
-_ACRTIMP __int64       __cdecl strtoimax_l(const char*,char**,int,_locale_t);
-_ACRTIMP unsigned __int64 __cdecl strtoumax(const char*,char**,int);
-_ACRTIMP unsigned __int64 __cdecl strtoumax_l(const char*,char**,int,_locale_t);
+_ACRTIMP __int64       __cdecl _strtoll_l(const char*,char**,int,_locale_t);
+_ACRTIMP unsigned __int64 __cdecl _strtoull_l(const char*,char**,int,_locale_t);
 _ACRTIMP __int64       __cdecl _strtoi64(const char*,char**,int);
 _ACRTIMP __int64       __cdecl _strtoi64_l(const char*,char**,int,_locale_t);
 _ACRTIMP unsigned __int64 __cdecl _strtoui64(const char*,char**,int);
@@ -304,7 +298,5 @@ static inline ldiv_t __wine_msvcrt_ldiv(__msvcrt_long num, __msvcrt_long denom)
 #endif
 
 #include <poppack.h>
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_STDLIB_H */

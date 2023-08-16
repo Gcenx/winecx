@@ -671,6 +671,19 @@ static void test_SetScrollInfo(void)
     ret = IsWindowEnabled(hScroll);
     ok(ret, "Unexpected enabled state.\n");
 
+    EnableScrollBar(mainwnd, SB_CTL, ESB_ENABLE_BOTH);
+
+    si.fMask = SIF_POS;
+    si.nPos = 3;
+    ret = SetScrollInfo(mainwnd, SB_HORZ, &si, FALSE);
+    ok(ret == 3, "SetScrollInfo returned %d\n", ret);
+
+    /* undocumented flag making SetScrollInfo return previous position */
+    si.fMask = SIF_POS | 0x1000;
+    si.nPos = 4;
+    ret = SetScrollInfo(mainwnd, SB_HORZ, &si, FALSE);
+    ok(ret == 3, "SetScrollInfo returned %d\n", ret);
+
     DestroyWindow(hScroll);
     DestroyWindow(mainwnd);
 }
@@ -725,7 +738,6 @@ static void test_subclass(void)
     res = SetScrollPos(hwnd, SB_CTL, 1, FALSE);
     ok(res == 2, "SetScrollPos returned %Iu\n", res);
     ok(set_scrollinfo.cbSize == sizeof(SCROLLINFO), "cbSize = %u\n", set_scrollinfo.cbSize);
-    todo_wine
     ok(set_scrollinfo.fMask == (0x1000 | SIF_POS), "fMask = %x\n", set_scrollinfo.fMask);
     ok(set_scrollinfo.nPos == 1, "nPos = %x\n", set_scrollinfo.nPos);
 
@@ -767,7 +779,6 @@ static void test_subclass(void)
     res = SetScrollPos(hwnd, SB_CTL, 1, FALSE);
     ok(res == 0, "SetScrollPos returned %Iu\n", res);
     ok(set_scrollinfo.cbSize == sizeof(SCROLLINFO), "cbSize = %u\n", set_scrollinfo.cbSize);
-    todo_wine
     ok(set_scrollinfo.fMask == (0x1000 | SIF_POS), "fMask = %x\n", set_scrollinfo.fMask);
     ok(set_scrollinfo.nPos == 1, "nPos = %x\n", set_scrollinfo.nPos);
 

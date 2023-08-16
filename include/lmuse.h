@@ -18,8 +18,6 @@
 #ifndef _LMUSE_H
 #define _LMUSE_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -81,7 +79,5 @@ NET_API_STATUS WINAPI NetUseGetInfo(LMSTR,LMSTR,DWORD,LPBYTE*);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* _LMUSE_H */

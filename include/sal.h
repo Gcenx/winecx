@@ -19,8 +19,6 @@
 #ifndef __WINE_SAL_H__
 #define __WINE_SAL_H__
 
-#include "wine/winheader_enter.h"
-
 #define _Always_(exp)
 
 #define _Analysis_noreturn_
@@ -428,7 +426,5 @@
 #define __out_opt
 #define __out_z
 #define __out_z_opt
-
-#include "wine/winheader_exit.h"
 
 #endif

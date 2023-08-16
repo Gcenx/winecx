@@ -328,7 +328,7 @@ static BOOL cx_process_dir(WCHAR* dir)
         {
             if (GetLastError() != ERROR_NO_MORE_FILES)
             {
-                WINE_TRACE("got error %d while scanning the '%s' directory\n", GetLastError(), wine_dbgstr_w(dir));
+                WINE_TRACE("got error %lu while scanning the '%s' directory\n", GetLastError(), wine_dbgstr_w(dir));
                 rc = FALSE;
             }
             FindClose(hFind);
@@ -356,7 +356,7 @@ BOOL cx_process_all_menus(void)
     {
         if (!SHGetSpecialFolderPathW(0, dir, locations[i], FALSE))
         {
-            WINE_TRACE("unable to get the path of folder %08x\n", locations[i]);
+            WINE_TRACE("unable to get the path of folder %08lx\n", locations[i]);
             /* Some special folders are not defined in some bottles
              * so this is not an error
              */
@@ -367,7 +367,7 @@ BOOL cx_process_all_menus(void)
         if (len >= MAX_PATH)
         {
             /* We've just trashed memory! Hopefully we are OK */
-            WINE_TRACE("Ignoring special folder %08x because its path is too long: %s\n", locations[i], wine_dbgstr_w(dir));
+            WINE_TRACE("Ignoring special folder %08lx because its path is too long: %s\n", locations[i], wine_dbgstr_w(dir));
             rc = FALSE;
             continue;
         }

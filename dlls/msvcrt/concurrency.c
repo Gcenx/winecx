@@ -24,6 +24,8 @@
 #include "windef.h"
 #include "winternl.h"
 #include "wine/debug.h"
+#include "wine/exception.h"
+#include "wine/list.h"
 #include "msvcrt.h"
 #include "cxx.h"
 
@@ -135,6 +137,7 @@ typedef struct {
     int shutdown_size;
     HANDLE *shutdown_events;
     CRITICAL_SECTION cs;
+    struct list scheduled_chores;
 } ThreadScheduler;
 extern const vtable_ptr ThreadScheduler_vtable;
 
@@ -163,6 +166,33 @@ typedef struct
     SpinWait_state state;
     yield_func yield_func;
 } SpinWait;
+
+#define FINISHED_INITIAL 0x80000000
+typedef struct
+{
+    void *unk1;
+    unsigned int unk2;
+    void *unk3;
+    Context *context;
+    volatile LONG count;
+    volatile LONG finished;
+    void *exception;
+    void *event;
+} _StructuredTaskCollection;
+
+typedef struct _UnrealizedChore
+{
+    const vtable_ptr *vtable;
+    void (__cdecl *chore_proc)(struct _UnrealizedChore*);
+    _StructuredTaskCollection *task_collection;
+    void (__cdecl *chore_wrapper)(struct _UnrealizedChore*);
+    void *unk[6];
+} _UnrealizedChore;
+
+struct scheduled_chore {
+    struct list entry;
+    _UnrealizedChore *chore;
+};
 
 /* keep in sync with msvcp90/msvcp90.h */
 typedef struct cs_queue
@@ -319,6 +349,9 @@ extern const vtable_ptr improper_scheduler_attach_vtable;
 typedef exception improper_scheduler_detach;
 extern const vtable_ptr improper_scheduler_detach_vtable;
 
+typedef exception invalid_multiple_scheduling;
+extern const vtable_ptr invalid_multiple_scheduling_vtable;
+
 typedef exception invalid_scheduler_policy_key;
 extern const vtable_ptr invalid_scheduler_policy_key_vtable;
 
@@ -327,6 +360,9 @@ extern const vtable_ptr invalid_scheduler_policy_thread_specification_vtable;
 
 typedef exception invalid_scheduler_policy_value;
 extern const vtable_ptr invalid_scheduler_policy_value_vtable;
+
+typedef exception missing_wait;
+extern const vtable_ptr missing_wait_vtable;
 
 typedef struct {
     exception e;
@@ -368,7 +404,7 @@ static void create_default_scheduler(void);
 DEFINE_THISCALL_WRAPPER(improper_lock_ctor_str, 8)
 improper_lock* __thiscall improper_lock_ctor_str(improper_lock *this, const char *str)
 {
-    TRACE("(%p %p)\n", this, str);
+    TRACE("(%p %s)\n", this, str);
     return __exception_ctor(this, str, &improper_lock_vtable);
 }
 
@@ -393,7 +429,7 @@ DEFINE_THISCALL_WRAPPER(improper_scheduler_attach_ctor_str, 8)
 improper_scheduler_attach* __thiscall improper_scheduler_attach_ctor_str(
         improper_scheduler_attach *this, const char *str)
 {
-    TRACE("(%p %p)\n", this, str);
+    TRACE("(%p %s)\n", this, str);
     return __exception_ctor(this, str, &improper_scheduler_attach_vtable);
 }
 
@@ -420,7 +456,7 @@ DEFINE_THISCALL_WRAPPER(improper_scheduler_detach_ctor_str, 8)
 improper_scheduler_detach* __thiscall improper_scheduler_detach_ctor_str(
         improper_scheduler_detach *this, const char *str)
 {
-    TRACE("(%p %p)\n", this, str);
+    TRACE("(%p %s)\n", this, str);
     return __exception_ctor(this, str, &improper_scheduler_detach_vtable);
 }
 
@@ -441,13 +477,42 @@ improper_scheduler_detach * __thiscall improper_scheduler_detach_copy_ctor(
     return __exception_copy_ctor(_this, rhs, &improper_scheduler_detach_vtable);
 }
 
+/* ??0invalid_multiple_scheduling@Concurrency@@QAA@PBD@Z */
+/* ??0invalid_multiple_scheduling@Concurrency@@QAE@PBD@Z */
+/* ??0invalid_multiple_scheduling@Concurrency@@QEAA@PEBD@Z */
+DEFINE_THISCALL_WRAPPER(invalid_multiple_scheduling_ctor_str, 8)
+invalid_multiple_scheduling* __thiscall invalid_multiple_scheduling_ctor_str(
+        invalid_multiple_scheduling *this, const char *str)
+{
+    TRACE("(%p %s)\n", this, str);
+    return __exception_ctor(this, str, &invalid_multiple_scheduling_vtable);
+}
+
+/* ??0invalid_multiple_scheduling@Concurrency@@QAA@XZ */
+/* ??0invalid_multiple_scheduling@Concurrency@@QAE@XZ */
+/* ??0invalid_multiple_scheduling@Concurrency@@QEAA@XZ */
+DEFINE_THISCALL_WRAPPER(invalid_multiple_scheduling_ctor, 4)
+invalid_multiple_scheduling* __thiscall invalid_multiple_scheduling_ctor(
+        invalid_multiple_scheduling *this)
+{
+    return invalid_multiple_scheduling_ctor_str(this, NULL);
+}
+
+DEFINE_THISCALL_WRAPPER(invalid_multiple_scheduling_copy_ctor,8)
+invalid_multiple_scheduling * __thiscall invalid_multiple_scheduling_copy_ctor(
+        invalid_multiple_scheduling * _this, const invalid_multiple_scheduling * rhs)
+{
+    TRACE("(%p %p)\n", _this, rhs);
+    return __exception_copy_ctor(_this, rhs, &invalid_multiple_scheduling_vtable);
+}
+
 /* ??0invalid_scheduler_policy_key@Concurrency@@QAE@PBD@Z */
 /* ??0invalid_scheduler_policy_key@Concurrency@@QEAA@PEBD@Z */
 DEFINE_THISCALL_WRAPPER(invalid_scheduler_policy_key_ctor_str, 8)
 invalid_scheduler_policy_key* __thiscall invalid_scheduler_policy_key_ctor_str(
         invalid_scheduler_policy_key *this, const char *str)
 {
-    TRACE("(%p %p)\n", this, str);
+    TRACE("(%p %s)\n", this, str);
     return __exception_ctor(this, str, &invalid_scheduler_policy_key_vtable);
 }
 
@@ -474,7 +539,7 @@ DEFINE_THISCALL_WRAPPER(invalid_scheduler_policy_thread_specification_ctor_str, 
 invalid_scheduler_policy_thread_specification* __thiscall invalid_scheduler_policy_thread_specification_ctor_str(
         invalid_scheduler_policy_thread_specification *this, const char *str)
 {
-    TRACE("(%p %p)\n", this, str);
+    TRACE("(%p %s)\n", this, str);
     return __exception_ctor(this, str, &invalid_scheduler_policy_thread_specification_vtable);
 }
 
@@ -501,7 +566,7 @@ DEFINE_THISCALL_WRAPPER(invalid_scheduler_policy_value_ctor_str, 8)
 invalid_scheduler_policy_value* __thiscall invalid_scheduler_policy_value_ctor_str(
         invalid_scheduler_policy_value *this, const char *str)
 {
-    TRACE("(%p %p)\n", this, str);
+    TRACE("(%p %s)\n", this, str);
     return __exception_ctor(this, str, &invalid_scheduler_policy_value_vtable);
 }
 
@@ -520,6 +585,34 @@ invalid_scheduler_policy_value * __thiscall invalid_scheduler_policy_value_copy_
 {
     TRACE("(%p %p)\n", _this, rhs);
     return __exception_copy_ctor(_this, rhs, &invalid_scheduler_policy_value_vtable);
+}
+
+/* ??0missing_wait@Concurrency@@QAA@PBD@Z */
+/* ??0missing_wait@Concurrency@@QAE@PBD@Z */
+/* ??0missing_wait@Concurrency@@QEAA@PEBD@Z */
+DEFINE_THISCALL_WRAPPER(missing_wait_ctor_str, 8)
+missing_wait* __thiscall missing_wait_ctor_str(
+        missing_wait *this, const char *str)
+{
+    TRACE("(%p %p)\n", this, str);
+    return __exception_ctor(this, str, &missing_wait_vtable);
+}
+
+/* ??0missing_wait@Concurrency@@QAA@XZ */
+/* ??0missing_wait@Concurrency@@QAE@XZ */
+/* ??0missing_wait@Concurrency@@QEAA@XZ */
+DEFINE_THISCALL_WRAPPER(missing_wait_ctor, 4)
+missing_wait* __thiscall missing_wait_ctor(missing_wait *this)
+{
+    return missing_wait_ctor_str(this, NULL);
+}
+
+DEFINE_THISCALL_WRAPPER(missing_wait_copy_ctor,8)
+missing_wait * __thiscall missing_wait_copy_ctor(
+        missing_wait * _this, const missing_wait * rhs)
+{
+    TRACE("(%p %p)\n", _this, rhs);
+    return __exception_copy_ctor(_this, rhs, &missing_wait_vtable);
 }
 
 /* ??0scheduler_resource_allocation_error@Concurrency@@QAE@PBDJ@Z */
@@ -573,21 +666,29 @@ DEFINE_RTTI_DATA1(improper_scheduler_attach, 0, &cexception_rtti_base_descriptor
         ".?AVimproper_scheduler_attach@Concurrency@@")
 DEFINE_RTTI_DATA1(improper_scheduler_detach, 0, &cexception_rtti_base_descriptor,
         ".?AVimproper_scheduler_detach@Concurrency@@")
+DEFINE_RTTI_DATA1(invalid_multiple_scheduling, 0, &cexception_rtti_base_descriptor,
+        ".?AVinvalid_multiple_scheduling@Concurrency@@")
 DEFINE_RTTI_DATA1(invalid_scheduler_policy_key, 0, &cexception_rtti_base_descriptor,
         ".?AVinvalid_scheduler_policy_key@Concurrency@@")
 DEFINE_RTTI_DATA1(invalid_scheduler_policy_thread_specification, 0, &cexception_rtti_base_descriptor,
         ".?AVinvalid_scheduler_policy_thread_specification@Concurrency@@")
 DEFINE_RTTI_DATA1(invalid_scheduler_policy_value, 0, &cexception_rtti_base_descriptor,
         ".?AVinvalid_scheduler_policy_value@Concurrency@@")
+DEFINE_RTTI_DATA1(missing_wait, 0, &cexception_rtti_base_descriptor,
+        ".?AVmissing_wait@Concurrency@@")
 DEFINE_RTTI_DATA1(scheduler_resource_allocation_error, 0, &cexception_rtti_base_descriptor,
         ".?AVscheduler_resource_allocation_error@Concurrency@@")
 
 DEFINE_CXX_DATA1(improper_lock, &cexception_cxx_type_info, cexception_dtor)
 DEFINE_CXX_DATA1(improper_scheduler_attach, &cexception_cxx_type_info, cexception_dtor)
 DEFINE_CXX_DATA1(improper_scheduler_detach, &cexception_cxx_type_info, cexception_dtor)
+DEFINE_CXX_DATA1(invalid_multiple_scheduling, &cexception_cxx_type_info, cexception_dtor)
 DEFINE_CXX_DATA1(invalid_scheduler_policy_key, &cexception_cxx_type_info, cexception_dtor)
 DEFINE_CXX_DATA1(invalid_scheduler_policy_thread_specification, &cexception_cxx_type_info, cexception_dtor)
 DEFINE_CXX_DATA1(invalid_scheduler_policy_value, &cexception_cxx_type_info, cexception_dtor)
+#if _MSVCR_VER >= 120
+DEFINE_CXX_DATA1(missing_wait, &cexception_cxx_type_info, cexception_dtor)
+#endif
 DEFINE_CXX_DATA1(scheduler_resource_allocation_error, &cexception_cxx_type_info, cexception_dtor)
 
 __ASM_BLOCK_BEGIN(concurrency_exception_vtables)
@@ -600,6 +701,9 @@ __ASM_BLOCK_BEGIN(concurrency_exception_vtables)
     __ASM_VTABLE(improper_scheduler_detach,
             VTABLE_ADD_FUNC(cexception_vector_dtor)
             VTABLE_ADD_FUNC(cexception_what));
+    __ASM_VTABLE(invalid_multiple_scheduling,
+            VTABLE_ADD_FUNC(cexception_vector_dtor)
+            VTABLE_ADD_FUNC(cexception_what));
     __ASM_VTABLE(invalid_scheduler_policy_key,
             VTABLE_ADD_FUNC(cexception_vector_dtor)
             VTABLE_ADD_FUNC(cexception_what));
@@ -607,6 +711,9 @@ __ASM_BLOCK_BEGIN(concurrency_exception_vtables)
             VTABLE_ADD_FUNC(cexception_vector_dtor)
             VTABLE_ADD_FUNC(cexception_what));
     __ASM_VTABLE(invalid_scheduler_policy_value,
+            VTABLE_ADD_FUNC(cexception_vector_dtor)
+            VTABLE_ADD_FUNC(cexception_what));
+    __ASM_VTABLE(missing_wait,
             VTABLE_ADD_FUNC(cexception_vector_dtor)
             VTABLE_ADD_FUNC(cexception_what));
     __ASM_VTABLE(scheduler_resource_allocation_error,
@@ -650,29 +757,38 @@ static Context* get_current_context(void)
     return ret;
 }
 
+static Scheduler* get_scheduler_from_context(Context *ctx)
+{
+    ExternalContextBase *context = (ExternalContextBase*)ctx;
+
+    if (context->context.vtable != &ExternalContextBase_vtable)
+        return NULL;
+    return context->scheduler.scheduler;
+}
+
 static Scheduler* try_get_current_scheduler(void)
 {
-    ExternalContextBase *context = (ExternalContextBase*)try_get_current_context();
+    Context *context = try_get_current_context();
+    Scheduler *ret;
 
     if (!context)
         return NULL;
 
-    if (context->context.vtable != &ExternalContextBase_vtable) {
+    ret = get_scheduler_from_context(context);
+    if (!ret)
         ERR("unknown context set\n");
-        return NULL;
-    }
-    return context->scheduler.scheduler;
+    return ret;
 }
 
 static Scheduler* get_current_scheduler(void)
 {
-    ExternalContextBase *context = (ExternalContextBase*)get_current_context();
+    Context *context = get_current_context();
+    Scheduler *ret;
 
-    if (context->context.vtable != &ExternalContextBase_vtable) {
+    ret = get_scheduler_from_context(context);
+    if (!ret)
         ERR("unknown context set\n");
-        return NULL;
-    }
-    return context->scheduler.scheduler;
+    return ret;
 }
 
 /* ?CurrentContext@Context@Concurrency@@SAPAV12@XZ */
@@ -783,6 +899,25 @@ bool __thiscall ExternalContextBase_IsSynchronouslyBlocked(const ExternalContext
     return FALSE;
 }
 
+static void remove_scheduled_chores(Scheduler *scheduler, const ExternalContextBase *context)
+{
+    ThreadScheduler *tscheduler = (ThreadScheduler*)scheduler;
+    struct scheduled_chore *sc, *next;
+
+    if (tscheduler->scheduler.vtable != &ThreadScheduler_vtable)
+        return;
+
+    EnterCriticalSection(&tscheduler->cs);
+    LIST_FOR_EACH_ENTRY_SAFE(sc, next, &tscheduler->scheduled_chores,
+                             struct scheduled_chore, entry) {
+        if (sc->chore->task_collection->context == &context->context) {
+            list_remove(&sc->entry);
+            operator_delete(sc);
+        }
+    }
+    LeaveCriticalSection(&tscheduler->cs);
+}
+
 static void ExternalContextBase_dtor(ExternalContextBase *this)
 {
     struct scheduler_list *scheduler_cur, *scheduler_next;
@@ -798,10 +933,12 @@ static void ExternalContextBase_dtor(ExternalContextBase *this)
     }
 
     if (this->scheduler.scheduler) {
+        remove_scheduled_chores(this->scheduler.scheduler, this);
         call_Scheduler_Release(this->scheduler.scheduler);
 
         for(scheduler_cur=this->scheduler.next; scheduler_cur; scheduler_cur=scheduler_next) {
             scheduler_next = scheduler_cur->next;
+            remove_scheduled_chores(scheduler_cur->scheduler, this);
             call_Scheduler_Release(scheduler_cur->scheduler);
             operator_delete(scheduler_cur);
         }
@@ -1101,6 +1238,7 @@ void __thiscall SchedulerPolicy_dtor(SchedulerPolicy *this)
 static void ThreadScheduler_dtor(ThreadScheduler *this)
 {
     int i;
+    struct scheduled_chore *sc, *next;
 
     if(this->ref != 0) WARN("ref = %ld\n", this->ref);
     SchedulerPolicy_dtor(&this->policy);
@@ -1111,6 +1249,12 @@ static void ThreadScheduler_dtor(ThreadScheduler *this)
 
     this->cs.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&this->cs);
+
+    if (!list_empty(&this->scheduled_chores))
+        ERR("scheduled chore list is not empty\n");
+    LIST_FOR_EACH_ENTRY_SAFE(sc, next, &this->scheduled_chores,
+            struct scheduled_chore, entry)
+        operator_delete(sc);
 }
 
 DEFINE_THISCALL_WRAPPER(ThreadScheduler_Id, 4)
@@ -1224,15 +1368,29 @@ typedef struct
 {
     void (__cdecl *proc)(void*);
     void *data;
+    ThreadScheduler *scheduler;
 } schedule_task_arg;
+
+void __cdecl CurrentScheduler_Detach(void);
 
 static void WINAPI schedule_task_proc(PTP_CALLBACK_INSTANCE instance, void *context, PTP_WORK work)
 {
     schedule_task_arg arg;
+    BOOL detach = FALSE;
 
     arg = *(schedule_task_arg*)context;
     operator_delete(context);
+
+    if(&arg.scheduler->scheduler != get_current_scheduler()) {
+        ThreadScheduler_Attach(arg.scheduler);
+        detach = TRUE;
+    }
+    ThreadScheduler_Release(arg.scheduler);
+
     arg.proc(arg.data);
+
+    if(detach)
+        CurrentScheduler_Detach();
 }
 
 DEFINE_THISCALL_WRAPPER(ThreadScheduler_ScheduleTask_loc, 16)
@@ -1247,11 +1405,14 @@ void __thiscall ThreadScheduler_ScheduleTask_loc(ThreadScheduler *this,
     arg = operator_new(sizeof(*arg));
     arg->proc = proc;
     arg->data = data;
+    arg->scheduler = this;
+    ThreadScheduler_Reference(this);
 
     work = CreateThreadpoolWork(schedule_task_proc, arg, NULL);
     if(!work) {
         scheduler_resource_allocation_error e;
 
+        ThreadScheduler_Release(this);
         operator_delete(arg);
         scheduler_resource_allocation_error_ctor_name(&e, NULL,
                 HRESULT_FROM_WIN32(GetLastError()));
@@ -1319,6 +1480,8 @@ static ThreadScheduler* ThreadScheduler_ctor(ThreadScheduler *this,
 
     InitializeCriticalSection(&this->cs);
     this->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": ThreadScheduler");
+
+    list_init(&this->scheduled_chores);
     return this;
 }
 
@@ -1741,6 +1904,326 @@ bool __thiscall SpinWait__SpinOnce(SpinWait *this)
     }
 }
 
+#if _MSVCR_VER >= 110
+
+/* ??0_StructuredTaskCollection@details@Concurrency@@QAE@PAV_CancellationTokenState@12@@Z */
+/* ??0_StructuredTaskCollection@details@Concurrency@@QEAA@PEAV_CancellationTokenState@12@@Z */
+DEFINE_THISCALL_WRAPPER(_StructuredTaskCollection_ctor, 8)
+_StructuredTaskCollection* __thiscall _StructuredTaskCollection_ctor(
+        _StructuredTaskCollection *this, /*_CancellationTokenState*/void *token)
+{
+    TRACE("(%p)\n", this);
+
+    if (token)
+        FIXME("_StructuredTaskCollection with cancellation token not implemented!\n");
+
+    memset(this, 0, sizeof(*this));
+    this->finished = FINISHED_INITIAL;
+    return this;
+}
+
+#endif /* _MSVCR_VER >= 110 */
+
+#if _MSVCR_VER >= 120
+
+/* ??1_StructuredTaskCollection@details@Concurrency@@QAA@XZ */
+/* ??1_StructuredTaskCollection@details@Concurrency@@QAE@XZ */
+/* ??1_StructuredTaskCollection@details@Concurrency@@QEAA@XZ */
+DEFINE_THISCALL_WRAPPER(_StructuredTaskCollection_dtor, 4)
+void __thiscall _StructuredTaskCollection_dtor(_StructuredTaskCollection *this)
+{
+    FIXME("(%p): stub!\n", this);
+    if (this->count && !__uncaught_exception()) {
+        missing_wait e;
+        missing_wait_ctor_str(&e, "Missing call to _RunAndWait");
+        _CxxThrowException(&e, &missing_wait_exception_type);
+    }
+}
+
+#endif /* _MSVCR_VER >= 120 */
+
+static ThreadScheduler *get_thread_scheduler_from_context(Context *context)
+{
+    Scheduler *scheduler = get_scheduler_from_context(context);
+    if (scheduler && scheduler->vtable == &ThreadScheduler_vtable)
+        return (ThreadScheduler*)scheduler;
+    return NULL;
+}
+
+struct execute_chore_data {
+    _UnrealizedChore *chore;
+    _StructuredTaskCollection *task_collection;
+};
+
+static LONG CALLBACK execute_chore_except(EXCEPTION_POINTERS *pexc, void *_data)
+{
+    struct execute_chore_data *data = _data;
+    void *prev_exception, *new_exception;
+    exception_ptr *ptr;
+
+    if (pexc->ExceptionRecord->ExceptionCode != CXX_EXCEPTION)
+        return EXCEPTION_CONTINUE_SEARCH;
+
+    ptr = operator_new(sizeof(*ptr));
+    __ExceptionPtrCreate(ptr);
+    exception_ptr_from_record(ptr, pexc->ExceptionRecord);
+
+    new_exception = data->task_collection->exception;
+    do {
+        if ((ULONG_PTR)new_exception & ~0x7) {
+            __ExceptionPtrDestroy(ptr);
+            operator_delete(ptr);
+            break;
+        }
+        prev_exception = new_exception;
+        new_exception = (void*)((ULONG_PTR)new_exception | (ULONG_PTR)ptr);
+    } while ((new_exception = InterlockedCompareExchangePointer(
+                    &data->task_collection->exception, new_exception,
+                    prev_exception)) != prev_exception);
+    data->task_collection->event = 0;
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+static void execute_chore(_UnrealizedChore *chore,
+        _StructuredTaskCollection *task_collection)
+{
+    struct execute_chore_data data = { chore, task_collection };
+
+    TRACE("(%p %p)\n", chore, task_collection);
+
+    __TRY
+    {
+        if (!((ULONG_PTR)task_collection->exception & ~0x7) && chore->chore_proc)
+            chore->chore_proc(chore);
+    }
+    __EXCEPT_CTX(execute_chore_except, &data)
+    {
+    }
+    __ENDTRY
+}
+
+static void CALLBACK chore_wrapper_finally(BOOL normal, void *data)
+{
+    _UnrealizedChore *chore = data;
+    LONG prev_finished, new_finished;
+    volatile LONG *ptr;
+
+    TRACE("(%u %p)\n", normal, data);
+
+    if (!chore->task_collection)
+        return;
+    ptr = &chore->task_collection->finished;
+    chore->task_collection = NULL;
+
+    do {
+        prev_finished = *ptr;
+        if (prev_finished == FINISHED_INITIAL)
+            new_finished = 1;
+        else
+            new_finished = prev_finished + 1;
+    } while (InterlockedCompareExchange(ptr, new_finished, prev_finished)
+             != prev_finished);
+    RtlWakeAddressSingle((LONG*)ptr);
+}
+
+static void __cdecl chore_wrapper(_UnrealizedChore *chore)
+{
+    __TRY
+    {
+        execute_chore(chore, chore->task_collection);
+    }
+    __FINALLY_CTX(chore_wrapper_finally, chore)
+}
+
+static BOOL pick_and_execute_chore(ThreadScheduler *scheduler)
+{
+    struct list *entry;
+    struct scheduled_chore *sc;
+    _UnrealizedChore *chore;
+
+    TRACE("(%p)\n", scheduler);
+
+    if (scheduler->scheduler.vtable != &ThreadScheduler_vtable)
+    {
+        ERR("unknown scheduler set\n");
+        return FALSE;
+    }
+
+    EnterCriticalSection(&scheduler->cs);
+    entry = list_head(&scheduler->scheduled_chores);
+    if (entry)
+        list_remove(entry);
+    LeaveCriticalSection(&scheduler->cs);
+    if (!entry)
+        return FALSE;
+
+    sc = LIST_ENTRY(entry, struct scheduled_chore, entry);
+    chore = sc->chore;
+    operator_delete(sc);
+
+    chore->chore_wrapper(chore);
+    return TRUE;
+}
+
+static void __cdecl _StructuredTaskCollection_scheduler_cb(void *data)
+{
+    pick_and_execute_chore((ThreadScheduler*)get_current_scheduler());
+}
+
+static bool schedule_chore(_StructuredTaskCollection *this,
+        _UnrealizedChore *chore, Scheduler **pscheduler)
+{
+    struct scheduled_chore *sc;
+    ThreadScheduler *scheduler;
+
+    if (chore->task_collection) {
+        invalid_multiple_scheduling e;
+        invalid_multiple_scheduling_ctor_str(&e, "Chore scheduled multiple times");
+        _CxxThrowException(&e, &invalid_multiple_scheduling_exception_type);
+        return FALSE;
+    }
+
+    if (!this->context)
+        this->context = get_current_context();
+    scheduler = get_thread_scheduler_from_context(this->context);
+    if (!scheduler) {
+        ERR("unknown context or scheduler set\n");
+        return FALSE;
+    }
+
+    sc = operator_new(sizeof(*sc));
+    sc->chore = chore;
+
+    chore->task_collection = this;
+    chore->chore_wrapper = chore_wrapper;
+    InterlockedIncrement(&this->count);
+
+    EnterCriticalSection(&scheduler->cs);
+    list_add_head(&scheduler->scheduled_chores, &sc->entry);
+    LeaveCriticalSection(&scheduler->cs);
+    *pscheduler = &scheduler->scheduler;
+    return TRUE;
+}
+
+#if _MSVCR_VER >= 110
+
+/* ?_Schedule@_StructuredTaskCollection@details@Concurrency@@QAAXPAV_UnrealizedChore@23@PAVlocation@3@@Z */
+/* ?_Schedule@_StructuredTaskCollection@details@Concurrency@@QAEXPAV_UnrealizedChore@23@PAVlocation@3@@Z */
+/* ?_Schedule@_StructuredTaskCollection@details@Concurrency@@QEAAXPEAV_UnrealizedChore@23@PEAVlocation@3@@Z */
+DEFINE_THISCALL_WRAPPER(_StructuredTaskCollection__Schedule_loc, 12)
+void __thiscall _StructuredTaskCollection__Schedule_loc(
+        _StructuredTaskCollection *this, _UnrealizedChore *chore,
+        /*location*/void *placement)
+{
+    Scheduler *scheduler;
+
+    TRACE("(%p %p %p)\n", this, chore, placement);
+
+    if (schedule_chore(this, chore, &scheduler))
+    {
+        call_Scheduler_ScheduleTask_loc(scheduler,
+                _StructuredTaskCollection_scheduler_cb, NULL, placement);
+    }
+}
+
+#endif /* _MSVCR_VER >= 110 */
+
+/* ?_Schedule@_StructuredTaskCollection@details@Concurrency@@QAAXPAV_UnrealizedChore@23@@Z */
+/* ?_Schedule@_StructuredTaskCollection@details@Concurrency@@QAEXPAV_UnrealizedChore@23@@Z */
+/* ?_Schedule@_StructuredTaskCollection@details@Concurrency@@QEAAXPEAV_UnrealizedChore@23@@Z */
+DEFINE_THISCALL_WRAPPER(_StructuredTaskCollection__Schedule, 8)
+void __thiscall _StructuredTaskCollection__Schedule(
+        _StructuredTaskCollection *this, _UnrealizedChore *chore)
+{
+    Scheduler *scheduler;
+
+    TRACE("(%p %p)\n", this, chore);
+
+    if (schedule_chore(this, chore, &scheduler))
+    {
+        call_Scheduler_ScheduleTask(scheduler,
+                _StructuredTaskCollection_scheduler_cb, NULL);
+    }
+}
+
+static void CALLBACK exception_ptr_rethrow_finally(BOOL normal, void *data)
+{
+    exception_ptr *ep = data;
+
+    TRACE("(%u %p)\n", normal, data);
+
+    __ExceptionPtrDestroy(ep);
+    operator_delete(ep);
+}
+
+/* ?_RunAndWait@_StructuredTaskCollection@details@Concurrency@@QAA?AW4_TaskCollectionStatus@23@PAV_UnrealizedChore@23@@Z */
+/* ?_RunAndWait@_StructuredTaskCollection@details@Concurrency@@QAG?AW4_TaskCollectionStatus@23@PAV_UnrealizedChore@23@@Z */
+/* ?_RunAndWait@_StructuredTaskCollection@details@Concurrency@@QEAA?AW4_TaskCollectionStatus@23@PEAV_UnrealizedChore@23@@Z */
+/*_TaskCollectionStatus*/int __stdcall _StructuredTaskCollection__RunAndWait(
+        _StructuredTaskCollection *this, _UnrealizedChore *chore)
+{
+    LONG expected, val;
+    ULONG_PTR exception;
+
+    TRACE("(%p %p)\n", this, chore);
+
+    if (chore) {
+        if (chore->task_collection) {
+            invalid_multiple_scheduling e;
+            invalid_multiple_scheduling_ctor_str(&e, "Chore scheduled multiple times");
+            _CxxThrowException(&e, &invalid_multiple_scheduling_exception_type);
+        }
+        execute_chore(chore, this);
+    }
+
+    if (this->context) {
+        ThreadScheduler *scheduler = get_thread_scheduler_from_context(this->context);
+        if (scheduler) {
+            while (pick_and_execute_chore(scheduler)) ;
+        }
+    }
+
+    expected = this->count ? this->count : FINISHED_INITIAL;
+    while ((val = this->finished) != expected)
+        RtlWaitOnAddress((LONG*)&this->finished, &val, sizeof(val), NULL);
+
+    this->finished = 0;
+    this->count = 0;
+
+    exception = (ULONG_PTR)this->exception;
+    if (exception & ~0x7) {
+        exception_ptr *ep = (exception_ptr*)(exception & ~0x7);
+        this->exception = 0;
+        __TRY
+        {
+            __ExceptionPtrRethrow(ep);
+        }
+        __FINALLY_CTX(exception_ptr_rethrow_finally, ep)
+    }
+    return 1;
+}
+
+/* ?_Cancel@_StructuredTaskCollection@details@Concurrency@@QAAXXZ */
+/* ?_Cancel@_StructuredTaskCollection@details@Concurrency@@QAEXXZ */
+/* ?_Cancel@_StructuredTaskCollection@details@Concurrency@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(_StructuredTaskCollection__Cancel, 4)
+void __thiscall _StructuredTaskCollection__Cancel(
+        _StructuredTaskCollection *this)
+{
+    FIXME("(%p): stub!\n", this);
+}
+
+/* ?_IsCanceling@_StructuredTaskCollection@details@Concurrency@@QAA_NXZ */
+/* ?_IsCanceling@_StructuredTaskCollection@details@Concurrency@@QAE_NXZ */
+/* ?_IsCanceling@_StructuredTaskCollection@details@Concurrency@@QEAA_NXZ */
+DEFINE_THISCALL_WRAPPER(_StructuredTaskCollection__IsCanceling, 4)
+bool __thiscall _StructuredTaskCollection__IsCanceling(
+        _StructuredTaskCollection *this)
+{
+    FIXME("(%p): stub!\n", this);
+    return FALSE;
+}
+
 /* ??0critical_section@Concurrency@@QAE@XZ */
 /* ??0critical_section@Concurrency@@QEAA@XZ */
 DEFINE_THISCALL_WRAPPER(critical_section_ctor, 4)
@@ -1925,8 +2408,8 @@ bool __thiscall critical_section_try_lock_for(
 
         last->next = q;
         GetSystemTimeAsFileTime(&ft);
-        to.QuadPart = ((LONGLONG)ft.dwHighDateTime<<32) +
-            ft.dwLowDateTime + (LONGLONG)timeout*10000;
+        to.QuadPart = ((LONGLONG)ft.dwHighDateTime << 32) +
+            ft.dwLowDateTime + (LONGLONG)timeout * TICKSPERMSEC;
         status = NtWaitForKeyedEvent(keyed_event, q, 0, &to);
         if(status == STATUS_TIMEOUT) {
             if(!InterlockedExchange(&q->free, TRUE))
@@ -2109,7 +2592,7 @@ unsigned int __cdecl _GetConcurrency(void)
 static inline PLARGE_INTEGER evt_timeout(PLARGE_INTEGER pTime, unsigned int timeout)
 {
     if(timeout == COOPERATIVE_TIMEOUT_INFINITE) return NULL;
-    pTime->QuadPart = (ULONGLONG)timeout * -10000;
+    pTime->QuadPart = (ULONGLONG)timeout * -TICKSPERMSEC;
     return pTime;
 }
 
@@ -2324,7 +2807,7 @@ void __thiscall _Condition_variable_dtor(_Condition_variable *this)
         cv_queue *next = this->queue->next;
         if(!this->queue->expired)
             ERR("there's an active wait\n");
-        HeapFree(GetProcessHeap(), 0, this->queue);
+        operator_delete(this->queue);
         this->queue = next;
     }
     critical_section_dtor(&this->lock);
@@ -2377,7 +2860,7 @@ bool __thiscall _Condition_variable_wait_for(_Condition_variable *this,
 
     GetSystemTimeAsFileTime(&ft);
     to.QuadPart = ((LONGLONG)ft.dwHighDateTime << 32) +
-        ft.dwLowDateTime + (LONGLONG)timeout * 10000;
+        ft.dwLowDateTime + (LONGLONG)timeout * TICKSPERMSEC;
     while (q->next != CV_WAKE) {
         status = RtlWaitOnAddress(&q->next, &next, sizeof(next), &to);
         if(status == STATUS_TIMEOUT) {
@@ -2421,7 +2904,7 @@ void __thiscall _Condition_variable_notify_one(_Condition_variable *this)
             RtlWakeAddressSingle(&node->next);
             return;
         } else {
-            HeapFree(GetProcessHeap(), 0, node);
+            operator_delete(node);
         }
     }
 }
@@ -2450,7 +2933,7 @@ void __thiscall _Condition_variable_notify_all(_Condition_variable *this)
         if(!InterlockedExchange(&ptr->expired, TRUE))
             RtlWakeAddressSingle(&ptr->next);
         else
-            HeapFree(GetProcessHeap(), 0, ptr);
+            operator_delete(ptr);
         ptr = next;
     }
 }
@@ -2948,9 +3431,11 @@ void msvcrt_init_concurrency(void *base)
     init_improper_lock_rtti(base);
     init_improper_scheduler_attach_rtti(base);
     init_improper_scheduler_detach_rtti(base);
+    init_invalid_multiple_scheduling_rtti(base);
     init_invalid_scheduler_policy_key_rtti(base);
     init_invalid_scheduler_policy_thread_specification_rtti(base);
     init_invalid_scheduler_policy_value_rtti(base);
+    init_missing_wait_rtti(base);
     init_scheduler_resource_allocation_error_rtti(base);
     init_Context_rtti(base);
     init_ContextBase_rtti(base);
@@ -2964,9 +3449,13 @@ void msvcrt_init_concurrency(void *base)
     init_improper_lock_cxx(base);
     init_improper_scheduler_attach_cxx(base);
     init_improper_scheduler_detach_cxx(base);
+    init_invalid_multiple_scheduling_cxx(base);
     init_invalid_scheduler_policy_key_cxx(base);
     init_invalid_scheduler_policy_thread_specification_cxx(base);
     init_invalid_scheduler_policy_value_cxx(base);
+#if _MSVCR_VER >= 120
+    init_missing_wait_cxx(base);
+#endif
     init_scheduler_resource_allocation_error_cxx(base);
 #endif
 }

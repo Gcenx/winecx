@@ -1,25 +1,30 @@
 MODULE    = winegstreamer.dll
 UNIXLIB   = winegstreamer.so
 IMPORTLIB = winegstreamer
-IMPORTS   = strmbase ole32 msdmo
+IMPORTS   = strmbase ole32 oleaut32 msdmo
 DELAYIMPORTS = mfplat
-EXTRAINCL = $(GSTREAMER_CFLAGS)
-EXTRALIBS = $(GSTREAMER_LIBS) $(PTHREAD_LIBS)
+UNIX_CFLAGS  = $(GSTREAMER_CFLAGS)
+UNIX_LIBS    = $(GSTREAMER_LIBS) $(PTHREAD_LIBS)
 
 C_SRCS = \
-	audioconvert.c \
+	aac_decoder.c \
+	color_convert.c \
 	h264_decoder.c \
 	main.c \
 	media_source.c \
 	mfplat.c \
 	quartz_parser.c \
+	quartz_transform.c \
+	resampler.c \
+	video_processor.c \
+	wg_allocator.c \
 	wg_format.c \
 	wg_parser.c \
+	wg_sample.c \
 	wg_transform.c \
-	wm_asyncreader.c \
 	wm_reader.c \
-	wm_syncreader.c \
-	wma_decoder.c
+	wma_decoder.c \
+	wmv_decoder.c
 
 IDL_SRCS = \
 	winegstreamer_classes.idl

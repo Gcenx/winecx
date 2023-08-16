@@ -21,8 +21,6 @@
 #ifndef __WINE_WINDDIUI_H
 #define __WINE_WINDDIUI_H
 
-#include "wine/winheader_enter.h"
-
 #include <ddk/compstui.h>
 
 #ifdef __cplusplus
@@ -49,7 +47,5 @@ BOOL WINAPI DrvPrinterEvent(LPWSTR, INT, DWORD, LPARAM);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_WINDDIUI_H */

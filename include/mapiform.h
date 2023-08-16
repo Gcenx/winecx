@@ -19,8 +19,6 @@
 #ifndef MAPIFORM_H
 #define MAPIFORM_H
 
-#include "wine/winheader_enter.h"
-
 #include <mapidefs.h>
 #include <mapicode.h>
 #include <mapiguid.h>
@@ -45,7 +43,5 @@ HRESULT     WINAPI MAPIOpenLocalFormContainer(LPVOID*);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* MAPIFORM_H */

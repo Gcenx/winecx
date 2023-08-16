@@ -18,8 +18,6 @@
 #ifndef _WINE_SNMP_H
 #define _WINE_SNMP_H
 
-#include "wine/winheader_enter.h"
-
 #include <windows.h>
 
 #include <pshpack4.h>
@@ -273,9 +271,11 @@ INT WINAPI SnmpUtilVarBindListCpy(SnmpVarBindList *pVblDst,
  SnmpVarBindList *pVblSrc);
 VOID WINAPI SnmpUtilVarBindListFree(SnmpVarBindList *pVbl);
 
-LPVOID WINAPI SnmpUtilMemAlloc(UINT nBytes) __WINE_ALLOC_SIZE(1);
-LPVOID WINAPI SnmpUtilMemReAlloc(LPVOID pMem, UINT nBytes) __WINE_ALLOC_SIZE(2);
-VOID WINAPI SnmpUtilMemFree(LPVOID pMem);
+void WINAPI SnmpUtilMemFree(void *mem);
+void * WINAPI SnmpUtilMemAlloc(UINT n_bytes)
+ __WINE_ALLOC_SIZE(1) __WINE_DEALLOC(SnmpUtilMemFree) __WINE_MALLOC;
+void * WINAPI SnmpUtilMemReAlloc(void *mem, UINT n_bytes)
+ __WINE_ALLOC_SIZE(2) __WINE_DEALLOC(SnmpUtilMemFree);
 
 LPSTR WINAPI SnmpUtilOidToA(AsnObjectIdentifier *Oid);
 LPSTR WINAPI SnmpUtilIdsToA(UINT *Ids, UINT IdLength);
@@ -292,7 +292,5 @@ VOID WINAPIV SnmpUtilDbgPrint(INT nLogLevel, LPSTR szFormat, ...);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* _WINE_SNMP_H */

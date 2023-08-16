@@ -19,8 +19,6 @@
 #ifndef __DMOREG_H__
 #define __DMOREG_H__
 
-#include "wine/winheader_enter.h"
-
 #include "mediaobj.h"
 
 #ifdef __cplusplus
@@ -76,7 +74,5 @@ DEFINE_GUID(DMOCATEGORY_AGC,
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __DMOREG_H__ */

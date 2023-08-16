@@ -21,6 +21,7 @@
  */
 
 #include <limits.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -141,6 +142,42 @@ void * __cdecl memmove( void *dst, const void *src, size_t n )
 }
 
 
+/*********************************************************************
+ *		memcpy_s (MSVCRT.@)
+ */
+errno_t __cdecl memcpy_s( void *dst, size_t len, const void *src, size_t count )
+{
+    if (!count) return 0;
+    if (!dst) return EINVAL;
+    if (!src)
+    {
+        memset( dst, 0, len );
+        return EINVAL;
+    }
+    if (count > len)
+    {
+        memset( dst, 0, len );
+        return ERANGE;
+    }
+    memmove( dst, src, count );
+    return 0;
+}
+
+
+/*********************************************************************
+ *		memmove_s (MSVCRT.@)
+ */
+errno_t __cdecl memmove_s( void *dst, size_t len, const void *src, size_t count )
+{
+    if (!count) return 0;
+    if (!dst) return EINVAL;
+    if (!src) return EINVAL;
+    if (count > len) return ERANGE;
+    memmove( dst, src, count );
+    return 0;
+}
+
+
 static inline void memset_aligned_32( unsigned char *d, uint64_t v, size_t n )
 {
     unsigned char *end = d + n;
@@ -224,6 +261,26 @@ char * __cdecl strcat( char *dst, const char *src )
 
 
 /*********************************************************************
+ *                  strcat_s   (NTDLL.@)
+ */
+errno_t __cdecl strcat_s( char *dst, size_t len, const char *src )
+{
+    size_t i, j;
+
+    if (!dst || !len) return EINVAL;
+    if (!src)
+    {
+        *dst = 0;
+        return EINVAL;
+    }
+    for (i = 0; i < len; i++) if (!dst[i]) break;
+    for (j = 0; (j + i) < len; j++) if (!(dst[j + i] = src[j])) return 0;
+    *dst = 0;
+    return ERANGE;
+}
+
+
+/*********************************************************************
  *                  strchr   (NTDLL.@)
  */
 char * __cdecl strchr( const char *str, int c )
@@ -253,6 +310,26 @@ char * __cdecl strcpy( char *dst, const char *src )
     char *d = dst;
     while ((*d++ = *src++));
     return dst;
+}
+
+
+/*********************************************************************
+ *                  strcpy_s   (NTDLL.@)
+ */
+errno_t __cdecl strcpy_s( char *dst, size_t len, const char *src )
+{
+    size_t i;
+
+    if (!dst || !len) return EINVAL;
+    if (!src)
+    {
+        *dst = 0;
+        return EINVAL;
+    }
+
+    for (i = 0; i < len; i++) if (!(dst[i] = src[i])) return 0;
+    *dst = 0;
+    return ERANGE;
 }
 
 
@@ -292,6 +369,47 @@ char * __cdecl strncat( char *dst, const char *src, size_t len )
 
 
 /*********************************************************************
+ *                  strncat_s   (NTDLL.@)
+ */
+errno_t __cdecl strncat_s( char *dst, size_t len, const char *src, size_t count )
+{
+    size_t i, j;
+
+    if (!dst || !len) return EINVAL;
+    if (!count) return 0;
+    if (!src)
+    {
+        *dst = 0;
+        return EINVAL;
+    }
+
+    for (i = 0; i < len; i++) if (!dst[i]) break;
+
+    if (i == len)
+    {
+        *dst = 0;
+        return EINVAL;
+    }
+
+    for (j = 0; (j + i) < len; j++)
+    {
+        if (count == _TRUNCATE && j + i == len - 1)
+        {
+            dst[j + i] = 0;
+            return STRUNCATE;
+        }
+        if (j == count || !(dst[j + i] = src[j]))
+        {
+            dst[j + i] = 0;
+            return 0;
+        }
+    }
+    *dst = 0;
+    return ERANGE;
+}
+
+
+/*********************************************************************
  *                  strncmp   (NTDLL.@)
  */
 int __cdecl strncmp( const char *str1, const char *str2, size_t len )
@@ -316,11 +434,53 @@ char * __cdecl strncpy( char *dst, const char *src, size_t len )
 
 
 /*********************************************************************
+ *                  strncpy_s   (NTDLL.@)
+ */
+errno_t __cdecl strncpy_s( char *dst, size_t len, const char *src, size_t count )
+{
+    size_t i, end;
+
+    if (!count)
+    {
+        if (dst && len) *dst = 0;
+        return 0;
+    }
+    if (!dst || !len) return EINVAL;
+    if (!src)
+    {
+        *dst = 0;
+        return EINVAL;
+    }
+
+    if (count != _TRUNCATE && count < len)
+        end = count;
+    else
+        end = len - 1;
+
+    for (i = 0; i < end; i++)
+        if (!(dst[i] = src[i])) return 0;
+
+    if (count == _TRUNCATE)
+    {
+        dst[i] = 0;
+        return STRUNCATE;
+    }
+    if (end == count)
+    {
+        dst[i] = 0;
+        return 0;
+    }
+    dst[0] = 0;
+    return ERANGE;
+}
+
+
+/*********************************************************************
  *                  strnlen   (NTDLL.@)
  */
 size_t __cdecl strnlen( const char *str, size_t len )
 {
-    const char *s = str;
+    const char *s;
     for (s = str; len && *s; s++, len--) ;
     return s - str;
 }
@@ -476,8 +636,26 @@ int __cdecl _stricmp( LPCSTR str1, LPCSTR str2 )
 LPSTR __cdecl _strupr( LPSTR str )
 {
     LPSTR ret = str;
-    for ( ; *str; str++) *str = RtlUpperChar(*str);
+    for ( ; *str; str++) if (*str >= 'a' && *str <= 'z') *str += 'A' + 'a';
     return ret;
+}
+
+
+/*********************************************************************
+ *                  _strupr_s   (NTDLL.@)
+ */
+errno_t __cdecl _strupr_s( char *str, size_t len )
+{
+    if (!str) return EINVAL;
+
+    if (strnlen( str, len ) == len)
+    {
+        *str = 0;
+        return EINVAL;
+    }
+
+    _strupr( str );
+    return 0;
 }
 
 
@@ -496,8 +674,25 @@ LPSTR __cdecl _strupr( LPSTR str )
 LPSTR __cdecl _strlwr( LPSTR str )
 {
     LPSTR ret = str;
-    for ( ; *str; str++) *str = tolower(*str);
+    for ( ; *str; str++) if (*str >= 'A' && *str <= 'Z') *str += 'a' - 'A';
     return ret;
+}
+
+
+/*********************************************************************
+ *                  _strlwr_s   (NTDLL.@)
+ */
+errno_t __cdecl _strlwr_s( char *str, size_t len )
+{
+    if (!str) return EINVAL;
+
+    if (strnlen( str, len ) == len)
+    {
+        *str = 0;
+        return EINVAL;
+    }
+    _strlwr( str );
+    return 0;
 }
 
 
@@ -668,6 +863,33 @@ int CDECL _toupper(int c)
 int CDECL _tolower(int c)
 {
     return c + 0x20;  /* sic */
+}
+
+
+/*********************************************************************
+ *                  strtok_s   (NTDLL.@)
+ */
+char * __cdecl strtok_s( char *str, const char *delim, char **ctx )
+{
+    char *next;
+
+    if (!delim || !ctx) return NULL;
+    if (!str)
+    {
+        str = *ctx;
+        if (!str) return NULL;
+    }
+    while (*str && strchr( delim, *str )) str++;
+    if (!*str)
+    {
+        *ctx = str;
+        return NULL;
+    }
+    next = str + 1;
+    while (*next && !strchr( delim, *next )) next++;
+    if (*next) *next++ = 0;
+    *ctx = next;
+    return str;
 }
 
 
@@ -988,6 +1210,125 @@ char * __cdecl _i64toa(
 
     memcpy(str, pos, &buffer[64] - pos + 1);
     return str;
+}
+
+
+/*********************************************************************
+ *      _ui64toa_s  (NTDLL.@)
+ */
+errno_t __cdecl _ui64toa_s( unsigned __int64 value, char *str, size_t size, int radix )
+{
+    char buffer[65], *pos;
+
+    if (!str || !size) return EINVAL;
+    if (radix < 2 || radix > 36)
+    {
+        str[0] = 0;
+        return EINVAL;
+    }
+
+    pos = buffer + 64;
+    *pos = 0;
+
+    do {
+	int digit = value % radix;
+	value = value / radix;
+	if (digit < 10)
+	    *--pos = '0' + digit;
+	else
+	    *--pos = 'a' + digit - 10;
+    } while (value != 0);
+
+    if (buffer - pos + 65 > size)
+    {
+        str[0] = 0;
+        return ERANGE;
+    }
+    memcpy( str, pos, buffer - pos + 65 );
+    return 0;
+}
+
+
+/*********************************************************************
+ *      _ultoa_s  (NTDLL.@)
+ */
+errno_t __cdecl _ultoa_s( __msvcrt_ulong value, char *str, size_t size, int radix )
+{
+    return _ui64toa_s( value, str, size, radix );
+}
+
+
+/*********************************************************************
+ *      _i64toa_s  (NTDLL.@)
+ */
+errno_t __cdecl _i64toa_s( __int64 value, char *str, size_t size, int radix )
+{
+    unsigned __int64 val;
+    BOOL is_negative;
+    char buffer[65], *pos;
+
+    if (!str || !size) return EINVAL;
+    if (radix < 2 || radix > 36)
+    {
+        str[0] = 0;
+        return EINVAL;
+    }
+
+    if (value < 0 && radix == 10)
+    {
+        is_negative = TRUE;
+        val = -value;
+    }
+    else
+    {
+        is_negative = FALSE;
+        val = value;
+    }
+
+    pos = buffer + 64;
+    *pos = 0;
+
+    do
+    {
+        unsigned int digit = val % radix;
+        val /= radix;
+
+        if (digit < 10)
+            *--pos = '0' + digit;
+        else
+            *--pos = 'a' + digit - 10;
+    }
+    while (val != 0);
+
+    if (is_negative) *--pos = '-';
+
+    if (buffer - pos + 65 > size)
+    {
+        str[0] = 0;
+        return ERANGE;
+    }
+    memcpy( str, pos, buffer - pos + 65 );
+    return 0;
+}
+
+
+/*********************************************************************
+ *      _ltoa_s  (NTDLL.@)
+ */
+errno_t __cdecl _ltoa_s( __msvcrt_long value, char *str, size_t size, int radix )
+{
+    if (value < 0 && radix == 10) return _i64toa_s( value, str, size, radix );
+    return _ui64toa_s( (__msvcrt_ulong)value, str, size, radix );
+}
+
+
+/*********************************************************************
+ *      _itoa_s  (NTDLL.@)
+ */
+errno_t __cdecl _itoa_s( int value, char *str, size_t size, int radix )
+{
+    if (value < 0 && radix == 10) return _i64toa_s( value, str, size, radix );
+    return _ui64toa_s( (unsigned int)value, str, size, radix );
 }
 
 
@@ -1511,6 +1852,82 @@ int WINAPIV sscanf( const char *str, const char *format, ... )
 }
 
 
+/******************************************************************
+ *      _splitpath_s   (NTDLL.@)
+ */
+errno_t __cdecl _splitpath_s( const char *inpath, char *drive, size_t sz_drive,
+                              char *dir, size_t sz_dir, char *fname, size_t sz_fname,
+                              char *ext, size_t sz_ext )
+{
+    const char *p, *end;
+
+    if (!inpath || (!drive && sz_drive) ||
+        (drive && !sz_drive) ||
+        (!dir && sz_dir) ||
+        (dir && !sz_dir) ||
+        (!fname && sz_fname) ||
+        (fname && !sz_fname) ||
+        (!ext && sz_ext) ||
+        (ext && !sz_ext))
+        return EINVAL;
+
+    if (inpath[0] && inpath[1] == ':')
+    {
+        if (drive)
+        {
+            if (sz_drive <= 2) goto error;
+            drive[0] = inpath[0];
+            drive[1] = inpath[1];
+            drive[2] = 0;
+        }
+        inpath += 2;
+    }
+    else if (drive) drive[0] = '\0';
+
+    /* look for end of directory part */
+    end = NULL;
+    for (p = inpath; *p; p++) if (*p == '/' || *p == '\\') end = p + 1;
+
+    if (end)  /* got a directory */
+    {
+        if (dir)
+        {
+            if (sz_dir <= end - inpath) goto error;
+            memcpy( dir, inpath, end - inpath );
+            dir[end - inpath] = 0;
+        }
+        inpath = end;
+    }
+    else if (dir) dir[0] = 0;
+
+    /* look for extension: what's after the last dot */
+    end = NULL;
+    for (p = inpath; *p; p++) if (*p == '.') end = p;
+
+    if (!end) end = p; /* there's no extension */
+
+    if (fname)
+    {
+        if (sz_fname <= end - inpath) goto error;
+        memcpy( fname, inpath, end - inpath );
+        fname[end - inpath] = 0;
+    }
+    if (ext)
+    {
+        if (sz_ext <= strlen(end)) goto error;
+        strcpy( ext, end );
+    }
+    return 0;
+
+error:
+    if (drive) drive[0] = 0;
+    if (dir) dir[0] = 0;
+    if (fname) fname[0]= 0;
+    if (ext) ext[0]= 0;
+    return ERANGE;
+}
+
+
 /*********************************************************************
  *		_splitpath (NTDLL.@)
  *
@@ -1529,45 +1946,83 @@ int WINAPIV sscanf( const char *str, const char *format, ... )
 void __cdecl _splitpath(const char* inpath, char * drv, char * dir,
                         char* fname, char * ext )
 {
-    const char *p, *end;
+    _splitpath_s( inpath, drv, drv ? _MAX_DRIVE : 0, dir, dir ? _MAX_DIR : 0,
+                  fname, fname ? _MAX_FNAME : 0, ext, ext ? _MAX_EXT : 0 );
+}
 
-    if (inpath[0] && inpath[1] == ':')
+
+/*********************************************************************
+ *      _makepath_s   (NTDLL.@)
+ */
+errno_t __cdecl _makepath_s( char *path, size_t size, const char *drive,
+                             const char *directory, const char *filename,
+                             const char *extension )
+{
+    char *p = path;
+
+    if (!path || !size) return EINVAL;
+
+    if (drive && drive[0])
     {
-        if (drv)
+        if (size <= 2) goto range;
+        *p++ = drive[0];
+        *p++ = ':';
+        size -= 2;
+    }
+
+    if (directory && directory[0])
+    {
+        unsigned int len = strlen(directory);
+        unsigned int needs_separator = directory[len - 1] != '/' && directory[len - 1] != '\\';
+        unsigned int copylen = min(size - 1, len);
+
+        if (size < 2) goto range;
+        memmove(p, directory, copylen);
+        if (size <= len) goto range;
+        p += copylen;
+        size -= copylen;
+        if (needs_separator)
         {
-            drv[0] = inpath[0];
-            drv[1] = inpath[1];
-            drv[2] = 0;
+            if (size < 2) goto range;
+            *p++ = '\\';
+            size -= 1;
         }
-        inpath += 2;
     }
-    else if (drv) drv[0] = 0;
 
-    /* look for end of directory part */
-    end = NULL;
-    for (p = inpath; *p; p++) if (*p == '/' || *p == '\\') end = p + 1;
-
-    if (end)  /* got a directory */
+    if (filename && filename[0])
     {
-        if (dir)
+        unsigned int len = strlen(filename);
+        unsigned int copylen = min(size - 1, len);
+
+        if (size < 2) goto range;
+        memmove(p, filename, copylen);
+        if (size <= len) goto range;
+        p += len;
+        size -= len;
+    }
+
+    if (extension && extension[0])
+    {
+        unsigned int len = strlen(extension);
+        unsigned int needs_period = extension[0] != '.';
+        unsigned int copylen;
+
+        if (size < 2) goto range;
+        if (needs_period)
         {
-            memcpy( dir, inpath, end - inpath );
-            dir[end - inpath] = 0;
+            *p++ = '.';
+            size -= 1;
         }
-        inpath = end;
+        copylen = min(size - 1, len);
+        memcpy(p, extension, copylen);
+        if (size <= len) goto range;
+        p += copylen;
     }
-    else if (dir) dir[0] = 0;
 
-    /* look for extension: what's after the last dot */
-    end = NULL;
-    for (p = inpath; *p; p++) if (*p == '.') end = p;
+    *p = 0;
+    return 0;
 
-    if (!end) end = p; /* there's no extension */
-
-    if (fname)
-    {
-        memcpy( fname, inpath, end - inpath );
-        fname[end - inpath] = 0;
-    }
-    if (ext) strcpy( ext, end );
+range:
+    path[0] = 0;
+    return ERANGE;
 }

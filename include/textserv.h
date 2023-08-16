@@ -19,8 +19,6 @@
 #ifndef _TEXTSERV_H
 #define _TEXTSERV_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -448,7 +446,5 @@ typedef HRESULT (WINAPI *PCreateTextServices)(IUnknown*,ITextHost*,IUnknown**);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* _TEXTSERV_H */

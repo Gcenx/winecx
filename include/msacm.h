@@ -21,8 +21,6 @@
 #ifndef __WINE_MSACM_H
 #define __WINE_MSACM_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif /* defined(__cplusplus) */
@@ -781,7 +779,5 @@ MMRESULT WINAPI acmStreamUnprepareHeader(
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
-
-#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_MSACM_H */

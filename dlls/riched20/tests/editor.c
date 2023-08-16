@@ -5025,6 +5025,23 @@ static void check_EM_SETSEL(HWND hwnd, const struct exsetsel_s *setsel, int id) 
             id, setsel->expected_getsel_start, setsel->expected_getsel_end, start, end);
 }
 
+/* When the selection is out of the windows view, the scrollbar should move. */
+static void check_EM_SETSEL_multiline(HWND hwnd)
+{
+    int oldY;
+    int curY;
+    const char textwithlines[] = "This is a text\n"
+                                 "with lines\n"
+                                 "I expect this text\n"
+                                 "to be\nlarge\nenough\n";
+
+    SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)textwithlines);
+    oldY = get_scroll_pos_y(hwnd);
+    SendMessageA(hwnd, EM_SETSEL, 59, 59);
+    curY = get_scroll_pos_y(hwnd);
+    ok(oldY < curY, "oldY %d >= curY %d\n", oldY, curY);
+}
+
 static void test_EM_SETSEL(void)
 {
     char buffA[32] = {0};
@@ -5064,6 +5081,8 @@ static void test_EM_SETSEL(void)
         ok(sel_start == 4, "Selection start incorrectly: %d expected 4\n", sel_start);
         ok(sel_end == 8, "Selection end incorrectly: %d expected 8\n", sel_end);
     }
+
+    check_EM_SETSEL_multiline(hwndRichEdit);
 
     DestroyWindow(hwndRichEdit);
 }
@@ -5858,6 +5877,7 @@ static void test_EM_STREAMIN(void)
   char buffer[1024] = {0}, tmp[16];
   CHARRANGE range;
   PARAFORMAT2 fmt;
+  DWORD len;
 
   const char * streamText0 = "{\\rtf1\\fi100\\li200\\rtlpar\\qr TestSomeText}";
   const char * streamText0a = "{\\rtf1\\fi100\\li200\\rtlpar\\qr TestSomeText\\par}";
@@ -6065,12 +6085,12 @@ static void test_EM_STREAMIN(void)
   result = SendMessageA(hwndRichEdit, EM_STREAMIN, SF_TEXT, (LPARAM)&es);
   ok(result == 8, "got %Id\n", result);
 
-  WideCharToMultiByte(CP_ACP, 0, UTF8Split_exp, -1, tmp, sizeof(tmp), NULL, NULL);
+  len = WideCharToMultiByte(CP_ACP, 0, UTF8Split_exp, -1, tmp, sizeof(tmp), NULL, NULL);
 
   result = SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
-  ok(result  == 3,
+  ok(result + 1 == len,
       "EM_STREAMIN: Test UTF8Split returned %Id\n", result);
-  result = memcmp (buffer, tmp, 3);
+  result = memcmp (buffer, tmp, result);
   ok(result  == 0,
       "EM_STREAMIN: Test UTF8Split set wrong text: Result: %s\n",buffer);
   ok(es.dwError == 0, "EM_STREAMIN: Test UTF8Split set error %ld, expected %d\n", es.dwError, 0);
@@ -7181,6 +7201,51 @@ static void test_word_movement(void)
     SendMessageW(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
     ok(sel_start == sel_end, "Selection should be empty\n");
     ok(sel_start == 8, "Cursor is at %d instead of %d\n", sel_start, 8);
+
+    DestroyWindow(hwnd);
+}
+
+static void test_word_movement_multiline(void)
+{
+    DWORD sel_start, sel_end;
+    LRESULT result;
+    HWND hwnd;
+
+    /* multi-line control inserts CR normally */
+    hwnd = new_richedit(NULL);
+
+    result = SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)"Lorem ipsum\rdolor sit\rnamet");
+    ok(result == TRUE, "WM_SETTEXT returned %Iu.\n", result);
+    SendMessageA(hwnd, EM_SETSEL, 0, 0);
+    /* [|Lorem ipsum] [dolor sit] [amet] */
+
+    send_ctrl_key(hwnd, VK_RIGHT);
+    /* [Lorem |ipsum] [dolor sit] [amet] */
+    sel_start = sel_end = 0xdeadbeefUL;
+    SendMessageA(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
+    ok(sel_start == sel_end, "expected sel length to be 0, got %lu.\n", sel_end - sel_start);
+    ok(sel_start == 6, "expected sel_start to be %u, got %lu.\n", 6, sel_start);
+
+    send_ctrl_key(hwnd, VK_RIGHT);
+    /* [Lorem ipsum|] [dolor sit] [amet] */
+    sel_start = sel_end = 0xdeadbeefUL;
+    SendMessageA(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
+    ok(sel_start == sel_end, "expected sel length to be 0, got %lu.\n", sel_end - sel_start);
+    ok(sel_start == 11, "expected sel_start to be %u, got %lu.\n", 11, sel_start);
+
+    send_ctrl_key(hwnd, VK_RIGHT);
+    /* [Lorem ipsum] [|dolor sit] [amet] */
+    sel_start = sel_end = 0xdeadbeefUL;
+    SendMessageA(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
+    ok(sel_start == sel_end, "expected sel length to be 0, got %lu.\n", sel_end - sel_start);
+    ok(sel_start == 12, "expected sel_start to be %u, got %lu.\n", 12, sel_start);
+
+    send_ctrl_key(hwnd, VK_LEFT);
+    /* [Lorem ipsum|] [dolor sit] [amet] */
+    sel_start = sel_end = 0xdeadbeefUL;
+    SendMessageA(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
+    ok(sel_start == sel_end, "expected sel length to be 0, got %lu.\n", sel_end - sel_start);
+    ok(sel_start == 11, "expected sel_start to be %u, got %lu.\n", 11, sel_start);
 
     DestroyWindow(hwnd);
 }
@@ -9023,7 +9088,7 @@ static void test_window_classes(void)
     int i;
     HWND hwnd;
 
-    for (i = 0; i < sizeof(test)/sizeof(test[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(test); i++)
     {
         SetLastError(0xdeadbeef);
         hwnd = CreateWindowExA(0, test[i].class, NULL, WS_POPUP, 0, 0, 0, 0, 0, 0, 0, NULL);
@@ -9093,6 +9158,7 @@ START_TEST( editor )
   test_eventMask();
   test_undo_coalescing();
   test_word_movement();
+  test_word_movement_multiline();
   test_EM_CHARFROMPOS();
   test_SETPARAFORMAT();
   test_word_wrap();

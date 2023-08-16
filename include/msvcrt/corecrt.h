@@ -21,9 +21,6 @@
 #ifndef __WINE_CORECRT_H
 #define __WINE_CORECRT_H
 
-#include "wine/winheader_enter.h"
-#include "wine/32on64utils.h"
-
 #ifndef __WINE_USE_MSVCRT
 #define __WINE_USE_MSVCRT
 #endif
@@ -40,7 +37,7 @@
 # define WIN32
 #endif
 
-#if ((defined(__x86_64__) && !defined(__i386_on_x86_64__)) || defined(__aarch64__)) && !defined(_WIN64)
+#if (defined(__x86_64__) || defined(__powerpc64__) || defined(__aarch64__)) && !defined(_WIN64)
 #define _WIN64
 #endif
 
@@ -97,8 +94,6 @@
 #  else
 #   error You need to define __stdcall for your compiler
 #  endif
-# elif defined(__i386_on_x86_64__)
-#   define __stdcall __attribute__((stdcall32)) __attribute__((__force_align_arg_pointer__))
 # elif defined(__x86_64__) && defined (__GNUC__)
 #  if __has_attribute(__force_align_arg_pointer__)
 #   define __stdcall __attribute__((ms_abi)) __attribute__((__force_align_arg_pointer__))
@@ -122,25 +117,12 @@
 #  else
 #   define __cdecl __attribute__((__cdecl__))
 #  endif
-# elif defined(__i386_on_x86_64__)
-#   define __cdecl __attribute__((cdecl32)) __attribute__((__force_align_arg_pointer__))
 # else
 #  define __cdecl __stdcall
 # endif
 #endif
 
-
-#if defined(__i386_on_x86_64__)
-# include <stdarg.h>
-# undef va_list
-# undef va_start
-# undef va_end
-# undef va_copy
-# define va_list __builtin_va_list32
-# define va_start(list,arg) __builtin_va_start32(list,arg)
-# define va_end(list) __builtin_va_end32(list)
-# define va_copy(dest,src) __builtin_va_copy32(dest,src)
-#elif (defined(__x86_64__) || (defined(__aarch64__) && __has_attribute(ms_abi))) && defined (__GNUC__)
+#if (defined(__x86_64__) || (defined(__aarch64__) && __has_attribute(ms_abi))) && defined (__GNUC__)
 # include <stdarg.h>
 # undef va_list
 # undef va_start
@@ -358,6 +340,24 @@ typedef struct threadlocaleinfostruct {
 #else
 #define __WINE_CRT_PRINTF_ATTR(fmt,args)
 #define __WINE_CRT_SCANF_ATTR(fmt,args)
+#endif
+
+#if defined(__GNUC__) && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 3)))
+#define __WINE_ALLOC_SIZE(...) __attribute__((__alloc_size__(__VA_ARGS__)))
+#else
+#define __WINE_ALLOC_SIZE(...)
+#endif
+
+#if defined(__GNUC__) && (__GNUC__ > 10)
+#define __WINE_DEALLOC(...) __attribute__((malloc (__VA_ARGS__)))
+#else
+#define __WINE_DEALLOC(...)
+#endif
+
+#if defined(__GNUC__) && (__GNUC__ > 2)
+#define __WINE_MALLOC __attribute__((malloc))
+#else
+#define __WINE_MALLOC
 #endif
 
 #endif /* __WINE_CORECRT_H */

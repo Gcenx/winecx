@@ -129,7 +129,7 @@ static void gdbctx_delete_xpoint(struct gdb_context *gdbctx, struct dbg_thread *
         ERR("%04lx:%04lx: Couldn't remove breakpoint at:%p/%x type:%d\n", process->pid, thread ? thread->tid : ~0, x->addr, x->size, x->type);
 
     list_remove(&x->entry);
-    HeapFree(GetProcessHeap(), 0, x);
+    free(x);
 }
 
 static void gdbctx_insert_xpoint(struct gdb_context *gdbctx, struct dbg_thread *thread,
@@ -146,7 +146,7 @@ static void gdbctx_insert_xpoint(struct gdb_context *gdbctx, struct dbg_thread *
         return;
     }
 
-    if (!(x = HeapAlloc(GetProcessHeap(), 0, sizeof(struct gdb_xpoint))))
+    if (!(x = malloc(sizeof(struct gdb_xpoint))))
     {
         ERR("%04lx:%04lx: Couldn't allocate memory for breakpoint at:%p/%x type:%d\n", process->pid, thread->tid, addr, size, type);
         return;
@@ -267,6 +267,18 @@ static void reply_buffer_append(struct reply_buffer* reply, const void* data, si
 static inline void reply_buffer_append_str(struct reply_buffer* reply, const char* str)
 {
     reply_buffer_append(reply, str, strlen(str));
+}
+
+static inline void reply_buffer_append_wstr(struct reply_buffer* reply, const WCHAR* wstr)
+{
+    char* str;
+    int len;
+
+    len = WideCharToMultiByte(CP_ACP, 0, wstr, -1, NULL, 0, NULL, NULL);
+    str = malloc(len);
+    if (str && WideCharToMultiByte(CP_ACP, 0, wstr, -1, str, len, NULL, NULL))
+        reply_buffer_append_str(reply, str);
+    free(str);
 }
 
 static inline void reply_buffer_append_hex(struct reply_buffer* reply, const void* src, size_t len)
@@ -1777,6 +1789,7 @@ static enum packet_return packet_query_threads(struct gdb_context* gdbctx)
     struct reply_buffer* reply = &gdbctx->qxfer_buffer;
     struct dbg_process* process = gdbctx->process;
     struct dbg_thread* thread;
+    WCHAR* description;
 
     if (!process) return packet_error;
 
@@ -1790,7 +1803,12 @@ static enum packet_return packet_query_threads(struct gdb_context* gdbctx)
         reply_buffer_append_str(reply, "id=\"");
         reply_buffer_append_uinthex(reply, thread->tid, 4);
         reply_buffer_append_str(reply, "\" name=\"");
-        if (strlen(thread->name))
+        if ((description = fetch_thread_description(thread->tid)))
+        {
+            reply_buffer_append_wstr(reply, description);
+            LocalFree(description);
+        }
+        else if (strlen(thread->name))
         {
             reply_buffer_append_str(reply, thread->name);
         }
@@ -2043,6 +2061,27 @@ static enum packet_return packet_query(struct gdb_context* gdbctx)
             packet_reply_open(gdbctx);
             packet_reply_add(gdbctx, "QC");
             packet_reply_val(gdbctx, thd->tid, 4);
+            packet_reply_close(gdbctx);
+            return packet_done;
+        }
+        break;
+    case 'G':
+        if (gdbctx->in_packet_len > 10 &&
+            strncmp(gdbctx->in_packet, "GetTIBAddr", 10) == 0 &&
+            gdbctx->in_packet[10] == ':')
+        {
+            unsigned    tid;
+            char*       end;
+            struct dbg_thread* thd;
+
+            tid = strtol(gdbctx->in_packet + 11, &end, 16);
+            if (end == NULL) break;
+
+            thd = dbg_get_thread(gdbctx->process, tid);
+            if (thd == NULL)
+                return packet_reply_error(gdbctx, HOST_EINVAL);
+            packet_reply_open(gdbctx);
+            packet_reply_val(gdbctx, (ULONG_PTR)thd->teb, sizeof(thd->teb));
             packet_reply_close(gdbctx);
             return packet_done;
         }

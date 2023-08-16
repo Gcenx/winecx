@@ -21,6 +21,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include "macdrv.h"
@@ -135,8 +139,8 @@ static BOOL modify_icon(struct tray_icon *icon, NOTIFYICONDATAW *nid)
 
     if (nid->uFlags & NIF_ICON)
     {
-        if (icon->image) DestroyIcon(icon->image);
-        icon->image = CopyIcon(nid->hIcon);
+        if (icon->image) NtUserDestroyCursor(icon->image, 0);
+        icon->image = CopyImage(nid->hIcon, IMAGE_ICON, 0, 0, 0);
         if (icon->status_item)
             update_image = TRUE;
     }
@@ -195,7 +199,7 @@ static BOOL add_icon(NOTIFYICONDATAW *nid)
         return FALSE;
     }
 
-    if (!(icon = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*icon))))
+    if (!(icon = calloc(1, sizeof(*icon))))
     {
         ERR("out of memory\n");
         return FALSE;
@@ -234,8 +238,8 @@ static BOOL delete_icon(struct tray_icon *icon)
         macdrv_destroy_status_item(icon->status_item);
     }
     list_remove(&icon->entry);
-    DestroyIcon(icon->image);
-    HeapFree(GetProcessHeap(), 0, icon);
+    NtUserDestroyCursor(icon->image, 0);
+    free(icon);
     return TRUE;
 }
 
@@ -245,12 +249,14 @@ static BOOL delete_icon(struct tray_icon *icon)
  *
  * Driver-side implementation of Shell_NotifyIcon.
  */
-int CDECL wine_notify_icon(DWORD msg, NOTIFYICONDATAW *data)
+NTSTATUS macdrv_notify_icon(void *arg)
 {
+    struct notify_icon_params *params = arg;
+    NOTIFYICONDATAW *data = params->data;
     BOOL ret = FALSE;
     struct tray_icon *icon;
 
-    switch (msg)
+    switch (params->msg)
     {
     case NIM_ADD:
         ret = add_icon(data);
@@ -272,7 +278,7 @@ int CDECL wine_notify_icon(DWORD msg, NOTIFYICONDATAW *data)
         }
         break;
     default:
-        FIXME("unhandled tray message: %u\n", msg);
+        FIXME("unhandled tray message: %u\n", params->msg);
         break;
     }
     return ret;
@@ -290,8 +296,9 @@ static BOOL notify_owner(struct tray_icon *icon, UINT msg, int x, int y)
     }
 
     TRACE("posting msg 0x%04x to hwnd %p id 0x%x\n", msg, icon->owner, icon->id);
-    if (!SendNotifyMessageW(icon->owner, icon->callback_message, wp, lp) &&
-        (GetLastError() == ERROR_INVALID_WINDOW_HANDLE))
+    if (!NtUserMessageCall(icon->owner, icon->callback_message, wp, lp,
+                           0, NtUserSendNotifyMessage, FALSE) &&
+        (RtlGetLastWin32Error() == ERROR_INVALID_WINDOW_HANDLE))
     {
         WARN("window %p was destroyed, removing icon 0x%x\n", icon->owner, icon->id);
         delete_icon(icon);
@@ -335,13 +342,7 @@ void macdrv_status_item_mouse_button(const macdrv_event *event)
             else if (event->status_item_mouse_button.count % 2 == 0)
                 msg += WM_LBUTTONDBLCLK - WM_LBUTTONDOWN;
 
-            if (!SendMessageW(icon->owner, WM_MACDRV_ACTIVATE_ON_FOLLOWING_FOCUS, 0, 0) &&
-                GetLastError() == ERROR_INVALID_WINDOW_HANDLE)
-            {
-                WARN("window %p was destroyed, removing icon 0x%x\n", icon->owner, icon->id);
-                delete_icon(icon);
-                return;
-            }
+            send_message(icon->owner, WM_MACDRV_ACTIVATE_ON_FOLLOWING_FOCUS, 0, 0);
 
             if (!notify_owner(icon, msg, event->status_item_mouse_button.x, event->status_item_mouse_button.y))
                 return;

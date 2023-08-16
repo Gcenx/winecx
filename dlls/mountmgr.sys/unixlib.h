@@ -57,6 +57,21 @@ struct add_drive_params
     int *letter;
 };
 
+struct size_info
+{
+    LONGLONG total_allocation_units;
+    LONGLONG caller_available_allocation_units;
+    LONGLONG actual_available_allocation_units;
+    ULONG sectors_per_allocation_unit;
+    ULONG bytes_per_sector;
+};
+
+struct get_volume_size_info_params
+{
+    const char *unix_mount;
+    struct size_info *info;
+};
+
 struct get_dosdev_symlink_params
 {
     const char *dev;
@@ -135,6 +150,7 @@ enum mountmgr_funcs
     unix_add_drive,
     unix_get_dosdev_symlink,
     unix_set_dosdev_symlink,
+    unix_get_volume_size_info,
     unix_get_volume_dos_devices,
     unix_read_volume_file,
     unix_match_unixdev,
@@ -151,9 +167,7 @@ enum mountmgr_funcs
     unix_enumerate_credentials,
 };
 
-extern unixlib_handle_t mountmgr_handle;
-
-#define MOUNTMGR_CALL( func, params ) __wine_unix_call( mountmgr_handle, unix_ ## func, params )
+#define MOUNTMGR_CALL( func, params ) WINE_UNIX_CALL( unix_ ## func, params )
 
 extern void queue_device_op( enum device_op op, const char *udi, const char *device,
                              const char *mount_point, enum device_type type, const GUID *guid,

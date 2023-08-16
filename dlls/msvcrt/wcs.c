@@ -79,7 +79,7 @@ wchar_t* CDECL _wcsdup( const wchar_t* str )
   wchar_t* ret = NULL;
   if (str)
   {
-    int size = (wcslen(str) + 1) * sizeof(wchar_t);
+    size_t size = (wcslen(str) + 1) * sizeof(wchar_t);
     ret = malloc( size );
     if (ret) memcpy( ret, str, size );
   }
@@ -1317,6 +1317,45 @@ int WINAPIV _scprintf(const char *format, ...)
 }
 
 /*********************************************************************
+ *              _scprintf_l (MSVCRT.@)
+ */
+int WINAPIV _scprintf_l(const char *format, _locale_t locale, ...)
+{
+    int retval;
+    va_list valist;
+    va_start(valist, locale);
+    retval = _vscprintf_l(format, locale, valist);
+    va_end(valist);
+    return retval;
+}
+
+/*********************************************************************
+ *              _scprintf_p (MSVCRT.@)
+ */
+int WINAPIV _scprintf_p(const char *format, ...)
+{
+    int retval;
+    va_list valist;
+    va_start(valist, format);
+    retval = _vscprintf_p_l(format, NULL, valist);
+    va_end(valist);
+    return retval;
+}
+
+/*********************************************************************
+ *              _scprintf_p_l (MSVCRT.@)
+ */
+int WINAPIV _scprintf_p_l(const char *format, _locale_t locale, ...)
+{
+    int retval;
+    va_list valist;
+    va_start(valist, locale);
+    retval = _vscprintf_p_l(format, locale, valist);
+    va_end(valist);
+    return retval;
+}
+
+/*********************************************************************
  *              _vsnwprintf (MSVCRT.@)
  */
 int CDECL _vsnwprintf(wchar_t *str, size_t len,
@@ -1579,6 +1618,50 @@ int WINAPIV sprintf_s( char *str, size_t num, const char *format, ... )
     va_end( ap );
     return r;
 }
+
+/*********************************************************************
+ *		_scwprintf_l (MSVCRT.@)
+ */
+int WINAPIV _scwprintf_l( const wchar_t *format, _locale_t locale, ... )
+{
+    va_list ap;
+    int r;
+
+    va_start( ap, locale );
+    r = _vsnwprintf_l( NULL, INT_MAX, format, locale, ap );
+    va_end( ap );
+    return r;
+}
+
+/*********************************************************************
+ *		_scwprintf_p_l (MSVCRT.@)
+ */
+int WINAPIV _scwprintf_p_l( const wchar_t *format, _locale_t locale, ... )
+{
+    va_list ap;
+    int r;
+
+    va_start( ap, locale );
+    r = vswprintf_p_l_opt( NULL, INT_MAX, format, 0, locale, ap );
+    va_end( ap );
+    return r;
+}
+
+#if _MSVCR_VER>=80
+/*********************************************************************
+ *		_scwprintf_p (MSVCRT.@)
+ */
+int WINAPIV _scwprintf_p( const wchar_t *format, ... )
+{
+    va_list ap;
+    int r;
+
+    va_start( ap, format );
+    r = vswprintf_p_l_opt( NULL, INT_MAX, format, 0, NULL, ap );
+    va_end( ap );
+    return r;
+}
+#endif
 
 /*********************************************************************
  *		_scwprintf (MSVCRT.@)
@@ -1846,6 +1929,22 @@ int WINAPIV _sprintf_p(char *buffer, size_t length, const char *format, ...)
     return r;
 }
 #endif
+
+/*********************************************************************
+ *		_swprintf_p (MSVCRT.@)
+ */
+int WINAPIV _swprintf_p(wchar_t *buffer, size_t length,
+        const wchar_t *format, ...)
+{
+    va_list valist;
+    int r;
+
+    va_start(valist, format);
+    r = vswprintf_p_l_opt(buffer, length, format, 0, NULL, valist);
+    va_end(valist);
+
+    return r;
+}
 
 /*********************************************************************
  *		_swprintf_p_l (MSVCRT.@)
@@ -2376,41 +2475,41 @@ wchar_t* __cdecl wcsncpy( wchar_t* s1, const wchar_t *s2, size_t n )
 /******************************************************************
  *		wcsncpy_s (MSVCRT.@)
  */
-INT CDECL wcsncpy_s( wchar_t* wcDest, size_t numElement, const wchar_t *wcSrc,
-                            size_t count )
+INT CDECL wcsncpy_s( wchar_t *dst, size_t elem, const wchar_t *src, size_t count )
 {
-    WCHAR *p = wcDest;
+    WCHAR *p = dst;
     BOOL truncate = (count == _TRUNCATE);
 
-    if(!wcDest && !numElement && !count)
-        return 0;
-
-    if (!wcDest || !numElement)
-        return EINVAL;
-
-    if (!wcSrc)
+    if (!count)
     {
-        *wcDest = 0;
-        return count ? EINVAL : 0;
+        if (dst && elem) *dst = 0;
+        return 0;
     }
 
-    while (numElement && count && *wcSrc)
+    if (!MSVCRT_CHECK_PMT(dst != NULL)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(elem != 0)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(src != NULL))
     {
-        *p++ = *wcSrc++;
-        numElement--;
+        *dst = 0;
+        return EINVAL;
+    }
+
+    while (elem && count && *src)
+    {
+        *p++ = *src++;
+        elem--;
         count--;
     }
-    if (!numElement && truncate)
+    if (!elem && truncate)
     {
         *(p-1) = 0;
         return STRUNCATE;
     }
-    else if (!numElement)
+    else if (!elem)
     {
-        *wcDest = 0;
+        *dst = 0;
         return ERANGE;
     }
-
     *p = 0;
     return 0;
 }
@@ -2451,51 +2550,44 @@ wchar_t* __cdecl wcscat( wchar_t *dst, const wchar_t *src )
 }
 
 /*********************************************************************
- *  wcsncat_s (MSVCRT.@)
- *
+ *           wcsncat_s (MSVCRT.@)
  */
-INT CDECL wcsncat_s(wchar_t *dst, size_t elem,
-        const wchar_t *src, size_t count)
+errno_t CDECL wcsncat_s(wchar_t *dst, size_t elem, const wchar_t *src, size_t count)
 {
-    size_t srclen;
-    wchar_t dststart;
-    INT ret = 0;
+    size_t i, j;
 
     if (!MSVCRT_CHECK_PMT(dst != NULL)) return EINVAL;
     if (!MSVCRT_CHECK_PMT(elem > 0)) return EINVAL;
-    if (!MSVCRT_CHECK_PMT(src != NULL || count == 0)) return EINVAL;
-
-    if (count == 0)
-        return 0;
-
-    for (dststart = 0; dststart < elem; dststart++)
+    if (count == 0) return 0;
+    if (!MSVCRT_CHECK_PMT(src != NULL))
     {
-        if (dst[dststart] == '\0')
-            break;
-    }
-    if (dststart == elem)
-    {
-        MSVCRT_INVALID_PMT("dst[elem] is not NULL terminated\n", EINVAL);
+        *dst = 0;
         return EINVAL;
     }
 
-    if (count == _TRUNCATE)
+    for (i = 0; i < elem; i++) if (!dst[i]) break;
+
+    if (i == elem)
     {
-        srclen = wcslen(src);
-        if (srclen >= (elem - dststart))
+        MSVCRT_INVALID_PMT("dst[elem] is not NULL terminated\n", EINVAL);
+        *dst = 0;
+        return EINVAL;
+    }
+
+    for (j = 0; (j + i) < elem; j++)
+    {
+        if(count == _TRUNCATE && j + i == elem - 1)
         {
-            srclen = elem - dststart - 1;
-            ret = STRUNCATE;
+            dst[j + i] = '\0';
+            return STRUNCATE;
+        }
+        if(j == count || (dst[j + i] = src[j]) == '\0')
+        {
+            dst[j + i] = '\0';
+            return 0;
         }
     }
-    else
-        srclen = min(wcslen(src), count);
-    if (srclen < (elem - dststart))
-    {
-        memcpy(&dst[dststart], src, srclen*sizeof(wchar_t));
-        dst[dststart+srclen] = '\0';
-        return ret;
-    }
+
     MSVCRT_INVALID_PMT("dst[elem] is too small", ERANGE);
     dst[0] = '\0';
     return ERANGE;
@@ -2526,7 +2618,7 @@ static int wctoint(WCHAR c, int base)
     else if ('a' <= c && c <= 'z')
         v = c - 'a' + 10;
     else {
-        /* NOTE: wine_fold_string(MAP_FOLDDIGITS) supports too many things. */
+        /* NOTE: MAP_FOLDDIGITS supports too many things. */
         /* Unicode points that contain digits 0-9; keep this sorted! */
         static const WCHAR zeros[] = {
             0x660, 0x6f0, 0x966, 0x9e6, 0xa66, 0xae6, 0xb66, 0xc66, 0xce6,

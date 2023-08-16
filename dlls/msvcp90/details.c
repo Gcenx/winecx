@@ -239,7 +239,7 @@ static void threadsafe_queue_push(threadsafe_queue *queue, size_t id,
         queue->tail = p;
         if(!queue->head)
             queue->head = p;
-        queue->lock = 0;
+        WriteRelease(&queue->lock, 0);
     }
     else
     {
@@ -289,7 +289,7 @@ static BOOL threadsafe_queue_pop(threadsafe_queue *queue, size_t id,
         queue->head = p->_Next;
         if(!queue->head)
             queue->tail = NULL;
-        queue->lock = 0;
+        WriteRelease(&queue->lock, 0);
 
         /* TODO: Add exception handling */
         call__Concurrent_queue_base_v4__Deallocate_page(parent, p);
@@ -493,24 +493,26 @@ static void concurrent_vector_alloc_segment(_Concurrent_vector_base_v4 *this,
             spin_wait(&spin);
         if(!InterlockedCompareExchangeSizeT((this->segment + seg),
                     SEGMENT_ALLOC_MARKER, 0))
-        __TRY
         {
-            if(seg == 0)
-                this->segment[seg] = this->allocator(this, element_size * (1 << this->first_block));
-            else if(seg < this->first_block)
-                this->segment[seg] = (BYTE**)this->segment[0]
+            __TRY
+            {
+                if(seg == 0)
+                    this->segment[seg] = this->allocator(this, element_size * (1 << this->first_block));
+                else if(seg < this->first_block)
+                    this->segment[seg] = (BYTE**)this->segment[0]
                         + element_size * (1 << seg);
-            else
-                this->segment[seg] = this->allocator(this, element_size * (1 << seg));
+                else
+                    this->segment[seg] = this->allocator(this, element_size * (1 << seg));
+            }
+            __EXCEPT_ALL
+            {
+                this->segment[seg] = NULL;
+                _CxxThrowException(NULL, NULL);
+            }
+            __ENDTRY
+            if(!this->segment[seg])
+                _vector_base_v4__Internal_throw_exception(this, 2);
         }
-        __EXCEPT_ALL
-        {
-            this->segment[seg] = NULL;
-            _CxxThrowException(NULL, NULL);
-        }
-        __ENDTRY
-        if(!this->segment[seg])
-            _vector_base_v4__Internal_throw_exception(this, 2);
     }
 }
 
@@ -1088,6 +1090,15 @@ bool __cdecl _Task_impl_base__IsNonBlockingThread(void)
 {
     FIXME("() stub\n");
     return FALSE;
+}
+
+/* ?ReportUnhandledError@_ExceptionHolder@details@Concurrency@@AAAXXZ */
+/* ?ReportUnhandledError@_ExceptionHolder@details@Concurrency@@AAEXXZ */
+/* ?ReportUnhandledError@_ExceptionHolder@details@Concurrency@@AEAAXXZ */
+DEFINE_THISCALL_WRAPPER(_ExceptionHolder__ReportUnhandledError, 4)
+void __thiscall _ExceptionHolder__ReportUnhandledError(void *this)
+{
+    FIXME("(%p) stub\n", this);
 }
 #endif
 

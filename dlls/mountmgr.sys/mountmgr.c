@@ -46,13 +46,11 @@ struct mount_point
 static struct list mount_points_list = LIST_INIT(mount_points_list);
 static HKEY mount_key;
 
-unixlib_handle_t mountmgr_handle = 0;
-
 void set_mount_point_id( struct mount_point *mount, const void *id, unsigned int id_len )
 {
-    RtlFreeHeap( GetProcessHeap(), 0, mount->id );
+    free( mount->id );
     mount->id_len = max( MIN_ID_LEN, id_len );
-    if ((mount->id = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, mount->id_len )))
+    if ((mount->id = calloc( mount->id_len, 1 )))
     {
         memcpy( mount->id, id, id_len );
         RegSetValueExW( mount_key, mount->link.Buffer, 0, REG_BINARY, mount->id, mount->id_len );
@@ -67,7 +65,7 @@ static struct mount_point *add_mount_point( DEVICE_OBJECT *device, UNICODE_STRIN
     WCHAR *str;
     UINT len = (lstrlenW(link) + 1) * sizeof(WCHAR) + device_name->Length + sizeof(WCHAR);
 
-    if (!(mount = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*mount) + len ))) return NULL;
+    if (!(mount = malloc( sizeof(*mount) + len ))) return NULL;
 
     str = (WCHAR *)(mount + 1);
     lstrcpyW( str, link );
@@ -118,8 +116,8 @@ void delete_mount_point( struct mount_point *mount )
     list_remove( &mount->entry );
     RegDeleteValueW( mount_key, mount->link.Buffer );
     IoDeleteSymbolicLink( &mount->link );
-    RtlFreeHeap( GetProcessHeap(), 0, mount->id );
-    RtlFreeHeap( GetProcessHeap(), 0, mount );
+    free( mount->id );
+    free( mount );
 }
 
 /* check if a given mount point matches the requested specs */
@@ -188,7 +186,7 @@ static NTSTATUS query_mount_points( void *buff, SIZE_T insize,
         return STATUS_BUFFER_OVERFLOW;
     }
 
-    input = HeapAlloc( GetProcessHeap(), 0, insize );
+    input = malloc( insize );
     if (!input)
         return STATUS_NO_MEMORY;
     memcpy( input, buff, insize );
@@ -219,7 +217,7 @@ static NTSTATUS query_mount_points( void *buff, SIZE_T insize,
     }
     info->Size = pos;
     iosb->Information = pos;
-    HeapFree( GetProcessHeap(), 0, input );
+    free( input );
     return STATUS_SUCCESS;
 }
 
@@ -282,6 +280,8 @@ static NTSTATUS define_shell_folder( const void *in_buff, SIZE_T insize )
     char *buffer = NULL, *backup = NULL;
     struct set_shell_folder_params params;
 
+    FIXME("%p %llu\n", in_buff, (unsigned long long)insize);
+
     if (input->folder_offset >= insize || input->folder_size > insize - input->folder_offset ||
         input->symlink_offset >= insize)
         return STATUS_INVALID_PARAMETER;
@@ -298,9 +298,11 @@ static NTSTATUS define_shell_folder( const void *in_buff, SIZE_T insize )
     name.Length = input->folder_size;
     InitializeObjectAttributes( &attr, &name, 0, 0, NULL );
 
+    FIXME("folder %s link=%s\n", debugstr_w(name.Buffer), debugstr_a(link));
+
     for (;;)
     {
-        if (!(buffer = HeapAlloc( GetProcessHeap(), 0, size )))
+        if (!(buffer = malloc( size )))
         {
             status = STATUS_NO_MEMORY;
             goto done;
@@ -309,12 +311,12 @@ static NTSTATUS define_shell_folder( const void *in_buff, SIZE_T insize )
         if (status == STATUS_NO_SUCH_FILE) status = STATUS_SUCCESS;
         if (status == STATUS_SUCCESS) break;
         if (status != STATUS_BUFFER_TOO_SMALL) goto done;
-        HeapFree( GetProcessHeap(), 0, buffer );
+        free( buffer );
     }
 
     if (input->create_backup)
     {
-        if (!(backup = HeapAlloc( GetProcessHeap(), 0, strlen(buffer) + sizeof(".backup" ) )))
+        if (!(backup = malloc( strlen(buffer) + sizeof(".backup" ) )))
         {
             status = STATUS_NO_MEMORY;
             goto done;
@@ -329,8 +331,8 @@ static NTSTATUS define_shell_folder( const void *in_buff, SIZE_T insize )
     status = MOUNTMGR_CALL( set_shell_folder, &params );
 
 done:
-    HeapFree( GetProcessHeap(), 0, buffer );
-    HeapFree( GetProcessHeap(), 0, backup );
+    free( buffer );
+    free( backup );
     return status;
 }
 
@@ -350,7 +352,7 @@ static NTSTATUS query_shell_folder( void *buff, SIZE_T insize, SIZE_T outsize, I
 
     for (;;)
     {
-        if (!(buffer = HeapAlloc( GetProcessHeap(), 0, size ))) return STATUS_NO_MEMORY;
+        if (!(buffer = malloc( size ))) return STATUS_NO_MEMORY;
         status = wine_nt_to_unix_file_name( &attr, buffer, &size, FILE_OPEN );
         if (!status)
         {
@@ -360,10 +362,10 @@ static NTSTATUS query_shell_folder( void *buff, SIZE_T insize, SIZE_T outsize, I
             break;
         }
         if (status != STATUS_BUFFER_TOO_SMALL) break;
-        HeapFree( GetProcessHeap(), 0, buffer );
+        free( buffer );
     }
 
-    HeapFree( GetProcessHeap(), 0, buffer );
+    free( buffer );
     return status;
 }
 
@@ -618,7 +620,6 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 #ifdef _WIN64
     HKEY wow64_ports_key = NULL;
 #endif
-    void *instance;
     UNICODE_STRING nameW, linkW;
     DEVICE_OBJECT *device;
     HKEY devicemap_key;
@@ -627,9 +628,7 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 
     TRACE( "%s\n", debugstr_w(path->Buffer) );
 
-    RtlPcToFileHeader( DriverEntry, &instance );
-    status = NtQueryVirtualMemory( GetCurrentProcess(), instance, MemoryWineUnixFuncs,
-                                   &mountmgr_handle, sizeof(mountmgr_handle), NULL );
+    status = __wine_init_unix_call();
     if (status) return status;
 
     driver->MajorFunction[IRP_MJ_DEVICE_CONTROL] = mountmgr_ioctl;

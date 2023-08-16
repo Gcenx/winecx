@@ -766,6 +766,12 @@ static void test_readerinput(void)
     IXmlReader_Release(reader);
 
     IUnknown_Release(reader_input);
+
+    /* Using codepage */
+    hr = CreateXmlReaderInputWithEncodingCodePage(input, NULL, 1200, FALSE, NULL, &reader_input);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    IUnknown_Release(reader_input);
+
     IUnknown_Release(input);
 }
 
@@ -1013,6 +1019,27 @@ todo_wine {
     TEST_READER_STATE(reader, XmlReadState_Error);
 
     IStream_Release(stream);
+
+    /* No encoding attribute. */
+    set_input_string(reader, "<?xml version=\"1.0\" standalone=\"yes\"?><a/>");
+    hr = IXmlReader_Read(reader, &type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(type == XmlNodeType_XmlDeclaration, "got %d\n", type);
+
+    /* Just version attribute, no spaces. */
+    set_input_string(reader, "<?xml version=\"1.0\"?><a/>");
+    hr = IXmlReader_Read(reader, &type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(type == XmlNodeType_XmlDeclaration, "got %d\n", type);
+
+    set_input_string(reader, "<?xml version=\"1.0\"encoding=\"UTF-8\"?><a/>");
+    hr = IXmlReader_Read(reader, &type);
+    ok(hr == WC_E_XMLDECL, "Unexpected hr %#lx.\n", hr);
+
+    set_input_string(reader, "<?xml version=\"1.0\"standalone=\"yes\"?><a/>");
+    hr = IXmlReader_Read(reader, &type);
+    ok(hr == WC_E_XMLDECL, "Unexpected hr %#lx.\n", hr);
+
     IXmlReader_Release(reader);
 }
 
@@ -1806,16 +1833,15 @@ static void test_isemptyelement(void)
 {
     struct test_entry_empty *test = empty_element_tests;
     IXmlReader *reader;
+    XmlNodeType type;
     HRESULT hr;
+    BOOL ret;
 
     hr = CreateXmlReader(&IID_IXmlReader, (void**)&reader, NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     while (test->xml)
     {
-        XmlNodeType type;
-        BOOL ret;
-
         set_input_string(reader, test->xml);
 
         type = XmlNodeType_None;
@@ -1828,6 +1854,23 @@ static void test_isemptyelement(void)
 
         test++;
     }
+
+    /* Move to an attribute of an empty element. */
+    set_input_string(reader, "<a attr1=\'b\' />");
+
+    hr = IXmlReader_Read(reader, &type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(type == XmlNodeType_Element, "Unexpected node type %d.\n", type);
+    ret = IXmlReader_IsEmptyElement(reader);
+    ok(ret, "Unexpected empty flag %d.\n", ret);
+
+    hr = IXmlReader_MoveToFirstAttribute(reader);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IXmlReader_GetNodeType(reader, &type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(type == XmlNodeType_Attribute, "Unexpected node type %d.\n", type);
+    ret = IXmlReader_IsEmptyElement(reader);
+    ok(!ret, "Unexpected empty flag %d.\n", ret);
 
     IXmlReader_Release(reader);
 }
@@ -2564,11 +2607,13 @@ static void test_attribute_by_name(void)
     ok(hr == S_FALSE, "Unexpected hr %#lx.\n", hr);
 
     read_node(reader, XmlNodeType_Element);
+    TEST_DEPTH(reader, 0);
 
     hr = IXmlReader_MoveToAttributeByName(reader, L"", NULL);
     ok(hr == S_FALSE, "Unexpected hr %#lx.\n", hr);
 
     read_node(reader, XmlNodeType_Element);
+    TEST_DEPTH(reader, 1);
 
     hr = IXmlReader_MoveToAttributeByName(reader, NULL, NULL);
     ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
@@ -2584,14 +2629,17 @@ static void test_attribute_by_name(void)
 
     hr = IXmlReader_MoveToAttributeByName(reader, L"xmlns", xmlns_uriW);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    TEST_DEPTH(reader, 2);
     reader_value(reader, L"myns");
 
     hr = IXmlReader_MoveToAttributeByName(reader, L"a", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    TEST_DEPTH(reader, 2);
     reader_value(reader, L"value a");
 
     hr = IXmlReader_MoveToAttributeByName(reader, L"b", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    TEST_DEPTH(reader, 2);
     reader_value(reader, L"value b");
 
     hr = IXmlReader_MoveToAttributeByName(reader, L"a", L"myns");
@@ -2602,18 +2650,22 @@ static void test_attribute_by_name(void)
 
     hr = IXmlReader_MoveToAttributeByName(reader, L"ns", xmlns_uriW);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    TEST_DEPTH(reader, 2);
     reader_value(reader, L"ns uri");
 
     hr = IXmlReader_MoveToAttributeByName(reader, L"b", L"");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    TEST_DEPTH(reader, 2);
     reader_value(reader, L"value b");
 
     hr = IXmlReader_MoveToAttributeByName(reader, L"c", NULL);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    TEST_DEPTH(reader, 2);
     reader_value(reader, L"value c2");
 
     hr = IXmlReader_MoveToAttributeByName(reader, L"c", L"ns uri");
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    TEST_DEPTH(reader, 2);
     reader_value(reader, L"value c");
 
     IXmlReader_Release(reader);

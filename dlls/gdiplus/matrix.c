@@ -39,17 +39,15 @@ WINE_DEFAULT_DEBUG_CHANNEL(gdiplus);
  *
  * and puts the output in out.
  * */
-static void matrix_multiply(GDIPCONST REAL * left, GDIPCONST REAL * right, REAL * out)
+static inline void matrix_multiply(GDIPCONST REAL * left, GDIPCONST REAL * right, REAL * out)
 {
     REAL temp[6];
-    int i, odd;
-
-    for(i = 0; i < 6; i++){
-        odd = i % 2;
-        temp[i] = left[i - odd] * right[odd] + left[i - odd + 1] * right[odd + 2] +
-                  (i >= 4 ? right[odd + 4] : 0.0);
-    }
-
+    temp[0] = left[0] * right[0] + left[1] * right[2];
+    temp[1] = left[0] * right[1] + left[1] * right[3];
+    temp[2] = left[2] * right[0] + left[3] * right[2];
+    temp[3] = left[2] * right[1] + left[3] * right[3];
+    temp[4] = left[4] * right[0] + left[5] * right[2] + right[4];
+    temp[5] = left[4] * right[1] + left[5] * right[3] + right[5];
     memcpy(out, temp, 6 * sizeof(REAL));
 }
 
@@ -287,24 +285,27 @@ GpStatus WINGDIPAPI GdipRotateMatrix(GpMatrix *matrix, REAL angle,
 GpStatus WINGDIPAPI GdipScaleMatrix(GpMatrix *matrix, REAL scaleX, REAL scaleY,
     GpMatrixOrder order)
 {
-    REAL scale[6];
-
     TRACE("(%p, %.2f, %.2f, %d)\n", matrix, scaleX, scaleY, order);
 
     if(!matrix)
         return InvalidParameter;
 
-    scale[0] = scaleX;
-    scale[1] = 0.0;
-    scale[2] = 0.0;
-    scale[3] = scaleY;
-    scale[4] = 0.0;
-    scale[5] = 0.0;
-
     if(order == MatrixOrderAppend)
-        matrix_multiply(matrix->matrix, scale, matrix->matrix);
+    {
+        matrix->matrix[0] *= scaleX;
+        matrix->matrix[1] *= scaleY;
+        matrix->matrix[2] *= scaleX;
+        matrix->matrix[3] *= scaleY;
+        matrix->matrix[4] *= scaleX;
+        matrix->matrix[5] *= scaleY;
+    }
     else if (order == MatrixOrderPrepend)
-        matrix_multiply(scale, matrix->matrix, matrix->matrix);
+    {
+        matrix->matrix[0] *= scaleX;
+        matrix->matrix[1] *= scaleX;
+        matrix->matrix[2] *= scaleY;
+        matrix->matrix[3] *= scaleY;
+    }
     else
         return InvalidParameter;
 
@@ -416,24 +417,23 @@ GpStatus WINGDIPAPI GdipTransformMatrixPointsI(GpMatrix *matrix, GpPoint *pts, I
 GpStatus WINGDIPAPI GdipTranslateMatrix(GpMatrix *matrix, REAL offsetX,
     REAL offsetY, GpMatrixOrder order)
 {
-    REAL translate[6];
-
     TRACE("(%p, %.2f, %.2f, %d)\n", matrix, offsetX, offsetY, order);
 
     if(!matrix)
         return InvalidParameter;
 
-    translate[0] = 1.0;
-    translate[1] = 0.0;
-    translate[2] = 0.0;
-    translate[3] = 1.0;
-    translate[4] = offsetX;
-    translate[5] = offsetY;
-
     if(order == MatrixOrderAppend)
-        matrix_multiply(matrix->matrix, translate, matrix->matrix);
+    {
+        matrix->matrix[4] += offsetX;
+        matrix->matrix[5] += offsetY;
+    }
     else if (order == MatrixOrderPrepend)
-        matrix_multiply(translate, matrix->matrix, matrix->matrix);
+    {
+        matrix->matrix[4] = offsetX * matrix->matrix[0] + offsetY * matrix->matrix[2]
+            + matrix->matrix[4];
+        matrix->matrix[5] = offsetX * matrix->matrix[1] + offsetY * matrix->matrix[3]
+            + matrix->matrix[5];
+    }
     else
         return InvalidParameter;
 

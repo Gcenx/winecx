@@ -19,8 +19,6 @@
 #ifndef __AUTHZ_H__
 #define __AUTHZ_H__
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -118,7 +116,5 @@ BOOL WINAPI AuthzInitializeContextFromToken(DWORD flags, HANDLE token_handle,
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

@@ -19,8 +19,6 @@
 #ifndef _NTDEF_
 #define _NTDEF_
 
-#include "wine/winheader_enter.h"
-
 #include <basetsd.h>
 #include <specstrings.h>
 
@@ -86,6 +84,6 @@ typedef struct _RTL_BALANCED_NODE
 
 #define RTL_BALANCED_NODE_RESERVED_PARENT_MASK 3
 
-#include "wine/winheader_exit.h"
+#define RTL_CONSTANT_STRING(s) { sizeof(s) - sizeof(s[0]), sizeof(s), (void*)s }
 
 #endif /* _NTDEF_ */

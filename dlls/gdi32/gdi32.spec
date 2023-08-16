@@ -85,6 +85,7 @@
 @ stdcall D3DKMTOpenAdapterFromHdc(ptr) win32u.NtGdiDdDDIOpenAdapterFromHdc
 @ stdcall D3DKMTOpenAdapterFromLuid(ptr) win32u.NtGdiDdDDIOpenAdapterFromLuid
 @ stdcall D3DKMTQueryStatistics(ptr) win32u.NtGdiDdDDIQueryStatistics
+@ stdcall D3DKMTQueryVideoMemoryInfo(ptr) win32u.NtGdiDdDDIQueryVideoMemoryInfo
 @ stdcall D3DKMTSetQueuedLimit(ptr) win32u.NtGdiDdDDISetQueuedLimit
 @ stdcall D3DKMTSetVidPnSourceOwner(ptr) win32u.NtGdiDdDDISetVidPnSourceOwner
 @ stdcall DPtoLP(long ptr long)
@@ -481,7 +482,7 @@
 @ stdcall SetDCBrushColor(long long)
 @ stdcall SetDCPenColor(long long)
 @ stdcall SetDIBColorTable(long long long ptr)
-@ stdcall SetDIBits(long long long long ptr ptr long)
+@ stdcall SetDIBits(long long long long ptr ptr long) NtGdiSetDIBits
 @ stdcall SetDIBitsToDevice(long long long long long long long long long ptr ptr long)
 @ stdcall SetDeviceGammaRamp(long ptr) NtGdiSetDeviceGammaRamp
 @ stdcall SetEnhMetaFileBits(long ptr)

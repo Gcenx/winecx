@@ -879,7 +879,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH InitializeCriticalSectionEx( CRITICAL_SECTION *cri
  * File mappings
  ***********************************************************************/
 
-
 /***********************************************************************
  *             CreateFileMappingW   (kernelbase.@)
  */
@@ -948,6 +947,15 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileMappingW( HANDLE file, LPSECURITY_ATTR
 
 
 /***********************************************************************
+ *             CreateFileMappingFromApp   (kernelbase.@)
+ */
+HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileMappingFromApp( HANDLE file, LPSECURITY_ATTRIBUTES sa, ULONG protect,
+        ULONG64 size, LPCWSTR name )
+{
+    return CreateFileMappingW( file, sa, protect, size << 32, size, name );
+}
+
+/***********************************************************************
  *             OpenFileMappingW   (kernelbase.@)
  */
 HANDLE WINAPI DECLSPEC_HOTPATCH OpenFileMappingW( DWORD access, BOOL inherit, LPCWSTR name )
@@ -965,6 +973,24 @@ HANDLE WINAPI DECLSPEC_HOTPATCH OpenFileMappingW( DWORD access, BOOL inherit, LP
         /* win9x doesn't do access checks, so try with full access first */
         if (!NtOpenSection( &ret, access | SECTION_MAP_READ | SECTION_MAP_WRITE, &attr )) return ret;
     }
+
+    if (!set_ntstatus( NtOpenSection( &ret, access, &attr ))) return 0;
+    return ret;
+}
+
+
+/***********************************************************************
+ *             OpenFileMappingFromApp   (kernelbase.@)
+ */
+HANDLE WINAPI DECLSPEC_HOTPATCH OpenFileMappingFromApp( ULONG access, BOOL inherit, LPCWSTR name )
+{
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING nameW;
+    HANDLE ret;
+
+    if (!get_open_object_attributes( &attr, &nameW, inherit, name )) return 0;
+
+    if (access == FILE_MAP_COPY) access = SECTION_MAP_READ;
 
     if (!set_ntstatus( NtOpenSection( &ret, access, &attr ))) return 0;
     return ret;

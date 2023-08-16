@@ -25,100 +25,27 @@
 #include "wine/debug.h"
 
 #include "dbghelp_private.h"
-#ifdef USE_STATS
-#include <math.h>
-#endif
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
 
-struct pool_arena
+void pool_init(struct pool* pool, size_t arena_size)
 {
-    struct list entry;
-    char       *current;
-    char       *end;
-};
-
-void pool_init(struct pool* a, size_t arena_size)
-{
-    list_init( &a->arena_list );
-    list_init( &a->arena_full );
-    a->arena_size = arena_size;
+    pool->heap = HeapCreate(HEAP_NO_SERIALIZE, arena_size, 0);
 }
 
 void pool_destroy(struct pool* pool)
 {
-    struct pool_arena*  arena;
-    struct pool_arena*  next;
-
-#ifdef USE_STATS
-    size_t alloc, used, num;
-
-    alloc = used = num = 0;
-    LIST_FOR_EACH_ENTRY( arena, &pool->arena_list, struct pool_arena, entry )
-    {
-        alloc += arena->end - (char *)arena;
-        used += arena->current - (char*)arena;
-        num++;
-    }
-    LIST_FOR_EACH_ENTRY( arena, &pool->arena_full, struct pool_arena, entry )
-    {
-        alloc += arena->end - (char *)arena;
-        used += arena->current - (char*)arena;
-        num++;
-    }
-    if (alloc == 0) alloc = 1;      /* avoid division by zero */
-    FIXME("STATS: pool %p has allocated %u kbytes, used %u kbytes in %u arenas, non-allocation ratio: %.2f%%\n",
-          pool, (unsigned)(alloc >> 10), (unsigned)(used >> 10), (unsigned)num,
-          100.0 - (float)used / (float)alloc * 100.0);
-#endif
-
-    LIST_FOR_EACH_ENTRY_SAFE( arena, next, &pool->arena_list, struct pool_arena, entry )
-    {
-        list_remove( &arena->entry );
-        HeapFree(GetProcessHeap(), 0, arena);
-    }
-    LIST_FOR_EACH_ENTRY_SAFE( arena, next, &pool->arena_full, struct pool_arena, entry )
-    {
-        list_remove( &arena->entry );
-        HeapFree(GetProcessHeap(), 0, arena);
-    }
+    HeapDestroy(pool->heap);
 }
 
 void* pool_alloc(struct pool* pool, size_t len)
 {
-    struct pool_arena*  arena;
-    void*               ret;
-    size_t size;
+    return HeapAlloc(pool->heap, 0, len);
+}
 
-    len = (len + 3) & ~3; /* round up size on DWORD boundary */
-
-    LIST_FOR_EACH_ENTRY( arena, &pool->arena_list, struct pool_arena, entry )
-    {
-        if (arena->end - arena->current >= len)
-        {
-            ret = arena->current;
-            arena->current += len;
-            if (arena->current + 16 >= arena->end)
-            {
-                list_remove( &arena->entry );
-                list_add_tail( &pool->arena_full, &arena->entry );
-            }
-            return ret;
-        }
-    }
-
-    size = max( pool->arena_size, len );
-    arena = HeapAlloc(GetProcessHeap(), 0, size + sizeof(struct pool_arena));
-    if (!arena) return NULL;
-
-    ret = arena + 1;
-    arena->current = (char*)ret + len;
-    arena->end = (char*)ret + size;
-    if (arena->current + 16 >= arena->end)
-        list_add_tail( &pool->arena_full, &arena->entry );
-    else
-        list_add_head( &pool->arena_list, &arena->entry );
-    return ret;
+void* pool_realloc(struct pool* pool, void* ptr, size_t len)
+{
+    return ptr ? HeapReAlloc(pool->heap, 0, ptr, len) : pool_alloc(pool, len);
 }
 
 char* pool_strdup(struct pool* pool, const char* str)
@@ -168,32 +95,25 @@ void* vector_at(const struct vector* v, unsigned pos)
 
 void* vector_add(struct vector* v, struct pool* pool)
 {
-    unsigned    ncurr = v->num_elts++;
-
-    /* check that we don't wrap around */
-    assert(v->num_elts > ncurr);
-    if (ncurr == (v->num_buckets << v->shift))
+    if (v->num_elts == (v->num_buckets << v->shift))
     {
-        if(v->num_buckets == v->buckets_allocated)
+        if (v->num_buckets == v->buckets_allocated)
         {
             /* Double the bucket cache, so it scales well with big vectors.*/
-            unsigned    new_reserved;
+            unsigned    new_reserved = v->buckets_allocated ? v->buckets_allocated * 2 : 1;
             void*       new;
 
-            new_reserved = 2*v->buckets_allocated;
-            if(new_reserved == 0) new_reserved = 1;
-
-            /* Don't even try to resize memory.
-               Pool datastructure is very inefficient with reallocs. */
-            new = pool_alloc(pool, new_reserved * sizeof(void*));
-            memcpy(new, v->buckets, v->buckets_allocated * sizeof(void*));
+            new = pool_realloc(pool, v->buckets, new_reserved * sizeof(void*));
+            if (!new) return NULL;
             v->buckets = new;
             v->buckets_allocated = new_reserved;
         }
         v->buckets[v->num_buckets] = pool_alloc(pool, v->elt_size << v->shift);
+        if (!v->buckets[v->num_buckets]) return NULL;
+        v->num_elts++;
         return v->buckets[v->num_buckets++];
     }
-    return vector_at(v, ncurr);
+    return vector_at(v, v->num_elts++);
 }
 
 /* We construct the sparse array as two vectors (of equal size)

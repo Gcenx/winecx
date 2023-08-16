@@ -158,8 +158,8 @@ static const WCHAR wszTextHtml[] = {'t','e','x','t','/','h','t','m','l',0};
 
 static WCHAR BSCBHolder[] = { '_','B','S','C','B','_','H','o','l','d','e','r','_',0 };
 
-#define WINEHQ_IP "4.4.81.124"
-static const WCHAR wszWineHQSite[] = L"www.winehq.org";
+#define WINEHQ_IP "4.4.81.126"
+static const WCHAR wszWineHQSite[] = L"gitlab.winehq.org";
 static const WCHAR wszWineHQIP[] = L"" WINEHQ_IP;
 static const CHAR wszIndexHtmlA[] = "index.html";
 static const WCHAR cache_fileW[] = {'c',':','\\','c','a','c','h','e','.','h','t','m',0};
@@ -170,7 +170,7 @@ static const WCHAR emptyW[] = {0};
 
 static BOOL stopped_binding = FALSE, stopped_obj_binding = FALSE, emulate_protocol = FALSE,
     data_available = FALSE, http_is_first = TRUE, bind_to_object = FALSE, filedwl_api, post_test;
-static DWORD read = 0, bindf = 0, prot_state = 0, thread_id, tymed, security_problem;
+static DWORD nread = 0, bindf = 0, prot_state = 0, thread_id, tymed, security_problem;
 static const WCHAR *reported_url;
 static CHAR mime_type[512];
 static IInternetProtocolSink *protocol_sink = NULL;
@@ -580,7 +580,7 @@ static HRESULT WINAPI Protocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
 
     CHECK_EXPECT(Start);
 
-    read = 0;
+    nread = 0;
 
     reported_url = szUrl;
     if(!filedwl_api) /* FIXME */
@@ -1128,7 +1128,7 @@ static HRESULT WINAPI Protocol_Read(IInternetProtocol *iface, void *pv,
             }else {
                 memset(pv, '?', cb);
                 *pcbRead = cb;
-                read++;
+                nread++;
                 return S_OK;
             }
         case 3:
@@ -1150,7 +1150,7 @@ static HRESULT WINAPI Protocol_Read(IInternetProtocol *iface, void *pv,
         }
     }
 
-    if(read) {
+    if(nread) {
         *pcbRead = 0;
         return S_FALSE;
     }
@@ -1163,7 +1163,7 @@ static HRESULT WINAPI Protocol_Read(IInternetProtocol *iface, void *pv,
     }
 
     ok(*pcbRead == 0, "*pcbRead=%ld, expected 0\n", *pcbRead);
-    read += *pcbRead = sizeof(data)-1;
+    nread += *pcbRead = sizeof(data)-1;
     memcpy(pv, data, sizeof(data));
     return S_OK;
 }
@@ -3747,7 +3747,7 @@ static void test_URLDownloadToFile_abort(void)
     CHECK_CALLED(OnProgress_SENDINGREQUEST);
     CHECK_CALLED(OnProgress_MIMETYPEAVAILABLE);
     CHECK_CALLED(OnProgress_BEGINDOWNLOADDATA);
-    CHECK_CALLED(OnProgress_DOWNLOADINGDATA);
+    CLEAR_CALLED(OnProgress_DOWNLOADINGDATA);
     CHECK_CALLED(OnProgress_ENDDOWNLOADDATA);
     CHECK_CALLED(OnStopBinding);
 
@@ -3771,7 +3771,7 @@ static void create_file(const char *file_name, const char *content)
 
     file = CreateFileA(file_name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
             FILE_ATTRIBUTE_NORMAL, NULL);
-    ok(file != INVALID_HANDLE_VALUE, "CreateFile failed\n");
+    ok(file != INVALID_HANDLE_VALUE, "CreateFile failed: %lu\n", GetLastError());
     if(file == INVALID_HANDLE_VALUE)
         return;
 
@@ -3977,11 +3977,11 @@ static BOOL can_do_https(void)
     ses = InternetOpenA("winetest", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
     ok(ses != NULL, "InternetOpen failed\n");
 
-    con = InternetConnectA(ses, "test.winehq.org", INTERNET_DEFAULT_HTTPS_PORT,
+    con = InternetConnectA(ses, "gitlab.winehq.org", INTERNET_DEFAULT_HTTPS_PORT,
             NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
     ok(con != NULL, "InternetConnect failed\n");
 
-    req = HttpOpenRequestA(con, "GET", "/tests/hello.html", NULL, NULL, NULL,
+    req = HttpOpenRequestA(con, "GET", "/robots.txt", NULL, NULL, NULL,
             INTERNET_FLAG_SECURE, 0);
     ok(req != NULL, "HttpOpenRequest failed\n");
 
@@ -4181,7 +4181,7 @@ START_TEST(url)
         trace("emulated about test (to object)...\n");
         test_BindToObject(ABOUT_TEST, BINDTEST_EMULATE, S_OK);
 
-        trace("emulalated test reporting result in read...\n");
+        trace("emulated test reporting result in read...\n");
         test_BindToStorage(WINETEST_SYNC_TEST, BINDTEST_EMULATE, TYMED_ISTREAM);
 
         trace("file test...\n");

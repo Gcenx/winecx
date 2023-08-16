@@ -310,6 +310,9 @@ argumentsTest();
     ok(callAsExprTest.arguments === null, "callAsExprTest.arguments = " + callAsExprTest.arguments);
 })(1,2);
 
+tmp = ((function() { var f = function() {return this}; return (function() { return f(); }); })())();
+ok(tmp === this, "detached scope function call this != global this");
+
 tmp = (function() {1;})();
 ok(tmp === undefined, "tmp = " + tmp);
 tmp = eval("1;");
@@ -1556,6 +1559,7 @@ inobj.test2 = true;
 
 tmp = 0;
 for(iter in inobj) {
+    forinTestObj.prototype.test4 = true;
     arr[iter] = true;
     tmp++;
 }
@@ -1564,6 +1568,7 @@ ok(tmp === 3, "for..in tmp = " + tmp);
 ok(arr["test1"] === true, "arr[test1] !== true");
 ok(arr["test2"] === true, "arr[test2] !== true");
 ok(arr["test3"] === true, "arr[test3] !== true");
+ok(arr["test4"] !== true, "arr[test4] === true");
 
 ok((delete inobj.test1) === true, "delete inobj.test1 returned false");
 ok(!("test1" in inobj), "test1 is still in inobj after delete");

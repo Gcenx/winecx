@@ -19,8 +19,6 @@
 #ifndef __WINE_LMJOIN_H
 #define __WINE_LMJOIN_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -41,7 +39,5 @@ NET_API_STATUS NET_API_FUNCTION NetGetJoinInformation(
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

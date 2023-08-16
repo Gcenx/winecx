@@ -19,8 +19,6 @@
 #ifndef __WINE_DXDIAG_H
 #define __WINE_DXDIAG_H
 
-#include "wine/winheader_enter.h"
-
 #include <ole2.h>
 
 #ifdef __cplusplus
@@ -153,7 +151,5 @@ DECLARE_INTERFACE_(IDxDiagProvider,IUnknown)
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

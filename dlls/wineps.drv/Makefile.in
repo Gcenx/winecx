@@ -1,5 +1,7 @@
 MODULE    = wineps.drv
-IMPORTS   = user32 gdi32 winspool advapi32
+UNIXLIB   = wineps.so
+IMPORTS   = user32 gdi32 winspool advapi32 win32u
+UNIX_LIBS = -lwin32u -lm
 
 C_SRCS = \
 	afm.c \
@@ -45,6 +47,7 @@ C_SRCS = \
 	data/ZapfChancery_MediumItalic.c \
 	data/ZapfDingbats.c \
 	data/agl.c \
+	direction.c \
 	download.c \
 	driver.c \
 	encode.c \
@@ -55,11 +58,13 @@ C_SRCS = \
 	init.c \
 	pen.c \
 	ppd.c \
+	printproc.c \
 	ps.c \
 	text.c \
 	type1.c \
 	type1afm.c \
 	type42.c \
+	unixlib.c \
 	vertical.c
 
 RC_SRCS = wineps.rc

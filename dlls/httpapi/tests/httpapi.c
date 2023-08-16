@@ -108,7 +108,7 @@ static unsigned short add_url_v1(HANDLE queue)
         swprintf(url, ARRAY_SIZE(url), L"http://localhost:%u/", port);
         if (!(ret = HttpAddUrl(queue, url, NULL)))
             return port;
-        ok(ret == ERROR_SHARING_VIOLATION, "Failed to add %s, error %u.\n", debugstr_w(url), ret);
+        ok(ret == ERROR_SHARING_VIOLATION || ret == ERROR_ALREADY_EXISTS, "Failed to add %s, error %u.\n", debugstr_w(url), ret);
     }
     ok(0, "Failed to add url %s, error %u.\n", debugstr_w(url), ret);
     return 0;
@@ -228,16 +228,16 @@ static void test_v1_server(void)
     ret = send(s, req_text, strlen(req_text), 0);
     ok(ret == strlen(req_text), "send() returned %d.\n", ret);
 
-    ret = GetOverlappedResult(queue, &ovl, &ret_size, TRUE);
-    ok(ret, "Got error %lu.\n", GetLastError());
-    ok(ret_size > sizeof(*req), "Got size %lu.\n", ret_size);
-
     /* Various versions of Windows (observed on 64-bit Windows 8 and Windows 10
      * version 1507, but probably affecting others) suffer from a bug where the
      * kernel will report success before completely filling the buffer or
      * reporting the correct buffer size. Wait for a short interval to work
      * around this. */
     Sleep(100);
+
+    ret = GetOverlappedResult(queue, &ovl, &ret_size, TRUE);
+    ok(ret, "Got error %lu.\n", GetLastError());
+    ok(ret_size > sizeof(*req), "Got size %lu.\n", ret_size);
 
     ok(!req->Flags, "Got flags %#lx.\n", req->Flags);
     ok(req->ConnectionId, "Expected nonzero connection ID.\n");
@@ -572,27 +572,39 @@ static void test_v1_short_buffer(void)
     ok(ret == strlen(req_text), "send() returned %d.\n", ret);
 
     memset(req_buffer, 0xcc, sizeof(req_buffer));
+
+    ret_size = 1;
     ret = HttpReceiveHttpRequest(queue, HTTP_NULL_ID, 0, (HTTP_REQUEST *)req, sizeof(HTTP_REQUEST_V1) - 1, &ret_size, NULL);
     ok(ret == ERROR_INSUFFICIENT_BUFFER, "Got error %u.\n", ret);
+    ok(ret_size == 1 /* win < 10 */ || !ret_size, "Got size %lu.\n", ret_size);
+
+    ret_size = 1;
     ret = HttpReceiveHttpRequest(queue, HTTP_NULL_ID, 0, (HTTP_REQUEST *)req, sizeof(HTTP_REQUEST_V1), &ret_size, NULL);
     ok(ret == ERROR_MORE_DATA, "Got error %u.\n", ret);
     ok(ret_size > sizeof(*req), "Got size %lu.\n", ret_size);
+
     ok(!!req->ConnectionId, "Got connection ID %s.\n", wine_dbgstr_longlong(req->ConnectionId));
     ok(!!req->RequestId, "Got request ID %s.\n", wine_dbgstr_longlong(req->RequestId));
     ok(!req->Version.MajorVersion || req->Version.MajorVersion == 0xcccc /* < Vista */,
             "Got major version %u.\n", req->Version.MajorVersion);
     ok(!req->BytesReceived || req->BytesReceived == ((ULONGLONG)0xcccccccc << 32 | 0xcccccccc) /* < Vista */,
             "Got %s bytes.\n", wine_dbgstr_longlong(req->BytesReceived));
+    req_id = req->RequestId;
 
     /* At this point the request has been assigned a specific ID, and one cannot
      * receive it by calling with HTTP_NULL_ID. */
     ret = HttpReceiveHttpRequest(queue, HTTP_NULL_ID, 0, (HTTP_REQUEST *)req2, sizeof(req_buffer2), NULL, &ovl);
     ok(ret == ERROR_IO_PENDING, "Got error %u.\n", ret);
 
-    req_id = req->RequestId;
     memset(req_buffer, 0xcc, sizeof(req_buffer));
     ret = HttpReceiveHttpRequest(queue, req_id, 0, (HTTP_REQUEST *)req, ret_size - 1, &ret_size, NULL);
     ok(ret == ERROR_MORE_DATA, "Got error %u.\n", ret);
+    ok(req->RequestId == req_id, "Got request ID %s.\n", wine_dbgstr_longlong(req->RequestId));
+
+    memset(req_buffer, 0xcc, sizeof(req_buffer));
+    ret = HttpReceiveHttpRequest(queue, req_id, 0, (HTTP_REQUEST *)req, ret_size - 1, NULL, NULL);
+    ok(ret == ERROR_MORE_DATA, "Got error %u.\n", ret);
+    ok(req->RequestId == req_id, "Got request ID %s.\n", wine_dbgstr_longlong(req->RequestId));
 
     memset(req_buffer, 0xcc, sizeof(req_buffer));
     ret = HttpReceiveHttpRequest(queue, req_id, 0, (HTTP_REQUEST *)req, ret_size, &ret_size, NULL);
@@ -828,11 +840,15 @@ static void test_v1_entity_body(void)
     ok(ret_size == 2, "Got size %lu.\n", ret_size);
     ok(!memcmp(recv_body, "pi", 2), "Entity body didn't match.\n");
 
+    ret = HttpReceiveRequestEntityBody(queue, req->RequestId, 0, recv_body, 1, NULL, NULL);
+    ok(!ret, "Got error %u.\n", ret);
+    ok(!memcmp(recv_body, "n", 1), "Entity body didn't match.\n");
+
     ret_size = 0xdeadbeef;
     ret = HttpReceiveRequestEntityBody(queue, req->RequestId, 0, recv_body, 4, &ret_size, NULL);
     ok(!ret, "Got error %u.\n", ret);
-    ok(ret_size == 3, "Got size %lu.\n", ret_size);
-    ok(!memcmp(recv_body, "ng", 3), "Entity body didn't match.\n");
+    ok(ret_size == 2, "Got size %lu.\n", ret_size);
+    ok(!memcmp(recv_body, "g", 2), "Entity body didn't match.\n");
 
     ret_size = 0xdeadbeef;
     ret = HttpReceiveRequestEntityBody(queue, req->RequestId, 0, recv_body, sizeof(recv_body), &ret_size, NULL);
@@ -1083,6 +1099,145 @@ static void test_v1_unknown_tokens(void)
     ok(ret, "Failed to close queue handle, error %lu.\n", GetLastError());
 }
 
+static void test_v1_multiple_urls(void)
+{
+    char DECLSPEC_ALIGN(8) req_buffer[2048];
+    HTTP_REQUEST_V1 *req = (HTTP_REQUEST_V1 *)req_buffer;
+    unsigned short ports[4];
+    char req_text[200];
+    DWORD ret_size;
+    HANDLE queue;
+    SOCKET s;
+    unsigned int i;
+    int ret;
+
+    ret = HttpCreateHttpHandle(&queue, 0);
+    ok(!ret, "Got error %u.\n", ret);
+
+    for (i = 0; i < 4; ++i)
+        ports[i] = add_url_v1(queue);
+
+    for (i = 0; i < 4; ++i)
+    {
+        s = create_client_socket(ports[i]);
+        sprintf(req_text, simple_req, ports[i]);
+        ret = send(s, req_text, strlen(req_text), 0);
+        ok(ret == strlen(req_text), "send() returned %d.\n", ret);
+
+        memset(req_buffer, 0xcc, sizeof(req_buffer));
+        ret = HttpReceiveHttpRequest(queue, HTTP_NULL_ID, 0, (HTTP_REQUEST *)req, sizeof(req_buffer), &ret_size, NULL);
+        ok(!ret, "Got error %u.\n", ret);
+        ok(ret_size > sizeof(*req), "Got size %lu.\n", ret_size);
+
+        send_response_v1(queue, req->RequestId, s);
+        closesocket(s);
+    }
+
+    ret = CloseHandle(queue);
+    ok(ret, "Failed to close queue handle, error %lu.\n", GetLastError());
+}
+
+static void test_v1_relative_urls(void)
+{
+    char DECLSPEC_ALIGN(8) req_buffer[2048];
+    char relative_req[] =
+        "GET %s HTTP/1.1\r\n"
+        "Host: localhost:%u\r\n"
+        "Connection: keep-alive\r\n"
+        "User-Agent: WINE\r\n"
+        "\r\n";
+    HTTP_REQUEST_V1 *req = (HTTP_REQUEST_V1 *)req_buffer;
+    unsigned short port;
+    WCHAR url[50], url2[50];
+    char req_text[200];
+    DWORD ret_size;
+    HANDLE queue, queue2;
+    SOCKET s;
+    int ret;
+
+    ret = HttpCreateHttpHandle(&queue, 0);
+    ok(!ret, "Got error %u.\n", ret);
+    ret = HttpCreateHttpHandle(&queue2, 0);
+    ok(!ret, "Got error %u.\n", ret);
+
+    port = add_url_v1(queue);
+    swprintf(url2, ARRAY_SIZE(url2), L"http://localhost:%u/foobar/foo/", port);
+    ret = HttpAddUrl(queue2, url2, NULL);
+    ok(!ret, "Got error %u.\n", ret);
+
+    s = create_client_socket(port);
+    sprintf(req_text, simple_req, port);
+    ret = send(s, req_text, strlen(req_text), 0);
+    ok(ret == strlen(req_text), "send() returned %d.\n", ret);
+
+    memset(req_buffer, 0xcc, sizeof(req_buffer));
+    ret = HttpReceiveHttpRequest(queue, HTTP_NULL_ID, 0, (HTTP_REQUEST *)req, sizeof(req_buffer), &ret_size, NULL);
+    ok(!ret, "Got error %u.\n", ret);
+    ok(ret_size > sizeof(*req), "Got size %lu.\n", ret_size);
+
+    send_response_v1(queue, req->RequestId, s);
+
+    sprintf(req_text, relative_req, "/foobar/foo/bar", port);
+    ret = send(s, req_text, strlen(req_text), 0);
+    ok(ret == strlen(req_text), "send() returned %d.\n", ret);
+
+    memset(req_buffer, 0xcc, sizeof(req_buffer));
+    ret = HttpReceiveHttpRequest(queue2, HTTP_NULL_ID, 0, (HTTP_REQUEST *)req, sizeof(req_buffer), &ret_size, NULL);
+    ok(!ret, "Got error %u.\n", ret);
+    ok(ret_size > sizeof(*req), "Got size %lu.\n", ret_size);
+
+    send_response_v1(queue2, req->RequestId, s);
+
+    sprintf(req_text, relative_req, "/foobar/foo", port);
+    ret = send(s, req_text, strlen(req_text), 0);
+    ok(ret == strlen(req_text), "send() returned %d.\n", ret);
+
+    memset(req_buffer, 0xcc, sizeof(req_buffer));
+    ret = HttpReceiveHttpRequest(queue2, HTTP_NULL_ID, 0, (HTTP_REQUEST *)req, sizeof(req_buffer), &ret_size, NULL);
+    ok(!ret, "Got error %u.\n", ret);
+    ok(ret_size > sizeof(*req), "Got size %lu.\n", ret_size);
+
+    send_response_v1(queue2, req->RequestId, s);
+
+    sprintf(req_text, relative_req, "/foobar/foo?a=b", port);
+    ret = send(s, req_text, strlen(req_text), 0);
+    ok(ret == strlen(req_text), "send() returned %d.\n", ret);
+
+    memset(req_buffer, 0xcc, sizeof(req_buffer));
+    ret = HttpReceiveHttpRequest(queue2, HTTP_NULL_ID, 0, (HTTP_REQUEST *)req, sizeof(req_buffer), &ret_size, NULL);
+    ok(!ret, "Got error %u.\n", ret);
+    ok(ret_size > sizeof(*req), "Got size %lu.\n", ret_size);
+
+    send_response_v1(queue2, req->RequestId, s);
+
+    closesocket(s);
+    remove_url_v1(queue, port);
+    ret = HttpRemoveUrl(queue2, url2);
+    ok(!ret, "Got error %u.\n", ret);
+
+    swprintf(url, ARRAY_SIZE(url), L"http://localhost:%u/barfoo/", port);
+    ret = HttpAddUrl(queue, url, NULL);
+    ok(!ret, "Got error %u.\n", ret);
+    swprintf(url2, ARRAY_SIZE(url2), L"http://localhost:%u/barfoo/", port);
+    ret = HttpAddUrl(queue2, url2, NULL);
+    ok(ret == ERROR_ALREADY_EXISTS, "Got error %u.\n", ret);
+
+    swprintf(url2, ARRAY_SIZE(url2), L"http://localhost:%u/barfoo", port);
+    ret = HttpAddUrl(queue2, url2, NULL);
+    ok(ret == ERROR_ALREADY_EXISTS, "Got error %u.\n", ret);
+
+    swprintf(url2, ARRAY_SIZE(url2), L"http://localhost:%u/barfoo?a=b", port);
+    ret = HttpAddUrl(queue2, url2, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got error %u.\n", ret);
+
+    ret = CloseHandle(queue);
+    ok(ret, "Failed to close queue handle, error %lu.\n", GetLastError());
+    ret = CloseHandle(queue2);
+    ok(ret, "Failed to close queue handle, error %lu.\n", GetLastError());
+
+    return;
+}
+
 static void test_v1_urls(void)
 {
     char DECLSPEC_ALIGN(8) req_buffer[2048];
@@ -1216,6 +1371,122 @@ static void test_HttpCreateUrlGroup(void)
 
     ret = pHttpCloseServerSession(session);
     ok(!ret, "Unexpected return value %u.\n", ret);
+}
+
+static void test_v2_bound_port(void)
+{
+    static const HTTPAPI_VERSION version = {2, 0};
+    struct sockaddr_in sockaddr;
+    HTTP_SERVER_SESSION_ID session;
+    HTTP_BINDING_INFO binding;
+    HTTP_URL_GROUP_ID group;
+    unsigned short port;
+    WCHAR url[50];
+    HANDLE queue, dummy_queue;
+    int ret;
+    SOCKET s, s2;
+
+    ret = pHttpCreateServerSession(version, &session, 0);
+    ok(!ret, "Failed to create session, error %u.\n", ret);
+    ret = pHttpCreateUrlGroup(session, &group, 0);
+    ok(!ret, "Failed to create URL group, error %u.\n", ret);
+
+    ret = pHttpCreateRequestQueue(version, NULL, NULL, 0, &queue);
+    ok(!ret, "Failed to create request queue, error %u.\n", ret);
+    ret = pHttpCreateRequestQueue(version, NULL, NULL, 0, &dummy_queue);
+    ok(!ret, "Failed to create request queue, error %u.\n", ret);
+    binding.Flags.Present = 1;
+    binding.RequestQueueHandle = queue;
+    ret = pHttpSetUrlGroupProperty(group, HttpServerBindingProperty, &binding, sizeof(binding));
+    ok(!ret, "Failed to bind request queue, error %u.\n", ret);
+
+    s2 = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr.sin_family = AF_INET;
+    sockaddr.sin_addr.S_un.S_addr = inet_addr("127.0.0.1");
+    for (port = 50000; port < 51000; ++port)
+    {
+        sockaddr.sin_port = htons(port);
+        ret = bind(s2, (struct sockaddr *)&sockaddr, sizeof(sockaddr));
+        if (!ret)
+            break;
+    }
+    ok(!ret, "Failed to bind to port\n");
+    swprintf(url, ARRAY_SIZE(url), L"http://localhost:%u/", port);
+    ret = pHttpAddUrlToUrlGroup(group, url, 0xdeadbeef, 0);
+    ok(ret == ERROR_SHARING_VIOLATION, "Unexpected failure adding %s, error %u.\n", debugstr_w(url), ret);
+    shutdown(s2, SD_BOTH);
+    closesocket(s2);
+
+    binding.RequestQueueHandle = dummy_queue;
+    ret = pHttpSetUrlGroupProperty(group, HttpServerBindingProperty, &binding, sizeof(binding));
+    ok(!ret, "Failed to rebind request queue, error %u.\n", ret);
+
+    s = socket(AF_INET, SOCK_STREAM, 0);
+    ret = connect(s, (struct sockaddr *)&sockaddr, sizeof(sockaddr));
+    ok(ret, "Connecting to socket succeeded, %lu.\n", GetLastError());
+    ok(GetLastError() == WSAECONNREFUSED, "Unexpected error connecting to socket, %lu.\n", GetLastError());
+
+    closesocket(s);
+    ret = pHttpCloseRequestQueue(dummy_queue);
+    ok(!ret, "Failed to close queue handle, error %u.\n", ret);
+    ret = pHttpCloseRequestQueue(queue);
+    ok(!ret, "Failed to close queue handle, error %u.\n", ret);
+    ret = pHttpCloseUrlGroup(group);
+    ok(!ret, "Failed to close group, error %u.\n", ret);
+    ret = pHttpCloseServerSession(session);
+    ok(!ret, "Failed to close group, error %u.\n", ret);
+}
+
+static void test_v2_queue_after_url(void)
+{
+    char DECLSPEC_ALIGN(8) req_buffer[2048];
+    HTTP_REQUEST_V2 *reqv2 = (HTTP_REQUEST_V2 *)req_buffer;
+    static const HTTPAPI_VERSION version = {2, 0};
+    HTTP_REQUEST_V1 *req = &reqv2->s;
+    HTTP_SERVER_SESSION_ID session;
+    HTTP_BINDING_INFO binding;
+    HTTP_URL_GROUP_ID group;
+    unsigned short port;
+    char req_text[100];
+    HANDLE queue;
+    int ret;
+    SOCKET s;
+
+    ret = pHttpCreateServerSession(version, &session, 0);
+    ok(!ret, "Failed to create session, error %u.\n", ret);
+    ret = pHttpCreateUrlGroup(session, &group, 0);
+    ok(!ret, "Failed to create URL group, error %u.\n", ret);
+
+    port = add_url_v2(group);
+
+    ret = pHttpCreateRequestQueue(version, NULL, NULL, 0, &queue);
+    ok(!ret, "Failed to create request queue, error %u.\n", ret);
+    binding.Flags.Present = 1;
+    binding.RequestQueueHandle = queue;
+    ret = pHttpSetUrlGroupProperty(group, HttpServerBindingProperty, &binding, sizeof(binding));
+    ok(!ret, "Failed to bind request queue, error %u.\n", ret);
+
+    s = create_client_socket(port);
+
+    sprintf(req_text, simple_req, port);
+    ret = send(s, req_text, strlen(req_text), 0);
+    ok(ret == strlen(req_text), "send() returned %d.\n", ret);
+
+    ret = HttpReceiveHttpRequest(queue, HTTP_NULL_ID, 0, (HTTP_REQUEST *)req, sizeof(req_buffer), NULL, NULL);
+    ok(!ret, "Got error %u.\n", ret);
+
+    ok(req->BytesReceived == strlen(req_text), "Got %s bytes.\n", wine_dbgstr_longlong(req->BytesReceived));
+
+    ret = remove_url_v2(group, port);
+    ok(!ret, "Got error %u.\n", ret);
+
+    closesocket(s);
+    ret = pHttpCloseRequestQueue(queue);
+    ok(!ret, "Failed to close queue handle, error %u.\n", ret);
+    ret = pHttpCloseUrlGroup(group);
+    ok(!ret, "Failed to close group, error %u.\n", ret);
+    ret = pHttpCloseServerSession(session);
+    ok(!ret, "Failed to close group, error %u.\n", ret);
 }
 
 static void test_v2_server(void)
@@ -1527,6 +1798,8 @@ START_TEST(httpapi)
     test_v1_bad_request();
     test_v1_cooked_url();
     test_v1_unknown_tokens();
+    test_v1_multiple_urls();
+    test_v1_relative_urls();
     test_v1_urls();
 
     ret = HttpTerminate(HTTP_INITIALIZE_SERVER, NULL);
@@ -1538,6 +1811,8 @@ START_TEST(httpapi)
         test_HttpCreateServerSession();
         test_HttpCreateUrlGroup();
         test_v2_server();
+        test_v2_queue_after_url();
+        test_v2_bound_port();
         test_v2_completion_port();
 
         ret = HttpTerminate(HTTP_INITIALIZE_SERVER, NULL);

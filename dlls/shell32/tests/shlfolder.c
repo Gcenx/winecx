@@ -40,7 +40,6 @@
 #include "wine/test.h"
 
 #include <initguid.h>
-DEFINE_GUID(IID_IParentAndItem, 0xB3A4B685, 0xB685, 0x4805, 0x99,0xD9, 0x5D,0xEA,0xD2,0x87,0x32,0x36);
 DEFINE_GUID(CLSID_ShellDocObjView, 0xe7e4bc40, 0xe76a, 0x11ce, 0xa9,0xbb, 0x00,0xaa,0x00,0x4a,0xe8,0x37);
 
 static HRESULT (WINAPI *pSHCreateItemFromIDList)(PCIDLIST_ABSOLUTE pidl, REFIID riid, void **ppv);
@@ -80,6 +79,37 @@ static WCHAR *make_wstr(const char *str)
 
     MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
     return ret;
+}
+
+static BOOL check_window_exists(const char *name)
+{
+    HWND window = NULL;
+    int i;
+
+    for (i = 0; i < 10; i++)
+    {
+        if ((window = FindWindowA("ExplorerWClass", name))
+            || (window = FindWindowA("CabinetWClass", name)))
+        {
+            SendMessageA(window, WM_SYSCOMMAND, SC_CLOSE, 0);
+            break;
+        }
+
+        Sleep(100);
+    }
+
+    if (!window)
+        return FALSE;
+
+    for (i = 0; i < 10; i++)
+    {
+        if (!IsWindow(window))
+            break;
+
+        Sleep(100);
+    }
+
+    return TRUE;
 }
 
 static void init_function_pointers(void)
@@ -169,8 +199,8 @@ static struct
     {{'c',':','\\',0}, S_OK},
     {{'c',':','\\','\\',0}, E_INVALIDARG, 1},
     {{'c',':','\\','f','a','k','e',0}, 0x80070002}, /* ERROR_FILE_NOT_FOUND */
-    {{'c',':','f','a','k','e',0}, E_INVALIDARG, 1},
-    {{'c',':','/',0}, E_INVALIDARG, 1},
+    {{'c',':','f','a','k','e',0}, E_INVALIDARG},
+    {{'c',':','/',0}, E_INVALIDARG},
     {{'c',':','\\','w','i','n','d','o','w','s',0}, S_OK},
     {{'c',':','\\','w','i','n','d','o','w','s','\\',0}, S_OK},
     {{'c',':','\\','w','i','n','d','o','w','s','\\','.',0}, E_INVALIDARG, 1},
@@ -926,6 +956,8 @@ static void test_GetAttributesOf(void)
     static WCHAR cTestDirW[] = {'t','e','s','t','d','i','r',0};
     IShellFolder *IDesktopFolder, *testIShellFolder;
     ITEMIDLIST *newPIDL;
+    IEnumIDList *list;
+    ULONG fetch;
     int len;
 
     hr = SHGetDesktopFolder(&psfDesktop);
@@ -1040,6 +1072,57 @@ static void test_GetAttributesOf(void)
 
     Cleanup();
 
+    /* test Control Panel elements */
+    hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL,
+            (WCHAR *)L"::{21EC2020-3AEA-1069-A2DD-08002B30309D}", NULL, &newPIDL, 0);
+    ok(hr == S_OK, "ParseDisplayName failed %08lx\n", hr);
+    hr = IShellFolder_BindToObject(IDesktopFolder, newPIDL, NULL,
+            &IID_IShellFolder, (void**)&testIShellFolder);
+    ok(hr == S_OK, "BindToObject failed %08lx\n", hr);
+    ILFree(newPIDL);
+
+    hr = IShellFolder_EnumObjects(testIShellFolder, NULL, SHCONTF_NONFOLDERS, &list);
+    ok(hr == S_OK, "EnumObjects failed %08lx\n", hr);
+
+    while (IEnumIDList_Next(list, 1, &newPIDL, &fetch) == S_OK)
+    {
+        WCHAR name[256];
+        STRRET strret;
+
+        hr = IShellFolder_GetDisplayNameOf(testIShellFolder, newPIDL, SHGDN_FORPARSING, &strret);
+        ok(hr == S_OK, "GetDisplayNameOf failed %08lx\n", hr);
+        StrRetToBufW(&strret, newPIDL, name, ARRAY_SIZE(name));
+
+        dwFlags = ~0;
+        hr = IShellFolder_GetAttributesOf(testIShellFolder, 1,
+                (LPCITEMIDLIST*)&newPIDL, &dwFlags);
+        ok(hr == S_OK, "ControlPanel->GetAttributesOf failed %08lx\n", hr);
+        ok(dwFlags == SFGAO_CANLINK ||
+                broken(!wcsncmp(L"::{26EE0668-A00A-44D7-9371-BEB064C98683}\\", name, 41)
+                    && dwFlags == SFGAO_VALIDATE),
+                "%s dwFlags = %08lx\n", debugstr_w(name), dwFlags);
+        ILFree(newPIDL);
+    }
+    IEnumIDList_Release(list);
+
+    hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL,
+            (WCHAR*)L"c:\\", NULL, &newPIDL, 0);
+    ok(hr == S_OK, "ParseDisplayName failed %08lx\n", hr);
+
+    dwFlags = ~0;
+    hr = IShellFolder_GetAttributesOf(testIShellFolder, 1,
+            (LPCITEMIDLIST*)&newPIDL, &dwFlags);
+    ok(hr == S_OK, "ControlPanel->GetAttributesOf failed %08lx\n", hr);
+    ok(dwFlags == SFGAO_VALIDATE, "dwFlags = %08lx\n", dwFlags);
+
+    dwFlags = ~0 & ~SFGAO_VALIDATE;
+    hr = IShellFolder_GetAttributesOf(testIShellFolder, 1,
+            (LPCITEMIDLIST*)&newPIDL, &dwFlags);
+    ok(hr == S_OK, "ControlPanel->GetAttributesOf failed %08lx\n", hr);
+    ok(dwFlags == SFGAO_CANLINK, "dwFlags = %08lx\n", dwFlags);
+
+    ILFree(newPIDL);
+    IShellFolder_Release(testIShellFolder);
     IShellFolder_Release(IDesktopFolder);
 }
 
@@ -4433,6 +4516,55 @@ static void test_contextmenu(IContextMenu *menu, BOOL background)
     DestroyMenu(hmenu);
 }
 
+static void test_IShellItemImageFactory(void)
+{
+    HRESULT ret;
+    IShellItem *shellitem;
+    IShellItemImageFactory *siif;
+    LPITEMIDLIST pidl_desktop = NULL;
+
+    ret = SHGetSpecialFolderLocation(NULL, CSIDL_DESKTOP, &pidl_desktop);
+    ok(ret == S_OK, "SHGetSpecialFolderLocation returned 0x%08lx\n", ret);
+
+    ret = pSHCreateShellItem(NULL, NULL, pidl_desktop, &shellitem);
+    ILFree(pidl_desktop);
+    ok(SUCCEEDED(ret), "SHCreateShellItem returned 0x%08lx\n", ret);
+
+    ret = IShellItem_QueryInterface(shellitem, &IID_IShellItemImageFactory, (void **)&siif);
+    IShellItem_Release(shellitem);
+    ok(ret == S_OK, "QueryInterface returned 0x%08lx\n", ret);
+    if (SUCCEEDED(ret))
+    {
+        HBITMAP hbm = NULL;
+        SIZE size = {32, 32};
+
+        ret = IShellItemImageFactory_GetImage(siif, size, SIIGBF_BIGGERSIZEOK, &hbm);
+        IShellItemImageFactory_Release(siif);
+        ok(ret == S_OK, "GetImage returned %lx\n", ret);
+        ok(FAILED(ret) == !hbm, "result = %lx but bitmap = %p\n", ret, hbm);
+
+        if (SUCCEEDED(ret) && hbm)
+        {
+            DIBSECTION dib;
+            int infosz;
+
+            infosz = GetObjectW(hbm, sizeof(dib), &dib);
+            ok(infosz == sizeof(dib), "Expected GetObjectW to return sizeof(DIBSECTION), got %d\n", infosz);
+
+            /* Bitmap must have 32-bit pixels regardless of original image format */
+            ok(dib.dsBm.bmPlanes == 1, "Expected bmPlanes to be %d, got %d\n", 1, dib.dsBm.bmPlanes);
+            ok(dib.dsBm.bmBitsPixel == 32, "Expected bmBitsPixel to be %d, got %d\n", 32, dib.dsBm.bmBitsPixel);
+
+            /* DIB must be truecolor (32bppRGB/32bppARGB) regardless of original image format */
+            ok(dib.dsBmih.biPlanes == 1, "Expected biPlanes to be %d, got %d\n", 1, dib.dsBmih.biPlanes);
+            ok(dib.dsBmih.biBitCount == 32, "Expected biBitCount to be %d, got %d\n", 32, dib.dsBmih.biBitCount);
+            ok(dib.dsBmih.biCompression == BI_RGB, "Expected biCompression to be BI_RGB, got %lu\n", dib.dsBmih.biCompression);
+
+            DeleteObject(hbm);
+        }
+    }
+}
+
 static void test_GetUIObject(void)
 {
     IShellFolder *psf_desktop;
@@ -5001,7 +5133,7 @@ static void test_SHChangeNotify(BOOL test_new_delivery)
     entries[0].fRecursive = TRUE;
 
     notifyID = SHChangeNotifyRegister(wnd, !test_new_delivery ? SHCNRF_ShellLevel : SHCNRF_ShellLevel|SHCNRF_NewDelivery,
-            SHCNE_ALLEVENTS, WM_USER_NOTIFY, 1, entries);
+            SHCNE_MKDIR | SHCNE_CREATE | SHCNE_RMDIR, WM_USER_NOTIFY, 1, entries);
     ok(notifyID != 0, "Failed to register a window for change notifications\n");
 
     for (i = 0; i < ARRAY_SIZE(chnotify_tests); ++i)
@@ -5361,6 +5493,63 @@ static void test_SHGetSetFolderCustomSettings(void)
     RemoveDirectoryW(pathW);
 }
 
+static void test_SHOpenFolderAndSelectItems(void)
+{
+    PIDLIST_ABSOLUTE folder, items[2];
+    HRESULT hr;
+
+    /* NULL folder */
+    hr = SHOpenFolderAndSelectItems(NULL, 0, NULL, 0);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    /* Open and select folder without child items */
+    folder = ILCreateFromPathW(L"C:\\Windows\\System32");
+    hr = SHOpenFolderAndSelectItems(folder, 0, NULL, 0);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(check_window_exists("Windows"), "Failed to create window.\n");
+    ILFree(folder);
+
+    /* Open folder and select one child item */
+    folder = ILCreateFromPathW(L"C:\\Windows");
+    items[0] = ILCreateFromPathW(L"C:\\Windows\\System32");
+    hr = SHOpenFolderAndSelectItems(folder, 1, (PCUITEMID_CHILD_ARRAY)items, 0);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(check_window_exists("Windows"), "Failed to create window.\n");
+    ILFree(items[0]);
+    ILFree(folder);
+
+    /* Open folder and select two child items */
+    folder = ILCreateFromPathW(L"C:\\Windows");
+    items[0] = ILCreateFromPathW(L"C:\\Windows\\System32");
+    items[1] = ILCreateFromPathW(L"C:\\Windows\\Resources");
+    hr = SHOpenFolderAndSelectItems(folder, 2, (PCUITEMID_CHILD_ARRAY)items, 0);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(check_window_exists("Windows"), "Failed to create window.\n");
+    ILFree(items[1]);
+    ILFree(items[0]);
+    ILFree(folder);
+
+    /* Open folder and select one child item with OFASI_EDIT */
+    folder = ILCreateFromPathW(L"C:\\Windows");
+    items[0] = ILCreateFromPathW(L"C:\\Windows\\System32");
+    hr = SHOpenFolderAndSelectItems(folder, 1, (PCUITEMID_CHILD_ARRAY)items, OFASI_EDIT);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(check_window_exists("Windows"), "Failed to create window.\n");
+    ILFree(items[0]);
+    ILFree(folder);
+
+    /* Open folder and select two child items and OFASI_EDIT */
+    folder = ILCreateFromPathW(L"C:\\Windows");
+    items[0] = ILCreateFromPathW(L"C:\\Windows\\System32");
+    items[1] = ILCreateFromPathW(L"C:\\Windows\\Resources");
+    hr = SHOpenFolderAndSelectItems(folder, 2, (PCUITEMID_CHILD_ARRAY)items, 0);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(check_window_exists("Windows"), "Failed to create window.\n");
+    ILFree(items[1]);
+    ILFree(items[0]);
+    ILFree(folder);
+}
+
 START_TEST(shlfolder)
 {
     init_function_pointers();
@@ -5385,6 +5574,7 @@ START_TEST(shlfolder)
     test_SHCreateShellItemArray();
     test_ShellItemArrayEnumItems();
     test_desktop_IPersist();
+    test_IShellItemImageFactory();
     test_GetUIObject();
     test_CreateViewObject_contextmenu();
     test_SHSimpleIDListFromPath();
@@ -5405,6 +5595,7 @@ START_TEST(shlfolder)
     test_GetDefaultSearchGUID();
     test_SHLimitInputEdit();
     test_SHGetSetFolderCustomSettings();
+    test_SHOpenFolderAndSelectItems();
 
     OleUninitialize();
 }

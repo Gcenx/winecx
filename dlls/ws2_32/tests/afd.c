@@ -33,16 +33,16 @@
 
 #define TIMEOUT_INFINITE _I64_MAX
 
-static void tcp_socketpair(SOCKET *src, SOCKET *dst)
+static void tcp_socketpair_flags(SOCKET *src, SOCKET *dst, DWORD flags)
 {
     SOCKET server = INVALID_SOCKET;
     struct sockaddr_in addr;
     int len, ret;
 
-    *src = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED);
+    *src = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, flags);
     ok(*src != INVALID_SOCKET, "failed to create socket, error %u\n", WSAGetLastError());
 
-    server = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED);
+    server = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, flags);
     ok(server != INVALID_SOCKET, "failed to create socket, error %u\n", WSAGetLastError());
 
     memset(&addr, 0, sizeof(addr));
@@ -68,12 +68,32 @@ static void tcp_socketpair(SOCKET *src, SOCKET *dst)
     closesocket(server);
 }
 
+static void tcp_socketpair(SOCKET *src, SOCKET *dst)
+{
+    tcp_socketpair_flags(src, dst, WSA_FLAG_OVERLAPPED);
+}
+
 static void set_blocking(SOCKET s, ULONG blocking)
 {
     int ret;
     blocking = !blocking;
     ret = ioctlsocket(s, FIONBIO, &blocking);
     ok(!ret, "got error %u\n", WSAGetLastError());
+}
+
+/* Set the linger timeout to zero and close the socket. This will trigger an
+ * RST on the connection on Windows as well as on Unix systems. */
+static void close_with_rst(SOCKET s)
+{
+    static const struct linger linger = {.l_onoff = 1};
+    int ret;
+
+    SetLastError(0xdeadbeef);
+    ret = setsockopt(s, SOL_SOCKET, SO_LINGER, (const char *)&linger, sizeof(linger));
+    ok(!ret, "got %d\n", ret);
+    ok(!GetLastError(), "got error %lu\n", GetLastError());
+
+    closesocket(s);
 }
 
 static void test_open_device(void)
@@ -153,19 +173,32 @@ static void test_poll(void)
     struct afd_poll_params *in_params = (struct afd_poll_params *)in_buffer;
     struct afd_poll_params *out_params = (struct afd_poll_params *)out_buffer;
     int large_buffer_size = 1024 * 1024;
+    GUID acceptex_guid = WSAID_ACCEPTEX;
     SOCKET client, server, listener;
+    OVERLAPPED overlapped = {0};
+    HANDLE event, afd_handle;
+    LPFN_ACCEPTEX pAcceptEx;
     struct sockaddr_in addr;
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING string;
+    DWORD size, flags = 0;
     char *large_buffer;
     IO_STATUS_BLOCK io;
     LARGE_INTEGER now;
     ULONG params_size;
-    HANDLE event;
+    WSABUF wsabuf;
     int ret, len;
 
     large_buffer = malloc(large_buffer_size);
     memset(in_buffer, 0, sizeof(in_buffer));
     memset(out_buffer, 0, sizeof(out_buffer));
     event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    overlapped.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+
+    RtlInitUnicodeString(&string, L"\\Device\\Afd\\deadbeef");
+    InitializeObjectAttributes(&attr, &string, 0, NULL, NULL);
+    ret = NtOpenFile(&afd_handle, SYNCHRONIZE, &attr, &io, 0, 0);
+    ok(!ret, "got %#x\n", ret);
 
     listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     ret = bind(listener, (const struct sockaddr *)&bind_addr, sizeof(bind_addr));
@@ -175,6 +208,10 @@ static void test_poll(void)
     len = sizeof(addr);
     ret = getsockname(listener, (struct sockaddr *)&addr, &len);
     ok(!ret, "got error %u\n", WSAGetLastError());
+
+    ret = WSAIoctl(listener, SIO_GET_EXTENSION_FUNCTION_POINTER, &acceptex_guid, sizeof(acceptex_guid),
+            &pAcceptEx, sizeof(pAcceptEx), &size, NULL, NULL);
+    ok(!ret, "failed to get AcceptEx, error %u\n", WSAGetLastError());
 
     params_size = offsetof(struct afd_poll_params, sockets[1]);
     in_params->count = 1;
@@ -220,7 +257,7 @@ static void test_poll(void)
     in_params->sockets[0].status = 0xdeadbeef;
 
     memset(out_params, 0, params_size);
-    ret = NtDeviceIoControlFile((HANDLE)listener, event, NULL, NULL, &io,
+    ret = NtDeviceIoControlFile(afd_handle, event, NULL, NULL, &io,
             IOCTL_AFD_POLL, in_params, params_size, out_params, params_size);
     ok(!ret, "got %#x\n", ret);
     ok(!io.Status, "got %#lx\n", io.Status);
@@ -234,7 +271,7 @@ static void test_poll(void)
     NtQuerySystemTime(&now);
     in_params->timeout = now.QuadPart;
 
-    ret = NtDeviceIoControlFile((HANDLE)listener, event, NULL, NULL, &io,
+    ret = NtDeviceIoControlFile(afd_handle, event, NULL, NULL, &io,
             IOCTL_AFD_POLL, in_params, params_size, out_params, params_size);
     ok(ret == STATUS_PENDING, "got %#x\n", ret);
     ret = WaitForSingleObject(event, 100);
@@ -328,6 +365,50 @@ static void test_poll(void)
 
     check_poll(client, event, AFD_POLL_WRITE | AFD_POLL_CONNECT | AFD_POLL_READ);
     check_poll(server, event, AFD_POLL_CONNECT);
+
+    /* Test sending data while there is a pending WSARecv(). */
+
+    in_params->timeout = -1000 * 10000;
+    in_params->count = 1;
+    in_params->sockets[0].socket = server;
+    in_params->sockets[0].flags = AFD_POLL_READ;
+
+    ret = NtDeviceIoControlFile((HANDLE)server, event, NULL, NULL, &io,
+            IOCTL_AFD_POLL, in_params, params_size, out_params, params_size);
+    ok(ret == STATUS_PENDING, "got %#x\n", ret);
+
+    wsabuf.buf = large_buffer;
+    wsabuf.len = 1;
+    ret = WSARecv(server, &wsabuf, 1, NULL, &flags, &overlapped, NULL);
+    ok(ret == -1, "got %d\n", ret);
+    ok(WSAGetLastError() == ERROR_IO_PENDING, "got error %u\n", WSAGetLastError());
+
+    ret = send(client, "a", 1, 0);
+    ok(ret == 1, "got %d\n", ret);
+
+    ret = WaitForSingleObject(overlapped.hEvent, 200);
+    ok(!ret, "got %d\n", ret);
+    ret = GetOverlappedResult((HANDLE)server, &overlapped, &size, FALSE);
+    ok(ret, "got error %lu\n", GetLastError());
+    ok(size == 1, "got size %lu\n", size);
+
+    ret = WaitForSingleObject(event, 0);
+    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+
+    ret = send(client, "a", 1, 0);
+    ok(ret == 1, "got %d\n", ret);
+
+    ret = WaitForSingleObject(event, 200);
+    ok(!ret, "got %#x\n", ret);
+    ok(!io.Status, "got %#lx\n", io.Status);
+    ok(io.Information == offsetof(struct afd_poll_params, sockets[1]), "got %#Ix\n", io.Information);
+    ok(out_params->count == 1, "got count %u\n", out_params->count);
+    ok(out_params->sockets[0].socket == server, "got socket %#Ix\n", out_params->sockets[0].socket);
+    ok(out_params->sockets[0].flags == AFD_POLL_READ, "got flags %#x\n", out_params->sockets[0].flags);
+    ok(!out_params->sockets[0].status, "got status %#x\n", out_params->sockets[0].status);
+
+    ret = recv(server, large_buffer, 1, 0);
+    ok(ret == 1, "got %d\n", ret);
 
     /* Test sending out-of-band data. */
 
@@ -625,6 +706,87 @@ static void test_poll(void)
 
     closesocket(client);
 
+    /* Test connecting while there is a pending AcceptEx(). */
+
+    in_params->timeout = -1000 * 10000;
+    in_params->count = 1;
+    in_params->sockets[0].socket = listener;
+    in_params->sockets[0].flags = AFD_POLL_ACCEPT;
+
+    ret = NtDeviceIoControlFile((HANDLE)listener, event, NULL, NULL, &io,
+            IOCTL_AFD_POLL, in_params, params_size, out_params, params_size);
+    ok(ret == STATUS_PENDING, "got %#x\n", ret);
+
+    server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ret = pAcceptEx(listener, server, large_buffer, 0, 0, sizeof(struct sockaddr_in) + 16, NULL, &overlapped);
+    ok(!ret, "got %d\n", ret);
+    ok(WSAGetLastError() == ERROR_IO_PENDING, "got error %u\n", WSAGetLastError());
+
+    client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ret = connect(client, (struct sockaddr *)&addr, sizeof(addr));
+    ok(!ret, "got error %u\n", WSAGetLastError());
+
+    ret = WaitForSingleObject(overlapped.hEvent, 200);
+    ok(!ret, "got %d\n", ret);
+    ret = GetOverlappedResult((HANDLE)listener, &overlapped, &size, FALSE);
+    ok(ret, "got error %lu\n", GetLastError());
+    ok(!size, "got size %lu\n", size);
+
+    ret = WaitForSingleObject(event, 0);
+    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+
+    closesocket(server);
+    closesocket(client);
+
+    client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ret = connect(client, (struct sockaddr *)&addr, sizeof(addr));
+    ok(!ret, "got error %u\n", WSAGetLastError());
+
+    ret = WaitForSingleObject(event, 200);
+    ok(!ret, "got %#x\n", ret);
+    ok(!io.Status, "got %#lx\n", io.Status);
+    ok(io.Information == offsetof(struct afd_poll_params, sockets[1]), "got %#Ix\n", io.Information);
+    ok(out_params->count == 1, "got count %u\n", out_params->count);
+    ok(out_params->sockets[0].socket == listener, "got socket %#Ix\n", out_params->sockets[0].socket);
+    ok(out_params->sockets[0].flags == AFD_POLL_ACCEPT, "got flags %#x\n", out_params->sockets[0].flags);
+    ok(!out_params->sockets[0].status, "got status %#x\n", out_params->sockets[0].status);
+
+    server = accept(listener, NULL, NULL);
+    ok(server != -1, "got error %u\n", WSAGetLastError());
+    closesocket(server);
+    closesocket(client);
+
+    /* Verify that CONNECT and WRITE are signaled simultaneously. */
+
+    client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    in_params->timeout = -1000 * 10000;
+    in_params->count = 1;
+    in_params->sockets[0].socket = client;
+    in_params->sockets[0].flags = ~0;
+    params_size = offsetof(struct afd_poll_params, sockets[1]);
+
+    ret = NtDeviceIoControlFile((HANDLE)client, event, NULL, NULL, &io,
+            IOCTL_AFD_POLL, in_params, params_size, out_params, params_size);
+    ok(ret == STATUS_PENDING, "got %#x\n", ret);
+
+    ret = connect(client, (struct sockaddr *)&addr, sizeof(addr));
+    ok(!ret, "got error %u\n", WSAGetLastError());
+
+    ret = WaitForSingleObject(event, 200);
+    ok(!ret, "got %#x\n", ret);
+    ok(!io.Status, "got %#lx\n", io.Status);
+    ok(io.Information == offsetof(struct afd_poll_params, sockets[1]), "got %#Ix\n", io.Information);
+    ok(out_params->count == 1, "got count %u\n", out_params->count);
+    ok(out_params->sockets[0].flags == (AFD_POLL_CONNECT | AFD_POLL_WRITE),
+            "got flags %#x\n", out_params->sockets[0].flags);
+    ok(!out_params->sockets[0].status, "got status %#x\n", out_params->sockets[0].status);
+
+    server = accept(listener, NULL, NULL);
+    ok(server != -1, "got error %u\n", WSAGetLastError());
+    closesocket(server);
+    closesocket(client);
+
     closesocket(listener);
 
     /* Test UDP sockets. */
@@ -665,6 +827,37 @@ static void test_poll(void)
     ok(out_params->sockets[0].socket == client, "got socket %#Ix\n", out_params->sockets[0].socket);
     ok(out_params->sockets[0].flags == AFD_POLL_READ, "got flags %#x\n", out_params->sockets[0].flags);
     ok(!out_params->sockets[0].status, "got status %#x\n", out_params->sockets[0].status);
+
+    in_params->timeout = -1000 * 10000;
+    in_params->count = 1;
+    in_params->sockets[0].socket = server;
+    in_params->sockets[0].flags = AFD_POLL_CONNECT;
+    params_size = offsetof(struct afd_poll_params, sockets[1]);
+
+    ret = NtDeviceIoControlFile((HANDLE)server, event, NULL, NULL, &io,
+            IOCTL_AFD_POLL, in_params, params_size, out_params, params_size);
+    ok(ret == STATUS_PENDING, "got %#x\n", ret);
+
+    ret = connect(server, (struct sockaddr *)&addr, sizeof(addr));
+    ok(!ret, "got error %lu\n", GetLastError());
+
+    ret = WaitForSingleObject(event, 100);
+    todo_wine ok(!ret, "got %#x\n", ret);
+    if (!ret)
+    {
+        ok(!io.Status, "got %#lx\n", io.Status);
+        ok(io.Information == offsetof(struct afd_poll_params, sockets[1]), "got %#Ix\n", io.Information);
+        ok(out_params->count == 1, "got count %u\n", out_params->count);
+        ok(out_params->sockets[0].socket == server, "got socket %#Ix\n", out_params->sockets[0].socket);
+        ok(out_params->sockets[0].flags == AFD_POLL_CONNECT, "got flags %#x\n", out_params->sockets[0].flags);
+        ok(!out_params->sockets[0].status, "got status %#x\n", out_params->sockets[0].status);
+    }
+    else
+    {
+        CancelIo((HANDLE)server);
+        ret = WaitForSingleObject(event, 100);
+        ok(!ret, "wait timed out\n");
+    }
 
     closesocket(client);
     closesocket(server);
@@ -745,8 +938,11 @@ static void test_poll(void)
     closesocket(client);
     closesocket(server);
 
+    CloseHandle(overlapped.hEvent);
     CloseHandle(event);
     free(large_buffer);
+
+    CloseHandle(afd_handle);
 }
 
 struct poll_exclusive_thread_cb_ctx
@@ -1175,6 +1371,50 @@ static void test_poll_completion_port(void)
     CloseHandle(event);
 }
 
+static void test_poll_reset(void)
+{
+    char in_buffer[offsetof(struct afd_poll_params, sockets[3])];
+    char out_buffer[offsetof(struct afd_poll_params, sockets[3])];
+    struct afd_poll_params *in_params = (struct afd_poll_params *)in_buffer;
+    struct afd_poll_params *out_params = (struct afd_poll_params *)out_buffer;
+    SOCKET client, server;
+    IO_STATUS_BLOCK io;
+    ULONG params_size;
+    HANDLE event;
+    int ret;
+
+    memset(in_buffer, 0, sizeof(in_buffer));
+    memset(out_buffer, 0, sizeof(out_buffer));
+    event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    tcp_socketpair(&client, &server);
+
+    in_params->timeout = -1000 * 10000;
+    in_params->count = 1;
+    in_params->sockets[0].socket = client;
+    in_params->sockets[0].flags = ~(AFD_POLL_WRITE | AFD_POLL_CONNECT);
+    params_size = offsetof(struct afd_poll_params, sockets[1]);
+
+    ret = NtDeviceIoControlFile((HANDLE)client, event, NULL, NULL, &io,
+            IOCTL_AFD_POLL, in_params, params_size, out_params, params_size);
+    ok(ret == STATUS_PENDING, "got %#x\n", ret);
+
+    close_with_rst(server);
+
+    ret = WaitForSingleObject(event, 100);
+    ok(!ret, "got %#x\n", ret);
+    ok(!io.Status, "got %#lx\n", io.Status);
+    ok(io.Information == offsetof(struct afd_poll_params, sockets[1]), "got %#Ix\n", io.Information);
+    ok(out_params->count == 1, "got count %u\n", out_params->count);
+    ok(out_params->sockets[0].socket == client, "got socket %#Ix\n", out_params->sockets[0].socket);
+    ok(out_params->sockets[0].flags == AFD_POLL_RESET, "got flags %#x\n", out_params->sockets[0].flags);
+    ok(!out_params->sockets[0].status, "got status %#x\n", out_params->sockets[0].status);
+
+    check_poll(client, event, AFD_POLL_WRITE | AFD_POLL_CONNECT | AFD_POLL_RESET);
+
+    closesocket(client);
+    CloseHandle(event);
+}
+
 static void test_recv(void)
 {
     const struct sockaddr_in bind_addr = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
@@ -1226,13 +1466,14 @@ static void test_recv(void)
             IOCTL_AFD_RECV, &params, sizeof(params) - 1, NULL, 0);
     ok(ret == STATUS_INVALID_PARAMETER, "got %#x\n", ret);
 
-    memset(&io, 0, sizeof(io));
+    io.Status = 0xdeadbeef;
+    io.Information = 0xdeadbeef;
     memset(buffer, 0xcc, sizeof(buffer));
     ret = NtDeviceIoControlFile((HANDLE)client, event, NULL, NULL, &io,
             IOCTL_AFD_RECV, &params, sizeof(params), NULL, 0);
     ok(ret == STATUS_PENDING, "got %#x\n", ret);
-    ok(!io.Status, "got status %#lx\n", io.Status);
-    ok(!io.Information, "got information %#Ix\n", io.Information);
+    ok(io.Status == 0xdeadbeef, "got status %#lx\n", io.Status);
+    ok(io.Information == 0xdeadbeef, "got information %#Ix\n", io.Information);
 
     /* These structures need not remain valid. */
     memset(&params, 0xcc, sizeof(params));
@@ -1683,6 +1924,18 @@ static void test_get_events(void)
     ok(!ret, "got error %lu\n", GetLastError());
     ok(!events.lNetworkEvents, "got events %#lx\n", events.lNetworkEvents);
 
+    ret = WSAEventSelect(server, event, FD_ACCEPT | FD_CLOSE | FD_CONNECT | FD_OOB | FD_READ | FD_WRITE);
+    ok(!ret, "got error %lu\n", GetLastError());
+
+    memset(&params, 0xcc, sizeof(params));
+    memset(&io, 0xcc, sizeof(io));
+    ret = NtDeviceIoControlFile((HANDLE)server, NULL, NULL, NULL, &io,
+            IOCTL_AFD_GET_EVENTS, NULL, 0, &params, sizeof(params));
+    ok(!ret, "got %#x\n", ret);
+    ok(params.flags == AFD_POLL_WRITE, "got flags %#x\n", params.flags);
+    for (i = 0; i < ARRAY_SIZE(params.status); ++i)
+        ok(!params.status[i], "got status[%u] %#x\n", i, params.status[i]);
+
     closesocket(client);
     closesocket(server);
 
@@ -1762,6 +2015,56 @@ static void test_get_events(void)
 
         closesocket(client);
     }
+
+    CloseHandle(event);
+}
+
+static void test_get_events_reset(void)
+{
+    struct afd_get_events_params params;
+    SOCKET client, server;
+    IO_STATUS_BLOCK io;
+    unsigned int i;
+    HANDLE event;
+    int ret;
+
+    event = CreateEventW(NULL, TRUE, FALSE, NULL);
+
+    tcp_socketpair(&client, &server);
+
+    ret = WSAEventSelect(client, event, FD_ACCEPT | FD_CONNECT | FD_CLOSE | FD_OOB | FD_READ | FD_WRITE);
+    ok(!ret, "got error %lu\n", GetLastError());
+
+    close_with_rst(server);
+
+    memset(&params, 0xcc, sizeof(params));
+    memset(&io, 0xcc, sizeof(io));
+    ret = NtDeviceIoControlFile((HANDLE)client, NULL, NULL, NULL, &io,
+            IOCTL_AFD_GET_EVENTS, NULL, 0, &params, sizeof(params));
+    ok(!ret, "got %#x\n", ret);
+    ok(params.flags == (AFD_POLL_RESET | AFD_POLL_CONNECT | AFD_POLL_WRITE), "got flags %#x\n", params.flags);
+    for (i = 0; i < ARRAY_SIZE(params.status); ++i)
+        ok(!params.status[i], "got status[%u] %#x\n", i, params.status[i]);
+
+    closesocket(client);
+
+    tcp_socketpair(&client, &server);
+
+    ret = WSAEventSelect(server, event, FD_ACCEPT | FD_CONNECT | FD_CLOSE | FD_OOB | FD_READ | FD_WRITE);
+    ok(!ret, "got error %lu\n", GetLastError());
+
+    close_with_rst(client);
+
+    memset(&params, 0xcc, sizeof(params));
+    memset(&io, 0xcc, sizeof(io));
+    ret = NtDeviceIoControlFile((HANDLE)server, NULL, NULL, NULL, &io,
+            IOCTL_AFD_GET_EVENTS, NULL, 0, &params, sizeof(params));
+    ok(!ret, "got %#x\n", ret);
+    ok(params.flags == (AFD_POLL_RESET | AFD_POLL_WRITE), "got flags %#x\n", params.flags);
+    for (i = 0; i < ARRAY_SIZE(params.status); ++i)
+        ok(!params.status[i], "got status[%u] %#x\n", i, params.status[i]);
+
+    closesocket(server);
 
     CloseHandle(event);
 }
@@ -2097,6 +2400,359 @@ static void test_getsockname(void)
     CloseHandle(event);
 }
 
+struct ioctl_params
+{
+    HANDLE handle, event;
+    PIO_APC_ROUTINE apc;
+    void *apc_context;
+    IO_STATUS_BLOCK *io;
+    ULONG code;
+    void *in_buffer;
+    ULONG in_size;
+    void *out_buffer;
+    ULONG out_size;
+    NTSTATUS ret;
+    HANDLE complete_event;
+    BOOL kill_thread;
+};
+
+static DWORD WINAPI async_ioctl_thread(void *params)
+{
+    struct ioctl_params *io = params;
+
+    io->ret = NtDeviceIoControlFile(io->handle, io->event, io->apc, io->apc_context, io->io,
+            io->code, io->in_buffer, io->in_size, io->out_buffer, io->out_size);
+    SetEvent(io->complete_event);
+    if (io->kill_thread)
+        Sleep(3000);
+    return io->ret;
+}
+
+static NTSTATUS WINAPI thread_NtDeviceIoControlFile(BOOL kill_thread, HANDLE handle, HANDLE event,
+        PIO_APC_ROUTINE apc, void *apc_context, IO_STATUS_BLOCK *io, ULONG code, void *in_buffer, ULONG in_size,
+        void *out_buffer, ULONG out_size)
+{
+    struct ioctl_params p;
+    HANDLE thread;
+    DWORD ret;
+
+    p.handle = handle;
+    p.event = event;
+    p.apc = apc;
+    p.apc_context = apc_context;
+    p.io = io;
+    p.code = code;
+    p.in_buffer = in_buffer;
+    p.in_size = in_size;
+    p.out_buffer = out_buffer;
+    p.out_size = out_size;
+    p.complete_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    p.kill_thread = kill_thread;
+
+    thread = CreateThread(NULL, 0, async_ioctl_thread, &p, 0, NULL);
+    ok(!!thread, "got NULL.\n");
+    ret = WaitForSingleObject(p.complete_event, INFINITE);
+    ok(ret == WAIT_OBJECT_0, "got ret %#lx.\n", ret);
+    if (kill_thread)
+        TerminateThread(thread, -1);
+    CloseHandle(p.complete_event);
+    ret = WaitForSingleObject(thread, INFINITE);
+    ok(ret == WAIT_OBJECT_0, "got ret %#lx.\n", ret);
+    CloseHandle(thread);
+    SleepEx(0, TRUE);
+    return p.ret;
+}
+
+static unsigned int test_async_thread_termination_apc_count;
+
+static void WINAPI test_async_thread_termination_apc( void *arg, IO_STATUS_BLOCK *iosb, ULONG reserved )
+{
+    ++test_async_thread_termination_apc_count;
+}
+
+static void test_async_thread_termination(void)
+{
+    static const struct
+    {
+        BOOL kill_thread;
+        BOOL event;
+        PIO_APC_ROUTINE apc;
+        void *apc_context;
+    }
+    tests[] =
+    {
+        {FALSE, TRUE, NULL, NULL},
+        {TRUE,  TRUE, NULL, NULL},
+        {FALSE, FALSE, NULL, NULL},
+        {TRUE,  FALSE, NULL, NULL},
+        {FALSE, TRUE, test_async_thread_termination_apc, NULL},
+        {TRUE,  TRUE, test_async_thread_termination_apc, NULL},
+        {FALSE, FALSE, test_async_thread_termination_apc, NULL},
+        {TRUE,  FALSE, test_async_thread_termination_apc, NULL},
+        {FALSE, TRUE, NULL, (void *)0xdeadbeef},
+        {TRUE,  TRUE, NULL, (void *)0xdeadbeef},
+        {FALSE, FALSE, NULL, (void *)0xdeadbeef},
+        {TRUE,  FALSE, NULL, (void *)0xdeadbeef},
+        {FALSE, TRUE, test_async_thread_termination_apc, (void *)0xdeadbeef},
+        {TRUE,  TRUE, test_async_thread_termination_apc, (void *)0xdeadbeef},
+        {FALSE, FALSE, test_async_thread_termination_apc, (void *)0xdeadbeef},
+        {TRUE,  FALSE, test_async_thread_termination_apc, (void *)0xdeadbeef},
+    };
+
+    const struct sockaddr_in bind_addr = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+    char in_buffer[offsetof(struct afd_poll_params, sockets[3])];
+    char out_buffer[offsetof(struct afd_poll_params, sockets[3])];
+    struct afd_poll_params *in_params = (struct afd_poll_params *)in_buffer;
+    struct afd_poll_params *out_params = (struct afd_poll_params *)out_buffer;
+    LARGE_INTEGER zero = {{0}};
+    ULONG_PTR key, value;
+    IO_STATUS_BLOCK io;
+    HANDLE event, port;
+    ULONG params_size;
+    SOCKET listener;
+    unsigned int i;
+    int ret;
+
+    event = CreateEventW(NULL, FALSE, FALSE, NULL);
+
+    listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ret = bind(listener, (const struct sockaddr *)&bind_addr, sizeof(bind_addr));
+    ok(!ret, "got error %u\n", WSAGetLastError());
+    ret = listen(listener, 1);
+    ok(!ret, "got error %u\n", WSAGetLastError());
+
+    in_params->count = 1;
+    in_params->exclusive = FALSE;
+    in_params->sockets[0].socket = listener;
+    in_params->sockets[0].flags = ~0;
+    in_params->sockets[0].status = 0xdeadbeef;
+    params_size = offsetof(struct afd_poll_params, sockets[1]);
+    in_params->timeout = -10 * 1000 * 1000 * 5;
+
+    /* asyncs without completion port are always cancelled on thread exit. */
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        winetest_push_context("test %u", i);
+        memset(&io, 0xcc, sizeof(io));
+        ResetEvent(event);
+        ret = thread_NtDeviceIoControlFile(tests[i].kill_thread, (HANDLE)listener, tests[i].event ? event : NULL,
+                tests[i].apc, tests[i].apc_context, &io, IOCTL_AFD_POLL, in_params, params_size,
+                out_params, params_size);
+        ok(ret == STATUS_PENDING, "got %#x\n", ret);
+        ok(io.Status == STATUS_CANCELLED, "got %#lx\n", io.Status);
+        if (tests[i].event)
+        {
+            ret = WaitForSingleObject(event, 1000);
+            ok(!ret, "got %#x\n", ret);
+        }
+        winetest_pop_context();
+    }
+
+    SleepEx(0, TRUE);
+    ok(!test_async_thread_termination_apc_count, "got APC.\n");
+
+    port = CreateIoCompletionPort((HANDLE)listener, NULL, 0, 0);
+
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        winetest_push_context("test %u", i);
+        memset(&io, 0xcc, sizeof(io));
+        ResetEvent(event);
+        ret = thread_NtDeviceIoControlFile(tests[i].kill_thread, (HANDLE)listener, tests[i].event ? event : NULL,
+                tests[i].apc, tests[i].apc_context, &io, IOCTL_AFD_POLL, in_params, params_size,
+                out_params, params_size);
+        if (tests[i].apc)
+        {
+            ok(ret == STATUS_INVALID_PARAMETER, "got %#x\n", ret);
+            winetest_pop_context();
+            continue;
+        }
+        ok(ret == STATUS_PENDING, "got %#x\n", ret);
+        if (!tests[i].apc_context || tests[i].event)
+        {
+            ok(io.Status == STATUS_CANCELLED, "got %#lx\n", io.Status);
+            memset(&io, 0xcc, sizeof(io));
+            key = 0xcc;
+            value = 0;
+            ret = NtRemoveIoCompletion(port, &key, &value, &io, &zero);
+            if (tests[i].apc_context)
+            {
+                ok(!ret, "got %#x\n", ret);
+                ok(!key, "got key %#Ix\n", key);
+                ok(value == 0xdeadbeef, "got value %#Ix\n", value);
+                ok(io.Status == STATUS_CANCELLED, "got %#lx\n", io.Status);
+            }
+            else
+            {
+                ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+            }
+            winetest_pop_context();
+            continue;
+        }
+
+        /* async is not cancelled if there is a completion port, completion key and no event. */
+        ok(io.Status == 0xcccccccc, "got %#lx\n", io.Status);
+        memset(&io, 0xcc, sizeof(io));
+        key = 0xcc;
+        value = 0;
+        ret = NtRemoveIoCompletion(port, &key, &value, &io, &zero);
+        ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+        CancelIoEx((HANDLE)listener, NULL);
+        ret = NtRemoveIoCompletion(port, &key, &value, &io, &zero);
+        ok(!ret, "got %#x\n", ret);
+        ok(!key, "got key %#Ix\n", key);
+        ok(value == 0xdeadbeef, "got value %#Ix\n", value);
+        ok(io.Status == STATUS_CANCELLED, "got %#lx\n", io.Status);
+        winetest_pop_context();
+    }
+
+    CloseHandle(port);
+    CloseHandle(event);
+    closesocket(listener);
+}
+
+static DWORD WINAPI sync_read_file_thread(void *arg)
+{
+    HANDLE server = arg;
+    IO_STATUS_BLOCK io;
+    char buffer[5];
+    NTSTATUS ret;
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    memset(&io, 0xcc, sizeof(io));
+    ret = NtReadFile(server, NULL, NULL, NULL, &io, buffer, sizeof(buffer), NULL, NULL);
+    ok(!ret, "got status %#lx\n", ret);
+    ok(!io.Status, "got status %#lx\n", io.Status);
+    ok(io.Information == 4, "got size %Iu\n", io.Information);
+    ok(!memcmp(buffer, "data", 4), "got data %s\n", debugstr_an(buffer, io.Information));
+
+    return 0;
+}
+
+static void test_read_write(void)
+{
+    WSANETWORKEVENTS events;
+    IO_STATUS_BLOCK io, io2;
+    SOCKET client, server;
+    LARGE_INTEGER offset;
+    HANDLE event, thread;
+    char buffer[5];
+    NTSTATUS ret;
+
+    event = CreateEventA(NULL, TRUE, FALSE, NULL);
+
+    tcp_socketpair_flags(&client, &server, 0);
+    set_blocking(server, FALSE);
+
+    memset(&io, 0xcc, sizeof(io));
+    ret = NtWriteFile((HANDLE)client, NULL, NULL, NULL, &io, "data", 4, NULL, NULL);
+    ok(!ret, "got status %#lx\n", ret);
+    ok(!io.Status, "got status %#lx\n", io.Status);
+    ok(io.Information == 4, "got size %Iu\n", io.Information);
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    memset(&io, 0xcc, sizeof(io));
+    ret = NtReadFile((HANDLE)server, NULL, NULL, NULL, &io, buffer, sizeof(buffer), NULL, NULL);
+    ok(!ret, "got status %#lx\n", ret);
+    ok(!io.Status, "got status %#lx\n", io.Status);
+    ok(io.Information == 4, "got size %Iu\n", io.Information);
+    ok(!memcmp(buffer, "data", 4), "got data %s\n", debugstr_an(buffer, io.Information));
+
+    ret = send(server, "data", 4, 0);
+    ok(ret == 4, "got %ld\n", ret);
+
+    ret = WSAEventSelect(client, event, FD_READ);
+    ok(!ret, "got error %lu\n", GetLastError());
+
+    ret = WSAEnumNetworkEvents(client, event, &events);
+    ok(!ret, "got error %lu\n", GetLastError());
+    ok(events.lNetworkEvents == FD_READ, "got events %#lx\n", events.lNetworkEvents);
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = NtReadFile((HANDLE)client, NULL, NULL, NULL, &io, buffer, 1, NULL, NULL);
+    ok(!ret, "got status %#lx\n", ret);
+    ok(io.Information == 1, "got size %Iu\n", io.Information);
+    ok(buffer[0] == 'd', "got data %s\n", debugstr_an(buffer, io.Information));
+
+    ret = WSAEnumNetworkEvents(client, event, &events);
+    ok(!ret, "got error %lu\n", GetLastError());
+    ok(events.lNetworkEvents == FD_READ, "got events %#lx\n", events.lNetworkEvents);
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = NtReadFile((HANDLE)client, NULL, NULL, NULL, &io, buffer, sizeof(buffer), NULL, NULL);
+    ok(!ret, "got status %#lx\n", ret);
+    ok(io.Information == 3, "got size %Iu\n", io.Information);
+    ok(!memcmp(buffer, "ata", 3), "got data %s\n", debugstr_an(buffer, io.Information));
+
+    /* NtReadFile always blocks, even when the socket is non-overlapped and nonblocking */
+
+    thread = CreateThread(NULL, 0, sync_read_file_thread, (void *)server, 0, NULL);
+    ret = WaitForSingleObject(thread, 100);
+    ok(ret == WAIT_TIMEOUT, "got %ld\n", ret);
+
+    ret = NtWriteFile((HANDLE)client, NULL, NULL, NULL, &io, "data", 4, NULL, NULL);
+    ok(!ret, "got status %#lx\n", ret);
+
+    ret = WaitForSingleObject(thread, 1000);
+    ok(!ret, "got %ld\n", ret);
+    CloseHandle(thread);
+
+    closesocket(server);
+    closesocket(client);
+
+    tcp_socketpair(&client, &server);
+
+    ret = NtReadFile((HANDLE)server, event, NULL, NULL, &io, buffer, sizeof(buffer), NULL, NULL);
+    todo_wine ok(ret == STATUS_INVALID_PARAMETER, "got status %#lx\n", ret);
+    if (ret == STATUS_PENDING)
+    {
+        CancelIo((HANDLE)server);
+        ret = WaitForSingleObject(event, 100);
+        ok(!ret, "wait timed out\n");
+    }
+
+    offset.QuadPart = -1;
+    ret = NtReadFile((HANDLE)server, event, NULL, NULL, &io, buffer, sizeof(buffer), &offset, NULL);
+    todo_wine ok(ret == STATUS_INVALID_PARAMETER, "got status %#lx\n", ret);
+    if (ret == STATUS_PENDING)
+    {
+        CancelIo((HANDLE)server);
+        ret = WaitForSingleObject(event, 100);
+        ok(!ret, "wait timed out\n");
+    }
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    memset(&io, 0xcc, sizeof(io));
+    offset.QuadPart = 1;
+    ret = NtReadFile((HANDLE)server, event, NULL, NULL, &io, buffer, sizeof(buffer), &offset, NULL);
+    ok(ret == STATUS_PENDING, "got status %#lx\n", ret);
+
+    ret = NtWriteFile((HANDLE)client, NULL, NULL, NULL, &io2, "data", 4, NULL, NULL);
+    todo_wine ok(ret == STATUS_INVALID_PARAMETER, "got status %#lx\n", ret);
+
+    offset.QuadPart = -3;
+    ret = NtWriteFile((HANDLE)client, NULL, NULL, NULL, &io2, "data", 4, &offset, NULL);
+    todo_wine ok(ret == STATUS_INVALID_PARAMETER, "got status %#lx\n", ret);
+
+    memset(&io2, 0xcc, sizeof(io2));
+    offset.QuadPart = 2;
+    ret = NtWriteFile((HANDLE)client, NULL, NULL, NULL, &io2, "data", 4, &offset, NULL);
+    ok(!ret, "got status %#lx\n", ret);
+    ok(!io2.Status, "got status %#lx\n", io2.Status);
+    ok(io2.Information == 4, "got size %Iu\n", io2.Information);
+
+    ret = WaitForSingleObject(event, 1000);
+    ok(!ret, "wait timed out\n");
+    ok(!io.Status, "got status %#lx\n", io.Status);
+    ok(io.Information == 4, "got size %Iu\n", io.Information);
+    ok(!memcmp(buffer, "data", 4), "got data %s\n", debugstr_an(buffer, io.Information));
+
+    closesocket(server);
+    closesocket(client);
+
+    CloseHandle(event);
+}
+
 START_TEST(afd)
 {
     WSADATA data;
@@ -2107,11 +2763,15 @@ START_TEST(afd)
     test_poll();
     test_poll_exclusive();
     test_poll_completion_port();
+    test_poll_reset();
     test_recv();
     test_event_select();
     test_get_events();
+    test_get_events_reset();
     test_bind();
     test_getsockname();
+    test_async_thread_termination();
+    test_read_write();
 
     WSACleanup();
 }

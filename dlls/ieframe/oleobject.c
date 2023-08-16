@@ -410,7 +410,7 @@ static ULONG WINAPI EnumOLEVERB_Release(IEnumOLEVERB *iface)
     TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref)
-        heap_free(This);
+        free(This);
 
     return ref;
 }
@@ -754,7 +754,7 @@ static HRESULT WINAPI OleObject_EnumVerbs(IOleObject *iface, IEnumOLEVERB **ppEn
 
     TRACE("(%p)->(%p)\n", This, ppEnumOleVerb);
 
-    ret = heap_alloc(sizeof(*ret));
+    ret = malloc(sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 

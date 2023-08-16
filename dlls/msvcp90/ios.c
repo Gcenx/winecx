@@ -3262,8 +3262,13 @@ FILE* __cdecl _Fiopen(const char *name, int mode, int prot)
 
     TRACE("(%s %d %d)\n", name, mode, prot);
 
+#if _MSVCP_VER >= 80 && _MSVCP_VER <= 90
     if(mbstowcs_s(NULL, nameW, FILENAME_MAX, name, FILENAME_MAX-1) != 0)
         return NULL;
+#else
+    if(!MultiByteToWideChar(CP_ACP, 0, name, -1, nameW, FILENAME_MAX-1))
+        return NULL;
+#endif
     return _Fiopen_wchar(nameW, mode, prot);
 }
 
@@ -15953,4 +15958,89 @@ void free_io(void)
 
     basic_ostream_wchar_vbase_dtor(&wclog.obj);
     basic_filebuf_wchar_dtor(&filebuf_wchar_log);
+}
+
+/* ?_Cin_func@std@@YAAAV?$basic_istream@DU?$char_traits@D@std@@@1@XZ */
+/* ?_Cin_func@std@@YAAEAV?$basic_istream@DU?$char_traits@D@std@@@1@XZ */
+basic_istream_char* __cdecl _Cin_func(void)
+{
+    return &cin.obj;
+}
+
+/* ?_Wcin_func@std@@YAAAV?$basic_istream@GU?$char_traits@G@std@@@1@XZ */
+/* ?_Wcin_func@std@@YAAEAV?$basic_istream@GU?$char_traits@G@std@@@1@XZ */
+basic_istream_wchar* __cdecl _Wcin_func_short(void)
+{
+    return &ucin.obj;
+}
+
+/* ?_Wcin_func@std@@YAAAV?$basic_istream@_WU?$char_traits@_W@std@@@1@XZ */
+/* ?_Wcin_func@std@@YAAEAV?$basic_istream@_WU?$char_traits@_W@std@@@1@XZ */
+basic_istream_wchar* __cdecl _Wcin_func(void)
+{
+    return &wcin.obj;
+}
+
+/* ?_Cout_func@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@1@XZ */
+/* ?_Cout_func@std@@YAAEAV?$basic_ostream@DU?$char_traits@D@std@@@1@XZ */
+basic_ostream_char* __cdecl _Cout_func(void)
+{
+    return &cout.obj;
+}
+
+/* ?_Wcout_func@std@@YAAAV?$basic_ostream@GU?$char_traits@G@std@@@1@XZ */
+/* ?_Wcout_func@std@@YAAEAV?$basic_ostream@GU?$char_traits@G@std@@@1@XZ */
+basic_ostream_wchar* __cdecl _Wcout_func_short(void)
+{
+    return &ucout.obj;
+}
+
+
+/* ?_Wcout_func@std@@YAAAV?$basic_ostream@_WU?$char_traits@_W@std@@@1@XZ */
+/* ?_Wcout_func@std@@YAAEAV?$basic_ostream@_WU?$char_traits@_W@std@@@1@XZ */
+basic_ostream_wchar* __cdecl _Wcout_func(void)
+{
+    return &wcout.obj;
+}
+
+/* ?_Clog_func@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@1@XZ */
+/* ?_Clog_func@std@@YAAEAV?$basic_ostream@DU?$char_traits@D@std@@@1@XZ */
+basic_ostream_char* __cdecl _Clog_func(void)
+{
+    return &MSVCP_clog.obj;
+}
+
+/* ?_Wclog_func@std@@YAAAV?$basic_ostream@GU?$char_traits@G@std@@@1@XZ */
+/* ?_Wclog_func@std@@YAAEAV?$basic_ostream@GU?$char_traits@G@std@@@1@XZ */
+basic_ostream_wchar* __cdecl _Wclog_func_short(void)
+{
+    return &uclog.obj;
+}
+
+/* ?_Wclog_func@std@@YAAAV?$basic_ostream@_WU?$char_traits@_W@std@@@1@XZ */
+/* ?_Wclog_func@std@@YAAEAV?$basic_ostream@_WU?$char_traits@_W@std@@@1@XZ */
+basic_ostream_wchar* __cdecl _Wclog_func(void)
+{
+    return &wclog.obj;
+}
+
+/* ?_Cerr_func@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@1@XZ */
+/* ?_Cerr_func@std@@YAAEAV?$basic_ostream@DU?$char_traits@D@std@@@1@XZ */
+basic_ostream_char* __cdecl _Cerr_func(void)
+{
+    return &cerr.obj;
+}
+
+/* ?_Wcerr_func@std@@YAAAV?$basic_ostream@GU?$char_traits@G@std@@@1@XZ */
+/* ?_Wcerr_func@std@@YAAEAV?$basic_ostream@GU?$char_traits@G@std@@@1@XZ */
+basic_ostream_wchar* __cdecl _Wcerr_func_short(void)
+{
+    return &ucerr.obj;
+}
+
+/* ?_Wcerr_func@std@@YAAAV?$basic_ostream@_WU?$char_traits@_W@std@@@1@XZ */
+/* ?_Wcerr_func@std@@YAAEAV?$basic_ostream@_WU?$char_traits@_W@std@@@1@XZ */
+basic_ostream_wchar* __cdecl _Wcerr_func(void)
+{
+    return &wcerr.obj;
 }

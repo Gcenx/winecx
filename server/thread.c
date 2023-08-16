@@ -1503,6 +1503,7 @@ DECL_HANDLER(terminate_thread)
         thread->exit_code = req->exit_code;
         if (thread != current) kill_thread( thread, 1 );
         else reply->self = 1;
+        cancel_terminating_thread_asyncs( thread );
         release_object( thread );
     }
 }
@@ -1574,8 +1575,10 @@ DECL_HANDLER(get_thread_times)
 DECL_HANDLER(set_thread_info)
 {
     struct thread *thread;
+    unsigned int access = (req->mask == SET_THREAD_INFO_DESCRIPTION) ? THREAD_SET_LIMITED_INFORMATION
+                                                                     : THREAD_SET_INFORMATION;
 
-    if ((thread = get_thread_from_handle( req->handle, THREAD_SET_INFORMATION )))
+    if ((thread = get_thread_from_handle( req->handle, access )))
     {
         set_thread_info( thread, req );
         release_object( thread );
@@ -1751,6 +1754,7 @@ DECL_HANDLER(queue_apc)
         thread = get_thread_from_handle( req->handle, THREAD_SET_CONTEXT );
         break;
     case APC_VIRTUAL_ALLOC:
+    case APC_VIRTUAL_ALLOC_EX:
     case APC_VIRTUAL_FREE:
     case APC_VIRTUAL_PROTECT:
     case APC_VIRTUAL_FLUSH:

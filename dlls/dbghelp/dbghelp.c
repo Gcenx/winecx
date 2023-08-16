@@ -104,7 +104,7 @@ BOOL validate_addr64(DWORD64 addr)
 {
     if (sizeof(void*) == sizeof(int) && (addr >> 32))
     {
-        FIXME("Unsupported address %s\n", wine_dbgstr_longlong(addr));
+        FIXME("Unsupported address %I64x\n", addr);
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
@@ -135,7 +135,7 @@ const char* wine_dbgstr_addr(const ADDRESS64* addr)
     switch (addr->Mode)
     {
     case AddrModeFlat:
-        return wine_dbg_sprintf("flat<%s>", wine_dbgstr_longlong(addr->Offset));
+        return wine_dbg_sprintf("flat<%I64x>", addr->Offset);
     case AddrMode1616:
         return wine_dbg_sprintf("1616<%04x:%04lx>", addr->Segment, (DWORD)addr->Offset);
     case AddrMode1632:
@@ -330,6 +330,16 @@ const WCHAR *process_getenv(const struct process *process, const WCHAR *name)
     }
 
     return NULL;
+}
+
+const struct cpu* process_get_cpu(const struct process* pcs)
+{
+    const struct module* m = pcs->lmodules;
+
+    /* main module is the last one in list */
+    if (!m) return dbghelp_current_cpu;
+    while (m->next) m = m->next;
+    return m->cpu;
 }
 
 /******************************************************************
@@ -672,7 +682,7 @@ BOOL WINAPI SymSetScopeFromAddr(HANDLE hProcess, ULONG64 addr)
 
     if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
     pair.pcs->localscope_pc = addr;
-    if ((sym = symt_find_nearest(pair.effective, addr)) != NULL && sym->symt.tag == SymTagFunction)
+    if ((sym = symt_find_symbol_at(pair.effective, addr)) != NULL && sym->symt.tag == SymTagFunction)
         pair.pcs->localscope_symt = &sym->symt;
     else
         pair.pcs->localscope_symt = NULL;
@@ -694,7 +704,7 @@ BOOL WINAPI SymSetScopeFromIndex(HANDLE hProcess, ULONG64 addr, DWORD index)
     sym = symt_index2ptr(pair.effective, index);
     if (!symt_check_tag(sym, SymTagFunction)) return FALSE;
 
-    pair.pcs->localscope_pc = ((struct symt_function*)sym)->address; /* FIXME of FuncDebugStart when it exists? */
+    pair.pcs->localscope_pc = ((struct symt_function*)sym)->ranges[0].low; /* FIXME of FuncDebugStart when it exists? */
     pair.pcs->localscope_symt = sym;
 
     return TRUE;
@@ -706,24 +716,24 @@ BOOL WINAPI SymSetScopeFromIndex(HANDLE hProcess, ULONG64 addr, DWORD index)
 BOOL WINAPI SymSetScopeFromInlineContext(HANDLE hProcess, ULONG64 addr, DWORD inlinectx)
 {
     struct module_pair pair;
-    struct symt_inlinesite* inlined;
+    struct symt_function* inlined;
 
     TRACE("(%p %I64x %lx)\n", hProcess, addr, inlinectx);
 
     switch (IFC_MODE(inlinectx))
     {
-    case IFC_MODE_IGNORE:
-    case IFC_MODE_REGULAR: return SymSetScopeFromAddr(hProcess, addr);
     case IFC_MODE_INLINE:
         if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
         inlined = symt_find_inlined_site(pair.effective, addr, inlinectx);
         if (inlined)
         {
             pair.pcs->localscope_pc = addr;
-            pair.pcs->localscope_symt = &inlined->func.symt;
+            pair.pcs->localscope_symt = &inlined->symt;
             return TRUE;
         }
-        return FALSE;
+        /* fall through */
+    case IFC_MODE_IGNORE:
+    case IFC_MODE_REGULAR: return SymSetScopeFromAddr(hProcess, addr);
     default:
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
@@ -858,24 +868,22 @@ BOOL WINAPI SymRegisterCallback(HANDLE hProcess,
 /***********************************************************************
  *		SymRegisterCallback64 (DBGHELP.@)
  */
-BOOL WINAPI SymRegisterCallback64(HANDLE hProcess, 
+BOOL WINAPI SymRegisterCallback64(HANDLE hProcess,
                                   PSYMBOL_REGISTERED_CALLBACK64 CallbackFunction,
                                   ULONG64 UserContext)
 {
-    TRACE("(%p, %p, %s)\n", 
-          hProcess, CallbackFunction, wine_dbgstr_longlong(UserContext));
+    TRACE("(%p, %p, %I64x)\n", hProcess, CallbackFunction, UserContext);
     return sym_register_cb(hProcess, CallbackFunction, NULL, UserContext, FALSE);
 }
 
 /***********************************************************************
  *		SymRegisterCallbackW64 (DBGHELP.@)
  */
-BOOL WINAPI SymRegisterCallbackW64(HANDLE hProcess, 
+BOOL WINAPI SymRegisterCallbackW64(HANDLE hProcess,
                                    PSYMBOL_REGISTERED_CALLBACK64 CallbackFunction,
                                    ULONG64 UserContext)
 {
-    TRACE("(%p, %p, %s)\n", 
-          hProcess, CallbackFunction, wine_dbgstr_longlong(UserContext));
+    TRACE("(%p, %p, %I64x)\n", hProcess, CallbackFunction, UserContext);
     return sym_register_cb(hProcess, CallbackFunction, NULL, UserContext, TRUE);
 }
 

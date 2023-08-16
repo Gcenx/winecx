@@ -18,8 +18,6 @@
 #ifndef WINE_IPRTRMIB_H__
 #define WINE_IPRTRMIB_H__
 
-#include "wine/winheader_enter.h"
-
 #include <mprapi.h>
 #include <ipifcons.h>
 
@@ -46,7 +44,5 @@ typedef enum _UDP_TABLE_CLASS
     UDP_TABLE_OWNER_PID,
     UDP_TABLE_OWNER_MODULE
 } UDP_TABLE_CLASS, *PUDP_TABLE_CLASS;
-
-#include "wine/winheader_exit.h"
 
 #endif /* WINE_IPRTRMIB_H__ */

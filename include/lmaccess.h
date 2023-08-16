@@ -21,8 +21,6 @@
 #ifndef __WINE_LMACCESS_H
 #define __WINE_LMACCESS_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -479,7 +477,5 @@ NET_API_STATUS WINAPI NetUserModalsGet(LPCWSTR,DWORD,LPBYTE*);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

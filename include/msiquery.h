@@ -19,8 +19,6 @@
 #ifndef __WINE_MSIQUERY_H
 #define __WINE_MSIQUERY_H
 
-#include "wine/winheader_enter.h"
-
 #include <msi.h>
 
 typedef enum tagMSICONDITION
@@ -350,7 +348,5 @@ MSIHANDLE WINAPI MsiGetLastErrorRecord(void);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_MSIQUERY_H */

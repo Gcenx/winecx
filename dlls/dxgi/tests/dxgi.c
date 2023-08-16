@@ -5817,6 +5817,7 @@ static BOOL check_message(const struct message *expected,
 
 static LRESULT CALLBACK test_wndproc(HWND hwnd, unsigned int message, WPARAM wparam, LPARAM lparam)
 {
+    flaky
     ok(!expect_no_messages, "Got unexpected message %#x, hwnd %p, wparam %#Ix, lparam %#Ix.\n",
             message, hwnd, wparam, lparam);
 
@@ -6120,6 +6121,7 @@ static void test_swapchain_window_styles(void)
         exstyle = GetWindowLongA(swapchain_desc.OutputWindow, GWL_EXSTYLE);
         ok(style == tests[i].expected_style, "Got unexpected style %#lx, expected %#lx.\n",
                 style, tests[i].expected_style);
+        flaky_if(i == 4)
         ok(exstyle == tests[i].expected_exstyle, "Got unexpected exstyle %#lx, expected %#lx.\n",
                 exstyle, tests[i].expected_exstyle);
 
@@ -6136,6 +6138,7 @@ static void test_swapchain_window_styles(void)
         exstyle = GetWindowLongA(swapchain_desc.OutputWindow, GWL_EXSTYLE);
         ok(style == tests[i].expected_style, "Got unexpected style %#lx, expected %#lx.\n",
                 style, tests[i].expected_style);
+        flaky_if(i == 4)
         ok(exstyle == tests[i].expected_exstyle, "Got unexpected exstyle %#lx, expected %#lx.\n",
                 exstyle, tests[i].expected_exstyle);
 
@@ -6164,6 +6167,7 @@ static void test_swapchain_window_styles(void)
         exstyle = GetWindowLongA(swapchain_desc.OutputWindow, GWL_EXSTYLE);
         ok(style == tests[i].expected_style, "Got unexpected style %#lx, expected %#lx.\n",
                 style, tests[i].expected_style);
+        flaky_if(i == 4)
         ok(exstyle == tests[i].expected_exstyle, "Got unexpected exstyle %#lx, expected %#lx.\n",
                 exstyle, tests[i].expected_exstyle);
 
@@ -6190,7 +6194,7 @@ static void test_swapchain_window_styles(void)
             exstyle = GetWindowLongA(swapchain_desc.OutputWindow, GWL_EXSTYLE);
             todo_wine ok(style == tests[i].expected_style, "Got unexpected style %#lx, expected %#lx.\n",
                     style, tests[i].expected_style);
-            todo_wine
+            flaky_if(i == 4) todo_wine
             ok(exstyle == tests[i].expected_exstyle, "Got unexpected exstyle %#lx, expected %#lx.\n",
                     exstyle, tests[i].expected_exstyle);
         }
@@ -6206,7 +6210,7 @@ static void test_swapchain_window_styles(void)
         exstyle = GetWindowLongA(swapchain_desc.OutputWindow, GWL_EXSTYLE);
         todo_wine ok(style == tests[i].expected_style, "Got unexpected style %#lx, expected %#lx.\n",
                 style, tests[i].expected_style);
-        todo_wine
+        flaky_if(i == 4) todo_wine
         ok(exstyle == tests[i].expected_exstyle, "Got unexpected exstyle %#lx, expected %#lx.\n",
                 exstyle, tests[i].expected_exstyle);
 
@@ -7512,6 +7516,62 @@ static void test_swapchain_present_count(IUnknown *device, BOOL is_d3d12)
     DestroyWindow(window);
 }
 
+static void test_video_memory_budget_notification(void)
+{
+    DXGI_QUERY_VIDEO_MEMORY_INFO memory_info;
+    IDXGIAdapter3 *adapter3;
+    IDXGIAdapter *adapter;
+    IDXGIDevice *device;
+    DWORD cookie, ret;
+    ULONG refcount;
+    HANDLE event;
+    HRESULT hr;
+
+    if (!(device = create_device(0)))
+    {
+        skip("Failed to create device.\n");
+        return;
+    }
+
+    hr = IDXGIDevice_GetAdapter(device, &adapter);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = IDXGIAdapter_QueryInterface(adapter, &IID_IDXGIAdapter3, (void **)&adapter3);
+    ok(hr == S_OK || hr == E_NOINTERFACE, "Got unexpected hr %#lx.\n", hr);
+    if (hr == E_NOINTERFACE)
+        goto done;
+
+    hr = IDXGIAdapter3_RegisterVideoMemoryBudgetChangeNotificationEvent(adapter3, NULL, &cookie);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#lx.\n", hr);
+
+    event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    hr = IDXGIAdapter3_RegisterVideoMemoryBudgetChangeNotificationEvent(adapter3, event, NULL);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#lx.\n", hr);
+
+    hr = IDXGIAdapter3_RegisterVideoMemoryBudgetChangeNotificationEvent(adapter3, event, &cookie);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = IDXGIAdapter3_QueryVideoMemoryInfo(adapter3, 0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &memory_info);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (!memory_info.Budget)
+    {
+        hr = IDXGIAdapter3_QueryVideoMemoryInfo(adapter3, 0, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &memory_info);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    }
+    if (memory_info.Budget)
+    {
+        ret = WaitForSingleObject(event, 1000);
+        ok(ret == WAIT_OBJECT_0, "Expected event fired.\n");
+    }
+
+    IDXGIAdapter3_UnregisterVideoMemoryBudgetChangeNotification(adapter3, cookie);
+    IDXGIAdapter3_Release(adapter3);
+    CloseHandle(event);
+
+done:
+    IDXGIAdapter_Release(adapter);
+    refcount = IDXGIDevice_Release(device);
+    ok(!refcount, "Device has %lu references left.\n", refcount);
+}
+
 static void run_on_d3d10(void (*test_func)(IUnknown *device, BOOL is_d3d12))
 {
     IDXGIDevice *device;
@@ -7611,6 +7671,7 @@ START_TEST(dxgi)
     queue_test(test_output_desc);
     queue_test(test_object_wrapping);
     queue_test(test_factory_check_feature_support);
+    queue_test(test_video_memory_budget_notification);
 
     run_queued_tests();
 

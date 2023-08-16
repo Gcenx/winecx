@@ -18,32 +18,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
-
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winuser.h"
+#include "user_private.h"
 #include "controls.h"
-#include "win.h"
 
 static BOOL bMultiLineTitle;
 static HFONT hIconTitleFont;
-
-/*********************************************************************
- * icon title class descriptor
- */
-const struct builtin_class_descr ICONTITLE_builtin_class =
-{
-    (LPCWSTR)ICONTITLE_CLASS_ATOM, /* name */
-    0,                    /* style */
-    WINPROC_ICONTITLE,    /* proc */
-    0,                    /* extra */
-    IDC_ARROW,            /* cursor */
-    0                     /* brush */
-};
 
 /***********************************************************************
  *           ICONTITLE_SetTitlePos
@@ -68,7 +47,7 @@ static BOOL ICONTITLE_SetTitlePos( HWND hwnd, HWND owner )
         length = lstrlenW( str );
     }
 
-    if (!(hDC = GetDC( hwnd ))) return FALSE;
+    if (!(hDC = NtUserGetDC( hwnd ))) return FALSE;
 
     hPrevFont = SelectObject( hDC, hIconTitleFont );
 
@@ -197,7 +176,7 @@ LRESULT WINAPI IconTitleWndProc( HWND hWnd, UINT msg,
             else
                 lParam = (owner == GetActiveWindow());
             if( ICONTITLE_Paint( hWnd, owner, (HDC)wParam, (BOOL)lParam ) )
-                ValidateRect( hWnd, NULL );
+                NtUserValidateRect( hWnd, NULL );
             return 1;
     }
     return DefWindowProcW( hWnd, msg, wParam, lParam );

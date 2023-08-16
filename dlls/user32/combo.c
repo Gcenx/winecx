@@ -21,18 +21,11 @@
  *   - CB_SETTOPINDEX
  */
 
-#include <stdarg.h>
-#include <string.h>
-
 #define OEMRESOURCE
 
-#include "windef.h"
-#include "winbase.h"
-#include "ntuser.h"
+#include <stdlib.h>
 #include "user_private.h"
-#include "win.h"
 #include "controls.h"
-#include "winternl.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(combo);
@@ -75,20 +68,6 @@ static UINT	CBitHeight, CBitWidth;
 
 static void CBCalcPlacement(HEADCOMBO *combo);
 static void CBResetPos(HEADCOMBO *combo, BOOL redraw);
-
-/*********************************************************************
- * combo class descriptor
- */
-const struct builtin_class_descr COMBO_builtin_class =
-{
-    L"ComboBox",          /* name */
-    CS_PARENTDC | CS_DBLCLKS | CS_HREDRAW | CS_VREDRAW, /* style  */
-    WINPROC_COMBO,        /* proc */
-    sizeof(HEADCOMBO *),  /* extra */
-    IDC_ARROW,            /* cursor */
-    0                     /* brush */
-};
-
 
 /***********************************************************************
  *           COMBO_Init
@@ -134,7 +113,7 @@ static LRESULT COMBO_NCCreate(HWND hwnd, LONG style)
 {
     LPHEADCOMBO lphc;
 
-    if (COMBO_Init() && (lphc = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(HEADCOMBO))) )
+    if( COMBO_Init() && (lphc = calloc( 1, sizeof(HEADCOMBO) )) )
     {
         lphc->self = hwnd;
         SetWindowLongPtrW( hwnd, 0, (LONG_PTR)lphc );
@@ -176,14 +155,14 @@ static LRESULT COMBO_NCDestroy( LPHEADCOMBO lphc )
            NtUserDestroyWindow( lphc->hWndLBox );
 
        SetWindowLongPtrW( lphc->self, 0, 0 );
-       HeapFree( GetProcessHeap(), 0, lphc );
+       free( lphc );
    }
    return 0;
 }
 
 static INT combo_get_text_height(const HEADCOMBO *combo)
 {
-    HDC hdc = GetDC(combo->self);
+    HDC hdc = NtUserGetDC(combo->self);
     HFONT prev_font = 0;
     TEXTMETRICW tm;
 
@@ -663,7 +642,7 @@ static void CBPaintText(
         size = SendMessageW(lphc->hWndLBox, LB_GETTEXTLEN, id, 0);
 	if (size == LB_ERR)
 	  FIXME("LB_ERR probably not handled yet\n");
-        if( (pText = HeapAlloc( GetProcessHeap(), 0, (size + 1) * sizeof(WCHAR))) )
+        if( (pText = malloc((size + 1) * sizeof(WCHAR))) )
 	{
             /* size from LB_GETTEXTLEN may be too large, from LB_GETTEXT is accurate */
            size=SendMessageW(lphc->hWndLBox, LB_GETTEXT, id, (LPARAM)pText);
@@ -680,7 +659,7 @@ static void CBPaintText(
    else if(!(lphc->wState & CBF_NOREDRAW) && IsWindowVisible( lphc->self ))
    {
      /* paint text field ourselves */
-     HDC hdc = hdc_paint ? hdc_paint : GetDC(lphc->self);
+     HDC hdc = hdc_paint ? hdc_paint : NtUserGetDC(lphc->self);
      UINT itemState = ODS_COMBOBOXEDIT;
      HFONT hPrevFont = (lphc->hFont) ? SelectObject(hdc, lphc->hFont) : 0;
      HBRUSH hPrevBrush, hBkgBrush;
@@ -758,7 +737,7 @@ static void CBPaintText(
      if (!hdc_paint)
        NtUserReleaseDC( lphc->self, hdc );
    }
-   HeapFree( GetProcessHeap(), 0, pText );
+   free(pText);
 }
 
 /***********************************************************************
@@ -852,7 +831,7 @@ static INT CBUpdateLBox( LPHEADCOMBO lphc, BOOL bSelect )
    length = SendMessageW( lphc->hWndEdit, WM_GETTEXTLENGTH, 0, 0 );
 
    if( length > 0 )
-       pText = HeapAlloc( GetProcessHeap(), 0, (length + 1) * sizeof(WCHAR));
+       pText = malloc((length + 1) * sizeof(WCHAR));
 
    TRACE("\t edit text length %i\n", length );
 
@@ -860,7 +839,7 @@ static INT CBUpdateLBox( LPHEADCOMBO lphc, BOOL bSelect )
    {
        GetWindowTextW( lphc->hWndEdit, pText, length + 1);
        idx = SendMessageW(lphc->hWndLBox, LB_FINDSTRING, -1, (LPARAM)pText);
-       HeapFree( GetProcessHeap(), 0, pText );
+       free(pText);
    }
 
    SendMessageW(lphc->hWndLBox, LB_SETCURSEL, bSelect ? idx : -1, 0);
@@ -889,7 +868,7 @@ static void CBUpdateEdit( LPHEADCOMBO lphc , INT index )
        length = SendMessageW(lphc->hWndLBox, LB_GETTEXTLEN, index, 0);
        if( length != LB_ERR)
        {
-	   if( (pText = HeapAlloc( GetProcessHeap(), 0, (length + 1) * sizeof(WCHAR))) )
+           if( (pText = malloc((length + 1) * sizeof(WCHAR))) )
 	   {
                SendMessageW(lphc->hWndLBox, LB_GETTEXT, index, (LPARAM)pText);
 	   }
@@ -906,7 +885,7 @@ static void CBUpdateEdit( LPHEADCOMBO lphc , INT index )
    if( lphc->wState & CBF_FOCUSED )
       SendMessageW(lphc->hWndEdit, EM_SETSEL, 0, -1);
 
-   HeapFree( GetProcessHeap(), 0, pText );
+   free(pText);
 }
 
 /***********************************************************************
@@ -1084,9 +1063,9 @@ BOOL COMBO_FlipListbox( LPHEADCOMBO lphc, BOOL ok, BOOL bRedrawButton )
  *           CBRepaintButton
  */
 static void CBRepaintButton( LPHEADCOMBO lphc )
-   {
-  InvalidateRect(lphc->self, &lphc->buttonRect, TRUE);
-  UpdateWindow(lphc->self);
+{
+    NtUserInvalidateRect(lphc->self, &lphc->buttonRect, TRUE);
+    UpdateWindow(lphc->self);
 }
 
 /***********************************************************************
@@ -1104,7 +1083,7 @@ static void COMBO_SetFocus( LPHEADCOMBO lphc )
        /* lphc->wState |= CBF_FOCUSED;  */
 
        if( !(lphc->wState & CBF_EDIT) )
-	 InvalidateRect(lphc->self, &lphc->textRect, TRUE);
+           NtUserInvalidateRect(lphc->self, &lphc->textRect, TRUE);
 
        CB_NOTIFY( lphc, CBN_SETFOCUS );
        lphc->wState |= CBF_FOCUSED;
@@ -1130,7 +1109,7 @@ static void COMBO_KillFocus( LPHEADCOMBO lphc )
 
            /* redraw text */
 	   if( !(lphc->wState & CBF_EDIT) )
-	     InvalidateRect(lphc->self, &lphc->textRect, TRUE);
+               NtUserInvalidateRect(lphc->self, &lphc->textRect, TRUE);
 
            CB_NOTIFY( lphc, CBN_KILLFOCUS );
        }
@@ -1317,7 +1296,7 @@ static LRESULT COMBO_GetTextW( LPHEADCOMBO lphc, INT count, LPWSTR buf )
         /* 'length' is without the terminating character */
         if (length >= count)
         {
-            LPWSTR lpBuffer = HeapAlloc(GetProcessHeap(), 0, (length + 1) * sizeof(WCHAR));
+            WCHAR *lpBuffer = malloc((length + 1) * sizeof(WCHAR));
             if (!lpBuffer) goto error;
             length = SendMessageW(lphc->hWndLBox, LB_GETTEXT, idx, (LPARAM)lpBuffer);
 
@@ -1327,7 +1306,7 @@ static LRESULT COMBO_GetTextW( LPHEADCOMBO lphc, INT count, LPWSTR buf )
                 lstrcpynW( buf, lpBuffer, count );
                 length = count;
             }
-            HeapFree( GetProcessHeap(), 0, lpBuffer );
+            free(lpBuffer);
         }
         else length = SendMessageW(lphc->hWndLBox, LB_GETTEXT, idx, (LPARAM)buf);
 
@@ -1367,7 +1346,7 @@ static LRESULT COMBO_GetTextA( LPHEADCOMBO lphc, INT count, LPSTR buf )
         /* 'length' is without the terminating character */
         if (length >= count)
         {
-            LPSTR lpBuffer = HeapAlloc(GetProcessHeap(), 0, (length + 1) );
+            char *lpBuffer = malloc(length + 1);
             if (!lpBuffer) goto error;
             length = SendMessageA(lphc->hWndLBox, LB_GETTEXT, idx, (LPARAM)lpBuffer);
 
@@ -1377,7 +1356,7 @@ static LRESULT COMBO_GetTextA( LPHEADCOMBO lphc, INT count, LPSTR buf )
                 lstrcpynA( buf, lpBuffer, count );
                 length = count;
             }
-            HeapFree( GetProcessHeap(), 0, lpBuffer );
+            free(lpBuffer);
         }
         else length = SendMessageA(lphc->hWndLBox, LB_GETTEXT, idx, (LPARAM)buf);
 
@@ -1459,7 +1438,7 @@ static void COMBO_Size( HEADCOMBO *lphc )
      */
     if( curComboHeight > newComboHeight )
     {
-      TRACE("oldComboHeight=%d, newComboHeight=%d, oldDropBottom=%d, oldDropTop=%d\n",
+      TRACE("oldComboHeight=%d, newComboHeight=%d, oldDropBottom=%ld, oldDropTop=%ld\n",
             curComboHeight, newComboHeight, lphc->droppedRect.bottom,
             lphc->droppedRect.top);
       lphc->droppedRect.bottom = lphc->droppedRect.top + curComboHeight - newComboHeight;
@@ -1561,7 +1540,7 @@ static LRESULT COMBO_SelectString( LPHEADCOMBO lphc, INT start, LPARAM pText, BO
        CBUpdateEdit( lphc, index );
      else
      {
-       InvalidateRect(lphc->self, &lphc->textRect, TRUE);
+       NtUserInvalidateRect(lphc->self, &lphc->textRect, TRUE);
      }
    }
    return (LRESULT)index;
@@ -1700,19 +1679,6 @@ static LRESULT COMBO_GetComboBoxInfo(const HEADCOMBO *lphc, COMBOBOXINFO *pcbi)
     return TRUE;
 }
 
-static char *strdupA(LPCSTR str)
-{
-    char *ret;
-    DWORD len;
-
-    if(!str) return NULL;
-
-    len = strlen(str);
-    ret = HeapAlloc(GetProcessHeap(), 0, len + 1);
-    memcpy(ret, str, len + 1);
-    return ret;
-}
-
 /***********************************************************************
  *           ComboWndProc_common
  */
@@ -1720,7 +1686,7 @@ LRESULT ComboWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM lPar
 {
       LPHEADCOMBO lphc = (LPHEADCOMBO)GetWindowLongPtrW( hwnd, 0 );
 
-      TRACE("[%p]: msg %s wp %08lx lp %08lx\n",
+      TRACE("[%p]: msg %s wp %08Ix lp %08Ix\n",
             hwnd, SPY_GetMsgName(message, hwnd), wParam, lParam );
 
       if (!IsWindow(hwnd)) return 0;
@@ -1854,7 +1820,7 @@ LRESULT ComboWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM lPar
 		EnableWindow( lphc->hWndLBox, (BOOL)wParam );
 
 		/* Force the control to repaint when the enabled state changes. */
-		InvalidateRect(lphc->self, NULL, TRUE);
+		NtUserInvalidateRect(lphc->self, NULL, TRUE);
 		return  TRUE;
 	case WM_SETREDRAW:
 		if( wParam )
@@ -1949,18 +1915,18 @@ LRESULT ComboWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM lPar
                     LRESULT ret;
                     if( lphc->dwStyle & CBS_LOWERCASE )
                     {
-                        string = strdupA((LPSTR)lParam);
+                        string = strdup((char *)lParam);
                         CharLowerA(string);
                     }
 
                     else if( lphc->dwStyle & CBS_UPPERCASE )
                     {
-                        string = strdupA((LPSTR)lParam);
+                        string = strdup((char *)lParam);
                         CharUpperA(string);
                     }
 
                     ret = SendMessageA(lphc->hWndLBox, LB_ADDSTRING, 0, string ? (LPARAM)string : lParam);
-                    HeapFree(GetProcessHeap(), 0, string);
+                    free(string);
                     return ret;
                 }
 	case CB_INSERTSTRING:
@@ -2003,7 +1969,7 @@ LRESULT ComboWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM lPar
                 if( (lphc->wState & CBF_EDIT) && CB_HASSTRINGS(lphc) )
                     SendMessageW(lphc->hWndEdit, WM_SETTEXT, 0, (LPARAM)L"");
                 else
-                    InvalidateRect(lphc->self, NULL, TRUE);
+                    NtUserInvalidateRect(lphc->self, NULL, TRUE);
 		return  TRUE;
 	case CB_INITSTORAGE:
 		return SendMessageW(lphc->hWndLBox, LB_INITSTORAGE, wParam, lParam);
@@ -2107,7 +2073,7 @@ LRESULT ComboWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM lPar
 		return  TRUE;
 	default:
 		if (message >= WM_USER)
-		    WARN("unknown msg WM_USER+%04x wp=%04lx lp=%08lx\n",
+		    WARN("unknown msg WM_USER+%04x wp=%04Ix lp=%08Ix\n",
 			message - WM_USER, wParam, lParam );
 		break;
       }

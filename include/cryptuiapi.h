@@ -18,8 +18,6 @@
 #ifndef __CRYPTUIAPI_H__
 #define __CRYPTUIAPI_H__
 
-#include "wine/winheader_enter.h"
-
 #include <wintrust.h>
 #include <wincrypt.h>
 #include <prsht.h>
@@ -435,7 +433,5 @@ BOOL WINAPI CryptUIDlgViewSignerInfoW(CRYPTUI_VIEWSIGNERINFO_STRUCTW *pcvsi);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif

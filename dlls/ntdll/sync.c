@@ -155,6 +155,13 @@ static BOOL crit_section_has_debuginfo( const RTL_CRITICAL_SECTION *crit )
     return crit->DebugInfo != NULL && crit->DebugInfo != no_debug_info_marker;
 }
 
+static const char *crit_section_get_name( const RTL_CRITICAL_SECTION *crit )
+{
+    if (crit_section_has_debuginfo( crit ))
+        return (char *)crit->DebugInfo->Spare[0];
+    return "?";
+}
+
 static inline HANDLE get_semaphore( RTL_CRITICAL_SECTION *crit )
 {
     HANDLE ret = crit->LockSemaphore;
@@ -218,7 +225,7 @@ NTSTATUS WINAPI RtlInitializeCriticalSectionAndSpinCount( RTL_CRITICAL_SECTION *
 NTSTATUS WINAPI RtlInitializeCriticalSectionEx( RTL_CRITICAL_SECTION *crit, ULONG spincount, ULONG flags )
 {
     if (flags & (RTL_CRITICAL_SECTION_FLAG_DYNAMIC_SPIN|RTL_CRITICAL_SECTION_FLAG_STATIC_INIT))
-        FIXME("(%p,%u,0x%08x) semi-stub\n", crit, spincount, flags);
+        FIXME("(%p,%lu,0x%08lx) semi-stub\n", crit, spincount, flags);
 
     /* FIXME: if RTL_CRITICAL_SECTION_FLAG_STATIC_INIT is given, we should use
      * memory from a static pool to hold the debug info. Then heap.c could pass
@@ -311,17 +318,16 @@ NTSTATUS WINAPI RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit )
 
         if ( status == STATUS_TIMEOUT )
         {
-            const char *name = NULL;
-            if (crit_section_has_debuginfo( crit )) name = (char *)crit->DebugInfo->Spare[0];
-            if (!name) name = "?";
-            ERR( "section %p %s wait timed out in thread %04x, blocked by %04x, retrying (60 sec)\n",
+            const char *name = crit_section_get_name( crit );
+
+            ERR( "section %p %s wait timed out in thread %04lx, blocked by %04lx, retrying (60 sec)\n",
                  crit, debugstr_a(name), GetCurrentThreadId(), HandleToULong(crit->OwningThread) );
             status = wait_semaphore( crit, 60 );
             timeout -= 60;
 
             if ( status == STATUS_TIMEOUT && TRACE_ON(relay) )
             {
-                ERR( "section %p %s wait timed out in thread %04x, blocked by %04x, retrying (5 min)\n",
+                ERR( "section %p %s wait timed out in thread %04lx, blocked by %04lx, retrying (5 min)\n",
                      crit, debugstr_a(name), GetCurrentThreadId(), HandleToULong(crit->OwningThread) );
                 status = wait_semaphore( crit, 300 );
                 timeout -= 300;
@@ -461,7 +467,7 @@ NTSTATUS WINAPI RtlLeaveCriticalSection( RTL_CRITICAL_SECTION *crit )
     if (--crit->RecursionCount)
     {
         if (crit->RecursionCount > 0) InterlockedDecrement( &crit->LockCount );
-        else ERR( "section %p is not acquired\n", crit );
+        else ERR( "section %p %s is not acquired\n", crit, debugstr_a( crit_section_get_name( crit )));
     }
     else
     {
@@ -936,7 +942,7 @@ NTSTATUS WINAPI RtlWaitOnAddress( const void *addr, const void *cmp, SIZE_T size
         list_remove( &entry.entry );
     spin_unlock( &queue->lock );
 
-    TRACE("returning %#x\n", ret);
+    TRACE("returning %#lx\n", ret);
 
     if (ret == STATUS_ALERTED) ret = STATUS_SUCCESS;
     return ret;

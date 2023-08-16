@@ -19,8 +19,6 @@
 #ifndef _WINE_WSIPX_
 #define _WINE_WSIPX_
 
-#include "wine/winheader_enter.h"
-
 #ifdef USE_WS_PREFIX
 # define WS(x)    WS_##x
 #else
@@ -49,6 +47,4 @@ typedef struct WS(sockaddr_ipx)
 #endif
 
 #undef WS
-#include "wine/winheader_exit.h"
-
 #endif /* _WINE_WSIPX_ */

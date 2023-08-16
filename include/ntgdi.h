@@ -109,10 +109,13 @@ enum
     NtGdiSetMapMode = 8,
     /* not compatible with Windows */
     NtGdiSetBkColor = 100,
+    NtGdiSetBkMode,
     NtGdiSetTextColor,
     NtGdiSetDCBrushColor,
     NtGdiSetDCPenColor,
     NtGdiSetGraphicsMode,
+    NtGdiSetROP2,
+    NtGdiSetTextAlign,
 };
 
 /* NtGdiGetDCDword parameter, not compatible with Windows */
@@ -162,7 +165,7 @@ enum
 
 typedef struct DC_ATTR
 {
-    HDC       hdc;                 /* handle to self */
+    UINT      hdc;                 /* handle to self */
     LONG      disabled;            /* disabled flag, controlled by DCHF_(DISABLE|ENABLE)DC */
     int       save_level;
     COLORREF  background_color;
@@ -193,8 +196,9 @@ typedef struct DC_ATTR
     SIZE      virtual_size;
     UINT      font_code_page;
     RECTL     emf_bounds;
-    void     *emf;
-    ABORTPROC abort_proc;          /* AbortProc for printing */
+    UINT64    emf;                 /* client EMF record pointer */
+    UINT64    abort_proc;          /* AbortProc for printing */
+    UINT64    print;               /* client printer info pointer */
 } DC_ATTR;
 
 struct font_enum_entry
@@ -369,7 +373,7 @@ BOOL     WINAPI NtGdiGetTextMetricsW( HDC hdc, TEXTMETRICW *metrics, ULONG flags
 BOOL     WINAPI NtGdiGetTransform( HDC hdc, DWORD which, XFORM *xform );
 BOOL     WINAPI NtGdiGradientFill( HDC hdc, TRIVERTEX *vert_array, ULONG nvert,
                                    void *grad_array, ULONG ngrad, ULONG mode );
-HFONT    WINAPI NtGdiHfontCreate( const ENUMLOGFONTEXDVW *enumex, ULONG unk2, ULONG unk3,
+HFONT    WINAPI NtGdiHfontCreate( const void *logfont, ULONG unk2, ULONG unk3,
                                   ULONG unk4, void *data );
 DWORD    WINAPI NtGdiInitSpool(void);
 INT      WINAPI NtGdiIntersectClipRect( HDC hdc, INT left, INT top, INT right, INT bottom );
@@ -472,15 +476,17 @@ NTSTATUS WINAPI NtGdiDdDDIOpenAdapterFromHdc( D3DKMT_OPENADAPTERFROMHDC *desc );
 NTSTATUS WINAPI NtGdiDdDDIOpenAdapterFromDeviceName( D3DKMT_OPENADAPTERFROMDEVICENAME *desc );
 NTSTATUS WINAPI NtGdiDdDDIOpenAdapterFromLuid( D3DKMT_OPENADAPTERFROMLUID *desc );
 NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats );
+NTSTATUS WINAPI NtGdiDdDDIQueryVideoMemoryInfo( D3DKMT_QUERYVIDEOMEMORYINFO *desc );
 NTSTATUS WINAPI NtGdiDdDDISetQueuedLimit( D3DKMT_SETQUEUEDLIMIT *desc );
 NTSTATUS WINAPI NtGdiDdDDISetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNER *desc );
 
 /* Wine extensions */
-extern BOOL CDECL __wine_get_brush_bitmap_info( HBRUSH handle, BITMAPINFO *info, void *bits,
+INT WINAPI NtGdiSetDIBits(HDC,HBITMAP,UINT,UINT,LPCVOID,const BITMAPINFO*,UINT);
+extern BOOL WINAPI __wine_get_brush_bitmap_info( HBRUSH handle, BITMAPINFO *info, void *bits,
                                                 UINT *usage );
-extern BOOL CDECL __wine_get_icm_profile( HDC hdc, BOOL allow_default, DWORD *size,
-                                          WCHAR *filename );
-extern BOOL CDECL __wine_get_file_outline_text_metric( const WCHAR *path,
-                                                       OUTLINETEXTMETRICW *otm );
+extern BOOL WINAPI __wine_get_icm_profile( HDC hdc, BOOL allow_default, DWORD *size,
+                                           WCHAR *filename );
+extern BOOL WINAPI __wine_get_file_outline_text_metric( const WCHAR *path, TEXTMETRICW *otm,
+                                                        UINT *em_square, WCHAR *face_name );
 
 #endif /* _NTGDI_ */

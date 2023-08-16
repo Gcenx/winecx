@@ -60,7 +60,7 @@ static void fatal_error( const char *err, ... )  __attribute__((noreturn,format(
 
 #if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
 static const char exe_link[] = "/proc/self/exe";
-#else
+#elif ! defined (__FreeBSD__) && ! defined(__DragonFly__)
 static const char exe_link[] = "";
 #endif
 
@@ -147,7 +147,7 @@ static char *get_runtime_exedir(void)
     static int pathname[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
     size_t dir_size = PATH_MAX;
     char *dir = malloc( dir_size );
-    if (dir && !sysctl( pathname, sizeof(pathname)/sizeof(pathname[0]), dir, &dir_size, NULL, 0 ))
+    if (dir && !sysctl( pathname, ARRAY_SIZE( pathname ), dir, &dir_size, NULL, 0 ))
         return dir;
     free( dir );
     return NULL;

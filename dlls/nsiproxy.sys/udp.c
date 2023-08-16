@@ -83,9 +83,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(nsi);
 
-static DWORD udp_num_addrs( USHORT family )
+static UINT udp_num_addrs( USHORT family )
 {
-    DWORD endpoint_count = 0;
+    UINT endpoint_count = 0;
 
     nsi_enumerate_all( 1, 0, &NPI_MS_UDP_MODULEID, NSI_UDP_ENDPOINT_TABLE,
                        NULL, 0, NULL, 0, NULL, 0, NULL, 0, &endpoint_count );
@@ -93,8 +93,8 @@ static DWORD udp_num_addrs( USHORT family )
     return endpoint_count;
 }
 
-static NTSTATUS udp_stats_get_all_parameters( const void *key, DWORD key_size, void *rw_data, DWORD rw_size,
-                                              void *dynamic_data, DWORD dynamic_size, void *static_data, DWORD static_size )
+static NTSTATUS udp_stats_get_all_parameters( const void *key, UINT key_size, void *rw_data, UINT rw_size,
+                                              void *dynamic_data, UINT dynamic_size, void *static_data, UINT static_size )
 {
     struct nsi_udp_stats_dynamic dyn;
     const USHORT *family = key;
@@ -145,7 +145,7 @@ static NTSTATUS udp_stats_get_all_parameters( const void *key, DWORD key_size, v
         struct
         {
             const char *name;
-            DWORD *elem;
+            UINT *elem;
         } udp_stat_list[] =
         {
             { "Udp6InDatagrams",  &in_dgrams },
@@ -154,7 +154,7 @@ static NTSTATUS udp_stats_get_all_parameters( const void *key, DWORD key_size, v
             { "Udp6OutDatagrams", &out_dgrams },
         };
         char buf[512], *ptr, *value;
-        DWORD res, i;
+        UINT res, i;
         FILE *fp;
 
         if (!(fp = fopen( "/proc/net/snmp6", "r" ))) return STATUS_NOT_SUPPORTED;
@@ -202,11 +202,11 @@ static NTSTATUS udp_stats_get_all_parameters( const void *key, DWORD key_size, v
     return STATUS_NOT_SUPPORTED;
 }
 
-static NTSTATUS udp_endpoint_enumerate_all( void *key_data, DWORD key_size, void *rw_data, DWORD rw_size,
-                                            void *dynamic_data, DWORD dynamic_size,
-                                            void *static_data, DWORD static_size, DWORD_PTR *count )
+static NTSTATUS udp_endpoint_enumerate_all( void *key_data, UINT key_size, void *rw_data, UINT rw_size,
+                                            void *dynamic_data, UINT dynamic_size,
+                                            void *static_data, UINT static_size, UINT_PTR *count )
 {
-    DWORD num = 0;
+    UINT num = 0;
     NTSTATUS status = STATUS_SUCCESS;
     BOOL want_data = key_size || rw_size || dynamic_size || static_size;
     struct nsi_udp_endpoint_key key, *key_out = key_data;
@@ -223,6 +223,7 @@ static NTSTATUS udp_endpoint_enumerate_all( void *key_data, DWORD key_size, void
         FILE *fp;
         char buf[512], *ptr;
         int inode;
+        UINT addr;
 
         if (!(fp = fopen( "/proc/net/udp", "r" ))) return ERROR_NOT_SUPPORTED;
 
@@ -235,10 +236,11 @@ static NTSTATUS udp_endpoint_enumerate_all( void *key_data, DWORD key_size, void
         while ((ptr = fgets( buf, sizeof(buf), fp )))
         {
             if (sscanf( ptr, "%*u: %x:%hx %*s %*s %*s %*s %*s %*s %*s %d",
-                        &key.local.Ipv4.sin_addr.WS_s_addr, &key.local.Ipv4.sin_port, &inode ) != 3)
+                        &addr, &key.local.Ipv4.sin_port, &inode ) != 3)
                 continue;
 
             key.local.Ipv4.sin_family = WS_AF_INET;
+            key.local.Ipv4.sin_addr.WS_s_addr = addr;
             key.local.Ipv4.sin_port = htons( key.local.Ipv4.sin_port );
 
             stat.pid = find_owning_pid( pid_map, pid_map_size, inode );
@@ -266,7 +268,7 @@ static NTSTATUS udp_endpoint_enumerate_all( void *key_data, DWORD key_size, void
             ptr = fgets( buf, sizeof(buf), fp );
             while ((ptr = fgets( buf, sizeof(buf), fp )))
             {
-                DWORD *local_addr = (DWORD *)&key.local.Ipv6.sin6_addr;
+                UINT *local_addr = (UINT *)&key.local.Ipv6.sin6_addr;
 
                 if (sscanf( ptr, "%*u: %8x%8x%8x%8x:%hx %*s %*s %*s %*s %*s %*s %*s %d",
                             local_addr, local_addr + 1, local_addr + 2, local_addr + 3,

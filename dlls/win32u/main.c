@@ -24,8 +24,7 @@
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
-#include "ntgdi.h"
-#include "win32u_private.h"
+#include "ntuser.h"
 #include "wine/unixlib.h"
 
 extern void *__wine_syscall_dispatcher DECLSPEC_HIDDEN;
@@ -52,23 +51,12 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, void *reserved )
     {
     case DLL_PROCESS_ATTACH:
         LdrDisableThreadCalloutsForDll( inst );
-#ifdef __WINESRC__
-        /* unix call 0: 'init' */
-        if (gdi_init()) break;
-        winstation_init();
-        sysparams_init();
-
-        /* unix call 1: 'callbacks_init' */
-        /* BKS TODO */
-#else
         if (__wine_syscall_dispatcher) break;  /* already set through Wow64Transition */
         if (!NtQueryVirtualMemory( GetCurrentProcess(), inst, MemoryWineUnixFuncs,
                                    &win32u_handle, sizeof(win32u_handle), NULL ))
         {
             __wine_unix_call( win32u_handle, 0, &__wine_syscall_dispatcher );
-            wrappers_init( win32u_handle );
         }
-#endif
         break;
     }
     return TRUE;

@@ -20,9 +20,11 @@
 #define __WINE_NTDLL_MISC_H
 
 #include <stdarg.h>
+#include <stdlib.h>
 #include <sys/types.h>
 
 #include "windef.h"
+#include "winbase.h"
 #include "winnt.h"
 #include "winternl.h"
 #include "unixlib.h"
@@ -61,6 +63,7 @@ extern RUNTIME_FUNCTION *lookup_function_info( ULONG_PTR pc, ULONG_PTR *base, LD
 /* debug helpers */
 extern LPCSTR debugstr_us( const UNICODE_STRING *str ) DECLSPEC_HIDDEN;
 extern const char *debugstr_exception_code( DWORD code ) DECLSPEC_HIDDEN;
+extern void set_native_thread_name( DWORD tid, const char *name ) DECLSPEC_HIDDEN;
 
 /* init routines */
 extern void version_init(void) DECLSPEC_HIDDEN;
@@ -69,6 +72,7 @@ extern void actctx_init(void) DECLSPEC_HIDDEN;
 extern void locale_init(void) DECLSPEC_HIDDEN;
 extern void init_user_process_params(void) DECLSPEC_HIDDEN;
 extern void CDECL DECLSPEC_NORETURN signal_start_thread( CONTEXT *ctx ) DECLSPEC_HIDDEN;
+extern void get_resource_lcids( LANGID *user, LANGID *user_neutral, LANGID *system ) DECLSPEC_HIDDEN;
 
 /* module handling */
 extern LIST_ENTRY tls_links DECLSPEC_HIDDEN;
@@ -82,7 +86,6 @@ extern const WCHAR windows_dir[] DECLSPEC_HIDDEN;
 extern const WCHAR system_dir[] DECLSPEC_HIDDEN;
 
 extern void (FASTCALL *pBaseThreadInitThunk)(DWORD,LPTHREAD_START_ROUTINE,void *) DECLSPEC_HIDDEN;
-extern const struct unix_funcs *unix_funcs DECLSPEC_HIDDEN;
 
 extern struct _KUSER_SHARED_DATA *user_shared_data DECLSPEC_HIDDEN;
 

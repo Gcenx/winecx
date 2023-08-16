@@ -19,6 +19,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include "macdrv.h"
@@ -27,10 +31,8 @@
 #include "winternl.h"
 #include "winnt.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wine/wgl.h"
 #include "wine/wgl_driver.h"
-#include "wine/static_strings.h"
 
 #define GL_SILENCE_DEPRECATION
 #define __gl_h_
@@ -39,11 +41,6 @@
 #include <OpenGL/glu.h>
 #include <OpenGL/CGLRenderers.h>
 #include <dlfcn.h>
-
-#ifdef __i386_on_x86_64__
-#include <mach/mach.h>
-#include <mach/mach_vm.h>
-#endif
 
 WINE_DEFAULT_DEBUG_CHANNEL(wgl);
 
@@ -59,14 +56,6 @@ struct gl_info {
 };
 
 static struct gl_info gl_info;
-DECLARE_STATIC_STRINGS(gl_strings);
-
-
-struct gl_resources
-{
-    CFMutableDictionaryRef mapped_buffers;
-    LONG refcount;
-};
 
 
 struct wgl_context
@@ -87,25 +76,12 @@ struct wgl_context
     BOOL                    sharing;
     LONG                    update_swap_interval;
     LONG                    view_moved;
-    DWORD                   last_flush_time;
+    unsigned int            last_flush_time;
     UINT                    major;
-#ifdef __i386_on_x86_64__
-    LONG                    last_error;
-    struct gl_resources *HOSTPTR resources;
-    void                   *pending_mapped;
-#endif
 };
 
 static struct list context_list = LIST_INIT(context_list);
-
-static CRITICAL_SECTION context_section;
-static CRITICAL_SECTION_DEBUG critsect_debug =
-{
-    0, 0, &context_section,
-    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": context_section") }
-};
-static CRITICAL_SECTION context_section = { &critsect_debug, -1, 0, 0, 0, 0 };
+static pthread_mutex_t context_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 struct wgl_pbuffer
@@ -119,15 +95,7 @@ struct wgl_pbuffer
 };
 
 static CFMutableDictionaryRef dc_pbuffers;
-
-static CRITICAL_SECTION dc_pbuffers_section;
-static CRITICAL_SECTION_DEBUG dc_pbuffers_section_debug =
-{
-    0, 0, &dc_pbuffers_section,
-    { &dc_pbuffers_section_debug.ProcessLocksList, &dc_pbuffers_section_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": dc_pbuffers_section") }
-};
-static CRITICAL_SECTION dc_pbuffers_section = { &dc_pbuffers_section_debug, -1, 0, 0, 0, 0 };
+static pthread_mutex_t dc_pbuffers_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 static struct opengl_funcs opengl_funcs;
@@ -136,7 +104,6 @@ static struct opengl_funcs opengl_funcs;
 static const char *opengl_func_names[] = { ALL_WGL_FUNCS };
 #undef USE_GL_FUNC
 
-#include "wine/hostaddrspace_enter.h"
 
 static void (*pglCopyColorTable)(GLenum target, GLenum internalformat, GLint x, GLint y,
                                  GLsizei width);
@@ -149,21 +116,6 @@ static void (*pglReadPixels)(GLint x, GLint y, GLsizei width, GLsizei height,
                              GLenum format, GLenum type, void *pixels);
 static void (*pglViewport)(GLint x, GLint y, GLsizei width, GLsizei height);
 
-#ifdef __i386_on_x86_64__
-static void (*pglDeleteBuffers)(GLsizei n, const GLuint *buffers);
-static void (*pglDeleteBuffersARB)(GLsizei n, const GLuint *buffers);
-static void (*pglGetBufferPointerv)(GLenum target, GLenum pname, void **params);
-static void (*pglGetBufferPointervARB)(GLenum target, GLenum pname, void **params);
-static GLenum (*pglGetError)(void);
-static void *(*pglMapBuffer)(GLenum target, GLenum access);
-static void *(*pglMapBufferARB)(GLenum target, GLenum access);
-static void *(*pglMapBufferRange)(GLenum target, WINEGLDEF(GLintptr) offset,
-                                  WINEGLDEF(GLsizeiptr) length, GLbitfield access);
-static GLboolean (*pglUnmapBuffer)(GLenum target);
-static GLboolean (*pglUnmapBufferARB)(GLenum target);
-#endif
-
-#include "wine/hostaddrspace_exit.h"
 
 struct color_mode {
     GLint   mode;
@@ -297,7 +249,7 @@ static pixel_format *pixel_formats;
 static int nb_formats, nb_displayable_formats;
 
 
-static void * HOSTPTR opengl_handle;
+static void *opengl_handle;
 
 
 static const char* debugstr_attrib(int attrib, int value)
@@ -1031,7 +983,7 @@ static int pixel_format_category(pixel_format pf)
 }
 
 
-static CFComparisonResult pixel_format_comparator(const void * HOSTPTR val1, const void * HOSTPTR val2, void * HOSTPTR context)
+static CFComparisonResult pixel_format_comparator(const void *val1, const void *val2, void *context)
 {
     CFNumberRef number1 = val1;
     CFNumberRef number2 = val2;
@@ -1216,7 +1168,7 @@ static BOOL init_pixel_formats(void)
     range = CFRangeMake(0, CFArrayGetCount(pixel_format_array));
     if (range.length)
     {
-        pixel_formats = HeapAlloc(GetProcessHeap(), 0, range.length * sizeof(*pixel_formats));
+        pixel_formats = malloc(range.length * sizeof(*pixel_formats));
         if (pixel_formats)
         {
             CFArraySortValues(pixel_format_array, range, pixel_format_comparator, NULL);
@@ -1295,7 +1247,7 @@ static BOOL init_gl_info(void)
     CGLError err;
     CGLContextObj context;
     CGLContextObj old_context = CGLGetCurrentContext();
-    const char * HOSTPTR str;
+    const char *str;
     size_t length;
 
     err = CGLChoosePixelFormat(attribs, &pix, &virtualScreens);
@@ -1321,11 +1273,11 @@ static BOOL init_gl_info(void)
         return FALSE;
     }
 
-    str = (const char* HOSTPTR)opengl_funcs.gl.p_glGetString(GL_EXTENSIONS);
+    str = (const char*)opengl_funcs.gl.p_glGetString(GL_EXTENSIONS);
     length = strlen(str) + sizeof(legacy_extensions);
     if (allow_vsync)
         length += strlen(legacy_ext_swap_control);
-    gl_info.glExtensions = HeapAlloc(GetProcessHeap(), 0, length);
+    gl_info.glExtensions = malloc(length);
     strcpy(gl_info.glExtensions, str);
     strcat(gl_info.glExtensions, legacy_extensions);
     if (allow_vsync)
@@ -1333,7 +1285,7 @@ static BOOL init_gl_info(void)
 
     opengl_funcs.gl.p_glGetIntegerv(GL_MAX_VIEWPORT_DIMS, gl_info.max_viewport_dims);
 
-    str = (const char* HOSTPTR)opengl_funcs.gl.p_glGetString(GL_VERSION);
+    str = (const char*)opengl_funcs.gl.p_glGetString(GL_VERSION);
     sscanf(str, "%u.%u", &gl_info.max_major, &gl_info.max_minor);
     TRACE("GL version   : %s\n", str);
     TRACE("GL renderer  : %s\n", opengl_funcs.gl.p_glGetString(GL_RENDERER));
@@ -1367,7 +1319,7 @@ static BOOL init_gl_info(void)
         return TRUE;
     }
 
-    str = (const char* HOSTPTR)opengl_funcs.gl.p_glGetString(GL_VERSION);
+    str = (const char*)opengl_funcs.gl.p_glGetString(GL_VERSION);
     TRACE("Core context GL version: %s\n", str);
     sscanf(str, "%u.%u", &gl_info.max_major, &gl_info.max_minor);
     CGLSetCurrentContext(old_context);
@@ -1382,7 +1334,7 @@ static int get_dc_pixel_format(HDC hdc)
     int format;
     HWND hwnd;
 
-    if ((hwnd = WindowFromDC(hdc)))
+    if ((hwnd = NtUserWindowFromDC(hdc)))
     {
         struct macdrv_win_data *data;
 
@@ -1399,8 +1351,8 @@ static int get_dc_pixel_format(HDC hdc)
     {
         struct wgl_pbuffer *pbuffer;
 
-        EnterCriticalSection(&dc_pbuffers_section);
-        pbuffer = ADDRSPACECAST(struct wgl_pbuffer*, CFDictionaryGetValue(dc_pbuffers, hdc));
+        pthread_mutex_lock(&dc_pbuffers_mutex);
+        pbuffer = (struct wgl_pbuffer*)CFDictionaryGetValue(dc_pbuffers, hdc);
         if (pbuffer)
             format = pbuffer->format;
         else
@@ -1408,7 +1360,7 @@ static int get_dc_pixel_format(HDC hdc)
             WARN("no window or pbuffer for DC %p\n", hdc);
             format = 0;
         }
-        LeaveCriticalSection(&dc_pbuffers_section);
+        pthread_mutex_unlock(&dc_pbuffers_mutex);
     }
 
     return format;
@@ -1418,7 +1370,7 @@ static int get_dc_pixel_format(HDC hdc)
 /**********************************************************************
  *              create_context
  */
-static BOOL create_context(struct wgl_context *context, struct wgl_context *share, unsigned int major)
+static BOOL create_context(struct wgl_context *context, CGLContextObj share, unsigned int major)
 {
     const pixel_format *pf;
     CGLPixelFormatAttribute attribs[64];
@@ -1432,7 +1384,7 @@ static BOOL create_context(struct wgl_context *context, struct wgl_context *shar
     if (!pf)
     {
         ERR("Invalid pixel format %d, expect problems!\n", context->format);
-        SetLastError(ERROR_INVALID_PIXEL_FORMAT);
+        RtlSetLastWin32Error(ERROR_INVALID_PIXEL_FORMAT);
         return FALSE;
     }
 
@@ -1522,17 +1474,17 @@ static BOOL create_context(struct wgl_context *context, struct wgl_context *shar
     if (err != kCGLNoError || !pix)
     {
         WARN("CGLChoosePixelFormat() failed with error %d %s\n", err, CGLErrorString(err));
-        SetLastError(ERROR_INVALID_OPERATION);
+        RtlSetLastWin32Error(ERROR_INVALID_OPERATION);
         return FALSE;
     }
 
-    err = CGLCreateContext(pix, share ? share->cglcontext : NULL, &context->cglcontext);
+    err = CGLCreateContext(pix, share, &context->cglcontext);
     CGLReleasePixelFormat(pix);
     if (err != kCGLNoError || !context->cglcontext)
     {
         context->cglcontext = NULL;
         WARN("CGLCreateContext() failed with error %d %s\n", err, CGLErrorString(err));
-        SetLastError(ERROR_INVALID_OPERATION);
+        RtlSetLastWin32Error(ERROR_INVALID_OPERATION);
         return FALSE;
     }
 
@@ -1556,42 +1508,10 @@ static BOOL create_context(struct wgl_context *context, struct wgl_context *shar
     if (!context->context)
     {
         WARN("macdrv_create_opengl_context() failed\n");
-        SetLastError(ERROR_INVALID_OPERATION);
+        RtlSetLastWin32Error(ERROR_INVALID_OPERATION);
         return FALSE;
     }
     context->major = major;
-
-#ifdef __i386_on_x86_64__
-    InterlockedExchange(&context->last_error, GL_NO_ERROR);
-
-    EnterCriticalSection(&context_section);
-    if (share)
-    {
-        InterlockedIncrement(&share->resources->refcount);
-        context->resources = share->resources;
-    }
-    else
-    {
-        if (!(context->resources = malloc(sizeof(*context->resources))))
-        {
-            LeaveCriticalSection(&context_section);
-            macdrv_dispose_opengl_context(context->context);
-            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-            return FALSE;
-        }
-        if (!(context->resources->mapped_buffers = CFDictionaryCreateMutable(NULL, 0, NULL, NULL)))
-        {
-            LeaveCriticalSection(&context_section);
-            WARN("CFDictionaryCreateMutable() failed\n");
-            free(context->resources);
-            macdrv_dispose_opengl_context(context->context);
-            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-            return FALSE;
-        }
-        context->resources->refcount = 1;
-    }
-    LeaveCriticalSection(&context_section);
-#endif
 
     InterlockedExchange(&context->update_swap_interval, TRUE);
 
@@ -1610,12 +1530,12 @@ static BOOL set_pixel_format(HDC hdc, int fmt, BOOL allow_reset)
 {
     struct macdrv_win_data *data;
     const pixel_format *pf;
-    HWND hwnd = WindowFromDC(hdc);
+    HWND hwnd = NtUserWindowFromDC(hdc);
     BOOL ret = FALSE;
 
     TRACE("hdc %p format %d\n", hdc, fmt);
 
-    if (!hwnd || hwnd == GetDesktopWindow())
+    if (!hwnd || hwnd == NtUserGetDesktopWindow())
     {
         WARN("not a proper window DC %p/%p\n", hdc, hwnd);
         return FALSE;
@@ -1680,13 +1600,13 @@ static void mark_contexts_for_moved_view(macdrv_view view)
 {
     struct wgl_context *context;
 
-    EnterCriticalSection(&context_section);
+    pthread_mutex_lock(&context_mutex);
     LIST_FOR_EACH_ENTRY(context, &context_list, struct wgl_context, entry)
     {
         if (context->draw_view == view)
             InterlockedExchange(&context->view_moved, TRUE);
     }
-    LeaveCriticalSection(&context_section);
+    pthread_mutex_unlock(&context_mutex);
 }
 
 
@@ -1976,7 +1896,7 @@ static const char* get_gl_string(CGLPixelFormatObj pixel_format, GLenum name)
         err = CGLSetCurrentContext(context);
         if (err == kCGLNoError)
         {
-            ret = (const char*)wine_static_ustring_add(&gl_strings, opengl_funcs.gl.p_glGetString(name));
+            ret = (const char*)opengl_funcs.gl.p_glGetString(name);
             CGLSetCurrentContext(old_context);
         }
         else
@@ -2008,7 +1928,7 @@ static void get_fallback_renderer_version(GLuint *value)
             if (version && CFGetTypeID(version) == CFStringGetTypeID())
             {
                 size_t len = CFStringGetMaximumSizeForEncoding(CFStringGetLength(version), kCFStringEncodingUTF8);
-                char* buf = HeapAlloc(GetProcessHeap(), 0, len);
+                char* buf = malloc(len);
                 if (buf && CFStringGetCString(version, buf, len, kCFStringEncodingUTF8))
                 {
                     unsigned int major, minor, bugfix;
@@ -2024,7 +1944,7 @@ static void get_fallback_renderer_version(GLuint *value)
                         got_it = TRUE;
                     }
                 }
-                HeapFree(GetProcessHeap(), 0, buf);
+                free(buf);
             }
             CFRelease(bundle);
         }
@@ -2051,9 +1971,9 @@ static void get_fallback_renderer_version(GLuint *value)
  * form for the vendor specific information is not generally applicable,
  * but seems reliable on OS X.
  */
-static BOOL parse_renderer_version(const char* HOSTPTR version, GLuint *value)
+static BOOL parse_renderer_version(const char* version, GLuint *value)
 {
-    const char* HOSTPTR p = strchr(version, ' ');
+    const char* p = strchr(version, ' ');
     int count;
     unsigned int major, minor, bugfix;
 
@@ -2229,93 +2149,6 @@ static BOOL query_renderer_integer(CGLRendererInfoObj renderer_info, GLint rende
 }
 
 
-#ifdef __i386_on_x86_64__
-/**********************************************************************
- *              set_mapped_buffer
- */
-static void set_mapped_buffer(CFMutableDictionaryRef mapped_buffers, GLuint buffer, void *addr)
-{
-    TRACE("buffer %u address %p\n", buffer, addr);
-    CFDictionarySetValue(mapped_buffers, (const void * HOSTPTR)(ULONG_HOSTPTR)buffer, addr);
-}
-
-
-/**********************************************************************
- *              free_mapped_buffer
- */
-static void free_mapped_buffer(struct wgl_context *context, GLuint buffer)
-{
-    CFMutableDictionaryRef mapped_buffers = context->resources->mapped_buffers;
-    const void * HOSTPTR addr;
-    if ((addr = CFDictionaryGetValue(mapped_buffers, (const void * HOSTPTR)(ULONG_HOSTPTR)buffer)))
-    {
-        TRACE("buffer %u address %p\n", buffer, addr);
-        if (context->pending_mapped)
-            VirtualFree(context->pending_mapped, 0, MEM_RELEASE);
-        context->pending_mapped = ADDRSPACECAST(void *, addr);
-        CFDictionaryRemoveValue(mapped_buffers, (const void * HOSTPTR)(ULONG_HOSTPTR)buffer);
-    }
-}
-
-
-/**********************************************************************
- *              free_mapped_buffer_applier
- */
-static void free_mapped_buffer_applier(const void * HOSTPTR key, const void * HOSTPTR value, void * HOSTPTR context)
-{
-    TRACE("buffer %u address %p\n", (unsigned int)(ULONG_HOSTPTR)key, value);
-    VirtualFree(ADDRSPACECAST(void *, value), 0, MEM_RELEASE);
-}
-
-
-/**********************************************************************
- *              free_mapped_buffers
- *
- * Unmap all low memory associated with buffers in a context.
- */
-static void free_mapped_buffers(struct wgl_context *context)
-{
-    struct gl_resources *HOSTPTR resources = context->resources;
-
-    if (context->pending_mapped)
-        VirtualFree(context->pending_mapped, 0, MEM_RELEASE);
-    context->pending_mapped = NULL;
-
-    if (!InterlockedDecrement(&context->resources->refcount))
-    {
-        CFMutableDictionaryRef mapped_buffers = resources->mapped_buffers;
-
-        CFDictionaryApplyFunction(mapped_buffers, free_mapped_buffer_applier, NULL);
-        CFRelease(mapped_buffers);
-        free(resources);
-    }
-}
-
-static GLenum binding_for_target(GLenum target)
-{
-    switch (target)
-    {
-        case GL_ARRAY_BUFFER: return GL_ARRAY_BUFFER_BINDING;
-        case GL_ATOMIC_COUNTER_BUFFER: return GL_ATOMIC_COUNTER_BUFFER_BINDING;
-        case GL_COPY_READ_BUFFER: return GL_COPY_READ_BUFFER_BINDING;
-        case GL_COPY_WRITE_BUFFER: return GL_COPY_WRITE_BUFFER_BINDING;
-        case GL_DISPATCH_INDIRECT_BUFFER: return GL_DISPATCH_INDIRECT_BUFFER_BINDING;
-        case GL_DRAW_INDIRECT_BUFFER: return GL_DRAW_INDIRECT_BUFFER_BINDING;
-        case GL_ELEMENT_ARRAY_BUFFER: return GL_ELEMENT_ARRAY_BUFFER_BINDING;
-        case GL_PIXEL_PACK_BUFFER: return GL_PIXEL_PACK_BUFFER_BINDING;
-        case GL_PIXEL_UNPACK_BUFFER: return GL_PIXEL_UNPACK_BUFFER_BINDING;
-        case GL_QUERY_BUFFER: return GL_QUERY_BUFFER_BINDING;
-        case GL_SHADER_STORAGE_BUFFER: return GL_SHADER_STORAGE_BUFFER_BINDING;
-        case GL_TEXTURE_BUFFER: return GL_TEXTURE_BUFFER_BINDING;
-        case GL_TRANSFORM_FEEDBACK_BUFFER: return GL_TRANSFORM_FEEDBACK_BUFFER_BINDING;
-        case GL_UNIFORM_BUFFER: return GL_UNIFORM_BUFFER_BINDING;
-    }
-
-    return target;
-}
-#endif
-
-
 /**********************************************************************
  *              macdrv_glCopyColorTable
  *
@@ -2389,7 +2222,7 @@ static void macdrv_glFlush(void)
     if (skip_single_buffer_flushes)
     {
         const pixel_format *pf = &pixel_formats[context->format - 1];
-        DWORD now = GetTickCount();
+        unsigned int now = NtGetTickCount();
 
         TRACE("double buffer %d last flush time %d now %d\n", (int)pf->double_buffer,
               context->last_flush_time, now);
@@ -2421,7 +2254,7 @@ static void macdrv_glFlush(void)
  * string, and won't query any other WGL extensions unless they find
  * that particular extension there.
  */
-static const GLubyte * HOSTPTR macdrv_glGetString(GLenum name)
+static const GLubyte *macdrv_glGetString(GLenum name)
 {
     if (name == GL_EXTENSIONS && gl_info.glExtensions)
         return (const GLubyte *)gl_info.glExtensions;
@@ -2440,7 +2273,7 @@ static const GLubyte * HOSTPTR macdrv_glGetString(GLenum name)
  * implementation does.
  */
 static void macdrv_glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
-                                GLenum format, GLenum type, void * HOSTPTR pixels)
+                                GLenum format, GLenum type, void *pixels)
 {
     struct wgl_context *context = NtCurrentTeb()->glContext;
 
@@ -2471,178 +2304,6 @@ static void macdrv_glViewport(GLint x, GLint y, GLsizei width, GLsizei height)
 }
 
 
-#ifdef __i386_on_x86_64__
-/**********************************************************************
- *              macdrv_glDeleteBuffers
- *
- * Hook into glDeleteBuffers to unmap low memory for any buffers that might
- * be mapped.
- */
-static void macdrv_glDeleteBuffers(GLsizei n, const GLuint * HOSTPTR buffers)
-{
-    /* Unmap first, so the deletion will succeed. */
-    struct wgl_context *current = NtCurrentTeb()->glContext;
-    GLsizei i;
-    for (i = 0; i < n; i++)
-        free_mapped_buffer(current, buffers[i]);
-
-    pglDeleteBuffers(n, buffers);
-}
-
-
-/**********************************************************************
- *              macdrv_glGetBufferPointerv
- *
- * Hook into glGetBufferPointerv to return the low-memory buffer mapping
- * in response to GL_BUFFER_MAP_POINTER.
- */
-static void macdrv_glGetBufferPointerv(GLenum target, GLenum pname, void * HOSTPTR * HOSTPTR params)
-{
-    TRACE("target 0x%04x pname 0x%04x\n", target, pname);
-
-    if (pname == GL_BUFFER_MAP_POINTER)
-    {
-        struct wgl_context *current = NtCurrentTeb()->glContext;
-        GLuint buffer;
-        void * HOSTPTR addr;
-
-        opengl_funcs.gl.p_glGetIntegerv(binding_for_target(target), (GLint * HOSTPTR)&buffer);
-        /* Let the native GL handle the default buffer (that is, no buffer at all). */
-        if (buffer != 0 &&
-            (addr = (void * HOSTPTR)CFDictionaryGetValue(current->resources->mapped_buffers, (const void * HOSTPTR)(ULONG_HOSTPTR)buffer)))
-        {
-            TRACE("buffer %u address %p\n", buffer, addr);
-            *params = addr;
-            return;
-        }
-    }
-
-    pglGetBufferPointerv(target, pname, params);
-}
-
-
-/**********************************************************************
- *              macdrv_glGetError
- *
- * Hook into glGetError to return errors from other wrappers.
- */
-static GLenum macdrv_glGetError(void)
-{
-    struct wgl_context *current = NtCurrentTeb()->glContext;
-    GLenum err;
-
-    if ((err = InterlockedExchange(&current->last_error, GL_NO_ERROR)) != GL_NO_ERROR)
-        return err;
-
-    return pglGetError();
-}
-
-static void * HOSTPTR remap_memory(void * HOSTPTR hostaddr, GLint size, GLenum target, BOOL readonly)
-{
-    struct wgl_context *current = NtCurrentTeb()->glContext;
-    vm_prot_t cur_protection, max_protection;
-    mach_vm_address_t lowaddr, base;
-    mach_vm_size_t aligned_size;
-    kern_return_t kr;
-    GLuint buffer;
-
-    TRACE("    host address %p\n", hostaddr);
-    if (!hostaddr) return NULL;
-
-    /* If this pointer is already below 4 GB, we don't need to do anything. */
-    if ((ULONG_HOSTPTR)hostaddr < 0x100000000ULL)
-        return hostaddr;
-
-    /* Get some low memory, then remap it to the host allocation. */
-    base = (vm_map_address_t)hostaddr & ~PAGE_MASK;
-    aligned_size = (size + ((vm_map_offset_t)hostaddr - base) + PAGE_MASK) & ~PAGE_MASK;
-    TRACE("base host address 0x%08llx, aligned size %llu\n", base, aligned_size);
-
-    if (!(lowaddr = (mach_vm_address_t)VirtualAlloc(NULL, aligned_size, MEM_COMMIT,
-                                                    readonly ? PAGE_READONLY : PAGE_READWRITE)))
-    {
-        WARN("failed to find low memory to remap to\n");
-        pglUnmapBuffer(target);
-        InterlockedExchange(&current->last_error, GL_OUT_OF_MEMORY);
-        return NULL;
-    }
-
-    if ((kr = mach_vm_remap(mach_task_self(), &lowaddr, aligned_size, 0, VM_FLAGS_FIXED|VM_FLAGS_OVERWRITE,
-                            mach_task_self(), base, FALSE, &cur_protection, &max_protection,
-                            VM_INHERIT_DEFAULT)) != KERN_SUCCESS)
-    {
-        WARN("failed to remap memory; Mach error %d\n", kr);
-        VirtualFree((void *)(UINT32)lowaddr, 0, MEM_RELEASE);
-        pglUnmapBuffer(target);
-        InterlockedExchange(&current->last_error, GL_OUT_OF_MEMORY);
-        return NULL;
-    }
-
-    opengl_funcs.gl.p_glGetIntegerv(binding_for_target(target), (GLint * HOSTPTR)&buffer);
-    set_mapped_buffer(current->resources->mapped_buffers, buffer, (void *)(UINT32)lowaddr);
-    TRACE("    remapped buffer %u to address 0x%08llx\n", buffer, lowaddr);
-    return (void * HOSTPTR)(lowaddr + ((vm_map_offset_t)hostaddr - base));
-
-}
-
-/**********************************************************************
- *              macdrv_glMapBuffer
- *
- * Hook into glMapBuffer to map its memory into the lower 4 GB if necessary.
- */
-static void * HOSTPTR macdrv_glMapBuffer(GLenum target, GLenum access)
-{
-    GLint size;
-    void * HOSTPTR hostaddr;
-
-    TRACE("target 0x%04x access 0x%04x\n", target, access);
-
-    hostaddr = pglMapBuffer(target, access);
-    opengl_funcs.ext.p_glGetBufferParameteriv(target, GL_BUFFER_SIZE, &size);
-    return remap_memory(hostaddr, size, target, access == GL_READ_ONLY);
-}
-
-
-/**********************************************************************
- *              macdrv_glMapBufferRange
- *
- * Hook into glMapBufferRange to map its memory into the lower 4 GB if necessary.
- */
-static void * HOSTPTR macdrv_glMapBufferRange(GLenum target, WINEGLDEF(GLintptr) offset,
-                                              WINEGLDEF(GLsizeiptr) size, GLbitfield access)
-{
-    void * HOSTPTR hostaddr;
-
-    TRACE("target 0x%04x offset %ld/0x%08lx size %ld/0x%08lx access 0x%04x\n",
-          target, offset, offset, size, size, access);
-
-    hostaddr = pglMapBufferRange(target, offset, size, access);
-    return remap_memory(hostaddr, size, target, !(access & GL_MAP_WRITE_BIT));
-}
-
-
-/**********************************************************************
- *              macdrv_glUnmapBuffer
- *
- * Hook into glUnmapBuffer to unmap low memory that was mapped in the
- * glMapBuffer[Range] wrapper above.
- */
-static GLboolean macdrv_glUnmapBuffer(GLenum target)
-{
-    /* Unmap first, so the kernel can release the physical pages. */
-    struct wgl_context *current = NtCurrentTeb()->glContext;
-    GLuint buffer;
-
-    TRACE("target 0x%04x\n", target);
-
-    opengl_funcs.gl.p_glGetIntegerv(binding_for_target(target), (GLint * HOSTPTR)&buffer);
-    free_mapped_buffer(current, buffer);
-
-    return pglUnmapBuffer(target);
-}
-#endif
-
-
 /***********************************************************************
  *              macdrv_wglBindTexImageARB
  *
@@ -2658,7 +2319,7 @@ static BOOL macdrv_wglBindTexImageARB(struct wgl_pbuffer *pbuffer, int iBuffer)
 
     if (pbuffer->no_texture)
     {
-        SetLastError(ERROR_INVALID_OPERATION);
+        RtlSetLastWin32Error(ERROR_INVALID_OPERATION);
         return GL_FALSE;
     }
 
@@ -2697,12 +2358,12 @@ static BOOL macdrv_wglBindTexImageARB(struct wgl_pbuffer *pbuffer, int iBuffer)
         case WGL_AUX8_ARB:
         case WGL_AUX9_ARB:
             FIXME("unsupported source buffer 0x%x\n", iBuffer);
-            SetLastError(ERROR_INVALID_DATA);
+            RtlSetLastWin32Error(ERROR_INVALID_DATA);
             return GL_FALSE;
 
         default:
             WARN("unknown source buffer 0x%x\n", iBuffer);
-            SetLastError(ERROR_INVALID_DATA);
+            RtlSetLastWin32Error(ERROR_INVALID_DATA);
             return GL_FALSE;
     }
 
@@ -2710,7 +2371,7 @@ static BOOL macdrv_wglBindTexImageARB(struct wgl_pbuffer *pbuffer, int iBuffer)
     if (err != kCGLNoError)
     {
         WARN("CGLTexImagePBuffer failed with err %d %s\n", err, CGLErrorString(err));
-        SetLastError(ERROR_INVALID_OPERATION);
+        RtlSetLastWin32Error(ERROR_INVALID_OPERATION);
         return GL_FALSE;
     }
 
@@ -3063,7 +2724,7 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
     if (!is_valid_pixel_format(format))
     {
         ERR("Invalid pixel format %d, expect problems!\n", format);
-        SetLastError(ERROR_INVALID_PIXEL_FORMAT);
+        RtlSetLastWin32Error(ERROR_INVALID_PIXEL_FORMAT);
         return NULL;
     }
 
@@ -3100,7 +2761,7 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
                     value != WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB)
                 {
                     WARN("WGL_CONTEXT_PROFILE_MASK_ARB bits %#x invalid\n", value);
-                    SetLastError(ERROR_INVALID_PROFILE_ARB);
+                    RtlSetLastWin32Error(ERROR_INVALID_PROFILE_ARB);
                     return NULL;
                 }
                 profile = value;
@@ -3116,7 +2777,7 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
                 if (err != kCGLNoError)
                 {
                     WARN("CGLQueryRendererInfo failed: %d %s\n", err, CGLErrorString(err));
-                    SetLastError(ERROR_GEN_FAILURE);
+                    RtlSetLastWin32Error(ERROR_GEN_FAILURE);
                     return NULL;
                 }
 
@@ -3126,7 +2787,7 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
                 {
                     WARN("WGL_RENDERER_ID_WINE renderer %d exceeds count (%d)\n", value, renderer_count);
                     CGLDestroyRendererInfo(renderer_info);
-                    SetLastError(ERROR_INVALID_PARAMETER);
+                    RtlSetLastWin32Error(ERROR_INVALID_PARAMETER);
                     return NULL;
                 }
 
@@ -3134,7 +2795,7 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
                 {
                     WARN("WGL_RENDERER_ID_WINE failed to get ID of renderer %d\n", value);
                     CGLDestroyRendererInfo(renderer_info);
-                    SetLastError(ERROR_GEN_FAILURE);
+                    RtlSetLastWin32Error(ERROR_GEN_FAILURE);
                     return NULL;
                 }
 
@@ -3143,7 +2804,7 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
                 if (renderer_id && temp != renderer_id)
                 {
                     WARN("WGL_RENDERER_ID_WINE requested two different renderers (0x%08x vs. 0x%08x)\n", renderer_id, temp);
-                    SetLastError(ERROR_INVALID_PARAMETER);
+                    RtlSetLastWin32Error(ERROR_INVALID_PARAMETER);
                     return NULL;
                 }
                 renderer_id = temp;
@@ -3152,7 +2813,7 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
 
             default:
                 WARN("Unknown attribute %s.\n", debugstr_attrib(attr, value));
-                SetLastError(ERROR_INVALID_PARAMETER);
+                RtlSetLastWin32Error(ERROR_INVALID_PARAMETER);
                 return NULL;
         }
     }
@@ -3163,13 +2824,13 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
         if (!(flags & WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB))
         {
             WARN("OS X only supports forward-compatible 3.2+ contexts\n");
-            SetLastError(ERROR_INVALID_VERSION_ARB);
+            RtlSetLastWin32Error(ERROR_INVALID_VERSION_ARB);
             return NULL;
         }
         if (profile != WGL_CONTEXT_CORE_PROFILE_BIT_ARB)
         {
             WARN("Compatibility profiles for GL version >= 3.2 not supported\n");
-            SetLastError(ERROR_INVALID_PROFILE_ARB);
+            RtlSetLastWin32Error(ERROR_INVALID_PROFILE_ARB);
             return NULL;
         }
         if (major > gl_info.max_major ||
@@ -3177,7 +2838,7 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
         {
             WARN("This GL implementation does not support the requested GL version %u.%u\n",
                  major, minor);
-            SetLastError(ERROR_INVALID_PROFILE_ARB);
+            RtlSetLastWin32Error(ERROR_INVALID_PROFILE_ARB);
             return NULL;
         }
         core = TRUE;
@@ -3185,36 +2846,36 @@ static struct wgl_context *macdrv_wglCreateContextAttribsARB(HDC hdc,
     else if (major >= 3)
     {
         WARN("Profile version %u.%u not supported\n", major, minor);
-        SetLastError(ERROR_INVALID_VERSION_ARB);
+        RtlSetLastWin32Error(ERROR_INVALID_VERSION_ARB);
         return NULL;
     }
     else if (major < 1 || (major == 1 && (minor < 0 || minor > 5)) ||
              (major == 2 && (minor < 0 || minor > 1)))
     {
         WARN("Invalid GL version requested\n");
-        SetLastError(ERROR_INVALID_VERSION_ARB);
+        RtlSetLastWin32Error(ERROR_INVALID_VERSION_ARB);
         return NULL;
     }
     if (!core && flags & WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB)
     {
         WARN("Forward compatible context requested for GL version < 3\n");
-        SetLastError(ERROR_INVALID_VERSION_ARB);
+        RtlSetLastWin32Error(ERROR_INVALID_VERSION_ARB);
         return NULL;
     }
 
-    if (!(context = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*context)))) return NULL;
+    if (!(context = calloc(1, sizeof(*context)))) return NULL;
 
     context->format = format;
     context->renderer_id = renderer_id;
-    if (!create_context(context, share_context, major))
+    if (!create_context(context, share_context ? share_context->cglcontext : NULL, major))
     {
-        HeapFree(GetProcessHeap(), 0, context);
+        free(context);
         return NULL;
     }
 
-    EnterCriticalSection(&context_section);
+    pthread_mutex_lock(&context_mutex);
     list_add_tail(&context_list, &context->entry);
-    LeaveCriticalSection(&context_section);
+    pthread_mutex_unlock(&context_mutex);
 
     return context;
 }
@@ -3239,11 +2900,11 @@ static struct wgl_pbuffer *macdrv_wglCreatePbufferARB(HDC hdc, int iPixelFormat,
     if (!is_valid_pixel_format(iPixelFormat) || !pixel_formats[iPixelFormat - 1].pbuffer)
     {
         WARN("invalid pixel format %d\n", iPixelFormat);
-        SetLastError(ERROR_INVALID_PIXEL_FORMAT);
+        RtlSetLastWin32Error(ERROR_INVALID_PIXEL_FORMAT);
         return NULL;
     }
 
-    pbuffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*pbuffer));
+    pbuffer = calloc(1, sizeof(*pbuffer));
     pbuffer->format = iPixelFormat;
 
     for ( ; piAttribList && *piAttribList; piAttribList += 2)
@@ -3274,7 +2935,7 @@ static struct wgl_pbuffer *macdrv_wglCreatePbufferARB(HDC hdc, int iPixelFormat,
                         break;
                     default:
                         WARN("unknown WGL_TEXTURE_FORMAT_ARB value 0x%x\n", value);
-                        SetLastError(ERROR_INVALID_DATA);
+                        RtlSetLastWin32Error(ERROR_INVALID_DATA);
                         goto done;
                 }
                 break;
@@ -3294,7 +2955,7 @@ static struct wgl_pbuffer *macdrv_wglCreatePbufferARB(HDC hdc, int iPixelFormat,
                         break;
                     case WGL_TEXTURE_1D_ARB:
                         FIXME("WGL_TEXTURE_TARGET_ARB: WGL_TEXTURE_1D_ARB; not supported\n");
-                        SetLastError(ERROR_NO_SYSTEM_RESOURCES);
+                        RtlSetLastWin32Error(ERROR_NO_SYSTEM_RESOURCES);
                         goto done;
                     case WGL_TEXTURE_2D_ARB:
                         TRACE("WGL_TEXTURE_TARGET_ARB: WGL_TEXTURE_2D_ARB\n");
@@ -3306,7 +2967,7 @@ static struct wgl_pbuffer *macdrv_wglCreatePbufferARB(HDC hdc, int iPixelFormat,
                         break;
                     default:
                         WARN("unknown WGL_TEXTURE_TARGET_ARB value 0x%x\n", value);
-                        SetLastError(ERROR_INVALID_DATA);
+                        RtlSetLastWin32Error(ERROR_INVALID_DATA);
                         goto done;
                 }
                 break;
@@ -3327,7 +2988,7 @@ static struct wgl_pbuffer *macdrv_wglCreatePbufferARB(HDC hdc, int iPixelFormat,
 
             default:
                 WARN("unknown attribute 0x%x\n", attr);
-                SetLastError(ERROR_INVALID_DATA);
+                RtlSetLastWin32Error(ERROR_INVALID_DATA);
                 goto done;
         }
     }
@@ -3346,15 +3007,15 @@ static struct wgl_pbuffer *macdrv_wglCreatePbufferARB(HDC hdc, int iPixelFormat,
         WARN("CGLCreatePBuffer failed; err %d %s\n", err, CGLErrorString(err));
         pbuffer->pbuffer = NULL;
         if (err == kCGLBadAlloc)
-            SetLastError(ERROR_NO_SYSTEM_RESOURCES);
+            RtlSetLastWin32Error(ERROR_NO_SYSTEM_RESOURCES);
         else
-            SetLastError(ERROR_INVALID_DATA);
+            RtlSetLastWin32Error(ERROR_INVALID_DATA);
     }
 
 done:
     if (!pbuffer->pbuffer)
     {
-        HeapFree(GetProcessHeap(), 0, pbuffer);
+        free(pbuffer);
         return NULL;
     }
 
@@ -3373,7 +3034,7 @@ static BOOL macdrv_wglDestroyPbufferARB(struct wgl_pbuffer *pbuffer)
     TRACE("pbuffer %p\n", pbuffer);
     if (pbuffer && pbuffer->pbuffer)
         CGLReleasePBuffer(pbuffer->pbuffer);
-    HeapFree(GetProcessHeap(), 0, pbuffer);
+    free(pbuffer);
     return GL_TRUE;
 }
 
@@ -3414,18 +3075,18 @@ static HDC macdrv_wglGetPbufferDCARB(struct wgl_pbuffer *pbuffer)
     HDC hdc;
     struct wgl_pbuffer *prev;
 
-    hdc = CreateDCA("DISPLAY", NULL, NULL, NULL);
+    hdc = NtGdiOpenDCW(NULL, NULL, NULL, 0, TRUE, NULL, NULL, NULL);
     if (!hdc) return 0;
 
-    EnterCriticalSection(&dc_pbuffers_section);
-    prev = ADDRSPACECAST(struct wgl_pbuffer*, CFDictionaryGetValue(dc_pbuffers, hdc));
+    pthread_mutex_lock(&dc_pbuffers_mutex);
+    prev = (struct wgl_pbuffer*)CFDictionaryGetValue(dc_pbuffers, hdc);
     if (prev)
     {
         CGLReleasePBuffer(prev->pbuffer);
-        HeapFree(GetProcessHeap(), 0, prev);
+        free(prev);
     }
     CFDictionarySetValue(dc_pbuffers, hdc, pbuffer);
-    LeaveCriticalSection(&dc_pbuffers_section);
+    pthread_mutex_unlock(&dc_pbuffers_mutex);
 
     TRACE("pbuffer %p -> hdc %p\n", pbuffer, hdc);
     return hdc;
@@ -3459,7 +3120,7 @@ static BOOL macdrv_wglGetPixelFormatAttribivARB(HDC hdc, int iPixelFormat, int i
     if (!pf)
     {
         WARN("invalid pixel format %d\n", iPixelFormat);
-        SetLastError(ERROR_INVALID_PIXEL_FORMAT);
+        RtlSetLastWin32Error(ERROR_INVALID_PIXEL_FORMAT);
         return GL_FALSE;
     }
 
@@ -3742,7 +3403,7 @@ static BOOL macdrv_wglGetPixelFormatAttribfvARB(HDC hdc, int iPixelFormat, int i
           hdc, iPixelFormat, iLayerPlane, nAttributes, piAttributes, pfValues);
 
     /* Allocate a temporary array to store integer values */
-    attr = HeapAlloc(GetProcessHeap(), 0, nAttributes * sizeof(int));
+    attr = malloc(nAttributes * sizeof(int));
     if (!attr)
     {
         ERR("couldn't allocate %d array\n", nAttributes);
@@ -3761,7 +3422,7 @@ static BOOL macdrv_wglGetPixelFormatAttribfvARB(HDC hdc, int iPixelFormat, int i
             pfValues[i] = attr[i];
     }
 
-    HeapFree(GetProcessHeap(), 0, attr);
+    free(attr);
     return ret;
 }
 
@@ -3828,7 +3489,7 @@ static BOOL macdrv_wglMakeContextCurrentARB(HDC draw_hdc, HDC read_hdc, struct w
         return TRUE;
     }
 
-    if ((hwnd = WindowFromDC(draw_hdc)))
+    if ((hwnd = NtUserWindowFromDC(draw_hdc)))
     {
         if (!(data = get_win_data(hwnd)))
         {
@@ -3840,14 +3501,14 @@ static BOOL macdrv_wglMakeContextCurrentARB(HDC draw_hdc, HDC read_hdc, struct w
         {
             WARN("no pixel format set\n");
             release_win_data(data);
-            SetLastError(ERROR_INVALID_HANDLE);
+            RtlSetLastWin32Error(ERROR_INVALID_HANDLE);
             return FALSE;
         }
         if (context->format != data->pixel_format)
         {
             WARN("mismatched pixel format draw_hdc %p %u context %p %u\n", draw_hdc, data->pixel_format, context, context->format);
             release_win_data(data);
-            SetLastError(ERROR_INVALID_PIXEL_FORMAT);
+            RtlSetLastWin32Error(ERROR_INVALID_PIXEL_FORMAT);
             return FALSE;
         }
 
@@ -3865,15 +3526,15 @@ static BOOL macdrv_wglMakeContextCurrentARB(HDC draw_hdc, HDC read_hdc, struct w
     {
         struct wgl_pbuffer *pbuffer;
 
-        EnterCriticalSection(&dc_pbuffers_section);
-        pbuffer = ADDRSPACECAST(struct wgl_pbuffer*, CFDictionaryGetValue(dc_pbuffers, draw_hdc));
+        pthread_mutex_lock(&dc_pbuffers_mutex);
+        pbuffer = (struct wgl_pbuffer*)CFDictionaryGetValue(dc_pbuffers, draw_hdc);
         if (pbuffer)
         {
             if (context->format != pbuffer->format)
             {
                 WARN("mismatched pixel format draw_hdc %p %u context %p %u\n", draw_hdc, pbuffer->format, context, context->format);
-                LeaveCriticalSection(&dc_pbuffers_section);
-                SetLastError(ERROR_INVALID_PIXEL_FORMAT);
+                pthread_mutex_unlock(&dc_pbuffers_mutex);
+                RtlSetLastWin32Error(ERROR_INVALID_PIXEL_FORMAT);
                 return FALSE;
             }
 
@@ -3883,22 +3544,22 @@ static BOOL macdrv_wglMakeContextCurrentARB(HDC draw_hdc, HDC read_hdc, struct w
         else
         {
             WARN("no window or pbuffer for DC\n");
-            LeaveCriticalSection(&dc_pbuffers_section);
-            SetLastError(ERROR_INVALID_HANDLE);
+            pthread_mutex_unlock(&dc_pbuffers_mutex);
+            RtlSetLastWin32Error(ERROR_INVALID_HANDLE);
             return FALSE;
         }
 
         context->draw_hwnd = NULL;
         context->draw_view = NULL;
         context->draw_pbuffer = pbuffer;
-        LeaveCriticalSection(&dc_pbuffers_section);
+        pthread_mutex_unlock(&dc_pbuffers_mutex);
     }
 
     context->read_view = NULL;
     context->read_pbuffer = NULL;
     if (read_hdc && read_hdc != draw_hdc)
     {
-        if ((hwnd = WindowFromDC(read_hdc)))
+        if ((hwnd = NtUserWindowFromDC(read_hdc)))
         {
             if ((data = get_win_data(hwnd)))
             {
@@ -3913,9 +3574,9 @@ static BOOL macdrv_wglMakeContextCurrentARB(HDC draw_hdc, HDC read_hdc, struct w
         }
         else
         {
-            EnterCriticalSection(&dc_pbuffers_section);
-            context->read_pbuffer = ADDRSPACECAST(struct wgl_pbuffer*, CFDictionaryGetValue(dc_pbuffers, read_hdc));
-            LeaveCriticalSection(&dc_pbuffers_section);
+            pthread_mutex_lock(&dc_pbuffers_mutex);
+            context->read_pbuffer = (struct wgl_pbuffer*)CFDictionaryGetValue(dc_pbuffers, read_hdc);
+            pthread_mutex_unlock(&dc_pbuffers_mutex);
         }
     }
 
@@ -3954,7 +3615,7 @@ static BOOL macdrv_wglQueryCurrentRendererIntegerWINE(GLenum attribute, GLuint *
 
     if (attribute == WGL_RENDERER_VERSION_WINE)
     {
-        if (!parse_renderer_version((const char* HOSTPTR)opengl_funcs.gl.p_glGetString(GL_VERSION), value))
+        if (!parse_renderer_version((const char*)opengl_funcs.gl.p_glGetString(GL_VERSION), value))
             get_fallback_renderer_version(value);
         TRACE("WGL_RENDERER_VERSION_WINE -> %u.%u.%u\n", value[0], value[1], value[2]);
         return TRUE;
@@ -4028,14 +3689,14 @@ static const char *macdrv_wglQueryCurrentRendererStringWINE(GLenum attribute)
     {
         case WGL_RENDERER_DEVICE_ID_WINE:
         {
-            ret = (const char*)wine_static_ustring_add(&gl_strings, opengl_funcs.gl.p_glGetString(GL_RENDERER));
+            ret = (const char*)opengl_funcs.gl.p_glGetString(GL_RENDERER);
             TRACE("WGL_RENDERER_DEVICE_ID_WINE -> %s\n", debugstr_a(ret));
             break;
         }
 
         case WGL_RENDERER_VENDOR_ID_WINE:
         {
-            ret = (const char*)wine_static_ustring_add(&gl_strings, opengl_funcs.gl.p_glGetString(GL_VENDOR));
+            ret = (const char*)opengl_funcs.gl.p_glGetString(GL_VENDOR);
             TRACE("WGL_RENDERER_VENDOR_ID_WINE -> %s\n", debugstr_a(ret));
             break;
         }
@@ -4069,7 +3730,7 @@ static BOOL macdrv_wglQueryPbufferARB(struct wgl_pbuffer *pbuffer, int iAttribut
     if (err != kCGLNoError)
     {
         WARN("CGLDescribePBuffer failed; error %d %s\n", err, CGLErrorString(err));
-        SetLastError(ERROR_INVALID_HANDLE);
+        RtlSetLastWin32Error(ERROR_INVALID_HANDLE);
         return GL_FALSE;
     }
 
@@ -4148,7 +3809,7 @@ static BOOL macdrv_wglQueryPbufferARB(struct wgl_pbuffer *pbuffer, int iAttribut
             break;
         default:
             WARN("invalid attribute 0x%x\n", iAttribute);
-            SetLastError(ERROR_INVALID_DATA);
+            RtlSetLastWin32Error(ERROR_INVALID_DATA);
             return GL_FALSE;
     }
 
@@ -4260,22 +3921,22 @@ static int macdrv_wglReleasePbufferDCARB(struct wgl_pbuffer *pbuffer, HDC hdc)
 
     TRACE("pbuffer %p hdc %p\n", pbuffer, hdc);
 
-    EnterCriticalSection(&dc_pbuffers_section);
+    pthread_mutex_lock(&dc_pbuffers_mutex);
 
-    prev = ADDRSPACECAST(struct wgl_pbuffer*, CFDictionaryGetValue(dc_pbuffers, hdc));
+    prev = (struct wgl_pbuffer*)CFDictionaryGetValue(dc_pbuffers, hdc);
     if (prev)
     {
         if (prev != pbuffer)
             FIXME("hdc %p isn't associated with pbuffer %p\n", hdc, pbuffer);
         CGLReleasePBuffer(prev->pbuffer);
-        HeapFree(GetProcessHeap(), 0, prev);
+        free(prev);
         CFDictionaryRemoveValue(dc_pbuffers, hdc);
     }
     else hdc = 0;
 
-    LeaveCriticalSection(&dc_pbuffers_section);
+    pthread_mutex_unlock(&dc_pbuffers_mutex);
 
-    return hdc && DeleteDC(hdc);
+    return hdc && NtGdiDeleteObjectApp(hdc);
 }
 
 
@@ -4293,7 +3954,7 @@ static BOOL macdrv_wglReleaseTexImageARB(struct wgl_pbuffer *pbuffer, int iBuffe
 
     if (pbuffer->no_texture)
     {
-        SetLastError(ERROR_INVALID_OPERATION);
+        RtlSetLastWin32Error(ERROR_INVALID_OPERATION);
         return GL_FALSE;
     }
 
@@ -4301,7 +3962,7 @@ static BOOL macdrv_wglReleaseTexImageARB(struct wgl_pbuffer *pbuffer, int iBuffe
     if (err != kCGLNoError)
     {
         WARN("CGLTexImagePBuffer failed with err %d %s\n", err, CGLErrorString(err));
-        SetLastError(ERROR_INVALID_OPERATION);
+        RtlSetLastWin32Error(ERROR_INVALID_OPERATION);
         return GL_FALSE;
     }
 
@@ -4359,13 +4020,13 @@ static BOOL macdrv_wglSetPbufferAttribARB(struct wgl_pbuffer *pbuffer, const int
                         break;
                     default:
                         WARN("unknown WGL_CUBE_MAP_FACE_ARB value 0x%x\n", value);
-                        SetLastError(ERROR_INVALID_DATA);
+                        RtlSetLastWin32Error(ERROR_INVALID_DATA);
                         return GL_FALSE;
                 }
                 break;
             default:
                 WARN("invalid attribute 0x%x\n", attr);
-                SetLastError(ERROR_INVALID_DATA);
+                RtlSetLastWin32Error(ERROR_INVALID_DATA);
                 return GL_FALSE;
         }
     }
@@ -4402,7 +4063,7 @@ static BOOL macdrv_wglSwapIntervalEXT(int interval)
 
     if (interval < 0)
     {
-        SetLastError(ERROR_INVALID_DATA);
+        RtlSetLastWin32Error(ERROR_INVALID_DATA);
         return FALSE;
     }
     if (interval > 1)
@@ -4428,7 +4089,7 @@ static BOOL macdrv_wglSwapIntervalEXT(int interval)
     InterlockedExchange(&context->update_swap_interval, FALSE);
     if (!set_swap_interval(context, interval))
     {
-        SetLastError(ERROR_GEN_FAILURE);
+        RtlSetLastWin32Error(ERROR_GEN_FAILURE);
         return FALSE;
     }
 
@@ -4436,13 +4097,13 @@ static BOOL macdrv_wglSwapIntervalEXT(int interval)
     {
         struct wgl_context *ctx;
 
-        EnterCriticalSection(&context_section);
+        pthread_mutex_lock(&context_mutex);
         LIST_FOR_EACH_ENTRY(ctx, &context_list, struct wgl_context, entry)
         {
             if (ctx != context && ctx->draw_hwnd == context->draw_hwnd)
                 InterlockedExchange(&context->update_swap_interval, TRUE);
         }
-        LeaveCriticalSection(&context_section);
+        pthread_mutex_unlock(&context_mutex);
     }
 
     return TRUE;
@@ -4549,13 +4210,9 @@ static void load_extensions(void)
 }
 
 
-static BOOL CALLBACK init_opengl(INIT_ONCE *init_once, void *context, void **param)
+static void init_opengl(void)
 {
-    static BOOL init_done = FALSE;
     unsigned int i;
-
-    if (init_done) return (opengl_handle != NULL);
-    init_done = TRUE;
 
     TRACE("()\n");
 
@@ -4563,7 +4220,7 @@ static BOOL CALLBACK init_opengl(INIT_ONCE *init_once, void *context, void **par
     if (!dc_pbuffers)
     {
         WARN("CFDictionaryCreateMutable failed\n");
-        return FALSE;
+        return;
     }
 
     opengl_handle = dlopen("/System/Library/Frameworks/OpenGL.framework/OpenGL", RTLD_LAZY|RTLD_LOCAL|RTLD_NOLOAD);
@@ -4571,12 +4228,12 @@ static BOOL CALLBACK init_opengl(INIT_ONCE *init_once, void *context, void **par
     {
         ERR("Failed to load OpenGL: %s\n", dlerror());
         ERR("OpenGL support is disabled.\n");
-        return FALSE;
+        return;
     }
 
     for (i = 0; i < ARRAY_SIZE(opengl_func_names); i++)
     {
-        if (!(((void * HOSTPTR *)&opengl_funcs.gl)[i] = dlsym(opengl_handle, opengl_func_names[i])))
+        if (!(((void **)&opengl_funcs.gl)[i] = dlsym(opengl_handle, opengl_func_names[i])))
         {
             ERR("%s not found in OpenGL, disabling.\n", opengl_func_names[i]);
             goto failed;
@@ -4597,50 +4254,26 @@ static BOOL CALLBACK init_opengl(INIT_ONCE *init_once, void *context, void **par
         REDIRECT(glFlush);
     if (allow_vsync)
         REDIRECT(glFinish);
-#ifdef __i386_on_x86_64__
-    REDIRECT(glGetError);
-#endif
 #undef REDIRECT
 
     /* redirect some OpenGL extension functions */
-#define REDIRECT2(func,impl) \
-    do { if ((p##func = dlsym(opengl_handle, #func))) { opengl_funcs.ext.p_##func = macdrv_##impl; } } while(0)
-#define REDIRECT(func) REDIRECT2(func,func)
+#define REDIRECT(func) \
+    do { if ((p##func = dlsym(opengl_handle, #func))) { opengl_funcs.ext.p_##func = macdrv_##func; } } while(0)
     REDIRECT(glCopyColorTable);
-#ifdef __i386_on_x86_64__
-    REDIRECT(glDeleteBuffers);
-    REDIRECT2(glDeleteBuffersARB, glDeleteBuffers);
-    REDIRECT(glGetBufferPointerv);
-    REDIRECT2(glGetBufferPointervARB, glGetBufferPointerv);
-    REDIRECT(glMapBuffer);
-    REDIRECT2(glMapBufferARB, glMapBuffer);
-    REDIRECT(glMapBufferRange);
-    REDIRECT(glUnmapBuffer);
-    REDIRECT2(glUnmapBufferARB, glUnmapBuffer);
-#endif
 #undef REDIRECT
 
-    /* make sure to initialize extension function pointers that we use
-     * in our wrappers */
     if (gluCheckExtension((GLubyte*)"GL_APPLE_flush_render", (GLubyte*)gl_info.glExtensions))
         pglFlushRenderAPPLE = dlsym(opengl_handle, "glFlushRenderAPPLE");
-#ifdef __i386_on_x86_64__
-    opengl_funcs.ext.p_glGetBufferParameteriv = dlsym(opengl_handle, "glGetBufferParameteriv");
-    if (!opengl_funcs.ext.p_glGetBufferParameteriv)
-        opengl_funcs.ext.p_glGetBufferParameteriv = dlsym(opengl_handle, "glGetBufferParameterivARB");
-    TRACE("p_glGetBufferParameteriv %p\n", opengl_funcs.ext.p_glGetBufferParameteriv);
-#endif
 
     load_extensions();
     if (!init_pixel_formats())
         goto failed;
 
-    return TRUE;
+    return;
 
 failed:
     dlclose(opengl_handle);
     opengl_handle = NULL;
-    return FALSE;
 }
 
 
@@ -4670,7 +4303,7 @@ void sync_gl_view(struct macdrv_win_data* data, const RECT* old_whole_rect, cons
 /**********************************************************************
  *              macdrv_wglDescribePixelFormat
  */
-static int WINAPI macdrv_wglDescribePixelFormat(HDC hdc, int fmt, UINT size, PIXELFORMATDESCRIPTOR *descr)
+static int macdrv_wglDescribePixelFormat(HDC hdc, int fmt, UINT size, PIXELFORMATDESCRIPTOR *descr)
 {
     const pixel_format *pf;
     const struct color_mode *mode;
@@ -4736,7 +4369,7 @@ static int WINAPI macdrv_wglDescribePixelFormat(HDC hdc, int fmt, UINT size, PIX
 /***********************************************************************
  *              macdrv_wglCopyContext
  */
-static BOOL WINAPI macdrv_wglCopyContext(struct wgl_context *src, struct wgl_context *dst, UINT mask)
+static BOOL macdrv_wglCopyContext(struct wgl_context *src, struct wgl_context *dst, UINT mask)
 {
     CGLError err;
 
@@ -4751,7 +4384,7 @@ static BOOL WINAPI macdrv_wglCopyContext(struct wgl_context *src, struct wgl_con
 /***********************************************************************
  *              macdrv_wglCreateContext
  */
-static struct wgl_context * WINAPI macdrv_wglCreateContext(HDC hdc)
+static struct wgl_context *macdrv_wglCreateContext(HDC hdc)
 {
     struct wgl_context *context;
 
@@ -4765,25 +4398,23 @@ static struct wgl_context * WINAPI macdrv_wglCreateContext(HDC hdc)
 /***********************************************************************
  *              macdrv_wglDeleteContext
  */
-static BOOL WINAPI macdrv_wglDeleteContext(struct wgl_context *context)
+static BOOL macdrv_wglDeleteContext(struct wgl_context *context)
 {
     TRACE("deleting context %p/%p/%p\n", context, context->context, context->cglcontext);
 
-    EnterCriticalSection(&context_section);
+    pthread_mutex_lock(&context_mutex);
     list_remove(&context->entry);
-    LeaveCriticalSection(&context_section);
+    pthread_mutex_unlock(&context_mutex);
 
     macdrv_dispose_opengl_context(context->context);
-#ifdef __i386_on_x86_64__
-    free_mapped_buffers(context);
-#endif
-    return HeapFree(GetProcessHeap(), 0, context);
+    free(context);
+    return TRUE;
 }
 
 /***********************************************************************
  *              macdrv_wglGetPixelFormat
  */
-static int WINAPI macdrv_wglGetPixelFormat(HDC hdc)
+static int macdrv_wglGetPixelFormat(HDC hdc)
 {
     int format;
 
@@ -4805,9 +4436,9 @@ static int WINAPI macdrv_wglGetPixelFormat(HDC hdc)
 /***********************************************************************
  *              macdrv_wglGetProcAddress
  */
-static WINEGLDEF(PROC) WINAPI macdrv_wglGetProcAddress(const char *proc)
+static PROC macdrv_wglGetProcAddress(const char *proc)
 {
-    void *HOSTPTR ret;
+    void *ret;
 
     if (!strncmp(proc, "wgl", 3)) return NULL;
     ret = dlsym(opengl_handle, proc);
@@ -4830,7 +4461,7 @@ static WINEGLDEF(PROC) WINAPI macdrv_wglGetProcAddress(const char *proc)
 /***********************************************************************
  *              macdrv_wglMakeCurrent
  */
-static BOOL WINAPI macdrv_wglMakeCurrent(HDC hdc, struct wgl_context *context)
+static BOOL macdrv_wglMakeCurrent(HDC hdc, struct wgl_context *context)
 {
     TRACE("hdc %p context %p/%p/%p\n", hdc, context, (context ? context->context : NULL),
           (context ? context->cglcontext : NULL));
@@ -4841,7 +4472,7 @@ static BOOL WINAPI macdrv_wglMakeCurrent(HDC hdc, struct wgl_context *context)
 /**********************************************************************
  *              macdrv_wglSetPixelFormat
  */
-static BOOL WINAPI macdrv_wglSetPixelFormat(HDC hdc, int fmt, const PIXELFORMATDESCRIPTOR *descr)
+static BOOL macdrv_wglSetPixelFormat(HDC hdc, int fmt, const PIXELFORMATDESCRIPTOR *descr)
 {
     return set_pixel_format(hdc, fmt, FALSE);
 }
@@ -4849,7 +4480,7 @@ static BOOL WINAPI macdrv_wglSetPixelFormat(HDC hdc, int fmt, const PIXELFORMATD
 /***********************************************************************
  *              macdrv_wglShareLists
  */
-static BOOL WINAPI macdrv_wglShareLists(struct wgl_context *org, struct wgl_context *dest)
+static BOOL macdrv_wglShareLists(struct wgl_context *org, struct wgl_context *dest)
 {
     macdrv_opengl_context saved_context;
     CGLContextObj saved_cglcontext;
@@ -4880,7 +4511,7 @@ static BOOL WINAPI macdrv_wglShareLists(struct wgl_context *org, struct wgl_cont
     saved_cglcontext = dest->cglcontext;
     dest->context = NULL;
     dest->cglcontext = NULL;
-    if (!create_context(dest, org, dest->major))
+    if (!create_context(dest, org->cglcontext, dest->major))
     {
         dest->context = saved_context;
         dest->cglcontext = saved_cglcontext;
@@ -4902,7 +4533,7 @@ static BOOL WINAPI macdrv_wglShareLists(struct wgl_context *org, struct wgl_cont
 /**********************************************************************
  *              macdrv_wglSwapBuffers
  */
-static BOOL WINAPI macdrv_wglSwapBuffers(HDC hdc)
+static BOOL macdrv_wglSwapBuffers(HDC hdc)
 {
     struct wgl_context *context = NtCurrentTeb()->glContext;
     BOOL match = FALSE;
@@ -4917,13 +4548,13 @@ static BOOL WINAPI macdrv_wglSwapBuffers(HDC hdc)
         sync_context(context);
     }
 
-    if ((hwnd = WindowFromDC(hdc)))
+    if ((hwnd = NtUserWindowFromDC(hdc)))
     {
         struct macdrv_win_data *data;
 
         if (!(data = get_win_data(hwnd)))
         {
-            SetLastError(ERROR_INVALID_HANDLE);
+            RtlSetLastWin32Error(ERROR_INVALID_HANDLE);
             return FALSE;
         }
 
@@ -4936,13 +4567,13 @@ static BOOL WINAPI macdrv_wglSwapBuffers(HDC hdc)
     {
         struct wgl_pbuffer *pbuffer;
 
-        EnterCriticalSection(&dc_pbuffers_section);
-        pbuffer = ADDRSPACECAST(struct wgl_pbuffer*, CFDictionaryGetValue(dc_pbuffers, hdc));
-        LeaveCriticalSection(&dc_pbuffers_section);
+        pthread_mutex_lock(&dc_pbuffers_mutex);
+        pbuffer = (struct wgl_pbuffer*)CFDictionaryGetValue(dc_pbuffers, hdc);
+        pthread_mutex_unlock(&dc_pbuffers_mutex);
 
         if (!pbuffer)
         {
-            SetLastError(ERROR_INVALID_HANDLE);
+            RtlSetLastWin32Error(ERROR_INVALID_HANDLE);
             return FALSE;
         }
 
@@ -4987,7 +4618,7 @@ static struct opengl_funcs opengl_funcs =
  */
 struct opengl_funcs *macdrv_wine_get_wgl_driver(UINT version)
 {
-    static INIT_ONCE opengl_init = INIT_ONCE_STATIC_INIT;
+    static pthread_once_t init_once = PTHREAD_ONCE_INIT;
 
     if (version != WINE_WGL_DRIVER_VERSION)
     {
@@ -4995,7 +4626,6 @@ struct opengl_funcs *macdrv_wine_get_wgl_driver(UINT version)
         return NULL;
     }
 
-    if (!InitOnceExecuteOnce(&opengl_init, init_opengl, NULL, NULL)) return (void *)-1;
-
-    return &opengl_funcs;
+    pthread_once(&init_once, init_opengl);
+    return opengl_handle ? &opengl_funcs : (void *)-1;
 }

@@ -467,6 +467,7 @@ static const NodeImplVtbl HTMLAreaElementImplVtbl = {
     HTMLElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLAreaElement_handle_event,
     HTMLElement_get_attr_col
 };
@@ -489,7 +490,7 @@ HRESULT HTMLAreaElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTM
     HTMLAreaElement *ret;
     nsresult nsres;
 
-    ret = heap_alloc_zero(sizeof(HTMLAreaElement));
+    ret = calloc(1, sizeof(HTMLAreaElement));
     if(!ret)
         return E_OUTOFMEMORY;
 

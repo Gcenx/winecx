@@ -52,6 +52,7 @@ static HRESULT (WINAPI *pGetThemeTransitionDuration)(HTHEME, int, int, int, int,
 static LONG (WINAPI *pDisplayConfigGetDeviceInfo)(DISPLAYCONFIG_DEVICE_INFO_HEADER *);
 static LONG (WINAPI *pDisplayConfigSetDeviceInfo)(DISPLAYCONFIG_DEVICE_INFO_HEADER *);
 static BOOL (WINAPI *pGetDpiForMonitorInternal)(HMONITOR, UINT, UINT *, UINT *);
+static UINT (WINAPI *pGetDpiForSystem)(void);
 static DPI_AWARENESS_CONTEXT (WINAPI *pSetThreadDpiAwarenessContext)(DPI_AWARENESS_CONTEXT);
 
 static NTSTATUS (WINAPI *pD3DKMTCloseAdapter)(const D3DKMT_CLOSEADAPTER *);
@@ -94,6 +95,7 @@ static void init_funcs(void)
     GET_PROC(user32, DisplayConfigGetDeviceInfo)
     GET_PROC(user32, DisplayConfigSetDeviceInfo)
     GET_PROC(user32, GetDpiForMonitorInternal)
+    GET_PROC(user32, GetDpiForSystem)
     GET_PROC(user32, SetThreadDpiAwarenessContext)
 
     GET_PROC(gdi32, D3DKMTCloseAdapter)
@@ -1075,9 +1077,9 @@ static void test_GetThemePartSize(void)
     HRESULT hr;
     SIZE size;
 
-    if (!pSetThreadDpiAwarenessContext)
+    if (!pSetThreadDpiAwarenessContext || !pGetDpiForSystem)
     {
-        win_skip("SetThreadDpiAwarenessContext is unavailable.\n");
+        win_skip("SetThreadDpiAwarenessContext() or GetDpiForSystem() is unavailable.\n");
         return;
     }
 
@@ -1090,7 +1092,7 @@ static void test_GetThemePartSize(void)
     old_context = pSetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     current_dpi = get_primary_monitor_effective_dpi();
     old_dpi = current_dpi;
-    system_dpi = GetDpiForSystem();
+    system_dpi = pGetDpiForSystem();
     target_dpi = system_dpi;
 
     hwnd = CreateWindowA("Button", "Test", WS_POPUP, 100, 100, 100, 100, NULL, NULL, NULL, NULL);
@@ -2550,6 +2552,50 @@ static void test_GetThemeBackgroundRegion(void)
     DestroyWindow(hwnd);
 }
 
+static void test_theme(void)
+{
+    BOOL transparent;
+    HTHEME htheme;
+    HRESULT hr;
+    HWND hwnd;
+
+    if (!IsThemeActive())
+    {
+        skip("Theming is inactive.\n");
+        return;
+    }
+
+    hwnd = CreateWindowA(WC_STATICA, "", WS_POPUP, 0, 0, 1, 1, 0, 0, 0, NULL);
+    ok(!!hwnd, "CreateWindowA failed, error %#lx.\n", GetLastError());
+
+    /* Test that scrollbar arrow parts are transparent */
+    htheme = OpenThemeData(hwnd, L"ScrollBar");
+    ok(!!htheme, "OpenThemeData failed.\n");
+
+    transparent = FALSE;
+    hr = GetThemeBool(htheme, SBP_ARROWBTN, 0, TMT_TRANSPARENT, &transparent);
+    /* XP does use opaque scrollbar arrow parts and TMT_TRANSPARENT is FALSE */
+    if (LOBYTE(LOWORD(GetVersion())) < 6)
+    {
+        ok(hr == E_PROP_ID_UNSUPPORTED, "Got unexpected hr %#lx.\n", hr);
+
+        transparent = IsThemeBackgroundPartiallyTransparent(htheme, SBP_ARROWBTN, 0);
+        ok(!transparent, "Expected opaque.\n");
+    }
+    /* > XP use opaque scrollbar arrow parts, but TMT_TRANSPARENT is TRUE */
+    else
+    {
+        ok(hr == S_OK, "Got unexpected hr %#lx,\n", hr);
+        ok(transparent, "Expected transparent.\n");
+
+        transparent = IsThemeBackgroundPartiallyTransparent(htheme, SBP_ARROWBTN, 0);
+        ok(transparent, "Expected transparent.\n");
+    }
+    CloseThemeData(htheme);
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(system)
 {
     ULONG_PTR ctx_cookie;
@@ -2574,6 +2620,7 @@ START_TEST(system)
     test_DrawThemeParentBackground();
     test_DrawThemeBackgroundEx();
     test_GetThemeBackgroundRegion();
+    test_theme();
 
     if (load_v6_module(&ctx_cookie, &ctx))
     {

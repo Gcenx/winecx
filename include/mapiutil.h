@@ -19,8 +19,6 @@
 #ifndef MAPIUTIL_H_
 #define MAPIUTIL_H_
 
-#include "wine/winheader_enter.h"
-
 #include <mapix.h>
 
 #ifdef __cplusplus
@@ -275,7 +273,5 @@ DECLARE_INTERFACE_(IPropData,IMAPIProp)
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* MAPIUTIL_H_ */

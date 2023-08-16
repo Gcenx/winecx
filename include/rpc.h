@@ -25,8 +25,6 @@
 #ifndef __WINE_RPC_H
 #define __WINE_RPC_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef _WIN64
 # define __RPC_WIN64__
 #else
@@ -40,9 +38,16 @@
 #define __RPC_USER __stdcall
 #define __RPC_STUB __stdcall
 #define RPC_ENTRY  __stdcall
-#define RPCRTAPI
-typedef LONG RPC_STATUS;
 
+#ifndef RPCRTAPI
+#if !defined(_RPCRT4_) && !defined(_KRPCENV_)
+#define RPCRTAPI DECLSPEC_IMPORT
+#else
+#define RPCRTAPI
+#endif
+#endif
+
+typedef LONG RPC_STATUS;
 typedef void* I_RPC_HANDLE;
 
 #include <rpcdce.h>
@@ -78,7 +83,5 @@ typedef void* I_RPC_HANDLE;
 /* #define RpcAbnormalTermination() abort() */
 
 #endif /* USE_COMPILER_EXCEPTIONS */
-
-#include "wine/winheader_exit.h"
 
 #endif /*__WINE_RPC_H */

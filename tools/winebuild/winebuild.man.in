@@ -176,8 +176,8 @@ Import the specified library, looking for a corresponding
 \fIlibname.def\fR file in the directories specified with the \fB-L\fR
 option.
 .TP
-.B \-m16, -m32, -m64, -mwine32
-Generate respectively 16-bit, 32-bit, 64-bit or 32-bit-on-64-bit code.
+.B \-m16, -m32, -m64
+Generate respectively 16-bit, 32-bit or 64-bit code.
 .TP
 .BI \-marm,\ \-mthumb,\ \-march= option ,\ \-mcpu= option ,\ \-mfpu= option ,\ \-mfloat-abi= option
 Set code generation options for the assembler.
@@ -185,9 +185,6 @@ Set code generation options for the assembler.
 .B \-mno-cygwin
 Build a library that uses the Windows runtime instead of the Unix C
 library.
-.TP
-.B \-munix
-Build the Unix counterpart of a builtin module.
 .TP
 .BI \-M,\ --main-module= module
 When building a 16-bit dll, set the name of its 32-bit counterpart to
@@ -279,6 +276,9 @@ Display the program version and exit.
 .TP
 .B \-w, --warnings
 Turn on warnings.
+.TP
+.B \--without-dlltool
+Generate import library without using dlltool.
 .SH "SPEC FILE SYNTAX"
 .SS "General syntax"
 A spec file should contain a list of ordinal declarations. The general

@@ -79,7 +79,7 @@ static const struct column col_bios[] =
     { L"Manufacturer",                   CIM_STRING|COL_FLAG_DYNAMIC },
     { L"Name",                           CIM_STRING },
     { L"ReleaseDate",                    CIM_DATETIME|COL_FLAG_DYNAMIC },
-    { L"SerialNumber",                   CIM_STRING },
+    { L"SerialNumber",                   CIM_STRING|COL_FLAG_DYNAMIC },
     { L"SMBIOSBIOSVersion",              CIM_STRING|COL_FLAG_DYNAMIC },
     { L"SMBIOSMajorVersion",             CIM_UINT16 },
     { L"SMBIOSMinorVersion",             CIM_UINT16 },
@@ -100,6 +100,7 @@ static const struct column col_compsys[] =
     { L"Description",               CIM_STRING },
     { L"Domain",                    CIM_STRING },
     { L"DomainRole",                CIM_UINT16 },
+    { L"HypervisorPresent",         CIM_BOOLEAN },
     { L"Manufacturer",              CIM_STRING },
     { L"Model",                     CIM_STRING },
     { L"Name",                      CIM_STRING|COL_FLAG_DYNAMIC },
@@ -367,7 +368,10 @@ static const struct column col_qualifier[] =
 static const struct column col_quickfixengineering[] =
 {
     { L"Caption",  CIM_STRING },
+    { L"Description",  CIM_STRING },
     { L"HotFixID", CIM_STRING|COL_FLAG_KEY },
+    { L"InstalledBy",  CIM_STRING },
+    { L"InstalledOn",  CIM_STRING },
 };
 static const struct column col_rawsmbiostables[] =
 {
@@ -418,6 +422,7 @@ static const struct column col_stdregprov[] =
     { L"CreateKey",      CIM_FLAG_ARRAY|COL_FLAG_METHOD },
     { L"EnumKey",        CIM_FLAG_ARRAY|COL_FLAG_METHOD },
     { L"EnumValues",     CIM_FLAG_ARRAY|COL_FLAG_METHOD },
+    { L"GetBinaryValue", CIM_FLAG_ARRAY|COL_FLAG_METHOD },
     { L"GetStringValue", CIM_FLAG_ARRAY|COL_FLAG_METHOD },
     { L"SetStringValue", CIM_FLAG_ARRAY|COL_FLAG_METHOD },
     { L"SetDWORDValue",  CIM_FLAG_ARRAY|COL_FLAG_METHOD },
@@ -484,6 +489,13 @@ static const struct column col_serverfeature[] =
     { L"ParentID", CIM_UINT32 },
     { L"Name",     CIM_STRING },
 };
+
+static const struct column col_volume[] =
+{
+    { L"DeviceId",      CIM_STRING|COL_FLAG_DYNAMIC|COL_FLAG_KEY },
+    { L"DriveLetter",   CIM_STRING|COL_FLAG_DYNAMIC },
+};
+
 static const struct column col_winsat[] =
 {
     { L"CPUScore",              CIM_REAL32 },
@@ -544,6 +556,7 @@ struct record_computersystem
     const WCHAR *description;
     const WCHAR *domain;
     UINT16       domainrole;
+    int          hypervisorpresent;
     const WCHAR *manufacturer;
     const WCHAR *model;
     const WCHAR *name;
@@ -811,7 +824,10 @@ struct record_qualifier
 struct record_quickfixengineering
 {
     const WCHAR *caption;
+    const WCHAR *description;
     const WCHAR *hotfixid;
+    const WCHAR *installedby;
+    const WCHAR *installedon;
 };
 struct record_rawsmbiostables
 {
@@ -862,6 +878,7 @@ struct record_stdregprov
     class_method *createkey;
     class_method *enumkey;
     class_method *enumvalues;
+    class_method *getbinaryvalue;
     class_method *getstringvalue;
     class_method *setstringvalue;
     class_method *setdwordvalue;
@@ -927,6 +944,13 @@ struct record_serverfeature
     UINT32       parentid;
     const WCHAR *name;
 };
+
+struct record_volume
+{
+    const WCHAR *deviceid;
+    const WCHAR *driveletter;
+};
+
 struct record_winsat
 {
     FLOAT        cpuscore;
@@ -970,6 +994,11 @@ static const struct record_param data_param[] =
     { L"StdRegProv", L"EnumValues", -1, L"ReturnValue", CIM_UINT32 },
     { L"StdRegProv", L"EnumValues", -1, L"sNames", CIM_STRING|CIM_FLAG_ARRAY },
     { L"StdRegProv", L"EnumValues", -1, L"Types", CIM_SINT32|CIM_FLAG_ARRAY },
+    { L"StdRegProv", L"GetBinaryValue", 1, L"hDefKey", CIM_SINT32, 0x80000002 },
+    { L"StdRegProv", L"GetBinaryValue", 1, L"sSubKeyName", CIM_STRING },
+    { L"StdRegProv", L"GetBinaryValue", 1, L"sValueName", CIM_STRING },
+    { L"StdRegProv", L"GetBinaryValue", -1, L"ReturnValue", CIM_UINT32 },
+    { L"StdRegProv", L"GetBinaryValue", -1, L"uValue", CIM_UINT8|CIM_FLAG_ARRAY },
     { L"StdRegProv", L"GetStringValue", 1, L"hDefKey", CIM_SINT32, 0x80000002 },
     { L"StdRegProv", L"GetStringValue", 1, L"sSubKeyName", CIM_STRING },
     { L"StdRegProv", L"GetStringValue", 1, L"sValueName", CIM_STRING },
@@ -1023,7 +1052,7 @@ static const struct record_qualifier data_qualifier[] =
 
 static const struct record_quickfixengineering data_quickfixengineering[] =
 {
-    { L"http://winehq.org", L"KB1234567" },
+    { L"http://winehq.org", L"Update", L"KB1234567", L"", L"22/2/2022" },
 };
 
 static const struct record_softwarelicensingproduct data_softwarelicensingproduct[] =
@@ -1037,6 +1066,7 @@ static const struct record_stdregprov data_stdregprov[] =
         reg_create_key,
         reg_enum_key,
         reg_enum_values,
+        reg_get_binaryvalue,
         reg_get_stringvalue,
         reg_set_stringvalue,
         reg_set_dwordvalue,
@@ -1386,6 +1416,13 @@ static WCHAR *get_bios_releasedate( const char *buf, UINT len )
     return ret;
 }
 
+static WCHAR *get_bios_serialnumber( const char *buf, UINT len )
+{
+    WCHAR *ret = get_bios_string( 4, buf, len );
+    if (!ret) return wcsdup( L"0" );
+    return ret;
+}
+
 static WCHAR *get_bios_smbiosbiosversion( const char *buf, UINT len )
 {
     WCHAR *ret = get_bios_string( 2, buf, len );
@@ -1463,7 +1500,7 @@ static enum fill_status fill_bios( struct table *table, const struct expr *cond 
     rec->manufacturer           = get_bios_manufacturer( buf, len );
     rec->name                   = L"Default System BIOS";
     rec->releasedate            = get_bios_releasedate( buf, len );
-    rec->serialnumber           = L"0";
+    rec->serialnumber           = get_bios_serialnumber( buf, len );
     rec->smbiosbiosversion      = get_bios_smbiosbiosversion( buf, len );
     rec->smbiosmajorversion     = get_bios_smbiosmajorversion( buf, len );
     rec->smbiosminorversion     = get_bios_smbiosminorversion( buf, len );
@@ -1635,33 +1672,6 @@ static WCHAR *get_username(void)
     return ret;
 }
 
-static enum fill_status fill_compsys( struct table *table, const struct expr *cond )
-{
-    struct record_computersystem *rec;
-    enum fill_status status = FILL_STATUS_UNFILTERED;
-    UINT row = 0;
-
-    if (!resize_table( table, 1, sizeof(*rec) )) return FILL_STATUS_FAILED;
-
-    rec = (struct record_computersystem *)table->data;
-    rec->description            = L"AT/AT COMPATIBLE";
-    rec->domain                 = L"WORKGROUP";
-    rec->domainrole             = 0; /* standalone workstation */
-    rec->manufacturer           = L"The Wine Project";
-    rec->model                  = L"Wine";
-    rec->name                   = get_computername();
-    rec->num_logical_processors = get_logical_processor_count( NULL, &rec->num_processors );
-    rec->systemtype             = get_systemtype();
-    rec->total_physical_memory  = get_total_physical_memory();
-    rec->username               = get_username();
-    if (!match_row( table, row, cond, &status )) free_row_values( table, row );
-    else row++;
-
-    TRACE("created %u rows\n", row);
-    table->num_rows = row;
-    return status;
-}
-
 static WCHAR *get_compsysproduct_string( BYTE id, const char *buf, UINT len )
 {
     const struct smbios_header *hdr;
@@ -1675,17 +1685,59 @@ static WCHAR *get_compsysproduct_string( BYTE id, const char *buf, UINT len )
     return get_smbios_string( id, buf, offset, len );
 }
 
-static WCHAR *get_compsysproduct_identifyingnumber( const char *buf, UINT len )
-{
-    WCHAR *ret = get_compsysproduct_string( 4, buf, len );
-    if (!ret) return wcsdup( L"0" );
-    return ret;
-}
-
 static WCHAR *get_compsysproduct_name( const char *buf, UINT len )
 {
     WCHAR *ret = get_compsysproduct_string( 2, buf, len );
     if (!ret) return wcsdup( L"Wine" );
+    return ret;
+}
+
+static WCHAR *get_compsysproduct_vendor( const char *buf, UINT len )
+{
+    WCHAR *ret = get_compsysproduct_string( 1, buf, len );
+    if (!ret) return wcsdup( L"The Wine Project" );
+    return ret;
+}
+
+static enum fill_status fill_compsys( struct table *table, const struct expr *cond )
+{
+    struct record_computersystem *rec;
+    enum fill_status status = FILL_STATUS_UNFILTERED;
+    UINT row = 0, len;
+    char *buf;
+
+    if (!resize_table( table, 1, sizeof(*rec) )) return FILL_STATUS_FAILED;
+
+    len = GetSystemFirmwareTable( RSMB, 0, NULL, 0 );
+    if (!(buf = malloc( len ))) return FILL_STATUS_FAILED;
+    GetSystemFirmwareTable( RSMB, 0, buf, len );
+
+    rec = (struct record_computersystem *)table->data;
+    rec->description            = L"AT/AT COMPATIBLE";
+    rec->domain                 = L"WORKGROUP";
+    rec->domainrole             = 0; /* standalone workstation */
+    rec->hypervisorpresent      = 0;
+    rec->manufacturer           = get_compsysproduct_vendor( buf, len );
+    rec->model                  = get_compsysproduct_name( buf, len );
+    rec->name                   = get_computername();
+    rec->num_logical_processors = get_logical_processor_count( NULL, &rec->num_processors );
+    rec->systemtype             = get_systemtype();
+    rec->total_physical_memory  = get_total_physical_memory();
+    rec->username               = get_username();
+    if (!match_row( table, row, cond, &status )) free_row_values( table, row );
+    else row++;
+
+    free( buf );
+
+    TRACE("created %u rows\n", row);
+    table->num_rows = row;
+    return status;
+}
+
+static WCHAR *get_compsysproduct_identifyingnumber( const char *buf, UINT len )
+{
+    WCHAR *ret = get_compsysproduct_string( 4, buf, len );
+    if (!ret) return wcsdup( L"0" );
     return ret;
 }
 
@@ -1707,13 +1759,6 @@ static WCHAR *get_compsysproduct_uuid( const char *buf, UINT len )
               ptr[14], ptr[15] );
 done:
     if (!ret) ret = wcsdup( L"deaddead-dead-dead-dead-deaddeaddead" );
-    return ret;
-}
-
-static WCHAR *get_compsysproduct_vendor( const char *buf, UINT len )
-{
-    WCHAR *ret = get_compsysproduct_string( 1, buf, len );
-    if (!ret) return wcsdup( L"The Wine Project" );
     return ret;
 }
 
@@ -3602,6 +3647,7 @@ static WCHAR *get_osbuildnumber( OSVERSIONINFOEXW *ver )
     if (ret) swprintf( ret, 11, L"%u", ver->dwBuildNumber );
     return ret;
 }
+
 static WCHAR *get_oscaption( OSVERSIONINFOEXW *ver )
 {
     static const WCHAR windowsW[] = L"Microsoft Windows ";
@@ -3616,12 +3662,17 @@ static WCHAR *get_oscaption( OSVERSIONINFOEXW *ver )
     static const WCHAR win8W[] = L"8 Pro";
     static const WCHAR win81W[] = L"8.1 Pro";
     static const WCHAR win10W[] = L"10 Pro";
+    static const WCHAR win11W[] = L"11 Pro";
     int len = ARRAY_SIZE( windowsW ) - 1;
     WCHAR *ret;
 
     if (!(ret = malloc( len * sizeof(WCHAR) + sizeof(win2003W) ))) return NULL;
     memcpy( ret, windowsW, sizeof(windowsW) );
-    if (ver->dwMajorVersion == 10 && ver->dwMinorVersion == 0) memcpy( ret + len, win10W, sizeof(win10W) );
+    if (ver->dwMajorVersion == 10 && ver->dwMinorVersion == 0)
+    {
+        if (ver->dwBuildNumber >= 22000) memcpy( ret + len, win11W, sizeof(win11W) );
+        else memcpy( ret + len, win10W, sizeof(win10W) );
+    }
     else if (ver->dwMajorVersion == 6 && ver->dwMinorVersion == 3) memcpy( ret + len, win81W, sizeof(win81W) );
     else if (ver->dwMajorVersion == 6 && ver->dwMinorVersion == 2) memcpy( ret + len, win8W, sizeof(win8W) );
     else if (ver->dwMajorVersion == 6 && ver->dwMinorVersion == 1)
@@ -3643,6 +3694,7 @@ static WCHAR *get_oscaption( OSVERSIONINFOEXW *ver )
     else memcpy( ret + len, win2000W, sizeof(win2000W) );
     return ret;
 }
+
 static WCHAR *get_osname( const WCHAR *caption )
 {
     static const WCHAR partitionW[] = L"|C:\\WINDOWS|\\Device\\Harddisk0\\Partition1";
@@ -3668,6 +3720,7 @@ static WCHAR *get_osversion( OSVERSIONINFOEXW *ver )
     if (ret) swprintf( ret, 33, L"%u.%u.%u", ver->dwMajorVersion, ver->dwMinorVersion, ver->dwBuildNumber );
     return ret;
 }
+
 static DWORD get_operatingsystemsku(void)
 {
     DWORD ret = PRODUCT_UNDEFINED;
@@ -4173,6 +4226,60 @@ static enum fill_status fill_videocontroller( struct table *table, const struct 
     return status;
 }
 
+static WCHAR *get_volume_driveletter( const WCHAR *volume )
+{
+    DWORD len = 0;
+    WCHAR *ret;
+
+    if (!GetVolumePathNamesForVolumeNameW( volume, NULL, 0, &len ) && GetLastError() != ERROR_MORE_DATA) return NULL;
+    if (!(ret = malloc( len * sizeof(WCHAR) ))) return NULL;
+    if (!GetVolumePathNamesForVolumeNameW( volume, ret, len, &len ) || !wcschr( ret, ':' ))
+    {
+        free( ret );
+        return NULL;
+    }
+    wcschr( ret, ':' )[1] = 0;
+    return ret;
+}
+
+static enum fill_status fill_volume( struct table *table, const struct expr *cond )
+{
+    struct record_volume *rec;
+    enum fill_status status = FILL_STATUS_UNFILTERED;
+    UINT row = 0, offset = 0;
+    WCHAR path[MAX_PATH];
+    HANDLE handle;
+
+    if (!resize_table( table, 2, sizeof(*rec) )) return FILL_STATUS_FAILED;
+
+    handle = FindFirstVolumeW( path, ARRAY_SIZE(path) );
+    while (handle != INVALID_HANDLE_VALUE)
+    {
+        if (!resize_table( table, row + 1, sizeof(*rec) )) return FILL_STATUS_FAILED;
+
+        rec = (struct record_volume *)(table->data + offset);
+        rec->deviceid    = wcsdup( path );
+        rec->driveletter = get_volume_driveletter( path );
+
+        if (!match_row( table, row, cond, &status )) free_row_values( table, row );
+        else
+        {
+            offset += sizeof(*rec);
+            row++;
+        }
+
+        if (!FindNextVolumeW( handle, path, ARRAY_SIZE(path) ))
+        {
+            FindVolumeClose( handle );
+            handle = INVALID_HANDLE_VALUE;
+        }
+    }
+
+    TRACE("created %u rows\n", row);
+    table->num_rows = row;
+    return status;
+}
+
 static WCHAR *get_sounddevice_pnpdeviceid( DXGI_ADAPTER_DESC *desc )
 {
     static const WCHAR fmtW[] = L"HDAUDIO\\FUNC_01&VEN_%04X&DEV_%04X&SUBSYS_%08X&REV_%04X\\0&DEADBEEF&0&DEAD";
@@ -4255,6 +4362,7 @@ static struct table cimv2_builtin_classes[] =
     { L"Win32_SoundDevice", C(col_sounddevice), 0, 0, NULL, fill_sounddevice },
     { L"Win32_SystemEnclosure", C(col_systemenclosure), 0, 0, NULL, fill_systemenclosure },
     { L"Win32_VideoController", C(col_videocontroller), 0, 0, NULL, fill_videocontroller },
+    { L"Win32_Volume", C(col_volume), 0, 0, NULL, fill_volume },
     { L"Win32_WinSAT", C(col_winsat), D(data_winsat) },
 };
 

@@ -19,8 +19,6 @@
 #ifndef __WINE_MCX_H
 #define __WINE_MCX_H
 
-#include "wine/winheader_enter.h"
-
 typedef struct tagMODEMDEVCAPS {
        DWORD dwActualSize;
        DWORD dwRequiredSize;
@@ -58,7 +56,5 @@ typedef struct tagMODEMSETTINGS {
        DWORD dwNegotiatedDCERate;
        BYTE  abVariablePortion[1];
 } MODEMSETTINGS, *LPMODEMSETTINGS;
-
-#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_MCX_H */

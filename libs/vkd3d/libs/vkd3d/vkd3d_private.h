@@ -143,6 +143,8 @@ struct vkd3d_vulkan_info
     bool rasterization_stream;
     bool transform_feedback_queries;
 
+    bool uav_read_without_format;
+
     bool vertex_attrib_zero_divisor;
     unsigned int max_vertex_attrib_divisor;
 
@@ -346,7 +348,6 @@ struct vkd3d_fence_worker
     union vkd3d_thread_handle thread;
     struct vkd3d_mutex mutex;
     struct vkd3d_cond cond;
-    struct vkd3d_cond fence_destruction_cond;
     bool should_exit;
 
     size_t fence_count;
@@ -529,7 +530,7 @@ struct d3d12_fence
     {
         uint64_t value;
         HANDLE event;
-        bool latch;
+        bool *latch;
     } *events;
     size_t events_size;
     size_t event_count;
@@ -1683,15 +1684,6 @@ HRESULT vkd3d_load_vk_device_procs(struct vkd3d_vk_device_procs *procs,
 extern const char vkd3d_build[];
 
 bool vkd3d_get_program_name(char program_name[PATH_MAX]);
-
-static inline void vkd3d_set_thread_name(const char *name)
-{
-#if defined(HAVE_PTHREAD_SETNAME_NP_2)
-    pthread_setname_np(pthread_self(), name);
-#elif defined(HAVE_PTHREAD_SETNAME_NP_1)
-    pthread_setname_np(name);
-#endif
-}
 
 VkResult vkd3d_set_vk_object_name_utf8(struct d3d12_device *device, uint64_t vk_object,
         VkDebugReportObjectTypeEXT vk_object_type, const char *name);

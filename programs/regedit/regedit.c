@@ -22,31 +22,31 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
+
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "main.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(regedit);
 
 static void output_writeconsole(const WCHAR *str, DWORD wlen)
 {
-    DWORD count, ret;
+    DWORD count;
 
-    ret = WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), str, wlen, &count, NULL);
-    if (!ret)
+    if (!WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), str, wlen, &count, NULL))
     {
         DWORD len;
         char  *msgA;
 
         /* WriteConsole() fails on Windows if its output is redirected. If this occurs,
-         * we should call WriteFile() and assume the console encoding is still correct.
+         * we should call WriteFile() with OEM code page.
          */
-        len = WideCharToMultiByte(GetConsoleOutputCP(), 0, str, wlen, NULL, 0, NULL, NULL);
-        msgA = heap_xalloc(len);
+        len = WideCharToMultiByte(GetOEMCP(), 0, str, wlen, NULL, 0, NULL, NULL);
+        msgA = malloc(len);
+        if (!msgA) return;
 
-        WideCharToMultiByte(GetConsoleOutputCP(), 0, str, wlen, msgA, len, NULL, NULL);
+        WideCharToMultiByte(GetOEMCP(), 0, str, wlen, msgA, len, NULL, NULL);
         WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), msgA, len, &count, FALSE);
-        heap_free(msgA);
+        free(msgA);
     }
 }
 
@@ -119,13 +119,13 @@ static void PerformRegAction(REGEDIT_ACTION action, WCHAR **argv, int *i)
                 size = SearchPathW(NULL, filename, NULL, 0, NULL, NULL);
                 if (size > 0)
                 {
-                    realname = heap_xalloc(size * sizeof(WCHAR));
+                    realname = malloc(size * sizeof(WCHAR));
                     size = SearchPathW(NULL, filename, NULL, size, realname, NULL);
                 }
                 if (size == 0)
                 {
                     output_message(STRING_FILE_NOT_FOUND, filename);
-                    heap_free(realname);
+                    free(realname);
                     return;
                 }
                 reg_file = _wfopen(realname, L"rb");
@@ -133,14 +133,14 @@ static void PerformRegAction(REGEDIT_ACTION action, WCHAR **argv, int *i)
                 {
                     _wperror(L"regedit");
                     output_message(STRING_CANNOT_OPEN_FILE, filename);
-                    heap_free(realname);
+                    free(realname);
                     return;
                 }
             }
             import_registry_file(reg_file);
             if (realname)
             {
-                heap_free(realname);
+                free(realname);
                 fclose(reg_file);
             }
             break;

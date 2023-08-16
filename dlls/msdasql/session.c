@@ -36,6 +36,247 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msdasql);
 
+struct msdasql_prop
+{
+    DBPROPID    property_id;
+    DBPROPFLAGS flags;
+    VARTYPE     vartype;
+
+    LONG value;
+};
+
+static struct msdasql_prop msdasql_init_props[] =
+{
+    { DBPROP_ABORTPRESERVE,                   DBPROPFLAGS_ROWSET | DBPROPFLAGS_DATASOURCEINFO, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_BLOCKINGSTORAGEOBJECTS,          DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_BOOKMARKS,                       DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_BOOKMARKSKIPPED,                 DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_BOOKMARKTYPE,                    DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_I4, 1 },
+    { DBPROP_CANFETCHBACKWARDS,               DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_CANHOLDROWS,                     DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_CANSCROLLBACKWARDS,              DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_COLUMNRESTRICT,                  DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_COMMITPRESERVE,                  DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_DELAYSTORAGEOBJECTS,             DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_IMMOBILEROWS,                    DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_LITERALBOOKMARKS,                DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_LITERALIDENTITY,                 DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_MAXOPENROWS,                     DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4, 0 },
+    { DBPROP_MAXPENDINGROWS,                  DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_I4,  0 },
+    { DBPROP_MAXROWS,                         DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_I4, 0 },
+    { DBPROP_NOTIFICATIONPHASES,              DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4, 31 },
+    { DBPROP_OTHERUPDATEDELETE,               DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_OWNINSERT,                       DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_OWNUPDATEDELETE,                 DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_QUICKRESTART ,                   DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_REENTRANTEVENTS,                 DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_REMOVEDELETED,                   DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_REPORTMULTIPLECHANGES,           DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_ROWRESTRICT,                     DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_ROWTHREADMODEL,                  DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4, 2 },
+    { DBPROP_TRANSACTEDOBJECT,                DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_UPDATABILITY,                    DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4, 0 },
+    { DBPROP_STRONGIDENTITY,                  DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_IAccessor,                       DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_IColumnsInfo,                    DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_IColumnsRowset,                  DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_IConnectionPointContainer,       DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_IRowset,                         DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_IRowsetChange,                   DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_IRowsetIdentity,                 DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_IRowsetInfo,                     DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_IRowsetLocate,                   DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_IRowsetResynch,                  DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_IRowsetUpdate,                   DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_ISupportErrorInfo,               DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_ISequentialStream,               DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_NOTIFYCOLUMNSET,                 DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4,  3 },
+    { DBPROP_NOTIFYROWDELETE,                 DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4,  3 },
+    { DBPROP_NOTIFYROWFIRSTCHANGE,            DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4,  3 },
+    { DBPROP_NOTIFYROWINSERT,                 DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4,  3 },
+    { DBPROP_NOTIFYROWRESYNCH,                DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4,  3 },
+    { DBPROP_NOTIFYROWSETRELEASE,             DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4,  3 },
+    { DBPROP_NOTIFYROWSETFETCHPOSITIONCHANGE, DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4,  3 },
+    { DBPROP_NOTIFYROWUNDOCHANGE,             DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4,  3 },
+    { DBPROP_NOTIFYROWUNDODELETE,             DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4,  3 },
+    { DBPROP_NOTIFYROWUNDOINSERT,             DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4,  3 },
+    { DBPROP_NOTIFYROWUPDATE,                 DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4,  3 },
+    { DBPROP_CHANGEINSERTEDROWS,              DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_RETURNPENDINGINSERTS,            DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_IConvertType,                    DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_NOTIFICATIONGRANULARITY,         DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_I4, 1 },
+    { DBPROP_IMultipleResults,                DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_ACCESSORDER,                     DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_I4, 1 },
+    { DBPROP_BOOKMARKINFO,                    DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4, 0 },
+    { DBPROP_UNIQUEROWS,                      DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_IRowsetFind,                     DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_IRowsetScroll,                   DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_IRowsetRefresh,                  DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_FINDCOMPAREOPS,                  DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ, VT_I4, 27 },
+    { DBPROP_ORDEREDBOOKMARKS,                DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_CLIENTCURSOR,                    DBPROPFLAGS_ROWSET | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_TRUE },
+    { DBPROP_ABORTPRESERVE,                   DBPROPFLAGS_DATASOURCEINFO | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_ACTIVESESSIONS,                  DBPROPFLAGS_DATASOURCEINFO | DBPROPFLAGS_READ, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_ASYNCTXNCOMMIT,                  DBPROPFLAGS_DATASOURCEINFO | DBPROPFLAGS_READ, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_AUTH_CACHE_AUTHINFO,             DBPROPFLAGS_DATASOURCEINFO | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_AUTH_ENCRYPT_PASSWORD,           DBPROPFLAGS_DATASOURCEINFO | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_I4, 0 },
+    { DBPROP_AUTH_INTEGRATED,                 DBPROPFLAGS_DATASOURCEINFO | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_I4, 14 },
+    { DBPROP_AUTH_MASK_PASSWORD,              DBPROPFLAGS_DATASOURCEINFO | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_AUTH_PASSWORD,                   DBPROPFLAGS_DATASOURCEINFO | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_AUTH_PERSIST_ENCRYPTED,          DBPROPFLAGS_DATASOURCEINFO | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_AUTH_PERSIST_SENSITIVE_AUTHINFO, DBPROPFLAGS_DATASOURCEINFO | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_AUTH_USERID,                     DBPROPFLAGS_DATASOURCEINFO | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+    { DBPROP_BLOCKINGSTORAGEOBJECTS,          DBPROPFLAGS_DATASOURCEINFO | DBPROPFLAGS_READ | DBPROPFLAGS_WRITE, VT_BOOL, VARIANT_FALSE },
+};
+
+#define SQLTYPE_TO_STR(x) case x: return #x
+
+static const char *debugstr_sqltype(SQLSMALLINT type)
+{
+    switch (type)
+    {
+        SQLTYPE_TO_STR(SQL_DECIMAL);
+        SQLTYPE_TO_STR(SQL_CHAR);
+        SQLTYPE_TO_STR(SQL_VARCHAR);
+        SQLTYPE_TO_STR(SQL_LONGVARCHAR);
+        SQLTYPE_TO_STR(SQL_NUMERIC);
+        SQLTYPE_TO_STR(SQL_GUID);
+        SQLTYPE_TO_STR(SQL_TINYINT);
+        SQLTYPE_TO_STR(SQL_SMALLINT);
+        SQLTYPE_TO_STR(SQL_INTEGER);
+        SQLTYPE_TO_STR(SQL_REAL);
+        SQLTYPE_TO_STR(SQL_FLOAT);
+        SQLTYPE_TO_STR(SQL_DOUBLE);
+        SQLTYPE_TO_STR(SQL_BINARY);
+        SQLTYPE_TO_STR(SQL_VARBINARY);
+        SQLTYPE_TO_STR(SQL_LONGVARBINARY);
+        SQLTYPE_TO_STR(SQL_TYPE_DATE);
+        SQLTYPE_TO_STR(SQL_DATE);
+        SQLTYPE_TO_STR(SQL_TIME);
+        SQLTYPE_TO_STR(SQL_TYPE_TIMESTAMP);
+        SQLTYPE_TO_STR(SQL_TIMESTAMP);
+        SQLTYPE_TO_STR(SQL_TYPE_TIME);
+        SQLTYPE_TO_STR(SQL_BIGINT);
+        SQLTYPE_TO_STR(SQL_C_SBIGINT);
+        SQLTYPE_TO_STR(SQL_C_SLONG);
+        SQLTYPE_TO_STR(SQL_C_ULONG);
+        SQLTYPE_TO_STR(SQL_WLONGVARCHAR);
+        SQLTYPE_TO_STR(SQL_WCHAR);
+        SQLTYPE_TO_STR(SQL_WVARCHAR);
+        default:
+             return "Unknown";
+    }
+}
+
+static const char *debugstr_dbtype(DBTYPE type)
+{
+    switch(type)
+    {
+        SQLTYPE_TO_STR(DBTYPE_NUMERIC);
+        SQLTYPE_TO_STR(DBTYPE_STR);
+        SQLTYPE_TO_STR(DBTYPE_GUID);
+        SQLTYPE_TO_STR(DBTYPE_I1);
+        SQLTYPE_TO_STR(DBTYPE_I2);
+        SQLTYPE_TO_STR(DBTYPE_UI2);
+        SQLTYPE_TO_STR(DBTYPE_I4);
+        SQLTYPE_TO_STR(DBTYPE_I8);
+        SQLTYPE_TO_STR(DBTYPE_UI4);
+        SQLTYPE_TO_STR(DBTYPE_R4);
+        SQLTYPE_TO_STR(DBTYPE_R8);
+        SQLTYPE_TO_STR(DBTYPE_BYTES);
+        SQLTYPE_TO_STR(DBTYPE_DBDATE);
+        SQLTYPE_TO_STR(DBTYPE_DBTIME);
+        SQLTYPE_TO_STR(DBTYPE_DATE);
+        SQLTYPE_TO_STR(DBTYPE_DBTIMESTAMP);
+        SQLTYPE_TO_STR(DBTYPE_WSTR);
+        default:
+             return "Unknown";
+    }
+}
+
+static SQLSMALLINT sqltype_to_bindtype(SQLSMALLINT type, BOOL sign)
+{
+    switch (type)
+    {
+        case SQL_DECIMAL:
+            return DBTYPE_NUMERIC;
+        case SQL_CHAR:
+        case SQL_VARCHAR:
+        case SQL_LONGVARCHAR:
+        case SQL_NUMERIC:
+            return DBTYPE_STR;
+        case SQL_GUID:
+            return DBTYPE_GUID;
+        case SQL_TINYINT:
+            return DBTYPE_I1;
+        case SQL_SMALLINT:
+            return sign ? DBTYPE_I2 : DBTYPE_UI2;
+        case SQL_INTEGER:
+            return sign ? DBTYPE_I4 : DBTYPE_UI4;
+        case SQL_REAL:
+            return DBTYPE_R4;
+        case SQL_FLOAT:
+        case SQL_DOUBLE:
+            return DBTYPE_R8;
+        case SQL_BINARY:
+        case SQL_VARBINARY:
+        case SQL_LONGVARBINARY:
+            return DBTYPE_BYTES;
+        case SQL_TYPE_DATE:
+            return DBTYPE_DBDATE;
+        case SQL_DATE:
+            return DBTYPE_DBTIME;
+        case SQL_TIME:
+            return DBTYPE_DATE;
+        case SQL_TYPE_TIMESTAMP:
+        case SQL_TIMESTAMP:
+            return DBTYPE_DBTIMESTAMP;
+        case SQL_TYPE_TIME:
+            return DBTYPE_DBTIME;
+        case SQL_BIGINT:
+        case SQL_C_SBIGINT:
+            return DBTYPE_I8;
+        case SQL_C_SLONG:
+            return DBTYPE_I4;
+        case SQL_C_ULONG:
+            return DBTYPE_UI4;
+        case SQL_WLONGVARCHAR:
+        case SQL_WCHAR:
+        case SQL_WVARCHAR:
+            return DBTYPE_WSTR;
+        default:
+            FIXME("Unsupported type %i\n", type);
+    }
+
+    return DBTYPE_I4;
+}
+
+static BOOL is_variable_length(SQLSMALLINT type)
+{
+    switch(type)
+    {
+        case SQL_LONGVARCHAR:
+        case SQL_WLONGVARCHAR:
+        case SQL_LONGVARBINARY:
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static BOOL is_fixed_length(SQLSMALLINT type)
+{
+    switch(type)
+    {
+        case SQL_LONGVARCHAR:
+        case SQL_WLONGVARCHAR:
+        case SQL_WVARCHAR:
+        case SQL_LONGVARBINARY:
+        case SQL_VARBINARY:
+            return FALSE;
+    }
+    return TRUE;
+}
+
 struct msdasql_session
 {
     IUnknown session_iface;
@@ -332,6 +573,9 @@ struct command
     IUnknown *session;
     HDBC hdbc;
     SQLHSTMT hstmt;
+
+    struct msdasql_prop *properties;
+    LONG prop_count;
 };
 
 static inline struct command *impl_from_ICommandText( ICommandText *iface )
@@ -449,6 +693,8 @@ static ULONG WINAPI command_Release(ICommandText *iface)
     if (!refs)
     {
         TRACE( "destroying %p\n", command );
+        if (command->properties)
+            heap_free(command->properties);
         if (command->session)
             IUnknown_Release(command->session);
 
@@ -659,8 +905,19 @@ static HRESULT WINAPI rowset_info_GetProperties(IRowsetInfo *iface, const ULONG 
         const DBPROPIDSET propertyidsets[], ULONG *out_count, DBPROPSET **propertysets)
 {
     struct msdasql_rowset *rowset = impl_from_IRowsetInfo( iface );
-    FIXME("%p, %lu, %p, %p, %p\n", rowset, count, propertyidsets, out_count, propertysets);
-    return E_NOTIMPL;
+    HRESULT hr;
+    ICommandProperties *props;
+
+    TRACE("%p, %lu, %p, %p, %p\n", rowset, count, propertyidsets, out_count, propertysets);
+
+    hr = IUnknown_QueryInterface(rowset->caller, &IID_ICommandProperties, (void**)&props);
+    if (FAILED(hr))
+        return hr;
+
+    hr = ICommandProperties_GetProperties(props, count, propertyidsets, out_count, propertysets);
+    ICommandProperties_Release(props);
+
+    return hr;
 }
 
 static HRESULT WINAPI rowset_info_GetReferencedRowset(IRowsetInfo *iface, DBORDINAL ordinal,
@@ -718,9 +975,134 @@ static ULONG  WINAPI rowset_colsinfo_Release(IColumnsInfo *iface)
 static HRESULT WINAPI rowset_colsinfo_GetColumnInfo(IColumnsInfo *iface, DBORDINAL *columns,
         DBCOLUMNINFO **colinfo, OLECHAR **stringsbuffer)
 {
+#define MAX_COLUMN_LEN 128
+
     struct msdasql_rowset *rowset = rowset_impl_from_IColumnsInfo( iface );
-    FIXME("%p, %p, %p, %p\n", rowset, columns, colinfo, stringsbuffer);
-    return E_NOTIMPL;
+    DBCOLUMNINFO *dbcolumn;
+    RETCODE ret;
+    SQLSMALLINT colcnt;
+    int i;
+    OLECHAR *ptr;
+
+    TRACE("%p, %p, %p, %p\n", rowset, columns, colinfo, stringsbuffer);
+
+    if (!columns || !colinfo || !stringsbuffer)
+        return E_INVALIDARG;
+
+    SQLNumResultCols(rowset->hstmt, &colcnt);
+    TRACE("SQLNumResultCols %d\n", colcnt);
+
+    *columns = colcnt;
+
+    ptr = *stringsbuffer = CoTaskMemAlloc(colcnt * MAX_COLUMN_LEN * sizeof(WCHAR));
+    if (!ptr)
+        return E_OUTOFMEMORY;
+
+    dbcolumn = CoTaskMemAlloc(colcnt * sizeof(DBCOLUMNINFO));
+    if (!dbcolumn)
+    {
+        CoTaskMemFree(ptr);
+        return E_OUTOFMEMORY;
+    }
+
+    for (i = 0; i < colcnt; i++)
+    {
+        SQLWCHAR      columnname[MAX_COLUMN_LEN];
+        SQLSMALLINT   ColumnNameLen;
+        SQLSMALLINT   ColumnDataType;
+        SQLULEN       ColumnDataSize;
+        SQLSMALLINT   ColumnDataDigits;
+        SQLSMALLINT   ColumnDataNullable;
+
+        ret = SQLDescribeColW(rowset->hstmt, i+1, columnname, MAX_COLUMN_LEN, &ColumnNameLen, &ColumnDataType,
+                    &ColumnDataSize, &ColumnDataDigits, &ColumnDataNullable);
+        if (SQL_SUCCEEDED(ret))
+        {
+            SQLLEN  length;
+
+            TRACE("%d: Column Name : %s, Column Name Len : %i, SQL Data Type : %i, Data Size : %i, DecimalDigits : %i, Nullable %i\n",
+                 i, debugstr_w(columnname), (int)ColumnNameLen, (int)ColumnDataType, (int)ColumnDataSize, (int)ColumnDataDigits,
+                 (int)ColumnDataNullable);
+            lstrcpyW(ptr, columnname);
+
+            dbcolumn[i].pwszName = ptr;
+            dbcolumn[i].pTypeInfo = NULL;
+            dbcolumn[i].iOrdinal = i+1;
+
+            ret = SQLColAttribute(rowset->hstmt, i+1, SQL_DESC_UNSIGNED, NULL, 0, NULL, &length);
+            if (!SQL_SUCCEEDED(ret))
+            {
+                CoTaskMemFree(ptr);
+                CoTaskMemFree(dbcolumn);
+                ERR("Failed to get column %d attribute\n", i+1);
+                return E_FAIL;
+            }
+
+            dbcolumn[i].wType = sqltype_to_bindtype(ColumnDataType, length == SQL_FALSE);
+            TRACE("SQLType %s -> %s\n", debugstr_sqltype(ColumnDataType), debugstr_dbtype(dbcolumn[i].wType));
+
+            dbcolumn[i].dwFlags = DBCOLUMNFLAGS_WRITE;
+
+            ret = SQLColAttribute(rowset->hstmt, i+1, SQL_DESC_LENGTH, NULL, 0, NULL, &length);
+            if (!SQL_SUCCEEDED(ret))
+            {
+                CoTaskMemFree(ptr);
+                CoTaskMemFree(dbcolumn);
+                ERR("Failed to get column %d length (%d)\n", i+1, ret);
+                return E_FAIL;
+            }
+            dbcolumn[i].ulColumnSize = length;
+
+            if (dbcolumn[i].ulColumnSize > 1024 && is_variable_length(ColumnDataType))
+                dbcolumn[i].dwFlags |= DBCOLUMNFLAGS_MAYDEFER | DBCOLUMNFLAGS_ISLONG;
+
+            if (ColumnDataNullable)
+                dbcolumn[i].dwFlags |= DBCOLUMNFLAGS_ISNULLABLE | DBCOLUMNFLAGS_MAYBENULL;
+
+            if (is_fixed_length(ColumnDataType))
+                dbcolumn[i].dwFlags |= DBCOLUMNFLAGS_ISFIXEDLENGTH;
+
+            ret = SQLColAttribute(rowset->hstmt, i+1, SQL_DESC_SCALE, NULL, 0, NULL, &length);
+            if (!SQL_SUCCEEDED(ret))
+            {
+                CoTaskMemFree(ptr);
+                CoTaskMemFree(dbcolumn);
+                ERR("Failed to get column %d scale (%d)\n", i+1, ret);
+                return E_FAIL;
+            }
+            if (length == 0)
+                length = 255;
+            dbcolumn[i].bScale = length;
+
+            ret = SQLColAttribute(rowset->hstmt, i+1, SQL_DESC_PRECISION, NULL, 0, NULL, &length);
+            if (!SQL_SUCCEEDED(ret))
+            {
+                CoTaskMemFree(ptr);
+                CoTaskMemFree(dbcolumn);
+                ERR("Failed to get column %d precision (%d)\n", i+1, ret);
+                return E_FAIL;
+            }
+            if (length == 0)
+                length = 255;
+            dbcolumn[i].bPrecision= length;
+
+            dbcolumn[i].columnid.eKind = DBKIND_NAME;
+            dbcolumn[i].columnid.uName.pwszName = ptr;
+
+            ptr += ColumnNameLen + 1;
+        }
+        else
+        {
+            CoTaskMemFree(ptr);
+            CoTaskMemFree(dbcolumn);
+            ERR("Failed to get column %d description (%d)\n", i+1, ret);
+            return E_FAIL;
+        }
+    }
+
+    *colinfo = dbcolumn;
+#undef MAX_COLUMN_LEN
+    return S_OK;
 }
 
 static HRESULT WINAPI rowset_colsinfo_MapColumnIDs(IColumnsInfo *iface, DBORDINAL column_ids,
@@ -821,8 +1203,16 @@ static ULONG WINAPI column_rs_Release(IColumnsRowset *iface)
 static HRESULT WINAPI column_rs_GetAvailableColumns(IColumnsRowset *iface, DBORDINAL *count, DBID **columns)
 {
     struct msdasql_rowset *rowset = impl_from_IColumnsRowset( iface );
-    FIXME("%p, %p, %p\n", rowset, count, columns);
-    return E_NOTIMPL;
+
+    TRACE("%p, %p, %p\n", rowset, count, columns);
+
+    if (!count || !columns)
+        return E_INVALIDARG;
+
+    *count = 0;
+    *columns = NULL;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI column_rs_GetColumnsRowset(IColumnsRowset *iface, IUnknown *outer, DBORDINAL count,
@@ -865,13 +1255,6 @@ static HRESULT WINAPI command_Execute(ICommandText *iface, IUnknown *outer, REFI
         return E_FAIL;
     }
 
-    ret = SQLRowCount(hstmt, &results);
-    if (ret != SQL_SUCCESS)
-        ERR("SQLRowCount failed (%d)\n", ret);
-
-    if (affected)
-        *affected = results;
-
     *rowset = NULL;
     if (!wcsnicmp( command->query, L"select ", 7 ))
     {
@@ -894,7 +1277,16 @@ static HRESULT WINAPI command_Execute(ICommandText *iface, IUnknown *outer, REFI
         IRowset_Release(&msrowset->IRowset_iface);
     }
     else
+    {
+        ret = SQLRowCount(hstmt, &results);
+        if (ret != SQL_SUCCESS)
+            ERR("SQLRowCount failed (%d)\n", ret);
+
         SQLFreeStmt(hstmt, SQL_CLOSE);
+    }
+
+    if (affected)
+        *affected = results;
 
     return hr;
 }
@@ -989,19 +1381,187 @@ static ULONG WINAPI command_prop_Release(ICommandProperties *iface)
     return ICommandText_Release(&command->ICommandText_iface);
 }
 
+static ULONG get_property_count(DWORD flag, struct msdasql_prop *properties, int prop_count)
+{
+    int i, count = 0;
+
+    for(i=0; i < prop_count; i++)
+    {
+        if (properties[i].flags & flag)
+            count++;
+    }
+
+    return count;
+}
+
 static HRESULT WINAPI command_prop_GetProperties(ICommandProperties *iface, ULONG count,
         const DBPROPIDSET propertyidsets[], ULONG *sets_cnt, DBPROPSET **propertyset)
 {
     struct command *command = impl_from_ICommandProperties( iface );
-    FIXME("%p %lu %p %p %p\n", command, count, propertyidsets, sets_cnt, propertyset);
-    return E_NOTIMPL;
+    DBPROPSET *propset = NULL;
+    int i, j, k;
+
+    TRACE("%p %ld %p %p %p\n", command, count, propertyidsets, sets_cnt, propertyset);
+
+    /* All Properties */
+    if (count == 0)
+    {
+        int idx;
+        propset = CoTaskMemAlloc(2 * sizeof(DBPROPSET));
+        if (!propset)
+            return E_OUTOFMEMORY;
+
+        propset[0].guidPropertySet = DBPROPSET_ROWSET;
+        propset[0].cProperties = get_property_count(DBPROPFLAGS_ROWSET, command->properties, command->prop_count);
+        propset[0].rgProperties = CoTaskMemAlloc(propset[0].cProperties * sizeof(DBPROP));
+        if (!propset[0].rgProperties)
+        {
+            CoTaskMemFree(propset);
+            return E_OUTOFMEMORY;
+        }
+
+        idx = 0;
+        for (j=0; j < command->prop_count; j++)
+        {
+            if (!(command->properties[j].flags & DBPROPFLAGS_ROWSET))
+                continue;
+            propset[0].rgProperties[idx].dwPropertyID = command->properties[j].property_id;
+
+            V_VT(&propset[0].rgProperties[idx].vValue) = command->properties[j].vartype;
+            if (command->properties[j].vartype == VT_BOOL)
+            {
+                V_BOOL(&propset[0].rgProperties[idx].vValue) = command->properties[j].value;
+            }
+            else if (command->properties[j].vartype == VT_I4)
+            {
+                V_I4(&propset[0].rgProperties[idx].vValue) = command->properties[j].value;
+            }
+            else
+                ERR("Unknown variant type %d\n", command->properties[j].vartype);
+
+            idx++;
+        }
+
+        propset[1].guidPropertySet = DBPROPSET_PROVIDERROWSET;
+        propset[1].cProperties = get_property_count(DBPROPFLAGS_DATASOURCEINFO, command->properties, command->prop_count);
+        propset[1].rgProperties = CoTaskMemAlloc(propset[1].cProperties * sizeof(DBPROP));
+        if (!propset[1].rgProperties)
+        {
+            CoTaskMemFree(propset[0].rgProperties);
+            CoTaskMemFree(propset);
+            return E_OUTOFMEMORY;
+        }
+
+        idx = 0;
+        for (j=0; j < command->prop_count; j++)
+        {
+            if (!(command->properties[j].flags & DBPROPFLAGS_DATASOURCEINFO))
+                continue;
+            propset[1].rgProperties[idx].dwPropertyID = command->properties[j].property_id;
+
+            V_VT(&propset[1].rgProperties[idx].vValue) = command->properties[j].vartype;
+            if (command->properties[j].vartype == VT_BOOL)
+            {
+                V_BOOL(&propset[1].rgProperties[idx].vValue) = command->properties[j].value;
+            }
+            else if (command->properties[j].vartype == VT_I4)
+            {
+                V_I4(&propset[1].rgProperties[idx].vValue) = command->properties[j].value;
+            }
+            else
+                ERR("Unknown variant type %d\n", command->properties[j].vartype);
+
+            idx++;
+        }
+
+        *sets_cnt = 2;
+    }
+    else
+    {
+        propset = CoTaskMemAlloc(count * sizeof(DBPROPSET));
+        if (!propset)
+            return E_OUTOFMEMORY;
+
+        for (i=0; i < count; i++)
+        {
+            TRACE("Property id %d (count %ld, set %s)\n", i, propertyidsets[i].cPropertyIDs,
+                    debugstr_guid(&propertyidsets[i].guidPropertySet));
+
+            propset[i].cProperties = propertyidsets[i].cPropertyIDs;
+            propset[i].rgProperties = CoTaskMemAlloc(propset[i].cProperties * sizeof(DBPROP));
+
+            for (j=0; j < propset[i].cProperties; j++)
+            {
+                propset[i].rgProperties[j].dwPropertyID = propertyidsets[i].rgPropertyIDs[j];
+
+                for(k = 0; k < command->prop_count; k++)
+                {
+                    if (command->properties[k].property_id == propertyidsets[i].rgPropertyIDs[j])
+                    {
+                        V_VT(&propset[i].rgProperties[i].vValue) = command->properties[j].vartype;
+                        if (command->properties[j].vartype == VT_BOOL)
+                        {
+                            V_BOOL(&propset[i].rgProperties[i].vValue) = command->properties[j].value;
+                        }
+                        else if (command->properties[j].vartype == VT_I4)
+                        {
+                            V_I4(&propset[i].rgProperties[i].vValue) = command->properties[j].value;
+                        }
+                        else
+                            ERR("Unknown variant type %d\n", command->properties[j].vartype);
+                        break;
+                    }
+                }
+            }
+        }
+
+        *sets_cnt = count;
+    }
+
+    *propertyset = propset;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI command_prop_SetProperties(ICommandProperties *iface, ULONG count,
         DBPROPSET propertyset[])
 {
     struct command *command = impl_from_ICommandProperties( iface );
-    FIXME("%p, %lu, %p\n", command, count, propertyset);
+    int i, j, k;
+
+    TRACE("%p %lu, %p\n", command, count, propertyset);
+
+    for(i=0; i < count; i++)
+    {
+        TRACE("set %s, count %ld\n", debugstr_guid(&propertyset[i].guidPropertySet), propertyset[i].cProperties);
+        for(j=0; j < propertyset[i].cProperties; j++)
+        {
+            for(k=0; k < command->prop_count; k++)
+            {
+                if (command->properties[k].property_id == propertyset[i].rgProperties[j].dwPropertyID)
+                {
+                    TRACE("Found property 0x%08lx\n", command->properties[k].property_id);
+                    if (command->properties[k].flags & DBPROPFLAGS_WRITE)
+                    {
+                        if (command->properties[k].vartype == VT_BOOL)
+                        {
+                            command->properties[k].value = V_BOOL(&propertyset[i].rgProperties[j].vValue);
+                        }
+                        else if (command->properties[k].vartype == VT_I4)
+                        {
+                            command->properties[k].value = V_I4(&propertyset[i].rgProperties[j].vValue);
+                        }
+                        else
+                            ERR("Unknown variant type %d\n", command->properties[j].vartype);
+                    }
+                    else
+                        WARN("Attempting to set Readonly property\n");
+
+                    break;
+                }
+            }
+        }
+    }
     return S_OK;
 }
 
@@ -1226,6 +1786,10 @@ static HRESULT WINAPI createcommand_CreateCommand(IDBCreateCommand *iface, IUnkn
     command->query = NULL;
     command->hdbc = session->hdbc;
     command->hstmt = NULL;
+
+    command->prop_count = ARRAY_SIZE(msdasql_init_props);
+    command->properties = heap_alloc(sizeof(msdasql_init_props));
+    memcpy(command->properties, msdasql_init_props, sizeof(msdasql_init_props));
 
     IUnknown_QueryInterface(&session->session_iface, &IID_IUnknown, (void**)&command->session);
 

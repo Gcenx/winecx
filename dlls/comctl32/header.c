@@ -41,7 +41,6 @@
 #include "vssym32.h"
 #include "uxtheme.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(header);
 
@@ -141,7 +140,7 @@ static void HEADER_StoreHDItemInHeader(HEADER_ITEM *lpItem, UINT mask, const HDI
 
     if (mask & HDI_TEXT)
     {
-        heap_free(lpItem->pszText);
+        Free(lpItem->pszText);
         lpItem->pszText = NULL;
 
         if (phdi->pszText != LPSTR_TEXTCALLBACKW) /* covers != TEXTCALLBACKA too */
@@ -336,7 +335,7 @@ static HRGN create_sort_arrow( INT x, INT y, INT h, BOOL is_up )
 
     if (size > sizeof(buffer))
     {
-        data = heap_alloc( size );
+        data = Alloc( size );
         if (!data) return NULL;
     }
     data->rdh.dwSize = sizeof(data->rdh);
@@ -362,7 +361,7 @@ static HRGN create_sort_arrow( INT x, INT y, INT h, BOOL is_up )
         data->rdh.nCount++;
     }
     rgn = ExtCreateRegion( NULL, size, data );
-    if (data != (RGNDATA *)buffer) heap_free( data );
+    if (data != (RGNDATA *)buffer) Free( data );
     return rgn;
 }
 
@@ -961,7 +960,7 @@ HEADER_SendNotifyWithIntFieldT(const HEADER_INFO *infoPtr, UINT code, INT iItem,
  *   (so we handle the two cases only doing a specific cast for pszText).
  * Checks if any of the required fields is a callback. If this is the case sends a
  * NMHDISPINFO notify to retrieve these items. The items are stored in the
- * HEADER_ITEM pszText and iImage fields. They should be freed with
+ * HEADER_ITEM pszText and iImage fields. They should be Freed with
  * HEADER_FreeCallbackItems.
  *
  * @param hwnd : hwnd header container handler
@@ -983,7 +982,7 @@ HEADER_PrepareCallbackItems(const HEADER_INFO *infoPtr, INT iItem, INT reqMask)
     if (mask&HDI_TEXT && lpItem->pszText != NULL)
     {
         ERR("(): function called without a call to FreeCallbackItems\n");
-        heap_free(lpItem->pszText);
+        Free(lpItem->pszText);
         lpItem->pszText = NULL;
     }
     
@@ -994,13 +993,13 @@ HEADER_PrepareCallbackItems(const HEADER_INFO *infoPtr, INT iItem, INT reqMask)
     {
         dispInfo.hdr.code = HDN_GETDISPINFOW;
         if (mask & HDI_TEXT)
-            pvBuffer = heap_alloc_zero(MAX_HEADER_TEXT_LEN * sizeof(WCHAR));
+            pvBuffer = Alloc(MAX_HEADER_TEXT_LEN * sizeof(WCHAR));
     }
     else
     {
         dispInfo.hdr.code = HDN_GETDISPINFOA;
         if (mask & HDI_TEXT)
-            pvBuffer = heap_alloc_zero(MAX_HEADER_TEXT_LEN * sizeof(CHAR));
+            pvBuffer = Alloc(MAX_HEADER_TEXT_LEN * sizeof(CHAR));
     }
     dispInfo.pszText      = pvBuffer;
     dispInfo.cchTextMax   = (pvBuffer!=NULL?MAX_HEADER_TEXT_LEN:0);
@@ -1031,7 +1030,7 @@ HEADER_PrepareCallbackItems(const HEADER_INFO *infoPtr, INT iItem, INT reqMask)
         else
         {
             Str_SetPtrAtoW(&lpItem->pszText, (LPSTR)dispInfo.pszText);
-            heap_free(pvBuffer);
+            Free(pvBuffer);
         }
     }
         
@@ -1057,7 +1056,7 @@ HEADER_FreeCallbackItems(HEADER_ITEM *lpItem)
 {
     if (lpItem->callbackMask&HDI_TEXT)
     {
-        heap_free(lpItem->pszText);
+        Free(lpItem->pszText);
         lpItem->pszText = NULL;
     }
 
@@ -1179,15 +1178,15 @@ HEADER_DeleteItem (HEADER_INFO *infoPtr, INT iItem)
        TRACE("%d: order=%d, iOrder=%d, ->iOrder=%d\n", i, infoPtr->order[i], infoPtr->items[i].iOrder, infoPtr->items[infoPtr->order[i]].iOrder);
 
     iOrder = infoPtr->items[iItem].iOrder;
-    heap_free(infoPtr->items[iItem].pszText);
+    Free(infoPtr->items[iItem].pszText);
 
     infoPtr->uNumItem--;
     memmove(&infoPtr->items[iItem], &infoPtr->items[iItem + 1],
             (infoPtr->uNumItem - iItem) * sizeof(HEADER_ITEM));
     memmove(&infoPtr->order[iOrder], &infoPtr->order[iOrder + 1],
             (infoPtr->uNumItem - iOrder) * sizeof(INT));
-    infoPtr->items = heap_realloc(infoPtr->items, sizeof(HEADER_ITEM) * infoPtr->uNumItem);
-    infoPtr->order = heap_realloc(infoPtr->order, sizeof(INT) * infoPtr->uNumItem);
+    infoPtr->items = ReAlloc(infoPtr->items, sizeof(HEADER_ITEM) * infoPtr->uNumItem);
+    infoPtr->order = ReAlloc(infoPtr->order, sizeof(INT) * infoPtr->uNumItem);
         
     /* Correct the orders */
     for (i = 0; i < infoPtr->uNumItem; i++)
@@ -1417,8 +1416,8 @@ HEADER_InsertItemT (HEADER_INFO *infoPtr, INT nItem, const HDITEMW *phdi, BOOL b
         iOrder = infoPtr->uNumItem;
 
     infoPtr->uNumItem++;
-    infoPtr->items = heap_realloc(infoPtr->items, sizeof(HEADER_ITEM) * infoPtr->uNumItem);
-    infoPtr->order = heap_realloc(infoPtr->order, sizeof(INT) * infoPtr->uNumItem);
+    infoPtr->items = ReAlloc(infoPtr->items, sizeof(HEADER_ITEM) * infoPtr->uNumItem);
+    infoPtr->order = ReAlloc(infoPtr->order, sizeof(INT) * infoPtr->uNumItem);
     
     /* make space for the new item */
     memmove(&infoPtr->items[nItem + 1], &infoPtr->items[nItem],
@@ -1537,7 +1536,7 @@ HEADER_SetItemT (HEADER_INFO *infoPtr, INT nItem, const HDITEMW *phdi, BOOL bUni
     HEADER_CopyHDItemForNotify(infoPtr, &hdNotify, phdi, bUnicode, &pvScratch);
     if (HEADER_SendNotifyWithHDItemT(infoPtr, HDN_ITEMCHANGINGW, nItem, &hdNotify))
     {
-        heap_free(pvScratch);
+        Free(pvScratch);
         return FALSE;
     }
 
@@ -1554,7 +1553,7 @@ HEADER_SetItemT (HEADER_INFO *infoPtr, INT nItem, const HDITEMW *phdi, BOOL bUni
 
     InvalidateRect(infoPtr->hwndSelf, NULL, FALSE);
 
-    heap_free(pvScratch);
+    Free(pvScratch);
     return TRUE;
 }
 
@@ -1577,7 +1576,7 @@ HEADER_Create (HWND hwnd, const CREATESTRUCTW *lpcs)
     HFONT hOldFont;
     HDC   hdc;
 
-    infoPtr = heap_alloc_zero (sizeof(*infoPtr));
+    infoPtr = Alloc(sizeof(*infoPtr));
     SetWindowLongPtrW (hwnd, 0, (DWORD_PTR)infoPtr);
 
     infoPtr->hwndSelf = hwnd;
@@ -1632,14 +1631,14 @@ HEADER_NCDestroy (HEADER_INFO *infoPtr)
     if (infoPtr->items) {
         lpItem = infoPtr->items;
         for (nItem = 0; nItem < infoPtr->uNumItem; nItem++, lpItem++)
-            heap_free(lpItem->pszText);
-        heap_free(infoPtr->items);
+            Free(lpItem->pszText);
+        Free(infoPtr->items);
     }
 
-    heap_free(infoPtr->order);
+    Free(infoPtr->order);
 
     SetWindowLongPtrW (infoPtr->hwndSelf, 0, 0);
-    heap_free(infoPtr);
+    Free(infoPtr);
 
     return 0;
 }

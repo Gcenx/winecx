@@ -94,7 +94,7 @@ static HRESULT get_map_this(script_ctx_t *ctx, jsval_t vthis, MapInstance **ret)
         return JS_E_OBJECT_EXPECTED;
     if(!(jsdisp = to_jsdisp(get_object(vthis))) || !is_class(jsdisp, JSCLASS_MAP)) {
         WARN("not a Map object passed as 'this'\n");
-        return throw_error(ctx, JS_E_MAP_EXPECTED, L"Map");
+        return throw_error(ctx, JS_E_WRONG_THIS, L"Map");
     }
 
     *ret = CONTAINING_RECORD(jsdisp, MapInstance, dispex);
@@ -109,7 +109,7 @@ static HRESULT get_set_this(script_ctx_t *ctx, jsval_t vthis, MapInstance **ret)
         return JS_E_OBJECT_EXPECTED;
     if(!(jsdisp = to_jsdisp(get_object(vthis))) || !is_class(jsdisp, JSCLASS_SET)) {
         WARN("not a Set object passed as 'this'\n");
-        return throw_error(ctx, JS_E_MAP_EXPECTED, L"Set");
+        return throw_error(ctx, JS_E_WRONG_THIS, L"Set");
     }
 
     *ret = CONTAINING_RECORD(jsdisp, MapInstance, dispex);
@@ -134,7 +134,7 @@ static void release_map_entry(struct jsval_map_entry *entry)
     jsval_release(entry->key);
     jsval_release(entry->value);
     list_remove(&entry->list_entry);
-    heap_free(entry);
+    free(entry);
 }
 
 static void delete_map_entry(MapInstance *map, struct jsval_map_entry *entry)
@@ -159,7 +159,7 @@ static HRESULT set_map_entry(MapInstance *map, jsval_t key, jsval_t value, jsval
         jsval_release(entry->value);
         entry->value = val;
     }else {
-        if(!(entry = heap_alloc_zero(sizeof(*entry)))) return E_OUTOFMEMORY;
+        if(!(entry = calloc(1, sizeof(*entry)))) return E_OUTOFMEMORY;
 
         hres = jsval_copy(key, &entry->key);
         if(SUCCEEDED(hres)) {
@@ -168,7 +168,7 @@ static HRESULT set_map_entry(MapInstance *map, jsval_t key, jsval_t value, jsval
                 jsval_release(entry->key);
         }
         if(FAILED(hres)) {
-            heap_free(entry);
+            free(entry);
             return hres;
         }
         grab_map_entry(entry);
@@ -183,8 +183,8 @@ static HRESULT set_map_entry(MapInstance *map, jsval_t key, jsval_t value, jsval
 
 static HRESULT iterate_map(MapInstance *map, script_ctx_t *ctx, unsigned argc, jsval_t *argv, jsval_t *r)
 {
-    struct jsval_map_entry *entry;
-    IDispatch *context_obj = NULL;
+    struct list *iter = list_head(&map->entries);
+    jsval_t context_this = jsval_undefined();
     HRESULT hres;
 
     if(!argc || !is_object_instance(argv[0])) {
@@ -192,24 +192,24 @@ static HRESULT iterate_map(MapInstance *map, script_ctx_t *ctx, unsigned argc, j
         return E_FAIL;
     }
 
-    if(argc > 1 && !is_undefined(argv[1])) {
-        if(!is_object_instance(argv[1])) {
-            FIXME("Unsupported context this %s\n", debugstr_jsval(argv[1]));
-            return E_NOTIMPL;
-        }
-        context_obj = get_object(argv[1]);
-    }
+    if(argc > 1)
+        context_this = argv[1];
 
-    LIST_FOR_EACH_ENTRY(entry, &map->entries, struct jsval_map_entry, list_entry) {
+    while(iter) {
+        struct jsval_map_entry *entry = LIST_ENTRY(iter, struct jsval_map_entry, list_entry);
         jsval_t args[3], v;
-        if(entry->deleted)
+
+        if(entry->deleted) {
+            iter = list_next(&map->entries, iter);
             continue;
+        }
+
         args[0] = entry->value;
         args[1] = entry->key;
         args[2] = jsval_obj(&map->dispex);
         grab_map_entry(entry);
-        hres = disp_call_value(ctx, get_object(argv[0]), context_obj,
-                               DISPATCH_METHOD, ARRAY_SIZE(args), args, &v);
+        hres = disp_call_value(ctx, get_object(argv[0]), context_this, DISPATCH_METHOD, ARRAY_SIZE(args), args, &v);
+        iter = list_next(&map->entries, iter);
         release_map_entry(entry);
         if(FAILED(hres))
             return hres;
@@ -223,6 +223,7 @@ static HRESULT iterate_map(MapInstance *map, script_ctx_t *ctx, unsigned argc, j
 static HRESULT Map_clear(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
         jsval_t *r)
 {
+    struct jsval_map_entry *entry, *entry2;
     MapInstance *map;
     HRESULT hres;
 
@@ -232,10 +233,8 @@ static HRESULT Map_clear(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned 
 
     TRACE("%p\n", map);
 
-    while(!list_empty(&map->entries)) {
-        struct jsval_map_entry *entry = LIST_ENTRY(list_head(&map->entries), struct jsval_map_entry, list_entry);
+    LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, &map->entries, struct jsval_map_entry, list_entry)
         delete_map_entry(map, entry);
-    }
 
     if(r) *r = jsval_undefined();
     return S_OK;
@@ -361,8 +360,33 @@ static void Map_destructor(jsdisp_t *dispex)
         release_map_entry(entry);
     }
 
-    heap_free(map);
+    free(map);
 }
+
+static HRESULT Map_gc_traverse(struct gc_ctx *gc_ctx, enum gc_traverse_op op, jsdisp_t *dispex)
+{
+    MapInstance *map = (MapInstance*)dispex;
+    struct jsval_map_entry *entry, *entry2;
+    HRESULT hres;
+
+    if(op == GC_TRAVERSE_UNLINK) {
+        LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, &map->entries, struct jsval_map_entry, list_entry)
+            release_map_entry(entry);
+        wine_rb_destroy(&map->map, NULL, NULL);
+        return S_OK;
+    }
+
+    LIST_FOR_EACH_ENTRY(entry, &map->entries, struct jsval_map_entry, list_entry) {
+        hres = gc_process_linked_val(gc_ctx, op, dispex, &entry->key);
+        if(FAILED(hres))
+            return hres;
+        hres = gc_process_linked_val(gc_ctx, op, dispex, &entry->value);
+        if(FAILED(hres))
+            return hres;
+    }
+    return S_OK;
+}
+
 static const builtin_prop_t Map_prototype_props[] = {
     {L"clear",      Map_clear,     PROPF_METHOD},
     {L"delete" ,    Map_delete,    PROPF_METHOD|1},
@@ -391,7 +415,11 @@ static const builtin_info_t Map_info = {
     ARRAY_SIZE(Map_props),
     Map_props,
     Map_destructor,
-    NULL
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    Map_gc_traverse
 };
 
 static HRESULT Map_constructor(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
@@ -406,7 +434,7 @@ static HRESULT Map_constructor(script_ctx_t *ctx, jsval_t vthis, WORD flags, uns
 
         if(!r)
             return S_OK;
-        if(!(map = heap_alloc_zero(sizeof(*map))))
+        if(!(map = calloc(1, sizeof(*map))))
             return E_OUTOFMEMORY;
 
         hres = init_dispex(&map->dispex, ctx, &Map_info, ctx->map_prototype);
@@ -417,6 +445,9 @@ static HRESULT Map_constructor(script_ctx_t *ctx, jsval_t vthis, WORD flags, uns
         list_init(&map->entries);
         *r = jsval_obj(&map->dispex);
         return S_OK;
+
+    case DISPATCH_METHOD:
+        return throw_error(ctx, JS_E_WRONG_THIS, L"Map");
 
     default:
         FIXME("unimplemented flags %x\n", flags);
@@ -443,6 +474,7 @@ static HRESULT Set_add(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned ar
 static HRESULT Set_clear(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
         jsval_t *r)
 {
+    struct jsval_map_entry *entry, *entry2;
     MapInstance *set;
     HRESULT hres;
 
@@ -452,10 +484,8 @@ static HRESULT Set_clear(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned 
 
     TRACE("%p\n", set);
 
-    while(!list_empty(&set->entries)) {
-        struct jsval_map_entry *entry = LIST_ENTRY(list_head(&set->entries), struct jsval_map_entry, list_entry);
+    LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, &set->entries, struct jsval_map_entry, list_entry)
         delete_map_entry(set, entry);
-    }
 
     if(r) *r = jsval_undefined();
     return S_OK;
@@ -544,7 +574,11 @@ static const builtin_info_t Set_info = {
     ARRAY_SIZE(Map_props),
     Map_props,
     Map_destructor,
-    NULL
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    Map_gc_traverse
 };
 
 static HRESULT Set_constructor(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
@@ -559,7 +593,7 @@ static HRESULT Set_constructor(script_ctx_t *ctx, jsval_t vthis, WORD flags, uns
 
         if(!r)
             return S_OK;
-        if(!(set = heap_alloc_zero(sizeof(*set))))
+        if(!(set = calloc(1, sizeof(*set))))
             return E_OUTOFMEMORY;
 
         hres = init_dispex(&set->dispex, ctx, &Set_info, ctx->set_prototype);
@@ -570,6 +604,9 @@ static HRESULT Set_constructor(script_ctx_t *ctx, jsval_t vthis, WORD flags, uns
         list_init(&set->entries);
         *r = jsval_obj(&set->dispex);
         return S_OK;
+
+    case DISPATCH_METHOD:
+        return throw_error(ctx, JS_E_WRONG_THIS, L"Set");
 
     default:
         FIXME("unimplemented flags %x\n", flags);

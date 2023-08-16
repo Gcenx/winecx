@@ -27,28 +27,40 @@
 
 #include <lcms2.h>
 
-struct profile
+enum object_type
 {
-    HANDLE      file;
-    DWORD       access;
-    char       *data;
-    DWORD       size;
-    cmsHPROFILE cmsprofile;
+    OBJECT_TYPE_PROFILE,
+    OBJECT_TYPE_TRANSFORM,
 };
 
-extern HPROFILE create_profile( struct profile * ) DECLSPEC_HIDDEN;
-extern BOOL close_profile( HPROFILE ) DECLSPEC_HIDDEN;
+struct object
+{
+    enum object_type type;
+    LONG             refs;
+    void           (*close)( struct object * );
+};
 
-extern HTRANSFORM create_transform( cmsHTRANSFORM ) DECLSPEC_HIDDEN;
-extern BOOL close_transform( HTRANSFORM ) DECLSPEC_HIDDEN;
+struct profile
+{
+    struct object hdr;
+    HANDLE        file;
+    DWORD         access;
+    char         *data;
+    DWORD         size;
+    cmsHPROFILE   cmsprofile;
+};
 
-struct profile *grab_profile( HPROFILE ) DECLSPEC_HIDDEN;
-cmsHTRANSFORM grab_transform( HTRANSFORM ) DECLSPEC_HIDDEN;
+struct transform
+{
+    struct object hdr;
+    cmsHTRANSFORM cmstransform;
+};
 
-void release_profile( struct profile * ) DECLSPEC_HIDDEN;
-void release_transform( cmsHTRANSFORM ) DECLSPEC_HIDDEN;
+extern HANDLE alloc_handle( struct object *obj ) DECLSPEC_HIDDEN;
+extern void free_handle( HANDLE ) DECLSPEC_HIDDEN;
 
-extern void free_handle_tables( void ) DECLSPEC_HIDDEN;
+struct object *grab_object( HANDLE, enum object_type ) DECLSPEC_HIDDEN;
+void release_object( struct object * ) DECLSPEC_HIDDEN;
 
 struct tag_entry
 {
@@ -64,20 +76,5 @@ extern BOOL get_tag_data( const struct profile *, TAGTYPE, DWORD, void *, DWORD 
 extern BOOL set_tag_data( const struct profile *, TAGTYPE, DWORD, const void *, DWORD * ) DECLSPEC_HIDDEN;
 extern void get_profile_header( const struct profile *, PROFILEHEADER * ) DECLSPEC_HIDDEN;
 extern void set_profile_header( const struct profile *, const PROFILEHEADER * ) DECLSPEC_HIDDEN;
-
-struct lcms_funcs
-{
-    void * (CDECL *open_profile)( void *data, DWORD size );
-    void   (CDECL *close_profile)( void *profile );
-    void * (CDECL *create_transform)( void *output, void *target, DWORD intent );
-    void * (CDECL *create_multi_transform)( void *profiles, DWORD count, DWORD intent );
-    BOOL   (CDECL *translate_bits)( void *transform, void *srcbits, BMFORMAT input,
-                                    void *dstbits, BMFORMAT output, DWORD size );
-    BOOL   (CDECL *translate_colors)( void *transform, COLOR *in, DWORD count, COLORTYPE input_type,
-                                      COLOR *out, COLORTYPE output_type );
-    void   (CDECL *close_transform)( void *transform );
-};
-
-extern const struct lcms_funcs *lcms_funcs;
 
 extern const char *dbgstr_tag(DWORD) DECLSPEC_HIDDEN;

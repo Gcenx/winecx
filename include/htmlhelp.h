@@ -19,8 +19,6 @@
 #ifndef __HTMLHELP_H__
 #define __HTMLHELP_H__
 
-#include "wine/winheader_enter.h"
-
 #define HH_DISPLAY_TOPIC        0x00
 #define HH_HELP_FINDER          0x00
 #define HH_DISPLAY_TOC          0x01
@@ -450,7 +448,5 @@ typedef struct tagHH_GLOBAL_PROPERTY
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __HTMLHELP_H__ */

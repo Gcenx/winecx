@@ -19,8 +19,6 @@
 #ifndef MAPIVAL_H
 #define MAPIVAL_H
 
-#include "wine/winheader_enter.h"
-
 #include <mapiutil.h>
 #include <stddef.h>
 #include <stdarg.h>
@@ -119,7 +117,5 @@ ULONG WINAPI FBadColumnSet(LPSPropTagArray);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* MAPIVAL_H */

@@ -21,8 +21,6 @@
 #ifndef __WINE_VDMDBG_H
 #define __WINE_VDMDBG_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif /* defined(__cplusplus) */
@@ -38,7 +36,5 @@ INT WINAPI VDMEnumTaskWOWEx(DWORD, TASKENUMPROCEX, LPARAM);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_VDMDBG_H */

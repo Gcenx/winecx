@@ -21,8 +21,6 @@
 #ifndef __WINE_DDRAWGDI_H
 #define __WINE_DDRAWGDI_H
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -34,7 +32,5 @@ ULONG APIENTRY DdQueryDisplaySettingsUniqueness(void);
 #ifdef __cplusplus
 }
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif /* __WINE_DDRAWGDI_H */

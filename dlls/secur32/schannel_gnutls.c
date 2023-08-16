@@ -54,6 +54,8 @@
 WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
+static const char *system_priority_file;
+
 /* Not present in gnutls version < 2.9.10. */
 static int (*pgnutls_cipher_get_block_size)(gnutls_cipher_algorithm_t);
 
@@ -109,6 +111,7 @@ MAKE_FUNCPTR(gnutls_record_recv);
 MAKE_FUNCPTR(gnutls_record_send);
 MAKE_FUNCPTR(gnutls_server_name_set);
 MAKE_FUNCPTR(gnutls_session_channel_binding);
+MAKE_FUNCPTR(gnutls_set_default_priority);
 MAKE_FUNCPTR(gnutls_transport_get_ptr);
 MAKE_FUNCPTR(gnutls_transport_set_errno);
 MAKE_FUNCPTR(gnutls_transport_set_ptr);
@@ -118,6 +121,7 @@ MAKE_FUNCPTR(gnutls_x509_crt_deinit);
 MAKE_FUNCPTR(gnutls_x509_crt_import);
 MAKE_FUNCPTR(gnutls_x509_crt_init);
 MAKE_FUNCPTR(gnutls_x509_privkey_deinit);
+MAKE_FUNCPTR(gnutls_alert_send);
 #undef MAKE_FUNCPTR
 
 #if GNUTLS_VERSION_MAJOR < 3
@@ -131,6 +135,11 @@ MAKE_FUNCPTR(gnutls_x509_privkey_deinit);
 #define GNUTLS_KX_ECDHE_RSA     12
 #define GNUTLS_KX_ECDHE_ECDSA   13
 #define GNUTLS_KX_ECDHE_PSK     14
+#endif
+
+#if GNUTLS_VERSION_MAJOR < 3 || (GNUTLS_VERSION_MAJOR == 3 && GNUTLS_VERSION_MINOR < 4)
+#define GNUTLS_CIPHER_AES_128_CCM 19
+#define GNUTLS_CIPHER_AES_256_CCM 20
 #endif
 
 #if GNUTLS_VERSION_MAJOR < 3 || (GNUTLS_VERSION_MAJOR == 3 && GNUTLS_VERSION_MINOR < 5)
@@ -408,37 +417,23 @@ static int pull_timeout(gnutls_transport_ptr_t transport, unsigned int timeout)
     return 0;
 }
 
-static NTSTATUS schan_create_session( void *args )
+static NTSTATUS set_priority(schan_credentials *cred, gnutls_session_t session)
 {
-    const struct create_session_params *params = args;
-    schan_credentials *cred = params->cred;
     char priority[128] = "NORMAL:%LATEST_RECORD_VERSION", *p;
     BOOL using_vers_all = FALSE, disabled;
-    unsigned int i, flags = (cred->credential_use == SECPKG_CRED_INBOUND) ? GNUTLS_SERVER : GNUTLS_CLIENT;
-    struct schan_transport *transport;
-    gnutls_session_t s;
-    int err;
+    int i, err;
 
-    *params->session = 0;
-
-    if (cred->enabled_protocols & (SP_PROT_DTLS1_0_CLIENT | SP_PROT_DTLS1_2_CLIENT))
+    if (system_priority_file && strcmp(system_priority_file, "/dev/null"))
     {
-        flags |= GNUTLS_DATAGRAM | GNUTLS_NONBLOCK;
+        TRACE("Using defaults with system priority file override\n");
+        err = pgnutls_set_default_priority(session);
+        if (err != GNUTLS_E_SUCCESS)
+        {
+            pgnutls_perror(err);
+            return STATUS_INTERNAL_ERROR;
+        }
+        return STATUS_SUCCESS;
     }
-
-    err = pgnutls_init(&s, flags);
-    if (err != GNUTLS_E_SUCCESS)
-    {
-        pgnutls_perror(err);
-        return STATUS_INTERNAL_ERROR;
-    }
-
-    if (!(transport = calloc(1, sizeof(*transport))))
-    {
-        pgnutls_deinit(s);
-        return STATUS_INTERNAL_ERROR;
-    }
-    transport->session = s;
 
     p = priority + strlen(priority);
 
@@ -466,13 +461,52 @@ static NTSTATUS schan_create_session( void *args )
     }
 
     TRACE("Using %s priority\n", debugstr_a(priority));
-    err = pgnutls_priority_set_direct(s, priority, NULL);
+    err = pgnutls_priority_set_direct(session, priority, NULL);
     if (err != GNUTLS_E_SUCCESS)
     {
         pgnutls_perror(err);
+        return STATUS_INTERNAL_ERROR;
+    }
+
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS schan_create_session( void *args )
+{
+    const struct create_session_params *params = args;
+    schan_credentials *cred = params->cred;
+    unsigned int flags = (cred->credential_use == SECPKG_CRED_INBOUND) ? GNUTLS_SERVER : GNUTLS_CLIENT;
+    struct schan_transport *transport;
+    gnutls_session_t s;
+    NTSTATUS status;
+    int err;
+
+    *params->session = 0;
+
+    if (cred->enabled_protocols & (SP_PROT_DTLS1_0_CLIENT | SP_PROT_DTLS1_2_CLIENT))
+    {
+        flags |= GNUTLS_DATAGRAM | GNUTLS_NONBLOCK;
+    }
+
+    err = pgnutls_init(&s, flags);
+    if (err != GNUTLS_E_SUCCESS)
+    {
+        pgnutls_perror(err);
+        return STATUS_INTERNAL_ERROR;
+    }
+
+    if (!(transport = calloc(1, sizeof(*transport))))
+    {
+        pgnutls_deinit(s);
+        return STATUS_INTERNAL_ERROR;
+    }
+    transport->session = s;
+
+    if ((status = set_priority(cred, s)))
+    {
         pgnutls_deinit(s);
         free(transport);
-        return STATUS_INTERNAL_ERROR;
+        return status;
     }
 
     err = pgnutls_credentials_set(s, GNUTLS_CRD_CERTIFICATE, certificate_creds_from_handle(cred->credentials));
@@ -524,6 +558,25 @@ static NTSTATUS schan_handshake( void *args )
     t->in.limit = params->input_size;
     init_schan_buffers(&t->out, params->output);
 
+    if (params->control_token == control_token_shutdown)
+    {
+        err = pgnutls_alert_send(s, GNUTLS_AL_WARNING, GNUTLS_A_CLOSE_NOTIFY);
+        if (err == GNUTLS_E_SUCCESS)
+        {
+            status = SEC_E_OK;
+        }
+        else if (err == GNUTLS_E_AGAIN)
+        {
+            status = SEC_E_INVALID_TOKEN;
+        }
+        else
+        {
+            pgnutls_perror(err);
+            status = SEC_E_INTERNAL_ERROR;
+        }
+        goto done;
+    }
+
     while (1)
     {
         err = pgnutls_handshake(s);
@@ -565,6 +618,7 @@ static NTSTATUS schan_handshake( void *args )
         break;
     }
 
+done:
     *params->input_offset = t->in.offset;
     *params->output_buffer_idx = t->out.current_buffer_idx;
     *params->output_offset = t->out.offset;
@@ -695,6 +749,211 @@ static NTSTATUS schan_get_connection_info( void *args )
     info->aiExch = get_kx_algid(kx);
     /* FIXME: info->dwExchStrength? */
     info->dwExchStrength = 0;
+    return SEC_E_OK;
+}
+
+static DWORD get_protocol_version( gnutls_session_t session )
+{
+    gnutls_protocol_t proto = pgnutls_protocol_get_version( session );
+
+    switch (proto)
+    {
+    case GNUTLS_SSL3:    return 0x300;
+    case GNUTLS_TLS1_0:  return 0x301;
+    case GNUTLS_TLS1_1:  return 0x302;
+    case GNUTLS_TLS1_2:  return 0x303;
+    case GNUTLS_DTLS1_0: return 0x201;
+    case GNUTLS_DTLS1_2: return 0x202;
+    default:
+        FIXME( "unknown protocol %u\n", proto );
+        return 0;
+    }
+}
+
+static const WCHAR *get_cipher_str( gnutls_session_t session )
+{
+    static const WCHAR aesW[] = {'A','E','S',0};
+    static const WCHAR unknownW[] = {'<','u','n','k','n','o','w','n','>',0};
+    gnutls_cipher_algorithm_t cipher = pgnutls_cipher_get( session );
+
+    switch (cipher)
+    {
+    case GNUTLS_CIPHER_AES_128_CBC:
+    case GNUTLS_CIPHER_AES_192_CBC:
+    case GNUTLS_CIPHER_AES_256_CBC:
+    case GNUTLS_CIPHER_AES_128_GCM:
+    case GNUTLS_CIPHER_AES_256_GCM:
+    case GNUTLS_CIPHER_AES_128_CCM:
+    case GNUTLS_CIPHER_AES_256_CCM:
+        return aesW;
+    default:
+        FIXME( "unknown cipher %u\n", cipher );
+        return unknownW;
+    }
+}
+
+static DWORD get_cipher_len( gnutls_session_t session )
+{
+    gnutls_cipher_algorithm_t cipher = pgnutls_cipher_get( session );
+
+    switch (cipher)
+    {
+    case GNUTLS_CIPHER_AES_128_CBC:
+    case GNUTLS_CIPHER_AES_128_GCM:
+    case GNUTLS_CIPHER_AES_128_CCM:
+        return 128;
+    case GNUTLS_CIPHER_AES_192_CBC:
+        return 192;
+    case GNUTLS_CIPHER_AES_256_CBC:
+    case GNUTLS_CIPHER_AES_256_GCM:
+    case GNUTLS_CIPHER_AES_256_CCM:
+        return 256;
+    default:
+        FIXME( "unknown cipher %u\n", cipher );
+        return 0;
+    }
+}
+
+static DWORD get_cipher_block_len( gnutls_session_t session )
+{
+    gnutls_cipher_algorithm_t cipher = pgnutls_cipher_get( session );
+    return pgnutls_cipher_get_block_size( cipher );
+}
+
+static const WCHAR *get_hash_str( gnutls_session_t session, BOOL full )
+{
+    static const WCHAR shaW[] = {'S','H','A',0};
+    static const WCHAR sha1W[] = {'S','H','A','1',0};
+    static const WCHAR sha224W[] = {'S','H','A','2','2','4',0};
+    static const WCHAR sha256W[] = {'S','H','A','2','5','6',0};
+    static const WCHAR sha384W[] = {'S','H','A','3','8','4',0};
+    static const WCHAR sha512W[] = {'S','H','A','5','1','2',0};
+    static const WCHAR unknownW[] = {'<','u','n','k','n','o','w','n','>',0};
+    gnutls_mac_algorithm_t mac = pgnutls_mac_get( session );
+
+    switch (mac)
+    {
+    case GNUTLS_MAC_SHA1:   return full ? sha1W : shaW;
+    case GNUTLS_MAC_SHA224: return sha224W;
+    case GNUTLS_MAC_SHA256: return sha256W;
+    case GNUTLS_MAC_SHA384: return sha384W;
+    case GNUTLS_MAC_SHA512: return sha512W;
+    default:
+        FIXME( "unknown mac %u\n", mac );
+        return unknownW;
+    }
+}
+
+static DWORD get_hash_len( gnutls_session_t session )
+{
+    gnutls_mac_algorithm_t mac = pgnutls_mac_get( session );
+    return pgnutls_mac_get_key_size( mac ) * 8;
+}
+
+static const WCHAR *get_exchange_str( gnutls_session_t session, BOOL full )
+{
+    static const WCHAR ecdhW[] = {'E','C','D','H',0};
+    static const WCHAR ecdheW[] = {'E','C','D','H','E',0};
+    static const WCHAR unknownW[] = {'<','u','n','k','n','o','w','n','>',0};
+    gnutls_kx_algorithm_t kx = pgnutls_kx_get( session );
+
+    switch (kx)
+    {
+    case GNUTLS_KX_ECDHE_RSA:
+    case GNUTLS_KX_ECDHE_ECDSA:
+        return full ? ecdheW : ecdhW;
+    default:
+        FIXME( "unknown kx %u\n", kx );
+        return unknownW;
+    }
+}
+
+static const WCHAR *get_certificate_str( gnutls_session_t session )
+{
+    static const WCHAR rsaW[] = {'R','S','A',0};
+    static const WCHAR ecdsaW[] = {'E','C','D','S','A',0};
+    static const WCHAR unknownW[] = {'<','u','n','k','n','o','w','n','>',0};
+    gnutls_kx_algorithm_t kx = pgnutls_kx_get( session );
+
+    switch (kx)
+    {
+    case GNUTLS_KX_RSA:
+    case GNUTLS_KX_RSA_EXPORT:
+    case GNUTLS_KX_DHE_RSA:
+    case GNUTLS_KX_ECDHE_RSA:   return rsaW;
+    case GNUTLS_KX_ECDHE_ECDSA: return ecdsaW;
+    default:
+        FIXME( "unknown kx %u\n", kx );
+        return unknownW;
+    }
+}
+
+static const WCHAR *get_chaining_mode_str( gnutls_session_t session )
+{
+    static const WCHAR cbcW[] = {'C','B','C',0};
+    static const WCHAR ccmW[] = {'C','C','M',0};
+    static const WCHAR gcmW[] = {'G','C','M',0};
+    static const WCHAR unknownW[] = {'<','u','n','k','n','o','w','n','>',0};
+    gnutls_cipher_algorithm_t cipher = pgnutls_cipher_get( session );
+
+    switch (cipher)
+    {
+    case GNUTLS_CIPHER_AES_128_CBC:
+    case GNUTLS_CIPHER_AES_192_CBC:
+    case GNUTLS_CIPHER_AES_256_CBC:
+        return cbcW;
+    case GNUTLS_CIPHER_AES_128_GCM:
+    case GNUTLS_CIPHER_AES_256_GCM:
+        return gcmW;
+    case GNUTLS_CIPHER_AES_128_CCM:
+    case GNUTLS_CIPHER_AES_256_CCM:
+        return ccmW;
+    default:
+        FIXME( "unknown cipher %u\n", cipher );
+        return unknownW;
+    }
+}
+
+static NTSTATUS schan_get_cipher_info( void *args )
+{
+    const WCHAR tlsW[] = {'T','L','S','_',0};
+    const WCHAR underscoreW[] = {'_',0};
+    const WCHAR widthW[] = {'_','W','I','T','H','_',0};
+    const struct get_cipher_info_params *params = args;
+    gnutls_session_t session = session_from_handle( params->session );
+    SecPkgContext_CipherInfo *info = params->info;
+    char buf[11];
+    WCHAR *ptr;
+    int len;
+
+    info->dwProtocol = get_protocol_version( session );
+    info->dwCipherSuite = 0; /* FIXME */
+    info->dwBaseCipherSuite = 0; /* FIXME */
+    wcscpy( info->szCipher, get_cipher_str( session ) );
+    info->dwCipherLen = get_cipher_len( session );
+    info->dwCipherBlockLen = get_cipher_block_len( session );
+    wcscpy( info->szHash, get_hash_str( session, TRUE ) );
+    info->dwHashLen = get_hash_len( session );
+    wcscpy( info->szExchange, get_exchange_str( session, FALSE ) );
+    info->dwMinExchangeLen = 0;
+    info->dwMaxExchangeLen = 65536;
+    wcscpy( info->szCertificate, get_certificate_str( session ) );
+    info->dwKeyType = 0; /* FIXME */
+
+    wcscpy( info->szCipherSuite, tlsW );
+    wcscat( info->szCipherSuite, get_exchange_str( session, TRUE ) );
+    wcscat( info->szCipherSuite, underscoreW );
+    wcscat( info->szCipherSuite, info->szCertificate );
+    wcscat( info->szCipherSuite, widthW );
+    wcscat( info->szCipherSuite, info->szCipher );
+    wcscat( info->szCipherSuite, underscoreW );
+    len = sprintf( buf, "%u", (unsigned int)info->dwCipherLen ) + 1;
+    ptr = info->szCipherSuite + wcslen( info->szCipherSuite );
+    ntdll_umbstowcs( buf, len, ptr, len );
+    wcscat( info->szCipherSuite, underscoreW );
+    wcscat( info->szCipherSuite, get_chaining_mode_str( session ) );
+    wcscat( info->szCipherSuite, underscoreW );
+    wcscat( info->szCipherSuite, get_hash_str( session, FALSE ) );
     return SEC_E_OK;
 }
 
@@ -1124,12 +1383,11 @@ static void gnutls_log(int level, const char *msg)
 
 static NTSTATUS process_attach( void *args )
 {
-    const char *env_str;
     int ret;
 
-    if ((env_str = getenv("GNUTLS_SYSTEM_PRIORITY_FILE")))
+    if ((system_priority_file = getenv("GNUTLS_SYSTEM_PRIORITY_FILE")))
     {
-        WARN("GNUTLS_SYSTEM_PRIORITY_FILE is %s.\n", debugstr_a(env_str));
+        TRACE("GNUTLS_SYSTEM_PRIORITY_FILE is %s.\n", debugstr_a(system_priority_file));
     }
     else
     {
@@ -1192,6 +1450,7 @@ else
     LOAD_FUNCPTR(gnutls_record_send);
     LOAD_FUNCPTR(gnutls_server_name_set)
     LOAD_FUNCPTR(gnutls_session_channel_binding)
+    LOAD_FUNCPTR(gnutls_set_default_priority)
     LOAD_FUNCPTR(gnutls_transport_get_ptr)
     LOAD_FUNCPTR(gnutls_transport_set_errno)
     LOAD_FUNCPTR(gnutls_transport_set_ptr)
@@ -1201,6 +1460,7 @@ else
     LOAD_FUNCPTR(gnutls_x509_crt_import)
     LOAD_FUNCPTR(gnutls_x509_crt_init)
     LOAD_FUNCPTR(gnutls_x509_privkey_deinit)
+    LOAD_FUNCPTR(gnutls_alert_send)
 #undef LOAD_FUNCPTR
 
     if (!(pgnutls_cipher_get_block_size = dlsym(libgnutls_handle, "gnutls_cipher_get_block_size")))
@@ -1283,6 +1543,7 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     schan_dispose_session,
     schan_free_certificate_credentials,
     schan_get_application_protocol,
+    schan_get_cipher_info,
     schan_get_connection_info,
     schan_get_enabled_protocols,
     schan_get_key_signature_algorithm,
@@ -1398,6 +1659,21 @@ static NTSTATUS wow64_schan_get_connection_info( void *args )
     return schan_get_connection_info(&params);
 }
 
+static NTSTATUS wow64_schan_get_cipher_info( void *args )
+{
+    struct
+    {
+        schan_session session;
+        PTR32 info;
+    } const *params32 = args;
+    struct get_cipher_info_params params =
+    {
+        params32->session,
+        ULongToPtr(params32->info),
+    };
+    return schan_get_cipher_info(&params);
+}
+
 static NTSTATUS wow64_schan_get_session_peer_certificate( void *args )
 {
     struct
@@ -1465,6 +1741,7 @@ static NTSTATUS wow64_schan_handshake( void *args )
         PTR32 input_offset;
         PTR32 output_buffer_idx;
         PTR32 output_offset;
+        enum control_token control_token;
     } const *params32 = args;
     struct handshake_params params =
     {
@@ -1475,6 +1752,7 @@ static NTSTATUS wow64_schan_handshake( void *args )
         ULongToPtr(params32->input_offset),
         ULongToPtr(params32->output_buffer_idx),
         ULongToPtr(params32->output_offset),
+        params32->control_token,
     };
     if (params32->input)
     {
@@ -1594,6 +1872,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     schan_dispose_session,
     wow64_schan_free_certificate_credentials,
     wow64_schan_get_application_protocol,
+    wow64_schan_get_cipher_info,
     wow64_schan_get_connection_info,
     schan_get_enabled_protocols,
     schan_get_key_signature_algorithm,

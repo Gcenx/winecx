@@ -20,9 +20,6 @@
 
 #define GL_SILENCE_DEPRECATION
 #include <OpenGL/gl.h>
-
-#include "wine/hostaddrspace_enter.h"
-
 #import "cocoa_opengl.h"
 
 #include "macdrv_cocoa.h"

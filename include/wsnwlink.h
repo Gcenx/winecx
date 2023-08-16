@@ -19,8 +19,6 @@
 #ifndef _WSNWLINK_
 #define _WSNWLINK_
 
-#include "wine/winheader_enter.h"
-
 #ifdef USE_WS_PREFIX
 #define WS(x)    WS_##x
 #else
@@ -72,7 +70,5 @@ typedef struct _IPX_ADDRESS_DATA {
     INT maxpkt;
     ULONG linkspeed;
 } IPX_ADDRESS_DATA, *PIPX_ADDRESS_DATA;
-
-#include "wine/winheader_exit.h"
 
 #endif /* _WSNWLINK_ */

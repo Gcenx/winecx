@@ -49,19 +49,6 @@ static LRESULT WINAPI menu_check_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LP
     return DefWindowProcA(hwnd, msg, wparam, lparam);
 }
 
-/* The MSVC headers ignore our NONAMELESSUNION requests so we have to define
- * our own type */
-typedef struct
-{
-    DWORD type;
-    union
-    {
-        MOUSEINPUT      mi;
-        KEYBDINPUT      ki;
-        HARDWAREINPUT   hi;
-    } u;
-} TEST_INPUT;
-
 /* globals to communicate between test and wndproc */
 
 static BOOL bMenuVisible;
@@ -2243,18 +2230,18 @@ static struct menu_mouse_tests_s {
 
 static void send_key(WORD wVk)
 {
-    TEST_INPUT i[2];
+    INPUT i[2];
     memset(i, 0, sizeof(i));
     i[0].type = i[1].type = INPUT_KEYBOARD;
-    i[0].u.ki.wVk = i[1].u.ki.wVk = wVk;
-    i[1].u.ki.dwFlags = KEYEVENTF_KEYUP;
-    SendInput(2, (INPUT *) i, sizeof(INPUT));
+    i[0].ki.wVk = i[1].ki.wVk = wVk;
+    i[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(2, i, sizeof(INPUT));
 }
 
 static BOOL click_menu(HANDLE hWnd, struct menu_item_pair_s *mi)
 {
     HMENU hMenu = hMenus[mi->uMenu];
-    TEST_INPUT i[3];
+    INPUT i[3];
     MSG msg;
     RECT r;
     int screen_w = GetSystemMetrics(SM_CXSCREEN);
@@ -2264,16 +2251,16 @@ static BOOL click_menu(HANDLE hWnd, struct menu_item_pair_s *mi)
 
     memset(i, 0, sizeof(i));
     i[0].type = i[1].type = i[2].type = INPUT_MOUSE;
-    i[0].u.mi.dx = i[1].u.mi.dx = i[2].u.mi.dx
+    i[0].mi.dx = i[1].mi.dx = i[2].mi.dx
             = ((r.left + 5) * 65535) / screen_w;
-    i[0].u.mi.dy = i[1].u.mi.dy = i[2].u.mi.dy
+    i[0].mi.dy = i[1].mi.dy = i[2].mi.dy
             = ((r.top + 5) * 65535) / screen_h;
-    i[0].u.mi.dwFlags = i[1].u.mi.dwFlags = i[2].u.mi.dwFlags
+    i[0].mi.dwFlags = i[1].mi.dwFlags = i[2].mi.dwFlags
             = MOUSEEVENTF_ABSOLUTE;
-    i[0].u.mi.dwFlags |= MOUSEEVENTF_MOVE;
-    i[1].u.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
-    i[2].u.mi.dwFlags |= MOUSEEVENTF_LEFTUP;
-    ret = SendInput(3, (INPUT *) i, sizeof(INPUT));
+    i[0].mi.dwFlags |= MOUSEEVENTF_MOVE;
+    i[1].mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
+    i[2].mi.dwFlags |= MOUSEEVENTF_LEFTUP;
+    ret = SendInput(3, i, sizeof(INPUT));
 
     /* hack to prevent mouse message buildup in Wine */
     while (PeekMessageA( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessageA( &msg );
@@ -3026,6 +3013,7 @@ static void test_InsertMenu(void)
         { MF_HELP, 1, MAKEINTRESOURCEA(1) }
     };
     HMENU hmenu;
+    BOOL ret;
 
 #define create_menu(a) create_menu_from_data((a), ARRAY_SIZE(a))
 #define create_menuitem(a) create_menuitem_from_data((a), ARRAY_SIZE(a))
@@ -3067,6 +3055,16 @@ static void test_InsertMenu(void)
 #undef create_menu
 #undef create_menuitem
 #undef compare_menu
+
+    hmenu = CreateMenu();
+
+    SetLastError(0xdeadbeef);
+    ret = InsertMenuW(hmenu, -1, MF_BYPOSITION | MF_POPUP, 0xdeadbeef, L"test");
+    ok(ret && GetLastError() == ERROR_INVALID_MENU_HANDLE,
+       "InsertMenuW returned %x %lu\n", ret, GetLastError());
+    ok(GetMenuItemCount(hmenu) == 1, "GetMenuItemCount() = %d\n", GetMenuItemCount(hmenu));
+
+    DestroyMenu(hmenu);
 }
 
 static void test_menu_getmenuinfo(void)

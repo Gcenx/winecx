@@ -34,14 +34,10 @@
  *    here the IMM level deals with if the application is IME aware or not.
  */
 
-#include "config.h"
-
-#include <stdarg.h>
-
-#include "macdrv.h"
-#include "winuser.h"
+#include "macdrv_dll.h"
 #include "imm.h"
 #include "ddk/imm.h"
+#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(imm);
 
@@ -153,7 +149,7 @@ static HIMCC updateCompStr(HIMCC old, LPCWSTR compstr, DWORD len, DWORD *flags)
     LPCOMPOSITIONSTRING lpcs = NULL;
     INT current_offset = 0;
 
-    TRACE("%s, %i\n", debugstr_wn(compstr, len), len);
+    TRACE("%s, %li\n", debugstr_wn(compstr, len), len);
 
     if (old == NULL && compstr == NULL && len == 0)
         return NULL;
@@ -301,7 +297,7 @@ static HIMCC updateResultStr(HIMCC old, LPWSTR resultstr, DWORD len)
     LPCOMPOSITIONSTRING lpcs = NULL;
     INT current_offset = 0;
 
-    TRACE("%s, %i\n", debugstr_wn(resultstr, len), len);
+    TRACE("%s, %li\n", debugstr_wn(resultstr, len), len);
 
     if (old == NULL && resultstr == NULL && len == 0)
         return NULL;
@@ -531,7 +527,7 @@ static void UpdateDataInDefaultIMEWindow(HIMC hIMC, HWND hwnd, BOOL showable)
 
 BOOL WINAPI ImeConfigure(HKL hKL, HWND hWnd, DWORD dwMode, LPVOID lpData)
 {
-    FIXME("(%p, %p, %d, %p): stub\n", hKL, hWnd, dwMode, lpData);
+    FIXME("(%p, %p, %ld, %p): stub\n", hKL, hWnd, dwMode, lpData);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
@@ -540,7 +536,7 @@ DWORD WINAPI ImeConversionList(HIMC hIMC, LPCWSTR lpSource, LPCANDIDATELIST lpCa
                                DWORD dwBufLen, UINT uFlag)
 
 {
-    FIXME("(%p, %s, %p, %d, %d): stub\n", hIMC, debugstr_w(lpSource), lpCandList,
+    FIXME("(%p, %s, %p, %ld, %d): stub\n", hIMC, debugstr_w(lpSource), lpCandList,
           dwBufLen, uFlag);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return 0;
@@ -566,7 +562,7 @@ BOOL WINAPI ImeProcessKey(HIMC hIMC, UINT vKey, LPARAM lKeyData, const LPBYTE lp
     LPINPUTCONTEXT lpIMC;
     BOOL inIME;
 
-    TRACE("hIMC %p vKey 0x%04x lKeyData 0x%08lx lpbKeyState %p\n", hIMC, vKey, lKeyData, lpbKeyState);
+    TRACE("hIMC %p vKey 0x%04x lKeyData 0x%08Ix lpbKeyState %p\n", hIMC, vKey, lKeyData, lpbKeyState);
 
     switch (vKey)
     {
@@ -577,7 +573,7 @@ BOOL WINAPI ImeProcessKey(HIMC hIMC, UINT vKey, LPARAM lKeyData, const LPBYTE lp
         return FALSE;
     }
 
-    inIME = macdrv_using_input_method();
+    inIME = MACDRV_CALL(ime_using_input_method, NULL);
     lpIMC = LockRealIMC(hIMC);
     if (lpIMC)
     {
@@ -658,6 +654,7 @@ BOOL WINAPI ImeSetActiveContext(HIMC hIMC, BOOL fFlag)
 UINT WINAPI ImeToAsciiEx(UINT uVKey, UINT uScanCode, const LPBYTE lpbKeyState,
                          LPDWORD lpdwTransKey, UINT fuState, HIMC hIMC)
 {
+    struct process_text_input_params params;
     UINT vkey;
     LPINPUTCONTEXT lpIMC;
     LPIMEPRIVATE myPrivate;
@@ -690,7 +687,13 @@ UINT WINAPI ImeToAsciiEx(UINT uVKey, UINT uScanCode, const LPBYTE lpbKeyState,
     UnlockRealIMC(hIMC);
 
     TRACE("Processing Mac 0x%04x\n", vkey);
-    macdrv_process_text_input(uVKey, uScanCode, repeat, lpbKeyState, hIMC, &done);
+    params.vkey = uVKey;
+    params.scan = uScanCode;
+    params.repeat = repeat;
+    params.key_state = lpbKeyState;
+    params.himc = hIMC;
+    params.done = &done;
+    MACDRV_CALL(ime_process_text_input, &params);
 
     while (!done)
         MsgWaitForMultipleObjectsEx(0, NULL, INFINITE, QS_POSTMESSAGE | QS_SENDMESSAGE, 0);
@@ -718,7 +721,7 @@ BOOL WINAPI NotifyIME(HIMC hIMC, DWORD dwAction, DWORD dwIndex, DWORD dwValue)
     BOOL bRet = FALSE;
     LPINPUTCONTEXT lpIMC;
 
-    TRACE("%p %i %i %i\n", hIMC, dwAction, dwIndex, dwValue);
+    TRACE("%p %li %li %li\n", hIMC, dwAction, dwIndex, dwValue);
 
     lpIMC = LockRealIMC(hIMC);
     if (lpIMC == NULL)
@@ -846,7 +849,7 @@ BOOL WINAPI NotifyIME(HIMC hIMC, DWORD dwAction, DWORD dwIndex, DWORD dwValue)
 
                     TRACE("NI_COMPOSITIONSTR: CPS_CANCEL\n");
 
-                    macdrv_clear_ime_text();
+                    MACDRV_CALL(ime_clear, NULL);
                     if (lpIMC->hCompStr)
                         ImmDestroyIMCC(lpIMC->hCompStr);
 
@@ -874,14 +877,14 @@ BOOL WINAPI NotifyIME(HIMC hIMC, DWORD dwAction, DWORD dwIndex, DWORD dwValue)
 
 BOOL WINAPI ImeRegisterWord(LPCWSTR lpszReading, DWORD dwStyle, LPCWSTR lpszRegister)
 {
-    FIXME("(%s, %d, %s): stub\n", debugstr_w(lpszReading), dwStyle, debugstr_w(lpszRegister));
+    FIXME("(%s, %ld, %s): stub\n", debugstr_w(lpszReading), dwStyle, debugstr_w(lpszRegister));
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
 
 BOOL WINAPI ImeUnregisterWord(LPCWSTR lpszReading, DWORD dwStyle, LPCWSTR lpszUnregister)
 {
-    FIXME("(%s, %d, %s): stub\n", debugstr_w(lpszReading), dwStyle, debugstr_w(lpszUnregister));
+    FIXME("(%s, %ld, %s): stub\n", debugstr_w(lpszReading), dwStyle, debugstr_w(lpszUnregister));
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
@@ -896,7 +899,7 @@ UINT WINAPI ImeGetRegisterWordStyle(UINT nItem, LPSTYLEBUFW lpStyleBuf)
 UINT WINAPI ImeEnumRegisterWord(REGISTERWORDENUMPROCW lpfnEnumProc, LPCWSTR lpszReading,
                                 DWORD dwStyle, LPCWSTR lpszRegister, LPVOID lpData)
 {
-    FIXME("(%p, %s, %d, %s, %p): stub\n", lpfnEnumProc, debugstr_w(lpszReading), dwStyle,
+    FIXME("(%p, %s, %ld, %s, %p): stub\n", lpfnEnumProc, debugstr_w(lpszReading), dwStyle,
           debugstr_w(lpszRegister), lpData);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return 0;
@@ -910,7 +913,7 @@ static BOOL IME_SetCompositionString(void* hIMC, DWORD dwIndex, LPCVOID lpComp, 
     LPIMEPRIVATE myPrivate;
     BOOL sendMessage = TRUE;
 
-    TRACE("(%p, %d, %p, %d):\n", hIMC, dwIndex, lpComp, dwCompLen);
+    TRACE("(%p, %ld, %p, %ld):\n", hIMC, dwIndex, lpComp, dwCompLen);
 
     /*
      * Explanation:
@@ -981,7 +984,7 @@ static BOOL IME_SetCompositionString(void* hIMC, DWORD dwIndex, LPCVOID lpComp, 
 BOOL WINAPI ImeSetCompositionString(HIMC hIMC, DWORD dwIndex, LPCVOID lpComp, DWORD dwCompLen,
                                     LPCVOID lpRead, DWORD dwReadLen)
 {
-    TRACE("(%p, %d, %p, %d, %p, %d):\n", hIMC, dwIndex, lpComp, dwCompLen, lpRead, dwReadLen);
+    TRACE("(%p, %ld, %p, %ld, %p, %ld):\n", hIMC, dwIndex, lpComp, dwCompLen, lpRead, dwReadLen);
 
     if (lpRead && dwReadLen)
         FIXME("Reading string unimplemented\n");
@@ -992,7 +995,7 @@ BOOL WINAPI ImeSetCompositionString(HIMC hIMC, DWORD dwIndex, LPCVOID lpComp, DW
 DWORD WINAPI ImeGetImeMenuItems(HIMC hIMC, DWORD dwFlags, DWORD dwType, LPIMEMENUITEMINFOW lpImeParentMenu,
                                 LPIMEMENUITEMINFOW lpImeMenu, DWORD dwSize)
 {
-    FIXME("(%p, %x %x %p %p %x): stub\n", hIMC, dwFlags, dwType, lpImeParentMenu, lpImeMenu, dwSize);
+    FIXME("(%p, %lx %lx %p %p %lx): stub\n", hIMC, dwFlags, dwType, lpImeParentMenu, lpImeMenu, dwSize);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return 0;
 }
@@ -1137,7 +1140,7 @@ static void PaintDefaultIMEWnd(HIMC hIMC, HWND hwnd)
 
 static void DefaultIMEComposition(HIMC hIMC, HWND hwnd, LPARAM lParam)
 {
-    TRACE("IME message WM_IME_COMPOSITION 0x%lx\n", lParam);
+    TRACE("IME message WM_IME_COMPOSITION 0x%Ix\n", lParam);
     if (!(lParam & GCS_RESULTSTR))
          UpdateDataInDefaultIMEWindow(hIMC, hwnd, TRUE);
 }
@@ -1200,7 +1203,7 @@ static LRESULT ImeHandleNotify(HIMC hIMC, HWND hwnd, UINT msg, WPARAM wParam, LP
             FIXME("WM_IME_NOTIFY:IMN_SETSTATUSWINDOWPOS\n");
             break;
         default:
-            FIXME("WM_IME_NOTIFY:<Unknown 0x%lx>\n", wParam);
+            FIXME("WM_IME_NOTIFY:<Unknown 0x%Ix>\n", wParam);
             break;
     }
     return 0;
@@ -1211,7 +1214,7 @@ static LRESULT WINAPI IME_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
     LRESULT rc = 0;
     HIMC    hIMC;
 
-    TRACE("Incoming Message 0x%x  (0x%08lx, 0x%08lx)\n", msg, wParam, lParam);
+    TRACE("Incoming Message 0x%x  (0x%08Ix, 0x%08Ix)\n", msg, wParam, lParam);
 
     /*
      * Each UI window contains the current Input Context.
@@ -1283,14 +1286,14 @@ static LRESULT WINAPI IME_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             DefaultIMEStartComposition(hIMC, hwnd);
             break;
         case WM_IME_ENDCOMPOSITION:
-            TRACE("IME message %s, 0x%lx, 0x%lx\n", "WM_IME_ENDCOMPOSITION", wParam, lParam);
+            TRACE("IME message %s, 0x%Ix, 0x%Ix\n", "WM_IME_ENDCOMPOSITION", wParam, lParam);
             ShowWindow(hwnd, SW_HIDE);
             break;
         case WM_IME_SELECT:
-            TRACE("IME message %s, 0x%lx, 0x%lx\n", "WM_IME_SELECT", wParam, lParam);
+            TRACE("IME message %s, 0x%Ix, 0x%Ix\n", "WM_IME_SELECT", wParam, lParam);
             break;
         case WM_IME_CONTROL:
-            TRACE("IME message %s, 0x%lx, 0x%lx\n", "WM_IME_CONTROL", wParam, lParam);
+            TRACE("IME message %s, 0x%Ix, 0x%Ix\n", "WM_IME_CONTROL", wParam, lParam);
             rc = 1;
             break;
         case WM_IME_NOTIFY:
@@ -1302,32 +1305,32 @@ static LRESULT WINAPI IME_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
     /* check the MSIME messages */
     if (msg == WM_MSIME_SERVICE)
     {
-        TRACE("IME message %s, 0x%lx, 0x%lx\n", "WM_MSIME_SERVICE", wParam, lParam);
+        TRACE("IME message %s, 0x%Ix, 0x%Ix\n", "WM_MSIME_SERVICE", wParam, lParam);
         rc = FALSE;
     }
     else if (msg == WM_MSIME_RECONVERTOPTIONS)
     {
-        TRACE("IME message %s, 0x%lx, 0x%lx\n", "WM_MSIME_RECONVERTOPTIONS", wParam, lParam);
+        TRACE("IME message %s, 0x%Ix, 0x%Ix\n", "WM_MSIME_RECONVERTOPTIONS", wParam, lParam);
     }
     else if (msg == WM_MSIME_MOUSE)
     {
-        TRACE("IME message %s, 0x%lx, 0x%lx\n", "WM_MSIME_MOUSE", wParam, lParam);
+        TRACE("IME message %s, 0x%Ix, 0x%Ix\n", "WM_MSIME_MOUSE", wParam, lParam);
     }
     else if (msg == WM_MSIME_RECONVERTREQUEST)
     {
-        TRACE("IME message %s, 0x%lx, 0x%lx\n", "WM_MSIME_RECONVERTREQUEST", wParam, lParam);
+        TRACE("IME message %s, 0x%Ix, 0x%Ix\n", "WM_MSIME_RECONVERTREQUEST", wParam, lParam);
     }
     else if (msg == WM_MSIME_RECONVERT)
     {
-        TRACE("IME message %s, 0x%lx, 0x%lx\n", "WM_MSIME_RECONVERT", wParam, lParam);
+        TRACE("IME message %s, 0x%Ix, 0x%Ix\n", "WM_MSIME_RECONVERT", wParam, lParam);
     }
     else if (msg == WM_MSIME_QUERYPOSITION)
     {
-        TRACE("IME message %s, 0x%lx, 0x%lx\n", "WM_MSIME_QUERYPOSITION", wParam, lParam);
+        TRACE("IME message %s, 0x%Ix, 0x%Ix\n", "WM_MSIME_QUERYPOSITION", wParam, lParam);
     }
     else if (msg == WM_MSIME_DOCUMENTFEED)
     {
-        TRACE("IME message %s, 0x%lx, 0x%lx\n", "WM_MSIME_DOCUMENTFEED", wParam, lParam);
+        TRACE("IME message %s, 0x%Ix, 0x%Ix\n", "WM_MSIME_DOCUMENTFEED", wParam, lParam);
     }
     /* DefWndProc if not an IME message */
     if (!rc && !((msg >= WM_IME_STARTCOMPOSITION && msg <= WM_IME_KEYLAST) ||
@@ -1388,33 +1391,26 @@ BOOL WINAPI ImeInquire(LPIMEINFO lpIMEInfo, LPWSTR lpszUIClass, LPCWSTR lpszOpti
 /* Interfaces to other parts of the Mac driver */
 
 /***********************************************************************
- *              macdrv_im_set_text
+ *              macdrv_ime_set_text
  */
-void macdrv_im_set_text(const macdrv_event *event)
+NTSTATUS WINAPI macdrv_ime_set_text(void *arg, ULONG size)
 {
-    HWND hwnd = macdrv_get_window_hwnd(event->window);
-    void * WIN32PTR himc = event->im_set_text.data;
-
-    TRACE("win %p/%p himc %p text %s complete %u\n", hwnd, event->window, himc,
-          debugstr_cf(event->im_set_text.text), event->im_set_text.complete);
+    struct ime_set_text_params *params = arg;
+    ULONG length = (size - offsetof(struct ime_set_text_params, text)) / sizeof(WCHAR);
+    void *himc = param_ptr(params->data);
+    HWND hwnd = UlongToHandle(params->hwnd);
 
     if (!himc) himc = RealIMC(FROM_MACDRV);
 
-    if (event->im_set_text.text)
+    if (length)
     {
-        CFIndex length = CFStringGetLength(event->im_set_text.text);
-        UniChar * WIN32PTR chars;
-
-        chars = HeapAlloc(GetProcessHeap(), 0, length * sizeof(*chars));
-        CFStringGetCharacters(event->im_set_text.text, CFRangeMake(0, length), chars);
-
         if (himc)
-            IME_SetCompositionString(himc, SCS_SETSTR, chars, length * sizeof(*chars),
-                event->im_set_text.cursor_pos, !event->im_set_text.complete);
+            IME_SetCompositionString(himc, SCS_SETSTR, params->text, length * sizeof(WCHAR),
+                                     params->cursor_pos, !params->complete);
         else
         {
             INPUT input;
-            CFIndex i;
+            unsigned int i;
 
             input.type              = INPUT_KEYBOARD;
             input.ki.wVk            = 0;
@@ -1423,7 +1419,7 @@ void macdrv_im_set_text(const macdrv_event *event)
 
             for (i = 0; i < length; i++)
             {
-                input.ki.wScan      = chars[i];
+                input.ki.wScan      = params->text[i];
                 input.ki.dwFlags    = KEYEVENTF_UNICODE;
                 __wine_send_input(hwnd, &input, NULL);
 
@@ -1431,62 +1427,50 @@ void macdrv_im_set_text(const macdrv_event *event)
                 __wine_send_input(hwnd, &input, NULL);
             }
         }
-
-        HeapFree(GetProcessHeap(), 0, chars);
     }
 
-    if (event->im_set_text.complete)
+    if (params->complete)
         IME_NotifyComplete(himc);
+    return 0;
 }
-
-/***********************************************************************
- *              macdrv_sent_text_input
- */
-void macdrv_sent_text_input(const macdrv_event *event)
-{
-    TRACE("handled: %s\n", event->sent_text_input.handled ? "TRUE" : "FALSE");
-    *event->sent_text_input.done = event->sent_text_input.handled ? 1 : -1;
-}
-
 
 /**************************************************************************
- *              query_ime_char_rect
+ *              macdrv_ime_query_char_rect
  */
-BOOL query_ime_char_rect(macdrv_query* query)
+NTSTATUS WINAPI macdrv_ime_query_char_rect(void *arg, ULONG size)
 {
-    HWND hwnd = macdrv_get_window_hwnd(query->window);
-    void * WIN32PTR himc = query->ime_char_rect.data;
-    CFRange* range = &query->ime_char_rect.range;
-    CGRect* rect = &query->ime_char_rect.rect;
+    struct ime_query_char_rect_params *params = arg;
+    struct ime_query_char_rect_result *result = param_ptr(params->result);
+    void *himc = param_ptr(params->data);
     IMECHARPOSITION charpos;
     BOOL ret = FALSE;
 
-    TRACE("win %p/%p himc %p range %ld-%ld\n", hwnd, query->window, himc, range->location,
-          range->length);
+    result->location = params->location;
+    result->length = params->length;
 
     if (!himc) himc = RealIMC(FROM_MACDRV);
 
     charpos.dwSize = sizeof(charpos);
-    charpos.dwCharPos = range->location;
+    charpos.dwCharPos = params->location;
     if (ImmRequestMessageW(himc, IMR_QUERYCHARPOSITION, (ULONG_PTR)&charpos))
     {
         int i;
 
-        *rect = CGRectMake(charpos.pt.x, charpos.pt.y, 0, charpos.cLineHeight);
+        SetRect(&result->rect, charpos.pt.x, charpos.pt.y, 0, charpos.pt.y + charpos.cLineHeight);
 
         /* iterate over rest of length to extend rect */
-        for (i = 1; i < range->length; i++)
+        for (i = 1; i < params->length; i++)
         {
             charpos.dwSize = sizeof(charpos);
-            charpos.dwCharPos = range->location + i;
+            charpos.dwCharPos = params->location + i;
             if (!ImmRequestMessageW(himc, IMR_QUERYCHARPOSITION, (ULONG_PTR)&charpos) ||
-                charpos.pt.y != rect->origin.y)
+                charpos.pt.y != result->rect.top)
             {
-                range->length = i;
+                result->length = i;
                 break;
             }
 
-            rect->size.width = charpos.pt.x - rect->origin.x;
+            result->rect.right = charpos.pt.x;
         }
 
         ret = TRUE;
@@ -1513,15 +1497,15 @@ BOOL query_ime_char_rect(macdrv_query* query)
                 if (private->textfont)
                     oldfont = SelectObject(dc, private->textfont);
 
-                if (range->location > compstr->dwCompStrLen)
-                    range->location = compstr->dwCompStrLen;
-                if (range->location + range->length > compstr->dwCompStrLen)
-                    range->length = compstr->dwCompStrLen - range->location;
+                if (result->location > compstr->dwCompStrLen)
+                    result->location = compstr->dwCompStrLen;
+                if (result->location + result->length > compstr->dwCompStrLen)
+                    result->length = compstr->dwCompStrLen - result->location;
 
-                GetTextExtentPoint32W(dc, str, range->location, &size);
+                GetTextExtentPoint32W(dc, str, result->location, &size);
                 charpos.rcDocument.left = size.cx;
                 charpos.rcDocument.top = 0;
-                GetTextExtentPoint32W(dc, str, range->location + range->length, &size);
+                GetTextExtentPoint32W(dc, str, result->location + result->length, &size);
                 charpos.rcDocument.right = size.cx;
                 charpos.rcDocument.bottom = size.cy;
 
@@ -1530,7 +1514,7 @@ BOOL query_ime_char_rect(macdrv_query* query)
 
                 LPtoDP(dc, (POINT*)&charpos.rcDocument, 2);
                 MapWindowPoints(private->hwndDefault, 0, (POINT*)&charpos.rcDocument, 2);
-                *rect = cgrect_from_rect(charpos.rcDocument);
+                result->rect = charpos.rcDocument;
                 ret = TRUE;
 
                 if (oldfont)
@@ -1552,16 +1536,13 @@ BOOL query_ime_char_rect(macdrv_query* query)
         if (GetGUIThreadInfo(0, &gti))
         {
             MapWindowPoints(gti.hwndCaret, 0, (POINT*)&gti.rcCaret, 2);
-            *rect = cgrect_from_rect(gti.rcCaret);
+            result->rect = gti.rcCaret;
             ret = TRUE;
         }
     }
 
-    if (ret && range->length && !rect->size.width)
-        rect->size.width = 1;
-
-    TRACE(" -> %s range %ld-%ld rect %s\n", ret ? "TRUE" : "FALSE", range->location,
-          range->length, wine_dbgstr_cgrect(*rect));
+    if (ret && result->length && result->rect.left == result->rect.right)
+        result->rect.right++;
 
     return ret;
 }

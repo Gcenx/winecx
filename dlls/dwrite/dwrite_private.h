@@ -16,6 +16,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#ifndef __WINE_DWRITE_PRIVATE_H
+#define __WINE_DWRITE_PRIVATE_H
+
 #include "dwrite_3.h"
 #include "d2d1.h"
 #include "winternl.h"
@@ -27,11 +30,25 @@
 #define MS_GSUB_TAG DWRITE_MAKE_OPENTYPE_TAG('G','S','U','B')
 #define MS_GPOS_TAG DWRITE_MAKE_OPENTYPE_TAG('G','P','O','S')
 
+typedef struct MATRIX_2X2
+{
+    float m11;
+    float m12;
+    float m21;
+    float m22;
+} MATRIX_2X2;
+
 static const DWRITE_MATRIX identity =
 {
     1.0f, 0.0f,
     0.0f, 1.0f,
     0.0f, 0.0f
+};
+
+static const MATRIX_2X2 identity_2x2 =
+{
+    1.0f, 0.0f,
+    0.0f, 1.0f,
 };
 
 static inline LPWSTR heap_strdupnW(const WCHAR *str, UINT32 len)
@@ -98,9 +115,14 @@ static inline const char *debugstr_tag(DWORD tag)
 
 const char *debugstr_sa_script(UINT16) DECLSPEC_HIDDEN;
 
-static inline unsigned short get_table_entry(const unsigned short *table, WCHAR ch)
+static inline unsigned short get_table_entry_16(const unsigned short *table, WCHAR ch)
 {
     return table[table[table[ch >> 8] + ((ch >> 4) & 0x0f)] + (ch & 0xf)];
+}
+
+static inline unsigned short get_table_entry_32(const unsigned short *table, UINT ch)
+{
+    return table[table[table[table[ch >> 12] + ((ch >> 8) & 0x0f)] + ((ch >> 4) & 0x0f)] + (ch & 0xf)];
 }
 
 static inline BOOL is_simulation_valid(DWRITE_FONT_SIMULATIONS simulations)
@@ -286,8 +308,9 @@ struct dwrite_fontface
 };
 
 extern HRESULT create_numbersubstitution(DWRITE_NUMBER_SUBSTITUTION_METHOD,const WCHAR *locale,BOOL,IDWriteNumberSubstitution**) DECLSPEC_HIDDEN;
-extern HRESULT create_textformat(const WCHAR*,IDWriteFontCollection*,DWRITE_FONT_WEIGHT,DWRITE_FONT_STYLE,DWRITE_FONT_STRETCH,
-                                 FLOAT,const WCHAR*,IDWriteTextFormat**) DECLSPEC_HIDDEN;
+extern HRESULT create_text_format(const WCHAR *family_name, IDWriteFontCollection *collection, DWRITE_FONT_WEIGHT weight,
+        DWRITE_FONT_STYLE style, DWRITE_FONT_STRETCH stretch, float size, const WCHAR *locale, REFIID riid,
+        void **out) DECLSPEC_HIDDEN;
 extern HRESULT create_textlayout(const struct textlayout_desc*,IDWriteTextLayout**) DECLSPEC_HIDDEN;
 extern HRESULT create_trimmingsign(IDWriteFactory7 *factory, IDWriteTextFormat *format,
         IDWriteInlineObject **sign) DECLSPEC_HIDDEN;
@@ -299,7 +322,8 @@ extern void    set_en_localizedstring(IDWriteLocalizedStrings*,const WCHAR*) DEC
 extern void    sort_localizedstrings(IDWriteLocalizedStrings*) DECLSPEC_HIDDEN;
 extern unsigned int get_localizedstrings_count(IDWriteLocalizedStrings *strings) DECLSPEC_HIDDEN;
 extern BOOL localizedstrings_contains(IDWriteLocalizedStrings *strings, const WCHAR *str) DECLSPEC_HIDDEN;
-extern HRESULT get_system_fontcollection(IDWriteFactory7 *factory, IDWriteFontCollection1 **collection) DECLSPEC_HIDDEN;
+extern HRESULT get_system_fontcollection(IDWriteFactory7 *factory, DWRITE_FONT_FAMILY_MODEL family_model,
+        IDWriteFontCollection **collection) DECLSPEC_HIDDEN;
 extern HRESULT get_eudc_fontcollection(IDWriteFactory7 *factory, IDWriteFontCollection3 **collection) DECLSPEC_HIDDEN;
 extern IDWriteTextAnalyzer2 *get_text_analyzer(void) DECLSPEC_HIDDEN;
 extern HRESULT create_font_file(IDWriteFontFileLoader *loader, const void *reference_key, UINT32 key_size, IDWriteFontFile **font_file) DECLSPEC_HIDDEN;
@@ -321,9 +345,10 @@ extern HRESULT create_colorglyphenum(D2D1_POINT_2F origin, const DWRITE_GLYPH_RU
 extern BOOL lb_is_newline_char(WCHAR) DECLSPEC_HIDDEN;
 extern HRESULT create_system_fontfallback(IDWriteFactory7 *factory, IDWriteFontFallback1 **fallback) DECLSPEC_HIDDEN;
 extern void release_system_fontfallback(IDWriteFontFallback1 *fallback) DECLSPEC_HIDDEN;
+extern void release_system_fallback_data(void) DECLSPEC_HIDDEN;
 extern HRESULT create_fontfallback_builder(IDWriteFactory7 *factory, IDWriteFontFallbackBuilder **builder) DECLSPEC_HIDDEN;
-extern HRESULT create_matching_font(IDWriteFontCollection*,const WCHAR*,DWRITE_FONT_WEIGHT,DWRITE_FONT_STYLE,DWRITE_FONT_STRETCH,
-    IDWriteFont**) DECLSPEC_HIDDEN;
+extern HRESULT create_matching_font(IDWriteFontCollection *collection, const WCHAR *family, DWRITE_FONT_WEIGHT weight,
+        DWRITE_FONT_STYLE style, DWRITE_FONT_STRETCH stretch, REFIID riid, void **obj) DECLSPEC_HIDDEN;
 extern HRESULT create_fontfacereference(IDWriteFactory7 *factory, IDWriteFontFile *file, UINT32 face_index,
         DWRITE_FONT_SIMULATIONS simulations, DWRITE_FONT_AXIS_VALUE const *axis_values, UINT32 axis_values_count,
         IDWriteFontFaceReference1 **reference) DECLSPEC_HIDDEN;
@@ -347,6 +372,9 @@ extern HRESULT create_font_resource(IDWriteFactory7 *factory, IDWriteFontFile *f
 extern HRESULT create_fontset_builder(IDWriteFactory7 *factory, IDWriteFontSetBuilder2 **ret) DECLSPEC_HIDDEN;
 extern HRESULT compute_glyph_origins(DWRITE_GLYPH_RUN const *run, DWRITE_MEASURING_MODE measuring_mode,
         D2D1_POINT_2F baseline_origin, DWRITE_MATRIX const *transform, D2D1_POINT_2F *origins) DECLSPEC_HIDDEN;
+extern HRESULT create_font_collection_from_set(IDWriteFactory7 *factory, IDWriteFontSet *set,
+        DWRITE_FONT_FAMILY_MODEL family_model, REFGUID riid, void **ret) DECLSPEC_HIDDEN;
+extern HRESULT create_system_fontset(IDWriteFactory7 *factory, REFIID riid, void **obj) DECLSPEC_HIDDEN;
 
 struct dwrite_fontface;
 
@@ -434,6 +462,7 @@ struct dwrite_font_props
     FONTSIGNATURE fontsig;
     LOGFONTW lf;
     UINT32 flags;
+    float slant_angle;
 };
 
 struct file_stream_desc {
@@ -460,16 +489,27 @@ struct ot_gsubgpos_table
     unsigned int lookup_list;
 };
 
+struct dwrite_var_axis
+{
+    DWRITE_FONT_AXIS_TAG tag;
+    float default_value;
+    float min_value;
+    float max_value;
+    unsigned int attributes;
+};
+
 extern HRESULT opentype_analyze_font(IDWriteFontFileStream*,BOOL*,DWRITE_FONT_FILE_TYPE*,DWRITE_FONT_FACE_TYPE*,UINT32*) DECLSPEC_HIDDEN;
 extern HRESULT opentype_try_get_font_table(const struct file_stream_desc *stream_desc, UINT32 tag, const void **data,
         void **context, UINT32 *size, BOOL *exists) DECLSPEC_HIDDEN;
-extern void opentype_get_font_properties(struct file_stream_desc*,struct dwrite_font_props*) DECLSPEC_HIDDEN;
+extern void opentype_get_font_properties(const struct file_stream_desc *stream_desc,
+        struct dwrite_font_props *props) DECLSPEC_HIDDEN;
 extern void opentype_get_font_metrics(struct file_stream_desc*,DWRITE_FONT_METRICS1*,DWRITE_CARET_METRICS*) DECLSPEC_HIDDEN;
 extern void opentype_get_font_typo_metrics(struct file_stream_desc *stream_desc, unsigned int *ascent,
         unsigned int *descent) DECLSPEC_HIDDEN;
 extern HRESULT opentype_get_font_info_strings(const struct file_stream_desc *stream_desc,
         DWRITE_INFORMATIONAL_STRING_ID id, IDWriteLocalizedStrings **strings) DECLSPEC_HIDDEN;
-extern HRESULT opentype_get_font_familyname(struct file_stream_desc*,IDWriteLocalizedStrings**) DECLSPEC_HIDDEN;
+extern HRESULT opentype_get_font_familyname(const struct file_stream_desc *desc, DWRITE_FONT_FAMILY_MODEL family_model,
+        IDWriteLocalizedStrings **names) DECLSPEC_HIDDEN;
 extern HRESULT opentype_get_font_facename(struct file_stream_desc*,WCHAR*,IDWriteLocalizedStrings**) DECLSPEC_HIDDEN;
 extern void opentype_get_typographic_features(struct ot_gsubgpos_table *table, unsigned int script_index,
         unsigned int language_index, struct tag_array *tags) DECLSPEC_HIDDEN;
@@ -484,6 +524,8 @@ extern DWRITE_CONTAINER_TYPE opentype_analyze_container_type(void const *, UINT3
 extern HRESULT opentype_get_kerning_pairs(struct dwrite_fontface *fontface, unsigned int count,
         const UINT16 *glyphs, INT32 *values) DECLSPEC_HIDDEN;
 extern BOOL opentype_has_kerning_pairs(struct dwrite_fontface *fontface) DECLSPEC_HIDDEN;
+extern HRESULT opentype_get_font_var_axis(const struct file_stream_desc *stream_desc, struct dwrite_var_axis **axis,
+        unsigned int *axis_count) DECLSPEC_HIDDEN;
 
 struct dwrite_colorglyph {
     USHORT layer; /* [0, num_layers) index indicating current layer */
@@ -510,7 +552,16 @@ enum gasp_flags {
 extern unsigned int opentype_get_gasp_flags(const struct dwrite_fonttable *gasp, float emsize) DECLSPEC_HIDDEN;
 
 /* BiDi helpers */
-extern HRESULT bidi_computelevels(const WCHAR*,UINT32,UINT8,UINT8*,UINT8*) DECLSPEC_HIDDEN;
+struct bidi_char
+{
+    unsigned int ch;
+    UINT8 explicit;
+    UINT8 resolved;
+    UINT8 nominal_bidi_class;
+    UINT8 bidi_class;
+};
+
+extern HRESULT bidi_computelevels(struct bidi_char *chars, unsigned int count, UINT8 baselevel) DECLSPEC_HIDDEN;
 
 struct dwrite_glyphbitmap
 {
@@ -786,3 +837,5 @@ struct font_data_context;
 extern HMODULE dwrite_module DECLSPEC_HIDDEN;
 
 extern void dwrite_fontface_get_glyph_bbox(IDWriteFontFace *fontface, struct dwrite_glyphbitmap *bitmap) DECLSPEC_HIDDEN;
+
+#endif /* __WINE_DWRITE_PRIVATE_H */

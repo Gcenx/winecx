@@ -18,7 +18,7 @@
 
 OPTION EXPLICIT  : : DIM W
 
-dim x, y, z, e
+dim x, y, z, e, hi
 Dim obj
 
 call ok(true, "true is not true?")
@@ -61,6 +61,11 @@ Call ok(&hffff& = 65535, "&hffff& <> -1")
 Call ok(&hfffe& = 65534, "&hfffe& <> -2")
 Call ok(&hffffffff& = -1, "&hffffffff& <> -1")
 Call ok((&h01or&h02)=3,"&h01or&h02 <> 3")
+
+' Test concat when no space and var begins with h
+hi = "y"
+x = "x" &hi
+Call ok(x = "xy", "x = " & x & " expected ""xy""")
 
 W = 5
 Call ok(W = 5, "W = " & W & " expected " & 5)
@@ -167,6 +172,8 @@ call ok(false imp null, "false imp null is false?")
 
 Call ok(2 >= 1, "! 2 >= 1")
 Call ok(2 >= 2, "! 2 >= 2")
+Call ok(2 => 1, "! 2 => 1")
+Call ok(2 => 2, "! 2 => 2")
 Call ok(not(true >= 2), "true >= 2 ?")
 Call ok(2 > 1, "! 2 > 1")
 Call ok(false > true, "! false < true")
@@ -177,6 +184,12 @@ Call ok(1 < 2, "! 1 < 2")
 Call ok(1 = 1 < 0, "! 1 = 1 < 0")
 Call ok(1 <= 2, "! 1 <= 2")
 Call ok(2 <= 2, "! 2 <= 2")
+Call ok(1 =< 2, "! 1 =< 2")
+Call ok(2 =< 2, "! 2 =< 2")
+Call ok(not (2 >< 2), "2 >< 2")
+Call ok(2 >< 1, "! 2 >< 1")
+Call ok(not (2 <> 2), "2 <> 2")
+Call ok(2 <> 1, "! 2 <> 1")
 
 Call ok(isNull(0 = null), "'(0 = null)' is not null")
 Call ok(isNull(null = 1), "'(null = 1)' is not null")
@@ -282,6 +295,23 @@ Else
 End If
 Call ok(x, "else not called?")
 
+' Else without following newline
+x = false
+If false Then
+   Call ok(false, "inside if false")
+Else x = true
+End If
+Call ok(x, "else not called?")
+
+' Else with colon before statement following newline
+x = false
+If false Then
+   Call ok(false, "inside if false")
+Else
+: x = true
+End If
+Call ok(x, "else not called?")
+
 x = false
 If false Then
    Call ok(false, "inside if false")
@@ -309,6 +339,23 @@ If false Then
    Call ok(false, "inside if false")
 ElseIf not False Then
    x = true
+End If
+Call ok(x, "elseif not called?")
+
+' ElseIf with statement on same line
+x = false
+If false Then
+   Call ok(false, "inside if false")
+ElseIf not False Then x = true
+End If
+Call ok(x, "elseif not called?")
+
+' ElseIf with statement following statement separator
+x = false
+If false Then
+   Call ok(false, "inside if false")
+ElseIf not False Then
+: x = true
 End If
 Call ok(x, "elseif not called?")
 
@@ -750,6 +797,26 @@ end select
 
 select case 0 : case 1 : case else : end select
 
+' Case without separator
+function SelectCaseTest(x)
+    select case x
+        case 0: SelectCaseTest = 100
+        case 1  SelectCaseTest = 200
+        case 2
+                SelectCaseTest = 300
+        case 3
+        case 4  SelectCaseTest = 400
+        case else SelectCaseTest = 500
+    end select
+end function
+
+call ok(SelectCaseTest(0) = 100, "Unexpected case " & SelectCaseTest(0))
+call ok(SelectCaseTest(1) = 200, "Unexpected case " & SelectCaseTest(1))
+call ok(SelectCaseTest(2) = 300, "Unexpected case " & SelectCaseTest(2))
+call ok(SelectCaseTest(3) = vbEmpty, "Unexpected case " & SelectCaseTest(3))
+call ok(SelectCaseTest(4) = 400, "Unexpected case " & SelectCaseTest(4))
+call ok(SelectCaseTest(5) = 500, "Unexpected case " & SelectCaseTest(5))
+
 if false then
 Sub testsub
     x = true
@@ -996,6 +1063,7 @@ Call ok(getVT(x) = "VT_DISPATCH*", "getVT(x) = " & getVT(x))
 
 Class TestClass
     Public publicProp
+    Public publicArrayProp
 
     Private privateProp
 
@@ -1050,6 +1118,11 @@ Class TestClass
 
     Public Sub Class_Initialize
         publicProp2 = 2
+        ReDim publicArrayProp(2)
+
+        publicArrayProp(0) = 1
+        publicArrayProp(1) = 2
+
         privateProp = true
         Call ok(getVT(privateProp) = "VT_BOOL*", "getVT(privateProp) = " & getVT(privateProp))
         Call ok(getVT(publicProp2) = "VT_I2*", "getVT(publicProp2) = " & getVT(publicProp2))
@@ -1101,6 +1174,13 @@ Call ok(funcCalled = "GetDefVal", "funcCalled = " & funcCalled)
 
 Call obj.Class_Initialize
 Call ok(obj.getPrivateProp() = true, "obj.getPrivateProp() = " & obj.getPrivateProp())
+
+'Accessing array property by index
+Call ok(obj.publicArrayProp(0) = 1, "obj.publicArrayProp(0) = " & obj.publicArrayProp(0))
+Call ok(obj.publicArrayProp(1) = 2, "obj.publicArrayProp(1) = " & obj.publicArrayProp(1))
+x = obj.publicArrayProp(2)
+Call ok(getVT(x) = "VT_EMPTY*", "getVT(x) = " & getVT(x))
+Call ok(obj.publicArrayProp("0") = 1, "obj.publicArrayProp(0) = " & obj.publicArrayProp("0"))
 
 x = (New testclass).publicProp
 
@@ -1181,10 +1261,16 @@ Call ok(getVT(test) = "VT_DISPATCH", "getVT(test) = " & getVT(test))
 Call ok(Me is Test, "Me is not Test")
 
 Const c1 = 1, c2 = 2, c3 = -3
+Private Const c4 = 4
+Public Const c5 = 5
 Call ok(c1 = 1, "c1 = " & c1)
 Call ok(getVT(c1) = "VT_I2", "getVT(c1) = " & getVT(c1))
 Call ok(c3 = -3, "c3 = " & c3)
 Call ok(getVT(c3) = "VT_I2", "getVT(c3) = " & getVT(c3))
+Call ok(c4 = 4, "c4 = " & c4)
+Call ok(getVT(c4) = "VT_I2", "getVT(c4) = " & getVT(c4))
+Call ok(c5 = 5, "c5 = " & c5)
+Call ok(getVT(c5) = "VT_I2", "getVT(c5) = " & getVT(c5))
 
 Const cb = True, cs = "test", cnull = null
 Call ok(cb, "cb = " & cb)
@@ -1496,12 +1582,109 @@ e = err.number
 on error goto 0
 ok e = 9, "e = " & e ' VBSE_OUT_OF_BOUNDS, can only change rightmost dimension
 
-dim staticarray(4)
-on error resume next
-redim staticarray(3)
-e = err.number
-on error goto 0
-todo_wine_ok e = 10, "e = " & e
+sub TestReDimFixed
+    on error resume next
+
+    dim staticarray(4)
+    err.clear
+    redim staticarray(3)
+    call ok(err.number = 10, "err.number = " & err.number)
+    call ok(isArrayFixed(staticarray), "Expected fixed size array")
+
+    err.clear
+    redim staticarray("abc")
+    call ok(err.number = 10, "err.number = " & err.number)
+
+    dim staticarray2(4)
+    err.clear
+    redim preserve staticarray2(5)
+    call ok(err.number = 10, "err.number = " & err.number)
+    call ok(isArrayFixed(staticarray2), "Expected fixed size array")
+
+    err.clear
+    redim preserve staticarray2("abc")
+    ' Win10+ builds return INVALID_CALL (5)
+    call ok(err.number = 5 or err.number = 13, "err.number = " & err.number)
+end sub
+Call TestRedimFixed
+
+sub TestRedimInputArg
+    on error resume next
+
+    dim x
+
+    x = Array(1)
+    err.clear
+    redim x("abc")
+    call ok(err.number = 13, "err.number = " & err.number)
+
+    err.clear
+    redim preserve x("abc")
+    ' Win10+ builds return INVALID_CALL (5)
+    call ok(err.number = 5 or err.number = 13, "err.number = " & err.number)
+end sub
+Call TestRedimInputArg
+
+sub TestReDimList
+    dim x, y
+
+    x = Array(1)
+    y = Array(1)
+    redim x(1, 3), y(2)
+    ok ubound(x, 1) = 1, "ubound(x, 1) = " & ubound(x, 1)
+    ok ubound(x, 2) = 3, "ubound(x, 2) = " & ubound(x, 2)
+    ok ubound(y, 1) = 2, "ubound(y, 1) = " & ubound(y, 1)
+
+    x(0,0) = 1.1
+    x(0,1) = 1.2
+    x(0,2) = 1.3
+    x(0,3) = 1.4
+    x(1,0) = 2.1
+    x(1,1) = 2.2
+    x(1,2) = 2.3
+    x(1,3) = 2.4
+
+    y(0) = 2.1
+    y(1) = 2.2
+    y(2) = 2.3
+
+    redim preserve x(1,1), y(3)
+    ok ubound(x, 1) = 1, "ubound(x, 1) = " & ubound(x, 1)
+    ok ubound(x, 2) = 1, "ubound(x, 2) = " & ubound(x, 2)
+    ok x(0,0) = 1.1, "x(0,0) = " & x(0,0)
+    ok x(0,1) = 1.2, "x(0,1) = " & x(0,1)
+    ok x(1,0) = 2.1, "x(1,0) = " & x(1,0)
+    ok x(1,1) = 2.2, "x(1,1) = " & x(1,1)
+    ok ubound(y, 1) = 3, "ubound(y, 1) = " & ubound(y, 1)
+    ok y(0) = 2.1, "y(0) = " & y(0)
+    ok y(1) = 2.2, "y(1) = " & y(1)
+    ok y(2) = 2.3, "y(2) = " & y(2)
+    ok y(3) = vbEmpty, "y(3) = " & y(3)
+end sub
+call TestReDimList
+
+dim rx
+redim rx(4)
+sub TestReDimByRef(byref x)
+   ok ubound(x) = 4, "ubound(x) = " & ubound(x)
+   redim x(6)
+   ok ubound(x) = 6, "ubound(x) = " & ubound(x)
+end sub
+call TestReDimByRef(rx)
+ok ubound(rx) = 6, "ubound(rx) = " & ubound(rx)
+
+redim rx(5)
+rx(3)=2
+sub TestReDimPreserveByRef(byref x)
+   ok ubound(x) = 5, "ubound(x) = " & ubound(x)
+   ok x(3) = 2, "x(3) = " & x(3)
+   redim preserve x(7)
+   ok ubound(x) = 7, "ubound(x) = " & ubound(x)
+   ok x(3) = 2, "x(3) = " & x(3)
+end sub
+call TestReDimPreserveByRef(rx)
+ok ubound(rx) = 7, "ubound(rx) = " & ubound(rx)
+ok rx(3) = 2, "rx(3) = " & rx(3)
 
 Class ArrClass
     Dim classarr(3)

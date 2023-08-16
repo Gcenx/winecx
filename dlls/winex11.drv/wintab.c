@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <stdlib.h>
@@ -27,9 +31,7 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "x11drv.h"
-#include "wine/unicode.h"
 #include "wine/debug.h"
 #include "wintab.h"
 
@@ -372,7 +374,7 @@ static BOOL match_token(const char *haystack, const char *needle)
 
         for (q = needle; *q && *p && tolower(*p) == tolower(*q); q++)
             p++;
-        if (! *q && (isspace(*p) || !*p))
+        if (! *q && (isspace(*p) || *p == ':' || !*p))
             return TRUE;
 
         while (*p && ! isspace(*p))
@@ -482,9 +484,9 @@ static void disable_system_cursors(void)
 
 
 /***********************************************************************
- *             X11DRV_LoadTabletInfo (X11DRV.@)
+ *           x11drv_tablet_load_info
  */
-BOOL CDECL X11DRV_LoadTabletInfo(HWND hwnddefault)
+NTSTATUS x11drv_tablet_load_info( void *hwnd )
 {
     static const WCHAR SZ_CONTEXT_NAME[] = {'W','i','n','e',' ','T','a','b','l','e','t',' ','C','o','n','t','e','x','t',0};
     static const WCHAR SZ_DEVICE_NAME[] = {'W','i','n','e',' ','T','a','b','l','e','t',' ','D','e','v','i','c','e',0};
@@ -510,11 +512,11 @@ BOOL CDECL X11DRV_LoadTabletInfo(HWND hwnddefault)
         return FALSE;
     }
 
-    hwndTabletDefault = hwnddefault;
+    hwndTabletDefault = hwnd;
 
     /* Do base initialization */
-    strcpyW(gSysContext.lcName, SZ_CONTEXT_NAME);
-    strcpyW(gSysDevice.NAME, SZ_DEVICE_NAME);
+    wcscpy(gSysContext.lcName, SZ_CONTEXT_NAME);
+    wcscpy(gSysDevice.NAME, SZ_DEVICE_NAME);
 
     gSysContext.lcOptions = CXO_SYSTEM;
     gSysContext.lcLocks = CXL_INSIZE | CXL_INASPECT | CXL_MARGIN |
@@ -537,8 +539,8 @@ BOOL CDECL X11DRV_LoadTabletInfo(HWND hwnddefault)
     gSysContext.lcSensZ = 65536;
     gSysContext.lcSysSensX= 65536;
     gSysContext.lcSysSensY= 65536;
-    gSysContext.lcSysExtX = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    gSysContext.lcSysExtY = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    gSysContext.lcSysExtX = NtUserGetSystemMetrics( SM_CXVIRTUALSCREEN );
+    gSysContext.lcSysExtY = NtUserGetSystemMetrics( SM_CYVIRTUALSCREEN );
 
     /* initialize cursors */
     disable_system_cursors();
@@ -550,7 +552,7 @@ BOOL CDECL X11DRV_LoadTabletInfo(HWND hwnddefault)
     gSysDevice.PKTDATA =
         PK_CONTEXT | PK_STATUS | PK_SERIAL_NUMBER| PK_TIME | PK_CURSOR |
         PK_BUTTONS |  PK_X | PK_Y | PK_NORMAL_PRESSURE | PK_ORIENTATION;
-    strcpyW(gSysDevice.PNPID, SZ_NON_PLUG_N_PLAY);
+    wcscpy(gSysDevice.PNPID, SZ_NON_PLUG_N_PLAY);
 
     devices = pXListInputDevices(data->display, &num_devices);
     if (!devices)
@@ -616,7 +618,7 @@ BOOL CDECL X11DRV_LoadTabletInfo(HWND hwnddefault)
                 WARN("Unable to open device %s\n",target->name);
                 break;
             }
-            MultiByteToWideChar(CP_UNIXCP, 0, target->name, -1, cursor.NAME, WT_MAX_NAME_LEN);
+            ntdll_umbstowcs(target->name, strlen(target->name) + 1, cursor.NAME, WT_MAX_NAME_LEN);
 
             if (! is_tablet_cursor(target->name, device_type))
             {
@@ -737,22 +739,22 @@ BOOL CDECL X11DRV_LoadTabletInfo(HWND hwnddefault)
                         Button = (XButtonInfoPtr) any;
                         TRACE("    ButtonInput %d: [class %d|length %d|num_buttons %d]\n",
                                 class_loop, (int) Button->class, Button->length, Button->num_buttons);
-                        cursor.BTNNAMES = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR)*cchBuf);
+                        cursor.BTNNAMES = malloc( sizeof(WCHAR) * cchBuf );
                         for (i = 0; i < cursor.BUTTONS; i++)
                         {
                             /* FIXME - these names are probably incorrect */
-                            int cch = strlenW(cursor.NAME) + 1;
+                            int cch = wcslen(cursor.NAME) + 1;
                             while (cch > cchBuf - cchPos - 1) /* we want one extra byte for the last NUL */
                             {
                                 cchBuf *= 2;
-                                cursor.BTNNAMES = HeapReAlloc(GetProcessHeap(), 0, cursor.BTNNAMES, sizeof(WCHAR)*cchBuf);
+                                cursor.BTNNAMES = realloc( cursor.BTNNAMES, sizeof(WCHAR) * cchBuf );
                             }
 
-                            strcpyW(cursor.BTNNAMES + cchPos, cursor.NAME);
+                            wcscpy(cursor.BTNNAMES + cchPos, cursor.NAME);
                             cchPos += cch;
                         }
                         cursor.BTNNAMES[cchPos++] = 0;
-                        cursor.BTNNAMES = HeapReAlloc(GetProcessHeap(), 0, cursor.BTNNAMES, sizeof(WCHAR)*cchPos);
+                        cursor.BTNNAMES = realloc( cursor.BTNNAMES, sizeof(WCHAR)*cchPos );
                         cursor.cchBTNNAMES = cchPos;
                     }
                     break;
@@ -906,7 +908,7 @@ static BOOL motion_event( HWND hwnd, XEvent *event )
     gMsgPacket.pkNormalPressure = motion->axis_data[2];
     gMsgPacket.pkButtons = get_button_state(curnum);
     gMsgPacket.pkChanged = get_changed_state(&gMsgPacket);
-    SendMessageW(hwndTabletDefault,WT_PACKET,gMsgPacket.pkSerialNumber,(LPARAM)hwnd);
+    send_message( hwndTabletDefault, WT_PACKET, gMsgPacket.pkSerialNumber, (LPARAM)hwnd );
     last_packet = gMsgPacket;
     return TRUE;
 }
@@ -945,7 +947,7 @@ static BOOL button_event( HWND hwnd, XEvent *event )
     }
     gMsgPacket.pkButtons = get_button_state(curnum);
     gMsgPacket.pkChanged = get_changed_state(&gMsgPacket);
-    SendMessageW(hwndTabletDefault,WT_PACKET,gMsgPacket.pkSerialNumber,(LPARAM)hwnd);
+    send_message( hwndTabletDefault, WT_PACKET, gMsgPacket.pkSerialNumber, (LPARAM)hwnd );
     last_packet = gMsgPacket;
     return TRUE;
 }
@@ -997,14 +999,14 @@ static BOOL proximity_event( HWND hwnd, XEvent *event )
      */
     proximity_info = MAKELPARAM((event->type == proximity_in_type),
                      (event->type == proximity_in_type) || (event->type == proximity_out_type));
-    SendMessageW(hwndTabletDefault, WT_PROXIMITY, (WPARAM)hwnd, proximity_info);
+    send_message( hwndTabletDefault, WT_PROXIMITY, (WPARAM)hwnd, proximity_info );
     return TRUE;
 }
 
 /***********************************************************************
- *		X11DRV_AttachEventQueueToTablet (X11DRV.@)
+ *           x11drv_tablet_attach_queue
  */
-int CDECL X11DRV_AttachEventQueueToTablet(HWND hOwner)
+NTSTATUS x11drv_tablet_attach_queue( void *owner )
 {
     struct x11drv_thread_data *data = x11drv_init_thread_data();
     int             num_devices;
@@ -1014,11 +1016,11 @@ int CDECL X11DRV_AttachEventQueueToTablet(HWND hOwner)
     XDeviceInfo     *target = NULL;
     XDevice         *the_device;
     XEventClass     event_list[7];
-    Window          win = X11DRV_get_whole_window( hOwner );
+    Window          win = X11DRV_get_whole_window( owner );
 
     if (!win || !xinput_handle) return 0;
 
-    TRACE("Creating context for window %p (%lx)  %i cursors\n", hOwner, win, gNumCursors);
+    TRACE("Creating context for window %p (%lx)  %i cursors\n", owner, win, gNumCursors);
 
     devices = pXListInputDevices(data->display, &num_devices);
 
@@ -1031,7 +1033,8 @@ int CDECL X11DRV_AttachEventQueueToTablet(HWND hOwner)
         if (!gSysCursor[cur_loop].ACTIVE) continue;
 
         /* the cursor name fits in the buffer because too long names are skipped */
-        WideCharToMultiByte(CP_UNIXCP, 0, gSysCursor[cur_loop].NAME, -1, cursorNameA, WT_MAX_NAME_LEN, NULL, NULL);
+        ntdll_wcstoumbs(gSysCursor[cur_loop].NAME, wcslen(gSysCursor[cur_loop].NAME) + 1,
+                        cursorNameA, WT_MAX_NAME_LEN, FALSE);
         for (loop=0; loop < num_devices; loop ++)
             if (strcmp(devices[loop].name, cursorNameA) == 0)
                 target = &devices[loop];
@@ -1093,11 +1096,11 @@ int CDECL X11DRV_AttachEventQueueToTablet(HWND hOwner)
 }
 
 /***********************************************************************
- *		X11DRV_GetCurrentPacket (X11DRV.@)
+ *           x11drv_tablet_get_packet
  */
-int CDECL X11DRV_GetCurrentPacket(LPWTPACKET packet)
+NTSTATUS x11drv_tablet_get_packet( void *packet )
 {
-    *packet = gMsgPacket;
+    *(WTPACKET *)packet = gMsgPacket;
     return 1;
 }
 
@@ -1114,10 +1117,15 @@ static inline int CopyTabletData(LPVOID target, LPCVOID src, INT size)
 }
 
 /***********************************************************************
- *		X11DRV_WTInfoW (X11DRV.@)
+ *           x11drv_tablet_info
  */
-UINT CDECL X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
+NTSTATUS x11drv_tablet_info( void *arg )
 {
+    struct tablet_info_params *params = arg;
+    UINT wCategory = params->category;
+    UINT nIndex = params->index;
+    void *lpOutput = params->output;
+
     /*
      * It is valid to call WTInfoA with lpOutput == NULL, as per standard.
      * lpOutput == NULL signifies the user only wishes
@@ -1151,7 +1159,7 @@ UINT CDECL X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
                 case IFC_WINTABID:
                 {
                     static const WCHAR driver[] = {'W','i','n','e',' ','W','i','n','t','a','b',' ','1','.','1',0};
-                    rc = CopyTabletData(lpOutput, driver, (strlenW(driver) + 1) * sizeof(WCHAR));
+                    rc = CopyTabletData(lpOutput, driver, (wcslen(driver) + 1) * sizeof(WCHAR));
                     break;
                 }
                 case IFC_SPECVERSION:
@@ -1190,7 +1198,7 @@ UINT CDECL X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
                     break;
                 case CTX_NAME:
                     rc = CopyTabletData(lpOutput, gSysContext.lcName,
-                         (strlenW(gSysContext.lcName)+1) * sizeof(WCHAR));
+                         (wcslen(gSysContext.lcName)+1) * sizeof(WCHAR));
                     break;
                 case CTX_OPTIONS:
                     rc = CopyTabletData(lpOutput, &gSysContext.lcOptions,
@@ -1354,7 +1362,7 @@ UINT CDECL X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
                 {
                     case CSR_NAME:
                         rc = CopyTabletData(lpOutput, tgtcursor->NAME,
-                                            (strlenW(tgtcursor->NAME)+1) * sizeof(WCHAR));
+                                            (wcslen(tgtcursor->NAME)+1) * sizeof(WCHAR));
                         break;
                     case CSR_ACTIVE:
                         rc = CopyTabletData(lpOutput,&tgtcursor->ACTIVE,
@@ -1446,7 +1454,7 @@ UINT CDECL X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
             {
                 case DVC_NAME:
                     rc = CopyTabletData(lpOutput,gSysDevice.NAME,
-                                        (strlenW(gSysDevice.NAME)+1) * sizeof(WCHAR));
+                                        (wcslen(gSysDevice.NAME)+1) * sizeof(WCHAR));
                     break;
                 case DVC_HARDWARE:
                     rc = CopyTabletData(lpOutput,&gSysDevice.HARDWARE,
@@ -1530,7 +1538,7 @@ UINT CDECL X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
                     break;
                 case DVC_PNPID:
                     rc = CopyTabletData(lpOutput,gSysDevice.PNPID,
-                                        (strlenW(gSysDevice.PNPID)+1)*sizeof(WCHAR));
+                                        (wcslen(gSysDevice.PNPID)+1)*sizeof(WCHAR));
                     break;
                 default:
                     FIXME("WTI_DEVICES unhandled index %i\n",nIndex);
@@ -1546,33 +1554,33 @@ UINT CDECL X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
 #else /* SONAME_LIBXI */
 
 /***********************************************************************
- *		AttachEventQueueToTablet (X11DRV.@)
+ *           x11drv_tablet_attach_queue
  */
-int CDECL X11DRV_AttachEventQueueToTablet(HWND hOwner)
+NTSTATUS x11drv_tablet_attach_queue( void *owner )
 {
     return 0;
 }
 
 /***********************************************************************
- *		GetCurrentPacket (X11DRV.@)
+ *           x11drv_tablet_get_packet
  */
-int CDECL X11DRV_GetCurrentPacket(LPWTPACKET packet)
+NTSTATUS x11drv_tablet_get_packet( void *arg )
 {
     return 0;
 }
 
 /***********************************************************************
- *		LoadTabletInfo (X11DRV.@)
+ *           x11drv_tablet_load_info
  */
-BOOL CDECL X11DRV_LoadTabletInfo(HWND hwnddefault)
+NTSTATUS x11drv_tablet_load_info( void *arg )
 {
     return FALSE;
 }
 
 /***********************************************************************
- *		WTInfoW (X11DRV.@)
+ *           x11drv_tablet_info
  */
-UINT CDECL X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
+NTSTATUS x11drv_tablet_info( void *arg )
 {
     return 0;
 }

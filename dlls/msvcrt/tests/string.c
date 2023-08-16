@@ -64,6 +64,8 @@ static int (__cdecl *p_strncmp)(const char *, const char *, size_t);
 static int (__cdecl *p_strcpy)(char *dst, const char *src);
 static int (__cdecl *pstrcpy_s)(char *dst, size_t len, const char *src);
 static int (__cdecl *pstrcat_s)(char *dst, size_t len, const char *src);
+static int (__cdecl *p_strncpy_s)(char *dst, size_t size, const char *src, size_t count);
+static int (__cdecl *p_strncat_s)(char *dst, size_t elem, const char *src, size_t count);
 static int (__cdecl *p_mbscat_s)(unsigned char *dst, size_t size, const unsigned char *src);
 static int (__cdecl *p_mbsnbcat_s)(unsigned char *dst, size_t size, const unsigned char *src, size_t count);
 static int (__cdecl *p_mbsnbcpy_s)(unsigned char * dst, size_t size, const unsigned char * src, size_t count);
@@ -364,6 +366,7 @@ static void test_mbcp(void)
     expect_eq(_mbclen(mbstring), 2, int, "%d");
     expect_eq(_mbclen(&mbstring[2]), 2, int, "%d");
     expect_eq(_mbclen(&mbstring[3]), 1, int, "%d");
+    expect_eq(_mbclen(mbsonlylead), 1, int, "%d");
     expect_eq(_mbslen(mbstring2), 4, int, "%d");
     expect_eq(_mbslen(mbsonlylead), 0, int, "%d");          /* lead + NUL not counted as character */
     expect_eq(_mbslen(mbstring), 4, int, "%d");             /* lead + invalid trail counted */
@@ -660,12 +663,21 @@ static void test_strcmp(void)
 
     ret = p_strncmp( "abc", "abcd", 3 );
     ok( ret == 0, "wrong ret %d\n", ret );
+#ifdef _WIN64
     ret = p_strncmp( "", "abc", 3 );
-    ok( ret == 0 - 'a' || ret == -1, "wrong ret %d\n", ret );
+    ok( ret == -1, "wrong ret %d\n", ret );
     ret = p_strncmp( "abc", "ab\xa0", 4 );
-    ok( ret == 'c' - 0xa0 || ret == -1, "wrong ret %d\n", ret );
+    ok( ret == -1, "wrong ret %d\n", ret );
     ret = p_strncmp( "ab\xb0", "ab\xa0", 3 );
-    ok( ret == 0xb0 - 0xa0 || ret == 1, "wrong ret %d\n", ret );
+    ok( ret == 1, "wrong ret %d\n", ret );
+#else
+    ret = p_strncmp( "", "abc", 3 );
+    ok( ret == 0 - 'a', "wrong ret %d\n", ret );
+    ret = p_strncmp( "abc", "ab\xa0", 4 );
+    ok( ret == 'c' - 0xa0, "wrong ret %d\n", ret );
+    ret = p_strncmp( "ab\xb0", "ab\xa0", 3 );
+    ok( ret == 0xb0 - 0xa0, "wrong ret %d\n", ret );
+#endif
     ret = p_strncmp( "ab\xb0", "ab\xa0", 2 );
     ok( ret == 0, "wrong ret %d\n", ret );
     ret = p_strncmp( "ab\xc2", "ab\xc2", 3 );
@@ -738,6 +750,55 @@ static void test_strcpy_s(void)
             dest[4] == 'l' && dest[5] == '\0' && dest[6] == '\0' && dest[7] == 'X',
             "Unexpected return data from strcpy: 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x\n",
             dest[0], dest[1], dest[2], dest[3], dest[4], dest[5], dest[6], dest[7]);
+
+    if(!p_strncpy_s)
+    {
+        win_skip("strncpy_s not found\n");
+        return;
+    }
+
+    ret = p_strncpy_s(NULL, 18, big, ARRAY_SIZE(big));
+    ok(ret == EINVAL, "p_strncpy_s expect EINVAL got %d\n", ret);
+
+    dest[0] = 'A';
+    ret = p_strncpy_s(dest, 8, NULL, 1);
+    ok(ret == EINVAL, "expected EINVAL got %d\n", ret);
+    ok(dest[0] == 0, "dest[0] not 0\n");
+
+    dest[0] = 'A';
+    ret = p_strncpy_s(dest, 8, NULL, 0);
+    ok(ret == 0, "expected ERROR_SUCCESS got %d\n", ret);
+    ok(dest[0] == 0, "dest[0] not 0\n");
+
+    dest[0] = 'A';
+    ret = p_strncpy_s(dest, 0, big, ARRAY_SIZE(big));
+    ok(ret == ERANGE || ret == EINVAL, "expected ERANGE/EINVAL got %d\n", ret);
+    ok(dest[0] == 0 || ret == EINVAL, "dest[0] not 0\n");
+
+    ret = p_strncpy_s(dest, 8, small, ARRAY_SIZE(small));
+    ok(ret == 0, "expected 0 got %d\n", ret);
+    ok(!strcmp(dest, small), "dest != small\n");
+
+    dest[0] = 'A';
+    ret = p_strncpy_s(dest, 8, big, ARRAY_SIZE(big));
+    ok(ret == ERANGE || ret == EINVAL, "expected ERANGE/EINVAL got %d\n", ret);
+    ok(dest[0] == 0, "dest[0] not 0\n");
+
+    dest[0] = 'A';
+    ret = p_strncpy_s(dest, 5, big, -1);
+    ok(ret == STRUNCATE, "expected STRUNCATE got %d\n", ret);
+    ok(dest[4] == 0, "dest[4] not 0\n");
+    ok(!memcmp(dest, big, 4), "dest = %s\n", wine_dbgstr_a(dest));
+
+    ret = p_strncpy_s(NULL, 0, (void*)0xdeadbeef, 0);
+    ok(ret == 0, "ret = %d\n", ret);
+
+    dest[0] = '1';
+    dest[1] = 0;
+    ret = p_strncpy_s(dest+1, 4, dest, -1);
+    ok(ret == STRUNCATE, "expected ERROR_SUCCESS got %d\n", ret);
+    ok(dest[0]=='1' && dest[1]=='1' && dest[2]=='1' && dest[3]=='1',
+            "dest = %s\n", wine_dbgstr_a(dest));
 }
 
 #define okchars(dst, b0, b1, b2, b3, b4, b5, b6, b7) \
@@ -2553,6 +2614,53 @@ static void test__strlwr_s(void)
     ok(ret == 0, "Expected _strlwr_s to return 0, got %d\n", ret);
 }
 
+static void test_strncat_s(void)
+{
+    int ret;
+    char dst[4];
+    char src[4];
+
+    if (!p_wcsncat_s)
+    {
+        win_skip("skipping wcsncat_s tests\n");
+        return;
+    }
+
+    strcpy(src, "abc");
+    strcpy(dst, "a");
+    ret = p_strncat_s(NULL, 4, src, 4);
+    ok(ret == EINVAL, "err = %d\n", ret);
+    ret = p_strncat_s(dst, 0, src, 4);
+    ok(ret == EINVAL, "err = %d\n", ret);
+    ok(dst[0] == 'a', "dst %x\n", dst[0]);
+    ret = p_strncat_s(dst, 0, src, _TRUNCATE);
+    ok(ret == EINVAL, "err = %d\n", ret);
+    ret = p_strncat_s(dst, 4, NULL, 1);
+    ok(ret == EINVAL, "err = %d\n", ret);
+    ok(!dst[0], "dst %x\n", dst[0]);
+    ret = p_strncat_s(NULL, 4, src, 0);
+    ok(ret == EINVAL, "err = %d\n", ret);
+    strcpy(dst, "a");
+    ret = p_strncat_s(dst, 4, NULL, 0);
+    ok(ret == 0, "err = %d\n", ret);
+    ok(dst[0] == 'a', "dst %x\n", dst[0]);
+
+    dst[0] = 0;
+    ret = p_strncat_s(dst, 2, src, 4);
+    ok(ret == ERANGE, "err = %d\n", ret);
+
+    dst[0] = 0;
+    ret = p_strncat_s(dst, 2, src, _TRUNCATE);
+    ok(ret == STRUNCATE, "err = %d\n", ret);
+    ok(dst[0] == 'a' && dst[1] == 0, "dst is %s\n", wine_dbgstr_a(dst));
+
+    strcpy(dst, "abc");
+    dst[3] = 'd';
+    ret = p_strncat_s(dst, 4, src, 4);
+    ok(ret == EINVAL, "err = %d\n", ret);
+    ok(!dst[0], "dst %x\n", dst[0]);
+}
+
 static void test_wcsncat_s(void)
 {
     int ret;
@@ -2566,15 +2674,24 @@ static void test_wcsncat_s(void)
     }
 
     wcscpy(src, L"abc");
-    dst[0] = 0;
+    wcscpy(dst, L"a");
     ret = p_wcsncat_s(NULL, 4, src, 4);
     ok(ret == EINVAL, "err = %d\n", ret);
     ret = p_wcsncat_s(dst, 0, src, 4);
     ok(ret == EINVAL, "err = %d\n", ret);
+    ok(dst[0] == 'a', "dst %x\n", dst[0]);
     ret = p_wcsncat_s(dst, 0, src, _TRUNCATE);
     ok(ret == EINVAL, "err = %d\n", ret);
+    ok(dst[0] == 'a', "dst %x\n", dst[0]);
+    ret = p_wcsncat_s(dst, 4, NULL, 1);
+    ok(ret == EINVAL, "err = %d\n", ret);
+    ok(!dst[0], "dst %x\n", dst[0]);
+    ret = p_wcsncat_s(NULL, 4, src, 0);
+    ok(ret == EINVAL, "err = %d\n", ret);
+    wcscpy(dst, L"a");
     ret = p_wcsncat_s(dst, 4, NULL, 0);
     ok(ret == 0, "err = %d\n", ret);
+    ok(dst[0] == 'a', "dst %x\n", dst[0]);
 
     dst[0] = 0;
     ret = p_wcsncat_s(dst, 2, src, 4);
@@ -2589,6 +2706,7 @@ static void test_wcsncat_s(void)
     dst[3] = 'd';
     ret = p_wcsncat_s(dst, 4, src, 4);
     ok(ret == EINVAL, "err = %d\n", ret);
+    ok(!dst[0], "dst %x\n", dst[0]);
 }
 
 static void test__mbsnbcat_s(void)
@@ -2722,6 +2840,7 @@ static void test__mbsupr_s(void)
 {
     errno_t ret;
     unsigned char buffer[20];
+    int cp = _getmbcp();
 
     if (!p_mbsupr_s)
     {
@@ -2761,7 +2880,7 @@ static void test__mbsupr_s(void)
 
     memcpy(buffer, "abcdefgh", sizeof("abcdefgh"));
     errno = EBADF;
-    ret = p_mbsupr_s(buffer, 4);
+    ret = p_mbsupr_s(buffer, sizeof("abcdefgh") - 1);
     ok(ret == EINVAL, "Expected _mbsupr_s to return EINVAL, got %d\n", ret);
     ok(errno == EINVAL, "Expected errno to be EINVAL, got %d\n", errno);
 
@@ -2773,12 +2892,20 @@ static void test__mbsupr_s(void)
        "Expected the output buffer to be \"ABCDEFGH\\0ijklmnop\", got \"%s\"\n",
        buffer);
 
+    _setmbcp(936);
+    memcpy(buffer, "\xa2\xa1\xa2\xa2q", sizeof("\xa2\xa1\xa2\xa2q"));
+    ret = p_mbsupr_s(buffer, sizeof(buffer));
+    ok(ret == 0, "Expected _mbsupr_s to return 0, got %d\n", ret);
+    ok(!memcmp(buffer, "\xa2\xf1\xa2\xf2Q", sizeof("\xa2\xf1\xa2\xf2Q")),
+            "got %s\n", debugstr_a((char*)buffer));
+    _setmbcp(cp);
 }
 
 static void test__mbslwr_s(void)
 {
     errno_t ret;
     unsigned char buffer[20];
+    int cp = _getmbcp();
 
     if (!p_mbslwr_s)
     {
@@ -2818,7 +2945,7 @@ static void test__mbslwr_s(void)
 
     memcpy(buffer, "ABCDEFGH", sizeof("ABCDEFGH"));
     errno = EBADF;
-    ret = p_mbslwr_s(buffer, 4);
+    ret = p_mbslwr_s(buffer, sizeof("ABCDEFGH") - 1);
     ok(ret == EINVAL, "Expected _mbslwr_s to return EINVAL, got %d\n", ret);
     ok(errno == EINVAL, "Expected errno to be EINVAL, got %d\n", errno);
 
@@ -2829,6 +2956,14 @@ static void test__mbslwr_s(void)
     ok(!memcmp(buffer, "abcdefgh\0IJKLMNOP", sizeof("abcdefgh\0IJKLMNOP")),
        "Expected the output buffer to be \"abcdefgh\\0IJKLMNOP\", got \"%s\"\n",
        buffer);
+
+    _setmbcp(936);
+    memcpy(buffer, "\xa2\xf1\xa2\xf2Q", sizeof("\xa2\xf1\xa2\xf2Q"));
+    ret = p_mbslwr_s(buffer, sizeof(buffer));
+    ok(ret == 0, "Expected _mbsupr_s to return 0, got %d\n", ret);
+    ok(!memcmp(buffer, "\xa2\xa1\xa2\xa2q", sizeof("\xa2\xa1\xa2\xa2q")),
+            "got %s\n", debugstr_a((char*)buffer));
+    _setmbcp(cp);
 }
 
 static void test__mbstok(void)
@@ -4498,6 +4633,8 @@ START_TEST(string)
     SET(p_strncmp, "strncmp");
     pstrcpy_s = (void *)GetProcAddress( hMsvcrt,"strcpy_s" );
     pstrcat_s = (void *)GetProcAddress( hMsvcrt,"strcat_s" );
+    p_strncpy_s = (void *)GetProcAddress( hMsvcrt, "strncpy_s" );
+    p_strncat_s = (void *)GetProcAddress( hMsvcrt, "strncat_s" );
     p_mbscat_s = (void*)GetProcAddress( hMsvcrt, "_mbscat_s" );
     p_mbsnbcat_s = (void *)GetProcAddress( hMsvcrt,"_mbsnbcat_s" );
     p_mbsnbcpy_s = (void *)GetProcAddress( hMsvcrt,"_mbsnbcpy_s" );
@@ -4572,6 +4709,7 @@ START_TEST(string)
     test_memcpy_s();
     test_memmove_s();
     test_strcat_s();
+    test_strncat_s();
     test__mbscat_s();
     test__mbsnbcpy_s();
     test__mbscpy_s();

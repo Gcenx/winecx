@@ -22,6 +22,7 @@
  *
  */
 
+#include <assert.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -93,13 +94,11 @@ static void color_or_size_dsa_add (WrappedDsa* wdsa, const WCHAR* name,
 				   const WCHAR* fancyName)
 {
     ThemeColorOrSize item;
-    
-    item.name = HeapAlloc (GetProcessHeap(), 0, 
-	(lstrlenW (name) + 1) * sizeof(WCHAR));
+
+    item.name = malloc ((wcslen (name) + 1) * sizeof(WCHAR));
     lstrcpyW (item.name, name);
 
-    item.fancyName = HeapAlloc (GetProcessHeap(), 0, 
-	(lstrlenW (fancyName) + 1) * sizeof(WCHAR));
+    item.fancyName = malloc ((wcslen (fancyName) + 1) * sizeof(WCHAR));
     lstrcpyW (item.fancyName, fancyName);
 
     DSA_InsertItem (wdsa->dsa, wdsa->count, &item);
@@ -109,8 +108,8 @@ static void color_or_size_dsa_add (WrappedDsa* wdsa, const WCHAR* name,
 static int CALLBACK dsa_destroy_callback (LPVOID p, LPVOID pData)
 {
     ThemeColorOrSize* item = p;
-    HeapFree (GetProcessHeap(), 0, item->name);
-    HeapFree (GetProcessHeap(), 0, item->fancyName);
+    free (item->name);
+    free (item->fancyName);
     return 1;
 }
 
@@ -156,8 +155,8 @@ static int themeFilesCount = 0;
 static int CALLBACK theme_dsa_destroy_callback (LPVOID p, LPVOID pData)
 {
     ThemeFile* item = p;
-    HeapFree (GetProcessHeap(), 0, item->themeFileName);
-    HeapFree (GetProcessHeap(), 0, item->fancyName);
+    free (item->themeFileName);
+    free (item->fancyName);
     free_color_or_size_dsa (&item->colors);
     free_color_or_size_dsa (&item->sizes);
     return 1;
@@ -208,12 +207,10 @@ static BOOL CALLBACK myEnumThemeProc (LPVOID lpReserved,
     create_color_or_size_dsa (&newEntry.sizes);
     fill_theme_string_array (pszThemeFileName, &newEntry.sizes, EnumThemeSizes);
 
-    newEntry.themeFileName = HeapAlloc (GetProcessHeap(), 0, 
-	(lstrlenW (pszThemeFileName) + 1) * sizeof(WCHAR));
+    newEntry.themeFileName = malloc ((wcslen (pszThemeFileName) + 1) * sizeof(WCHAR));
     lstrcpyW (newEntry.themeFileName, pszThemeFileName);
-  
-    newEntry.fancyName = HeapAlloc (GetProcessHeap(), 0, 
-	(lstrlenW (pszThemeName) + 1) * sizeof(WCHAR));
+
+    newEntry.fancyName = malloc ((wcslen (pszThemeName) + 1) * sizeof(WCHAR));
     lstrcpyW (newEntry.fancyName, pszThemeName);
   
     /*list_add_tail (&themeFiles, &newEntry->entry);*/
@@ -507,7 +504,7 @@ static struct
     {-1,                COLOR_INFOTEXT,         L"InfoText"      }, /* IDC_SYSPARAMS_TOOLTIP_TEXT */
     {-1,                COLOR_WINDOW,           L"Window"        }, /* IDC_SYSPARAMS_WINDOW */
     {-1,                COLOR_WINDOWTEXT,       L"WindowText"    }, /* IDC_SYSPARAMS_WINDOW_TEXT */
-    {SM_CXSIZE,         COLOR_ACTIVECAPTION,    L"ActiveTitle"   }, /* IDC_SYSPARAMS_ACTIVE_TITLE */
+    {SM_CYSIZE,         COLOR_ACTIVECAPTION,    L"ActiveTitle"   }, /* IDC_SYSPARAMS_ACTIVE_TITLE */
     {-1,                COLOR_CAPTIONTEXT,      L"TitleText"     }, /* IDC_SYSPARAMS_ACTIVE_TITLE_TEXT */
     {-1,                COLOR_INACTIVECAPTION,  L"InactiveTitle" }, /* IDC_SYSPARAMS_INACTIVE_TITLE */
     {-1,                COLOR_INACTIVECAPTIONTEXT,L"InactiveTitleText" }, /* IDC_SYSPARAMS_INACTIVE_TITLE_TEXT */
@@ -554,15 +551,25 @@ static void set_color_from_theme(const WCHAR *keyName, COLORREF color)
 
 static void do_parse_theme(WCHAR *file)
 {
-    WCHAR keyName[MAX_PATH], keyNameValue[MAX_PATH];
+    WCHAR *keyName, keyNameValue[MAX_PATH];
+    DWORD len, allocLen = 512;
     WCHAR *keyNamePtr = NULL;
     int red = 0, green = 0, blue = 0;
     COLORREF color;
 
     WINE_TRACE("%s\n", wine_dbgstr_w(file));
+    keyName = malloc(sizeof(*keyName) * allocLen);
+    for (;;)
+    {
+        assert(keyName);
+        len = GetPrivateProfileStringW(L"Control Panel\\Colors", NULL, NULL, keyName,
+                                       allocLen, file);
+        if (len < allocLen - 2)
+            break;
 
-    GetPrivateProfileStringW(L"Control Panel\\Colors", NULL, NULL, keyName,
-                             MAX_PATH, file);
+        allocLen *= 2;
+        keyName = realloc(keyName, sizeof(*keyName) * allocLen);
+    }
 
     keyNamePtr = keyName;
     while (*keyNamePtr!=0) {
@@ -580,6 +587,7 @@ static void do_parse_theme(WCHAR *file)
         keyNamePtr+=lstrlenW(keyNamePtr);
         keyNamePtr++;
     }
+    free(keyName);
 }
 
 static void on_theme_install(HWND dialog)
@@ -788,7 +796,7 @@ static void update_shell_folder_listview(HWND dialog) {
         item.iSubItem = 1;
         item.pszText = strdupU2W(asfiInfo[i].szLinkTarget);
         SendDlgItemMessageW(dialog, IDC_LIST_SFPATHS, LVM_SETITEMW, 0, (LPARAM)&item);
-        HeapFree(GetProcessHeap(), 0, item.pszText);
+        free(item.pszText);
     }
 
     /* Ensure that the previously selected item is selected again. */
@@ -811,7 +819,7 @@ static void on_shell_folder_selection_changed(HWND hDlg, LPNMLISTVIEW lpnm) {
             EnableWindow(GetDlgItem(hDlg, IDC_BROWSE_SFPATH), 1);
             link = strdupU2W(psfiSelected->szLinkTarget);
             set_textW(hDlg, IDC_EDIT_SFPATH, link);
-            HeapFree(GetProcessHeap(), 0, link);
+            free(link);
         } else {
             CheckDlgButton(hDlg, IDC_LINK_SFPATH, BST_UNCHECKED);
             EnableWindow(GetDlgItem(hDlg, IDC_EDIT_SFPATH), 0);
@@ -837,7 +845,7 @@ static void on_shell_folder_edit_changed(HWND hDlg) {
                                     MAKELPARAM(LVNI_SELECTED,0));
 
     if (!text || !psfiSelected || iSel < 0) {
-        HeapFree(GetProcessHeap(), 0, text);
+        free(text);
         return;
     }
 
@@ -850,7 +858,7 @@ static void on_shell_folder_edit_changed(HWND hDlg) {
     item.pszText = text;
     SendDlgItemMessageW(hDlg, IDC_LIST_SFPATHS, LVM_SETITEMW, 0, (LPARAM)&item);
 
-    HeapFree(GetProcessHeap(), 0, text);
+    free(text);
 
     SendMessageW(GetParent(hDlg), PSM_CHANGED, 0, 0);
 }
@@ -1082,7 +1090,7 @@ static void init_mime_types(HWND hDlg)
 
     CheckDlgButton(hDlg, IDC_ENABLE_FILE_ASSOCIATIONS, state);
 
-    HeapFree(GetProcessHeap(), 0, buf);
+    free(buf);
 }
 
 static void update_mime_types(HWND hDlg)
@@ -1093,6 +1101,24 @@ static void update_mime_types(HWND hDlg)
         state = L"N";
 
     set_reg_key(config_key, keypath(L"FileOpenAssociations"), L"Enable", state);
+}
+
+static BOOL CALLBACK update_window_pos_proc(HWND hwnd, LPARAM lp)
+{
+    RECT rect;
+
+    GetClientRect(hwnd, &rect);
+    AdjustWindowRectEx(&rect, GetWindowLongW(hwnd, GWL_STYLE), !!GetMenu(hwnd),
+                       GetWindowLongW(hwnd, GWL_EXSTYLE));
+    SetWindowPos(hwnd, 0, 0, 0, rect.right - rect.left, rect.bottom - rect.top,
+                 SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+    return TRUE;
+}
+
+/* Adjust the rectangle for top-level windows because the new non-client metrics may be different */
+static void update_window_pos(void)
+{
+    EnumWindows(update_window_pos_proc, 0);
 }
 
 INT_PTR CALLBACK
@@ -1145,7 +1171,7 @@ ThemeDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
                             if (text)
                             {
                                 metrics[index].size = wcstol(text, NULL, 10);
-                                HeapFree(GetProcessHeap(), 0, text);
+                                free(text);
                             }
                             else
                             {
@@ -1249,6 +1275,7 @@ ThemeDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     read_shell_folder_link_targets();
                     update_shell_folder_listview(hDlg);
                     update_mime_types(hDlg);
+                    update_window_pos();
                     SetWindowLongPtrW(hDlg, DWLP_MSGRESULT, PSNRET_NOERROR);
                     break;
                 }

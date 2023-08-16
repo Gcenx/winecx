@@ -25,8 +25,6 @@
 #ifndef _WINSPLP_
 #define _WINSPLP_
 
-#include "wine/winheader_enter.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -429,7 +427,5 @@ BOOL   WINAPI SpoolerFindClosePrinterChangeNotification(HANDLE hPrinter);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
-
-#include "wine/winheader_exit.h"
 
 #endif  /* _WINSPLP_ */

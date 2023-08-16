@@ -37,35 +37,136 @@ LPCSTR debugstr_us( const UNICODE_STRING *us )
     return debugstr_wn(us->Buffer, us->Length / sizeof(WCHAR));
 }
 
-static void
-NTDLL_mergesort( void *arr, void *barr, size_t elemsize, int(__cdecl *compar)(const void *, const void *),
-                 size_t left, size_t right )
+static int __cdecl compare_wrapper(void *ctx, const void *e1, const void *e2)
 {
-    if(right>left) {
-        size_t i, j, k, m;
-        m=left+(right-left)/2;
-        NTDLL_mergesort( arr, barr, elemsize, compar, left, m);
-        NTDLL_mergesort( arr, barr, elemsize, compar, m+1, right);
+    int (__cdecl *compare)( const void *, const void * ) = ctx;
+    return compare( e1, e2 );
+}
 
-#define X(a,i) ((char*)a+elemsize*(i))
-        for (k=left, i=left, j=m+1; i<=m && j<=right; k++) {
-            if (compar(X(arr, i), X(arr,j)) <= 0) {
-                memcpy(X(barr,k), X(arr, i), elemsize);
-                i++;
-            } else {
-                memcpy(X(barr,k), X(arr, j), elemsize);
-                j++;
-            }
+static inline void swap(char *l, char *r, size_t size)
+{
+    char tmp;
+
+    while(size--) {
+        tmp = *l;
+        *l++ = *r;
+        *r++ = tmp;
+    }
+}
+
+static void small_sort(void *base, size_t nmemb, size_t size,
+        int (CDECL *compar)(void *, const void *, const void *), void *context)
+{
+    size_t e, i;
+    char *max, *p;
+
+    for(e=nmemb; e>1; e--) {
+        max = base;
+        for(i=1; i<e; i++) {
+            p = (char*)base + i*size;
+            if(compar(context, p, max) > 0)
+                max = p;
         }
-        if (i<=m)
-            memcpy(X(barr,k), X(arr,i), (m-i+1)*elemsize);
-        else
-            memcpy(X(barr,k), X(arr,j), (right-j+1)*elemsize);
 
-        memcpy(X(arr, left), X(barr, left), (right-left+1)*elemsize);
+        if(p != max)
+            swap(p, max, size);
+    }
+}
+
+static void quick_sort(void *base, size_t nmemb, size_t size,
+        int (CDECL *compar)(void *, const void *, const void *), void *context)
+{
+    size_t stack_lo[8*sizeof(size_t)], stack_hi[8*sizeof(size_t)];
+    size_t beg, end, lo, hi, med;
+    int stack_pos;
+
+    stack_pos = 0;
+    stack_lo[stack_pos] = 0;
+    stack_hi[stack_pos] = nmemb-1;
+
+#define X(i) ((char*)base+size*(i))
+    while(stack_pos >= 0) {
+        beg = stack_lo[stack_pos];
+        end = stack_hi[stack_pos--];
+
+        if(end-beg < 8) {
+            small_sort(X(beg), end-beg+1, size, compar, context);
+            continue;
+        }
+
+        lo = beg;
+        hi = end;
+        med = lo + (hi-lo+1)/2;
+        if(compar(context, X(lo), X(med)) > 0)
+            swap(X(lo), X(med), size);
+        if(compar(context, X(lo), X(hi)) > 0)
+            swap(X(lo), X(hi), size);
+        if(compar(context, X(med), X(hi)) > 0)
+            swap(X(med), X(hi), size);
+
+        lo++;
+        hi--;
+        while(1) {
+            while(lo <= hi) {
+                if(lo!=med && compar(context, X(lo), X(med))>0)
+                    break;
+                lo++;
+            }
+
+            while(med != hi) {
+                if(compar(context, X(hi), X(med)) <= 0)
+                    break;
+                hi--;
+            }
+
+            if(hi < lo)
+                break;
+
+            swap(X(lo), X(hi), size);
+            if(hi == med)
+                med = lo;
+            lo++;
+            hi--;
+        }
+
+        while(hi > beg) {
+            if(hi!=med && compar(context, X(hi), X(med))!=0)
+                break;
+            hi--;
+        }
+
+        if(hi-beg >= end-lo) {
+            stack_lo[++stack_pos] = beg;
+            stack_hi[stack_pos] = hi;
+            stack_lo[++stack_pos] = lo;
+            stack_hi[stack_pos] = end;
+        }else {
+            stack_lo[++stack_pos] = lo;
+            stack_hi[stack_pos] = end;
+            stack_lo[++stack_pos] = beg;
+            stack_hi[stack_pos] = hi;
+        }
     }
 #undef X
 }
+
+
+/*********************************************************************
+ *                  qsort_s   (NTDLL.@)
+ */
+void __cdecl qsort_s( void *base, size_t nmemb, size_t size,
+                      int (__cdecl *compar)(void *, const void *, const void *), void *context )
+{
+    const size_t total_size = nmemb * size;
+
+    if (!base && nmemb) return;
+    if (!size) return;
+    if (!compar) return;
+    if (total_size / size != nmemb) return;
+    if (nmemb < 2) return;
+    quick_sort( base, nmemb, size, compar, context );
+}
+
 
 /*********************************************************************
  *                  qsort   (NTDLL.@)
@@ -73,26 +174,26 @@ NTDLL_mergesort( void *arr, void *barr, size_t elemsize, int(__cdecl *compar)(co
 void __cdecl qsort( void *base, size_t nmemb, size_t size,
                     int (__cdecl *compar)(const void *, const void *) )
 {
-    void *secondarr;
-    if (nmemb < 2 || size == 0) return;
-    secondarr = RtlAllocateHeap (GetProcessHeap(), 0, nmemb*size);
-    NTDLL_mergesort( base, secondarr, size, compar, 0, nmemb-1 );
-    RtlFreeHeap (GetProcessHeap(),0, secondarr);
+    qsort_s( base, nmemb, size, compare_wrapper, compar );
 }
 
+
 /*********************************************************************
- *                  bsearch   (NTDLL.@)
+ *                  bsearch_s   (NTDLL.@)
  */
-void * __cdecl bsearch( const void *key, const void *base, size_t nmemb,
-                        size_t size, int (__cdecl *compar)(const void *, const void *) )
+void * __cdecl bsearch_s( const void *key, const void *base, size_t nmemb, size_t size,
+                          int (__cdecl *compare)(void *, const void *, const void *), void *ctx )
 {
     ssize_t min = 0;
     ssize_t max = nmemb - 1;
 
+    if (!size) return NULL;
+    if (!compare) return NULL;
+
     while (min <= max)
     {
         ssize_t cursor = min + (max - min) / 2;
-        int ret = compar(key,(const char *)base+(cursor*size));
+        int ret = compare(ctx, key,(const char *)base+(cursor*size));
         if (!ret)
             return (char*)base+(cursor*size);
         if (ret < 0)
@@ -102,6 +203,17 @@ void * __cdecl bsearch( const void *key, const void *base, size_t nmemb,
     }
     return NULL;
 }
+
+
+/*********************************************************************
+ *                  bsearch   (NTDLL.@)
+ */
+void * __cdecl bsearch( const void *key, const void *base, size_t nmemb,
+                        size_t size, int (__cdecl *compar)(const void *, const void *) )
+{
+    return bsearch_s( key, base, nmemb, size, compare_wrapper, compar );
+}
+
 
 
 /*********************************************************************
@@ -132,7 +244,7 @@ NTSTATUS WINAPI WinSqmEndSession(HANDLE session)
  */
 void WINAPI WinSqmIncrementDWORD(DWORD unk1, DWORD unk2, DWORD unk3)
 {
-    FIXME("(%d, %d, %d): stub\n", unk1, unk2, unk3);
+    FIXME("(%ld, %ld, %ld): stub\n", unk1, unk2, unk3);
 }
 
 /*********************************************************************
@@ -149,7 +261,7 @@ BOOL WINAPI WinSqmIsOptedIn(void)
  */
 HANDLE WINAPI WinSqmStartSession(GUID *sessionguid, DWORD sessionid, DWORD unknown1)
 {
-    FIXME("(%p, 0x%x, 0x%x): stub\n", sessionguid, sessionid, unknown1);
+    FIXME("(%p, 0x%lx, 0x%lx): stub\n", sessionguid, sessionid, unknown1);
     return INVALID_HANDLE_VALUE;
 }
 
@@ -158,7 +270,7 @@ HANDLE WINAPI WinSqmStartSession(GUID *sessionguid, DWORD sessionid, DWORD unkno
  */
 void WINAPI WinSqmSetDWORD(HANDLE session, DWORD datapoint_id, DWORD datapoint_value)
 {
-    FIXME("(%p, %d, %d): stub\n", session, datapoint_id, datapoint_value);
+    FIXME("(%p, %ld, %ld): stub\n", session, datapoint_id, datapoint_value);
 }
 
 /******************************************************************************
@@ -168,7 +280,7 @@ ULONG WINAPI EtwEventActivityIdControl(ULONG code, GUID *guid)
 {
     static int once;
 
-    if (!once++) FIXME("0x%x, %p: stub\n", code, guid);
+    if (!once++) FIXME("0x%lx, %p: stub\n", code, guid);
     return ERROR_SUCCESS;
 }
 
@@ -210,7 +322,7 @@ ULONG WINAPI EtwEventUnregister( REGHANDLE handle )
 ULONG WINAPI EtwEventSetInformation( REGHANDLE handle, EVENT_INFO_CLASS class, void *info,
                                      ULONG length )
 {
-    FIXME("(%s, %u, %p, %u) stub\n", wine_dbgstr_longlong(handle), class, info, length);
+    FIXME("(%s, %u, %p, %lu) stub\n", wine_dbgstr_longlong(handle), class, info, length);
     return ERROR_SUCCESS;
 }
 
@@ -230,7 +342,7 @@ ULONG WINAPI EtwEventWriteString( REGHANDLE handle, UCHAR level, ULONGLONG keywo
 ULONG WINAPI EtwEventWriteTransfer( REGHANDLE handle, PCEVENT_DESCRIPTOR descriptor, LPCGUID activity,
                                     LPCGUID related, ULONG count, PEVENT_DATA_DESCRIPTOR data )
 {
-    FIXME("%s, %p, %s, %s, %u, %p: stub\n", wine_dbgstr_longlong(handle), descriptor,
+    FIXME("%s, %p, %s, %s, %lu, %p: stub\n", wine_dbgstr_longlong(handle), descriptor,
           debugstr_guid(activity), debugstr_guid(related), count, data);
     return ERROR_SUCCESS;
 }
@@ -260,7 +372,7 @@ ULONG WINAPI EtwRegisterTraceGuidsW( WMIDPREQUEST RequestAddress,
                 TRACE_GUID_REGISTRATION *TraceGuidReg, const WCHAR *MofImagePath,
                 const WCHAR *MofResourceName, TRACEHANDLE *RegistrationHandle )
 {
-    WARN("(%p, %p, %s, %u, %p, %s, %s, %p): stub\n", RequestAddress, RequestContext,
+    WARN("(%p, %p, %s, %lu, %p, %s, %s, %p): stub\n", RequestAddress, RequestContext,
           debugstr_guid(ControlGuid), GuidCount, TraceGuidReg, debugstr_w(MofImagePath),
           debugstr_w(MofResourceName), RegistrationHandle);
 
@@ -285,7 +397,7 @@ ULONG WINAPI EtwRegisterTraceGuidsA( WMIDPREQUEST RequestAddress,
                 TRACE_GUID_REGISTRATION *TraceGuidReg, const char *MofImagePath,
                 const char *MofResourceName, TRACEHANDLE *RegistrationHandle )
 {
-    WARN("(%p, %p, %s, %u, %p, %s, %s, %p): stub\n", RequestAddress, RequestContext,
+    WARN("(%p, %p, %s, %lu, %p, %s, %s, %p): stub\n", RequestAddress, RequestContext,
           debugstr_guid(ControlGuid), GuidCount, TraceGuidReg, debugstr_a(MofImagePath),
           debugstr_a(MofResourceName), RegistrationHandle);
     return ERROR_SUCCESS;
@@ -318,7 +430,7 @@ BOOLEAN WINAPI EtwEventEnabled( REGHANDLE handle, const EVENT_DESCRIPTOR *descri
 ULONG WINAPI EtwEventWrite( REGHANDLE handle, const EVENT_DESCRIPTOR *descriptor, ULONG count,
     EVENT_DATA_DESCRIPTOR *data )
 {
-    FIXME("(%s, %p, %u, %p): stub\n", wine_dbgstr_longlong(handle), descriptor, count, data);
+    FIXME("(%s, %p, %lu, %p): stub\n", wine_dbgstr_longlong(handle), descriptor, count, data);
     return ERROR_SUCCESS;
 }
 
@@ -364,7 +476,7 @@ ULONG WINAPI EtwLogTraceEvent( TRACEHANDLE SessionHandle, PEVENT_TRACE_HEADER Ev
 ULONG WINAPI EtwTraceMessageVa( TRACEHANDLE handle, ULONG flags, LPGUID guid, USHORT number,
                                 va_list args )
 {
-    FIXME("(%s %x %s %d) : stub\n", wine_dbgstr_longlong(handle), flags, debugstr_guid(guid), number);
+    FIXME("(%s %lx %s %d) : stub\n", wine_dbgstr_longlong(handle), flags, debugstr_guid(guid), number);
     return ERROR_SUCCESS;
 }
 
