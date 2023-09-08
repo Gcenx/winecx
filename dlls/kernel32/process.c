@@ -209,6 +209,31 @@ void WINAPI ExitProcess( DWORD status )
 
 #endif
 
+#ifdef __i386__
+/* CX HACK 22643 */
+static BOOL WINAPI check_is_steamwebhelper( INIT_ONCE *once, void *param, void **ctx )
+{
+    BOOL *is_swh = param;
+    WCHAR name[MAX_PATH], *module_exe;
+    if (GetModuleFileNameW(NULL, name, ARRAYSIZE(name)))
+    {
+        module_exe = wcsrchr(name, '\\');
+        module_exe = module_exe ? module_exe + 1 : name;
+        *is_swh = !wcsicmp(module_exe, L"steamwebhelper.exe");
+    }
+
+    return TRUE;
+}
+
+static BOOL is_steamwebhelper(void)
+{
+    static BOOL is_swh = FALSE;
+    static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
+    InitOnceExecuteOnce( &once, check_is_steamwebhelper, &is_swh, NULL );
+    return is_swh;
+}
+#endif
+
 /***********************************************************************
  * GetExitCodeProcess           [KERNEL32.@]
  *
@@ -229,6 +254,17 @@ BOOL WINAPI GetExitCodeProcess( HANDLE hProcess, LPDWORD lpExitCode )
     if (!set_ntstatus( NtQueryInformationProcess( hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), NULL )))
         return FALSE;
     if (lpExitCode) *lpExitCode = pbi.ExitStatus;
+#ifdef __i386__
+    /* CX HACK 22643:
+     * A Rosetta bug in macOS Monterey causes steamwebhelpers to die,
+     * return exit code 1 so they get restarted.
+     */
+    if (lpExitCode && *lpExitCode == 0 && is_steamwebhelper())
+    {
+        TRACE("For steamwebhelper, returning exit code 1\n");
+        *lpExitCode = 1;
+    }
+#endif
     return TRUE;
 }
 
