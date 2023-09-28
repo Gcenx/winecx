@@ -2186,6 +2186,15 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name, 
     TRACE_(loaddll)( "Loaded %s at %p: %s\n", debugstr_w(wm->ldr.FullDllName.Buffer), *module,
                      is_builtin ? "builtin" : "native" );
 
+#if defined(__x86_64__)
+    /* CW HACK 22434 */
+    if (is_builtin == FALSE)
+    {
+	struct pe_module_loaded_params params = { *module, (void*)((BYTE*)*module + map_size) };
+	NTDLL_UNIX_CALL( pe_module_loaded, &params );
+    }
+#endif
+
     wm->ldr.LoadCount = 1;
     *pwm = wm;
     *module = NULL;
@@ -2840,6 +2849,36 @@ static void patch_libcef( const WCHAR* libname, WINE_MODREF** pwm )
             before_72_0_3626_121_3, after_72_0_3626_121_3,
             sizeof(before_72_0_3626_121_3),
             0x23bb369,
+            TRUE
+        },
+
+        /* CW HACK 16900:
+         * libcef.dll 72.0.3626.96 used by the game Wizard101.
+         * Patch also works for version 3.3626.1886.g162fdec downloadable from CEF builds.
+         */
+        {
+            L"libcef.dll",
+            "72.0.3626.96",
+            /* This patch is identical to the one for 72.0.3626.121, just at a different offset. */
+            before_72_0_3626_121_1, after_72_0_3626_121_1,
+            sizeof(before_72_0_3626_121_1),
+            0x23bb82d,
+            FALSE
+        },
+        {
+            L"libcef.dll",
+            "72.0.3626.96",
+            before_72_0_3626_121_2, after_72_0_3626_121_2,
+            sizeof(before_72_0_3626_121_2),
+            0x23bb8a9,
+            FALSE
+        },
+        {
+            L"libcef.dll",
+            "72.0.3626.96",
+            before_72_0_3626_121_3, after_72_0_3626_121_3,
+            sizeof(before_72_0_3626_121_3),
+            0x23bb8e9,
             TRUE
         },
 

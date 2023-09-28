@@ -19,8 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include <stdarg.h>
 
 #include "windef.h"
@@ -425,7 +423,7 @@ static int add_data(struct Vector *v, const void *pData, int size)
 static int find_data(const struct Vector *v, const void *pData, int size)
 {
     int index;
-    for (index = 0; index < v->current; index++)
+    for (index = 0; index + size <= v->current; index++)
         if (!memcmp(v->pData + index, pData, size))
             return index;
     /* not found */

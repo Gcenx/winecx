@@ -1452,7 +1452,7 @@ NTSTATUS wow64_wgl_wglDeleteContext( void *args )
 #ifdef __APPLE__
     struct wgl_handle *ptr = get_handle_ptr(params.oldContext, HANDLE_CONTEXT);
 
-    free_mapped_buffers(ptr->u.context);
+    if (ptr) free_mapped_buffers(ptr->u.context);
 #endif
     if (!(status = wgl_wglDeleteContext( &params ))) update_teb32_context( params.teb );
     params32->ret = params.ret;

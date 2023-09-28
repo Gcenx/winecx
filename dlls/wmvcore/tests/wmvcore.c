@@ -1547,7 +1547,7 @@ static void test_sync_reader_types(void)
         if (IsEqualGUID(&majortype, &MEDIATYPE_Audio))
             test_stream_media_props(config, &MEDIATYPE_Audio, &MEDIASUBTYPE_MSAUDIO1, &FORMAT_WaveFormatEx, TRUE);
         else
-            test_stream_media_props(config, &MEDIATYPE_Video, &MEDIASUBTYPE_WMV1, &FORMAT_VideoInfo, TRUE);
+            test_stream_media_props(config, &MEDIATYPE_Video, &MEDIASUBTYPE_WMV1, &FORMAT_VideoInfo, FALSE);
 
         ref = IWMStreamConfig_Release(config);
         ok(!ref, "Got outstanding refcount %ld.\n", ref);
@@ -3427,7 +3427,7 @@ static void test_async_reader_types(void)
         if (IsEqualGUID(&majortype, &MEDIATYPE_Audio))
             test_stream_media_props(config, &MEDIATYPE_Audio, &MEDIASUBTYPE_MSAUDIO1, &FORMAT_WaveFormatEx, TRUE);
         else
-            test_stream_media_props(config, &MEDIATYPE_Video, &MEDIASUBTYPE_WMV1, &FORMAT_VideoInfo, TRUE);
+            test_stream_media_props(config, &MEDIATYPE_Video, &MEDIASUBTYPE_WMV1, &FORMAT_VideoInfo, FALSE);
 
         ref = IWMStreamConfig_Release(config);
         ok(!ref, "Got outstanding refcount %ld.\n", ref);

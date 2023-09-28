@@ -974,11 +974,14 @@ HRESULT WINAPI MFTUnregisterLocal(IClassFactory *factory)
 
 MFTIME WINAPI MFGetSystemTime(void)
 {
-    MFTIME mf;
+    static LARGE_INTEGER frequency;
+    LARGE_INTEGER counter;
 
-    GetSystemTimeAsFileTime( (FILETIME*)&mf );
+    if (!frequency.QuadPart)
+        QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&counter);
 
-    return mf;
+    return counter.QuadPart * 10000000 / frequency.QuadPart;
 }
 
 static BOOL mft_is_type_info_match(struct mft_registration *mft, const GUID *category, UINT32 flags,
@@ -9463,4 +9466,29 @@ LONGLONG WINAPI MFllMulDiv(LONGLONG val, LONGLONG num, LONGLONG denom, LONGLONG 
     if (ret >= I64_MAX) return LLOVERFLOW;
     return sign ? -(LONGLONG)ret : ret;
 #undef LLOVERFLOW
+}
+
+/***********************************************************************
+ *      MFCreatePathFromURL (mfplat.@)
+ */
+HRESULT WINAPI MFCreatePathFromURL(const WCHAR *url, WCHAR **ret_path)
+{
+    WCHAR path[MAX_PATH];
+    DWORD length;
+    HRESULT hr;
+
+    TRACE("%s, %p.\n", debugstr_w(url), ret_path);
+
+    if (!url || !ret_path)
+        return E_POINTER;
+
+    length = ARRAY_SIZE(path);
+    if (FAILED(hr = PathCreateFromUrlW(url, path, &length, 0)))
+        return hr;
+
+    if (!(*ret_path = CoTaskMemAlloc((length + 1) * sizeof(*path))))
+        return E_OUTOFMEMORY;
+
+    memcpy(*ret_path, path, (length + 1) * sizeof(*path));
+    return S_OK;
 }

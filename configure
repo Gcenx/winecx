@@ -2570,10 +2570,10 @@ Some influential environment variables:
   PULSE_LIBS  Linker flags for libpulse, overriding pkg-config
   GSTREAMER_CFLAGS
               C compiler flags for gstreamer-1.0 gstreamer-video-1.0
-              gstreamer-audio-1.0, overriding pkg-config
+              gstreamer-audio-1.0 gstreamer-tag-1.0, overriding pkg-config
   GSTREAMER_LIBS
               Linker flags for gstreamer-1.0 gstreamer-video-1.0
-              gstreamer-audio-1.0, overriding pkg-config
+              gstreamer-audio-1.0 gstreamer-tag-1.0, overriding pkg-config
   UDEV_CFLAGS C compiler flags for libudev, overriding pkg-config
   UDEV_LIBS   Linker flags for libudev, overriding pkg-config
   UNWIND_CFLAGS
@@ -9791,99 +9791,14 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
     WINELOADER_LDFLAGS="-Wl,-pie,-segalign,0x1000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist"
 
-    wine_can_build_preloader=yes
-    WINEPRELOADER_LDFLAGS="-nostartfiles -nodefaultlibs -e _start -ldylib1.o -Wl,-image_base,0x7d400000,-segalign,0x1000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist,-segaddr,WINE_4GB_RESERVE,0x100000000"
-    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Wl,-no_new_main -e _main" >&5
-printf %s "checking whether the compiler supports -Wl,-no_new_main -e _main... " >&6; }
-if test ${ac_cv_cflags__Wl__no_new_main__e__main+y}
-then :
-  printf %s "(cached) " >&6
-else $as_nop
-  ac_wine_try_cflags_saved=$CFLAGS
-CFLAGS="$CFLAGS -Wl,-no_new_main -e _main"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-int main(int argc, char **argv) { return 0; }
-_ACEOF
-if ac_fn_c_try_link "$LINENO"
-then :
-  ac_cv_cflags__Wl__no_new_main__e__main=yes
-else $as_nop
-  ac_cv_cflags__Wl__no_new_main__e__main=no
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.beam \
-    conftest$ac_exeext conftest.$ac_ext
-CFLAGS=$ac_wine_try_cflags_saved
-fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Wl__no_new_main__e__main" >&5
-printf "%s\n" "$ac_cv_cflags__Wl__no_new_main__e__main" >&6; }
-if test "x$ac_cv_cflags__Wl__no_new_main__e__main" = xyes
-then :
-  WINEPRELOADER_LDFLAGS="-Wl,-no_new_main $WINEPRELOADER_LDFLAGS"
-                     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Wl,-no_new_main -e _main -mmacosx-version-min=10.7 -nostartfiles -nodefaultlibs" >&5
-printf %s "checking whether the compiler supports -Wl,-no_new_main -e _main -mmacosx-version-min=10.7 -nostartfiles -nodefaultlibs... " >&6; }
-if test ${ac_cv_cflags__Wl__no_new_main__e__main__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs+y}
-then :
-  printf %s "(cached) " >&6
-else $as_nop
-  ac_wine_try_cflags_saved=$CFLAGS
-CFLAGS="$CFLAGS -Wl,-no_new_main -e _main -mmacosx-version-min=10.7 -nostartfiles -nodefaultlibs"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-int main(int argc, char **argv) { return 0; }
-_ACEOF
-if ac_fn_c_try_link "$LINENO"
-then :
-  ac_cv_cflags__Wl__no_new_main__e__main__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs=yes
-else $as_nop
-  ac_cv_cflags__Wl__no_new_main__e__main__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs=no
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.beam \
-    conftest$ac_exeext conftest.$ac_ext
-CFLAGS=$ac_wine_try_cflags_saved
-fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Wl__no_new_main__e__main__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs" >&5
-printf "%s\n" "$ac_cv_cflags__Wl__no_new_main__e__main__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs" >&6; }
-if test "x$ac_cv_cflags__Wl__no_new_main__e__main__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs" = xyes
-then :
-  WINEPRELOADER_LDFLAGS="-mmacosx-version-min=10.7 $WINEPRELOADER_LDFLAGS"
-else $as_nop
-  wine_can_build_preloader=no
-fi
-else $as_nop
-  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -mmacosx-version-min=10.7 -nostartfiles -nodefaultlibs" >&5
-printf %s "checking whether the compiler supports -mmacosx-version-min=10.7 -nostartfiles -nodefaultlibs... " >&6; }
-if test ${ac_cv_cflags__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs+y}
-then :
-  printf %s "(cached) " >&6
-else $as_nop
-  ac_wine_try_cflags_saved=$CFLAGS
-CFLAGS="$CFLAGS -mmacosx-version-min=10.7 -nostartfiles -nodefaultlibs"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-int main(int argc, char **argv) { return 0; }
-_ACEOF
-if ac_fn_c_try_link "$LINENO"
-then :
-  ac_cv_cflags__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs=yes
-else $as_nop
-  ac_cv_cflags__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs=no
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.beam \
-    conftest$ac_exeext conftest.$ac_ext
-CFLAGS=$ac_wine_try_cflags_saved
-fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs" >&5
-printf "%s\n" "$ac_cv_cflags__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs" >&6; }
-if test "x$ac_cv_cflags__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs" = xyes
-then :
-  WINEPRELOADER_LDFLAGS="-mmacosx-version-min=10.7 $WINEPRELOADER_LDFLAGS"
-else $as_nop
-  wine_can_build_preloader=no
-fi
-fi
+    case $host_cpu in
+      *i[3456]86*|*x86_64*) wine_can_build_preloader=yes ;;
+      *)                      wine_can_build_preloader=no ;;
+    esac
+
     if test "$wine_can_build_preloader" = "yes"
     then
+        WINEPRELOADER_LDFLAGS="-nostartfiles -nodefaultlibs -e _start -ldylib1.o -mmacosx-version-min=10.7 -Wl,-no_new_main,-segalign,0x1000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist"
         { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Wl,-no_pie" >&5
 printf %s "checking whether the compiler supports -Wl,-no_pie... " >&6; }
 if test ${ac_cv_cflags__Wl__no_pie+y}
@@ -9912,6 +9827,14 @@ if test "x$ac_cv_cflags__Wl__no_pie" = xyes
 then :
   WINEPRELOADER_LDFLAGS="-Wl,-no_pie $WINEPRELOADER_LDFLAGS"
 fi
+        case $host_cpu in
+          *i[3456]86*)
+            WINEPRELOADER_LDFLAGS="-Wl,-image_base,0x7d400000 $WINEPRELOADER_LDFLAGS"
+            ;;
+          *x86_64*)
+            WINEPRELOADER_LDFLAGS="-Wl,-image_base,0x200000000,-segalign,0x1000,-segaddr,WINE_RESERVE,0x1000 $WINEPRELOADER_LDFLAGS"
+            ;;
+        esac
                 WINELOADER_LDFLAGS="$WINELOADER_LDFLAGS -mmacosx-version-min=10.7"
     else
         as_fn_append wine_warnings "|can't build Wine preloader; many programs won't work"
@@ -17101,7 +17024,7 @@ if ${GSTREAMER_CFLAGS:+false} :
 then :
   if test ${PKG_CONFIG+y}
 then :
-  GSTREAMER_CFLAGS=`$PKG_CONFIG --cflags gstreamer-1.0 gstreamer-video-1.0 gstreamer-audio-1.0 2>conftest.err`
+  GSTREAMER_CFLAGS=`$PKG_CONFIG --cflags gstreamer-1.0 gstreamer-video-1.0 gstreamer-audio-1.0 gstreamer-tag-1.0 2>conftest.err`
 fi
 fi
 
@@ -17109,15 +17032,15 @@ if ${GSTREAMER_LIBS:+false} :
 then :
   if test ${PKG_CONFIG+y}
 then :
-  GSTREAMER_LIBS=`$PKG_CONFIG --libs gstreamer-1.0 gstreamer-video-1.0 gstreamer-audio-1.0 2>/dev/null`
+  GSTREAMER_LIBS=`$PKG_CONFIG --libs gstreamer-1.0 gstreamer-video-1.0 gstreamer-audio-1.0 gstreamer-tag-1.0 2>/dev/null`
 fi
 fi
 
 
-printf "%s\n" "$as_me:${as_lineno-$LINENO}: gstreamer-1.0 gstreamer-video-1.0 gstreamer-audio-1.0 cflags: $GSTREAMER_CFLAGS" >&5
-printf "%s\n" "$as_me:${as_lineno-$LINENO}: gstreamer-1.0 gstreamer-video-1.0 gstreamer-audio-1.0 libs: $GSTREAMER_LIBS" >&5
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: gstreamer-1.0 gstreamer-video-1.0 gstreamer-audio-1.0 gstreamer-tag-1.0 cflags: $GSTREAMER_CFLAGS" >&5
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: gstreamer-1.0 gstreamer-video-1.0 gstreamer-audio-1.0 gstreamer-tag-1.0 libs: $GSTREAMER_LIBS" >&5
 if test -s conftest.err; then
-     printf %s "$as_me:${as_lineno-$LINENO}: gstreamer-1.0 gstreamer-video-1.0 gstreamer-audio-1.0 errors: " >&5
+     printf %s "$as_me:${as_lineno-$LINENO}: gstreamer-1.0 gstreamer-video-1.0 gstreamer-audio-1.0 gstreamer-tag-1.0 errors: " >&5
      cat conftest.err >&5
 fi
 rm -f conftest.err

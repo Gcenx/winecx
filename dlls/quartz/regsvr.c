@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #define COBJMACROS
 #include <stdarg.h>
 #include <string.h>
@@ -259,8 +257,8 @@ static struct regsvr_filter const filter_list[] = {
     { NULL }		/* list terminator */
 };
 
-extern HRESULT WINAPI QUARTZ_DllRegisterServer(void) DECLSPEC_HIDDEN;
-extern HRESULT WINAPI QUARTZ_DllUnregisterServer(void) DECLSPEC_HIDDEN;
+extern HRESULT WINAPI QUARTZ_DllRegisterServer(void);
+extern HRESULT WINAPI QUARTZ_DllUnregisterServer(void);
 
 /***********************************************************************
  *		DllRegisterServer (QUARTZ.@)

@@ -800,6 +800,7 @@ static void session_clear_presentation(struct media_session *session)
 
     IMFTopology_Clear(session->presentation.current_topology);
     session->presentation.topo_status = MF_TOPOSTATUS_INVALID;
+    session->presentation.flags = 0;
 
     LIST_FOR_EACH_ENTRY_SAFE(source, source2, &session->presentation.sources, struct media_source, entry)
     {
@@ -866,13 +867,13 @@ static void session_command_complete_with_event(struct media_session *session, M
     session_command_complete(session);
 }
 
-static void session_subscribe_sources(struct media_session *session)
+static HRESULT session_subscribe_sources(struct media_session *session)
 {
     struct media_source *source;
-    HRESULT hr;
+    HRESULT hr = S_OK;
 
     if (session->presentation.flags & SESSION_FLAG_SOURCES_SUBSCRIBED)
-        return;
+        return hr;
 
     LIST_FOR_EACH_ENTRY(source, &session->presentation.sources, struct media_source, entry)
     {
@@ -880,10 +881,12 @@ static void session_subscribe_sources(struct media_session *session)
                 source->object)))
         {
             WARN("Failed to subscribe to source events, hr %#lx.\n", hr);
+            return hr;
         }
     }
 
     session->presentation.flags |= SESSION_FLAG_SOURCES_SUBSCRIBED;
+    return hr;
 }
 
 static void session_start(struct media_session *session, const GUID *time_format, const PROPVARIANT *start_position)
@@ -909,12 +912,20 @@ static void session_start(struct media_session *session, const GUID *time_format
             session->presentation.start_position.vt = VT_EMPTY;
             PropVariantCopy(&session->presentation.start_position, start_position);
 
-            session_subscribe_sources(session);
+            if (FAILED(hr = session_subscribe_sources(session)))
+            {
+                session_command_complete_with_event(session, MESessionStarted, hr, NULL);
+                return;
+            }
 
             LIST_FOR_EACH_ENTRY(source, &session->presentation.sources, struct media_source, entry)
             {
                 if (FAILED(hr = IMFMediaSource_Start(source->source, source->pd, &GUID_NULL, start_position)))
+                {
                     WARN("Failed to start media source %p, hr %#lx.\n", source->source, hr);
+                    session_command_complete_with_event(session, MESessionStarted, hr, NULL);
+                    return;
+                }
             }
 
             session->state = SESSION_STATE_STARTING_SOURCES;
@@ -1308,10 +1319,8 @@ static void session_set_rate(struct media_session *session, BOOL thin, float rat
     if (SUCCEEDED(hr))
         hr = IMFRateControl_GetRate(session->clock_rate_control, NULL, &clock_rate);
 
-    if (SUCCEEDED(hr) && (rate != clock_rate))
+    if (SUCCEEDED(hr) && (rate != clock_rate) && SUCCEEDED(hr = session_subscribe_sources(session)))
     {
-        session_subscribe_sources(session);
-
         LIST_FOR_EACH_ENTRY(source, &session->presentation.sources, struct media_source, entry)
         {
             if (SUCCEEDED(hr = MFGetService(source->object, &MF_RATE_CONTROL_SERVICE, &IID_IMFRateControl,
@@ -2216,6 +2225,7 @@ static HRESULT WINAPI mfsession_Shutdown(IMFMediaSession *iface)
         IMFPresentationClock_Release(session->clock);
         session->clock = NULL;
         session_clear_presentation(session);
+        session_clear_queued_topologies(session);
         session_submit_simple_command(session, SESSION_CMD_SHUTDOWN);
     }
     LeaveCriticalSection(&session->cs);
@@ -2387,6 +2397,7 @@ static HRESULT session_get_renderer_node_service(struct media_session *session,
                             if (FAILED(hr = MFGetService((IUnknown *)sink, service, riid, obj)))
                                 WARN("Failed to get service from renderer node, %#lx.\n", hr);
                         }
+                        IMFMediaSink_Release(sink);
                     }
                     IMFStreamSink_Release(stream_sink);
                 }
@@ -3388,8 +3399,9 @@ static void session_request_sample(struct media_session *session, IMFStreamSink 
         return;
     }
 
-    if (SUCCEEDED(session_request_sample_from_node(session, upstream_node, upstream_output)))
-        sink_node->u.sink.requests++;
+    sink_node->u.sink.requests++;
+    if (FAILED(session_request_sample_from_node(session, upstream_node, upstream_output)))
+        sink_node->u.sink.requests--;
     IMFTopologyNode_Release(upstream_node);
 }
 

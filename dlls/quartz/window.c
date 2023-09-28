@@ -194,6 +194,9 @@ HRESULT WINAPI BaseControlWindowImpl_put_Caption(IVideoWindow *iface, BSTR capti
 
     TRACE("window %p, caption %s.\n", window, debugstr_w(caption));
 
+    if (!window->pPin->peer)
+        return VFW_E_NOT_CONNECTED;
+
     if (!SetWindowTextW(window->hwnd, caption))
         return E_FAIL;
 
@@ -228,6 +231,8 @@ HRESULT WINAPI BaseControlWindowImpl_put_WindowStyle(IVideoWindow *iface, LONG s
 
     if (style & (WS_DISABLED|WS_HSCROLL|WS_MAXIMIZE|WS_MINIMIZE|WS_VSCROLL))
         return E_INVALIDARG;
+    if (!window->pPin->peer)
+        return VFW_E_NOT_CONNECTED;
 
     SetWindowLongW(window->hwnd, GWL_STYLE, style);
     SetWindowPos(window->hwnd, 0, 0, 0, 0, 0,
@@ -268,11 +273,14 @@ HRESULT WINAPI BaseControlWindowImpl_get_WindowStyleEx(IVideoWindow *iface, LONG
 
 HRESULT WINAPI BaseControlWindowImpl_put_AutoShow(IVideoWindow *iface, LONG AutoShow)
 {
-    struct video_window *This = impl_from_IVideoWindow(iface);
+    struct video_window *window = impl_from_IVideoWindow(iface);
 
-    TRACE("window %p, AutoShow %ld.\n", This, AutoShow);
+    TRACE("window %p, AutoShow %ld.\n", window, AutoShow);
 
-    This->AutoShow = AutoShow;
+    if (!window->pPin->peer)
+        return VFW_E_NOT_CONNECTED;
+
+    window->AutoShow = AutoShow;
 
     return S_OK;
 }
@@ -341,6 +349,9 @@ HRESULT WINAPI BaseControlWindowImpl_put_Visible(IVideoWindow *iface, LONG visib
     struct video_window *window = impl_from_IVideoWindow(iface);
 
     TRACE("window %p, visible %ld.\n", window, visible);
+
+    if (!window->pPin->peer)
+        return VFW_E_NOT_CONNECTED;
 
     ShowWindow(window->hwnd, visible ? SW_SHOW : SW_HIDE);
     return S_OK;
@@ -474,6 +485,9 @@ HRESULT WINAPI BaseControlWindowImpl_put_Owner(IVideoWindow *iface, OAHWND owner
 
     TRACE("window %p, owner %#Ix.\n", window, owner);
 
+    if (!window->pPin->peer)
+        return VFW_E_NOT_CONNECTED;
+
     /* Make sure we are marked as WS_CHILD before reparenting ourselves, so that
      * we do not steal focus. LEGO Island depends on this. */
 
@@ -500,11 +514,14 @@ HRESULT WINAPI BaseControlWindowImpl_get_Owner(IVideoWindow *iface, OAHWND *Owne
 
 HRESULT WINAPI BaseControlWindowImpl_put_MessageDrain(IVideoWindow *iface, OAHWND Drain)
 {
-    struct video_window *This = impl_from_IVideoWindow(iface);
+    struct video_window *window = impl_from_IVideoWindow(iface);
 
-    TRACE("window %p, drain %#Ix.\n", This, Drain);
+    TRACE("window %p, drain %#Ix.\n", window, Drain);
 
-    This->hwndDrain = (HWND)Drain;
+    if (!window->pPin->peer)
+        return VFW_E_NOT_CONNECTED;
+
+    window->hwndDrain = (HWND)Drain;
 
     return S_OK;
 }
@@ -580,6 +597,9 @@ HRESULT WINAPI BaseControlWindowImpl_SetWindowPosition(IVideoWindow *iface,
     struct video_window *window = impl_from_IVideoWindow(iface);
 
     TRACE("window %p, left %ld, top %ld, width %ld, height %ld.\n", window, left, top, width, height);
+
+    if (!window->pPin->peer)
+        return VFW_E_NOT_CONNECTED;
 
     if (!SetWindowPos(window->hwnd, NULL, left, top, width, height, SWP_NOACTIVATE | SWP_NOZORDER))
         return E_FAIL;
@@ -1138,13 +1158,16 @@ static HRESULT WINAPI basic_video_SetDefaultDestinationPosition(IBasicVideo *ifa
 static HRESULT WINAPI basic_video_GetVideoSize(IBasicVideo *iface, LONG *width, LONG *height)
 {
     struct video_window *window = impl_from_IBasicVideo(iface);
-    const BITMAPINFOHEADER *bitmap_header = get_bitmap_header(window);
+    const BITMAPINFOHEADER *bitmap_header;
 
     TRACE("window %p, width %p, height %p.\n", window, width, height);
 
     if (!width || !height)
         return E_POINTER;
+    if (!window->pPin->peer)
+        return VFW_E_NOT_CONNECTED;
 
+    bitmap_header = get_bitmap_header(window);
     *width = bitmap_header->biWidth;
     *height = bitmap_header->biHeight;
     return S_OK;

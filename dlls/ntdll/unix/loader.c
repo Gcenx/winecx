@@ -535,12 +535,21 @@ static const char *get_pe_dir( WORD machine )
 static void set_dll_path(void)
 {
     char *p, *path = getenv( "WINEDLLPATH" );
+    char *path_prepend = getenv( "WINEDLLPATH_PREPEND" );
     int i, count = 0;
 
-    if (path) for (p = path, count = 1; *p; p++) if (*p == ':') count++;
+    if (path) for (p = path, count++; *p; p++) if (*p == ':') count++;
+    if (path_prepend) for (p = path_prepend, count++; *p; p++) if (*p == ':') count++;
 
     dll_paths = malloc( (count + 2) * sizeof(*dll_paths) );
     count = 0;
+
+    if (path_prepend)
+    {
+        path_prepend = strdup(path_prepend);
+        for (p = strtok( path_prepend, ":" ); p; p = strtok( NULL, ":" )) dll_paths[count++] = strdup( p );
+        free( path_prepend );
+    }
 
     if (!build_dir) dll_paths[count++] = dll_dir;
 
@@ -2189,6 +2198,83 @@ static ULONG_PTR get_image_address(void)
 }
 
 
+/* CW HACK 22434 */
+#if defined(__APPLE__) && defined(__x86_64__)
+static pthread_once_t non_native_init_once = PTHREAD_ONCE_INIT;
+static void *non_native_support_lib;
+static void (*register_non_native_code_region)( void*, void* );
+static bool (*supports_non_native_code_regions)(void);
+
+/* libd3dshared.dylib requires Ventura or later, don't bother loading on earlier OSes */
+static BOOL ventura_or_later(void)
+{
+    int result;
+    struct utsname name;
+    unsigned major, minor;
+
+    result = (uname( &name ) == 0 &&
+              sscanf( name.release, "%u.%u", &major, &minor ) == 2 &&
+              major >= 22 /* macOS 13 Ventura */);
+
+    return (result == 1) ? TRUE : FALSE;
+}
+
+/* Only load libd3dshared under Rosetta/Apple Silicon.
+ * On Intel, supports_non_native_code_regions() returns TRUE, but of course
+ * it actually doesn't.
+ * register_non_native_code_region() then does a syscall() which triggers a
+ * SIGSYS and crashes.
+ */
+static BOOL is_apple_silicon(void)
+{
+    /* returns 0 for native process or on error, 1 for translated */
+    int ret = 0;
+    size_t size = sizeof(ret);
+    if (sysctlbyname( "sysctl.proc_translated", &ret, &size, NULL, 0 ) == -1)
+        return FALSE;
+    else
+        return (ret == 1) ? TRUE : FALSE;
+}
+
+static void init_non_native_support(void)
+{
+    char *libd3dshared_path = getenv( "CX_APPLEGPT_LIBD3DSHARED_PATH" );
+
+    register_non_native_code_region = NULL;
+    supports_non_native_code_regions = NULL;
+
+    if (!libd3dshared_path || !ventura_or_later() || !is_apple_silicon())
+        return;
+
+    non_native_support_lib = dlopen( libd3dshared_path, RTLD_LOCAL );
+    if (non_native_support_lib)
+    {
+        register_non_native_code_region = dlsym( non_native_support_lib, "register_non_native_code_region" );
+        supports_non_native_code_regions = dlsym( non_native_support_lib, "supports_non_native_code_regions" );
+        TRACE( "Loaded libd3dshared.dylib, does%s support non-native code regions\n",
+                supports_non_native_code_regions ? (supports_non_native_code_regions() ? "" : " not") : " not" );
+    }
+    else
+        TRACE( "Loading libd3dshared.dylib failed: %s\n", dlerror() );
+}
+
+static NTSTATUS pe_module_loaded( void *args )
+{
+    struct pe_module_loaded_params *params = args;
+
+    pthread_once( &non_native_init_once, &init_non_native_support );
+    if ((supports_non_native_code_regions && supports_non_native_code_regions()))
+    {
+        TRACE( "Marking non_native_code_region: %p-%p\n", params->start, params->end );
+        register_non_native_code_region( params->start, params->end );
+    }
+    return STATUS_SUCCESS;
+}
+#elif defined(__x86_64__)
+static NTSTATUS pe_module_loaded( void *args ) { return STATUS_NOT_IMPLEMENTED; }
+#endif
+
+
 /***********************************************************************
  *           __wine_unix_call_funcs
  */
@@ -2197,6 +2283,9 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     load_so_dll,
     unwind_builtin_dll,
     system_time_precise,
+#if defined(__x86_64__)
+    pe_module_loaded,
+#endif
 };
 
 BOOL simulate_writecopy;
@@ -2214,6 +2303,7 @@ static void hacks_init(void)
 
 static NTSTATUS wow64_load_so_dll( void *args ) { return STATUS_INVALID_IMAGE_FORMAT; }
 static NTSTATUS wow64_unwind_builtin_dll( void *args ) { return STATUS_UNSUCCESSFUL; }
+static NTSTATUS wow64_pe_module_loaded( void *args ) { return STATUS_NOT_IMPLEMENTED; }
 
 /***********************************************************************
  *           __wine_unix_call_wow64_funcs
@@ -2223,6 +2313,9 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     wow64_load_so_dll,
     wow64_unwind_builtin_dll,
     system_time_precise,
+#if defined(__x86_64__)
+    wow64_pe_module_loaded,
+#endif
 };
 
 #endif  /* _WIN64 */

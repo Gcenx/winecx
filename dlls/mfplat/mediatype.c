@@ -26,6 +26,7 @@
 #include "ks.h"
 #include "ksmedia.h"
 #include "amvideo.h"
+#include "wmcodecdsp.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 
@@ -2631,7 +2632,7 @@ static int __cdecl uncompressed_video_format_compare(const void *a, const void *
 
 static const struct uncompressed_video_format video_formats[] =
 {
-    { &MFVideoFormat_RGB24,         4, 3, 1, 0 },
+    { &MFVideoFormat_RGB24,         3, 3, 1, 0 },
     { &MFVideoFormat_ARGB32,        4, 3, 1, 0 },
     { &MFVideoFormat_RGB32,         4, 3, 1, 0 },
     { &MFVideoFormat_RGB565,        2, 3, 1, 0 },
@@ -2646,13 +2647,20 @@ static const struct uncompressed_video_format video_formats[] =
     { &MFVideoFormat_IMC3,          2, 3, 0, 1 },
     { &MFVideoFormat_IMC4,          1, 0, 0, 1 },
     { &MFVideoFormat_IYUV,          1, 0, 0, 1 },
+    { &MFVideoFormat_NV11,          1, 0, 0, 1 },
     { &MFVideoFormat_NV12,          1, 0, 0, 1 },
     { &MFVideoFormat_D16,           2, 3, 0, 0 },
     { &MFVideoFormat_L16,           2, 3, 0, 0 },
     { &MFVideoFormat_UYVY,          2, 0, 0, 1 },
     { &MFVideoFormat_YUY2,          2, 0, 0, 1 },
     { &MFVideoFormat_YV12,          1, 0, 0, 1 },
+    { &MFVideoFormat_YVYU,          2, 0, 0, 1 },
     { &MFVideoFormat_A16B16G16R16F, 8, 3, 1, 0 },
+    { &MEDIASUBTYPE_RGB8,           1, 3, 1, 0 },
+    { &MEDIASUBTYPE_RGB565,         2, 3, 1, 0 },
+    { &MEDIASUBTYPE_RGB555,         2, 3, 1, 0 },
+    { &MEDIASUBTYPE_RGB24,          3, 3, 1, 0 },
+    { &MEDIASUBTYPE_RGB32,          4, 3, 1, 0 },
 };
 
 static struct uncompressed_video_format *mf_get_video_format(const GUID *subtype)
@@ -2732,6 +2740,9 @@ HRESULT WINAPI MFCalculateImageSize(REFGUID subtype, UINT32 width, UINT32 height
             /* 2 x 2 block, interleaving UV for half the height */
             *size = ((width + 1) & ~1) * height * 3 / 2;
             break;
+        case MAKEFOURCC('N','V','1','1'):
+            *size = ((width + 3) & ~3) * height * 3 / 2;
+            break;
         case D3DFMT_L8:
         case D3DFMT_L16:
         case D3DFMT_D16:
@@ -2772,6 +2783,7 @@ HRESULT WINAPI MFGetPlaneSize(DWORD fourcc, DWORD width, DWORD height, DWORD *si
         case MAKEFOURCC('Y','V','1','2'):
         case MAKEFOURCC('I','4','2','0'):
         case MAKEFOURCC('I','Y','U','V'):
+        case MAKEFOURCC('N','V','1','1'):
             *size = stride * height * 3 / 2;
             break;
         default:
@@ -3582,6 +3594,22 @@ static const GUID * get_mf_subtype_for_am_subtype(const GUID *subtype)
 
     if (IsEqualGUID(subtype, &MEDIASUBTYPE_RGB32))
         return &MFVideoFormat_RGB32;
+    else if (IsEqualGUID(subtype, &MEDIASUBTYPE_ARGB32))
+        return &MFVideoFormat_ARGB32;
+    else if (IsEqualGUID(subtype, &MEDIASUBTYPE_I420))
+        return &MFVideoFormat_I420;
+    else if (IsEqualGUID(subtype, &MEDIASUBTYPE_AYUV))
+        return &MFVideoFormat_AYUV;
+    else if (IsEqualGUID(subtype, &MEDIASUBTYPE_YV12))
+        return &MFVideoFormat_YV12;
+    else if (IsEqualGUID(subtype, &MEDIASUBTYPE_YUY2))
+        return &MFVideoFormat_YUY2;
+    else if (IsEqualGUID(subtype, &MEDIASUBTYPE_UYVY))
+        return &MFVideoFormat_UYVY;
+    else if (IsEqualGUID(subtype, &MEDIASUBTYPE_YVYU))
+        return &MFVideoFormat_YVYU;
+    else if (IsEqualGUID(subtype, &MEDIASUBTYPE_NV12))
+        return &MFVideoFormat_NV12;
     else
     {
         FIXME("Unknown subtype %s.\n", debugstr_guid(subtype));

@@ -86,7 +86,7 @@ struct color_convert
     IMFMediaType *output_type;
     MFT_OUTPUT_STREAM_INFO output_info;
 
-    struct wg_transform *wg_transform;
+    wg_transform_t wg_transform;
     struct wg_sample_queue *wg_sample_queue;
 };
 
@@ -98,10 +98,11 @@ static inline struct color_convert *impl_from_IUnknown(IUnknown *iface)
 static HRESULT try_create_wg_transform(struct color_convert *impl)
 {
     struct wg_format input_format, output_format;
+    struct wg_transform_attrs attrs = {0};
 
     if (impl->wg_transform)
         wg_transform_destroy(impl->wg_transform);
-    impl->wg_transform = NULL;
+    impl->wg_transform = 0;
 
     mf_media_type_to_wg_format(impl->input_type, &input_format);
     if (input_format.major_type == WG_MAJOR_TYPE_UNKNOWN)
@@ -111,7 +112,7 @@ static HRESULT try_create_wg_transform(struct color_convert *impl)
     if (output_format.major_type == WG_MAJOR_TYPE_UNKNOWN)
         return MF_E_INVALIDMEDIATYPE;
 
-    if (!(impl->wg_transform = wg_transform_create(&input_format, &output_format)))
+    if (!(impl->wg_transform = wg_transform_create(&input_format, &output_format, &attrs)))
         return E_FAIL;
 
     return S_OK;
@@ -363,6 +364,7 @@ static HRESULT WINAPI transform_SetInputType(IMFTransform *iface, DWORD id, IMFM
     struct color_convert *impl = impl_from_IMFTransform(iface);
     GUID major, subtype;
     UINT64 frame_size;
+    UINT32 stride;
     HRESULT hr;
     ULONG i;
 
@@ -392,6 +394,19 @@ static HRESULT WINAPI transform_SetInputType(IMFTransform *iface, DWORD id, IMFM
         IMFMediaType_Release(impl->input_type);
         impl->input_type = NULL;
     }
+    if (FAILED(IMFMediaType_GetUINT32(impl->input_type, &MF_MT_DEFAULT_STRIDE, &stride)))
+    {
+        if (FAILED(hr = MFGetStrideForBitmapInfoHeader(subtype.Data1, frame_size >> 32, (LONG *)&stride)))
+        {
+            IMFMediaType_Release(impl->input_type);
+            impl->input_type = NULL;
+        }
+        if (FAILED(hr = IMFMediaType_SetUINT32(impl->input_type, &MF_MT_DEFAULT_STRIDE, abs((INT32)stride))))
+        {
+            IMFMediaType_Release(impl->input_type);
+            impl->input_type = NULL;
+        }
+    }
 
     if (impl->output_type && FAILED(hr = try_create_wg_transform(impl)))
     {
@@ -411,6 +426,7 @@ static HRESULT WINAPI transform_SetOutputType(IMFTransform *iface, DWORD id, IMF
     struct color_convert *impl = impl_from_IMFTransform(iface);
     GUID major, subtype;
     UINT64 frame_size;
+    UINT32 stride;
     HRESULT hr;
     ULONG i;
 
@@ -439,6 +455,19 @@ static HRESULT WINAPI transform_SetOutputType(IMFTransform *iface, DWORD id, IMF
     {
         IMFMediaType_Release(impl->output_type);
         impl->output_type = NULL;
+    }
+    if (FAILED(IMFMediaType_GetUINT32(impl->output_type, &MF_MT_DEFAULT_STRIDE, &stride)))
+    {
+        if (FAILED(hr = MFGetStrideForBitmapInfoHeader(subtype.Data1, frame_size >> 32, (LONG *)&stride)))
+        {
+            IMFMediaType_Release(impl->output_type);
+            impl->output_type = NULL;
+        }
+        if (FAILED(hr = IMFMediaType_SetUINT32(impl->output_type, &MF_MT_DEFAULT_STRIDE, abs((INT32)stride))))
+        {
+            IMFMediaType_Release(impl->output_type);
+            impl->output_type = NULL;
+        }
     }
 
     if (impl->input_type && FAILED(hr = try_create_wg_transform(impl)))
@@ -908,13 +937,14 @@ HRESULT color_convert_create(IUnknown *outer, IUnknown **out)
             .height = 1080,
         },
     };
-    struct wg_transform *transform;
+    struct wg_transform_attrs attrs = {0};
+    wg_transform_t transform;
     struct color_convert *impl;
     HRESULT hr;
 
     TRACE("outer %p, out %p.\n", outer, out);
 
-    if (!(transform = wg_transform_create(&input_format, &output_format)))
+    if (!(transform = wg_transform_create(&input_format, &output_format, &attrs)))
     {
         ERR_(winediag)("GStreamer doesn't support video conversion, please install appropriate plugins.\n");
         return E_FAIL;

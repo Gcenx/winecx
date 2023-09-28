@@ -58,7 +58,7 @@ struct wma_decoder
     IMFMediaType *output_type;
     MFT_OUTPUT_STREAM_INFO output_info;
 
-    struct wg_transform *wg_transform;
+    wg_transform_t wg_transform;
     struct wg_sample_queue *wg_sample_queue;
 };
 
@@ -70,10 +70,11 @@ static inline struct wma_decoder *impl_from_IUnknown(IUnknown *iface)
 static HRESULT try_create_wg_transform(struct wma_decoder *decoder)
 {
     struct wg_format input_format, output_format;
+    struct wg_transform_attrs attrs = {0};
 
     if (decoder->wg_transform)
         wg_transform_destroy(decoder->wg_transform);
-    decoder->wg_transform = NULL;
+    decoder->wg_transform = 0;
 
     mf_media_type_to_wg_format(decoder->input_type, &input_format);
     if (input_format.major_type == WG_MAJOR_TYPE_UNKNOWN)
@@ -83,7 +84,7 @@ static HRESULT try_create_wg_transform(struct wma_decoder *decoder)
     if (output_format.major_type == WG_MAJOR_TYPE_UNKNOWN)
         return MF_E_INVALIDMEDIATYPE;
 
-    if (!(decoder->wg_transform = wg_transform_create(&input_format, &output_format)))
+    if (!(decoder->wg_transform = wg_transform_create(&input_format, &output_format, &attrs)))
         return E_FAIL;
 
     return S_OK;
@@ -851,13 +852,14 @@ HRESULT wma_decoder_create(IUnknown *outer, IUnknown **out)
         },
     };
     static const struct wg_format input_format = {.major_type = WG_MAJOR_TYPE_AUDIO_WMA};
-    struct wg_transform *transform;
+    struct wg_transform_attrs attrs = {0};
+    wg_transform_t transform;
     struct wma_decoder *decoder;
     HRESULT hr;
 
     TRACE("outer %p, out %p.\n", outer, out);
 
-    if (!(transform = wg_transform_create(&input_format, &output_format)))
+    if (!(transform = wg_transform_create(&input_format, &output_format, &attrs)))
     {
         ERR_(winediag)("GStreamer doesn't support WMA decoding, please install appropriate plugins\n");
         return E_FAIL;

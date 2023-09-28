@@ -107,6 +107,9 @@ enum macdrv_client_funcs
     client_func_dnd_query_exited,
     client_func_ime_query_char_rect,
     client_func_ime_set_text,
+    client_func_regcreateopenkeyexa,
+    client_func_regqueryvalueexa,
+    client_func_regsetvalueexa,
     client_func_last
 };
 
@@ -190,6 +193,46 @@ struct ime_set_text_params
     UINT64 data;
     UINT32 complete;
     WCHAR text[1];
+};
+
+/* macdrv_regcreateopenkeyexa params */
+struct regcreateopenkeyexa_params
+{
+    UINT32 create;
+    UINT32 hkey;
+    UINT64 name;
+    UINT32 reserved;
+    UINT64 class;
+    UINT32 options;
+    UINT32 access;
+    UINT64 security;
+    UINT64 retkey;
+    UINT64 disposition;
+    UINT32 result;
+};
+
+/* macdrv_regqueryvalueexa params */
+struct regqueryvalueexa_params
+{
+    UINT32 hkey;
+    UINT64 name;
+    UINT64 reserved;
+    UINT64 type;
+    UINT64 data;
+    UINT64 count;
+    UINT32 result;
+};
+
+/* macdrv_regsetvalueexa params */
+struct regsetvalueexa_params
+{
+    UINT32 hkey;
+    UINT64 name;
+    UINT32 reserved;
+    UINT32 type;
+    UINT64 data;
+    UINT32 count;
+    UINT32 result;
 };
 
 static inline void *param_ptr(UINT64 param)

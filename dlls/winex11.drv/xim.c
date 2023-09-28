@@ -77,7 +77,12 @@ static void X11DRV_ImmSetInternalString(UINT offset, UINT selLength, LPWSTR lpCo
         ptr_new = realloc( CompositionString, dwCompStringSize + byte_expansion );
         if (ptr_new == NULL)
         {
-            ERR("Couldn't expand composition string buffer\n");
+            if (dwCompStringSize + byte_expansion) ERR("Couldn't expand composition string buffer\n");
+            else
+            {
+                CompositionString = NULL;
+                dwCompStringSize = 0;
+            }
             return;
         }
 

@@ -23,26 +23,52 @@
 
 #include "unixlib.h"
 
+#include <stdbool.h>
 #include <gst/gst.h>
 
-extern bool init_gstreamer(void) DECLSPEC_HIDDEN;
+/* unixlib.c */
+
+GST_DEBUG_CATEGORY_EXTERN(wine) DECLSPEC_HIDDEN;
+#define GST_CAT_DEFAULT wine
+
+extern NTSTATUS wg_init_gstreamer(void *args) DECLSPEC_HIDDEN;
+
+extern GstStreamType stream_type_from_caps(GstCaps *caps) DECLSPEC_HIDDEN;
 extern GstElement *create_element(const char *name, const char *plugin_set) DECLSPEC_HIDDEN;
+extern GstElement *find_element(GstElementFactoryListType type, GstCaps *src_caps, GstCaps *sink_caps) DECLSPEC_HIDDEN;
+extern bool append_element(GstElement *container, GstElement *element, GstElement **first, GstElement **last) DECLSPEC_HIDDEN;
+extern bool link_src_to_element(GstPad *src_pad, GstElement *element) DECLSPEC_HIDDEN;
+extern bool link_element_to_sink(GstElement *element, GstPad *sink_pad) DECLSPEC_HIDDEN;
+
+/* wg_format.c */
 
 extern void wg_format_from_caps(struct wg_format *format, const GstCaps *caps) DECLSPEC_HIDDEN;
 extern bool wg_format_compare(const struct wg_format *a, const struct wg_format *b) DECLSPEC_HIDDEN;
 extern GstCaps *wg_format_to_caps(const struct wg_format *format) DECLSPEC_HIDDEN;
+
+/* wg_transform.c */
 
 extern NTSTATUS wg_transform_create(void *args) DECLSPEC_HIDDEN;
 extern NTSTATUS wg_transform_destroy(void *args) DECLSPEC_HIDDEN;
 extern NTSTATUS wg_transform_set_output_format(void *args) DECLSPEC_HIDDEN;
 extern NTSTATUS wg_transform_push_data(void *args) DECLSPEC_HIDDEN;
 extern NTSTATUS wg_transform_read_data(void *args) DECLSPEC_HIDDEN;
+extern NTSTATUS wg_transform_get_status(void *args) DECLSPEC_HIDDEN;
+extern NTSTATUS wg_transform_drain(void *args) DECLSPEC_HIDDEN;
+extern NTSTATUS wg_transform_flush(void *args) DECLSPEC_HIDDEN;
+
+/* wg_allocator.c */
+
+static inline BYTE *wg_sample_data(struct wg_sample *sample)
+{
+    return (BYTE *)(UINT_PTR)sample->data;
+}
 
 /* wg_allocator_release_sample can be used to release any sample that was requested. */
 typedef struct wg_sample *(*wg_allocator_request_sample_cb)(gsize size, void *context);
-extern GstAllocator *wg_allocator_create(wg_allocator_request_sample_cb request_sample,
-        void *request_sample_context) DECLSPEC_HIDDEN;
+extern GstAllocator *wg_allocator_create(void) DECLSPEC_HIDDEN;
 extern void wg_allocator_destroy(GstAllocator *allocator) DECLSPEC_HIDDEN;
+extern void wg_allocator_provide_sample(GstAllocator *allocator, struct wg_sample *sample) DECLSPEC_HIDDEN;
 extern void wg_allocator_release_sample(GstAllocator *allocator, struct wg_sample *sample,
         bool discard_data) DECLSPEC_HIDDEN;
 

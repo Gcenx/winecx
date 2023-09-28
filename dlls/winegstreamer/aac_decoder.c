@@ -30,8 +30,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
-extern const GUID MFAudioFormat_RAW_AAC;
-
 static struct
 {
     const GUID *const guid;
@@ -57,7 +55,7 @@ struct aac_decoder
     IMFMediaType *input_type;
     IMFMediaType *output_type;
 
-    struct wg_transform *wg_transform;
+    wg_transform_t wg_transform;
     struct wg_sample_queue *wg_sample_queue;
 };
 
@@ -69,10 +67,11 @@ static struct aac_decoder *impl_from_IMFTransform(IMFTransform *iface)
 static HRESULT try_create_wg_transform(struct aac_decoder *decoder)
 {
     struct wg_format input_format, output_format;
+    struct wg_transform_attrs attrs = {0};
 
     if (decoder->wg_transform)
         wg_transform_destroy(decoder->wg_transform);
-    decoder->wg_transform = NULL;
+    decoder->wg_transform = 0;
 
     mf_media_type_to_wg_format(decoder->input_type, &input_format);
     if (input_format.major_type == WG_MAJOR_TYPE_UNKNOWN)
@@ -82,7 +81,7 @@ static HRESULT try_create_wg_transform(struct aac_decoder *decoder)
     if (output_format.major_type == WG_MAJOR_TYPE_UNKNOWN)
         return MF_E_INVALIDMEDIATYPE;
 
-    if (!(decoder->wg_transform = wg_transform_create(&input_format, &output_format)))
+    if (!(decoder->wg_transform = wg_transform_create(&input_format, &output_format, &attrs)))
         return E_FAIL;
 
     return S_OK;
@@ -500,8 +499,20 @@ static HRESULT WINAPI transform_GetOutputCurrentType(IMFTransform *iface, DWORD 
 
 static HRESULT WINAPI transform_GetInputStatus(IMFTransform *iface, DWORD id, DWORD *flags)
 {
-    FIXME("iface %p, id %#lx, flags %p stub!\n", iface, id, flags);
-    return E_NOTIMPL;
+    struct aac_decoder *decoder = impl_from_IMFTransform(iface);
+    bool accepts_input;
+    HRESULT hr;
+
+    TRACE("iface %p, id %#lx, flags %p.\n", iface, id, flags);
+
+    if (!decoder->wg_transform)
+        return MF_E_TRANSFORM_TYPE_NOT_SET;
+
+    if (FAILED(hr = wg_transform_get_status(decoder->wg_transform, &accepts_input)))
+        return hr;
+
+    *flags = accepts_input ? MFT_INPUT_STATUS_ACCEPT_DATA : 0;
+    return S_OK;
 }
 
 static HRESULT WINAPI transform_GetOutputStatus(IMFTransform *iface, DWORD *flags)
@@ -615,13 +626,14 @@ HRESULT aac_decoder_create(REFIID riid, void **ret)
         },
     };
     static const struct wg_format input_format = {.major_type = WG_MAJOR_TYPE_AUDIO_MPEG4};
-    struct wg_transform *transform;
+    struct wg_transform_attrs attrs = {0};
+    wg_transform_t transform;
     struct aac_decoder *decoder;
     HRESULT hr;
 
     TRACE("riid %s, ret %p.\n", debugstr_guid(riid), ret);
 
-    if (!(transform = wg_transform_create(&input_format, &output_format)))
+    if (!(transform = wg_transform_create(&input_format, &output_format, &attrs)))
     {
         ERR_(winediag)("GStreamer doesn't support WMA decoding, please install appropriate plugins\n");
         return E_FAIL;

@@ -25,7 +25,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(wmvcore);
 struct wm_stream
 {
     struct wm_reader *reader;
-    struct wg_parser_stream *wg_stream;
+    wg_parser_stream_t wg_stream;
     struct wg_format format;
     WMT_STREAM_SELECTION selection;
     WORD index;
@@ -60,7 +60,7 @@ struct wm_reader
     HANDLE file;
     HANDLE read_thread;
     bool read_thread_shutdown;
-    struct wg_parser *wg_parser;
+    wg_parser_t wg_parser;
 
     struct wm_stream *streams;
     WORD stream_count;
@@ -544,12 +544,16 @@ static HRESULT WINAPI stream_props_GetType(IWMMediaProps *iface, GUID *major_typ
 static HRESULT WINAPI stream_props_GetMediaType(IWMMediaProps *iface, WM_MEDIA_TYPE *mt, DWORD *size)
 {
     struct stream_config *config = impl_from_IWMMediaProps(iface);
+    const struct wg_format *format;
+    struct wg_format codec_format;
     const DWORD req_size = *size;
     AM_MEDIA_TYPE stream_mt;
 
     TRACE("iface %p, mt %p, size %p.\n", iface, mt, size);
 
-    if (!amt_from_wg_format(&stream_mt, &config->stream->format, true))
+    wg_parser_stream_get_codec_format(config->stream->wg_stream, &codec_format);
+    format = (codec_format.major_type != WG_MAJOR_TYPE_UNKNOWN) ? &codec_format : &config->stream->format;
+    if (!amt_from_wg_format(&stream_mt, format, true))
         return E_OUTOFMEMORY;
 
     *size = sizeof(stream_mt) + stream_mt.cbFormat;
@@ -1451,11 +1455,11 @@ static const IWMReaderTimecodeVtbl timecode_vtbl =
 
 static HRESULT init_stream(struct wm_reader *reader, QWORD file_size)
 {
-    struct wg_parser *wg_parser;
+    wg_parser_t wg_parser;
     HRESULT hr;
     WORD i;
 
-    if (!(wg_parser = wg_parser_create(WG_PARSER_DECODEBIN, false)))
+    if (!(wg_parser = wg_parser_create(WG_PARSER_DECODEBIN)))
         return E_OUTOFMEMORY;
 
     reader->wg_parser = wg_parser;
@@ -1508,6 +1512,10 @@ static HRESULT init_stream(struct wm_reader *reader, QWORD file_size)
              * Shadowgrounds provides wmv3 video and assumes that the initial
              * video type will be BGR. */
             stream->format.u.video.format = WG_VIDEO_FORMAT_BGR;
+
+            /* API consumers expect RGB video to be bottom-up. */
+            if (stream->format.u.video.height > 0)
+                stream->format.u.video.height = -stream->format.u.video.height;
         }
         wg_parser_stream_enable(stream->wg_stream, &stream->format);
     }
@@ -1530,7 +1538,7 @@ out_shutdown_thread:
 
 out_destroy_parser:
     wg_parser_destroy(reader->wg_parser);
-    reader->wg_parser = NULL;
+    reader->wg_parser = 0;
 
     return hr;
 }
@@ -1579,6 +1587,8 @@ static const char *get_major_type_string(enum wg_major_type type)
             return "h264";
         case WG_MAJOR_TYPE_VIDEO_WMV:
             return "wmv";
+        case WG_MAJOR_TYPE_VIDEO_INDEO:
+            return "indeo";
         case WG_MAJOR_TYPE_UNKNOWN:
             return "unknown";
     }
@@ -1700,7 +1710,8 @@ static HRESULT WINAPI unknown_inner_QueryInterface(IUnknown *iface, REFIID iid, 
         *out = &reader->IWMReaderTimecode_iface;
     else
     {
-        WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
+        FIXME("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
+        *out = NULL;
         return E_NOINTERFACE;
     }
 
@@ -1788,7 +1799,7 @@ static HRESULT WINAPI reader_Close(IWMSyncReader2 *iface)
     reader->read_thread = NULL;
 
     wg_parser_destroy(reader->wg_parser);
-    reader->wg_parser = NULL;
+    reader->wg_parser = 0;
 
     if (reader->source_stream)
         IStream_Release(reader->source_stream);
@@ -1858,7 +1869,7 @@ static HRESULT WINAPI reader_GetNextSample(IWMSyncReader2 *iface,
     while (hr == S_FALSE)
     {
         struct wg_parser_buffer wg_buffer;
-        if (!wg_parser_stream_get_buffer(reader->wg_parser, stream ? stream->wg_stream : NULL, &wg_buffer))
+        if (!wg_parser_stream_get_buffer(reader->wg_parser, stream ? stream->wg_stream : 0, &wg_buffer))
             hr = NS_E_NO_MORE_SAMPLES;
         else if (SUCCEEDED(hr = wm_reader_read_stream_sample(reader, &wg_buffer, sample, pts, duration, flags)))
             stream_number = wg_buffer.stream + 1;
@@ -1916,6 +1927,9 @@ static HRESULT WINAPI reader_GetOutputFormat(IWMSyncReader2 *iface,
                 return NS_E_INVALID_OUTPUT_FORMAT;
             }
             format.u.video.format = video_formats[index];
+            /* API consumers expect RGB video to be bottom-up. */
+            if (format.u.video.height > 0 && wg_video_format_is_rgb(format.u.video.format))
+                format.u.video.height = -format.u.video.height;
             break;
 
         case WG_MAJOR_TYPE_AUDIO:
@@ -1933,6 +1947,7 @@ static HRESULT WINAPI reader_GetOutputFormat(IWMSyncReader2 *iface,
         case WG_MAJOR_TYPE_VIDEO_CINEPAK:
         case WG_MAJOR_TYPE_VIDEO_H264:
         case WG_MAJOR_TYPE_VIDEO_WMV:
+        case WG_MAJOR_TYPE_VIDEO_INDEO:
             FIXME("Format %u not implemented!\n", format.major_type);
             break;
         case WG_MAJOR_TYPE_UNKNOWN:
@@ -1974,6 +1989,7 @@ static HRESULT WINAPI reader_GetOutputFormatCount(IWMSyncReader2 *iface, DWORD o
         case WG_MAJOR_TYPE_VIDEO_CINEPAK:
         case WG_MAJOR_TYPE_VIDEO_H264:
         case WG_MAJOR_TYPE_VIDEO_WMV:
+        case WG_MAJOR_TYPE_VIDEO_INDEO:
             FIXME("Format %u not implemented!\n", format.major_type);
             /* fallthrough */
         case WG_MAJOR_TYPE_AUDIO:
@@ -2206,7 +2222,7 @@ static HRESULT WINAPI reader_SetOutputProps(IWMSyncReader2 *iface, DWORD output,
                 hr = NS_E_INVALID_OUTPUT_FORMAT;
             else if (pref_format.u.video.width != format.u.video.width)
                 hr = NS_E_INVALID_OUTPUT_FORMAT;
-            else if (pref_format.u.video.height != format.u.video.height)
+            else if (abs(pref_format.u.video.height) != abs(format.u.video.height))
                 hr = NS_E_INVALID_OUTPUT_FORMAT;
             break;
 
@@ -2528,6 +2544,9 @@ HRESULT WINAPI winegstreamer_create_wm_sync_reader(IUnknown *outer, void **out)
     struct wm_reader *object;
 
     TRACE("out %p.\n", out);
+
+    if (!init_gstreamer())
+        return E_FAIL;
 
     if (!(object = calloc(1, sizeof(*object))))
         return E_OUTOFMEMORY;

@@ -81,17 +81,18 @@ struct video_processor
     IMFMediaType *output_type;
     MFT_OUTPUT_STREAM_INFO output_info;
 
-    struct wg_transform *wg_transform;
+    wg_transform_t wg_transform;
     struct wg_sample_queue *wg_sample_queue;
 };
 
 static HRESULT try_create_wg_transform(struct video_processor *impl)
 {
     struct wg_format input_format, output_format;
+    struct wg_transform_attrs attrs = {0};
 
     if (impl->wg_transform)
         wg_transform_destroy(impl->wg_transform);
-    impl->wg_transform = NULL;
+    impl->wg_transform = 0;
 
     mf_media_type_to_wg_format(impl->input_type, &input_format);
     if (input_format.major_type == WG_MAJOR_TYPE_UNKNOWN)
@@ -101,7 +102,7 @@ static HRESULT try_create_wg_transform(struct video_processor *impl)
     if (output_format.major_type == WG_MAJOR_TYPE_UNKNOWN)
         return MF_E_INVALIDMEDIATYPE;
 
-    if (!(impl->wg_transform = wg_transform_create(&input_format, &output_format)))
+    if (!(impl->wg_transform = wg_transform_create(&input_format, &output_format, &attrs)))
         return E_FAIL;
 
     return S_OK;
@@ -602,13 +603,14 @@ HRESULT video_processor_create(REFIID riid, void **ret)
             .height = 1080,
         },
     };
-    struct wg_transform *transform;
+    struct wg_transform_attrs attrs = {0};
+    wg_transform_t transform;
     struct video_processor *impl;
     HRESULT hr;
 
     TRACE("riid %s, ret %p.\n", debugstr_guid(riid), ret);
 
-    if (!(transform = wg_transform_create(&input_format, &output_format)))
+    if (!(transform = wg_transform_create(&input_format, &output_format, &attrs)))
     {
         ERR_(winediag)("GStreamer doesn't support video conversion, please install appropriate plugins.\n");
         return E_FAIL;

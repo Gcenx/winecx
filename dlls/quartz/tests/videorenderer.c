@@ -2379,11 +2379,34 @@ static void test_video_window(void)
     hr = IVideoWindow_get_Caption(window, &caption);
     todo_wine ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#lx.\n", hr);
 
+    caption = SysAllocString(L"foo");
+    hr = IVideoWindow_put_Caption(window, caption);
+    ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#lx.\n", hr);
+    SysFreeString(caption);
+
     hr = IVideoWindow_get_WindowStyle(window, &l);
     todo_wine ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#lx.\n", hr);
 
+    hr = IVideoWindow_put_WindowStyle(window, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN);
+    ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#lx.\n", hr);
+
     hr = IVideoWindow_get_AutoShow(window, &l);
     todo_wine ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#lx.\n", hr);
+
+    hr = IVideoWindow_put_AutoShow(window, OAFALSE);
+    ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#lx.\n", hr);
+
+    hr = IVideoWindow_put_Owner(window, (OAHWND)our_hwnd);
+    ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#lx.\n", hr);
+
+    hr = IVideoWindow_put_MessageDrain(window, (OAHWND)our_hwnd);
+    ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#lx.\n", hr);
+
+    hr = IVideoWindow_put_Visible(window, OATRUE);
+    ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#lx.\n", hr);
+
+    hr = IVideoWindow_SetWindowPosition(window, 100, 200, 300, 400);
+    ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#lx.\n", hr);
 
     testfilter_init(&source);
     IFilterGraph2_AddFilter(graph, &source.filter.IBaseFilter_iface, NULL);
@@ -2807,6 +2830,8 @@ static void test_basic_video(void)
     ok(hr == E_POINTER, "Got hr %#lx.\n", hr);
     hr = IBasicVideo_GetVideoSize(video, NULL, &height);
     ok(hr == E_POINTER, "Got hr %#lx.\n", hr);
+    hr = IBasicVideo_GetVideoSize(video, &width, &height);
+    ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#lx.\n", hr);
 
     hr = IBasicVideo_GetVideoPaletteEntries(video, 0, 1, NULL, &l);
     ok(hr == E_POINTER, "Got hr %#lx.\n", hr);

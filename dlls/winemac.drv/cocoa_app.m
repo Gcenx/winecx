@@ -46,6 +46,13 @@ static NSString* const WineAUMIDQuitNotificationSourcePIDKey = @"SourcePID";
 static NSString* const WineAUMIDQuitNotificationWineConfigDirKey = @"WineConfigDir";
 static NSString* const WineAUMIDQuitNotificationWinePrefixKey = @"WinePrefix";
 
+// Internal distributed notification to handle cooperative app activation in Sonoma.
+static NSString* const WineAppWillActivateNotification = @"WineAppWillActivateNotification";
+static NSString* const WineActivatingAppPIDKey = @"ActivatingAppPID";
+static NSString* const WineActivatingAppPrefixKey = @"ActivatingAppPrefix";
+static NSString* const WineActivatingAppConfigDirKey = @"ActivatingAppConfigDir";
+
+
 int macdrv_err_on;
 
 
@@ -53,6 +60,24 @@ int macdrv_err_on;
 @interface NSWindow (WineAutoTabbingExtensions)
 
     + (void) setAllowsAutomaticWindowTabbing:(BOOL)allows;
+
+@end
+#endif
+
+
+#if !defined(MAC_OS_VERSION_14_0) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_VERSION_14_0
+@interface NSApplication (CooperativeActivationSelectorsForOldSDKs)
+
+    - (void)activate;
+    - (void)yieldActivationToApplication:(NSRunningApplication *)application;
+    - (void)yieldActivationToApplicationWithBundleIdentifier:(NSString *)bundleIdentifier;
+
+@end
+
+@interface NSRunningApplication (CooperativeActivationSelectorsForOldSDKs)
+
+    - (BOOL)activateFromApplication:(NSRunningApplication *)application
+                            options:(NSApplicationActivationOptions)options;
 
 @end
 #endif
@@ -297,7 +322,7 @@ static NSString* WineLocalizedString(unsigned int stringID)
             [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 
             if (activateIfTransformed)
-                [NSApp activateIgnoringOtherApps:YES];
+                [self tryToActivateIgnoringOtherApps:YES];
 
 #if defined(MAC_OS_X_VERSION_10_9) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_9
             if (!enable_app_nap && [NSProcessInfo instancesRespondToSelector:@selector(beginActivityWithOptions:reason:)])
@@ -2064,6 +2089,16 @@ static NSString* WineLocalizedString(unsigned int stringID)
                     name:(NSString*)kTISNotifyEnabledKeyboardInputSourcesChanged
                   object:nil];
 
+        if ([NSApplication instancesRespondToSelector:@selector(yieldActivationToApplication:)])
+        {
+            /* App activation cooperation, starting in macOS 14 Sonoma. */
+            [dnc addObserver:self
+                    selector:@selector(otherWineAppWillActivate:)
+                        name:WineAppWillActivateNotification
+                      object:nil
+          suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
+        }
+
         /* CW Hack 22310 */
         [dnc addObserver:self
                 selector:@selector(handleAppUserModelIDQuitRequest:)
@@ -2190,6 +2225,91 @@ static NSString* WineLocalizedString(unsigned int stringID)
                         userInfo:userInfo
               deliverImmediately:YES];
     }
+
+    - (void) otherWineAppWillActivate:(NSNotification *)note
+    {
+        NSProcessInfo *ourProcess;
+        pid_t otherPID;
+        NSString *ourConfigDir, *otherConfigDir, *ourPrefix, *otherPrefix;
+        NSRunningApplication *otherApp;
+
+        /* No point in yielding if we're not the foreground app. */
+        if (![NSApp isActive]) return;
+
+        /* Ignore requests from ourself, dead processes, and other prefixes. */
+        ourProcess = [NSProcessInfo processInfo];
+        otherPID = [note.userInfo[WineActivatingAppPIDKey] integerValue];
+        if (otherPID == ourProcess.processIdentifier) return;
+
+        otherApp = [NSRunningApplication runningApplicationWithProcessIdentifier:otherPID];
+        if (!otherApp) return;
+
+        ourConfigDir = ourProcess.environment[@"WINECONFIGDIR"];
+        otherConfigDir = note.userInfo[WineActivatingAppConfigDirKey];
+        if (ourConfigDir.length && otherConfigDir.length &&
+            ![ourConfigDir isEqualToString:otherConfigDir])
+        {
+            return;
+        }
+
+        ourPrefix = ourProcess.environment[@"WINEPREFIX"];
+        otherPrefix = note.userInfo[WineActivatingAppPrefixKey];
+        if (ourPrefix.length && otherPrefix.length &&
+            ![ourPrefix isEqualToString:otherPrefix])
+        {
+            return;
+        }
+
+        /* There's a race condition here. The requesting app sends out
+           WineAppWillActivateNotification and then activates itself, but since
+           distributed notifications are asynchronous, we may not have yielded
+           in time. So we call activateFromApplication: on the other app here,
+           which will work around that race if it happened. If we didn't hit the
+           race, the activateFromApplication: call will be a no-op. */
+
+        /* We only add this observer if NSApplication responds to the yield
+           methods, so they're safe to call without checking here. */
+        [NSApp yieldActivationToApplication:otherApp];
+        [otherApp activateFromApplication:[NSRunningApplication currentApplication]
+                                  options:0];
+    }
+
+    - (void) tryToActivateIgnoringOtherApps:(BOOL)ignore
+    {
+        NSProcessInfo *processInfo;
+        NSString *configDir, *prefix;
+        NSDictionary *userInfo;
+
+        if ([NSApp isActive]) return;  /* Nothing to do. */
+
+        if (!ignore ||
+            ![NSApplication instancesRespondToSelector:@selector(yieldActivationToApplication:)])
+        {
+            /* Either we don't need to force activation, or the OS is old enough
+               that this is our only option. */
+            [NSApp activateIgnoringOtherApps:ignore];
+            return;
+        }
+
+        /* Ask other Wine apps to yield activation to us. */
+        processInfo = [NSProcessInfo processInfo];
+        configDir = processInfo.environment[@"WINECONFIGDIR"];
+        prefix = processInfo.environment[@"WINEPREFIX"];
+        userInfo = @{
+            WineActivatingAppPIDKey: @(processInfo.processIdentifier),
+            WineActivatingAppPrefixKey: prefix ? prefix : @"",
+            WineActivatingAppConfigDirKey: configDir ? configDir : @""
+        };
+
+        [[NSDistributedNotificationCenter defaultCenter]
+            postNotificationName:WineAppWillActivateNotification
+                          object:nil
+                        userInfo:userInfo
+              deliverImmediately:YES];
+
+        /* This is racy. See the note in otherWineAppWillActivate:. */
+        [NSApp activate];
+     }
 
     - (BOOL) inputSourceIsInputMethod
     {

@@ -3794,6 +3794,13 @@ static void virtual_release_address_space(void)
     range.base  = (char *)0x82000000;
     range.limit = get_wow_user_space_limit();
 
+#if defined(__APPLE__) && !defined(__i386__)
+    /* On 64-bit macOS, don't release any address space.
+     * It needs to be reserved for use by Wow64
+     */
+    return;
+#endif
+
     if (range.limit > (char *)0xfffff000) return;  /* 64-bit limit, nothing to do */
 
     if (range.limit > range.base)

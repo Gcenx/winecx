@@ -38,11 +38,20 @@ struct unwind_builtin_dll_params
     CONTEXT                    *context;
 };
 
+struct pe_module_loaded_params
+{
+    void *start;
+    void *end;
+};
+
 enum ntdll_unix_funcs
 {
     unix_load_so_dll,
     unix_unwind_builtin_dll,
     unix_system_time_precise,
+#if defined(__x86_64__)
+    unix_pe_module_loaded,
+#endif
 };
 
 extern unixlib_handle_t ntdll_unix_handle;

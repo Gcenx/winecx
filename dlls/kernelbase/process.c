@@ -546,6 +546,61 @@ static WCHAR * hack_steam_exe(const WCHAR *tidy_cmdline, WCHAR *steam_dir)
     return new_command_line;
 }
 
+static WCHAR *hack_replace_command_line(const WCHAR *cmd)
+{
+    static const struct
+    {
+        const WCHAR *substring;
+        const WCHAR *replacement;
+    }
+    replacements[] =
+    {
+        /* Hack 22686 */
+        { L"\\ELDEN RING\\Game\\start_protected_game.exe",
+          L"\\ELDEN RING\\Game\\eldenring.exe" },
+
+        /* Hack 22753 */
+        { L"\\ARMORED CORE VI FIRES OF RUBICON\\Game\\start_protected_game.exe",
+          L"\\ARMORED CORE VI FIRES OF RUBICON\\Game\\armoredcore6.exe" },
+
+        /* Hack 22704 */
+        { L"\\Baldurs Gate 3\\Launcher\\LariLauncher.exe",
+          L"\\Baldurs Gate 3\\bin\\bg3_dx11.exe" },
+    };
+    WCHAR *new_command, *pos;
+    SIZE_T substring_len, replacement_len, new_len;
+    unsigned int i;
+
+    if (!cmd) return NULL;
+
+    for (i = 0; i < ARRAY_SIZE(replacements); ++i)
+    {
+        pos = wcsstr(cmd, replacements[i].substring);
+        if (!pos) continue;
+
+        substring_len = lstrlenW(replacements[i].substring);
+        replacement_len = lstrlenW(replacements[i].replacement);
+        new_len = lstrlenW(cmd);
+        if (replacement_len > substring_len)
+            new_len += replacement_len - substring_len;
+
+        new_command = RtlAllocateHeap(GetProcessHeap(), 0, sizeof(WCHAR) * (new_len + 1));
+
+        if (!new_command) return NULL;
+
+        lstrcpyW(new_command, cmd);
+        new_command[pos - cmd] = 0;
+        lstrcatW(new_command, replacements[i].replacement);
+        lstrcatW(new_command, pos + substring_len);
+
+        FIXME("HACK: replacing %s with %s\n", debugstr_w(cmd), debugstr_w(new_command));
+
+        return new_command;
+    }
+
+    return NULL;
+}
+
 static const WCHAR *hack_append_command_line( const WCHAR *cmd, const WCHAR *cmd_line )
 {
     /* CROSSOVER HACK: bug 13322 (winehq bug 39403)
@@ -707,6 +762,27 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
         }
     }
     /* end CROSSOVER HACK */
+
+    /* CROSSOVER HACK: various; see hack_replace_command_line */
+    {
+        WCHAR *new_cmd;
+
+        if ((new_cmd = hack_replace_command_line(app_name)))
+        {
+            lstrcpyW(name, new_cmd);
+            app_name = name;
+            RtlFreeHeap( GetProcessHeap(), 0, new_cmd );
+        }
+
+        if ((new_cmd = hack_replace_command_line(tidy_cmdline)))
+        {
+            if (tidy_cmdline != cmd_line) RtlFreeHeap( GetProcessHeap(), 0, tidy_cmdline );
+            tidy_cmdline = new_cmd;
+        }
+    }
+    /* end CROSSOVER HACK */
+
+    TRACE( "app %s cmdline %s after all hacks\n", debugstr_w(app_name), debugstr_w(tidy_cmdline) );
 
     /* Warn if unsupported features are used */
 

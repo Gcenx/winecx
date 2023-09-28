@@ -214,16 +214,6 @@ NTSTATUS WINAPI wow64_NtFreeVirtualMemory( UINT *args )
     SIZE_T size;
     NTSTATUS status;
 
-    /* Hack for CW bug 20262 and 20768:
-     * Don't free reserved address space areas in 32on64. See
-     * dlls/ntdll/loader.c, release_address_space() and
-     * dlls/ntdll/unix/virtual.c, virtual_release_address_space(). */
-    if (*addr32 == 1 && !*size32)
-    {
-        TRACE("Preventing reserved address space release request.\n");
-        return STATUS_SUCCESS;
-    }
-
     status = NtFreeVirtualMemory( process, addr_32to64( &addr, addr32 ),
                                   size_32to64( &size, size32 ), type );
     if (!status)

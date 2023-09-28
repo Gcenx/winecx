@@ -23,6 +23,7 @@
 #define CONST_VTABLE
 
 #include "dshow.h"
+#include "wine/strmbase.h"
 #include "wine/test.h"
 
 static const GUID testguid = {0xabbccdde};
@@ -3314,7 +3315,7 @@ static void test_connect_direct(void)
 
 static void test_sync_source(void)
 {
-    struct testfilter filter1, filter2;
+    struct testfilter filter1, filter2, filter3;
 
     IFilterGraph2 *graph = create_graph();
     IReferenceClock *systemclock, *clock;
@@ -3326,6 +3327,7 @@ static void test_sync_source(void)
 
     testfilter_init(&filter1, NULL, 0);
     testfilter_init(&filter2, NULL, 0);
+    testfilter_init(&filter3, NULL, 0);
 
     IFilterGraph2_AddFilter(graph, &filter1.IBaseFilter_iface, NULL);
     IFilterGraph2_AddFilter(graph, &filter2.IBaseFilter_iface, NULL);
@@ -3346,10 +3348,14 @@ static void test_sync_source(void)
     ok(clock == systemclock, "Got clock %p.\n", clock);
     IReferenceClock_Release(clock);
 
+    IFilterGraph2_AddFilter(graph, &filter3.IBaseFilter_iface, NULL);
+    ok(filter3.clock == systemclock, "Got clock %p.\n", filter3.clock);
+
     hr = IMediaFilter_SetSyncSource(filter, NULL);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(!filter1.clock, "Got clock %p.\n", filter1.clock);
     ok(!filter2.clock, "Got clock %p.\n", filter2.clock);
+    ok(!filter3.clock, "Got clock %p.\n", filter3.clock);
 
     hr = IMediaFilter_GetSyncSource(filter, &clock);
     todo_wine ok(hr == S_FALSE, "Got hr %#lx.\n", hr);
@@ -3361,6 +3367,7 @@ static void test_sync_source(void)
     ok(!ref, "Got outstanding refcount %ld\n", ref);
     ok(filter1.ref == 1, "Got outstanding refcount %ld.\n", filter1.ref);
     ok(filter2.ref == 1, "Got outstanding refcount %ld.\n", filter2.ref);
+    ok(filter3.ref == 1, "Got outstanding refcount %ld.\n", filter3.ref);
 }
 
 #define check_filter_state(a, b) check_filter_state_(__LINE__, a, b)
@@ -5070,6 +5077,8 @@ static void test_add_source_filter(void)
     ok(IsEqualGUID(&mt.majortype, &MEDIATYPE_Stream), "Got major type %s.\n", wine_dbgstr_guid(&mt.majortype));
     ok(IsEqualGUID(&mt.subtype, &MEDIASUBTYPE_MPEG1Audio), "Got subtype %s.\n", wine_dbgstr_guid(&mt.subtype));
     IFileSourceFilter_Release(filesource);
+    CoTaskMemFree(ret_filename);
+    FreeMediaType(&mt);
 
     hr = IFilterGraph2_AddSourceFilter(graph, filename, L"test", &filter2);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
@@ -5109,6 +5118,8 @@ static void test_add_source_filter(void)
     ok(IsEqualGUID(&mt.majortype, &MEDIATYPE_Stream), "Got major type %s.\n", wine_dbgstr_guid(&mt.majortype));
     ok(IsEqualGUID(&mt.subtype, &MEDIATYPE_Midi), "Got subtype %s.\n", wine_dbgstr_guid(&mt.subtype));
     IFileSourceFilter_Release(filesource);
+    CoTaskMemFree(ret_filename);
+    FreeMediaType(&mt);
 
     hr = IFilterGraph2_RemoveFilter(graph, filter);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
@@ -5338,7 +5349,7 @@ static void test_autoplug_uyvy(void)
      * failure to decode up to missing audio hardware, even though we're not
      * trying to render audio. */
     hr = IFilterGraph2_Render(graph, &source_pin.IPin_iface);
-    todo_wine ok(hr == S_OK || hr == VFW_E_NO_AUDIO_HARDWARE, "Got hr %#lx.\n", hr);
+    ok(hr == S_OK || hr == VFW_E_NO_AUDIO_HARDWARE, "Got hr %#lx.\n", hr);
 
     ref = IFilterGraph2_Release(graph);
     ok(!ref, "Got outstanding refcount %ld.\n", ref);
