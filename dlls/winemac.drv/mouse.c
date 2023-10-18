@@ -738,6 +738,30 @@ static BOOL get_icon_info(HICON handle, ICONINFOEXW *ret)
     return TRUE;
 }
 
+/* CW HACK 22829 */
+static BOOL is_cs2(void)
+{
+    static const WCHAR cs2[] = {'c', 's', '2', '.', 'e', 'x', 'e', 0};
+    WCHAR *path, *appname, *p;
+
+    path = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+    appname = path;
+    if ((p = wcsrchr(appname, '/'))) appname = p + 1;
+    if ((p = wcsrchr(appname, '\\'))) appname = p + 1;
+
+    return !wcsicmp(appname, cs2);
+}
+static BOOL needs_cs2_hack(void)
+{
+    static BOOL needs_hack, did_check = FALSE;
+    if (!did_check)
+    {
+        needs_hack = is_cs2();
+        did_check = TRUE;
+    }
+    return needs_hack;
+}
+
 
 /***********************************************************************
  *              SetCursor (MACDRV.@)
@@ -825,6 +849,18 @@ void macdrv_SetCursor(HCURSOR cursor)
     }
 
 done:
+    if (needs_cs2_hack() && !cursor_name && cursor_frames)
+    {
+        /* CW HACK 22829: suspected memory corruption by D3DMetal causes
+         * a crash in CS2 when the cursor is being set.
+         * The only custom cursor used by CS2 is completely transparent/empty anyway,
+         * so just hide the cursor.
+         */
+        TRACE("CS2 hack: hiding cursor instead of displaying custom one\n");
+        CFRelease(cursor_frames);
+        cursor_frames = NULL;
+    }
+
     TRACE("setting cursor with cursor_name %s cursor_frames %p\n", debugstr_cf(cursor_name), cursor_frames);
     macdrv_set_cursor(cursor_name, cursor_frames);
     if (cursor_name) CFRelease(cursor_name);

@@ -644,6 +644,10 @@ static const WCHAR *hack_append_command_line( const WCHAR *cmd, const WCHAR *cmd
     /* CROSSOVER HACK: bug 22598
      * Add --launcher-skip to the Witcher 3 prelauncher.
      */
+    /* CROSSOVER HACK: bug 20279
+     * Add --in-process-gpu to the Warframe launcher (...\Tools\Launcher.exe), with
+     * various parent directories per server type.
+    */
 
     static const struct
     {
@@ -664,6 +668,7 @@ static const WCHAR *hack_append_command_line( const WCHAR *cmd, const WCHAR *cmd
         {L"Battle.net.exe", L" --in-process-gpu --use-gl=swiftshader", NULL, NULL},
         {L"msedgewebview2.exe", L" --in-process-gpu --use-gl=swiftshader --no-sandbox", NULL, L"--type=crashpad-handler"},
         {L"redprelauncher.exe", L" --launcher-skip", NULL, NULL},
+        {L"\\Tools\\Launcher.exe", L" --in-process-gpu", NULL, NULL},
     };
     unsigned int i;
 

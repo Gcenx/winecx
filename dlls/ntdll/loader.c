@@ -2823,6 +2823,27 @@ static void patch_libcef( const WCHAR* libname, WINE_MODREF** pwm )
             TRUE
         },
 
+        /* CW HACK 18682:
+         * libcef.dll 85.2.0.2241 used by Sea of Thieves for Xbox login.
+         * Can reuse patches 85_3_9_0 and 85_3_11_1 at different offsets.
+         */
+        {
+            L"libcef.dll",
+            "85.2.0.2241",
+            before_85_3_9_0, after_85_3_9_0,
+            sizeof(before_85_3_9_0),
+            0x28bdd90,
+            FALSE
+        },
+        {
+            L"libcef.dll",
+            "85.2.0.2241",
+            before_85_3_11_1, after_85_3_11_1,
+            sizeof(before_85_3_11_1),
+            0x28bde1a,
+            TRUE
+        },
+
         /* CW HACK 19114:
          * libcef.dll 72.0.3626.121 used by the game beamNG.drive.
          * Patch also works for version downloadable from CEF builds.
@@ -3533,8 +3554,18 @@ static NTSTATUS load_dll( const WCHAR *load_path, const WCHAR *libname, DWORD fl
     case STATUS_SUCCESS:  /* valid PE file */
         nts = load_native_dll( load_path, &nt_name, mapping, &image_info, &id, flags, system, pwm );
 #ifdef __x86_64__
-        if (nts == STATUS_SUCCESS && (!wcscmp( libname, L"libcef.dll" ) || !wcscmp( libname, L"Qt5WebEngineCore.dll" )))
-            patch_libcef( libname, pwm );
+        /* CX HACK 19487 (among others): binary patches for libcef %gs access */
+        if (nts == STATUS_SUCCESS)
+        {
+            const WCHAR *last_slash, *filename;
+            last_slash = wcsrchr( libname, L'\\' );
+            if (!last_slash) last_slash = wcsrchr( libname, L'/' );
+            filename = last_slash ? last_slash + 1 : libname;
+            if (!wcscmp( filename, L"libcef.dll" ) || !wcscmp( filename, L"Qt5WebEngineCore.dll" ))
+            {
+                patch_libcef( filename, pwm );
+            }
+        }
 #endif
         break;
     }

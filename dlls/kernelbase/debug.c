@@ -620,6 +620,19 @@ static BOOL check_resource_write( void *addr )
     return TRUE;
 }
 
+/* CrossOver Hack #22795 */
+static BOOL is_quicken_updateicons(void)
+{
+    WCHAR path[MAX_PATH];
+    DWORD exe_len = wcslen( L"UpdateIcons.exe" );
+    DWORD path_len = GetModuleFileNameW( NULL, path, MAX_PATH );
+
+    if (!wcsstr( path, L"quickenPatch" ))
+        return FALSE;
+
+    return exe_len <= path_len && !lstrcmpiW( path + path_len - exe_len, L"UpdateIcons.exe" );
+}
+
 
 /*******************************************************************
  *         UnhandledExceptionFilter   (kernelbase.@)
@@ -654,6 +667,13 @@ LONG WINAPI UnhandledExceptionFilter( EXCEPTION_POINTERS *epointers )
         }
 
         /* FIXME: Should check the current error mode */
+
+        /* CrossOver Hack #22795 */
+        if (is_quicken_updateicons())
+        {
+            FIXME( "HACK: crashing without error dialog for Quicken UpdateIcons.exe\n" );
+            TerminateProcess( GetCurrentProcess(), 1 );
+        }
 
         if (!start_debugger_atomic( epointers ) || !NtCurrentTeb()->Peb->BeingDebugged)
             return EXCEPTION_EXECUTE_HANDLER;
