@@ -91,6 +91,7 @@
 #include "winternl.h"
 #include "unix_private.h"
 #include "esync.h"
+#include "msync.h"
 #include "wine/list.h"
 #include "wine/debug.h"
 
@@ -2376,6 +2377,7 @@ static void start_main_thread(void)
     dbg_init();
     startup_info_size = server_init_process();
     hacks_init();
+    msync_init();
     esync_init();
     virtual_map_user_shared_data();
     init_cpu_info();

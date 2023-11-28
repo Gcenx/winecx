@@ -160,6 +160,21 @@ static inline NSUInteger adjusted_modifiers_for_settings(NSUInteger modifiers)
     return new_modifiers;
 }
 
+static inline BOOL stage_manager_enabled(void)
+{
+    /* There is no documented way to determine if Stage Manager is enabled,
+     * but this seems like the best option.
+     */
+    if (floor(NSAppKitVersionNumber) >= 2299 /* NSAppKitVersionNumber13_0 */)
+    {
+        NSUserDefaults *defs = [[NSUserDefaults alloc] initWithSuiteName:@"com.apple.WindowManager.plist"];
+        BOOL enabled = [defs boolForKey:@"GloballyEnabled"];
+        [defs release];
+        return enabled;
+    }
+    return FALSE;
+}
+
 
 @interface NSWindow (WineAccessPrivateMethods)
     - (id) _displayChanged;
@@ -1326,10 +1341,20 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
             {
                 if ([self wouldBeVisible])
                 {
-                    if ([self styleMask] & NSWindowStyleMaskFullScreen)
+                    if (([self styleMask] & NSWindowStyleMaskFullScreen) || stage_manager_enabled())
                     {
                         [self postDidUnminimizeEvent];
                         discard &= ~event_mask_for_type(WINDOW_DID_UNMINIMIZE);
+
+                        /* When Stage Manager is enabled, it's not possible to minimize the window
+                         * (miniaturize: just moves the window to the background).
+                         * Post an unminimize event, then miniaturize:.
+                         */
+                        if (stage_manager_enabled())
+                        {
+                            [self setStyleMask:([self styleMask] | NSWindowStyleMaskMiniaturizable)];
+                            [super miniaturize:nil];
+                        }
                     }
                     else
                     {
@@ -2648,6 +2673,16 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 
     - (void) miniaturize:(id)sender
     {
+        /* When Stage Manager is enabled, miniaturize: just moves the app/window to
+         * the background rather than minimizing the window.
+         * Don't start minimizing the window on the Win32 side.
+         */
+        if (stage_manager_enabled())
+        {
+            [super miniaturize:sender];
+            return;
+        }
+
         macdrv_event* event = macdrv_create_event(WINDOW_MINIMIZE_REQUESTED, self);
         [queue postEvent:event];
         macdrv_release_event(event);

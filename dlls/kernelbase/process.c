@@ -648,6 +648,9 @@ static const WCHAR *hack_append_command_line( const WCHAR *cmd, const WCHAR *cmd
      * Add --in-process-gpu to the Warframe launcher (...\Tools\Launcher.exe), with
      * various parent directories per server type.
     */
+    /* CROSSOVER HACK: bug 22769
+     * Add --in-process-gpu --use-gl=swiftshader to cefsubprocess.exe for Marvel Snap.
+     */
 
     static const struct
     {
@@ -669,6 +672,7 @@ static const WCHAR *hack_append_command_line( const WCHAR *cmd, const WCHAR *cmd
         {L"msedgewebview2.exe", L" --in-process-gpu --use-gl=swiftshader --no-sandbox", NULL, L"--type=crashpad-handler"},
         {L"redprelauncher.exe", L" --launcher-skip", NULL, NULL},
         {L"\\Tools\\Launcher.exe", L" --in-process-gpu", NULL, NULL},
+        {L"cefsubprocess.exe", L" --in-process-gpu --use-gl=swiftshader", NULL, L"--type=crashpad-handler"},
     };
     unsigned int i;
 

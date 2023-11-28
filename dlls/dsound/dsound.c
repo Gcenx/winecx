@@ -194,10 +194,33 @@ static ULONG DirectSoundDevice_AddRef(DirectSoundDevice * device)
     return ref;
 }
 
+/* CX HACK 21897 */
+static int is_fallout_4(void)
+{
+    static int status = -1;
+    if (status == -1)
+    {
+        WCHAR name[MAX_PATH], *module_exe;
+        if (GetModuleFileNameW(NULL, name, ARRAYSIZE(name)))
+        {
+            module_exe = wcsrchr(name, '\\');
+            module_exe = module_exe ? module_exe + 1 : name;
+            status = !wcsicmp(module_exe, L"Fallout4.exe");
+        }
+    }
+
+    return status;
+}
+
 static ULONG DirectSoundDevice_Release(DirectSoundDevice * device)
 {
     HRESULT hr;
-    ULONG ref = InterlockedDecrement(&(device->ref));
+    ULONG ref;
+
+    /* CX HACK 21897: Crappy workaround for a race condition. */
+    if (is_fallout_4()) Sleep(100);
+
+    ref = InterlockedDecrement(&(device->ref));
     TRACE("(%p) ref %ld\n", device, ref);
     if (!ref) {
         int i;

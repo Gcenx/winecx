@@ -42,6 +42,7 @@
 #include "request.h"
 #include "user.h"
 #include "esync.h"
+#include "msync.h"
 
 #define WM_NCMOUSEFIRST WM_NCMOUSEMOVE
 #define WM_NCMOUSELAST  (WM_NCMOUSEFIRST+(WM_MOUSELAST-WM_MOUSEFIRST))
@@ -144,6 +145,8 @@ struct msg_queue
     int                    keystate_lock;   /* owns an input keystate lock */
     struct esync_fd       *esync_fd;        /* esync file descriptor (signalled on message) */
     int                    esync_in_msgwait; /* our thread is currently waiting on us */
+    unsigned int           msync_idx;
+    int                    msync_in_msgwait; /* our thread is currently waiting on us */
     /* FIXME: consider something cleaner */
     int                    pending_surface_flush; /* flag if there is a surface flush expected
                                                    * on this queue (meaning that queue needs
@@ -168,6 +171,7 @@ static int msg_queue_add_queue( struct object *obj, struct wait_queue_entry *ent
 static void msg_queue_remove_queue( struct object *obj, struct wait_queue_entry *entry );
 static int msg_queue_signaled( struct object *obj, struct wait_queue_entry *entry );
 static struct esync_fd *msg_queue_get_esync_fd( struct object *obj, enum esync_type *type );
+static unsigned int msg_queue_get_msync_idx( struct object *obj, enum msync_type *type );
 static void msg_queue_satisfied( struct object *obj, struct wait_queue_entry *entry );
 static void msg_queue_destroy( struct object *obj );
 static void msg_queue_poll_event( struct fd *fd, int event );
@@ -184,6 +188,7 @@ static const struct object_ops msg_queue_ops =
     msg_queue_remove_queue,    /* remove_queue */
     msg_queue_signaled,        /* signaled */
     msg_queue_get_esync_fd,    /* get_esync_fd */
+    msg_queue_get_msync_idx,   /* get_msync_idx */
     msg_queue_satisfied,       /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
@@ -222,6 +227,7 @@ static const struct object_ops thread_input_ops =
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
     NULL,                         /* get_esync_fd */
+    NULL,                         /* get_msync_idx */
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
@@ -324,6 +330,8 @@ static struct msg_queue *create_msg_queue( struct thread *thread, struct thread_
         queue->keystate_lock   = 0;
         queue->esync_fd        = NULL;
         queue->esync_in_msgwait = 0;
+        queue->msync_idx       = 0;
+        queue->msync_in_msgwait = 0;
         queue->pending_surface_flush = 0;
         queue->surface_flushed = NULL;
         list_init( &queue->send_result );
@@ -334,6 +342,9 @@ static struct msg_queue *create_msg_queue( struct thread *thread, struct thread_
 
         if (do_esync())
             queue->esync_fd = esync_create_fd( 0, 0 );
+
+        if (do_msync())
+            queue->msync_idx = msync_alloc_shm( 0, 0 );
 
         thread->queue = queue;
     }
@@ -1003,6 +1014,9 @@ static int is_queue_hung( struct msg_queue *queue )
             return 0;  /* thread is waiting on queue -> not hung */
     }
 
+    if (do_msync() && queue->msync_in_msgwait)
+        return 0;   /* thread is waiting on queue in absentia -> not hung */
+
     if (do_esync() && queue->esync_in_msgwait)
         return 0;   /* thread is waiting on queue in absentia -> not hung */
 
@@ -1078,6 +1092,13 @@ static struct esync_fd *msg_queue_get_esync_fd( struct object *obj, enum esync_t
     return queue->esync_fd;
 }
 
+static unsigned int msg_queue_get_msync_idx( struct object *obj, enum msync_type *type )
+{
+    struct msg_queue *queue = (struct msg_queue *)obj;
+    *type = MSYNC_QUEUE;
+    return queue->msync_idx;
+}
+
 static void msg_queue_satisfied( struct object *obj, struct wait_queue_entry *entry )
 {
     struct msg_queue *queue = (struct msg_queue *)obj;
@@ -1124,6 +1145,7 @@ static void msg_queue_destroy( struct object *obj )
     if (queue->hooks) release_object( queue->hooks );
     if (queue->fd) release_object( queue->fd );
     if (do_esync()) esync_close_fd( queue->esync_fd );
+    if (do_msync()) msync_destroy_semaphore( queue->msync_idx );
 }
 
 static void msg_queue_poll_event( struct fd *fd, int event )
@@ -2505,6 +2527,8 @@ DECL_HANDLER(set_queue_mask)
             if (req->skip_wait) queue->wake_mask = queue->changed_mask = 0;
             else wake_up( &queue->obj, 0 );
         }
+        if (do_msync() && !is_signaled( queue ))
+            msync_clear( &queue->obj );
 
         if (do_esync() && !is_signaled( queue ))
             esync_clear( queue->esync_fd );
@@ -2521,6 +2545,9 @@ DECL_HANDLER(get_queue_status)
         reply->wake_bits    = queue->wake_bits;
         reply->changed_bits = queue->changed_bits;
         queue->changed_bits &= ~req->clear_bits;
+
+        if (do_msync() && !is_signaled( queue ))
+            msync_clear( &queue->obj );
 
         if (do_esync() && !is_signaled( queue ))
             esync_clear( queue->esync_fd );
@@ -2778,6 +2805,9 @@ DECL_HANDLER(get_message)
     queue->wake_mask = req->wake_mask;
     queue->changed_mask = req->changed_mask;
     set_error( STATUS_PENDING );  /* FIXME */
+
+    if (do_msync() && !is_signaled( queue ))
+        msync_clear( &queue->obj );
 
     if (do_esync() && !is_signaled( queue ))
         esync_clear( queue->esync_fd );
@@ -3490,6 +3520,21 @@ DECL_HANDLER(esync_msgwait)
 
     if (!queue) return;
     queue->esync_in_msgwait = req->in_msgwait;
+
+    if (current->process->idle_event && !(queue->wake_mask & QS_SMRESULT))
+        set_event( current->process->idle_event );
+
+    /* and start/stop waiting on the driver */
+    if (queue->fd)
+        set_fd_events( queue->fd, req->in_msgwait ? POLLIN : 0 );
+}
+
+DECL_HANDLER(msync_msgwait)
+{
+    struct msg_queue *queue = get_current_queue();
+
+    if (!queue) return;
+    queue->msync_in_msgwait = req->in_msgwait;
 
     if (current->process->idle_event && !(queue->wake_mask & QS_SMRESULT))
         set_event( current->process->idle_event );
