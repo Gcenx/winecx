@@ -2297,7 +2297,10 @@ static void hacks_init(void)
 
     env_str = getenv("WINE_SIMULATE_WRITECOPY");
     if (env_str) simulate_writecopy = atoi(env_str);
-    else simulate_writecopy = main_argc > 1 && strstr(main_argv[1], "UplayWebCore.exe");
+    else simulate_writecopy = main_argc > 1 && (
+           strstr(main_argv[1], "UplayWebCore.exe")
+        || strstr(main_argv[1], "Battle.net.exe") /* CW HACK 23072 */
+        );
 }
 
 #ifdef _WIN64
